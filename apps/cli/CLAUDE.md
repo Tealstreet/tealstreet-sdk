@@ -1,0 +1,426 @@
+# CLAUDE.md — @tealstreet/cli
+
+Terminal-based crypto trading interface built on Bun. Interactive REPL for direct exchange interaction.
+
+**Remote signing lives in `services/exchange-server/`.** The legacy in-CLI `serve` mode + `serve-config.ts` (instance keypair, paired sessions, relay config) was deleted in the listener rebuild — only `src/tasks-store.ts` survives from that subtree for `~/.tealstreet/tasks.json` persistence. **The local loopback listener (`src/listener/`) is the WS+HTTP surface the browser talks to** on `127.0.0.1:53219`. Bound when the REPL launches, closed on REPL exit. See [`operations/listener.md`](../documentation/cli/operations/listener.md) for the end-to-end spec — wire shapes, auth, kill switches, ops.
+
+## ⚠️ RULE — keep the user-facing docs in sync
+
+**User-facing CLI docs live in [`apps/documentation/cli/`](../documentation/cli/)** as a dedicated Docusaurus content-docs instance and ship to `docs.tealstreet.io/cli` on the next build. They are committed directly — no sync script, no mirror.
+
+**When you change anything covered by a public doc, update the matching doc in the same commit.** This is not optional and it is easy to forget — a feature can be fully shipped (merged, released) yet invisible to users because the docs never moved. If you touch behaviour in the left column, the right-column file changes in the **same commit/PR**, full stop.
+
+> **Before you commit any `apps/cli/src/**`behaviour change, ask: "which row of this table did I just touch?"** If the answer is any row, that doc file must be in your staged diff. Also update the matching part of`README.md` (contributor view) and the [Logging](#logging) section of this file when they overlap. Three homes, one source of truth — they drift the moment one is skipped.
+
+Concrete pairings:
+
+| You changed                                                                                                                                  | Update                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd:exec` / `cmd:output` / `cmd:done` wire frames, `hello`/`welcome`, close codes, listener auth, `POST /hook/<id>` shape, kill-switch keys | [`cli/operations/listener.md`](../documentation/cli/operations/listener.md)                                                                                                                                            |
+| New / renamed / removed REPL command, new flag, new alias                                                                                    | [`cli/reference/commands.md`](../documentation/cli/reference/commands.md)                                                                                                                                              |
+| Logging behaviour — `console.*` routing, operational-noise suppression, severity taxonomy (`log-classify.ts`), `print`-above-prompt          | [`cli/reference/output.md`](../documentation/cli/reference/output.md) + the [Logging](#logging) section below                                                                                                          |
+| Output surfaces — top alert bar (`status-line.ts`), bottom footer (`footer.ts` / `footer-segments.ts`), scroll region (`scroll-region.ts`)   | [`cli/reference/output.md`](../documentation/cli/reference/output.md), [`commands.md#footer`](../documentation/cli/reference/commands.md#footer), [`config-files.md`](../documentation/cli/operations/config-files.md) |
+| Write-op audit log / command tracing — `audit` command, `runId` grouping, `[fill]` attribution, rotation                                     | [`commands.md#audit`](../documentation/cli/reference/commands.md#audit) + [`config-files.md`](../documentation/cli/operations/config-files.md)                                                                         |
+| Sizing / price grammar changes                                                                                                               | [`cli/reference/sizing-and-prices.md`](../documentation/cli/reference/sizing-and-prices.md)                                                                                                                            |
+| Chain operators / loops / repeat / if / wait / retry behavior                                                                                | [`cli/reference/workflow.md`](../documentation/cli/reference/workflow.md)                                                                                                                                              |
+| New / removed `$constant` or math grammar                                                                                                    | [`cli/reference/variables.md`](../documentation/cli/reference/variables.md)                                                                                                                                            |
+| `set @x` / `sets @x` / `track max/min @x` / alias / capture syntax                                                                           | [`cli/reference/aliases-and-vars.md`](../documentation/cli/reference/aliases-and-vars.md)                                                                                                                              |
+| Recipe-shaped patterns (trailing stop, bracket, fan-out, TWAP, listener-from-web, webhook-from-TradingView)                                  | [`cli/quickstart.md`](../documentation/cli/quickstart.md) and the matching `cli/recipes/*.md` deep-dive                                                                                                                |
+| Hook / webhook subsystem                                                                                                                     | [`cli/operations/hooks-and-webhooks.md`](../documentation/cli/operations/hooks-and-webhooks.md)                                                                                                                        |
+| Trusted-clients allowlist + pairing UX                                                                                                       | [`cli/operations/trusted-clients.md`](../documentation/cli/operations/trusted-clients.md) and `operations/pairing.md`                                                                                                  |
+| Recording / SQLite schema changes                                                                                                            | [`cli/operations/recording.md`](../documentation/cli/operations/recording.md)                                                                                                                                          |
+| Release pipeline / homebrew / binaries                                                                                                       | [`cli/operations/releases.md`](../documentation/cli/operations/releases.md)                                                                                                                                            |
+| Config files under `~/.tealstreet/`                                                                                                          | [`cli/operations/config-files.md`](../documentation/cli/operations/config-files.md)                                                                                                                                    |
+| Safety guards (simulation / fatfinger / whitelist)                                                                                           | [`cli/reference/safety.md`](../documentation/cli/reference/safety.md)                                                                                                                                                  |
+
+Files excluded from the published site (via `docs.exclude` in `apps/documentation/docusaurus.config.js`): `**/CLAUDE.md`, `**/TODO.md`, `**/*.private.md`. Convention notes can stay co-located without leaking.
+
+See [`apps/documentation/cli/CLAUDE.md`](../documentation/cli/CLAUDE.md) if one exists for the authoring convention; the dedicated `/cli/` plugin instance and its sidebar live in `apps/documentation/sidebarsCli.js`.
+
+## Runtime
+
+**Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64.
+
+## Architecture
+
+```
+src/
+├── index.ts                 # Entry point (Commander.js setup)
+├── repl.ts                  # Interactive REPL (readline-based)
+├── config.ts                # Config: ~/.tealstreet/config.json
+├── exchange-factory.ts      # Exchange instantiation from config
+├── exchange-manager.ts      # Multi-exchange lifecycle
+├── auth.ts                  # OAuth2 login flow (port 9876 callback)
+├── updater.ts               # Version checking + auto-update
+├── logger.ts                # Rate-limited, deduplicated logging
+├── scroll-region.ts         # Single owner of the terminal DECSTBM scroll region (top bar + footer reserve through it)
+├── status-line.ts           # Top alert bar (transient warn/error/critical, auto-dims) — reserves the TOP rows
+├── footer.ts                # Bottom status footer surface (always-on) — reserves 2 BOTTOM rows (divider + content); flicker-free deduped redraw; setFooterRenderer injects content
+├── footer-segments.ts       # Pure built-in footer segment renderers (connection/account/balance/pnl/…) + DEFAULT_SEGMENTS
+├── platform-adapter.ts      # Standalone platform adapter (non-web)
+├── commands/                # CLI commands
+├── listener/                # Loopback :53219 WS + HTTP (see apps/documentation/cli/operations/listener.md)
+│   ├── index.ts             # startListener / stopListener
+│   ├── http.ts              # /health + POST /hook/:id + WS upgrade
+│   ├── ws.ts                # WS handshake + post-hello dispatch
+│   ├── auth.ts              # Origin allowlist + JWT email decode
+│   ├── state.ts             # listener.json + trusted-clients.json
+│   ├── prompt.ts            # REPL approval prompt via adapter
+│   ├── clients.ts           # REPL `clients list` / `revoke`
+│   ├── account-broadcast.ts # state:accounts + fs.watch + dedup
+│   ├── tasks-broadcast.ts   # state:tasks + fs.watch
+│   ├── hooks-broadcast.ts   # state:hooks (scrubbed) + fs.watch
+│   ├── hooks-store.ts       # hooks.json + secret/token plumbing
+│   ├── hook-repl.ts         # REPL `hook list/create/revoke/rotate/show`
+│   ├── adapter-context.ts   # AsyncLocalStorage adapter override
+│   ├── config.ts            # 3 kill-switch readers
+│   └── handlers/
+│       ├── cmd.ts           # cmd:exec → cmd:output → cmd:done
+│       ├── account.ts       # mutate:account upsert/delete (LWW)
+│       └── hook.ts          # mutate:hook + handleHookFire
+├── record/                  # Market data recording (SQLite)
+│   ├── database.ts          # SQLite DB (~/.tealstreet/recording.db)
+│   └── recorders/           # Recorder implementations
+├── tasks-store.ts           # ~/.tealstreet/tasks.json persistence
+├── audit-log.ts             # ~/.tealstreet/audit.log append-only write-op trail (TSBUG-107; off by default, `audit` cmd)
+├── scripts-store.ts         # ~/.tealstreet/scripts/*.ts file-based loader (SPEC §5.1) + initial-load promise for the dispatcher race-fix
+├── scripts-templates.ts     # Inline template strings seeded into ~/.tealstreet/scripts/ — TYPES_TEMPLATE composes CORE/CLI/WEB constants from script-types-bundle.ts
+├── script-types-bundle.ts   # AUTO-GENERATED by `yarn generate:types` (SPEC §11 Phase 6). DO NOT EDIT — the drift test in script-types-bundle.test.ts fails CI if this file is out of sync with the per-package generate-monaco-types.ts scripts.
+├── script-dispatcher.ts     # parseScriptInvocation — pure helper for runStep's `script:<name>` arm (SPEC §6.1)
+├── bun-transpile.ts         # Bun.Transpiler primitive for `runScriptFromHost` (fn-ref skips it; here for forward-compat)
+└── utils/
+```
+
+## Operating Modes
+
+**REPL mode** (default): Interactive terminal with readline. Watch modes (`wa`/`wp`/`wo`/`wm`) use alt screen + raw mode.
+
+**Listener mode** (passive, always-on by default): The loopback `Bun.serve` on `127.0.0.1:53219` is bound during REPL startup and torn down on REPL exit. Gated by `config.listener.enabled`. See [`operations/listener.md`](../documentation/cli/operations/listener.md).
+
+## Config Files
+
+All in `~/.tealstreet/`:
+
+- `config.json` — Account credentials, default symbol, auth token, the `listener.*` kill-switch block (`enabled` / `accountSync` / `remoteExec`, all default true), and the `footer.*` block (`enabled` on unless explicitly false, `intervalMs`, `segments[]`) for the bottom status footer.
+- `tasks.json` — Persisted long-running tasks
+- `vars.json` — User variables (`set @x …`) — `Record<string, string>`
+- `aliases.json` — User aliases (`alias <n> "<cmd>"`) — `Record<string, string>`
+- `cli-export.json` — Default target for the `export` / `import` REPL
+  commands (vars + aliases + reserved `binds`).
+- `listener.json` — Persistent `listenerId` UUID (web clients pin this on first approval)
+- `trusted-clients.json` — Approved web `clientId` → `{label, origin, approvedAt}`
+- `hooks.json` — Webhook registry (id + secret + command). **Contains shared secrets.**
+- `scripts/` — User-authored custom scripts (one `.ts` file per script) plus three seeded files: `tsconfig.json` (only-if-missing), `types.d.ts` (regenerated on every CLI launch so ambient types stay in sync with the running binary's script-API surface — content comes from `src/script-types-bundle.ts`, see Phase 6 gotcha below), `hello.ts` (only-if-missing example). Loaded via dynamic `import()` by `src/scripts-store.ts`; the directory IS the registry (no JSON manifest). Invoked via the `script:<name>` REPL prefix — see SPEC §6.1 + `apps/documentation/cli/reference/commands.md#scripts`. REPL `script reload` re-scans. Phase 5's dispatcher arm in `repl.ts:runStep` awaits `awaitScriptsLoaded()` so a cold-REPL `script:foo` doesn't race the fire-and-forget initial load.
+- `cli.log` — Log file (cleared on startup)
+- `market-data.db` — SQLite for market data snapshots
+
+## Auth Flow
+
+1. CLI opens browser → `{web}/cli-login?callback=http://localhost:9876/callback`
+2. User authenticates via Auth0
+3. Browser redirects back with JWT
+4. CLI stores token in config
+
+## Remote Signing
+
+Remote signing lives in `services/exchange-server/`. The CLI no longer
+participates in that trust model directly, but the flow is documented here
+because adjacent CLI work (auth/login) interacts with the same server:
+
+The client **always** strips API secrets before sending init messages to the
+exchange server. The server never holds keys — all request signing is
+delegated to the client over WebSocket.
+
+**How it works:**
+
+1. Client strips secret fields from the init payload — only the allowlisted
+   public fields (see `INIT_FIELDS` in `ExchangeServerWorker.ts`) are sent.
+2. Server detects the missing secret → creates a `WebSocketRemoteSigner` for
+   that account.
+3. When the exchange adapter needs a signature, it calls `remoteSigner.sign()`
+   which sends a `{ t: 'sign-req' }` frame back to the browser over the same
+   WebSocket.
+4. Browser signs with the real key → returns `{ t: 'sign-res' }`.
+5. Server fires the signed request to the exchange.
+
+**Security model:**
+
+- The client decides whether to sign — the server cannot request keys.
+- Write operations (place order, cancel, set leverage) are placed directly
+  from the client path when using hosted/serve mode; the server only handles
+  read-only request signing for state fetches.
+- Even a compromised server cannot trick the client into signing write
+  operations.
+
+**Key files:**
+
+- `services/exchange-server/src/remote-signer.ts` — `WebSocketRemoteSigner`
+  class (sign request/response transport, failure tracking, 5s timeout).
+- `packages/safe-cex/src/remoteSigningAdapter.ts` — Axios adapter (server-side)
+  that routes through the remote signer.
+- `apps/web/src/utils/shim/worker/ExchangeServerWorker.ts` — Browser-side
+  WebWorker: owns the single shared WS, multiplexes accounts over
+  MessagePort, holds the `INIT_FIELDS` allowlist that gates what is sent to
+  the server, and handles incoming `sign-req` by routing to the correct
+  account port.
+- `apps/web/src/controllers/exchangeController/exchangeAccountController.ts` —
+  Account lifecycle logic that decides when the server worker is used.
+
+## Logging
+
+**User-facing mirror: [`cli/reference/output.md`](../documentation/cli/reference/output.md) → "Output kinds".** Changing any row here means updating that doc + `README.md` in the same commit (see the doc-sync table above).
+
+| Method                             | Terminal                                                              | Log file (`~/.tealstreet/cli.log`) |
+| ---------------------------------- | --------------------------------------------------------------------- | ---------------------------------- |
+| `logger.info/warn/error/debug()`   | No                                                                    | Yes                                |
+| `console.log/info()`               | Above prompt, **unless operational** (then file-only)¹ — rate-limited | Yes                                |
+| `console.warn/error()`             | Above prompt + mirrored on the top status bar²                        | Yes                                |
+| `console.debug()`                  | No                                                                    | Only when `DEBUG=1`/`true`³        |
+| `print()` / `originalConsoleLog()` | Yes (no rate limit, no suppression)                                   | No                                 |
+
+¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
+
+² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
+
+³ `console.debug` routes to `logger.debug`, which is gated by `MIN_LOG_LEVEL` (`logger.ts`) — default `info`, so debug lines are **dropped entirely** unless `DEBUG=1`/`DEBUG=true` is set. Don't rely on debug output being in `cli.log` by default.
+
+**Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
+
+## Commands
+
+```bash
+yarn dev           # Run with bun
+yarn build         # Build cross-platform binaries (scripts/build.sh)
+yarn release       # Build + GitHub release (scripts/release.sh)
+yarn test          # Vitest
+yarn logs          # Tail ~/.tealstreet/cli.log
+```
+
+## Key Documentation
+
+- `README.md` — **dev-focused** (runtime, local dev, architecture pointers, terminal/watch-mode patterns, build & release). User-facing command/usage docs are NOT here — they live in `apps/documentation/cli/` → `docs.tealstreet.io/cli`.
+- `PLAN.md` — Implementation roadmap
+- `ROADMAP.md` — Feature priorities
+
+## Gotchas
+
+- Uses **Bun** runtime, not Node.js — `bun-types` in tsconfig
+- Watch mode terminal takeover: must recreate readline after raw mode (corrupts state)
+- **One scroll region, two surfaces.** A terminal has a single DECSTBM
+  scroll region. The top alert bar (`status-line.ts`) and the bottom
+  footer (`footer.ts`) MUST NOT each call `ESC[...r` directly — they'd
+  clobber each other. Both go through `scroll-region.ts`
+  (`reserveTop`/`reserveBottom`), which computes the one combined region
+  `[topReserved+1, rows-bottomReserved]` and owns the single resize +
+  `process 'exit'` reset (a leaked region breaks the user's shell).
+  Surfaces keep drawing their own CONTENT and register an
+  `addResizeListener` callback (fired after the region is re-applied).
+  Watch-mode alt-screen calls `suspend*`/`resume*` on BOTH surfaces; the
+  coordinator's suspend is a shared flag, so order doesn't matter. The
+  footer is **on by default** — it runs unless `config.footer.enabled` is
+  explicitly `false` (the gate is `enabled !== false`, set via `footer
+off`). `footer-segments.ts` is pure and unit-tested,
+  the impure live snapshot (`buildFooterState`) lives in `repl.ts` and is
+  injected via `setFooterRenderer`.
+- **Footer `script` segments are hard read-only.** A `{type:'script',
+name}` footer segment auto-runs the named script ~1×/sec
+  (`runFooterScript` in `repl.ts`). Because of that cadence it runs with
+  `FOOTER_READONLY_CAPS` (`writes: []`, no `runCommand`, no storage), so
+  `capabilityCheck.ts` throws on any write/`runCommand` regardless of the
+  script's own declared capabilities — a footer can **never** place or
+  cancel orders. It also runs with a **silenced `CoreAdapter.print`** (only
+  the return value is rendered, never terminal spam) and a **timeout +
+  per-script in-flight guard** (a slow/hung script shows `!name` and never
+  blocks the redraw or stacks runs). Don't loosen any of those three — an
+  auto-running render surface is only safe because of them.
+- Logger rate-limits to 5 msg/sec with 10s dedup window
+- Exchange integration delegates to `@tealstreet/safe-cex`
+- Build inlines env vars via `--define` (TEALSTREET_CLI_VERSION, URLs)
+- **Preprocess pipeline.** `processCommand` in `repl.ts` runs every input
+  through `preprocessCommand` from `cli-core` first: expands repeat blocks,
+  splits the result on `;` and `&`, expands leading aliases, substitutes
+  `@vars` and `$constants` (`$size`, `$entry`, …). `;` is **sequential**
+  — the runner drains in-flight fire-and-forget steps before a
+  `;`-separated step (its `awaitPrior` flag), so `close all; buy $1000`
+  waits for the close — while `&` is **parallel**; `sleep`/`wait` always
+  block (`block: true`). See the in-flight barrier in `processCommand`
+  /`runStep` (TSBUG-106).
+  The legacy `@cmd` parallel prefix is still accepted for backwards
+  compat — stripped + warned at preprocess time.
+- **Runner failure handling.** `cli-core.executeCommand` returns
+  `success: false` / `error` for handled command failures (most
+  commands return `this.error(...)` rather than throwing). `runStep`
+  relies on `processSingleCommand` throwing on that shape so `retry`,
+  `set ec`, blocking waits, and capture writeback all see failures.
+  Do not collapse returned failures back into plain `{ handled: true }`.
+- **`FilePreprocessStore` (`src/preprocess-store.ts`).** Subclasses
+  `MemoryPreprocessStore` from `cli-core` to persist vars/aliases to
+  `~/.tealstreet/vars.json` + `~/.tealstreet/aliases.json` after every
+  mutation (synchronous writes — a mid-session crash doesn't lose
+  state). Constructor load paths must call `super` mutators via callbacks;
+  going through overridden methods rewrites the persisted files on startup.
+- **`export` / `import` REPL commands** live in
+  `src/commands/export-import/` because they touch the filesystem.
+  Distinct from `tealstreet account export/import` (top-level
+  Commander route, dumps account credentials). Registered alongside
+  the record commands at REPL start and at the top of
+  `executeCommandWithCapture` so serve-mode invocations also see
+  them.
+- **REPL `tasks` / `kill` vs top-level `tealstreet tasks`.** REPL
+  `tasks` (from cli-core) lists in-process chasers + TWAPs; top-level
+  `tealstreet tasks list` reads `~/.tealstreet/tasks.json` via
+  `apps/cli/src/tasks-store.ts`. Both intentional; do not collapse.
+- **Write-op audit log (`src/audit-log.ts`, TSBUG-107).** Off by
+  default; the `audit on/off/status/tail` REPL command is handled
+  inline in `processSingleCommand` (not a cli-core command — it's
+  CLI-only, no FS on web). `processSingleCommand` calls
+  `recordWriteOp(command, account, result)` right after
+  `cliExecuteCommand`, BEFORE the failure throw so failed writes are
+  logged too. `recordWriteOp` (in `audit-log.ts`, where it's unit-
+  tested) owns the gating: no-op unless audit on + `result.handled` +
+  head in `AUDIT_WRITE_HEADS` (which includes aliases like `mv`/`lev`
+  so the same op can't slip the audit). The log is strictly
+  **append-only** — never rotate/rewrite it from the CLI; `readAuditTail`
+  reads the whole file (fine for now; bounded read + rotation deferred).
+  **Script-driven writes are also captured** (slice 2): `script:<name>`
+  steps bypass `processSingleCommand`, so the script-adapter's write
+  methods (`placeOrder`/`placeOrders`/`cancel*`/`updateOrder`/
+  `closePosition`/`setLeverage`) call `recordScriptWrite` for each
+  internal write op (success AND failure — wrapped in try/catch so a
+  failed scripted write is still audited; `closePosition` records partial
+  fills on a mid-loop throw), and `runScriptStep` records the named
+  invocation (against the override-resolved account) — all tagged
+  `[script]`. **Command lineage (slice 3):** every entry carries a
+  `runId` shared by all writes from one top-level invocation.
+  `processCommand` wraps the whole chain loop in
+  `runWithAuditRunId(newRunId(), …)`; the id is an `AsyncLocalStorage`
+  value (dedicated store in `audit-log.ts`, separate from the
+  adapter-context ALS), and `appendAuditEntry` defaults each entry's
+  `runId` from `currentAuditRunId()`. Because it's ALS, the id flows into
+  fire-and-forget `&`/default steps that settle _after_ `processCommand`
+  returns, into a `repeat`'s expanded steps, and into a script's internal
+  order writes (run inside the same scope) — no id is threaded through
+  the adapter signatures. `audit tail` renders it as `run=<id>`.
+  **Fill attribution (slice 4):** write ops that return order ids feed a
+  bounded in-memory `orderId → {runId, command, account}` map
+  (`rememberOrderLineage`, gated on audit-on so it can't grow unbounded,
+  oldest evicted past `MAX_LINEAGE`). The exchange `fill` handler in
+  `setupExchangeListeners` calls `recordFill(fill.orderId ?? fill.id, …)`;
+  on a hit it appends a `[fill]` entry stamped with the lineage's `runId`
+  (set explicitly — fills arrive async, outside the run scope) and a
+  `← <originating command>` pointer. Unattributable fills (placed before
+  audit was on / in a prior process) are skipped.
+  **Rotation + bounded read (slice 5, closes TSBUG-107):** the live
+  `audit.log` is size-capped (`maxLogBytes`, 5 MB) — tracked via an
+  in-memory `logBytes` counter (lazily seeded from `statSync`, so no
+  `stat` per write) and rolled to `audit.log.1` (single backup, replaced
+  each time) once it's exceeded, so disk use is bounded at ~2× the cap.
+  `readAuditTail` scans backwards from the end (`readTailLines`, 16 KB
+  chunks, decoded once to avoid splitting a multi-byte char) and dips
+  into `audit.log.1` only when a recent rotation left the live log short
+  — it never slurps the whole file. Test hooks:
+  `__setMaxLogBytesForTest`, and `__resetAuditCacheForTest` also clears
+  `logBytes`.
+- **ALS adapter context (`src/listener/adapter-context.ts`).**
+  Thread-locals a `printSink` via `node:async_hooks`. The five
+  `printX` methods on the standalone adapter consult `als.getStore()`
+  first; when set, output routes to the sink (WS frame emit). Outside
+  an ALS scope they fall through to terminal+log. **This is what lets
+  `cmd:exec` and webhook fires stream without touching every
+  `adapter.printX` call site in `repl.ts`** (~50+ of them). Late
+  frames from fire-and-forget `;`/`&` steps propagate through `.catch`
+  handlers attached during the scope — `cmd:done success:true` can be
+  followed by additional `cmd:output kind:'error'` frames, by design.
+  The same context **also carries `accountOverride` / `symbolOverride`**:
+  when set (`cmd:exec` from a web tab with `account`/`symbol` fields),
+  `processCommand` and `processSingleCommand` resolve `effectiveAccount`
+  / `effectiveSymbol` / `effectiveExchange` from the override (looking
+  up the exchange via `exchangeManager.getExchange`) instead of the
+  long-lived REPL session. The `result.sessionChanged` writeback is
+  also skipped on override runs so a web tab's `account <name>`
+  doesn't hijack the REPL's current account. Webhook fires don't set
+  overrides — they still run against the REPL session (see
+  `apps/documentation/cli/operations/listener.md` → wire frames table for `mutate:account`).
+- **`removeAccount` tombstones, doesn't physically drop.**
+  `apps/cli/src/config.ts:removeAccount` sets `deletedAt + updatedAt`
+  on the row rather than splicing it. `listAccounts()` and
+  `getActiveAccounts()` filter `!deletedAt` so local UX is unchanged;
+  the full snapshot path uses `listAllAccounts()`. Tombstones GC at
+  listener startup if >30 days old (`gcTombstonedAccounts()`).
+  **Don't add a code path that physically drops accounts** — the
+  web side treats missing-from-snapshot as "ignore" (not "deleted"),
+  so a physical drop would not propagate the delete and could
+  silently desync.
+- **`X-Hook-Token` length-guard.**
+  `apps/cli/src/listener/hooks-store.ts:verifyHookToken`
+  short-circuits on `token.length !== hook.secret.length` BEFORE
+  `crypto.timingSafeEqual`. Don't remove the guard —
+  `timingSafeEqual` throws `RangeError` on unequal-length buffers,
+  which would surface as HTTP 500 on an empty-token POST instead of
+  a clean 401.
+- **Phase 6 types bundle (`src/script-types-bundle.ts`).** Generated
+  artifact, committed. Pipeline: `yarn generate:types` at the repo
+  root runs `scripts/generate-script-types-bundle.ts`, which calls
+  the three per-package `scripts/generate-monaco-types.ts` (core /
+  cli / web) and writes the assembled bundle file. The bundle is
+  `import`ed by `scripts-templates.ts` to build `TYPES_TEMPLATE`,
+  which `scripts-store.ts:ensureScriptsDir` writes to
+  `~/.tealstreet/scripts/types.d.ts` on every launch. Drift safety:
+  `script-types-bundle.test.ts` re-runs the orchestrator in-memory
+  and compares against the on-disk file — CI fails if the two
+  diverge, forcing `yarn generate:types` + commit. **Never
+  hand-edit `script-types-bundle.ts`** — fix the generators or the
+  source packages and regenerate. The core generator uses a
+  dedicated `packages/script-api-core/scripts/bundle.tsconfig.json`
+  that carries the workspace `paths` + DOM lib inline so
+  `dts-bundle-generator` can resolve `@tealstreet/*` and safe-cex's
+  DOM-touching utils (CompressionFormat, BufferSource) without
+  per-package include scopes.
+- **Phase 6 v1.1 entry-point split (`packages/script-api-core/src/script.ts`).**
+  The Phase 6 generator now walks `src/script.ts` (user-facing
+  surface only), NOT `src/index.ts`. The package's `main` is still
+  `index.ts` so every host consumer (CLI's `script-runner.ts`,
+  `scripts-store.ts`, the web worker shim, all tests) keeps
+  importing the full surface from `@tealstreet/script-api-core`
+  unchanged — only the bundle target changed. The seeded
+  `types.d.ts` no longer contains `InProcessProxy`, `runScript`,
+  `buildApi`, capability validators, transpile helpers, etc.
+  **Leak guard**: `script-types-bundle.test.ts` runs 32 regex
+  assertions against `CORE_TYPES_DTS` to fail CI if any host symbol
+  re-appears as an actual TS declaration (textual mentions inside
+  JSDoc comments are allowed — they aren't load-bearing). When
+  adding a new host symbol to `index.ts`, add it to
+  `HOST_ONLY_SYMBOLS` in the same PR.
+- **Drift block skips in the OSS mirror — don't "fix" the glob import.**
+  `script-types-bundle.test.ts`'s drift block re-runs
+  `scripts/generate-script-types-bundle.ts`, a monorepo-root script that
+  is **not** in the `tealstreet-sdk` mirror slice. The block loads the
+  generator via a Vite partial-dynamic specifier
+  (``import(`../../../scripts/${generatorName}.ts`)``): the glob matches
+  in the monorepo (gate runs, 0 skipped) and matches nothing in the mirror,
+  where the dir is absent (import rejects → `describe.skipIf` skips). The
+  template specifier also stops tsc binding the missing module, keeping the
+  mirror's typecheck clean. Do not convert it back to a static/literal
+  import — that breaks mirror typecheck (`TS2307`). The host-symbol leak
+  guard in the same file reads the committed in-slice bundle and runs in
+  both. (Authoritative drift gate stays in the monorepo on sync-back —
+  `docs/safe-cex-cli-mirror-plan.md` §9.)
+- **Script `runCommand` intentionally fails unhandled commands.**
+  `src/script-adapter.ts:createStandaloneCoreAdapter().runCommand`
+  calls `cli-core.executeCommand` directly, not `processCommand` /
+  `runStep`. That means it does not run the preprocess pipeline, does
+  not see CLI-only commands handled in `repl.ts` (`script reload`,
+  `script:<name>`, hooks, logs, watch modes, record/export/import
+  registration side effects), and does not process REPL-only
+  `taskAction` follow-ups like TWAP startup. Because this is a narrower
+  surface than the REPL, `{ handled: false }` from `executeCommand`
+  must map to `RunCommandResult.ok === false` (`Unknown command: ...`),
+  never silent success. If you later widen `runCommand` to route
+  through `processCommand`, keep an explicit deny story for management
+  commands (`script reload`, `hook create`, `clients revoke`, watch
+  modes, etc.).
+- **Script retry idempotency is checked before the first attempt.**
+  `retry N script:<name>` must refuse a non-idempotent script before
+  user code runs at all. `runScriptStep` performs this preflight; the
+  lower-level `script-runner.ts` gate still protects direct host calls
+  where `retry: { isRetry: true }` is supplied.

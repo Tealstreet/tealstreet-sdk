@@ -1,0 +1,269 @@
+export enum EClusterConfigType {
+  // Client tier config
+  CLIENT_TIER = 'CLIENT_TIER',
+  // Initial margin config
+  INITIAL_MARGIN = 'INITIAL_MARGIN',
+  // Enable configurable leverage config
+  CONFIGURABLE_LEVERAGE_FLAGS = 'CONFIGURABLE_LEVERAGE_FLAGS',
+  // Configs for waiving margin checks in risk engine for position-reducing trades
+  WAIVE_MARGIN_CHECK_IF_REDUCING_POSITION_FLAGS = 'WAIVE_MARGIN_CHECK_IF_REDUCING_POSITION_FLAGS',
+  // Configs for pre-emptive cancellation behavior
+  PRE_EMPTIVE_CANCEL_FLAGS = 'PRE_EMPTIVE_CANCEL_FLAGS',
+  // Configs for external-match handling behavior on cluster
+  EXTERNAL_MATCH_MAKER_FLAGS = 'EXTERNAL_MATCH_MAKER_FLAGS',
+  // Configs for extending session keys to 37 days
+  FLAG_EXTEND_SESSION_KEYS_THIRTY_SEVEN_DAYS = 'FLAG_EXTEND_SESSION_KEYS_THIRTY_SEVEN_DAYS',
+  // Configs for account blacklist
+  ACCOUNT_BLACKLIST = 'ACCOUNT_BLACKLIST',
+  // Configs for vault APIs in risk service
+  VAULT_API_FLAGS = 'VAULT_API_FLAGS',
+  // Configs for extending TPSL order's expiry to 180 days and allow matching all orders even after session key expires
+  FLAG_LONG_LIVED_ORDER_MATCHING = 'FLAG_LONG_LIVED_ORDER_MATCHING',
+  // Configs for fixing pub empty match
+  FIX_PUB_EMPTY_MATCH = 'FIX_PUB_EMPTY_MATCH',
+  // Configs for enabling RPI matching
+  FLAG_ENABLE_RPI_MATCHING = 'FLAG_ENABLE_RPI_MATCHING',
+  // Configs for skipping IM check for reduce-only orders
+  FLAG_SKIP_REDUCE_ONLY_IM_CHECK = 'FLAG_SKIP_REDUCE_ONLY_IM_CHECK',
+  // Configs for allowing partial reduce-only execution
+  FLAG_ALLOW_PARTIAL_REDUCE_ONLY_EXECUTION = 'FLAG_ALLOW_PARTIAL_REDUCE_ONLY_EXECUTION',
+  // Configs for canceling reduce-only orders on position flip or close
+  FLAG_CANCEL_REDUCE_ONLY_ON_FLIP_OR_CLOSE = 'FLAG_CANCEL_REDUCE_ONLY_ON_FLIP_OR_CLOSE',
+  // Configs for enabling vault management fee tick
+  FLAG_VAULT_MANAGEMENT_FEE_TICK = 'FLAG_VAULT_MANAGEMENT_FEE_TICK',
+  // Configs for enabling vault redemption queue tracking
+  FLAG_VAULT_REDEMPTION_QUEUE_TRACKING = 'FLAG_VAULT_REDEMPTION_QUEUE_TRACKING',
+  // Configs for enabling currency store, to deprecate currency enum
+  FLAG_ENABLE_CURRENCY_STORE = 'FLAG_ENABLE_CURRENCY_STORE',
+  // Configs for GRVT-defined vault redemption parameters (applies to all vaults)
+  VAULT_REDEMPTION_PARAMETERS = 'VAULT_REDEMPTION_PARAMETERS',
+  // Flag to switch cluster-side orderbook delta publish rate to once per 50ms. If disabled, uses 100ms as the publish rate.
+  FLAG_SET_ORDER_BOOK_DELTA_CLUSTER_PUB_FREQ_50_MS = 'FLAG_SET_ORDER_BOOK_DELTA_CLUSTER_PUB_FREQ_50_MS',
+  // Configs for enabling derisk
+  FLAG_DERISK_PARAMETERS = 'FLAG_DERISK_PARAMETERS',
+  // Flag to add currency in asset context
+  FLAG_ADD_CURRENCY_IN_ASSET_TRADE_CONTEXT = 'FLAG_ADD_CURRENCY_IN_ASSET_TRADE_CONTEXT',
+  // Flag to enable ECN matching
+  FLAG_ENABLE_ECN_MATCHING = 'FLAG_ENABLE_ECN_MATCHING',
+  // Flag to disable poison vault redemption filter on July 11th, 2025
+  FLAG_DISABLE_POISON_VAULT_REDEMPTION_FILTER = 'FLAG_DISABLE_POISON_VAULT_REDEMPTION_FILTER',
+  // Flag to enable/disable the minimum initial investment for vaults
+  FLAG_VAULT_MINIMUM_INITIAL_INVESTMENT = 'FLAG_VAULT_MINIMUM_INITIAL_INVESTMENT',
+  // Flag to enable the fix for double publish stateOrder
+  FLAG_FIX_DOUBLE_PUBLISH_STATE_ORDER = 'FLAG_FIX_DOUBLE_PUBLISH_STATE_ORDER',
+  // Flag to enable price protection
+  FLAG_PRICE_PROTECTION = 'FLAG_PRICE_PROTECTION',
+  // Flag to enable bulk order
+  FLAG_ENABLE_BULK_ORDER = 'FLAG_ENABLE_BULK_ORDER',
+  // Flag to allow decreasing fee immediately
+  FLAG_ALLOW_DECREASE_FEE_IMMEDIATELY = 'FLAG_ALLOW_DECREASE_FEE_IMMEDIATELY',
+  // Flag to reject ECN from broker ahead of sequence
+  FLAG_REJECT_AHEAD_OF_SEQUENCE_ECN_FROM_BROKER = 'FLAG_REJECT_AHEAD_OF_SEQUENCE_ECN_FROM_BROKER',
+  // Flag to allow total equity after trade loss to be below IM
+  FLAG_ALLOW_TOTAL_EQUITY_AFTER_TRADE_LOSS_BELOW_IM = 'FLAG_ALLOW_TOTAL_EQUITY_AFTER_TRADE_LOSS_BELOW_IM',
+  // Flag to enable position cumulative data
+  FLAG_ENABLE_POSITION_CUMULATIVE_DATA = 'FLAG_ENABLE_POSITION_CUMULATIVE_DATA',
+  // Flag to disable vault creation
+  FLAG_DISABLE_VAULT_CREATE = 'FLAG_DISABLE_VAULT_CREATE',
+  // Flag to enable investment queue
+  FLAG_ENABLE_INVESTMENT_QUEUE = 'FLAG_ENABLE_INVESTMENT_QUEUE',
+  // Flag to enable calculating taker trade level realized PnL
+  FLAG_CALCULATE_TAKER_TRADE_LEVEL_REALIZED_PNL = 'FLAG_CALCULATE_TAKER_TRADE_LEVEL_REALIZED_PNL',
+  // Payload to configure cross-exchange vault access tiers by lifetime trading volume.
+  CONFIGURE_CEV_ACCESS_TIERS = 'CONFIGURE_CEV_ACCESS_TIERS',
+  // Flag to enable vault lock
+  FLAG_ENABLE_VAULT_LOCK = 'FLAG_ENABLE_VAULT_LOCK',
+  // Flag to enable MsgTimer in all services
+  FLAG_ENABLE_MSG_TIMER = 'FLAG_ENABLE_MSG_TIMER',
+  // Flag to enable position transfer
+  FLAG_ENABLE_POSITION_TRANSFER = 'FLAG_ENABLE_POSITION_TRANSFER',
+  // Flag to enable total equity with unrealized funding payment on snap sub account
+  FLAG_ENABLE_TOTAL_EQUITY_WITH_UNREALIZED_FUNDING_PAYMENT_ON_SNAP_SUB_ACCOUNT = 'FLAG_ENABLE_TOTAL_EQUITY_WITH_UNREALIZED_FUNDING_PAYMENT_ON_SNAP_SUB_ACCOUNT',
+  // Flag to let scribe write to local file storage
+  FLAG_ENABLE_SCRIBE_LOCAL_FILE_STORAGE = 'FLAG_ENABLE_SCRIBE_LOCAL_FILE_STORAGE',
+  // Flag to exclude liquidation from public trades
+  FLAG_EXCLUDE_LIQUIDATION_FROM_PUBLIC_TRADES = 'FLAG_EXCLUDE_LIQUIDATION_FROM_PUBLIC_TRADES',
+  // Flag to enable session key permission extension for internal transfer, vault redeem and invest
+  FLAG_ENABLE_SESSION_KEY_PERMISSION_EXTENSION = 'FLAG_ENABLE_SESSION_KEY_PERMISSION_EXTENSION',
+  // Configs for migrating GRVT funding rate v2 methodology
+  FUNDING_V_2 = 'FUNDING_V_2',
+  // Flag to enable post-only to cross orderbook
+  FLAG_ALLOW_POST_ONLY_TO_CROSS_ORDERBOOK = 'FLAG_ALLOW_POST_ONLY_TO_CROSS_ORDERBOOK',
+  // Flag to enable update funding info fix
+  FLAG_ENABLE_UPDATE_FUNDING_INFO_FIX = 'FLAG_ENABLE_UPDATE_FUNDING_INFO_FIX',
+  // Flag to disable funding-tick publications from marketdata
+  FLAG_DISABLE_MARKET_DATA_FUNDING_TICK_PUBS = 'FLAG_DISABLE_MARKET_DATA_FUNDING_TICK_PUBS',
+  // Flag to fix the reported funding payment
+  FLAG_FIX_V_2_REPORTED_FUNDING_PAYMENT = 'FLAG_FIX_V_2_REPORTED_FUNDING_PAYMENT',
+  // Flag to fix the total volume calculation
+  FLAG_FIX_TOTAL_VOLUME_CALCULATION = 'FLAG_FIX_TOTAL_VOLUME_CALCULATION',
+  // Flag to skip pre-trade check
+  FLAG_SKIP_PRE_TRADE_CHECK = 'FLAG_SKIP_PRE_TRADE_CHECK',
+  // Version of the risk snapshot
+  RISK_SNAPSHOT_VERSION = 'RISK_SNAPSHOT_VERSION',
+  // Flag to check IM multiplier
+  FLAG_IM_CHECK_MULTIPLIER = 'FLAG_IM_CHECK_MULTIPLIER',
+  // DEPRECATED: Use configureNonLiquidatableSubAccountsV2 for per-subaccount capabilities. V1 payload to configure non-liquidatable sub-accounts list.
+  CONFIGURE_NON_LIQUIDATABLE_SUB_ACCOUNTS = 'CONFIGURE_NON_LIQUIDATABLE_SUB_ACCOUNTS',
+  // Flag to enable risk-reducing trades when negative TE.
+  FLAG_ALLOW_RISK_REDUCING_TRADES_WHEN_NEGATIVE_TE = 'FLAG_ALLOW_RISK_REDUCING_TRADES_WHEN_NEGATIVE_TE',
+  // Config payload for setting ungated CEVs.
+  CONFIGURE_UNGATED_CROSS_EXCH_VAULTS = 'CONFIGURE_UNGATED_CROSS_EXCH_VAULTS',
+  // Flag to adjust WCPS for flipping position
+  FLAG_ADJUST_WCPS_FOR_FLIPPING_POSITION = 'FLAG_ADJUST_WCPS_FOR_FLIPPING_POSITION',
+  // Flag to swap risk attest and unlock pub order
+  FLAG_CEV_RISK_PUBS_ATTEST_THEN_UNLOCK = 'FLAG_CEV_RISK_PUBS_ATTEST_THEN_UNLOCK',
+  // Flag to enable margin matrix v2
+  FLAG_ENABLE_MARGIN_MATRIX_V_2 = 'FLAG_ENABLE_MARGIN_MATRIX_V_2',
+  // Flag to check MM multiplier
+  FLAG_MM_CHECK_MULTIPLIER = 'FLAG_MM_CHECK_MULTIPLIER',
+  // Flag to enable isolated margin
+  FLAG_ISOLATED_MARGIN = 'FLAG_ISOLATED_MARGIN',
+  // Flag to enable set sub account position margin config
+  FLAG_ENABLE_SET_SUB_ACCOUNT_POSITION_MARGIN_CONFIG = 'FLAG_ENABLE_SET_SUB_ACCOUNT_POSITION_MARGIN_CONFIG',
+  // Flag to enable add isolated position margin
+  FLAG_ENABLE_ADD_ISOLATED_POSITION_MARGIN = 'FLAG_ENABLE_ADD_ISOLATED_POSITION_MARGIN',
+  // Flag builder code
+  FLAG_BUILDER_CODE = 'FLAG_BUILDER_CODE',
+  // Flag to enable adjust is reducing position
+  FLAG_ENABLE_ADJUST_IS_REDUCING_POSITION = 'FLAG_ENABLE_ADJUST_IS_REDUCING_POSITION',
+  // Flag to fix cross liquidation post trade
+  FLAG_FIX_CROSS_LIQUIDATION_POST_TRADE = 'FLAG_FIX_CROSS_LIQUIDATION_POST_TRADE',
+  // Flag to allow keeping session keys for 180 days
+  FLAG_KEEP_EXPIRED_SESSION_KEYS_FOR_180_DAYS = 'FLAG_KEEP_EXPIRED_SESSION_KEYS_FOR_180_DAYS',
+  // Flag Trigger Order Cancellation V2
+  FLAG_TRIGGER_ORDER_CANCELLATION_V_2 = 'FLAG_TRIGGER_ORDER_CANCELLATION_V_2',
+  // Flag to fix oid assignment
+  FLAG_FIX_OID_ASSIGNMENT = 'FLAG_FIX_OID_ASSIGNMENT',
+  // Flag to fix cancel TPSL bulk order
+  FLAG_FIX_CANCEL_TPSL_BULK_ORDER_V_2 = 'FLAG_FIX_CANCEL_TPSL_BULK_ORDER_V_2',
+  // Flag to use the numop version of CheckMaxPositionSize with numops backend instead of BI
+  FLAG_USE_CHECK_MAX_POSITION_SIZE_NUMOPS = 'FLAG_USE_CHECK_MAX_POSITION_SIZE_NUMOPS',
+  // Flag to check duplicated builder in risk
+  FLAG_RISK_DUPLICATED_BUILDER_CHECK = 'FLAG_RISK_DUPLICATED_BUILDER_CHECK',
+  // V2 config for per-subaccount non-liquidatable capabilities
+  CONFIGURE_NON_LIQUIDATABLE_SUB_ACCOUNTS_V_2 = 'CONFIGURE_NON_LIQUIDATABLE_SUB_ACCOUNTS_V_2',
+  // Flag to reject trade price worse than bankruptcy price
+  FLAG_REJECT_TRADE_PRICE_WORSE_THAN_BANKRUPTCY_PRICE = 'FLAG_REJECT_TRADE_PRICE_WORSE_THAN_BANKRUPTCY_PRICE',
+  // Flag to set max number of makers
+  FLAG_MAX_NUM_MAKERS = 'FLAG_MAX_NUM_MAKERS',
+  // When enabled, NLSA availBal checks verify POST-transfer TE >= 0 instead of PRE-transfer
+  FLAG_FIX_NLSA_TRANSFER_AVAIL_BAL_CHECK = 'FLAG_FIX_NLSA_TRANSFER_AVAIL_BAL_CHECK',
+  // Flag to enforce max-addable checks for isolated increasing positions
+  FLAG_ENABLE_ISOLATED_INCREASE_MAX_ADDABLE = 'FLAG_ENABLE_ISOLATED_INCREASE_MAX_ADDABLE',
+  // Flag to control cancel on disconnect
+  FLAG_CANCEL_ON_DISCONNECT = 'FLAG_CANCEL_ON_DISCONNECT',
+  // Flag to control split TPSL support
+  FLAG_SPLIT_TPSL = 'FLAG_SPLIT_TPSL',
+  // Flag to enable spot trading
+  FLAG_SPOT_TRADING = 'FLAG_SPOT_TRADING',
+  // Flag to dump currency store first in snapshot, ensuring gateway rehydrates currency store before other state
+  FLAG_SNAPSHOT_CURRENCY_STORE_FIRST = 'FLAG_SNAPSHOT_CURRENCY_STORE_FIRST',
+  // Gates position history lifecycle accumulation and close publication
+  FLAG_ENABLE_POSITION_HISTORY = 'FLAG_ENABLE_POSITION_HISTORY',
+  // Flag to enable price data publishing from marketdata to cluster
+  FLAG_PUBLISH_PRICE_DATA = 'FLAG_PUBLISH_PRICE_DATA',
+  // Flag to control deviation penalty logic on trading checks
+  FLAG_DEVIATION_PENALTY = 'FLAG_DEVIATION_PENALTY',
+  // List of currency IDs considered as cash (stablecoins) for balance aggregation
+  CASH_CURRENCIES = 'CASH_CURRENCIES',
+  // Configurable candlestick broadcast frequency (in seconds) for spot swap instruments. 0 means disabled.
+  FLAG_SPOT_CANDLESTICK_PUB_FREQUENCY = 'FLAG_SPOT_CANDLESTICK_PUB_FREQUENCY',
+  // Aggregate matches with the same taker when stopping ECN requests to avoid duplicate replays
+  FLAG_FIX_AGGREGATE_TAKERS_ON_ECN_STOP = 'FLAG_FIX_AGGREGATE_TAKERS_ON_ECN_STOP',
+  // Preserve V2 funding info on existing pairs when ApplyInstrumentMap overwrites the instrument map
+  FLAG_PRESERVE_FUNDING_INFO_ON_INSTRUMENT_MAP = 'FLAG_PRESERVE_FUNDING_INFO_ON_INSTRUMENT_MAP',
+  // Per-asset VIP tier config for MAM borrowing limits, borrow rates, and collateral limits
+  SPOT_VIP_TIER_CONFIG = 'SPOT_VIP_TIER_CONFIG',
+}
+
+export const EClusterConfigTypeInt: Record<EClusterConfigType, number> = Object.freeze({
+  [EClusterConfigType.CLIENT_TIER]: 1,
+  [EClusterConfigType.INITIAL_MARGIN]: 2,
+  [EClusterConfigType.CONFIGURABLE_LEVERAGE_FLAGS]: 3,
+  [EClusterConfigType.WAIVE_MARGIN_CHECK_IF_REDUCING_POSITION_FLAGS]: 4,
+  [EClusterConfigType.PRE_EMPTIVE_CANCEL_FLAGS]: 5,
+  [EClusterConfigType.EXTERNAL_MATCH_MAKER_FLAGS]: 6,
+  [EClusterConfigType.FLAG_EXTEND_SESSION_KEYS_THIRTY_SEVEN_DAYS]: 7,
+  [EClusterConfigType.ACCOUNT_BLACKLIST]: 8,
+  [EClusterConfigType.VAULT_API_FLAGS]: 9,
+  [EClusterConfigType.FLAG_LONG_LIVED_ORDER_MATCHING]: 10,
+  [EClusterConfigType.FIX_PUB_EMPTY_MATCH]: 11,
+  [EClusterConfigType.FLAG_ENABLE_RPI_MATCHING]: 12,
+  [EClusterConfigType.FLAG_SKIP_REDUCE_ONLY_IM_CHECK]: 13,
+  [EClusterConfigType.FLAG_ALLOW_PARTIAL_REDUCE_ONLY_EXECUTION]: 14,
+  [EClusterConfigType.FLAG_CANCEL_REDUCE_ONLY_ON_FLIP_OR_CLOSE]: 15,
+  [EClusterConfigType.FLAG_VAULT_MANAGEMENT_FEE_TICK]: 16,
+  [EClusterConfigType.FLAG_VAULT_REDEMPTION_QUEUE_TRACKING]: 17,
+  [EClusterConfigType.FLAG_ENABLE_CURRENCY_STORE]: 18,
+  [EClusterConfigType.VAULT_REDEMPTION_PARAMETERS]: 19,
+  [EClusterConfigType.FLAG_SET_ORDER_BOOK_DELTA_CLUSTER_PUB_FREQ_50_MS]: 20,
+  [EClusterConfigType.FLAG_DERISK_PARAMETERS]: 21,
+  [EClusterConfigType.FLAG_ADD_CURRENCY_IN_ASSET_TRADE_CONTEXT]: 22,
+  [EClusterConfigType.FLAG_ENABLE_ECN_MATCHING]: 23,
+  [EClusterConfigType.FLAG_DISABLE_POISON_VAULT_REDEMPTION_FILTER]: 24,
+  [EClusterConfigType.FLAG_VAULT_MINIMUM_INITIAL_INVESTMENT]: 25,
+  [EClusterConfigType.FLAG_FIX_DOUBLE_PUBLISH_STATE_ORDER]: 26,
+  [EClusterConfigType.FLAG_PRICE_PROTECTION]: 27,
+  [EClusterConfigType.FLAG_ENABLE_BULK_ORDER]: 28,
+  [EClusterConfigType.FLAG_ALLOW_DECREASE_FEE_IMMEDIATELY]: 29,
+  [EClusterConfigType.FLAG_REJECT_AHEAD_OF_SEQUENCE_ECN_FROM_BROKER]: 30,
+  [EClusterConfigType.FLAG_ALLOW_TOTAL_EQUITY_AFTER_TRADE_LOSS_BELOW_IM]: 31,
+  [EClusterConfigType.FLAG_ENABLE_POSITION_CUMULATIVE_DATA]: 32,
+  [EClusterConfigType.FLAG_DISABLE_VAULT_CREATE]: 33,
+  [EClusterConfigType.FLAG_ENABLE_INVESTMENT_QUEUE]: 34,
+  [EClusterConfigType.FLAG_CALCULATE_TAKER_TRADE_LEVEL_REALIZED_PNL]: 35,
+  [EClusterConfigType.CONFIGURE_CEV_ACCESS_TIERS]: 36,
+  [EClusterConfigType.FLAG_ENABLE_VAULT_LOCK]: 37,
+  [EClusterConfigType.FLAG_ENABLE_MSG_TIMER]: 38,
+  [EClusterConfigType.FLAG_ENABLE_POSITION_TRANSFER]: 39,
+  [EClusterConfigType.FLAG_ENABLE_TOTAL_EQUITY_WITH_UNREALIZED_FUNDING_PAYMENT_ON_SNAP_SUB_ACCOUNT]: 40,
+  [EClusterConfigType.FLAG_ENABLE_SCRIBE_LOCAL_FILE_STORAGE]: 41,
+  [EClusterConfigType.FLAG_EXCLUDE_LIQUIDATION_FROM_PUBLIC_TRADES]: 42,
+  [EClusterConfigType.FLAG_ENABLE_SESSION_KEY_PERMISSION_EXTENSION]: 43,
+  [EClusterConfigType.FUNDING_V_2]: 44,
+  [EClusterConfigType.FLAG_ALLOW_POST_ONLY_TO_CROSS_ORDERBOOK]: 45,
+  [EClusterConfigType.FLAG_ENABLE_UPDATE_FUNDING_INFO_FIX]: 46,
+  [EClusterConfigType.FLAG_DISABLE_MARKET_DATA_FUNDING_TICK_PUBS]: 47,
+  [EClusterConfigType.FLAG_FIX_V_2_REPORTED_FUNDING_PAYMENT]: 48,
+  [EClusterConfigType.FLAG_FIX_TOTAL_VOLUME_CALCULATION]: 49,
+  [EClusterConfigType.FLAG_SKIP_PRE_TRADE_CHECK]: 50,
+  [EClusterConfigType.RISK_SNAPSHOT_VERSION]: 51,
+  [EClusterConfigType.FLAG_IM_CHECK_MULTIPLIER]: 52,
+  [EClusterConfigType.CONFIGURE_NON_LIQUIDATABLE_SUB_ACCOUNTS]: 53,
+  [EClusterConfigType.FLAG_ALLOW_RISK_REDUCING_TRADES_WHEN_NEGATIVE_TE]: 54,
+  [EClusterConfigType.CONFIGURE_UNGATED_CROSS_EXCH_VAULTS]: 55,
+  [EClusterConfigType.FLAG_ADJUST_WCPS_FOR_FLIPPING_POSITION]: 56,
+  [EClusterConfigType.FLAG_CEV_RISK_PUBS_ATTEST_THEN_UNLOCK]: 57,
+  [EClusterConfigType.FLAG_ENABLE_MARGIN_MATRIX_V_2]: 58,
+  [EClusterConfigType.FLAG_MM_CHECK_MULTIPLIER]: 59,
+  [EClusterConfigType.FLAG_ISOLATED_MARGIN]: 60,
+  [EClusterConfigType.FLAG_ENABLE_SET_SUB_ACCOUNT_POSITION_MARGIN_CONFIG]: 61,
+  [EClusterConfigType.FLAG_ENABLE_ADD_ISOLATED_POSITION_MARGIN]: 62,
+  [EClusterConfigType.FLAG_BUILDER_CODE]: 63,
+  [EClusterConfigType.FLAG_ENABLE_ADJUST_IS_REDUCING_POSITION]: 64,
+  [EClusterConfigType.FLAG_FIX_CROSS_LIQUIDATION_POST_TRADE]: 65,
+  [EClusterConfigType.FLAG_KEEP_EXPIRED_SESSION_KEYS_FOR_180_DAYS]: 66,
+  [EClusterConfigType.FLAG_TRIGGER_ORDER_CANCELLATION_V_2]: 67,
+  [EClusterConfigType.FLAG_FIX_OID_ASSIGNMENT]: 68,
+  [EClusterConfigType.FLAG_FIX_CANCEL_TPSL_BULK_ORDER_V_2]: 69,
+  [EClusterConfigType.FLAG_USE_CHECK_MAX_POSITION_SIZE_NUMOPS]: 70,
+  [EClusterConfigType.FLAG_RISK_DUPLICATED_BUILDER_CHECK]: 71,
+  [EClusterConfigType.CONFIGURE_NON_LIQUIDATABLE_SUB_ACCOUNTS_V_2]: 72,
+  [EClusterConfigType.FLAG_REJECT_TRADE_PRICE_WORSE_THAN_BANKRUPTCY_PRICE]: 73,
+  [EClusterConfigType.FLAG_MAX_NUM_MAKERS]: 74,
+  [EClusterConfigType.FLAG_FIX_NLSA_TRANSFER_AVAIL_BAL_CHECK]: 75,
+  [EClusterConfigType.FLAG_ENABLE_ISOLATED_INCREASE_MAX_ADDABLE]: 76,
+  [EClusterConfigType.FLAG_CANCEL_ON_DISCONNECT]: 77,
+  [EClusterConfigType.FLAG_SPLIT_TPSL]: 78,
+  [EClusterConfigType.FLAG_SPOT_TRADING]: 79,
+  [EClusterConfigType.FLAG_SNAPSHOT_CURRENCY_STORE_FIRST]: 80,
+  [EClusterConfigType.FLAG_ENABLE_POSITION_HISTORY]: 81,
+  [EClusterConfigType.FLAG_PUBLISH_PRICE_DATA]: 82,
+  [EClusterConfigType.FLAG_DEVIATION_PENALTY]: 83,
+  [EClusterConfigType.CASH_CURRENCIES]: 84,
+  [EClusterConfigType.FLAG_SPOT_CANDLESTICK_PUB_FREQUENCY]: 85,
+  [EClusterConfigType.FLAG_FIX_AGGREGATE_TAKERS_ON_ECN_STOP]: 86,
+  [EClusterConfigType.FLAG_PRESERVE_FUNDING_INFO_ON_INSTRUMENT_MAP]: 87,
+  [EClusterConfigType.SPOT_VIP_TIER_CONFIG]: 88
+})

@@ -1,0 +1,160 @@
+---
+title: 故障排除
+description: 本页将介绍用户在尝试将其喜爱的交易所连接到Tealstreet时遇到的一些最常见问题。
+sidebar_position: 4
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+# 故障排除
+
+在本页中，我们将介绍如何解决用户在尝试将其常用交易所API连接到 Tealstreet 时遇到的一些问题。在查看特定于交易所的问题之前，以下是您可以快速尝试的几件事情：
+
+1. 首先尝试刷新页面（Windows: Ctrl+R，MacOS: Command + R）
+
+2. 如果问题仍然存在，请尝试通过单击“清除数据”按钮来清除 Tealstreet 的浏览器缓存
+
+<div class="text--center">
+
+![Clear](/img/client/cleardata.png)
+
+</div>
+
+对于特定于交易所的问题，请使用侧边栏快速导航到您遇到问题的交易所。
+
+:::tip
+访问您常用的交易所的常见问题解答页面以获取答案：
+
+[Binance](https://www.binance.com/en/support/faq/c-3?navId=3#16) |
+[BitMEX](https://www.bitmex.com/app/faq) |
+[Bitget](https://www.bitget.com/en/support/categories/360001236891) |
+[Bybit](https://help.bybit.com/hc/en-us/categories/360002654173-Bybit-FAQ-) |
+[OKEx](https://www.okex.com/support/hc/en-us/categories/115000275231-FAQ) |
+[Phemex](https://phemex.com/user-guides)
+:::
+
+:::tip
+如果您使用密码管理器并且在密码和登录方面遇到问题，请尝试关闭与Tealstreet相关的所有域名和子域名的密码管理器的“自动登录”功能。
+:::
+
+## [Bybit](https://teal.link/bybit1)
+
+### 单向持仓模式和双向持仓模式
+
+:::info
+单向持仓模式和双向持仓模式适用于Bybit 的U本位交易对。这些设置无法在币本位市场的交易页面上更改。
+:::
+
+Bybit允许为交易账户启用双向持仓模式。这意味着您可以在同一合约上拥有相反的仓位（例如，在BTC上分别持有多头和空头仓位）。如果这会导致任何问题，请按照以下步骤禁用它：
+
+1. 通过导航到衍生品> USDT永续> 交易对来选择要禁用双向持仓模式的交易对。
+
+<div class="text--center">
+
+![Bybit-pair](/img/connect/troubleshoot/bybit-deriv.png)
+
+</div>
+
+2. 单击右侧边栏上的齿轮图标。
+
+<div class="text--center">
+
+![Bybit-Gear](/img/connect/troubleshoot/bybitgear.png)
+
+</div>
+
+3. 单击“仓位模式”，然后选择“单向持仓”以禁用该交易对的双向持仓模式。
+
+<div class="text--center">
+
+![Bybit-Mode](/img/connect/troubleshoot/bybitmode.png)
+
+</div>
+
+:::note
+您需要为每个U本位交易对分别禁用双向持仓模式。
+:::
+
+## [Binance](https://teal.link/Binance1) 币安
+
+### 双向持仓模式
+
+币安也允许用户为衍生品交易账户启用双向持仓模式。请按照下面的图像指南学习如何在两种模式之间进行切换:
+
+![Binance-Mode](/img/connect/troubleshoot/binancemode.png)
+
+如果您在已有某个交易对仓位的基础上加仓时遇到问题，请务必仔细检查币安网站上关于该交易对的杠杆/仓位限制。您可能需要为每个要交易的交易对调整杠杆/仓位限制。
+
+:::note
+币安目前不会通过API提交其币本位交易对的持仓清算（爆仓）价格。因此，在Tealstreet终端中您也将无法看到它
+:::
+
+### 订单类型
+
+币安区分“触发后关闭”和“仅减少”触发订单。
+
+#### 触发后关闭
+
+币安的“触发后关闭”订单没有仓位大小字段，如果触发将平掉整个仓位。
+
+#### 仅减少
+
+币安的“仅减少”触发订单的功能方式与Tealstreet处理“触发后关闭”订单的方式相同，即它只会通过在触发时提交订单来减少仓位（小于等于总仓位）。
+
+:::caution
+Tealstreet的“触发后关闭”订单功能等同于币安的 “仅减少”触发订单的功能。Tealstreet不会提交币安官方的“触发后关闭”订单。如果您已经有一个挂单的币安“触发后关闭”订单，并在Tealstreet上修改它，它将被修改并转换为币安“仅减少”触发订单（就像您在Tealstreet上提交它一样），并且大小将设置为您当前的仓位大小。
+:::
+
+### 超过最大允许仓位
+
+<div class="text--center">
+
+![Exceeding Leverage](/img/connect/troubleshoot/exlev.png)
+
+</div>
+
+当在全仓模式下，并在具有不同最大杠杆设置的合约之间切换时，会发生此错误。要在Tealstreet上修复它，用户需要使用滑块降低最大杠杆或在币安的网站上进行调整。
+
+:::note
+在全仓模式下，每个交易对的最大可用杠杆可能不同。如果您当前的最大全仓模式杠杆过高，或者有效的全仓模式杠杆过高（来自交易具有更高限制的市场），当您切换到具有较低最大杠杆限制的交易对时，您可能会收到一个错误，告诉您杠杆过高。
+:::
+
+## [OKEx](https://teal.link/OKEx)
+
+### 我能够将我的API添加到Tealstreet，但我无法提交订单!
+
+如果无法提交订单，请确保在您在帐户[设置](/docs/2.0.0/connect/okex)中启用了衍生品和期货交易。
+
+## [Phemex](https://teal.link/Phemex)
+
+:::note
+新的Phemex API密钥可能需要最多30分钟才能激活，请在添加API后耐心等待。
+:::
+
+### 我无法在Tealstreet上提交我的API密钥！
+
+请仔细检查是否在创建Phemex API密钥时选择了“默认API条目”。如果选择了“高速率限制API条目”，则可能无法提交所有必需的IP地址进行白名单。它们有四个！
+
+<div class="text--center">
+
+![API-Types](/img/connect/troubleshoot/phemexAPItypes.png)
+
+</div>
+
+### 我的钱包/保证金余额显示为零，但我知道我的账户中有钱！
+
+Phemex使用多个钱包来帮助保持资金分开。请确保您在“合约交易账户”中有资金。
+
+<div class="text--center">
+
+![Wallets](/img/connect/troubleshoot/phemexwallets.png)
+
+</div>
+
+### 我成功将Phemex API密钥链接到Tealstreet，但终端中的下单窗口无法加载！
+
+- 尝试在Phemex UI上提交测试订单。该持仓应在Tealstreet的“当前持仓”窗口中显示，并强制加载下单窗口。该问题是由于没有交易历史记录的新Phemex账户引起的。
+- 如果提交测试订单后仍无法加载，请通过电子邮件或在Discord中@我们联系 Tealstreet [support](/docs/support/contact-us)。

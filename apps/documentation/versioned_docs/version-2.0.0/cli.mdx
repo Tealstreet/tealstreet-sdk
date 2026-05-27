@@ -1,0 +1,266 @@
+---
+title: CLI Trading (Beta)
+description: Command Line Interface (CLI) trading for Tealstreet
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+---
+
+## Introduction
+
+This Command Line Interface (CLI) provides a set of commands for interacting with a trading system. The commands cover various operations such as placing market and limit orders, canceling orders, and managing aliases for custom commands.
+
+## Table of Contents
+
+1. [Order Actions](#order-actions)
+2. [Order Types](#order-types)
+3. [Order Parameters](#order-parameters)
+4. [Commands](#commands)
+    - [Market Order](#market-order)
+    - [Limit Order](#limit-order)
+    - [Stop Order](#stop-order)
+    - [Cancel All Orders](#cancel-all-orders)
+    - [Cancel All Orders for Symbol](#cancel-all-orders-for-symbol)
+    - [Flatten All Positions](#flatten-all-positions)
+    - [Flatten Position for Symbol](#flatten-position-for-symbol)
+    - [Ensure Position](#ensure-position)
+    - [Sleep](#sleep)
+    - [List Command Aliases](#list-command-aliases)
+    - [Show Command Alias](#show-command-alias)
+    - [Create Command Alias](#create-command-alias)
+    - [Delete Command Alias](#delete-command-alias)
+    - [Parse Command Alias](#parse-command-alias)
+
+## Order Actions {#order-actions}
+
+- **buy**: Initiates a buy order.
+- **sell**: Initiates a sell order.
+- **long**: Equivalent to "buy".
+- **short**: Equivalent to "sell".
+
+## Order Types {#order-types}
+
+- **market**: Places a market order.
+- **limit**: Places a limit order.
+- **stop**: Places a stop order.
+
+## Order Parameters {#order-parameters}
+
+- **number**: Represents a numerical value (float or integer).
+- **symbol**: Represents a trading instrument (at least 5 characters).
+- **post**: Specifies a "post only" order.
+- **reduce**: Specifies a "reduce only" order.
+- **word**: Represents a word.
+- **usd_currency**: Represents a US dollar currency symbol (e.g., "$", "dollars", "usd").
+
+## Commands {#commands}
+
+### Market Order {#market-order}
+
+**Grammar:**
+
+```plaintext
+[order_type 'market'] <action: buy | sell | long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+market buy 10 BTC with post
+```
+
+### Limit Order {#limit-order}
+
+**Grammar:**
+
+```plaintext
+[order_type 'limit'] <action: buy | sell | long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> at [$] <price: number> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+limit sell 5 ETH at $200 with reduce
+```
+
+### Stop Order {#stop-order}
+
+**Grammar:**
+
+```plaintext
+[order_type 'stop'] <action: buy | sell | long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> at [$] <price: number> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+stop sell 2 BTC at $35000 with post, reduce, mark
+```
+
+### Cancel All Orders {#cancel-all-orders}
+
+**Grammar:**
+
+```plaintext
+cancel [all] orders
+```
+
+**Example:**
+
+```plaintext
+cancel all orders
+```
+
+### Cancel All Orders for Symbol {#cancel-all-orders-for-symbol}
+
+**Grammar:**
+
+```plaintext
+cancel [all] <symbol: symbol> orders
+```
+
+**Example:**
+
+```plaintext
+cancel all BTC orders
+```
+
+### Flatten All Positions {#flatten-all-positions}
+
+**Grammar:**
+
+```plaintext
+flatten [all] [positions]
+```
+
+**Example:**
+
+```plaintext
+flatten all
+```
+
+### Flatten Position for Symbol {#flatten-position-for-symbol}
+
+**Grammar:**
+
+```plaintext
+flatten [all] <symbol: symbol> [positions] [position]
+```
+
+**Example:**
+
+```plaintext
+flatten BTC positions
+```
+
+### Ensure Position {#ensure-position}
+
+**Grammar:**
+
+```plaintext
+ensure <action: long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+ensure long $500 btcusdt
+```
+
+### Sleep {#sleep}
+
+**Grammar:**
+
+```plaintext
+sleep <seconds: SleepTime>
+```
+
+**Example:**
+
+```plaintext
+sleep 5
+```
+
+### List Command Aliases {#list-command-aliases}
+
+**Grammar:**
+
+```plaintext
+alias list
+```
+
+**Example:**
+
+```plaintext
+alias list
+```
+
+### Show Command Alias {#show-command-alias}
+
+**Grammar:**
+
+```plaintext
+alias show <name: word>
+```
+
+**Example:**
+
+```plaintext
+alias show my_alias
+```
+
+### Create Command Alias {#create-command-alias}
+
+**Grammar:**
+
+```plaintext
+alias [create] <name: word> [(args: word, ...)] = <command: restline>
+```
+
+**Example:**
+
+```plaintext
+alias create my_alias (arg1, arg2) = limit buy {arg1} at $500 with post
+```
+
+### Delete Command Alias {#delete-command-alias}
+
+**Grammar:**
+
+```plaintext
+alias [delete | remove | rm] <name: word>
+```
+
+**Example:**
+
+```plaintext
+alias delete my_alias
+```
+
+### Parse Command Alias {#parse-command-alias}
+
+**Grammar:**
+
+```plaintext
+<alias: word> [(args: word, ...)]
+```
+
+**Example:**
+
+```plaintext
+my_alias (value1, value2)
+```
+
+```plaintext
+This documentation provides an overview of the available commands and their grammar. Users can customize and execute these commands based on their trading needs.
+```
+
+## Considerations and Limitations
+
+- The CLI supports the use of additional or extra 'exec' args or parameters. For example certain exchanges require **bindStop**, **marginMode**, **positionMode** etc. These can be added to the command line and will be passed through to the exchange.

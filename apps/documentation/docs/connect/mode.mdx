@@ -1,0 +1,135 @@
+---
+title: MODE
+description: Connect your MODE account to Tealstreet.
+sidebar_position: 18
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiTeal from '/img/connect/mode/api-teal.png';
+import WalletConnect from '/img/connect/mode/walletconnect.png';
+import WalletConnect2 from '/img/connect/mode/walletconnect2.png';
+import ApiDropdown from '/img/connect/mode/apidropdown.png';
+import AuthorizeWallet from '/img/connect/mode/authorizewallet.png';
+import AuthorizeWallet2 from '/img/connect/mode/authorizewallet2.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<div style={{ maxWidth: 300 }}>
+    <ThemedImage
+        alt="mode-logo"
+        sources={{
+            light: useBaseUrl('/img/exchange/mode-dark.png'),
+            dark: useBaseUrl('/img/exchange/mode-light.png'),
+        }}
+    />
+</div>
+
+## Connecting [MODE](https://teal.link/mode) to Tealstreet
+
+<IntroTealstreet exchangeName="MODE" />
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [MODE](https://teal.link/mode) and:
+    - Connect your wallet
+
+<!-- ::::note
+You will not be able to connect to MODE if you are connecting from a geo-restricted region.
+:::: -->
+
+<div class="text--center">
+    <img src={WalletConnect} alt="Wallet Connect" style={{ width: 500 }} />
+</div>
+
+:::warning
+At the time of this writing, MODE requires you to use the MODE evm network.
+:::
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **Portfolio** button at the top and choosing **API Keys** from the side menu.
+
+<div class="text--center">
+    <img src={WalletConnect2} alt="Wallet Connect 2" style={{ width: 400 }} />
+</div>
+
+<!-- ::::caution
+MODE requires you to deposit funds before you can create an API Key. So make sure you take care of that first by using their **Deposit** button at the top right of the page after you have signed in with your wallet.
+:::: -->
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **More** button at the top and choosing **API** from the dropdown menu.
+    <div class="text--center">
+        <img src={ApiDropdown} alt="API Dropdown" style={{ width: 400 }} />
+    </div>
+
+:::::note
+MODE requires you to 'Create an Account' before you can create an API Key. You will also need to 'Enable Trading' before you can can finish creating an account.
+:::::
+
+<!-- ::::tip
+You can get to this page directly by navigating to **[this link](https://salsadex.com/portfolio/api-key?ref=TEALSALSA)**
+:::: -->
+
+- Create your account if you haven't already. It will also enabling trading during the process.
+- After you have created your account and enabled trading you will then need to create the API Key.
+    - Click the **Create API Key** button to begin the process.
+
+<div class="text--center">
+    <img src={AuthorizeWallet2} alt="Authorize Wallet 2" style={{ width: 400 }} />
+</div>
+
+- At the time of this writing you can leave the IP Whitelist option empty.
+- Ensure 'Read' and 'Trading' are selected for the permissions.
+    - Click 'Confirm' to continue and sign the transaction with your wallet.
+
+<div class="text--center">
+    <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 500 }} />
+</div>
+
+- Securely store the API Key information.
+- When done click the **OK** button.
+
+- Now lets return to Tealstreet to resume the API Linking process now that we have the 3 pieces of information we need.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the MODE API page.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **Account ID** MODE showed you when you created the API Key.
+  - Provide the **API Key** MODE created when you created the API Key.
+  - Provide the **API Secret** MODE showed you when you created the API Key.
+  - Click done.
+
+<OutroTealstreet exchangeName="MODE" />
+
+---
+
+## Frequently Asked Questions
+
+- MODE website says 'Access Denied'?? \* MODE has restrictions on users from certain jurisdictions such as the United States. Please see their Terms of Service for more info.
+
+<!-- * How do I enable trading on MODE?
+      * MODE requires you to enable trading on your account before you can use it. To enable trading, go to the [MODE](https://teal.link/mode) website and click the **Enable Trading** button after you have signed in with your wallet.
+
+<div class="text--center">
+  <img src={EnableTrading} alt="Enable Trading" style={{width: 500}} />
+</div>
+
+* I'm getting an error that my API Wallet doesn't exist?
+      - MODE deactivates API Keys after 180 days. They also can expire based on certain conditions such as zero funds or possibly liquidation.
+          - You can usually login with your wallet and create a new API Key to fix this issue. -->

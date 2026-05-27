@@ -1,0 +1,473 @@
+# Phemex Exchange Integration
+
+This directory contains the Phemex perpetual futures exchange integration for Tealstreet.
+
+## Exchange Information
+
+- **Type**: Centralized Exchange (CEX)
+- **Products supported**: USDT-margined and USDC-margined perpetual futures (`PerpetualV2`)
+- **Position modes**: Hedged (default) and One-Way
+- **Margin types**: Cross and Isolated (indicated by leverage sign convention)
+
+## API Documentation
+
+- **Official API Documentation**: https://phemex-docs.github.io/
+
+## CCXT Reference Implementation
+
+- **REST API Implementation**: https://github.com/ccxt/ccxt/blob/master/ts/src/phemex.ts
+- **WebSocket Implementation**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/phemex.ts
+
+## File Structure
+
+- `phemex.api.ts` - REST API client with HMAC-SHA256 authentication and request signing
+- `phemex.exchange.ts` - Main exchange class (`PhemexExchange`) extending `BaseExchange`
+- `phemex.types.ts` - TypeScript type definitions, endpoint constants, base URLs, and field mappings
+- `phemex.ws-private.ts` - Private WebSocket handlers for orders, positions, and account balance
+- `phemex.ws-public.ts` - Public WebSocket handlers for tickers, klines, and orderbook
+
+## Authentication
+
+### REST API (`phemex.api.ts`)
+
+Signing uses HMAC-SHA256 with the following process:
+
+1. Compute an expiry timestamp: `Math.round((currentTime + 60000) / 1000)`
+2. Concatenate: `url + queryParams + expiryString` (+ JSON body if present)
+3. Sign with `createHmac('sha256', secret).update(concatenated).digest('hex')`
+
+**Request headers**:
+
+- `X-PHEMEX-ACCESS-TOKEN` - API key
+- `X-PHEMEX-REQUEST-EXPIRY` - Expiry timestamp (seconds)
+- `X-PHEMEX-REQUEST-SIGNATURE` - HMAC-SHA256 hex signature
+- `Content-Type: application/json`
+
+**Time synchronization**: Uses `virtualClock.getCurrentTime()` for timestamps, not `Date.now()`. This is important for keeping request signatures valid when the local clock drifts.
+
+### WebSocket Authentication (`phemex.ws-private.ts`)
+
+1. Compute expiry: same as REST (`(currentTime + 60000) / 1000`)
+2. Sign: `createHmac('sha256', secret).update(apiKey + expiryString).digest('hex')`
+3. Send auth message: `{ method: 'user.auth', params: ['API', apiKey, signature, expiry], id: 999 }`
+4. On successful auth (response `id: 999` with no error), subscribe to `aop_p.subscribe` for account/order/position snapshots and updates
+5. On auth failure, emits error: `'Phemex websocket error - wrong api key or secret'`
+
+## Startup Sequence
+
+The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
+
+1. **Parallel fetch** (`Promise.all`):
+   - `fetchMarkets()` -> on completion, stores markets, sets `loaded.markets = true`, then immediately calls `publicWebsocket.connectAndSubscribe()` (public WS starts as soon as markets are loaded)
+   - `fetchTickersRaw()` -> raw ticker data fetched in parallel with markets
+2. **Parse tickers**: After both resolve, `parseTickers()` converts raw data, stores tickers, sets `loaded.tickers = true`
+3. **Branch by mode**:
+   - **Public data only** (`_startPublicDataOnly`): Sets empty orders/balance/positions, marks all as loaded. Logs "Ready to watch public data on Binance" (legacy log message).
+   - **Private mode** (`_startPrivate`):
+     1. Connects private WebSocket (`privateWebsocket.connectAndSubscribe()`)
+     2. Sets `isHedged = true` (hardcoded default)
+     3. Calls `tick()` which fetches positions and balance via REST
+     4. Logs "Ready to trade on Phemex"
+     5. Order loading is NOT done via REST -- relies entirely on the WebSocket `aop_p` subscription snapshot
+
+**Note on order loading**: REST `fetchOrders()` is commented out (`phemex.exchange.ts:155-165`). Initial orders come from the private WebSocket snapshot (`type: 'snapshot'` in `aop_p` subscription). The `fetchOrders()` method simply returns `this.store.orders`.
+
+### Tick Loop
+
+- `tick()` runs on a configurable interval via `options.extra.tickInterval`
+- Each tick calls `fetchPositionsAndBalance()` which fetches positions and balance from the `/g-accounts/accountPositions` endpoint
+- On error, logs the error and continues the loop
+- Uses `loop()` utility for scheduling
+
+## REST API Endpoints
+
+All endpoints are defined in `ENDPOINTS` constant in `phemex.types.ts`:
+
+| Constant                | Path                                | Method  | Description                                                              |
+| ----------------------- | ----------------------------------- | ------- | ------------------------------------------------------------------------ |
+| `MARKETS`               | `/public/products`                  | GET     | Fetch available perpetual markets (`perpProductsV2`)                     |
+| `TICKERS`               | `/md/v3/ticker/24hr/all`            | GET     | Fetch 24hr ticker data for all symbols                                   |
+| `ACCOUNT`               | `/g-accounts/accountPositions`      | GET     | Fetch account balance and positions (params: `currency=USDT`)            |
+| `POSITIONS`             | `/g-accounts/accountPositions`      | GET     | Same endpoint as ACCOUNT, also accepts `symbol` param                    |
+| `ORDER`                 | `/g-orders/create`                  | **PUT** | Place a new order                                                        |
+| `CANCEL_ORDER`          | `/g-orders/cancel`                  | DELETE  | Cancel a single order (params: `symbol`, `posSide`, `orderID`)           |
+| `BATCH_ORDERS`          | `/g-orders`                         | DELETE  | Cancel multiple orders (up to 10 per request; `orderID` comma-separated) |
+| `SET_LEVERAGE`          | `/g-positions/leverage`             | **PUT** | Set leverage for a symbol                                                |
+| `SET_LEVERAGE_CONTRACT` | `/positions/leverage`               | **PUT** | Set leverage (contract endpoint, unused)                                 |
+| `SET_POSITION_MODE`     | `/g-positions/switch-pos-mode-sync` | **PUT** | Switch between Hedged/OneWay position mode                               |
+| `USER_TRADES`           | `/exchange/order/v2/tradingList`    | GET     | User execution history (primary for `fetchExecutions`)                   |
+| `USER_TRADES_LEGACY`    | `/exchange/order/trade`             | GET     | Legacy fallback execution history endpoint                               |
+| `KLINE`                 | `/exchange/public/md/v2/kline/list` | GET     | Fetch OHLCV candlestick data                                             |
+| `ORDERBOOK`             | `/md/v2/fullbook`                   | GET     | Fetch full orderbook snapshot (params: `symbol`, `limit`)                |
+
+**Base URLs** (`BASE_URL`):
+
+- Livenet: `https://api.phemex.com`
+- Testnet: `https://testnet-api.phemex.com`
+
+**Important**: Order placement and leverage changes use HTTP PUT method, not POST.
+
+Execution-history behavior (`fetchExecutions`):
+
+- Calls `USER_TRADES` first, then `USER_TRADES_LEGACY` on fallback path
+- Filters non-trade execution rows (`execType !== trade`) before mapping
+- Normalizes symbol/side/timestamp and returns Unix-second execution timestamps
+
+**⚠️ Currently opted out via `supportsExecutionsHistory: false` in `exchangeMetadata.ts`.**
+
+The implementation exists and is correct, but invoking it from `executionsController` /
+`FillsModule` was observed to wedge the shared Singapore HOW WebSocket tunnel for
+users in restricted jurisdictions or with incomplete proxy whitelisting. Symptoms:
+unrelated public REST endpoints (`/public/products`) time out at 20s, markets fail
+to load, chart subscriptions get dropped after 30s. Disabling Phemex's `fetchExecutions`
+restores normal behavior. The exact upstream tunnel/proxy interaction has not yet been
+isolated; flip the flag back to `true` after a production canary confirms no regression.
+
+## WebSocket Implementation
+
+### WebSocket URLs (`BASE_WS_URL`)
+
+- Public livenet: `wss://ws.phemex.com`
+- Public testnet: `wss://testnet-api.phemex.com/ws`
+- Private livenet: `wss://ws.phemex.com`
+- Private testnet: `wss://testnet-api.phemex.com/ws`
+
+### Public WebSocket (`phemex.ws-public.ts`)
+
+Class name is `BinancePublicWebsocket` (legacy naming from fork).
+
+| Method            | Channel                           | Description                                                     |
+| ----------------- | --------------------------------- | --------------------------------------------------------------- |
+| On connect        | `perp_market24h_pack_p.subscribe` | Subscribes to all perpetual 24hr ticker updates                 |
+| `listenOHLCV`     | `kline_p.subscribe`               | Subscribes to kline data; params: `[symbol, resolution]`        |
+| `listenOrderBook` | `orderbook_p.subscribe`           | Subscribes to orderbook incremental updates; params: `[symbol]` |
+
+**Ping/pong**: Sends `{"method":"server.ping","params":[]}` with incrementing request IDs. Pong is detected by `json?.method === 'server.ping'` or `json?.result === 'pong'`. The `handlePongEvent()` from `BaseWebSocket` schedules the next ping after 5 seconds, and sets a 7.5-second timeout for pong miss that triggers reconnection.
+
+**Reconnection**: Inherits `BaseWebSocket.onClose` which handles cleanup and reconnection. On reconnect, `onOpen` re-subscribes to `perp_market24h_pack_p`, resets orderbook state, and re-subscribes to all active kline/orderbook topics.
+
+**Ticker data format**: Array-based packed format where each row contains:
+`[symbol, openRp, _, _, lastRp, volumeRq, _, openInterestRv, indexRp, markRp, fundingRateRr, _, bid, ask]`
+
+Bid and ask are optional fields -- only included if present (`phemex.ws-public.ts:153-154`).
+
+**Orderbook management**: Snapshot-first approach:
+
+1. Subscribe to WS incremental updates (`orderbook_p.subscribe`)
+2. On first WS message, trigger REST snapshot fetch via `/md/v2/fullbook` (limit: 1000)
+3. Buffer all WS updates while snapshot loads
+4. After snapshot arrives, filter buffered updates by `sequence` number (discard updates older than snapshot)
+5. Apply buffered updates, then process subsequent updates incrementally
+6. Updates use insert/update/delete by price level: amount=0 means delete, new price means insert, existing price means update (`processOrderBookUpdate`, `phemex.ws-public.ts:345-370`)
+
+**OHLCV streaming**: Kline topic format is `kline_p.subscribe|||{symbol}|||{resolution}`. Message handler key uses interval and symbol: `kline_p.{interval}.{symbol}`. Each kline message contains up to 2 rows (current and previous candle). The handler processes both and filters by matching interval. Kline data format: `[timestamp, interval, lastClose, open, high, low, close, volume, turnover]`.
+
+**Topic management**: Uses a `topics` dictionary with reference counting. Topics are unsubscribed only when all listeners are removed (count reaches 0).
+
+### Private WebSocket (`phemex.ws-private.ts`)
+
+Class name is `BinancePrivateWebsocket` (legacy naming from fork).
+
+After authentication, subscribes to `aop_p.subscribe` (Account/Order/Position).
+
+**Message types** (all in same subscription):
+
+- `accounts_p` - Account balance updates
+- `orders_p` - Order updates (snapshot on connect, then incremental)
+- `positions_p` - Position updates
+
+**Ping/pong**: Same `server.ping` method as public WS, with `sendWithLog` for grafana tracking.
+
+**Snapshot handling**: On initial `type: 'snapshot'`, replaces all orders in store (only keeps `OrderStatus.Open` orders). Subsequent updates use `addOrUpdateOrders`.
+
+**Fill emission**: Fills are emitted only for non-snapshot messages. Fills are deduplicated using `uniqBy` on order ID. Fill price uses `execPriceRp` from raw order info when available, falling back to the formatted order price.
+
+**Duplicate order status handling** (`phemex.ws-private.ts:358-367`): When a single message batch contains the same `orderID` with both open and closed statuses, the code detects the closed status update and overrides the open one. This prevents transient open states from appearing in the UI.
+
+**Debounced REST reconciliation on terminal order events**: For non-snapshot `orders_p` messages containing terminal statuses (`filled`, `triggered`, `canceled`, `rejected`), the private WS schedules a 1-second debounced `fetchPositionsAndBalance()` call. This fast-follow sync reduces position-open/close lag when WS position payloads are delayed or partial.
+
+## Order Types and Mappings
+
+Defined in `ORDER_TYPE` mapping:
+
+| Internal Type      | Phemex `ordType`                                         |
+| ------------------ | -------------------------------------------------------- |
+| `Market`           | `Market`                                                 |
+| `Limit`            | `Limit`                                                  |
+| `StopLoss`         | `Stop`                                                   |
+| `TakeProfit`       | `MarketIfTouched`                                        |
+| `TrailingStopLoss` | `MarketIfTouched` (with `pegPriceType: TrailingStopPeg`) |
+
+**Order status mapping** (`ORDER_STATUS`):
+
+- `new`, `untriggered`, `partially_filled`, `partiallyfilled` -> `Open`
+- `triggered`, `filled` -> `Closed`
+- `rejected`, `canceled` -> `Canceled`
+
+**Time in force options** (`TIME_IN_FORCE`):
+
+- `GoodTillCancel`, `ImmediateOrCancel`, `FillOrKill`, `PostOnly`
+
+**Stop/TP order type detection** (WebSocket, `phemex.ws-private.ts:370-396`): Uses `stopDirection` and `side` fields:
+
+- `Rising` + `Sell` = TakeProfit; `Rising` + `Buy` = StopLoss
+- `Falling` + `Sell` = StopLoss; `Falling` + `Buy` = TakeProfit
+- Handles `Stop`, `StopLimit`, `MarketIfTouched`, and `LimitIfTouched` ordTypes
+- Unrecognized types default to `OrderType.Market`
+
+**Trigger types**: `ByMarkPrice` or `ByLastPrice` (sent as `triggerType`, `slTrigger`, `tpTrigger` fields)
+
+**Broker ID**: All orders include `clOrdID` prefixed with `Tealstreet_` followed by a UUID (`phemex.api.ts:15`).
+
+**Reduce-only detection** (WS): Checks both `order.reduceOnly` boolean and `execInst` field for `'ReduceOnly'` or `'CloseOnTrigger'` strings (`phemex.ws-private.ts:409-411`).
+
+## Order Lifecycle
+
+### Order Placement (`placeOrder`, `phemex.exchange.ts:752`)
+
+1. Calls `formatCreateOrder()` which delegates to `formatCreateTrailingStopLossOrder()` for trailing stops
+2. For standard orders:
+   - Resolves position side via `getOrderPositionSide()`
+   - Splits into lots if amount exceeds `maxOrderQtyRq`
+   - Each lot gets a unique `clOrdID` (broker prefix + UUID)
+   - Stop/TP orders set `closeOnTrigger: 'true'`
+   - Attached TP/SL use `stopLossRp` and `takeProfitRp` fields on the same order payload
+3. Each payload sent via PUT to `/g-orders/create`
+4. Checks response: `code !== 0` is an error; `ordStatus: 'Suspended'` with `execStatus: 'PendingAllocate'` indicates insufficient margin
+
+### Order Update (`updateOrder`, `phemex.exchange.ts:708`)
+
+Uses **cancel-and-replace** pattern (no native amend):
+
+1. Extracts the real order ID by splitting on `__` (strips `__stop_loss` / `__take_profit` suffixes)
+2. Finds all related orders (parent + child TP/SL orders sharing the same base ID)
+3. If multiple related orders exist (parent with TP/SL children):
+   - Reconstructs the full order payload from the parent and child orders
+   - Updates the specific price being changed (parent price, stopLoss price, or takeProfit price)
+4. Cancels ALL related orders via `cancelOrders()`
+5. Re-places the reconstructed order via `placeOrder()`
+
+### Child Order (TP/SL) Handling
+
+When a parent order has attached TP/SL, the WebSocket reports them as:
+
+- Parent: `{orderID}` with `stopLossRp` and `takeProfitRp` fields
+- The WS handler creates virtual child orders: `{orderID}__stop_loss` and `{orderID}__take_profit`
+- Child orders have `amount: 0` (they inherit from parent context)
+- Child orders have inverted side relative to the parent
+- Trigger types are read from `slTrigger` and `tpTrigger` fields respectively
+
+### Cancel Batching (`cancelOrders`, `phemex.exchange.ts:635`)
+
+1. Deduplicates orders by stripping `__stop_loss`/`__take_profit` suffixes and using `uniqBy` on ID
+2. Resolves position side for each order via `getOrderPositionSide()`
+3. Groups orders by `{posSide}:{symbol}`
+4. For single-order groups: uses `/g-orders/cancel` with `symbol`, `posSide`, `orderID`
+5. For multi-order groups: chunks IDs into batches of 10, uses `/g-orders` with comma-separated `orderID`
+6. Validates all responses have `code === 0`
+7. Updates store to mark orders as canceled
+
+### Trailing Stop Loss (`formatCreateTrailingStopLossOrder`, `phemex.exchange.ts:897`)
+
+- Resolves position for the symbol and opposite side
+- Calculates `priceDistance` as absolute difference between `ticker.last` and `opts.price`
+- Sets `pegPriceType: 'TrailingStopPeg'` and `pegOffsetValueRp` (negative for sell, positive for buy)
+- Always uses the full position size (`position.contracts`)
+- Sets `ordType: 'Stop'` (not `MarketIfTouched`)
+
+### Position Side Resolution (`getOrderPositionSide`, `phemex.exchange.ts:937`)
+
+- Returns `'Merged'` for one-way mode
+- For hedged mode: Buy -> `'Long'`, Sell -> `'Short'`
+- Inverts the side for reduce-only, StopLoss, TakeProfit, and TrailingStopLoss orders
+- Uses `opts.info?.posSide` if already available (for order updates)
+
+## Symbol Format
+
+- **Internal format**: Uppercase string, e.g., `BTCUSDT`, `ETHUSDC`
+- **`formatSymbolIn`**: Converts exchange symbol to uppercase (simple `.toUpperCase()`)
+- **`formatSymbolOut`**: Looks up the original symbol from `market.info.symbol` to get the exchange-native format
+- **Market ID format**: `{base}/{quote}:{margin}` (e.g., `BTC/USDT:USDT`)
+- **Supported margin currencies**: USDT and USDC (filtered in `fetchMarkets`)
+- **Market filter**: Only `PerpetualV2` type products are included
+
+## Data Precision & Conversion
+
+Phemex V2 API uses **real-value (Rp/Rv/Rr/Rq) suffixed fields** rather than the legacy scaled integer format (Ep/Ev). All price and quantity fields are string representations of decimals, not scaled integers.
+
+### Field Naming Convention
+
+| Suffix | Meaning         | Example field       |
+| ------ | --------------- | ------------------- |
+| `Rp`   | Real Price      | `priceRp`, `markRp` |
+| `Rv`   | Real Value      | `accountBalanceRv`  |
+| `Rr`   | Real Rate/Ratio | `leverageRr`        |
+| `Rq`   | Real Quantity   | `orderQtyRq`        |
+
+All values are parsed with `parseFloat()`. There are no integer scaling factors in the V2 (g-prefix) API endpoints used by this integration.
+
+### Price & Amount Precision
+
+- `market.precision.price` from `tickSize` field (e.g., `0.01`)
+- `market.precision.amount` from `qtyStepSize` field (e.g., `0.001`)
+- Prices and amounts are adjusted using `adjust()` utility before order placement
+- Large orders are automatically split based on `maxOrderQtyRq` from market info
+
+### Balance Calculation (`phemex.exchange.ts:407-418`)
+
+- `total = accountBalanceRv` (bonus balance is excluded -- the `bonusBalanceRv` addition is commented out)
+- `used = totalUsedBalanceRv`
+- `free = total - used`
+- `upnl` is summed from parsed positions
+
+### uPNL Calculation (`phemex.exchange.ts:328`)
+
+- Uses `ticker.last` (not mark price): `upnl = contracts * (last - entryPrice)` for longs, inverted for shorts
+- Entry price sourced from `avgEntryPrice` or `avgEntryPriceRp` fields
+
+## Rate Limiting
+
+- **Rate-limited client** (`xhr`): `maxRPS: 3` (3 requests per second)
+- **Unlimited client** (`unlimitedXHR`): No rate limit, used for order operations
+- HTTP-over-WebSocket: Uses `axiosHttpOverWebsocketAdapter` when `tealstreetTunnel` is enabled
+- Request timeout: 20,000ms (hardcoded in `phemex.api.ts:25`, overrides `recvWindow`)
+- Axios retry: 3 retries on network errors (`isNetworkError` condition)
+
+## State Reconciliation
+
+### Orders
+
+- **Initial state**: Comes from WebSocket `aop_p` subscription snapshot (`type: 'snapshot'`)
+- **Snapshot handling**: On snapshot, replaces entire order store with only `OrderStatus.Open` orders; non-open orders in the snapshot are filtered out (`phemex.ws-private.ts:354`)
+- **Incremental updates**: Subsequent messages use `store.addOrUpdateOrders()` which merges by order ID
+- **Batch deduplication**: Within a single WebSocket message, if the same `orderID` appears with both open and closed statuses, the closed status takes precedence (`phemex.ws-private.ts:358-367`)
+- **REST fallback**: `fetchOrders()` simply returns `this.store.orders` -- there is no REST reconciliation. A `TODO: fetchAndSetPrivateSnapshot` comment exists at `phemex.exchange.ts:428`.
+
+### Positions
+
+- **REST polling**: Positions are fetched via REST in the `tick()` loop using `fetchPositionsAndBalance()`
+- **WebSocket updates**: `positions_p` messages map and upsert positions via `store.addOrUpdatePositions()` (not update-only)
+- **Zero-contract guard**: Brand-new zero-contract WS positions are ignored unless they already exist in the store; full cleanup is handled by periodic/full REST sync (`addOrUpdatePositionsFull`)
+- **Filtering**: Only positions for markets present in the store are processed (both REST and WS)
+- **Full replacement on tick**: `tick()` uses `store.addOrUpdatePositionsFull(positions)` which replaces all positions
+
+### Balance
+
+- **REST polling**: Fetched alongside positions in `tick()` via `fetchPositionsAndBalance()`
+- **WebSocket updates**: `accounts_p` messages update balance independently
+- **Fast-follow sync**: Terminal order events trigger the same debounced `fetchPositionsAndBalance()` reconciliation used for positions
+- **WS balance total calculation**: `total = accountBalanceRv - upnl` (different from REST which uses just `accountBalanceRv`)
+
+## Exchange Metadata
+
+### Grafana Monitoring
+
+**Periodic endpoints** (tracked for latency monitoring): `POSITIONS`, `ACCOUNT`
+**Every-call endpoints**: `BATCH_ORDERS`, `CANCEL_ORDER`, `ORDER`, `SET_LEVERAGE`, `SET_LEVERAGE_CONTRACT`, `SET_POSITION_MODE`
+
+### Implementation Capabilities
+
+#### Leverage (`setLeverage`)
+
+- Per-symbol, per-side leverage setting via `setLeverageHelper`
+- **Hedged mode**: Sets `longLeverageRr` and `shortLeverageRr` independently (or both if no side specified)
+- **One-way mode**: Sets single `leverageRr`
+- **Cross margin convention**: Negative leverage value indicates cross margin (e.g., `-10` = 10x cross)
+- **Isolated margin**: Positive leverage value (e.g., `10` = 10x isolated)
+- Uses PUT method on `/g-positions/leverage`
+- `prepLeverage()` helper clamps to market min/max and preserves margin type sign unless `allowChangingMarginType` is true
+
+#### Margin Type (`changeMarginType`)
+
+- Implemented by toggling leverage sign via `setLeverageHelper` with `allowChangingMarginType = true`
+- Cross margin: negative leverage; Isolated margin: positive leverage
+- Requires an existing position to determine current leverage
+
+#### Position Mode (`changePositionMode`)
+
+- Switches between `Hedged` and `OneWay` per symbol
+- Uses PUT on `/g-positions/switch-pos-mode-sync`
+- Params: `symbol`, `targetPosMode` (`Hedged` or `OneWay`)
+- Requires all positions for that symbol to be closed first (error code `39201`)
+- After switching, refetches positions for the symbol and merges with existing positions (filtering out old ones for that symbol)
+
+#### Positions
+
+- **Default mode**: `isHedged: true` (set on start, hardcoded)
+- Position side determined by `posSide` field (`Long`/`Short`) or `Side` field (`Buy`/`Sell`)
+- UPnL calculated against `ticker.last` (not mark price)
+- Leverage sign indicates margin type: negative = cross, positive = isolated
+- `crossMargin` boolean field also checked for margin type
+- Position mode read from `posMode` field (`'Hedged'` or `'OneWay'`)
+
+#### Not Implemented
+
+- `fetchOrders()`: Returns store orders only (no REST call)
+- `fetchHistoricalTrades()`: Returns empty array
+- `changeMarginType()`: Not exposed as independent REST call; uses leverage sign manipulation
+
+## Testnet / Demo
+
+- **REST base URL**: `https://testnet-api.phemex.com`
+- **WebSocket URL**: `wss://testnet-api.phemex.com/ws` (same for public and private)
+- URLs are selected via `options.testnet` boolean
+- No known feature limitations documented in the code
+- Same broker ID (`Tealstreet_`) used for both environments
+
+## Known Quirks / Implementation Notes
+
+1. **Legacy class naming**: WebSocket classes are named `BinancePublicWebsocket` and `BinancePrivateWebsocket` (carried over from original fork). The exchange class itself is correctly named `PhemexExchange`.
+2. **Log messages**: Some log messages reference "Binance" instead of "Phemex" (e.g., `_startPublicDataOnly` logs "Ready to watch public data on Binance" at `phemex.exchange.ts:173`).
+3. **fetchOrders not implemented**: REST order fetching is commented out; relies entirely on WebSocket `aop_p` subscription snapshot for initial order state. There is a TODO comment at `phemex.exchange.ts:428` about implementing `fetchAndSetPrivateSnapshot`.
+4. **fetchHistoricalTrades**: Returns empty array (not implemented).
+5. **API response format**: Success responses have `code: 0`. Non-zero codes indicate errors with message in `msg` field.
+6. **Suspended orders**: Orders with `ordStatus: 'Suspended'` and `execStatus: 'PendingAllocate'` indicate insufficient margin (`phemex.exchange.ts:763`).
+7. **Position side in orders**: Uses `posSide` field - `Merged` for one-way mode, `Long`/`Short` for hedged mode. For reduce-only/TP/SL orders in hedged mode, the position side is inverted.
+8. **Kline daily+ alignment**: For resolutions >= 86400s (1 day), fetching adjusts the end time to UTC start of day minus one day to align with exchange candle boundaries (`phemex.exchange.ts:463-466`).
+9. **Commented-out code**: Extensive commented-out code blocks in `formatCreateOrder()` and the WS private handler show alternative approaches for TP/SL as separate orders and COIN-M contract handling that were explored but not used.
+10. **Order ID comment references Binance**: Comment at `phemex.exchange.ts:889` says "otherwise Binance will duplicate the IDs" -- leftover from the fork origin.
+11. **Bonus balance excluded**: `bonusBalanceRv` is intentionally excluded from total balance calculation (commented out at `phemex.exchange.ts:407`).
+12. **Position contracts**: The code has a comment about COIN-M contract calculation (`phemex.exchange.ts:324`) but uses raw `size` for USD-M since it is not contract-based.
+
+## Error Handling
+
+### REST API Errors
+
+- **Response code check**: All API responses are checked for `code !== 0`. Non-zero codes indicate errors with the message in the `msg` field.
+- **Suspended order detection**: `ordStatus: 'Suspended'` + `execStatus: 'PendingAllocate'` is treated as an error with message "Order is suspended. Likely insufficient margin."
+- **Network retries**: Axios retry configured for 3 retries on network errors (`isNetworkError`).
+- **Error propagation pattern**: Most methods catch errors, log via `emitAndLogError()`, and either return fallback data (e.g., existing store state) or re-throw.
+
+### Specific Error Codes
+
+- `39201` - "the original positions are not closed when switch pos mode" (position mode change, `phemex.exchange.ts:529-534`)
+
+### WebSocket Errors
+
+- **Auth failure**: Detected by `json?.id === 999 && json?.error`, emits "Phemex websocket error - wrong api key or secret"
+- **Pong miss**: If no pong received within 7.5 seconds of ping, triggers reconnection (inherited from `BaseWebSocket.handlePongEvent`)
+
+### Error-as-Success Patterns
+
+- `cancelOrders()` checks each response in the batch for `code !== 0` and throws an aggregate error if any fail
+- `fetchPositionsAndBalance()` returns existing store state on error rather than throwing
+- `fetchMarkets()` returns existing `store.markets` on error
+
+## OHLCV / Kline
+
+**Supported timeframes** (mapped to seconds):
+`1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `3h`, `4h`, `6h`, `12h`, `1d`, `1w`, `1M`, `3M`, `1Y`
+
+**REST fetch format**: Array rows `[time, _, _, open, high, low, close, volume]` (indices 1 and 2 are unused)
+
+**WS streaming format**: `[timestamp, interval, lastClose, open, high, low, close, volume, turnover]`
+
+**Fetch parameters**: Uses `from`/`to` (unix seconds), `symbol`, `resolution` (seconds string). Limit is capped at 1000.
+
+## Testing / Validation
+
+Exchange-specific unit coverage exists for private WS reconciliation:
+
+- `src/__tests__/phemex.ws-private.test.ts` - Covers WS position upsert behavior, zero-contract guard behavior, and debounced REST reconciliation after terminal `orders_p` events.
+- `validateAccount()` - Attempts GET on `/g-accounts/accountPositions` with `currency: USDT`. Returns empty string on success, error message on failure.
+- `getAccount()` - Fetches account alias for user identification.

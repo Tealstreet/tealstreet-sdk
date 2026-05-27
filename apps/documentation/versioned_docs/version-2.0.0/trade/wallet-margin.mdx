@@ -1,0 +1,53 @@
+---
+title: Margin & Wallet
+description: Aggregated information on your wallet data and margin.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import MarginWallet from '/img/trading/margin-wallet/margin-wallet.gif';
+
+On this page you will learn about the Margin/Wallet window of Tealstreet.
+
+## Margin Window
+
+<div class="text--center">
+    <img src={MarginWallet} alt="Margin Wallet" style={{ width: 400 }} />
+</div>
+
+Once you have connected your exchange API, the Margin window of Tealstreet will show your:
+
+- Current Trading API Connected
+- Wallet balance
+- Unrealized PNL (Profit and Loss)
+- Margin Balance
+- Position Margin
+- Available Margin
+- Trade Mode (One-Way | Hedged)
+- Margin Type (Cross | Isolated)
+- Effective Leverage
+- Max Leverage (Long | Short)
+- A slider bar to easily adjust leverage scaling
+- Funding of the currently traded asset
+- Open Interest of the currently traded asset
+- 24H Volume Delta of the currently traded asset
+- 24H Price Delta of the currently traded asset
+
+Depending on your Primary Trade Settings and choice of Market / Trading Pair, your window might look different. You can use the slider to change your leverage for the selected trading pair.
+
+### Additional information
+
+:::note
+if you do not see any balance, double check that your exchange API is connected correctly. Second, what crypto are you trading? If it is not BTC, you need to adjust the Market / Trading Pair in the primary trade settings.
+
+- If you encounter any issues please _[contact us](/docs/support/contact-us)_
+  :::
+
+:::tip
+Click the 'USD' button to show your numbers in dollars instead of crypto. Click 'Combined Wallets' to show your entire balance of the currently selected exchange API.
+:::

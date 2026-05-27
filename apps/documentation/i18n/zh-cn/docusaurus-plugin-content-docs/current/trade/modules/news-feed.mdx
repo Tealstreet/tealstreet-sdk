@@ -1,0 +1,57 @@
+---
+title: 新闻订阅
+description: 新闻订阅模块显示来自Tree of Alpha源的最新新闻。
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import NewsFeedSettings from '/img/trading/modules/news-feed/module-news-feed.png';
+import NewsFeed from '/img/trading/modules/news-feed/news-feed.png';
+import NewsFeedTrading from '/img/trading/modules/news-feed/news-feed-trading.png';
+import NewsTradingSettings from '/img/trading/modules/twitter/news-trading-settings.png';
+
+**新闻订阅模块**是一个额外的信息来源，如果您想与加密和宏观新闻保持联系。类似于**Twitter模块**，但更加精选。
+
+<div class="text--center">
+    <img src={NewsFeed} alt="News Feed" style={{ width: 600 }} />
+</div>
+
+### 激活新闻订阅模块
+
+- 您可以通过转到终端设置的**模块**部分来激活它
+
+<div class="text--center">
+    <img src={NewsFeedSettings} alt="News Feed Module" style={{ width: 400 }} />
+</div>
+
+---
+
+### 在新闻订阅中交易新闻
+
+在最近的Tealstreet更新中，我们添加了根据Twitter和新闻订阅模块内的关键字下单的功能。这使您可以快速下单，而无需首先拉起图表。这是潜在的更快的交易入口。
+
+- 您可以通过转到终端设置页面中的**模块**面板来激活新闻交易。
+
+<div class="text--center">
+    <img src={NewsTradingSettings} alt="News Trading Settings" style={{ width: 500 }} />
+</div>
+
+- 一旦激活并按您的喜好自定义，您现在将能够从Twitter订阅模块内快速采取行动：
+
+<div class="text--center">
+    <img src={NewsFeedTrading} alt="News Trading" style={{ width: 600 }} />
+</div>
+
+:::caution
+请在使用此功能时小心，因为如果您不小心，它可能会导致意外的交易。有时会出现与加密无关的推文，但仍然可以触发检测系统生成交易按钮。我们正在努力改进此功能。
+:::
+
+:::note
+您还可以从位于[Twitter模块](/docs/trade/modules/twitter)顶部的按钮以及终端设置内的模块面板中访问新闻订阅。
+:::

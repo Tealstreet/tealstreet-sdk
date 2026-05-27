@@ -1,0 +1,208 @@
+---
+title: Risk Profile - Deprecated
+description: The Risk Profile feature of Tealstreet is a powerful tool to estimate your profit, loss, margin, balance, size, leverage, entry, and average entry based on your active position, resting orders, resting stops, and price direction.
+sidebar_position: 10
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import HideColumn from '/img/trading/risk-profile/hide-column.png';
+
+:::danger
+The Risk Profile is a very new **BETA** feature of Tealstreet. It is estimated and directionally correct. Use with caution and do **not** rely on it.
+:::
+
+On this page you will learn about the Risk Profile window/feature of Tealstreet.
+
+---
+
+## Introduction & Ship Analogy
+
+<div style={{ clear: 'both', overflow: 'auto', width: 'auto' }}>
+  <img src="/img/trading/stocks-storm.jpg" style={{float: 'left', marginRight: '20px', height: '300px' }} />
+<div>
+
+Managing a trading position is much like being the captain of a large merchant ship in the golden age of piracy. Transporting your wares, you experience many obstacles on your journey from Port Felixstowe to Port Royal. The chop of the waves, the rocks, the wake of larger ships, pirates, whales, and storms. Risk Profile won't tell you how to steer your ship, but it will tell you what will happen at the rocks and when you get to port.
+
+Ahoy! Storm ahead! How the hell are you gonna get out of this one? You're the salty ol' captain. You decide how to safely get you and your coins home.
+
+Essentially, your risk is the only thing within your control when trading. Adding risk when it is at a good entry or asymmetric, and removing risk when unsure or volatile.
+
+</div>
+</div>
+<br />
+
+![Risk Profile](/img/trading/risk-profile.png)
+
+---
+
+## What Does Risk Profile Do?
+
+Risk profile is a tool that estimates your profit, loss, margin, and balance based on your orders, position, and price. It's like a heads-up display for your trade idea. It simply tells you what would happen to your account if price goes up and if price goes down. It doesn't tell you how to trade, but it helps you manage your trade and risk very effectively.
+
+---
+
+### Risk Profile Modes
+
+_![Risk Profile Toggle](/img/trading/risk-profile-toggle.png)_
+
+- **Dynamic** - PnL is calculated base on Last Price and the center ◆ is the Last price. This is the default mode when you have no position open.
+- **Static** - When a position is live, PnL is calculated based on Entry Price, while the center ◆ is the Current Position Entry price. Static mode is only available when there is an open position.
+
+There are two tabs in the Risk Profile. First, we'll start with Moves.
+
+---
+
+## Risk Moves
+
+_![Risk Profile Tabs](/img/trading/risk-profile-tabs.png)_
+
+Risk Moves simply tells you the value of your position if price goes up or down in percent increments. It does not take into consideration resting orders like Risk Spread does.
+
+---
+
+### Header Definitions
+
+_![Risk Moves Headers](/img/trading/risk-moves-headers.png)_
+
+- **∼** - Estimated or Approximate
+- **Σ** - Sigma or Total or Sum
+- **Δ** - Delta or Change
+- **%** - Percent from the diamond center point. In Dynamic mode, the center is Last Price. In Static mode, the center is your Entry Price.
+- **Price** - Price at this percent.
+- **~Unrl. PnL** - Estimated unrealized PnL at this price based on your position.
+- **∼Σ Margin** - Your margin balance at this price based on your PnL.<br /> <code>Σ Margin = Current Margin Balance + Unrl. PnL</code>
+- **∼Margin Δ** - The cumulative percent change in your total margin balance at this price.
+
+![Risk Moves](/img/trading/risk-moves.png)
+
+In the example above, your long entry is $44,049. You have $21.44 of unrealized PnL and your position is up 0.14% from your entry. If price were to move 1% up from your entry ($44,489), your unrealized PnL would be $148.75. If price were to move 1% down from your entry, your unrealized PnL would be -$151.72. Respectively, a 1% move would either increase or decrease your total margin by approximately 2%. 2% gain if up, 2% gain if down.
+
+### Static vs Dynamic Mode
+
+#### Static
+
+![Risk Moves Headers](/img/trading/risk-moves-static.png)
+
+PnL based off of your Entry price. The ◆ is the center in which price moves away from. Based on your Entry, you are up $34.90.
+
+#### Dynamic
+
+![Risk Moves Headers](/img/trading/risk-moves-dynamic.png)
+
+PnL based off of Last price. This is based on the idea that your PnL always belongs to you because you can take it at anytime. In the screenshot above, you can see that you'll lose $33.18 because you let price go back to your entry. The moneygn was on the table... all you had to do was take it.
+
+---
+
+## Risk Spread
+
+_![Risk Spread](/img/trading/risk-profile-tabs-spread.png)_
+
+Risk Spread is a powerful tool to **estimate** your profit, loss, margin, balance, size, leverage, entry, and average entry based on your active position, resting orders, resting stops, and price direction. It shows you what would happen if price went up OR if price went down.
+
+![Risk Spread Headers](/img/trading/risk-spread-headers.png)
+
+The center diamond (◆) is the starting point. As price moves upwards or downwards, Risk Spread estimates what will happen at each event (order, take profit, stop, new long, etc).
+Risk Profile estimates up OR down, not up AND down, meaning it shows what happens to your position when price goes up OR when price goes down.
+
+![Risk Spread](/img/trading/risk-spread.png)
+
+### Header Definitions
+
+![Risk Spread](/img/trading/risk-spread-headers.png)
+
+- **∼** - Estimated or Approximate
+- **Σ** - Sigma or Total or Sum
+- **Δ** - Delta or Change
+- **Price Direction** - ◆ is the center. Price either goes up (▲) or down (▼) from here. In Dynamic mode, the center ◆ is Last Price. In Static mode, the center ◆ is your Entry Price.
+- **Event** - VERY IMPORTANT - What happens at this price based on your orders / position. An event could be a take profit, stop loss, add size, new position, etc.
+- **Order Size** - Size of this order (if an order) and how much it will increase (+) or decrease (-) your position.
+- **Pos. Size** - Size of your position. This size is after the order fills, if an order event.
+- **Avg. Entry** - Avg. entry at this event. Calculated based on prior fills up to this point (event).
+- **∼Lev.** - Expected leverage at this event (for the current market only).
+- **∼Unrl. PnL** - Unrealized PnL at this price. Based on orders being filled and position changes up until this point (event).
+- **∼Real PnL Δ** - Realized pnl at this event.
+- **∼Σ Real PnL** - Total cumulative realized PnL up to this event.
+- **∼Σ PnL** - Total cumulative PnL up to this event.<br /><code>Σ PnL = Unrl. Pnl + Σ Real PnL</code>
+- **∼Σ Margin** - Total margin at this event.<br /><code>Σ Margin = Prior Σ Margin + Σ PnL</code>
+- **∼Margin Δ** - Margin change percentage at this event.<br /><code>Margin Δ = (Current Σ Margin - Prior Σ Margin) / Prior Σ Margin</code>
+- **∼Σ Margin Δ** - Total cumulative margin change percentage from the starting ◆ margin to this event. Resets at position close. Change is from Σ PnL.<br /><code>Σ Margin Δ = (Current Margin - Starting Margin) / Starting Margin</code>
+- **∼Σ Balance** - Total balance at this event.<br /><code>Σ Balance = Current Balance + Σ Real PnL</code>
+- **∼Balance Δ** - Balance change percentage at this event. Change is from Realized PnL.<br /><code>Balance Δ = (Current Σ Balance - Prior Σ Balance) / Prior Σ Balance</code>
+- **∼Σ Balance Δ** - Total cumulative balance change percentage from the starting ◆ balance to this event. Resets at position close. Change is from Realized PnL.<br /><code>Σ Balance Δ = (Current Balance - Starting Balance) / Starting Balance</code>
+
+:::note
+Not all functionality is identical across all exchanges. For example the Realized PNL is sent from the exchange itself, some exchanges do not provide this data so the column will be blank.
+
+- Reminder that you can hide any unwanted columns by right-clicking on the column and clicking the remove button.
+
+<div class="text--center">
+    <img src={HideColumn} alt="Hide Column" style={{ width: 250 }} />
+</div>
+:::
+
+---
+
+## Example 1: No Open Position
+
+![Risk Spread](/img/trading/risk-spread-new-long.png)
+
+You want to open a new long and calculate your risk. You're entering with two buy orders and you placed a stop to limit your downside.
+
+### Price moving down
+
+1. This is the price right now.
+2. A new long position will open at 42,683.5.
+3. You're adding to your long and your new position size is 30,000 with a new average entry of 42,620. Since you will be at a loss from your prior order filling, your unrealized pnl is -$45.59 at this fill. Your margin balance will be -0.64%.
+4. This is a reduce only stop loss and your position will close. When price reaches your stop, you will realize an approximate loss of -$363.64. This will reduce your total margin by -4.49% and your new margin balance will be $6,765.56.
+
+---
+
+## Example 2: Active Long Position
+
+![Risk Spread](/img/trading/risk-spread-example-2.png)
+
+### Price moving up
+
+1. This is the last price because we're on Dynamic mode. You can see your long is up 0.33% from your entry. Your current position size is 15,000 and your entry is 44,049. You have $49.19 of unrealized PnL.
+2. You have a take profit (limit sell) at 44886. You close your position and realize a profit of $280.61. Your margin and balance increases by 3.2%.
+
+### Price moving down
+
+1. This is the Last price. Your unrealized PnL is shown here.
+2. This is your current active position's entry.
+3. This limit buy order will add to your long and make your position size 30,000. Your new average entry is 43,802. Your unrealized PnL will be -$171.29 at this point.
+4. This is your stop market order. You will close your position and realize a loss of -$498.10. Margin / Balance columns to the right show the affect of this on your account.
+
+---
+
+## Example 3: Active Short into Take Profit into New Long and Stop
+
+![Risk Spread](/img/trading/risk-spread-example-3.png)
+
+### Price moving up
+
+1. This is the last price.
+2. This is your short entry. Since Dynamic mode is based on Last price, you will be giving back -$24.97 if price returns to your entry.
+
+### Price moving down
+
+1. We're getting fancy. This is last price.
+2. We close our long and realize a profit of $71.79.
+3. Now flat and out of a position, price continuing down will open a new long at your buy order at 44,031. You now have a 14,000 long at this point.
+4. You add to your long. Total size is 28,000 and unrealized PnL is -$30.85.
+5. You get stopped. Your total PnL from the whole sequence of events downward... taking profits into longing into getting stopped... is -$84.08. Total Real PnL, Total PnL, Total Margin, and Total Balance all reflect this sequence of events.
+
+:::note
+The following factors are not fully supported in the Risk Profile:
+
+- Fees
+- Hedge Mode
+- Movement of other positions
+- Predicted movement of collateral
+- Leverage currently only calculated for this single position and not including other positions on cross collateral
+  :::

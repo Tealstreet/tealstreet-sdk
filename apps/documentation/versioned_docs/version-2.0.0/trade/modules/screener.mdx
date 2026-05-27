@@ -1,0 +1,61 @@
+---
+title: Screener
+description: The Screener module is a module that helps you track the best and worst performing tokens on an exchange.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Screener1 from '/img/trading/modules/screener/modules-screener2.png';
+import Screener2 from '/img/trading/modules/screener/modules-screener1.png';
+import ScreenerSettings from '/img/trading/modules/screener/modules-screener-settings.png';
+import ScreenerModRel from '/img/trading/modules/screener/screener-modrel.gif';
+
+The **Screener module** is a tool that filters & sorts tradng pairs by certain criteria (price change, funding rate)
+
+<div class="text--center">
+    <img src={Screener1} alt="Screener" style={{ width: 500 }} />
+</div>
+
+- By default it sorts trading pairs by largest price increase in last 24h.
+
+---
+
+### Activating the Screener module
+
+<div class="text--center">
+    <img src={ScreenerSettings} alt="Screener Settings" style={{ width: 600 }} />
+</div>
+
+- You can enable the **Screener** module under the Modules tab in your **Trade Settings** configuration window.
+
+:::tip
+Remember to unlock your layout to be able to move the module around.
+:::
+
+---
+
+### Using the Screener module
+
+<div class="text--center">
+    <img src={Screener2} alt="Screener 2" style={{ width: 800 }} />
+</div>
+
+- You can favorite your individual favorite pairs and they will show up under the pinned tab.
+
+<div class="text--center">
+    <img src={ScreenerModRel} alt="Screener Mod Rel" style={{ width: 800 }} />
+</div>
+
+:::note
+The **mod** toggle button will show the best and worst performing pairs. When switched to Rel it will show the best performing pairs sorted by descending.
+:::
+
+:::tip
+In the **Beta** tab of the **Terminal Settings** page you can enable the **Enable Kline Popover Charts** so that when you mouse-over a symbol in the screener a chart will pop up letting you preview the price action of the pair.
+:::

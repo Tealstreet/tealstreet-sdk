@@ -1,0 +1,1447 @@
+import type { Store } from '../store/store.interface';
+import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
+
+import createHmac from 'create-hmac';
+import uniq from 'lodash/uniq';
+import { nanoid } from 'nanoid';
+import { forEachSeries, mapSeries } from 'p-iteration';
+import { TinyEmitter } from 'tiny-emitter';
+
+import { sleep } from '@tealstreet/sleep/src/sleep';
+import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
+import {
+  Candle,
+  ClosedPnlEntry,
+  ExchangeAccount,
+  ExchangeName,
+  ExchangeOptions,
+  Execution,
+  ExecutionsOptions,
+  FetchedLeverage,
+  HistoricalTrade,
+  HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
+  LogSeverity,
+  Market,
+  OHLCVOptions,
+  OHLCVSOptions,
+  Order,
+  OrderBook,
+  OrderSide,
+  OrderType,
+  PlaceOrderOpts,
+  Position,
+  PositionSide,
+  PublicTrade,
+  RemoteSignerRequest,
+  RemoteSignerResponse,
+  Ticker,
+  Timeframe,
+  UpdateOrderOpts,
+} from '../types';
+import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
+import { tryParseJson } from '../utils/tryParseJson';
+import { BaseWebSocket } from './base.ws';
+import { ExternalPublicDataProvider } from './external-public-data';
+import { InProcessPublicDataProvider } from './in-process-public-data';
+
+// Conditional Sentry import - may not be available in all contexts
+let Sentry: any;
+try {
+  // Try to load Sentry if available
+  Sentry = require('@sentry/nextjs');
+} catch {
+  // Sentry not available (e.g., in some Web Worker contexts)
+  Sentry = undefined;
+}
+
+const normalizeSymbols = (symbols: string[]): string[] => {
+  const deduped = new Set<string>();
+
+  symbols.forEach((symbol) => {
+    if (typeof symbol === 'string' && symbol.trim()) {
+      deduped.add(symbol);
+    }
+  });
+
+  return Array.from(deduped);
+};
+
+export type CallableMethodsInWorker =
+  | 'setLeverage'
+  | 'changePositionMode'
+  | 'changeMarginType'
+  | 'fetchAndSetPrivateSnapshot'
+  | 'reconnect'
+  | 'fetchOHLCV'
+  | 'fetchExecutions'
+  | 'fetchOrders'
+  | 'fetchAndSetOrders'
+  | 'updateSymbolMetadata'
+  | 'fetchLastLogsFromWebsockets'
+  | 'removeOrders'
+  | 'fetchIncomeHistory'
+  | 'fetchIncomeHistoryRange';
+
+export interface Exchange {
+  // udf endpoints for TV, if supported
+  initTime: number;
+  udfEndpoint?: string;
+  udfEndpointTestnet?: string;
+
+  publicWebsocket?: BaseWebSocket<any>;
+  publicWebsocketSecondary?: BaseWebSocket<any>;
+  publicInverseWebsocket?: BaseWebSocket<any>;
+  privateWebsocket?: BaseWebSocket<any>;
+  businessWebsocket?: BaseWebSocket<any>;
+  futuresWebsocket?: BaseWebSocket<any>;
+
+  /**
+   * External public data provider for WebSocket multiplexing or in-process sharing.
+   * When configured, the exchange receives public data from an external source.
+   */
+  externalPublicDataProvider?: ExternalPublicDataProvider | InProcessPublicDataProvider;
+
+  get name(): ExchangeName;
+  get isOnline(): boolean;
+  /**
+   * Returns true if this exchange is running in public-data-only mode.
+   */
+  get isPublicDataOnly(): boolean;
+  /**
+   * Returns true if this exchange uses external public data from a gateway.
+   */
+  get usesExternalPublicData(): boolean;
+  /**
+   * Returns true if this exchange only connects private WS (public data from shared exchange).
+   */
+  get isPrivateOnly(): boolean;
+  /**
+   * Disable public websocket connections (replace connectAndSubscribe with no-ops).
+   */
+  disablePublicWebsockets(): void;
+  setOnlineStatus: (isOnline: boolean) => void;
+
+  store: Store;
+  emitter: TinyEmitter;
+  options: ExchangeOptions;
+  isDisposed: boolean;
+  on: TinyEmitter['on'];
+  once: TinyEmitter['once'];
+  off: TinyEmitter['off'];
+  dispose: () => void;
+  getAccount: () => Promise<ExchangeAccount>;
+  validateAccount: () => Promise<string>;
+  fetchPositions: (symbols?: string[]) => Promise<Position[]>;
+  fetchOrders: (symbols?: string[]) => Promise<Order[]>;
+  start: () => Promise<void>;
+  nuke: (tries?: number) => Promise<void>;
+  nukePositions: (tries?: number) => Promise<void>;
+  nukeOrders: () => Promise<void>;
+  changePositionMode: (hedged: boolean, symbol?: string) => Promise<void>;
+  changeMarginType: (isolated: boolean, symbol?: string) => Promise<void>;
+  setLeverage: (symbol: string, leverage: number, side?: PositionSide) => Promise<void>;
+  setAllLeverage: (leverage: number) => Promise<void>;
+  placeOrder: (opts: PlaceOrderOpts) => Promise<string[]>;
+  placeOrders: (orders: PlaceOrderOpts[]) => Promise<string[]>;
+  updateOrder: (opts: UpdateOrderOpts) => Promise<string[]>;
+  cancelOrders: (orders: Order[]) => Promise<void>;
+  cancelSymbolOrders: (symbol: string) => Promise<void>;
+  cancelAllOrders: () => Promise<void>;
+  fetchOHLCV: (opts: OHLCVOptions) => Promise<Candle[]>;
+  fetchExecutions: (opts: ExecutionsOptions) => Promise<Execution[]>;
+  fetchMarkets?: () => Promise<Market[]>;
+  fetchTickers?: () => Promise<Ticker[]>;
+  fetchSymbolMaxLeverage?: (symbol: string) => Promise<number>;
+  fetchLeverageForSymbol: (symbol: string) => Promise<FetchedLeverage | null>;
+  updateSymbolMetadata: (symbol: string) => Promise<void>;
+  fetchHistoricalTrades: (opts: HistoricalTradeOptions) => Promise<HistoricalTrade[]>;
+  fetchClosedPnl?: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
+  fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
+  fetchIncomeHistoryRange: (startTime: number, endTime: number, incomeType?: string) => Promise<IncomeRecord[]>;
+  fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
+  getActiveTickerSymbols: () => string[];
+  setActiveTickerSymbols: (symbols: string[]) => void;
+  listenOHLCV: (o: OHLCVOptions, c: (c: Candle) => void) => () => void;
+  listenOHLCVs: (o: OHLCVSOptions, c: (c: Candle & { symbol: string; interval: Timeframe }) => void) => void;
+  listenOrderBook: (s: string, c: (o: OrderBook) => void) => () => void;
+  listenOHLCVWebworker: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) => () => void;
+  listenOrderBookWebworker: (s: string, c: (o: OrderBook) => void) => () => void;
+  updatePositionsInWebworker: (symbols?: string[]) => Promise<void>;
+  callMethodInWorker: <M extends CallableMethodsInWorker>(
+    method: M,
+    ...args: Parameters<this[M]>
+  ) => Promise<ReturnType<this[M]>>;
+  afterMethodCalledInWorker: <M extends CallableMethodsInWorker>(
+    result: ReturnType<this[M]>,
+    method: M,
+    ...args: Parameters<this[M]>
+  ) => void;
+  fetchAndSetPrivateSnapshot: () => Promise<void>;
+  fetchAndSetOrders: (symbols?: string[]) => Promise<Order[]>;
+  removeOrders: (orders: Pick<Order, 'id'>[]) => void;
+  reconnect: () => void;
+  getOrFetchPositionsForSymbol: (symbol: string) => Promise<Position[]>;
+  getAllSockets(): BaseWebSocket<any>[];
+  getPublicSockets(): BaseWebSocket<any>[];
+  getPrivateSockets(): BaseWebSocket<any>[];
+  syncSocketHealthToStore?: () => void;
+  fetchLastLogsFromWebsockets: () => string[];
+
+  /**
+   * Sign a remote HTTP request using this exchange's axios interceptors.
+   * Returns signed headers, params, data via the capture adapter pattern.
+   */
+  signHttpRequest: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
+
+  /**
+   * Sign a remote WS auth request using this exchange's secret.
+   * Returns the signature string for WebSocket authentication.
+   */
+  signWsAuth: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
+}
+
+export class BaseExchange implements Exchange {
+  isDemo = false;
+  isSpot = false;
+  initTime = Date.now();
+
+  _exchangeName: ExchangeName;
+  store: Store;
+  options: ExchangeOptions;
+  emitter: TinyEmitter = new TinyEmitter();
+
+  publicWebsocket?: BaseWebSocket<any>;
+  publicWebsocketSecondary?: BaseWebSocket<any>;
+  publicInverseWebsocket?: BaseWebSocket<any>;
+  privateWebsocket?: BaseWebSocket<any>;
+  futuresWebsocket?: BaseWebSocket<any>;
+  businessWebsocket?: BaseWebSocket<any>;
+  secondsTickersWebsocket?: BaseWebSocket<any>;
+  thirdTickersWebsocket?: BaseWebSocket<any>;
+
+  /**
+   * External public data provider for WebSocket multiplexing or in-process sharing.
+   * When set (via ExchangeOptions.externalPublicData), the exchange receives
+   * public data from an external source instead of connecting directly to the exchange.
+   */
+  externalPublicDataProvider?: ExternalPublicDataProvider | InProcessPublicDataProvider;
+
+  isDisposed: boolean = false;
+  isNuking: boolean = false;
+  lastReconnectEmit = 0;
+  private _activeTickerSymbols: string[] = [];
+
+  // Online/offline state - used to prevent reconnection spam when network is down
+  private _isOnline: boolean = true;
+
+  // Watchdog timer for detecting stuck websockets
+  private watchdogTimer?: NodeJS.Timeout;
+  private readonly WATCHDOG_INTERVAL_MS = 10_000; // Check every 10 seconds
+  private readonly WATCHDOG_STALE_THRESHOLD_MS = 30_000; // Consider stale after 30s without messages
+  private readonly WATCHDOG_CONNECTION_TIMEOUT_MS = 60_000; // Max time to wait for first message after init
+  private remoteSignerAvailabilityCleanups = new Set<() => void>();
+
+  on: TinyEmitter['on'];
+  once: TinyEmitter['once'];
+  off: TinyEmitter['off'];
+
+  grafanaEndpointsEvery: string[] = [];
+  grafanaEndpointsPeriodic: string[] = [];
+
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+    this._exchangeName = exchangeName;
+    this.options = opts;
+    this.store = store;
+    this._activeTickerSymbols = normalizeSymbols(opts.tuning?.activeTickerSymbols || []);
+
+    this.on = this.emitter.on.bind(this.emitter);
+    this.once = this.emitter.once.bind(this.emitter);
+    this.off = this.emitter.off.bind(this.emitter);
+
+    this.store.subscribe((data) => {
+      this.emitter.emit('update', data);
+    });
+  }
+
+  getActiveTickerSymbols = () => {
+    return this._activeTickerSymbols;
+  };
+
+  setActiveTickerSymbols = (symbols: string[]) => {
+    const next = normalizeSymbols(symbols);
+
+    if (
+      next.length === this._activeTickerSymbols.length &&
+      next.every((symbol, index) => symbol === this._activeTickerSymbols[index])
+    ) {
+      return;
+    }
+
+    this._activeTickerSymbols = next;
+    this.emitter.emit('activeTickerSymbols:changed', next);
+  };
+
+  protected getTickerSymbolsForSubscription(availableSymbols: string[]) {
+    const activeSymbols = this.getActiveTickerSymbols();
+    if (!activeSymbols.length) {
+      return availableSymbols;
+    }
+
+    const activeSet = new Set(activeSymbols);
+    const filteredSymbols = availableSymbols.filter((symbol) => activeSet.has(symbol));
+
+    return filteredSymbols.length ? filteredSymbols : availableSymbols;
+  }
+
+  onWSPublicClose = () => {};
+
+  /**
+   * Returns true if this exchange can authenticate requests —
+   * either locally (key + secret) or via remote signing (key + remoteSigner).
+   */
+  protected get canSign(): boolean {
+    return !!this.options.key && (!!this.options.secret || !!this.options.remoteSigner);
+  }
+
+  /**
+   * Per-exchange REST tick interval. Metadata is the source of truth;
+   * `options.extra.tickInterval` is an explicit override (the web wrapper's
+   * browser-side slowdown multiplier, dev knobs). Single source of truth
+   * means non-web consumers (exchange-server, CLI, mobile) read the same
+   * value as the browser without an options-builder having to inject it.
+   *
+   * If metadata is missing and there is no override, returns undefined and
+   * `loop()` warns at the use site. The fix is to set `tickInterval` on the
+   * exchange's metadata entry — not to add another fallback here.
+   */
+  protected getTickInterval(): number | undefined {
+    const override = this.options.extra?.tickInterval;
+    if (override && override > 0) return override;
+    return getExchangeMetadata(this._exchangeName).tickInterval;
+  }
+
+  /**
+   * Returns true if this exchange is in public-data-only mode
+   * (no credentials or explicitly flagged — no private WebSocket, no trading).
+   */
+  get isPublicDataOnly(): boolean {
+    return this.options.publicDataOnly === true || !this.canSign;
+  }
+
+  /**
+   * Returns true if this exchange should only connect private WebSocket.
+   * Public data (tickers, orderbook, OHLCV) comes from a shared public exchange.
+   */
+  get isPrivateOnly(): boolean {
+    return this.options.privateOnly === true;
+  }
+
+  /**
+   * Returns true if this exchange is configured to use external public data
+   * from a gateway instead of direct WebSocket connections.
+   */
+  get usesExternalPublicData(): boolean {
+    return !!this.options.externalPublicData;
+  }
+
+  /**
+   * Disable all public websocket connections by replacing connectAndSubscribe with no-ops.
+   * Called externally (e.g., by ExchangeWorker) when privateOnly is true, after construction
+   * but before start(). This avoids modifying every exchange's start() method.
+   */
+  disablePublicWebsockets(): void {
+    const noop = () => {};
+    if (this.publicWebsocket) this.publicWebsocket.connectAndSubscribe = noop;
+    if (this.publicWebsocketSecondary) this.publicWebsocketSecondary.connectAndSubscribe = noop;
+    if (this.publicInverseWebsocket) this.publicInverseWebsocket.connectAndSubscribe = noop;
+    // Also patch secondsTickersWebsocket and thirdTickersWebsocket if present (Binance)
+    if (this.secondsTickersWebsocket) this.secondsTickersWebsocket.connectAndSubscribe = noop;
+    if (this.thirdTickersWebsocket) this.thirdTickersWebsocket.connectAndSubscribe = noop;
+  }
+
+  /**
+   * Initialize external public data provider if configured.
+   * Call this in the exchange's start() method BEFORE connecting public websockets.
+   * If external public data is configured, this method will:
+   * 1. Create the ExternalPublicDataProvider or InProcessPublicDataProvider
+   * 2. Connect to the source
+   * 3. Wait until markets AND tickers are loaded in the store
+   * 4. Return true (so the exchange knows to skip direct public WS connection)
+   *
+   * @returns true if external public data is being used, false otherwise
+   */
+  protected async initExternalPublicData(): Promise<boolean> {
+    const config = this.options.externalPublicData;
+    if (!config) {
+      return false;
+    }
+
+    // Validate that the exchange supports public-only mode
+    const meta = exchangeMetadata[this._exchangeName];
+    if (meta && !meta.supportsPublicOnly) {
+      throw new Error(
+        `Exchange "${this._exchangeName}" does not support public-only mode (supportsPublicOnly is false). ` +
+          `Cannot use externalPublicData with this exchange.`,
+      );
+    }
+
+    if (config.type === 'websocket') {
+      this.log(`Using external public data gateway: ${config.url}`, LogSeverity.Info);
+
+      this.externalPublicDataProvider = new ExternalPublicDataProvider(this, {
+        url: config.url,
+        exchangeId: config.exchangeId,
+        authToken: config.authToken,
+      });
+
+      this.externalPublicDataProvider.connect();
+    } else if (config.type === 'in-process') {
+      this.log('Using in-process public data source', LogSeverity.Info);
+
+      this.externalPublicDataProvider = new InProcessPublicDataProvider(this, config.source);
+      this.externalPublicDataProvider.connect();
+    }
+
+    // Wait until markets and tickers are loaded from the external source
+    // before returning, so the exchange's private startup has data available.
+    await this.waitForExternalPublicDataLoaded();
+
+    return true;
+  }
+
+  /**
+   * Wait until both markets and tickers are loaded in the store.
+   * Used after connecting an external public data provider to ensure
+   * data is available before the exchange proceeds with private startup.
+   */
+  private waitForExternalPublicDataLoaded(): Promise<void> {
+    const { loaded } = this.store;
+    if (loaded.markets && loaded.tickers) {
+      return Promise.resolve();
+    }
+
+    const TIMEOUT_MS = 30_000;
+    const POLL_INTERVAL_MS = 100;
+
+    return new Promise<void>((resolve) => {
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = () => {
+        if (pollTimer) clearTimeout(pollTimer);
+        clearTimeout(timer);
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        this.log('Timeout waiting for external public data (markets/tickers)', LogSeverity.Warning);
+        // Resolve anyway — let the exchange proceed; it may still work
+        // if data arrives shortly after (e.g., private startup is slow).
+        resolve();
+      }, TIMEOUT_MS);
+
+      const poll = () => {
+        if (this.isDisposed) {
+          cleanup();
+          resolve();
+          return;
+        }
+
+        const { loaded: l } = this.store;
+        if (l.markets && l.tickers) {
+          cleanup();
+          this.log('External public data loaded (markets + tickers)', LogSeverity.Info);
+          resolve();
+          return;
+        }
+
+        pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+      };
+
+      pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+    });
+  }
+
+  getAccount = async () => {
+    await Promise.reject(new Error('Not implemented'));
+    return {} as ExchangeAccount;
+  };
+
+  validateAccount = async (): Promise<string> => {
+    await Promise.reject(new Error('Not implemented'));
+    return '';
+  };
+
+  fetchPositions = async (_symbols?: string[]): Promise<Position[]> => {
+    await Promise.reject(new Error('Not implemented'));
+    return [];
+  };
+
+  fetchOrders = async (_symbols?: string[]): Promise<Order[]> => {
+    await Promise.reject(new Error('Not implemented'));
+    return [];
+  };
+
+  fetchMarkets = async (): Promise<Market[]> => {
+    await Promise.reject(new Error('Not implemented'));
+    return [];
+  };
+
+  fetchTickers = async (): Promise<Ticker[]> => {
+    await Promise.reject(new Error('Not implemented'));
+    return [];
+  };
+
+  /**
+   * Re-fetch markets from the exchange and update the store.
+   * Emits 'markets:changed' with { added, removed } if the market list changed.
+   * Per-symbol WS handlers can listen for this event to subscribe to new tickers.
+   */
+  refreshMarkets = async (): Promise<{ added: Market[]; removed: Market[] }> => {
+    const oldMarkets = new Map(this.store.markets.map((m) => [m.id, m]));
+    const newMarkets = await this.fetchMarkets();
+
+    const added = newMarkets.filter((m) => !oldMarkets.has(m.id));
+    const removed = Array.from(oldMarkets.values()).filter((m) => !newMarkets.find((n) => n.id === m.id));
+
+    if (added.length > 0 || removed.length > 0) {
+      this.store.update({ markets: newMarkets });
+      this.emitter.emit('markets:changed', { added, removed });
+      this.log(
+        `Markets refreshed: +${added.length} -${removed.length} (total: ${newMarkets.length})`,
+        LogSeverity.Info,
+      );
+    }
+
+    return { added, removed };
+  };
+
+  log = (message: string, severity: LogSeverity = LogSeverity.Info) => {
+    if (this.options.tuning?.consoleLogging !== false) {
+      console.log(message, severity);
+    }
+    this.emitter.emit('log', `[${this.name}] ${message}`, severity);
+  };
+
+  start = async () => {
+    await Promise.reject(new Error('Not implemented'));
+  };
+
+  fetchSymbolMaxLeverage = async (_symbol: string) => {
+    await Promise.reject(new Error('Not implemented'));
+    return 1;
+  };
+
+  updateSymbolMetadata = async (_symbol: string) => {
+    // Silently do nothing in base implementation
+  };
+
+  setLeverage = async (_symbol: string, _leverage: number) => {
+    await Promise.reject(new Error('Not implemented'));
+  };
+
+  fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+    try {
+      const leverage = await this.fetchSymbolMaxLeverage(symbol);
+      const leverageObj: FetchedLeverage = {
+        buyLeverage: leverage,
+        sellLeverage: leverage,
+      };
+      this.store.update({
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: leverageObj,
+        },
+      });
+      return leverageObj;
+    } catch (err) {
+      this.log(`Error fetching leverage for ${symbol}: ${err}`, LogSeverity.Warning);
+      return null;
+    }
+  };
+
+  changePositionMode = async (_hedged: boolean) => {
+    await Promise.reject(new Error('Not implemented'));
+  };
+
+  changeMarginType = async (_isolated: boolean) => {
+    await Promise.reject(new Error('Not implemented'));
+  };
+
+  setAllLeverage = async (inputLeverage: number) => {
+    await forEachSeries(this.store.positions, async (position) => {
+      if (!this.isDisposed) {
+        await this.setLeverage(position.symbol, inputLeverage);
+      }
+    });
+  };
+
+  placeOrder = async (_opts: PlaceOrderOpts) => {
+    await Promise.reject(new Error('Not implemented'));
+    return [] as string[];
+  };
+
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
+  updateOrder = async (_opts: UpdateOrderOpts) => {
+    await Promise.reject(new Error('Not implemented'));
+    return [] as string[];
+  };
+
+  cancelOrders = async (_orders: Order[]) => {
+    await Promise.reject(new Error('Not implemented'));
+  };
+
+  cancelSymbolOrders = async (symbol: string) => {
+    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    if (orders.length > 0) {
+      await this.cancelOrders(orders);
+    }
+  };
+
+  cancelAllOrders = async () => {
+    const symbols = uniq(this.store.orders.map((order) => order.symbol));
+
+    await forEachSeries(symbols, async (symbol) => {
+      if (!this.isDisposed) {
+        await this.cancelSymbolOrders(symbol);
+      }
+    });
+  };
+
+  fetchOHLCV = async (_opts: OHLCVOptions) => {
+    return await Promise.resolve([] as Candle[]);
+  };
+
+  fetchExecutions = async (_opts: ExecutionsOptions) => {
+    return await Promise.resolve([] as Execution[]);
+  };
+
+  fetchHistoricalTrades = async (_opts: HistoricalTradeOptions) => {
+    return await Promise.resolve([] as HistoricalTrade[]);
+  };
+
+  // Default implementation - exchanges that support income history should override
+  fetchIncomeHistory = async (_opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    return await Promise.resolve([] as IncomeRecord[]);
+  };
+
+  // Default implementation - exchanges that support income history should override
+  fetchIncomeHistoryRange = async (
+    _startTime: number,
+    _endTime: number,
+    _incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    return await Promise.resolve([] as IncomeRecord[]);
+  };
+
+  fetchPublicTrades = async (_symbol: string, _limit?: number): Promise<PublicTrade[]> => {
+    await Promise.reject(new Error('Not implemented'));
+    return [];
+  };
+
+  /**
+   * Listen to OHLCV candle updates.
+   * If using external public data, routes through the gateway provider.
+   * Exchanges should override this method and check usesExternalPublicData
+   * to use direct WebSocket if not using gateway.
+   */
+  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    // If using external public data provider, route through it
+    if (this.externalPublicDataProvider) {
+      return this.externalPublicDataProvider.subscribeCandle(opts, callback);
+    }
+    // Default implementation - exchanges should override
+    return () => {};
+  };
+
+  listenOHLCVs = (
+    _opts: OHLCVSOptions,
+    _callback: (candle: Candle & { symbol: string; interval: Timeframe }) => void,
+  ) => {
+    return;
+  };
+
+  /**
+   * Listen to orderbook updates.
+   * If using external public data, routes through the gateway provider.
+   * Exchanges should override this method and check usesExternalPublicData
+   * to use direct WebSocket if not using gateway.
+   */
+  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+    // If using external public data provider, route through it
+    if (this.externalPublicDataProvider) {
+      return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback);
+    }
+    // Default implementation - exchanges should override
+    return () => {};
+  };
+
+  deriveAlgoOrdersFromNormalOrdersOpts = (opts: PlaceOrderOpts[]) => {
+    // Indexed for-loop with direct push instead of `reduce + [...acc, ...n]`.
+    // The prior shape was O(N²) — each iteration spread the growing acc;
+    // for a 50-order batch with SL+TP that's ~2.5K element-reference
+    // copies just to derive the algo orders. User-action path so not
+    // hot-frequency, but the pattern is exactly the one the docs flag.
+    const result: PlaceOrderOpts[] = [];
+    for (let i = 0; i < opts.length; i++) {
+      const o = opts[i];
+      const inverseSide = o.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+      if (o.stopLoss) {
+        result.push({
+          symbol: o.symbol,
+          side: inverseSide,
+          type: OrderType.StopLoss,
+          price: o.stopLoss,
+          amount: o.amount,
+          slTriggerType: o.slTriggerType,
+        });
+      }
+      if (o.takeProfit) {
+        result.push({
+          symbol: o.symbol,
+          side: inverseSide,
+          type: OrderType.TakeProfit,
+          price: o.takeProfit,
+          amount: o.amount,
+          tpTriggerType: o.tpTriggerType,
+        });
+      }
+    }
+    return result;
+  };
+
+  nuke = async (tries = 0) => {
+    if (!this.isDisposed && !this.isNuking) {
+      this.isNuking = true;
+
+      // close all positions
+      const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+
+      await forEachSeries(openPositions, async (position) => {
+        await this.placeOrder({
+          symbol: position.symbol,
+          side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
+          type: OrderType.Market,
+          amount: position.contracts,
+          reduceOnly: true,
+        });
+      });
+
+      // cancel all orders
+      await this.cancelAllOrders();
+      this.isNuking = false;
+    }
+
+    const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+
+    if (tries + 1 <= 3 && openPositions.length > 0) {
+      await sleep(100);
+      await this.nuke(tries + 1);
+    }
+  };
+
+  nukePositions = async (tries = 0) => {
+    if (!this.isDisposed && !this.isNuking) {
+      this.isNuking = true;
+
+      // close all positions
+      const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+
+      await forEachSeries(openPositions, async (position) => {
+        await this.placeOrder({
+          symbol: position.symbol,
+          side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
+          type: OrderType.Market,
+          amount: position.contracts,
+          reduceOnly: true,
+        });
+      });
+
+      this.isNuking = false;
+    }
+
+    const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+
+    if (tries + 1 <= 3 && openPositions.length > 0) {
+      await sleep(100);
+      await this.nukePositions(tries + 1);
+    }
+  };
+
+  nukeOrders = async () => {
+    if (!this.isDisposed && !this.isNuking) {
+      this.isNuking = true;
+      // cancel all orders
+      await this.cancelAllOrders();
+      this.isNuking = false;
+    }
+  };
+
+  /**
+   * Waits for the remote signer to become available.
+   * Returns true if signer is available, false if exchange was disposed while waiting.
+   * When no remoteSigner is configured, returns true immediately.
+   */
+  protected async waitForRemoteSigner(): Promise<boolean> {
+    const remoteSigner = this.options.remoteSigner;
+    if (!remoteSigner || remoteSigner.isAvailable()) return true;
+
+    this.emitter.emit('remoteSignerStatus', 'disconnected');
+
+    return new Promise<boolean>((resolve) => {
+      if (this.isDisposed) {
+        resolve(false);
+        return;
+      }
+      if (remoteSigner.isAvailable()) {
+        this.emitter.emit('remoteSignerStatus', 'connected');
+        resolve(true);
+        return;
+      }
+      const unsubscribe = remoteSigner.onAvailabilityChange((available) => {
+        if (available) {
+          this.remoteSignerAvailabilityCleanups.delete(unsubscribe);
+          unsubscribe();
+          this.emitter.emit('remoteSignerStatus', 'connected');
+          resolve(!this.isDisposed);
+        }
+      });
+      this.remoteSignerAvailabilityCleanups.add(unsubscribe);
+    });
+  }
+
+  dispose() {
+    this.isDisposed = true;
+    this.remoteSignerAvailabilityCleanups.forEach((cleanup) => cleanup());
+    this.remoteSignerAvailabilityCleanups.clear();
+
+    // Stop the watchdog timer
+    this.stopWatchdog();
+
+    // Dispose external public data provider if present
+    if (this.externalPublicDataProvider) {
+      this.externalPublicDataProvider.dispose();
+      this.externalPublicDataProvider = undefined;
+    }
+
+    // Properly dispose all WebSocket connections
+    const sockets = this.getAllSockets();
+    sockets.forEach((socket) => {
+      if (socket) {
+        socket.dispose(); // Use dispose() which properly cleans up timeouts and calls ws.close()
+      }
+    });
+
+    this.off('update');
+    this.off('fill');
+    this.off('error');
+
+    this.off('listenOHLCV');
+    this.off('subscribeOHLCV');
+    this.off('unsubscribeOHLCV');
+
+    this.off('listenOrderBook');
+    this.off('subscribeOrderBook');
+    this.off('unsubscribeOrderBook');
+
+    this.off('updatePositions');
+    this.off('updatePositions:done');
+    this.off('callMethod');
+    this.off('callMethod:done');
+
+    this.store.reset();
+  }
+
+  listenOHLCVWebworker(o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) {
+    const subId = nanoid();
+    this.emitter.emit('subscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
+    const handler = (event: any) => {
+      if (event.symbol === o.symbol && event.interval === o.interval) {
+        c(event.candle);
+      }
+    };
+    this.emitter.on('listenOHLCV', handler);
+    return () => {
+      this.emitter.off('listenOHLCV', handler);
+      this.emitter.emit('unsubscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
+    };
+  }
+
+  listenOrderBookWebworker(s: string, c: (o: OrderBook) => void) {
+    const subId = nanoid();
+    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
+    const handler = (event: any) => {
+      if (event.symbol === s) {
+        c(event.orderbook);
+      }
+    };
+    this.emitter.on('listenOrderBook', handler);
+    return () => {
+      this.emitter.off('listenOrderBook', handler);
+      this.emitter.emit('unsubscribeOrderBook', { symbol: s, subId });
+    };
+  }
+
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders(symbols);
+
+    // if we pass symbols assume its not a full update...
+    if (symbols) {
+      for (const symbol of symbols) {
+        const symbolOrders = orders.filter((o) => o.symbol === symbol);
+        this.store.setOrdersForSymbol(symbol, symbolOrders);
+      }
+    } else {
+      this.store.update({
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      });
+    }
+
+    return orders;
+  };
+
+  updatePositionsInWebworker = async (symbols?: string[]) => {
+    const requestId = nanoid();
+    this.emitter.emit('updatePositions', { symbols, requestId });
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timeout updatePositionsInWebworker')), 5000);
+      const handleDone = (event: any) => {
+        if (event.requestId === requestId) {
+          clearTimeout(timeout);
+          this.emitter.off('updatePositions:done', handleDone);
+          if (event.success) {
+            resolve();
+          } else {
+            // Only log actual errors, not expected states like retry_too_soon
+            if (event.reason && event.reason !== 'retry_too_soon') {
+              console.error('reject in updatePositionsInWebworker', event.reason);
+            }
+            reject(new Error(event.reason || 'Unknown error in updatePositionsInWebworker'));
+          }
+        }
+      };
+      this.emitter.on('updatePositions:done', handleDone);
+    });
+  };
+
+  callMethodInWorker = async <M extends CallableMethodsInWorker>(
+    method: M,
+    ...args: Parameters<this[M]>
+  ): Promise<ReturnType<this[M]>> => {
+    const requestId = nanoid();
+    this.emitter.emit('callMethod', { method, args, requestId });
+
+    return new Promise<ReturnType<this[M]>>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timeout callMethodInWorker')), 5000);
+      const handleDone = (event: any) => {
+        if (event.requestId === requestId) {
+          clearTimeout(timeout);
+          this.emitter.off('callMethod:done', handleDone);
+          if (event.success) {
+            resolve(event.result);
+            this.afterMethodCalledInWorker(event.result, method, ...args);
+          } else {
+            // Reconstruct error from serialized format
+            let err: Error;
+            if (typeof event.result === 'object' && event.result !== null) {
+              err = new Error(event.result.message || 'Unknown error');
+              if (event.result.name) err.name = event.result.name;
+              if (event.result.stack) err.stack = event.result.stack;
+              // Restore custom properties like 'code' from exchange errors
+              if (event.result.code !== undefined) (err as any).code = event.result.code;
+            } else {
+              err = new Error(event.result || 'Unknown error');
+            }
+            reject(err);
+          }
+        }
+      };
+      this.emitter.on('callMethod:done', handleDone);
+    });
+  };
+
+  afterMethodCalledInWorker = <M extends CallableMethodsInWorker>(
+    _result: ReturnType<this[M]>,
+    _method: M,
+    ..._args: Parameters<this[M]>
+  ) => {};
+
+  removeOrders = (orders: Pick<Order, 'id'>[]) => {
+    this.store.removeOrders(orders);
+  };
+
+  // called on ws reconnect before resubscribing, refetch any private data snapshots needed
+  // that aren't handled in tick in case there has private state changes while disconnected...
+  // Usually only need to fetch orders here as rest handled in tick, but consider broader refetch
+  fetchAndSetPrivateSnapshot = async (tries = 1) => {
+    if (this.isPublicDataOnly) return;
+    // Disposal guard: this runs on every private-WS (re)connect via the
+    // housekeep listener with tries=10. Without these checks a disposed
+    // account (browser gone / remote signer dead) would keep retrying
+    // fetchOrders() — each retry signs a REST request that throws
+    // "Remote signer unavailable", flooding logs/CPU forever. See
+    // base.ws.ts send()/dispose() guards for the matching reconnect side.
+    if (this.isDisposed) return;
+
+    let count = 0;
+    while (count < tries) {
+      if (this.isDisposed) return;
+      try {
+        const orders = await this.fetchOrders();
+        if (this.isDisposed) return;
+        this.store.update({
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        });
+        return;
+      } catch (e: any) {
+        if (this.isDisposed) return;
+        this.emitAndLogError(e);
+        count++;
+        if (count < tries) await sleep(1000);
+      }
+    }
+  };
+
+  private _fetchPositionForSymbolPromise: Record<string, Promise<Position[]> | undefined> = {};
+
+  /**
+   * Fetches positions for a symbol, if not found in store. Update store after fetch.
+   * @param symbol
+   */
+  getOrFetchPositionsForSymbol = async (symbol: string) => {
+    // If the exchange doesn't support positions, return empty array
+    const features = exchangeMetadata[this._exchangeName]?.features;
+    if (features?.positions === false) {
+      return [];
+    }
+    let foundPositions = this.store.positions.filter((p) => p.symbol === symbol);
+    if (foundPositions.length === 0) {
+      const existingPromise = this._fetchPositionForSymbolPromise[symbol];
+      if (existingPromise) {
+        return await existingPromise;
+      }
+      // check if store loaded, else easy out
+      if (!this.store.loaded.positions) {
+        return [];
+      }
+      console.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
+      const newPromise = this.fetchPositions([symbol]);
+      this._fetchPositionForSymbolPromise[symbol] = newPromise;
+      foundPositions = await newPromise;
+
+      if (this.isDisposed) return [];
+
+      delete this._fetchPositionForSymbolPromise[symbol];
+      this.store.addOrUpdatePositions(foundPositions);
+    }
+    return foundPositions;
+  };
+
+  get name() {
+    return this._exchangeName;
+  }
+
+  get isOnline() {
+    return this._isOnline;
+  }
+
+  /**
+   * Sets the online/offline status for this exchange.
+   * When transitioning from offline to online, triggers WebSocket reconnection.
+   * When transitioning to offline, WebSocket reconnect loops will pause until online again.
+   */
+  setOnlineStatus = (isOnline: boolean) => {
+    const wasOffline = !this._isOnline;
+    this._isOnline = isOnline;
+
+    if (wasOffline && isOnline) {
+      // Coming back online - trigger reconnection for all sockets
+      this.log('Network came online - triggering WebSocket reconnection', LogSeverity.Info);
+      this.reconnect();
+    } else if (!isOnline) {
+      this.log('Network went offline - WebSocket reconnects will be paused', LogSeverity.Info);
+    }
+  };
+
+  reconnect = () => {
+    this.getAllSockets().forEach((socket) => socket?.reconnect());
+  };
+
+  emitAndLogError(err: string | Error | undefined | null, msg?: string, extraData?: Record<string, any>) {
+    if (this.isDisposed) {
+      console.warn('exchange error (disposed, suppressing)', err);
+      return;
+    }
+
+    console.error('exchange error', err);
+    console.trace();
+
+    let formattedMsg;
+    let errorObject: Error | undefined;
+    let sentryContext: any = {};
+
+    // Handle undefined, null, or other falsy values
+    if (!err) {
+      formattedMsg = msg || 'Unknown Exchange Error';
+      errorObject = new Error(formattedMsg);
+      errorObject.name = 'ExchangeError';
+    } else if (typeof err === 'string') {
+      formattedMsg = (msg || 'Exchange Error') + ': ' + err;
+      // Create an Error object for Sentry
+      errorObject = new Error(formattedMsg);
+      errorObject.name = 'ExchangeError';
+    } else {
+      errorObject = err;
+
+      // Check if this is an enhanced axios error
+      const enhancedError = err as EnhancedAxiosError;
+      if (enhancedError?.context && enhancedError?.enhancedMessage) {
+        // Use the enhanced message for better context
+        formattedMsg = msg || enhancedError?.enhancedMessage;
+
+        // Format error context for Sentry
+        const errorForSentry = formatErrorForSentry(enhancedError);
+        sentryContext = {
+          ...errorForSentry.tags,
+          ...errorForSentry.extra,
+          ...extraData,
+        };
+      } else {
+        if (msg) {
+          formattedMsg = msg;
+        } else {
+          formattedMsg = err.message || String(err);
+        }
+
+        // Check if this is a TradeTunnel error with URL context
+        const tunnelError = err as any;
+        if (tunnelError?.url || tunnelError?.method) {
+          sentryContext = {
+            ...sentryContext,
+            url: tunnelError.url,
+            method: tunnelError.method,
+            originalError: tunnelError.originalError,
+            errorType: tunnelError.name || 'TradeTunnelError',
+            ...extraData,
+          };
+        }
+      }
+    }
+
+    // Detect if we're in a web worker
+    const isWebWorker = typeof self !== 'undefined' && typeof window === 'undefined';
+
+    if (isWebWorker) {
+      // In web worker: emit error with Sentry flag and enhanced context
+      const enhancedError = typeof err === 'object' && err !== null ? (err as EnhancedAxiosError) : null;
+      this.emitter.emit('error', formattedMsg, {
+        sendToSentry: true,
+        sentryData: {
+          error: errorObject,
+          tags: {
+            exchange: this.name,
+            module: 'Exchange',
+            severity: 'error',
+            ...sentryContext,
+          },
+          extra: {
+            originalMessage: formattedMsg,
+            exchangeOptions: {
+              testnet: this.options.testnet,
+              publicDataOnly: this.options.publicDataOnly,
+            },
+            ...sentryContext,
+          },
+        },
+        // Pass enhanced error context for better toast messages
+        enhancedContext: enhancedError?.context,
+      });
+    } else {
+      // In main thread: send directly to Sentry for better stack trace
+      if (Sentry && errorObject) {
+        Sentry.captureException(errorObject, {
+          tags: {
+            exchange: this.name,
+            module: 'Exchange',
+            severity: 'error',
+            ...sentryContext,
+          },
+          extra: {
+            originalMessage: formattedMsg,
+            exchangeOptions: {
+              testnet: this.options.testnet,
+              publicDataOnly: this.options.publicDataOnly,
+            },
+            ...sentryContext,
+          },
+        });
+      }
+
+      // Emit error with enhanced context for better toast messages
+      const enhancedError = typeof err === 'object' && err !== null ? (err as EnhancedAxiosError) : null;
+      this.emitter.emit('error', formattedMsg, {
+        enhancedContext: enhancedError?.context,
+      });
+    }
+  }
+
+  // if multiple child WS they will all send reconnect messages, try and only emit once...
+  emitWsReconnected() {
+    const now = Date.now();
+    if (now - this.lastReconnectEmit > 5000) {
+      this.lastReconnectEmit = now;
+      this.emitter.emit('ws-reconnected', '');
+    }
+  }
+
+  public getAllSockets(): BaseWebSocket<any>[] {
+    return [
+      this.privateWebsocket,
+      this.publicWebsocket,
+      this.publicWebsocketSecondary,
+      this.publicInverseWebsocket,
+      this.futuresWebsocket,
+      this.businessWebsocket,
+      this.secondsTickersWebsocket,
+      this.thirdTickersWebsocket,
+    ].filter((socket): socket is BaseWebSocket<any> => socket !== undefined);
+  }
+
+  /** Returns all public WebSockets (market data, tickers, etc.) */
+  public getPublicSockets(): BaseWebSocket<any>[] {
+    return [
+      this.publicWebsocket,
+      this.publicWebsocketSecondary,
+      this.publicInverseWebsocket,
+      this.futuresWebsocket,
+      this.businessWebsocket,
+      this.secondsTickersWebsocket,
+      this.thirdTickersWebsocket,
+    ].filter((socket): socket is BaseWebSocket<any> => socket !== undefined);
+  }
+
+  /** Returns all private WebSockets (orders, positions, balance) */
+  public getPrivateSockets(): BaseWebSocket<any>[] {
+    return [this.privateWebsocket].filter((socket): socket is BaseWebSocket<any> => socket !== undefined);
+  }
+
+  /** Aggregates socket health from all websockets and syncs to store */
+  public syncSocketHealthToStore = () => {
+    // Start watchdog on first sync (when websockets start receiving messages)
+    this.startWatchdog();
+
+    const publicSockets = this.getPublicSockets();
+    const privateSockets = this.getPrivateSockets();
+
+    // Aggregate public socket health
+    const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
+    const publicHealthy = initializedPublicSockets.length === 0 || initializedPublicSockets.some((s) => s.isHealthy);
+    const publicInitialized = initializedPublicSockets.length > 0;
+    const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
+    const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
+
+    // Aggregate private socket health
+    const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
+    const privateHealthy = initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy);
+    const privateInitialized = initializedPrivateSockets.length > 0;
+    const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+    const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
+
+    this.store.updateSocketHealth({
+      publicHealthy,
+      privateHealthy,
+      publicInitialized,
+      privateInitialized,
+      publicLastMessage,
+      privateLastMessage,
+    });
+  };
+
+  /** Starts the watchdog timer to detect stuck websockets */
+  private startWatchdog = () => {
+    if (this.watchdogTimer || this.isDisposed) return;
+
+    const scheduleNext = () => {
+      if (this.isDisposed) return;
+      this.watchdogTimer = setTimeout(() => {
+        this.auditSocketHealth();
+        scheduleNext();
+      }, this.WATCHDOG_INTERVAL_MS);
+    };
+
+    scheduleNext();
+  };
+
+  /** Stops the watchdog timer */
+  private stopWatchdog = () => {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = undefined;
+    }
+  };
+
+  /** Audits all websockets and forces reconnect on stuck ones */
+  private auditSocketHealth = () => {
+    if (this.isDisposed) {
+      this.stopWatchdog();
+      return;
+    }
+
+    const now = Date.now();
+    const allSockets = this.getAllSockets();
+
+    for (const socket of allSockets) {
+      const isConnected = socket.ws?.readyState === WebSocket.OPEN;
+      const timeSinceLastMessage = socket.lastReceived > 0 ? now - socket.lastReceived : Infinity;
+      const socketStaleThresholdMs = socket.getWatchdogStaleThresholdMs() ?? this.WATCHDOG_STALE_THRESHOLD_MS;
+
+      // Case 1: Connected and initialized, but no recent messages (stale)
+      if (isConnected && socket.isInitialized && timeSinceLastMessage > socketStaleThresholdMs) {
+        this.log(
+          `[Watchdog] Socket stale: ${Math.round(timeSinceLastMessage / 1000)}s since last message, forcing reconnect`,
+          LogSeverity.Warning,
+        );
+        socket.reconnect();
+        continue;
+      }
+
+      // Case 2: Connected but never received messages (stuck on connect)
+      // Check if socket has been "connecting" for too long without receiving data
+      if (isConnected && !socket.isInitialized) {
+        const timeSinceExchangeInit = now - this.initTime;
+        if (timeSinceExchangeInit > this.WATCHDOG_CONNECTION_TIMEOUT_MS) {
+          this.log(
+            `[Watchdog] Socket never received messages after ${Math.round(timeSinceExchangeInit / 1000)}s, forcing reconnect`,
+            LogSeverity.Warning,
+          );
+          socket.reconnect();
+          continue;
+        }
+      }
+
+      // Case 3: Socket shows connected but lastReceived was reset (inconsistent state)
+      if (isConnected && socket.isInitialized && socket.lastReceived === 0) {
+        this.log(
+          `[Watchdog] Socket in inconsistent state (connected + initialized but lastReceived=0), forcing reconnect`,
+          LogSeverity.Warning,
+        );
+        socket.reconnect();
+        continue;
+      }
+    }
+
+    // Sync health to store after audit (without triggering watchdog start again)
+    this.syncSocketHealthToStoreInternal();
+  };
+
+  /** Internal method to sync health without starting watchdog (used by audit) */
+  private syncSocketHealthToStoreInternal = () => {
+    const publicSockets = this.getPublicSockets();
+    const privateSockets = this.getPrivateSockets();
+
+    const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
+    const publicHealthy = initializedPublicSockets.length === 0 || initializedPublicSockets.some((s) => s.isHealthy);
+    const publicInitialized = initializedPublicSockets.length > 0;
+    const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
+    const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
+
+    const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
+    const privateHealthy = initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy);
+    const privateInitialized = initializedPrivateSockets.length > 0;
+    const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+    const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
+
+    this.store.updateSocketHealth({
+      publicHealthy,
+      privateHealthy,
+      publicInitialized,
+      privateInitialized,
+      publicLastMessage,
+      privateLastMessage,
+    });
+  };
+
+  public fetchLastLogsFromWebsockets = (): string[] => {
+    const logs = this.getAllSockets().map((socket) => socket?.lastLog.toArray());
+    return logs.flat();
+  };
+
+  /**
+   * Sign a remote HTTP request using this exchange's axios interceptors.
+   * Capture adapter pattern: swaps the adapter, runs interceptors, captures signed config.
+   */
+  public signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    const xhr = (this as any).xhr;
+    if (!xhr) {
+      return { id: request.id, error: 'Exchange does not have xhr for signing' };
+    }
+
+    let captured: any = null;
+
+    // Use per-request adapter to avoid corrupting xhr.defaults.adapter
+    // (other requests on the same xhr instance would get the capture adapter during the await)
+    await xhr.request({
+      method: request.config!.method,
+      url: request.config!.url,
+      baseURL: request.config!.baseURL,
+      params: tryParseJson(request.config!.params),
+      data: tryParseJson(request.config!.data),
+      headers: request.config!.headers,
+      adapter: (config: any) => {
+        captured = config;
+        return Promise.resolve({ data: null, status: 200, statusText: 'OK', headers: {}, config });
+      },
+    });
+
+    const headers: Record<string, string> = {};
+    if (captured?.headers?.toJSON) {
+      for (const [k, v] of Object.entries(captured.headers.toJSON(true))) {
+        if (v != null) headers[k] = String(v);
+      }
+    } else if (captured?.headers) {
+      for (const [k, v] of Object.entries(captured.headers)) {
+        if (v != null) headers[k] = String(v);
+      }
+    }
+
+    return { id: request.id, config: { headers, url: captured?.url, params: captured?.params, data: captured?.data } };
+  };
+
+  /**
+   * Sign a remote WS auth request.
+   * Default: HMAC-SHA256 with the exchange's secret. Exchanges with non-HMAC
+   * WS auth (dexes, wallet-based) should override this method.
+   */
+  public signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    const { toSign, outputFormat } = request.wsAuth!;
+    const secret = this.options.secret;
+    if (!secret) {
+      return { id: request.id, error: 'No secret available for WS auth signing' };
+    }
+    const digestFormat = outputFormat === 'hex' || outputFormat === 'base64' ? outputFormat : 'hex';
+    const signature = createHmac('sha256', secret).update(toSign).digest(digestFormat);
+    return { id: request.id, wsAuthSignature: signature };
+  };
+
+  // Whether order is TP/SL or trailing stop
+  protected isTpSlOrTrailingOrder = (order: Order) => {
+    return (
+      order.type === OrderType.TakeProfit ||
+      order.type === OrderType.StopLoss ||
+      order.type === OrderType.TrailingStopLoss
+    );
+  };
+
+  // Whether order is TP/SL excluding trailing
+  protected isTpSlOrder = (order: Order) => {
+    return order.type === OrderType.TakeProfit || order.type === OrderType.StopLoss;
+  };
+}

@@ -1,0 +1,88 @@
+---
+title: PnL Cards
+description: PnL cards are a new feature that makes it easy to share your trading gains or losses on a Profit & Loss card.
+sidebar_position: 14
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import PNLCard from '/img/trading/pnl-cards/pnlcard.png';
+import PrePNLCard from '/img/trading/pnl-cards/pre-pnlcard.png';
+import PNLCardExample from '/img/trading/pnl-cards/pnlcard-example.png';
+import PNLCardExample2 from '/img/trading/pnl-cards/pnlcard-example2.png';
+import PNLCardFindPepe from '/img/trading/pnl-cards/pnlcard-findpepe.png';
+import PNLCardDetailed from '/img/trading/pnl-cards/pnlcard-detailed.png';
+
+PNL cards are a new feature that makes it easy to view your trading gains or losses on a Profit & Loss card.
+
+<div class="text--center">
+    <img src={PNLCard} alt="PNL Card" style={{ width: 450 }} />
+</div>
+
+### Overview
+
+- The PNL card is a powerful tool that helps you track:
+    - The leverage used as well as the direction of your trade
+    - The price at the time of the snapshot
+    - Your gains or losses
+
+This gives you a shareable at-a-glance view of how your trades are performing which is great for self journaling and sharing with your friends.
+
+---
+
+### Generating a PNL Card
+
+- To generate a PNL card, you need to have a trade open. Once a trade is open you can click the indicated pop-out button under Unrealized PNL display.
+
+    <div class="text--center">
+        <img src={PrePNLCard} alt="Pre PNL Card" style={{ width: 700 }} />
+    </div>
+
+- This will open a new window with the PNL card. You can then click the "Generate PNL Card" button to generate the card.
+
+<details open>
+    <summary>Detailed explanation</summary>
+    <p>
+        <div class="text--center">
+            <img src={PNLCardDetailed} alt="PNL Card Detailed" style={{ width: 600 }} />
+        </div>
+        1. Calculate position based on ROE or ROI.
+        <br />
+        2. Which theme style to use for the card (Seasonal options are temporary)
+        <br />
+        3. Refresh, Copy, Download, and Find Pepe. These can be utilized to customize, download, or copy the image to
+        clipboard
+        <br />
+    </p>
+</details>
+
+<div class="text--center">
+    <img src={PNLCardFindPepe} alt="PNL Card (Find Pepe)" style={{ width: 300 }} />
+</div>
+
+:::note
+You can adjust the size and position of your pepe by dragging the edges of the pepe's border
+:::
+
+---
+
+### Examples
+
+<details>
+    <summary>Examples</summary>
+    <p>
+        1. Simple design with a pepe and using ROE for calculation
+        <div class="text--center">
+            <img src={PNLCardExample} alt="PNL Card Example 1" style={{ width: 800 }} />
+        </div>
+        <br />
+        2. Original design with an extra large pepe and using ROI for calculation
+        <div class="text--center">
+            <img src={PNLCardExample2} alt="PNL Card Example 2" style={{ width: 800 }} />
+        </div>
+    </p>
+</details>

@@ -1,0 +1,43 @@
+---
+title: DOM (Depth of Market)
+description: Ladder-style view of bids/asks with live size, imbalance, and quick actions.
+sidebar_position: 25
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+The **DOM (Depth of Market)** module shows a ladder view of the orderbook with prices, size columns, and optional imbalance highlighting. It is optimized for fast reading and quick clicks directly on price levels.
+
+::::caution
+Some exchanges may throttle rapid clicks; use with care when placing frequent updates.
+::::
+
+---
+
+### Key Features
+
+- **Ladder View**: Prices centered around the mark/last, with bids/asks stacked vertically.
+- **Size Columns**: Shows per-level size; can display cumulative or individual sizes depending on mode.
+- **Imbalance Highlighting**: Optional shading to reveal skew between bid/ask depth.
+- **Grouping/Precision**: Adjust price grouping to fit your symbol and zoom level.
+- **Click to Stage**: Click a price level to stage an order price in the Place Order module (when supported by your exchange/account).
+
+---
+
+### Settings
+
+- **Layout & Mode**: Choose stacked vs split, and cumulative vs individual sizes (matches Orderbook settings).
+- **Grouping/Precision**: Set tick aggregation (price step) for the ladder.
+- **Imbalance Display**: Toggle showing bid/ask imbalance for quick skew detection.
+- **Auto-Center**: Keep the ladder centered on the mid/last price (if available).
+
+---
+
+### Usage Tips
+
+- For thin books, lower the grouping to see more granular levels; for volatile pairs, widen grouping to reduce noise.
+- Use imbalance shading to spot one-sided depth before placing orders.
+- Combine with the Place Order module: click a DOM level, then adjust size/post/reduce before submitting.

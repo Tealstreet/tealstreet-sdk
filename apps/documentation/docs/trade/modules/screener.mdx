@@ -1,0 +1,106 @@
+---
+title: Screener
+description: The Screener module is a module that helps you track the best and worst performing tokens on an exchange.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Screener1 from '/img/trading/modules/screener/modules-screener2.png';
+import Screener2 from '/img/trading/modules/screener/modules-screener1.png';
+import ScreenerSettings from '/img/trading/modules/screener/modules-screener-settings.png';
+import ScreenerModRel from '/img/trading/modules/screener/screener-modrel.gif';
+
+The **Screener module** is a tool that filters & sorts trading pairs by certain criteria (price change, funding rate, volume, etc.)
+
+<div class="text--center">
+    <img src={Screener1} alt="Screener" style={{ width: 500 }} />
+</div>
+
+- By default it sorts trading pairs by largest price increase in last 24h.
+
+---
+
+### Activating the Screener module
+
+<div class="text--center">
+    <img src={ScreenerSettings} alt="Screener Settings" style={{ width: 600 }} />
+</div>
+
+- You can enable the **Screener** module under the Modules tab in your **Trade Settings** configuration window.
+
+:::tip
+Remember to unlock your layout to be able to move the module around.
+:::
+
+---
+
+### Using the Screener module
+
+<div class="text--center">
+    <img src={Screener2} alt="Screener 2" style={{ width: 800 }} />
+</div>
+
+- Connect at least one account to load market data. If no account is active, the table will not populate.
+- You can favorite individual pairs and, when the **Show Pinned Column** setting is enabled, they will appear under the **Pinned** tab. If that setting is disabled, the module shows a single “All” list without tabs.
+
+<!-- <div class="text--center">
+    <img src={ScreenerModRel} alt="Screener Mod Rel" style={{width: 800}} />
+</div>
+
+:::note
+The **mod** toggle button will show the best and worst performing pairs. When switched to Rel it will show the best performing pairs sorted by descending.
+::: -->
+
+---
+
+### Screener Features
+
+The Screener module includes several configurable features accessible through the table settings:
+
+#### Tabbed View
+
+- **All Tab**: Shows all trading pairs with current sorting and filtering
+- **Pinned Tab**: Shows only your pinned/favorited trading pairs
+- The pinned column can be hidden in settings, which will disable the tabbed view and show only the "All" view
+
+#### Search Functionality
+
+- Use the search input to filter trading pairs by symbol name
+- Search is case-insensitive and updates in real-time
+
+#### Display Options
+
+- **Show Symbol Icons**: Toggle to display exchange and symbol icons
+- **Show Pinned Column**: Toggle to show/hide the pinned column (affects tabbed view)
+- **Show Short Names**: Display abbreviated symbol names
+- **Hide Expiring Futures**: Filter out futures contracts that are close to expiration
+- **Show Developer Tooltip**: Display additional developer information (only visible in dev mode)
+
+#### Sorting and Filtering
+
+- Default sort is by percentage change (24h) in descending order
+- Supports sorting by various columns including price, volume, funding rate, etc.
+- Real-time data updates every 5 seconds by default
+- Supports absolute mode for percentage calculations
+
+#### Market Categories
+
+The screener displays different market types:
+
+- **Spot**: Spot trading pairs
+- **Perpetual**: Perpetual futures contracts
+- **Expiring**: Futures contracts with expiration dates
+
+<!-- :::tip
+In the **News Trading** tab of the **Terminal Settings** page you can enable the **Enable Kline Popover Charts** so that when you mouse-over a symbol in the screener a chart will pop up letting you preview the price action of the pair.
+::: -->
+
+:::note
+The screener automatically refreshes data every 5 seconds to provide real-time market information. You can adjust this refresh rate in the module settings if needed.
+:::

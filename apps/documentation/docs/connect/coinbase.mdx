@@ -1,0 +1,145 @@
+---
+title: Coinbase
+description: Connecting Coinbase to Tealstreet
+sidebar_position: 12
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import v3SelectOptions from '/img/connect/common/v3-select-options.png';
+import v3ExchangeDropdown from '/img/connect/common/v3-exchange-dropdown.png';
+import v3SelectCoinbase from '/img/connect/coinbase/v3-select-coinbase.png';
+import coinbaseToggleAdv from '/img/connect/coinbase/coinbase-advanced-toggle.png';
+import ApiTeal from '/img/connect/coinbase/api-teal.png';
+import coinbaseApiSettings from '/img/connect/coinbase/coinbase-api-settings.png';
+import coinbaseApiCreate1 from '/img/connect/coinbase/coinbase-api-create1.png';
+import coinbaseApiCreate2 from '/img/connect/coinbase/coinbase-api-create2.png';
+import coinbaseApiCreate3 from '/img/connect/coinbase/coinbase-api-create3.png';
+import coinbaseUnlockfuts from '/img/connect/coinbase/coinbase-unlock-futs.png';
+import coinbaseLinked from '/img/connect/coinbase/coinbase-linked.png';
+import coinbaseIntxError from '/img/connect/coinbase/coinbase-intx-error.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+<ThemedImage
+    alt="coinbase-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/coinbase-light.png'),
+        dark: useBaseUrl('/img/exchange/coinbase-dark.png'),
+    }}
+    width={300}
+    height={50}
+/>
+
+<div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+    <iframe
+        src="https://www.youtube.com/embed/VPfBpvja_GY"
+        frameBorder="0"
+        allow="autoplay; encrypted-media"
+        allowFullScreen
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+    />
+</div>
+
+## Connecting [Coinbase](https://www.coinbase.com/) to Tealstreet
+
+- First, make sure you are logged into your [Coinbase](https://www.coinbase.com/) account.
+
+<!-- :::note
+Consider supporting Tealstreet by using the referral _[link](https://www.coinbase.com/)._
+::: -->
+
+<IntroTealstreet exchangeName="Coinbase" />
+
+Keep this window open, it will be used later after we create the API Key on the Coinbase site. \* In particular we'll be using the IP's shown in the Tealstreet window to whitelist the API Key in Coinbase later.
+
+---
+
+### Enabling Futures Trading on Coinbase
+
+Now lets bring up the coinbase account and make sure Advanced Trading is enabled.
+
+<div class="text--center">
+    <img src={coinbaseToggleAdv} alt="Advanced Trading Toggle" style={{ width: 550 }} />
+</div>
+
+If you haven't yet done so you will need to unlock Futures on your account by clicking the button shown below.
+
+- This will require you to agree to the terms and conditions for futures trading as well as perform any identify verification checks Coinbase may deem necessary.
+
+<div class="text--center">
+    <img src={coinbaseUnlockfuts} alt="Unlock Futures" style={{ width: 750 }} />
+</div>
+
+---
+
+### Creating the API Key
+
+Next open your Coinbase settings page and goto the **API** page.
+
+<div class="text--center">
+    <img src={coinbaseApiSettings} alt="API Settings" style={{ width: 550 }} />
+</div>
+
+Use the Coinbase recommended method to make your Developer Platform API Key.
+
+- Legacy API keys have been deprecated and might not work in the future.
+
+<div class="text--center">
+    <img src={coinbaseApiCreate1} alt="Create API Key Developer Platform" style={{ width: 550 }} />
+</div>
+
+Click **Create API Key**
+
+<div class="text--center">
+    <img src={coinbaseApiCreate2} alt="Create API Key Developer Platform" style={{ width: 550 }} />
+</div>
+
+Now fill out the information requested for the API Key. - _**Name**_: This can be whatever you want to call the key. - _**API Whitelist**_: Enter the IP Addresses that are shown inside the Tealstreet API Key creation window we loaded up earlier. - Select the _**View & Trade**_ permissions. You might need to change the portfolio setting to something other then Defaul to edit the permissions. - Select the _**Create & Download**_ button when done.
+
+<div class="text--center">
+    <img src={coinbaseApiCreate3} alt="Create API Key Developer Platform" style={{ width: 550 }} />
+</div>
+
+:::caution
+Do not activate transfer permission on this API Key.
+:::
+
+Proceed to confirm your keys details, and store them securely. Once you have the information you need return to the Tealstreet window we left open earlier.
+
+---
+
+### Linking Coinbase to Tealstreet
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Finalize Coinbase Key Details" style={{ width: 550 }} />
+</div>
+
+Fill out the information you got from Coinbase to link the API Key inside Tealstreet
+
+<!-- - **Use Tealstreet Network**: Tick the checkbox unless you plan to use another set of whitelisted IP's --> - **Name**: Name the key whatever you want - **API Key**: enter the key Coinbase gave you when you made the key - **API Secret**: enter the secret Coinbase gave you when you made the key
+
+Press **Done** when finished.
+
+<OutroTealstreet exchangeName="Coinbase" />
+
+<!-- <div class="text--center">
+  <img src={coinbaseLinked} alt="Linked Coinbase" style={{width: 750}} />
+</div> -->
+
+---
+
+## Troubleshooting Coinbase
+
+Below is a list of reported issues or concerns for **Coinbase**.
+
+### I am getting an error "No INTX Portfolio" ?
+
+Coinbase does not offer perpetual futures trading in all regions. If you are in a region that does not support perpetual futures trading, you will see this error. \* Dated Futures are separate from Perpetual Futures and are not supported by Tealstreet at this time.
+
+![Coinbase-RegionRestricted](/img/connect/coinbase/coinbase-intx-error.png)

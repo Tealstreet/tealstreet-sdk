@@ -1,0 +1,157 @@
+---
+title: ApeX Pro
+description: Connect your ApeX account to Tealstreet.
+sidebar_position: 13
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiConnect from '/img/connect/apex/v3/apiconnect.png';
+import ApiConnect2 from '/img/connect/apex/v3/apiconnect2.png';
+import ApiWhitelist from '/img/connect/apex/v3/apiwhitelist.png';
+import ApiTeal from '/img/connect/apex/v3/api-teal.png';
+import ApiCreate from '/img/connect/bingx/apicreate.png';
+import SecVerify from '/img/connect/bingx/secverify.png';
+import ApiCreated from '/img/connect/bingx/apicreated.png';
+import ApiCreated2 from '/img/connect/bingx/apicreated2.png';
+import ActivateFuts from '/img/connect/bingx/activatefuts.png';
+import ActivateFuts2 from '/img/connect/bingx/activatefuts2.png';
+import ApiCreation from '/img/connect/bingx/apicreation.png';
+import ApiCreation2 from '/img/connect/bingx/apicreation2.png';
+import ApiCreation3 from '/img/connect/bingx/apicreation3.png';
+import CrossMargin from '/img/connect/bingx/crossmargin.png';
+import CrossMargin2 from '/img/connect/bingx/crossmargin2.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+<ThemedImage
+    alt="ApeX-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/apex-logo.png'),
+        dark: useBaseUrl('/img/exchange/apex-logo.png'),
+    }}
+/>
+
+<!-- <div class="text--center">
+
+<iframe
+  width="660"
+  height="315"
+  src="https://www.youtube.com/embed/AbWE35TI-S4"
+  frameborder="0"
+  allow="autoplay; encrypted-media"
+  allowfullscreen>
+</iframe>
+
+</div> -->
+
+## Connecting [ApeX](https://teal.link/apex) to Tealstreet
+
+- First, make sure you are logged into your [ApeX](https://teal.link/apex) account.
+
+:::note
+Consider supporting Tealstreet by using the referral _[link](https://teal.link/apex)._
+:::
+
+<IntroTealstreet exchangeName="ApeX" />
+
+---
+
+### Creating the key
+
+- Now you are ready to generate the API Keys within your ApeX Account. Head on over to the [ApeX](https://teal.link/apex) tab and:
+    - Click on Connect Wallet.
+
+<div class="text--center">
+    <img src={ApiConnect} alt="Api Connect" style={{ width: 300 }} />
+</div>
+
+- Select your wallet. For this document we will be using **[Rabby](https://rabby.io)**.
+    - Even though the icon shown MetaMask, you can use any wallet that is supported by ApeX.
+
+<div class="text--center">
+    <img src={ApiConnect2} alt="Api Connect 2" style={{ width: 300 }} />
+</div>
+
+- On the API Key page click on the **Create API** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+<!-- :::tip
+You can get to this page directly by navigating to **[this link](https://bingx.com/en-us/account/api/)**
+::: -->
+
+- Now you are ready to choose the settings of your [ApeX](https://teal.link/apex) API Key pair.
+
+- Pass your security verification if the window pops up.
+
+<div class="text--center">
+    <img src={SecVerify} alt="Security Verify" style={{ width: 400 }} />
+</div>
+
+- Now you're key shouldve be created, however its settings will not be correct yet so we need to edit it:
+
+<div class="text--center">
+    <img src={ApiCreated} alt="API Created" style={{ width: 500 }} />
+</div>
+
+- Here we will be ticking the box to permit perpetual futures, as well as the checkbox to restrict IP addresses.
+
+<div class="text--center">
+    <img src={ApiCreated2} alt="API Created2" style={{ width: 500 }} />
+</div>
+
+- Now would be a good time to bring back your Tealstreet terminal API page from where we left off earlier to get the recommended IP addresses:
+
+<div class="text--center">
+    <img src={ApiWhitelist} alt="API Creation" style={{ width: 500 }} />
+</div>
+
+- Copy these IP addresses to your clipboard with the clip button
+    - paste them into the restricted IP's box on the ApeX API page.
+
+<div class="text--center">
+    <img src={ApiCreation3} alt="API Creation3" style={{ width: 500 }} />
+</div>
+
+- After editing the settings, click the **Save** button.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the ApeX API page.
+  <!-- - Ensure **Use TS Network** is checked unless you intend handle IP Whitelisting in some other way. -->
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **API Key** ApeX showed you when you created the API.
+  - Provide the **API Secret** ApeX showed you when you created the API.
+  - Provide the **Passphrase** ApeX showed you when you created the API.
+  - Provide the **Stark Key** ApeX showed you when you created the API.
+  - Click '**done**'.
+
+<OutroTealstreet exchangeName="ApeX" />
+
+<!-- -   -   -   -
+
+## Troubleshooting -->
+
+---
+
+## Frequently Asked Questions
+
+- Can I use One-Way mode for trading instead of hedged?
+    - Yes you can use One-Way mode.

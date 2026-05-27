@@ -1,0 +1,165 @@
+---
+title: WOO X
+description: Learn how to connect your Woo X API to Tealstreet.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import Dropdown from '/img/connect/woox/dropdown.png';
+import ApiDropdown from '/img/connect/woox/apidropdown.png';
+import ApiCreate from '/img/connect/woox/apicreate.png';
+import ApiCreation2 from '/img/connect/woox/apicreation2.png';
+import SecVerify from '/img/connect/woox/secverify.png';
+import ApiCreate2 from '/img/connect/woox/apicreate2.png';
+import ApiCreate4 from '/img/connect/woox/apicreate4.png';
+import WooEnableFutures from '/img/connect/woox/woo-enable-futures.png';
+
+<!--TODO: Still missing a paired light & dark set. I hacked together two different images to get
+these two close but this isnt ideal solution
+-->
+
+<ThemedImage
+    alt="WooX-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/WooX-light.png'),
+        dark: useBaseUrl('/img/exchange/WooX-dark.svg'),
+    }}
+/>
+
+## Connecting [WOO X](https://teal.link/woo) to Tealstreet
+
+- First, make sure you are logged into your [WOO X](https://teal.link/woo) account.
+
+:::note
+Consider supporting Tealstreet by using the referral _[link](https://teal.link/woo)._
+:::
+
+- Next, log into your [Tealstreet](http://app.tealstreet.io) account.
+
+:::tip
+It's a good idea to keep both Tealstreet and [WOO X](https://teal.link/woo) tabs open.
+:::
+
+1. Once you have successfully logged into Tealstreet, navigate to the header titled **‘API Keys’**
+
+2. Click the blue button titled **‘New API Key’**
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding Api" style={{ width: 750 }} />
+</div>
+
+- Choose [WOO X](https://teal.link/woo) from the dropdown menu.
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 500 }} />
+</div>
+
+Keep this window open, it will be used later when we create the API Key on the WooX site.
+
+---
+
+### Create the API Key
+
+- Now you are ready to generate the API Keys within your WooX Account. Head on over to the [WOO X](https://teal.link/woo) page and:
+    - Click on the User Icon.
+    - Select **Subaccounts and API** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="Api Dropdown" style={{ width: 300 }} />
+</div>
+
+- On the API Key page click on the **Create API** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://x.woo.org/en/account/sub-account/)**
+:::
+
+- Now you are ready to choose the settings of your [WOO X](https://teal.link/woo) API Key.
+
+- Pass your security verification if the window pops up.
+
+<div class="text--center">
+    <img src={SecVerify} alt="Security Verify" style={{ width: 400 }} />
+</div>
+
+- To create the API Key please proceed to fill out the form with the information its requesting
+
+<div class="text--center">
+    <img src={ApiCreate2} alt="API Created" style={{ width: 500 }} />
+</div>
+
+1. Select the **Tealstreet X WooX** option.
+2. Activate **Read** and **Enable Trading** permissions
+
+:::warning
+Do **not** activate the **Enable Withdrawals** permission.
+:::
+
+3. Provide a description. Whatever you would like to call the API Key.
+4. Provide the IP Addresses that are to be whitelisted that you can get from inside the Terminals **API Keys** window we opened earlier. Make sure to hit the **'Add'** button to **save the IP's** once you have pasted them into the box.
+    - In the screenshot below I have highlighted the **'clipboard'** function you can click to copy the IP addresses to your clipboard. You can then paste them into the WooX API keys box in step 4.
+
+<div class="text--center">
+    <img src={ApiCreate4} alt="API Created" style={{ width: 500 }} />
+</div>
+
+5. Provide authenticator code if you have 2FA enabled for your account.
+6. Click Create Api.
+
+---
+
+### Connecting the API Key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiCreation2} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API Key on the **WooX API** page.
+    1. Give the key a name, this can be anything you want.
+    2. Provide an encryption password. This is something solely for you to create as an extra layer of security.
+
+    :::tip
+    For more info about how the encryption works please see **[API Encryption](/docs/2.0.0/connect/api-encryption)**
+    ::: 3. Provide the Application ID here. This can be found in the Account Management section of the subaccounts & api page in you're Woo account page. 4. Provide the API key WooX showed you when you created the API. 5. Provide the API secret WooX showed you when you created the API. 6. Click Create.
+
+:::caution
+Never share your API Keys with anyone. Tealstreet team members will never ask you what your API key is.
+:::
+
+:::note
+Be sure to double check you do not confuse **API Key** and **API Secret.** Connecting your **[WOO X](https://teal.link/woo)** exchange account to Tealstreet will not work if these fields are not entered correctly.
+:::
+
+If all the details are correct, you will have successfully linked your [WOO X](https://teal.link/woo) account to Tealstreet.
+
+- Navigate to the **Trade** page of the Tealstreet terminal and select the [WOO X](https://teal.link/woo) account from the top dropdown menu.
+    - If properly linked, you will see your balance appear in the Margin window of Tealstreet. Happy trading!!!
+
+---
+
+## Troubleshooting
+
+### Leverage slider capped inside the terminal
+
+Woo restricts the amount of leverage that can be used via the API. This is a restriction that is not shared on the website.
+
+### Error about enabling futures
+
+<div class="text--center">
+    <img src={WooEnableFutures} alt="Enable Futures Error" style={{ width: 500 }} />
+</div>
+
+This error is caused by the API key not having futures enabled. To fix this, go to your WOO X account page and enable futures trading. This also needs to be done for individual sub accounts.

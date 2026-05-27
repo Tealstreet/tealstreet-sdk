@@ -1,0 +1,97 @@
+.features {
+  /*/outside box*/
+  display: flex;
+  width: 100%;
+  margin-top: 1.5%;
+  margin-bottom: 2.5%;
+  padding: 0rem 0;
+  align-items: center;
+  -webkit-animation: 0.4s 0.15s backwards a;
+  animation: 0.4s 0.15s backwards a;
+  transition-duration: 0.2s;
+  transition-property: all;
+}
+
+.tradebutton {
+  /*/outside box*/
+  justify-content: right;
+  display: flex;
+  margin-top: 1.5%;
+  margin-bottom: 0%;
+  padding: 0rem 0;
+  -webkit-animation: 0.4s 0.15s backwards a;
+  animation: 0.4s 0.15s backwards a;
+  transition-duration: 0.2s;
+  transition-property: all;
+}
+
+.tradebuttoncard {
+  box-shadow: 0 8px 28px 4px rgb(86 91 115 / 15%);
+  transition-duration: 0.2s;
+  transition-property: all;
+  border-radius: 1.5rem;
+  height: 100%;
+  color: var(--ifm-heading-color);
+}
+
+.tradebutton:hover {
+  transform: translateY(-1rem);
+  color: #25c2a0;
+  cursor: pointer;
+}
+
+.featureCol {
+  flex: 1 1 0;
+  min-width: 200px;
+  padding: 0 var(--ifm-spacing-horizontal);
+  display: flex;
+}
+
+.featureCol > a {
+  display: flex;
+  width: 100%;
+}
+
+@media (max-width: 996px) {
+  .featureCol {
+    flex: 1 1 45%;
+    min-width: 240px;
+    margin-bottom: 1rem;
+  }
+}
+
+.card {
+  box-shadow: 0 8px 28px 4px rgb(86 91 115 / 15%);
+  transition-duration: 0.2s;
+  transition-property: all;
+  border-radius: 1.5rem;
+  height: 100%;
+  width: 100%;
+  color: var(--ifm-heading-color);
+}
+
+.card:hover {
+  transform: translateY(-1rem);
+  color: #25c2a0;
+  cursor: pointer;
+}
+
+.features a:link {
+  color: var(--ifm-heading-color);
+  text-decoration: none;
+}
+
+.featureSvg {
+  height: 220px;
+  width: 220px;
+  padding: 16px 32px;
+  text-align: center;
+}
+
+@keyframes a {
+  0% {
+    opacity: 0;
+    -webkit-transform: translateY(1.5rem);
+    transform: translateY(1.5rem);
+  }
+}

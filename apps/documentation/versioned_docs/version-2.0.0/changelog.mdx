@@ -1,0 +1,746 @@
+---
+title: V2 Changelog
+description: Tealstreet's V2 Changelog
+sidebar_position: 9
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+## May 11 2024 Tealstreet Terminal - 2.3.61
+
+- Fixes
+    - **[Bitmex]** Another fix for wallet updating
+
+## May 10 2024 Tealstreet Terminal - 2.3.60
+
+- Fixes
+    - Fix for RoE PNL calculation
+    - **[Bitmex]** Fix for wallet updating
+
+## Apr 20 2024 Tealstreet Terminal - 2.3.51
+
+- Changes
+    - **[BloFin]** Add support for Hedge mode
+    - Permit disabling of Bybit IP Whitelisting for other services
+- Fixes
+    - Fixes for Runbot
+    - Allow longer ClientID's to resolve a bug with importing workspaces
+    - Fix an issue with leverage slider
+    - Updated some backend systems to improve support for BitMex
+
+## Mar 18 2024 Tealstreet Terminal - 2.3.50
+
+- Fixes
+    - Fix for a race condition when changing exchanges.
+    - Fix for an issue when changing exchanges while multi-charting
+    - **[BingX]** Fixes for BingX.
+
+## Mar 14 2024 Tealstreet Terminal - 2.3.49
+
+- New Features Added
+    - **[WOOFi]** support added
+- Changes
+    - Allow toggling of Binance IP Whitelist so other services can be used with API Key. (Traderwagon etc)
+    - **[BloFin]** Better handling of ratelimits
+    - Only allow partial TP/SL on positions
+    - Only bind stops if order size less then or equal to position size
+- Fixes
+    - **[Phemex]** Fix for a leverage issue.
+
+## Feb 16 2024 Tealstreet Terminal - 2.3.44
+
+- New Features Added
+    - WW2 Pepe PnL card pack added
+    - Woodsbot PnL card added
+- Changes
+    - Reduced size of toastr notifications on mobile devices
+    - **[Binance]** & **[Bybit]** adjusted reconnect logic to prevent some cases of throttling
+    - **[BloFin]** Improved handling of some errors
+- Fixes
+    - Fixed a bug causing elements to re-render too frequently, this should improve performance on slower devices
+    - **[Phemex]** Various fixes for exchange support
+
+## Jan 22 2024 Tealstreet Terminal - 2.3.43
+
+- New Features Added
+    - Economy calendar module added
+- Changes
+    - Unbound RR tool from limit order size
+    - Changes for Tree News to mitigate throttling/ratelimit issues
+- Fixes
+    - Fixes for various PnL cards
+    - Fixes for RR tool
+    - Various fixes and improvements to multiple systems
+
+## Jan 19 2024 Tealstreet Terminal - 2.3.42
+
+- Changes
+    - Routing changes for Phemex to improve performance and reliability
+
+## Jan 18 2024 Tealstreet Terminal - 2.3.41
+
+- Changes
+    - Order alignment changes to make it easier to separate active positions from resting orders
+    - Various performance improvements with order management system
+    - **[BitMex]** various improvements and fixes for exchange support
+- Fixes
+    - **[BingX]** Some fixes for order handling issues
+    - Fix for margin window sometimes overflowing
+    - Fixed an issue with Runbot webhooks
+    - Fixes for equity chart logic
+
+## Jan 15 2024 Tealstreet Terminal - 2.3.38
+
+- New Features Added
+    - **[BingX]** One-Way leverage adjustment support
+- Changes
+    - Screener will now highlight currently selected market
+    - Screener will highlight opened positions
+
+## Jan 13 2024 Tealstreet Terminal - 2.3.37
+
+- New Features Added
+    - Added support for trades per second in screener module
+- Changes
+    - Minor improvements to screener module
+    - **[BloFin]** Show if position is iso or cross
+- Fixes
+    - Fix for numpad decimal issue in place order module
+    - Fix for module settings not honoring active theme
+    - **[BloFin]** Fix for reconnection issue
+
+## Jan 8 2024 Tealstreet Terminal - 2.3.34
+
+- Changes
+    - Improvements to speed dialer module
+    - Improvements to bracket orders system
+- Fixes
+    - **[BloFin]** Various fixes and improvements
+    - various Fixes for RR tool
+    - **[OKX]** Fix for RoE display issue
+
+## Jan 5 2024 Tealstreet Terminal - 2.3.30
+
+- New Features Added
+    - **[BloFin]** integration finalized
+- Changes
+    - Additional preparatory work for supporting BloFin
+- Fixes
+    - Fix for clipboard function in regards to exchange ip whitelisting and api key creation
+
+## Jan 4 2024 Tealstreet Terminal - 2.3.29
+
+- Changes
+    - Some final fixes and improvements for [BloFin] integration
+    - Added per-ticker support for aggr module
+    - Improvements to mark price logic
+- Fixes
+    - Fix logo animation resetting incorrectly
+    - **[Bybit]** Fix for position idx order update issue
+
+## Dec 20 2023 Tealstreet Terminal - 2.3.27
+
+- Changes
+    - Preliminary backend support for [BloFin]
+    - Improved handling of orders that are only partially filled
+    - Various backend improvements and fixes
+- Fixes
+    - **[Binance]** Fix for margin calculation when using cross margin mode
+    - **[WooX]** Another fix for woo balance calculations
+
+## Dec 19 2023 Tealstreet Terminal - 2.3.24
+
+- New Features Added
+    - Support for trigger CLI commands via webhooks (Very Experimental)
+- Changes
+    - Improved support and performance for very large quantities of orders
+    - Significantly improved error handling for CLI & Webhooks
+    - Some improvements to how stops are handled
+- Fixes
+    - **[WooX]** Fix for issue with balance not calculating properly in wallet module
+
+## Dec 15 2023 Tealstreet Terminal - 2.3.22
+
+- New Features Added
+    - All Tickers Chart module added
+    - Added support for Aliases in the CLI module
+- Changes
+    - Improved performance and stability of CLI module
+    - Improvements to the Ticks Chart module to support Bybit
+    - Various performance improvements relating to PnL cards
+    - Enable News Trading module by default
+- Fixes
+    - Fix for Basic Chart sometimes resizing incorrectly
+    - Fix for OI Chart sometimes not updating on resize
+    - Fix an issue with stop order triggers
+
+## Dec 9 2023 Tealstreet Terminal - 2.3.21
+
+- Changes
+    - Allow quick access to partial tp/sl switch in order panel
+    - More improvements to the CLI and Copytrading systems
+    - Some improvements to risk profile module performance and formatting
+    - Enable Klines Popover support by default
+    - Toastr notifications are now grouped together better
+    - Various refactoring and improvements to various systems
+- Fixes
+    - Fix an issue in the news feed module
+    - Some fixes to the Screener module
+
+## Dec 2 2023 Tealstreet Terminal - 2.3.20
+
+- New Features Added
+    - **[Bybit]** New TP/SL trigger settings for Bybit V5
+- Fixes
+    - **[BingX]** Fix for issue with stop types
+
+## Nov 29 2023 Tealstreet Terminal - 2.3.19
+
+- New Features Added
+    - Global RR tool settings options added
+    - Some additional stats for open orders
+    - Lots of new memes added to the PnL card gallery
+- Changes
+    - Preparing preliminary support for CLI trading
+    - Preparing preliminary support for Copytading
+    - Some additional error logging added
+    - Refactoring of various systems to improve performance and maintainability
+    - **[Phemex]** Reduce frequency of position history update fetching
+- Fixes
+    - Some fixes for market import system
+    - Fix for issue with 1min chart when using multiple charts
+    - Fix for the available margin slider sometimes sticking to a value of zero
+    - Fix for Basic Chart sometimes not loading
+    - Fix for RR tool decimal issue
+    - Fix for sizing issue in the screener module
+    - Various fixes for Scaled Order issues
+    - A fix for stop size sometimes being miscalculated
+    - **[Bybit]** Various fixes and improvements for the wallet module
+    - **[BingX]** Fix for issue with resting order leverage detection
+    - Various other fixes and improvements
+
+## Nov 9 2023 Tealstreet Terminal - 2.3.17(c/d/e)
+
+- Changes
+    - Updated aggr module to support bybit v5 (2.3.17d)
+- Fixes
+    - Fixed stops without position for bybit v5 regular derivs (2.3.17c)
+    - **[Bybit]** fixed a bug where bybit inverse positions were not showing when multiple were open for initial couple of mins (e. g. BTC/ETH)
+
+## Nov 9 2023 Tealstreet Terminal - 2.3.15-2.3.17b
+
+- Changes
+    - **[Bitget]** Update position stop api to v2; re-enabling infinity stops without position (2.3.17b)
+    - Reverted all orders improvements due to bugs with number inputs (2.3.15)
+    - Fallback to conditional stops on bybit if there's no position opened (2.3.17)
+- Fixes
+    - Fixed jumpy scaled order behavior reported by Ashdrake (2.3.16)
+
+## Nov 7 2023 Tealstreet Terminal - 2.3.14
+
+- Changes
+    - Variety of ordering UI improvements (bracket orders, scaled orders, place order)
+    - Some screener improvements
+
+## Nov 5 2023 Tealstreet Terminal - 2.3.12b
+
+- Fixes
+    - Mostly addressed perf/latency issues on backend
+    - Fixed availableMargin display for Bitmex USDt contracts (pnl% is W-I-P)
+
+## Oct 30 2023 Tealstreet Terminal - 2.3.11d & 2.3.12
+
+- Changes
+    - Market TWAP now supports max 1000 orders & max 24 hours
+- Fixes
+    - **[Bybit]** V5 ratelimiting issue fixed (2.3.11d)
+
+## Oct 25 2023 Tealstreet Terminal - 2.3.11(b/c)
+
+- Changes
+    - Added an option to disable new market notifications
+    - **[Bybit]** Symbol search now defaults to V5 if thats the active exchange (instead of Bybit Classic)
+- Fixes
+    - **[Mobile]** TP/SL buttons sometimes disappearing
+    - **[ScaledOrders]** minor fixes to improve UI/UX
+    - **[BingX]** Fixed a bug with display of iso/cross mode (2.3.11b)
+    - **[Bybit]** Fix for inverse futures tp/sl adjustment issue (2.3.11c)
+
+## Oct 23 2023 Tealstreet Terminal - 2.3.10
+
+- Skipped due to a bug with mobile TP/SL buttons
+
+## Oct 20 2023 Tealstreet Terminal - 2.3.9
+
+- Fixes
+    - **[Phemex]** feed issue fixed
+
+## Oct 15 2023 Tealstreet Terminal - 2.3.8
+
+- Changes
+    - beta (alpha.47) has been merged into 2.3.8
+    - **[Bybit]** v5 is available via "V5" checkbox when you create bybit api key, old bybit api keys and apis to be deprecated starting tomorrow, please switch asap
+
+## Oct 5 2023 Tealstreet Terminal - 2.3.7
+
+- Bugfixes:
+    - **[TradingView]** Fixed Basic & OI charts
+
+<details>
+    <summary>Alpha.47 changes</summary>
+    <br />
+    <div class="text--left">
+        <b>waifu & kawai pnl cards</b> added, wg card updated
+        <br />
+        <b>[Bitget]</b>: some fixes to minimum order auto-creation (hack to be able to adjust tp/sl for a position)
+        <br />
+        <b>[PNL Cards]</b>: added more various backgrounds
+        <br />
+        <b>[Phemex]</b>: improved partial tp/sl via chart by providing an option of selecting a trigger type
+        (last/market)
+        <br />
+        <b>[Twitter Feed]</b>: improved symbol matching (especially "people")
+        <br />
+        <b>[Bingx]</b>: started working on auto-adjusting to best-possible leverage, for now WIP
+        <br />
+        fixed sometimes too fractional (a lot of decimal signs after a dot, now should be based on active market tick
+        size)
+        <br />
+        fixed Firefox logout issue when there's no api key
+        <br />
+        added two new pepe images
+        <br />
+    </div>
+</details>
+<details>
+    <summary>Alpha.46 changes</summary>
+    <br />
+    <div class="text--left">
+        <b>[TradingView]</b> Fixed Basic & OI charts
+        <br />
+    </div>
+</details>
+
+## Sep 29 2023 Tealstreet Terminal - 2.3.6
+
+- Changes
+    - **[BingX]** Added comp link at the top of terminal
+
+## Sep 27 2023 Tealstreet Terminal - 2.3.5
+
+- Bugfixes:
+    - **[BingX]** Fixed issue where stop can't be moved
+
+## Sep 26 2023 Tealstreet Terminal - 2.3.4
+
+- Bugfixes:
+    - **[BingX]** Fixed max leverage calculation, which now depends on concrete user account
+
+    <details>
+        <summary>Alpha.44 changes</summary>
+        <br />
+        <div class="text--left">
+            Fixed BingX max leverage calculation, which now depends on concrete user account
+            <br />
+        </div>
+    </details>
+
+## Sep 25 2023 Tealstreet Terminal - 2.3.3
+
+- Bugfixes:
+    - Fixed an issue where TradingView widget fonts were not correctly rendered for some users
+
+    <details>
+        <summary>Alpha.43 changes</summary>
+        <br />
+        <div class="text--left">
+            <b>TWAP</b>: extended maximum duration to 12 hours, fixed a bug where the reduceOnly flag was not respected
+            as well as improved compatibility w/ TWAPing across multiple accounts on the same exchange
+            <br />
+            <b>RR Tool</b>: a variety of improvements and bugfixes around entry point calculation and stops
+            <br />
+            <b>Scaled Order</b>: preview of denom & avg fill price line
+            <br />
+            <b>Screener</b>: The unknown funding rates symbols are now pushed to the bottom when sorted
+            <br />
+            <b>Mobile Trading</b>: experimental introduction of some long press gestures (e. g., to adjust quick order
+            size)
+            <br />
+            <b>Mobile Trading</b>: fixed Quick Order module crash in some older versions of iOS Safari
+        </div>
+    </details>
+    <details>
+        <summary>Alpha.42 changes</summary>
+        <br />
+        <div class="text--left">
+            <b>Scaled Orders</b>: preview denom & avg fill price line
+            <br />
+            <b>TWAP Orders</b>: limit bumped up from 100 to 1000
+            <br />
+        </div>
+    </details>
+    <details>
+        <summary>Alpha.40 changes</summary>
+        <br />
+        <div class="text--left">
+            <b>TWAP</b>: added (Experimental)
+            <br />
+            <b>Tick Charts</b>: added (Experimental)
+            <br />
+        </div>
+    </details>
+
+## Sep 11 2023 Tealstreet Terminal - 2.3.2
+
+- New Features Added:
+    - Implemented Popover Klines support for Screener Module Tickers
+    - Implemented Klines when hovering over favorite / last markets
+    - Implemented ability to edit open positions columns by right clicking
+- Changes & Improvements:
+    - Improved handling of user login errors
+- Bugfixes:
+    - Further fixes for auto-updater agent
+    - Fixes for PnL not properly showing, or disappearing when switching symbols
+    - Fix for banner not remembering when it should be hidden
+    - Fix for Reverse Position not working correctly if in a hedged position
+    - Fixes & improvements for Scaled Orders (# rounding errors, etc)
+
+## Sep 7 2023 Tealstreet Terminal - 2.3.0
+
+- New Features Added:
+    - Implemented buttons to take trades based on results of the News Feed & Twitter modules
+    - Implemented Tree News feed module
+    - Implemented Tap-To-Trade for mobile devices
+    - Implemented Trailing Stop support for Bybit Classic
+    - Added Reflink cards to API page
+- Changes & Improvements:
+    - Enabled Eye by default
+    - Improvements to UI/UX (depth chart, leverage and effective leverage colors, etc)
+    - Improvements to custom theming especially on mobile
+    - Improved backend handling of Klines for Binance & Woo
+    - Updated TradingView lib, along with fixes for saving profile & studies
+    - Updated backend systems to support future upcoming changes
+- Bugfixes:
+    - Fixes for Pepe's not displaying properly in PnL card gallery
+    - Fix for Firefox browsers sometimes freezing on resize
+    - Fix for Desktop Windows client sometimes freezing when left in background
+    - Fix for order sizes sometimes defaulting to a comma instead of a period on mobile
+    - Fix for Woo balance sometimes not updating visually unless forced by hard refresh
+    - Fix for Woo partial fills not triggering an update in the Open Positions tab
+    - Fix for Woo sometimes showing negative account margin
+    - Fixed a regression bug on Binance with leverage not persisting
+    - Fixes for Phemex USDT (Eye, hedged positions, and iso short setting not persisting)
+
+## Aug 26 2023 Tealstreet Terminal - 2.2.4
+
+- New Features Added:
+    - Finalized support for Woo Exchange
+    - Implemented Workspaces allowing users to edit, duplicate, export their workspaces easily
+    - Added a banner for promotion of campaigns and signups
+    - Added a setting to show or hide warning dialogs (ie flatten all positions)
+    - Added additional hotkeys (such as for RR tool)
+    - Added News Feed and some other modules
+- Changes & Improvements:
+    - Improvements & Fixes for PnL cards, especially for Mac
+    - Improvements to scaled orders and better handling of throttling situations
+    - Improvements to privacy mode and scaled orders
+    - Adjustments to Woo rate limits to avoid throttling
+    - Backend support for TWAP starts being implemented
+    - Updates for Electron and underlying support systems
+- Bugfixes:
+    - Various fixes and improvements to Bybit V5 support (including UM)
+    - Fix for TradingView timezone sometimes not saving
+    - Fixes and improvements to Custom Theming (depth chart, etc)
+    - Fixes for Binance Inverse markets
+    - Fixes for Phemex candlesticks and USDT order editing
+    - Fixes for partially filled limit orders sometimes displaying wrong values
+
+## Aug 11 2023 Tealstreet Terminal - 2.2.2
+
+- New Features Added:
+    - Additional themes added (Lala, etc)
+    - Added a top-panel button to quickly take users to the WSOT page. (Can be repurposed for other comps)
+- Changes & Improvements:
+    - Improvements to certain themes (Chroma, etc)
+    - New traders added to twitter list (such as Toros)
+- Bugfixes:
+    - Tons of fixes and updates to Position History system
+    - Tons of fixes and improvements to Bybit Unified support systems
+    - Various fixes for Bybit Classic (V2) api
+    - Fixes for Scaled Orders price-to-percent not behaving correctly
+    - Fixed a bug with the warning dialog popup on flatten position button not working correctly
+    - Fixed a bunch of issues with the AutoUpdater agent
+    - Fixes for partial TP/SL opening unexpected hedge positions sometimes
+    - Fixes for Bitget relating to order executions, leverage switchinh, and Inverse visuals
+    - Fixed an error in Bybit about position mismatch
+    - Fixes for Woo infinite stops not displaying correctly
+    - Fix for Woo websocket order bug
+
+## Jul 25 2023 Tealstreet Terminal - 2.1.7
+
+- Changes & Improvements
+    - Implemented search function for memes in PnL cards
+    - Implemented rate limiting to backend to help prevent exchanges throttling us
+- Bugfixes:
+    - Fixes for switching chart while active chaser order is running
+    - Fix for certain hotkeys to also trigger TradingView functions unexpectedly
+    - Fixes for last candle sometimes not drawing on a hard refresh of terminal
+    - Fixes for PnL % sometimes being incorrect on chart
+    - Fixes & Improved Woo support (50x leverage, trade duration, chart refreshing incorrectly)
+    - Fix for Theming issues with orderbook
+    - Fix for some TradingView Drawings
+    - Fix for exporting themes
+    - Fix for Risk Profile on Bitget when in a hedged position
+    - Fix for Bitget orders sometimes disappearing when adding more then one stop
+    - Fix for Margin display issues on Woo
+    - Fix for Bitmex Quantos Realized PnL
+
+## Jul 5 2023 Tealstreet Terminal - 2.1.2
+
+- Changes & Improvements:
+    - Improvements & fixes for community themes (Chroma, WWG, etc)
+    - Tons of fixes & improvements to Bybit Unified Margin account support
+- Bugfixes:
+    - Fixes for Woo (incorrect leverage visuals, market close bug)
+    - Fixes for Bitmex (Margin Formatting, hotkeys sometimes not working)
+    - Fixes for Bybit Classic & UM (wallet details, visual bug with orders disappearing)
+    - Fix for audio popping sound bug
+    - Fix for PnL sometimes freezing on chart
+    - Fix to be able to set size to 0 on order form
+    - Fixes for RR (long/short tool)
+
+## Jun 19 2023 Tealstreet Terminal - 2.0.19
+
+- New Features Added:
+    - Implemented support for Eye (seeing % change on ticker symbols)
+    - Implementation of Community Themes (btcsniper, Chroma, etc)
+    - Implementation of Community PnL Cards (ScalperC, etc)
+- Changes & Improvements:
+    - Improvements to PnL cards (Closed Position, Duration)
+    - Implemented code to attempt to recover backend websocket if unexpected disconnection occurs
+    - Further fixes & improvements to Theming (Color picker, etc)
+    - Improvements to position history & arrows on chart
+    - Improvements & fixes for Woo
+- Bugfixes:
+    - Fix for SL disappearing visually on Mobile
+    - Fix for Depth Chart infinite spinning wheel (OKX/Bitmex)
+    - Fixes for various animation delays
+    - Fixes for Screener funding rates
+    - Fixes for BingX
+    - Fixes for Bitget orderbook & mark price getting stuck
+    - Fixes for Phemex (Editing Orders, Accounts with 0 trades causing issues, etc)
+    - Fixes for Tradingview Lib
+
+## Jun 5 2023 Tealstreet Terminal - 2.0.14
+
+- New Features Added:
+    - Full support for BingX begins
+    - Added Screener Module
+- Changes & Improvements:
+    - Tons of improvements & fixes to Custom Theming
+    - Improvements to back-end server for managing load during high volume events
+    - Show % on position even when privacy mode enabled
+    - Improvements to candle backfilling of data
+    - Improved support for Bybit Unified Margin
+- Bugfixes:
+    - Lots of fixes for Woo & BingX
+    - Fixes for Bitmex (iso lev)
+    - Fixes for Bitget Charts (Gapping Klines, etc)
+    - Fixes for Funding (Visual bug)
+    - Fixes for disconnect handling to be more graceful
+    - Fixes for being unable to cancel orders via orderbook if custom theme enabled
+
+## May 22 2023 Tealstreet Terminal - 2.0.11
+
+- New Features Added:
+    - Initial support for Woo Exchange
+    - Backend support begins for BingX
+    - Added support for Hedge Mode & USDT Markets on Phemex
+    - Added Polling Interval change support for Limit Chaser orders
+    - Additional keybind functions (such as f and g while clicking chart)
+    - Additional improvements to Privacy Mode (email address hiding, etc)
+- Changes & Improvements:
+    - Can favorite markets from top bar, and use categories to search symbols in TV search bar
+- Bugfixes:
+    - Various fixes for backend support (Better order creation handling etc)
+    - Fix for chart jumping sometimes
+    - Fix for CloseOnTrigger & leverage slider, and other bugs for Bitmex
+    - Fix for Gray Screen crash
+    - Fix for too many decimals on PnL & RoE on chart
+    - Fixes for various issues related to BingX and Woo support
+    - Fixes Quantos assets (Wallet, contract sizing, uPnL, etc)
+    - Fixes for Multi-Acc streaming
+    - Fixes for ghost orders on chart
+    - Fixes for Position History (Duration, etc)
+    - Fixes for Custom Theming not saving properly
+
+## May 9 2023 Tealstreet Terminal - 2.0.0
+
+- New Features Added:
+    - Added Margin % Slider bar to place order module
+    - Added Limit Chaser orders
+    - Added % change indicator for positions when adding new orders on chart
+    - Added RR (Long/Short) tool
+    - Added Speed Dial orders
+    - Added initial Privacy Mode (hiding pnl, etc)
+- Changes & Improvements:
+    - Migration of servers from US to Singapore (API Migration)
+    - Support full TP/SL for Binance
+    - Markets Dropdown menu added
+    - Improvements to backend for handling user connections
+    - Minor UI/UX improvements (Such as hiding footer in full-screen)
+    - New TS Logo & Button linking to Docs
+    - Updated various backend systems
+- Bugfixes:
+    - Fix for disappearing orders when edited
+    - Fixes for Mobile & Market Importer
+    - Fixes for Phemex USDT, and some OKX issues
+    - Fixes for Bitget (Inverse, USDC, Position Mode Switching)
+    - Fixes for Bybit mode change and leverage slider
+    - Fixes for Chart Drawings Snapping
+    - Fixes for Custom Theming
+    - Fix for leverage slider sometimes going invisible
+
+## Mar 12 2023 Tealstreet Terminal - 1.5.33
+
+- New Features Added:
+    - Initial Custom Theming implemented
+    - Browser View widget added
+- Changes & Improvements:
+    - Binance Infinity stops enabled by default
+    - Seconds chart restored with various fixes
+    - Improvements for the back-end rate limits
+    - Make Unread notif popups more visible
+    - Archived seasonal PNL cards until next holiday
+- Bugfixes:
+    - Fixes for Market Importer
+    - Fix for Depth Chart overlay getting stuck
+    - Fixes for PNL Cards
+    - Fixes for Phemex, OKX, Bitget, and Binance
+    - Misc fixes under the hood
+
+## Jan 15 2023 Tealstreet Terminal - 1.5.29
+
+- New Features Added:
+    - Holiday PnL cards
+    - Flatten all positions button & hotkey
+    - Confirmation Dialog for severe actions (Like flatten position button)
+- Changes & Improvements:
+    - Adjusted chart alignment to be left-aligned
+    - Improved functionality of the Risk Profile
+    - Improved load time for Bitget
+- Bugfixes:
+    - Various fixes for Binance (Margin, mark price, orderbook, etc)
+    - Fixes for Lev Calculations & scaled orders
+
+## Dec 14 2022 Tealstreet Terminal - 1.5.20
+
+- New Features Added:
+    - Support for multiple Basic Charts
+    - Added position liquidation line to chart
+    - Enable / disable liquidation line with toggle
+    - Dark mode application theme
+    - PnL Cards
+    - Percent Trading Mode
+    - ROI vs ROE Percent Support
+    - TP/SL bracket orders by dragging the TradingView chart lines
+    - TradingView Chart Fill arrow size and opacity slider
+- Changes & improvements:
+    - Changed enable/disable History Arrows setting to toggle switch
+    - Enhanced responsiveness and improved refresh time
+    - Support for Binance CoT partial stops
+    - Setting/option to only show favorited markets while focused on Exchange key
+    - OKX margin type
+- Check out the full release [blog](https://www.tealstreet.io/tealstreet-1-5-2-release-notes/)
+
+## Sep 28 2022 Tealstreet Terminal - 1.5.0
+
+- New Features Added:
+    - Workspaces
+    - Execution History on Chart
+    - Margin Slider/Cost
+    - Favorites Side Bar
+    - PnL Percentage (%) Hover
+    - Open Orders Window
+    - Add/Remove Columns
+    - New Hotkeys
+    - Trailing Stops on FTX
+- New Beta Features Added:
+    - Position History
+    - Bracket Orders (beta)
+- Major Improvements and Optimizations to OKEx
+
+## May 20 2022 Tealstreet Terminal - 1.4.0
+
+- Various Optimizations
+    - Instant Order Placement Feedback
+    - Realtime Chart Data
+    - Desktop App
+- New Features Added:
+    - Scaled Orders
+    - Second(s) Time Frames on Chart
+    - Chart Hover Depth Chart Integration
+    - More Notification Control
+    - Favorite List Improvements
+    - Market Search
+- Various additional hotkeys added as well hot key improvments
+- Various bug fixes
+
+## Feb 21 2022 Tealstreet Terminal - 1.2.x
+
+- No more waitlist for new signups
+- Improved stability and increased responsiveness
+- Various bug fixes
+- New Features Added:
+    - Second Basic Chart
+    - Twitter Feed
+    - New Visibility Settings
+    - Chart Denominations
+- Check out the full release [blog](https://www.tealstreet.io/announcing-tealstreet-terminal-full-release/) and Twitter [Post](https://twitter.com/tealstreet/status/1495873227469385729)
+
+## Sep 11 2021 Tealstreet Beta Release
+
+- New updated version of Tealstreet released for beta users.
+- Phased rollout with waitlist for new signups
+- New Features Added:
+    - Two new orderbook/depthchart modes – cumulative, individual, and combined
+    - Support for six exchanges – FTX, Binance, Bybit, BitMEX, OKEx, and Phemex
+    - Support for perpetual and dated futures in both linear and inverse (USD margined and Coin margined)
+    - Combined wallet support to show all of your assets
+    - Ability to set size in base or quote currency
+    - Order placement in base or quote currency (USD or BTC)
+    - Native keyboard shortcuts
+    - Multiple account support – see all your positions without having to switch API keys
+- Improved stability and increased responsiveness
+
+## Mar 15 2021 Various Fixes / Updates
+
+- Fixed bybit testnet
+- Fixed bitmex post order bug
+
+## Mar 14 2021 Various Fixes / Updates
+
+- Setting to change location of notifications.
+- Increased threshold for websocket disconnect detection.
+- Can choose unit for quick size buttons.
+- Can customize quick order offsets.
+
+## Mar 9 2021 Various Fixes / Updates
+
+- Fixed loading problem on Safari (iOS / Mac).
+- Fixed websocket connection drop issue.
+- Moved toaster notification boxes to bottom left on desktop machines.
+- Fixed bug where numpad component caused scrolling glitch on close.
+- Made sidenav hidden.
+- Fixed depth chart max depth being half of max depth of orderbook.
+- Increased server capacity.
+
+## Feb 21 2021 Relocated / Updated Server
+
+- Servers have been moved back because latency was a huge issue for some reason in Singapore.
+- Scaled up the database capacity.
+- Testing out hot swapping updates to prevent any downtime.
+- No feature changes in this update, just server maintenance.

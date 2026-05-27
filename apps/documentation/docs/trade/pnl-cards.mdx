@@ -1,0 +1,120 @@
+---
+title: PnL Cards
+description: Generate, customize, and share PnL cards with templates, overlays, and backgrounds.
+sidebar_position: 14
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import PNLCard from '/img/trading/pnl-cards/v3/pnlcard.png';
+import PrePNLCard from '/img/trading/pnl-cards/v3/pre-pnlcard.png';
+import PNLCardExample from '/img/trading/pnl-cards/pnlcard-example.png';
+import PNLCardExample2 from '/img/trading/pnl-cards/pnlcard-example2.png';
+import PNLCardFindPepe from '/img/trading/pnl-cards/v3/pnlcard-findpepe.png';
+import PNLCardDetailed from '/img/trading/pnl-cards/v3/pnlcard-detailed.png';
+
+PnL cards let you capture a trade snapshot (ROE/ROI or $) and share it with selectable designs, backgrounds, and stickers.
+
+<div class="text--center">
+    <img src={PNLCard} alt="PNL Card" style={{ width: 450 }} />
+</div>
+
+### Overview
+
+- Track leverage, side, entry/exit/current price, and PnL at a glance.
+- Export or share directly from the in-app modal.
+
+---
+
+### Generating a PNL Card
+
+- Open a position, then click the pop-out button under Unrealized PnL.
+    <div class="text--center">
+        <img src={PrePNLCard} alt="Pre PNL Card" style={{ width: 700 }} />
+    </div>
+- In the modal toolbar:
+    - **Download**: PNG; GIF if an animated BG is active and supported.
+    - **Copy**: Copies the image (HTTPS required on web).
+    - **Share**: When the browser/device supports file sharing.
+    - **Reset**: Restores layout, backgrounds, overlays.
+    - **Random BG / Custom BG**: Only on designs that support backgrounds (see matrix below).
+    - **Pepe**: Add/change/remove sticker on supported designs.
+    - **Taunt**: Quote overlay (Sharky design only).
+
+<details open>
+    <summary>Detailed explanation</summary>
+    <p>
+        <div class="text--center">
+            <img src={PNLCardDetailed} alt="PNL Card Detailed" style={{ width: 600 }} />
+        </div>
+        1a. ROE/ROI: toggle the PnL calculation and display basis.
+        <br />
+        1b. %/$ Toggle: switch between % and $ display.
+        <br />
+        1c. Normal / Shaded Text: toggle text shading.
+        <br />
+        1d. Fixed Elements: lock/unlock element dragging/resizing (supported designs).
+        <br />
+        2a. Design: choose a card design from the gallery (seasonal designs may appear).
+        <br />
+        2b. Toolbar: Copy, Download, Random BG, Custom BG, Share, Add/Remove Pepe (availability depends on design).
+        <br />
+        Note: some controls are design- and platform-dependent (see support matrix below).
+    </p>
+</details>
+
+<div class="text--center">
+    <img src={PNLCardFindPepe} alt="PNL Card (Find Pepe)" style={{ width: 300 }} />
+</div>
+
+::::note
+You can drag and resize the pepe overlay on supported designs. Remove it via the Remove button or by dragging it off the canvas.
+::::
+
+---
+
+### Card Style & Feature Support
+
+- **Tealstreet / Original / Simple / Kawaii**: Support Random BG, Custom BG (PNG/JPG; GIF/WEBP for animated), Pepe sticker, drag/resize (when Drag is enabled), and GIF export when an animated BG is active.
+- **Other designs** (ScalperC, Mooncake, Pawnzi, Den, WG, WoodsBot, ZcoinScott, WAIFU, Lab, J Charts, Scalpx, Casper, Unpackers, Sharky, Ponzi, CryptoTraders, PoPo, etc.):
+    - Static backgrounds only (no Random/Custom BG) unless a button is shown.
+    - Pepe is generally not available unless the modal shows the button.
+    - Taunt overlay is **Sharky** only.
+    - Hidden/disabled buttons indicate the feature is not supported for that design.
+
+#### Background Options (supported designs only)
+
+1. **Random Background**: Curated lists; some adapt to long/short.
+2. **Custom Background**:
+    - Desktop: PNG/JPG for all; GIF/WEBP only on designs that support animation (Tealstreet/Original/Simple/Kawaii).
+    - Mobile: Custom BG button is hidden.
+    - If an animated BG is applied, exports use GIF when supported; otherwise PNG.
+
+---
+
+### Examples
+
+<details>
+    <summary>Examples</summary>
+    <p>
+        1. Simple design with a pepe and using ROE for calculation
+        <div class="text--center">
+            <img src={PNLCardExample} alt="PNL Card Example 1" style={{ width: 800 }} />
+        </div>
+        <br />
+        2. Original design with an extra large pepe and using ROI for calculation
+        <div class="text--center">
+            <img src={PNLCardExample2} alt="PNL Card Example 2" style={{ width: 800 }} />
+        </div>
+    </p>
+</details>
+
+---
+
+### Keyboard Shortcuts and PnL Cards
+
+PNL cards do not have dedicated hotkeys. Actions like Download, Copy, Share, Random BG, Custom BG, and toggles are operated via buttons in the modal. General trading hotkeys do not affect this modal.

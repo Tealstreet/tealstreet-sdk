@@ -1,0 +1,230 @@
+---
+title: 图表交易
+description: Chart Trading is a system that allows you to place orders directly on the chart.
+sidebar_position: 4
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import CommonSettings from '/img/trading/common/common-settings.png';
+import DraggableTPSL from '/img/trading/draggable-tp-sl/draggable-tp-sl.png';
+import ActivateDraggables from '/img/trading/draggable-tp-sl/activate-draggables.png';
+import Draggables from '/img/trading/draggable-tp-sl/draggables.gif';
+import DraggablePartial from '/img/trading/draggable-tp-sl/draggable-partial.png';
+import DraggablePartial2 from '/img/trading/draggable-tp-sl/draggable-partial2.gif';
+
+## The Chart
+
+The chart in Tealstreet is provided by TradingView and displays data from the selected exchange.
+
+<div class="text--center">
+
+![Chart-Main](/img/trading/chart-main.gif)
+
+</div>
+
+The chart supports all the features found in a regular TradingView Chart such as:
+
+- Drawing Tools
+
+<div class="text--center">
+
+![Drawing-Tools](/img/trading/drawing-tools.gif)
+
+</div>
+
+- Indicators
+
+<div class="text--center">
+
+![Indicators](/img/trading/indicators.gif)
+
+</div>
+
+- 不同时间框架的蜡烛图
+- 不同类型的蜡烛图视图
+- 交易视图图表设置
+- 更多
+
+Tealstreet图表中最有价值的方面是**图表交易**
+
+---
+
+## 图表交易
+
+您可以使用 Tealstreet 图表来：
+
+- 查看持仓
+- 下单交易
+- 拖动订单
+- 移除订单
+- 下停止订单
+- 下分批订单
+- 查看您的清算
+- 查看您的保本价格
+- 查看您的成交记录
+
+<div class="text--center">
+
+![Chart-Trading](/img/trading/chart-trading.gif)
+
+</div>
+
+:::note
+Tealstreet 图表将记住您在 **“下单”** 窗口中与图表交互的设置。这包括像委托、减仓、触发价格和触发后平仓等设置。
+
+<div class="text--center">
+
+![Chart-Settings](/img/trading/chartsettings.png)
+
+</div>
+:::
+
+---
+
+## 多标签图表交易
+
+:::note
+此功能是新功能，可能仍存在一些问题。请将您发现的任何问题报告给[Tealstreet Discord](/docs/support/contact-us)
+:::
+
+您可以使用Tealstreet终端拥有多个Trading View窗口，以查看和管理多个交易对的持仓。
+
+<div class="text--center">
+
+![Add-Chart](/img/trading/add-chart.gif)
+
+</div>
+
+- 点击图表窗口右上角的“+”按钮。
+- 使用“复制”按钮添加多个图表窗口。
+- 使用“删除”按钮删除其他窗口。
+
+<div class="text--center">
+
+![Add-Chart-2](/img/trading/add-chart-2.gif)
+
+</div>
+
+:::note
+下单窗口将记住您为所选交易对设置的设置。
+:::
+
+---
+
+## 可拖动的止盈和止损
+
+在 Tealstreet 终端中使用图表交易时，非常强大的功能是可以从您的持仓中在图表上拖动您的 TP 和 SL 线。
+
+<div class="text--center">
+    <img src={DraggableTPSL} alt="Stub" style={{ width: 450 }} />
+</div>
+
+- 一些用户可能会发现这比操作订单面板更快
+- 默认情况下，这些止损和止盈单被设置为市价单。有关更多信息，请参见下文。
+
+:::note
+此功能在每个交易所上的行为不完全相同，如果您将在多个交易所进行交易，则探索细微差别非常重要。
+:::
+
+<div class="text--center">
+    <img src={Draggables} alt="Stub" style={{ width: 600 }} />
+</div>
+
+---
+
+### 激活可拖动的止盈和止损
+
+- 要激活可拖动功能，请进入您的设置
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Stub" style={{ width: 300 }} />
+</div>
+
+- 在TradingView（图表）设置类别下，您将看到与可拖动相关的三个选项。
+
+<div class="text--center">
+    <img src={ActivateDraggables} alt="Stub" style={{ width: 550 }} />
+</div>
+
+<details>
+    <summary>点击此处获取有关可拖动功能的更多信息</summary>
+    <p>
+        <b>支持订单括号</b>：这将允许您在挂单上使用可拖动功能。
+        <br />
+        <b>支持持仓括号</b>：这将允许您在活动持仓上使用可拖动功能。
+        <br />
+        <b>持仓括号 TP 使用限价单</b>：这将强制从活动持仓创建的止盈单使用限价单（maker），而不是默认的市价单（taker）。
+        <br />
+        <b>显示反向持仓按钮</b>：这将在可拖动的止盈和止损按钮旁边显示一个按钮，让您可以快速使用市价单反向持仓。
+        <br />
+    </p>
+</details>
+
+---
+
+### 可拖动的部分止盈和止损
+
+- 您可以通过在 **“TradingView”** 设置类别中启用 **“在图表上启用部分止盈和止损”** 设置来激活部分可拖动功能。
+
+<div class="text--center">
+    <img src={DraggablePartial} alt="Draggable Partial SL/TP" style={{ width: 350 }} />
+</div>
+
+- 激活后，您可以根据在图表上水平拖动的位置调整 TP/SL 的大小。以下 GIF 显示了使用此功能的示例。
+
+<div class="text--center">
+    <img src={DraggablePartial2} alt="Draggable Partial SL/TP 2" style={{ width: 750 }} />
+</div>
+
+:::note
+此功能是新功能，仍被视为测试版。如果您发现任何问题，请在 [Tealstreet Discord](/docs/support/contact-us) 上报告。
+:::
+
+---
+
+## 一键交易
+
+:::tip
+确保已启用[快捷键](/docs/trade/shortcuts)。
+:::
+
+使用快捷键激活一键交易，使用户能够通过单击**图表**、订单簿或深度图表立即提交限价单。
+“以点击价格为限价”意味着终端将在点击价格低于最后交易价格时提交限价买单，在点击价格高于最后交易价格时提交限价卖单。
+
+<div class="text--center">
+
+![One-Clicked](/img/trading/one-click.png)
+
+</div>
+
+---
+
+## 从图表自动填充订单价格
+
+按住快捷键并单击图表，即可自动填充订单价格（默认情况下按住“z”键）。比手动输入更快！
+
+<div class="text--center">
+
+![Auto-Chart](/img/trading/auto-chart.gif)
+
+</div>
+
+---
+
+## 附加信息
+
+:::caution
+
+- 止损在所有交易所中的功能不完全相同
+- 例如，在 **[bitget](/docs/2.0.0/connect/bitget)** 上，您将无法为活动头寸激活多个止损，因为交易所处理止损的方式不同
+- 一些交易所和/或设置将允许止损显示为无穷大，对于不支持无穷大止损的交易所，可以使用 **[触发后平仓](/docs/2.0.0/trade/placing-orders)** 设置来模拟此功能
+  :::
+
+:::note
+“保护头寸”按钮目前无法使用。
+:::

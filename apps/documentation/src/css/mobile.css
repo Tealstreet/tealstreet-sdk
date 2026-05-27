@@ -1,0 +1,8 @@
+/* CSS rules to target the search listbox on mobile devices */
+@media only screen and (max-width: 600px) {
+  #search_input_react {
+    margin-left: auto;
+    margin-right: -20px;
+    position: relative;
+  }
+}

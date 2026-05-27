@@ -1,0 +1,138 @@
+---
+title: API General
+description: Learn how to connect your API to Tealstreet.
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import Dropdown from '/img/connect/commonv3/dropdown.png';
+import AddingApi from '/img/connect/commonv3/addingapi.jpg';
+import ApiSelection from '/img/connect/commonv3/api-selection.png';
+import Name from '/img/connect/commonv3/name.png';
+import encrypt from '/img/connect/common/encrypt.png';
+
+---
+
+### What is an API?
+
+API stands for **Application Programming Interface** and it is a program that enables one software to interact with the other. The API is a messenger taking requests and telling a system what the user wants it to do then returns the response back to the user. APIs are used extensively in providing data services across a range of fields and contexts.
+
+---
+
+### How is API used in Tealstreet?
+
+API in trading enables you to interact with the trading system. To be more specific, it allows you to interact directly with your favorite exchange. Connecting your API with Tealstreet enables you to directly connect with the exchange. You can display your wallet balance, place trades and manage your positions.
+
+---
+
+### How do I connect my API to Tealstreet?
+
+Connecting your API to Tealstreet is the same process for every exchange offered.
+
+- Login to your Tealstreet account. \* V3 requires a new account if you previously used V2.
+
+- Click the '**Settings**' button near the top right corner of the terminal.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{width: 1000},{height: 100}} />
+</div>
+
+- At the bottom of this page click the '**Add new key**' button
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 600 }} />
+</div>
+
+- Choose the exchange your want to connect to from the selection menu.
+
+<div class="text--center">
+    <img src={ApiSelection} alt="Api Selection" style={{ width: 500 }} />
+</div>
+
+- Generate the API key on the exchange you selected and paste it into the Tealstreet terminal to connect it.
+
+:::note
+You can import your API keys from a json file if you previously exported them.
+:::
+
+For exchange specific tutorials on obtaining your API keys, please see the following links:
+
+- [Binance](/docs/connect/binance)
+- [Bitget](/docs/connect/bitget)
+- [BitMEX](/docs/connect/bitmex)
+- [BingX](/docs/connect/bingx)
+- [Bybit](/docs/connect/bybit)
+- [OKX](/docs/connect/okx)
+- [Phemex](/docs/connect/phemex)
+- [Woo](/docs/connect/woo)
+- [BloFin](/docs/connect/blofin)
+- [WooFI](/docs/connect/woofi)
+- [ApeX](/docs/connect/apex-omni)
+- [HyperLiquid](/docs/connect/hyperliquid)
+- [Coinbase](/docs/connect/coinbase)
+- [Bitrue](/docs/connect/bitrue)
+- [Bitunix](/docs/connect/bitunix)
+- [Kraken Futures](/docs/connect/kraken-futures)
+- [Lighter](/docs/connect/lighter)
+- [AsterDex](/docs/connect/asterdex)
+- [KodiakFi](/docs/connect/kodiakfi)
+- [Mode](/docs/connect/mode)
+- [WhatDex](https://teal.link/what)
+- [Paradex](/docs/connect/paradex)
+      <!-- * [Breakout](/docs/connect/breakout) -->
+      <!-- * [CoinCatch](/docs/connect/coincatch) -->
+      <!-- * [Mexc](/docs/connect/mexc) (Planned) -->
+      <!-- * [Kucoin](/docs/connect/kucoin) (Planned) -->
+      <!-- * [Gate.io](/docs/connect/gateio) (Planned) -->
+
+- After you create your API key you may need to whitelist certain IP addresses. Head over to the Tealstreet window where you setup the API keys and copy the whitelisted IP(s) and paste them on the exchange website.
+
+:::note
+You can whitelist multiple IP(s).
+
+You do **not** need to manually input IP Addresses on certain exchanges (**Bybit**, **OKX**, **BloFin**) where Tealstreet is an officially supported 3rd Party App. These exchanges have a selector option instead of manual input which is usually named 'Third-Party App' or similar.
+:::
+
+<!-- * You can give your API a nickname.
+        * Choose whatever nickname you like! This is useful for traders who use multiple accounts and want to keep track.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{width: 800}} />
+</div>
+
+<div class="text--center">
+    <img src={Name} alt="Name" style={{width: 700}} />
+</div> -->
+
+<!-- * After choosing a nickname for your API key its time to setup an **Encryption Password.** You can read more about this security feature in the [API Encryption](/docs/connect/api-encryption) section. -->
+
+---
+
+### Activating a newly linked API Key
+
+- Once you have filled in all the required information and pasted the Key and Secret from the exchange website you can click the 'Create' button. Its a good idea to double check you've copied the API and Secret correctly or else the accounts will not be linked and you cannot trade until its correct!
+
+:::caution
+**IP Whitelisting** is required if you are using the **TS Network** option when making the API key.
+:::
+
+- If linked successfully your API key will automatically activate and you can start trading!
+
+<div class="text--center">
+
+![trade](/img/connect/commonv3/trade.png)
+
+</div>
+
+- You can enable/disable multiple API's at the same time, however only one will be considered the 'active' key.
+
+:::tip
+for more information check out our **[Quick Start Guide Video](https://www.youtube.com/watch?v=k0x1LpzwbfQ)**.
+:::
+
+<!-- <div class="text--center">
+
+![apidropdown](/img/connect/common/apidropdown.png)
+</div> -->

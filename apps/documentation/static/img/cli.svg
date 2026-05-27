@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- Outer ring matches About / Connect / Terminal / Support style -->
+  <circle cx="500" cy="500" r="440" fill="none" stroke="#25c2a0" stroke-width="40"/>
+  <!-- Prompt chevron -->
+  <polyline points="320,360 460,500 320,640" fill="none" stroke="#25c2a0" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Cursor / input line -->
+  <line x1="540" y1="640" x2="700" y2="640" stroke="#25c2a0" stroke-width="56" stroke-linecap="round"/>
+</svg>

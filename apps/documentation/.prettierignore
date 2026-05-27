@@ -1,0 +1,7 @@
+.docusaurus
+build
+node_modules
+.cache
+.audit
+terminal-doc-*.json
+terminal-doc-*.md

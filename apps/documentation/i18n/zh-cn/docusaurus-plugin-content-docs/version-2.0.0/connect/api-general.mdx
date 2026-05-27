@@ -1,0 +1,103 @@
+---
+title: API概述
+description: Learn how to connect your API to Tealstreet.
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import Dropdown from '/img/connect/common/dropdown.png';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import Name from '/img/connect/common/name.png';
+import encrypt from '/img/connect/common/encrypt.png';
+
+## API概述
+
+### 什么是API？
+
+API是应用程序编程接口的缩写，它是一种程序，使一个软件能够与另一个软件进行交互。API是一个信使，接收请求并告诉系统用户想要它做什么，然后将响应返回给用户。API在提供各种领域和上下文的数据服务方面得到广泛应用。
+
+### 在Tealstreet中如何使用API？
+
+在交易中，API使您能够与交易系统进行交互。更具体地说，它允许您直接连接到您喜欢的交易所进行合约交易。将您的API与Tealstreet连接，可在软件中显示您的钱包余额，执行下单并管理您的持仓
+
+### 如何将我的API连接到Tealstreet？
+
+将您的API连接到Tealstreet的过程对于提供的每个交易所都是相同的。
+
+- 点击标有“**API密钥**”的按钮，然后继续点击标有“**新API密钥**”的按钮。
+
+<div class="text--center">
+    <img src={AddingApi} alt="添加API" style={{ width: 700 }} />
+</div>
+
+- 从下拉菜单中选择您要连接的交易所。
+
+<div class="text--center">
+    <img src={Dropdown} alt="下拉菜单" style={{ width: 700 }} />
+</div>
+
+- 在您选择的交易所上生成API密钥（需要到交易所官方网站API管理界面生成），并将其粘贴到Tealstreet终端以连接它。
+
+有关获取下列交易所API密钥的教程，请参考以下链接：
+
+- [Binance](/docs/connect/binance)
+- [Bitget](/docs/connect/bitget)
+- [BitMEX](/docs/connect/bitmex)
+- [BingX](/docs/connect/bingx)
+- [Bybit](/docs/connect/bybit)
+- [OKEx](/docs/2.0.0/connect/okex)
+- [Phemex](/docs/connect/phemex)
+- [Woo](/docs/connect/woo)
+- [Kucoin](/docs/connect/kucoin) (计划)
+- [Gate.io](/docs/connect/gateio) (计划)
+- [Mexc](/docs/connect/mexc) (计划)
+
+- 创建API密钥后，您需要将某些IP地址列入白名单（在交易所网站创建API的时候会询问是否需要填入IP白名单）。转到设置API密钥的Tealstreet窗口，复制这些白名单IP，然后将其粘贴到交易所网站的API设置界面上。
+
+:::note
+您可以将多个IP列入白名单。
+
+在官方支持Tealstreet作为第三方应用程序的某些交易所（Bybit，OKX）上，您无需手动输入IP地址。这些交易所有一个选择器选项，直接选择
+:::
+
+- 您可以为您的API命名。
+
+:::tip
+选择您喜欢的任何昵称！这对于使用多个帐户的交易者非常有用，可以方便跟踪和避免混淆。
+:::
+
+<div class="text--center">
+    <img src={Name} alt="名称" style={{ width: 700 }} />
+</div>
+
+- 在为API密钥选择昵称后，就该设置**加密密码**了。您可以在[API加密](/docs/connect/api-encryption)部分了解更多有关此安全功能的信息。
+
+<div class="text--center">
+    <img src={AddingApi} alt="添加API" style={{ width: 800 }} />
+</div>
+
+- 填写所有必需信息并粘贴来自交易所网站的密钥和密钥后，单击“创建”按钮。最好再次检查您是否正确复制了API和密钥，否则帐户将无法链接，直到其正确为止！
+
+:::caution
+**IP白名单**和具有**加密密码**是将API保存在终端中的必要条件。
+:::
+
+- 现在，您应该看到您的交易所API列在API密钥中。单击交易以检查连接。
+
+<div class="text--center">
+
+![交易](/img/connect/common/trade.png)
+
+</div>
+
+- 从下拉菜单中选择您的交易所API密钥并输入加密密码，如下所示。如果有适当的连接，则几秒钟后应加载您的交易/钱包余额。 单击**星形**图标将API密钥添加到您的收藏夹列表中，以便您可以轻松导航到它。
+
+<div class="text--center">
+
+![apidropdown](/img/connect/common/apidropdown.png)
+
+</div>

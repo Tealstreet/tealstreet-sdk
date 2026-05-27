@@ -1,0 +1,235 @@
+---
+title: Bybit
+description: Connecting Bybit to Tealstreet
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import BybitPermissions from '/img/connect/bybit/bybit-permissions-1-mar2024.png';
+import BybitPermissions2 from '/img/connect/bybit/bybit-permissions-2-mar2024.png';
+import BybitPermissionsUM from '/img/connect/bybit/bybit-perms-um-mar13.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+import ApiWhitelist from '/img/connect/bybit/v3/apiwhitelist.png';
+import ApiTealstreet from '/img/connect/bybit/v3/api-teal.png';
+import ApiDropdown from '/img/connect/bybit/apidropdown.png';
+import ApiCreate from '/img/connect/bybit/apicreate.png';
+import SystemApi from '/img/connect/bybit/system-api.png';
+import InverseDerivs from '/img/connect/bybit/inverse-derivs.jpg';
+import BybitSpecific from '/img/connect/bybit/bybit-specific-settings.png';
+
+<ThemedImage
+    alt="bybit-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bybit-light.png'),
+        dark: useBaseUrl('/img/exchange/bybit-dark.png'),
+    }}
+/>
+
+<div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+    <iframe
+        src="https://www.youtube.com/embed/VY6G0JWedrQ"
+        frameBorder="0"
+        allow="autoplay; encrypted-media"
+        allowFullScreen
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+    />
+</div>
+
+## Connecting [Bybit](https://teal.link/bybit1) to Tealstreet
+
+- First, make sure you are logged into your [Bybit](https://teal.link/bybit1) account.
+
+<IntroTealstreet exchangeName="Bybit" />
+
+---
+
+Now you are ready to generate the API Keys within your Bybit Account. Head on over to the Bybit tab and: - Click on the User Icon. - Select **API** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 550 }} />
+</div>
+
+- On the API Key page click on the **Create New Key** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="API Create" style={{ width: 550 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://www.bybit.com/app/user/api-management)**
+:::
+
+    - Choose system generated API key.
+
+<div class="text--center">
+    <img src={SystemApi} alt="System Api" style={{ width: 400 }} />
+</div>
+
+---
+
+### Bybit API Creation
+
+- Now you are ready to choose the settings of your Bybit API Key pair.
+
+<!-- :::warning
+This guide assumes you will use the **SG** region for Tealstreet. If you instead want to use the **JA** region, you will need to choose **API Transaction** instead of **Connect to Third-Party Applications** and also manually input the IP Addresses from the **Tealstreet API creation window**.
+::: -->
+
+<div class="text--center">
+    <img src={BybitPermissions} alt="API Permissions 1" style={{ width: 550 }} />
+</div>
+
+<div class="text--center">
+    <img src={BybitPermissions2} alt="API Permissions 2" style={{ width: 550 }} />
+</div>
+
+1. Choose **‘Connect to Third-Party Applications.’**
+    <!-- * Only choose this option if your going to use **SG** Region in Tealstreet.
+    * Choose **"API Transaction"** if you are going to use **JA** Region in Tealstreet. -->
+2. In the Application Name select **'Tealstreet'**
+    <!-- * Again this option is only for **"SG"** Region in Tealstreet. -->
+3. Choose the **‘Read-Write’** permission.
+4. Select **‘Orders’ 'Positions' 'USDC Derivatives Trading'** and **‘Trade’** in the permission section.
+5. Double check all the selections are correct and then click ‘Submit’.
+    - A popup will appear next and prompt you to submit your 2FA code if its linked to your Bybit account.
+    - Once you submit the 2FA code, you will see a new popup from Bybit with your API Key details. You need to paste those details into the API Key page of Tealstreet.
+
+<details hide>
+    <summary>Unified Account API permissions</summary>
+    Unified Margin accounts have a slightly different screen.
+    <div class="text--center">
+        <img src={BybitPermissionsUM} alt="Bybit Permissions UM" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <br />
+    <p>
+        <br />
+        Select ‘Orders’ 'Positions' 'USDC Derivatives Trading' and ‘Trade’ in the permission section.
+    </p>
+</details>
+
+<!-- :::tip
+Read more about Tealstreet's password encryption system **[here](/docs/connect/api-encryption)**.
+::: -->
+
+:::caution
+Never share your API Keys with anyone.
+:::
+
+---
+
+### Tealstreet API Creation
+
+- Once you have created the API Key on Bybit’s website, you are ready to fill out the information on Tealstreet’s API KEYS page.
+
+<div class="text--center">
+    <img src={ApiTealstreet} alt="Tealstreet API" style={{ width: 650 }} />
+</div>
+
+- Ensure you have **Bybit** selected as the exchange.
+
+<!-- * Consider supporting Tealstreet by using the referral [link](https://teal.link/bybit1). -->
+
+- Enable **Use Tealstreet Network** unless you intend to route your orders from some other location.
+  - Adjust your whitelisted IP's accordingly.
+
+<!-- * Choose the region you would prefer. Currently this is Singapore (SG) or Japan (JA). -->
+
+- Choose a **name** for your Bybit account, it can be whatever you want it to be
+
+- Select the color you would like the API to be inside the terminal.
+
+<!-- - Choose your Encryption Password. Remember to save this somewhere! You will need to input this password when you navigate back to the trade page of the trading terminal. -->
+
+- Paste the **API Key** provided by Bybit here.
+
+- Paste the **API Secret** provided by Bybit here.
+
+- Click **‘Done’**
+
+<OutroTealstreet exchangeName="Bybit" />
+
+:::caution
+An infinity stop cannot override Bybits maximum order size rule.
+:::
+
+---
+
+## Unified Margin trading
+
+Unified Margin support has recently been introduced and there are a few things that are important to take note of:
+
+<div class="text--center">
+    <img src={InverseDerivs} alt="Inverse Derivatives account" style={{ width: 550 }} />
+</div>
+
+- Unified Margin does not support inverse futures, you will need to make sure you have funded your Inverse Derivatives account to trade Inverse on a Unified-Margin (UTA) account.
+
+- Users will be unable to switch to isolated margin if they have a negative USDT balance.
+
+:::note
+If you do not wish to use a Unified Margin account you can create a sub-account as a workaround. They default to non Unified Margin.
+:::
+
+:::warning
+As of Oct-2024 TealstreetV3 does not currently support isolated trading on Unified Margin accounts. V2 might still work.
+:::
+
+<!-- -   -   -   -
+
+## Bybit Specific Settings -->
+
+<!---
+TODO: This is a hacked together image, we need to make a better one.
+!--->
+
+<!-- <div class="text--center">
+  <img src={BybitSpecific} alt="Bybit Specific settings" style={{width: 550}} />
+</div>
+
+- **Auto Switch to One-Way Mode**:
+   This will automatically try to switch your account to one-way mode when you select a new ticker to ensure you don't accidentally end up unexpectedly hedged.
+- **Support Partial Stops**:
+   Enables the usage of partial stops instead of full-close stops. This is an extension to the default exchanges behavior.
+- **Bind Stops to Position**:
+   Enabling this Prevents the user from being able to place stops without an active position -->
+
+---
+
+## Troubleshooting
+
+:::warning
+On May-8-2023 Bybit mandated KYC for all users, and shortly before that it started banning US IP addresses. If you are trying to trade from a restricted country or did not do the KYC you will not be permitted to execute orders even if you previously were able to.
+:::
+
+:::note
+In March 2024 Bybit phased out support for Perpetual Futures for users in the Netherlands due to regulatory reasons.
+You can find more [info here](https://announcements.bybit.com/article/introducing-bybit-netherlands-bybit-nl-platform-blt32bff64c58963ac7/).
+:::
+
+### Why am I getting an error about unmatched IP when trying to use testnet? I used the system generated option
+
+- Testnets are generally provided on a best-effort basis and are not guaranteed to work.
+
+### I have a Unified Trading Account and I moved my funds into it, API Linked successfully but I can't execute orders and Tealstreet shows I have zero margin? whats going on?
+
+- You might be on Isolated, Try switching to _Cross_ Margin. Tealstreet does not currently support _Isolated_ on Unified Margin accounts.
+
+### I'm getting an error about illegal category why is that?
+
+- Tealstreet V3 does not currently support inverse perps as of this writing. You will need to use v2.
+
+### Does Tealstreet support Bybit Demo mode?
+
+- Yes, Tealstreet V3 supports demo mode. Make sure you are using demo and not testnet. You also do not need to provide any IP's for the whitelisting process for demo mode.
+
+### I have available balance but my available margin is zero and I can't place orders?
+
+- Try toggling your isolated / cross margin settings on the official Bybit website. Some users have reported that this resolves the issue.

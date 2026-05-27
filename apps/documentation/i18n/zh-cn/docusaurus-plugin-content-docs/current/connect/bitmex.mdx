@@ -1,0 +1,127 @@
+---
+title: Bitmex
+description: Connecting Bitmex to Tealstreet
+sidebar_position: 6
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiMore from '/img/connect/bitmex/apimore.png';
+
+<ThemedImage
+    alt="bitmex-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bitmex-light.png'),
+        dark: useBaseUrl('/img/exchange/bitmex-dark.png'),
+    }}
+/>
+
+## 连接 Bitmex 到 Tealstreet
+
+:::note
+IP 白名单是连接 BitMEX API 到 Tealstreet 的必要条件
+:::
+
+按照以下步骤操作：
+
+- 首先，确保您已登录到您的 **[Bitmex](https://teal.link/BitMEX)** 账户。
+
+- 其次，登录到您的 Tealstreet 账户。
+
+:::tip
+在管理交易时，同时保持 Tealstreet 和 Bitmex 标签页打开是个好主意。
+:::
+
+1. 成功登录 Tealstreet 后，导航到标题为 **“API Keys”** 的页眉。
+
+2. 点击蓝色按钮 **“New API Key”**
+
+![addingapi](/img/connect/common/addingapi.jpg)
+
+---
+
+### API Keys
+
+- 从下拉菜单中选择 Bitmex。
+
+<div class="text--center">
+
+![dropdown](/img/connect/bitmex/dropdown.png)
+
+</div>
+
+- 现在您已经准备好在 Bitmex 账户中生成 API 密钥。前往 Bitmex 标签页并执行以下操作：
+
+1. 点击账户。
+
+2. 选择 API 密钥。
+
+<div class="text--center">
+
+![api-connect](/img/connect/bitmex/api-connect.png)
+
+</div>
+
+:::note
+如果您需要更多信息，请访问 **[Bitmex API](https://www.bitmex.com/app/apiKeysUsage)** 文档页面。
+:::
+
+---
+
+### Bitmex API 设置
+
+- 现在您已经准备好创建 API。在创建 API 密钥页面上：
+
+<div class="text--center">
+    <img src={ApiMore} alt="API Detailed" style={{ width: 700 }} />
+</div>
+
+1. 首先，为您的 API 密钥选择一个名称。这对于使用多个交易所和/或子账户的交易者非常有帮助，并希望在它们之间进行区分。此名称仅在 BitMEX 网站上可见。
+
+2. 将 **Tealstreet 交易终端** 提供的 **白名单 IP 地址** 复制并粘贴到 CIDR 字段中。
+
+3. 在“密钥权限”上选择订单。
+
+4. 确保“提款”未选中。
+
+5. 点击“创建 API 密钥”。
+
+6. 现在您已经拥有了 API 密钥。一旦您离开页面，**API 密钥** 将不可用，因此请将其写下或复制粘贴。
+
+<div class="text--center">
+
+![api-example](/img/connect/bitmex/apiex.png)
+
+</div>
+
+:::caution
+不要与任何人分享您的 API 密钥。确保您将 **密钥秘密** 存储在安全的地方。
+:::
+
+- 一旦您在 Bitmex 的网站上创建了 API 密钥，您就可以在 Tealstreet 的 **API Keys** 页面上填写信息了。
+
+<div class="text--center">
+
+![API-Tealstreet](/img/connect/bitmex/apiteal.png)
+
+</div>
+
+```text
+1. 确保您已在交易所下拉菜单中选择了“Bitmex”。
+
+2. 为此 API 连接选择一个名称。您将在 Tealstreet 终端的交易页面上看到一个 API 下拉列表中的名称。这对于使用多个交易所和/或子账户的交易者非常有帮助，并希望在它们之间进行区分。
+
+3. 选择您的加密密码。记得将其保存在某个地方！
+
+4. 在此处粘贴 Bitmex 提供的 API 密钥。
+
+5. 在此处粘贴 Bitmex 提供的 API Secret。
+
+6. 点击“创建”。
+:::
+```

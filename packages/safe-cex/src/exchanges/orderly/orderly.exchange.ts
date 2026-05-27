@@ -1,0 +1,949 @@
+import type { Axios } from 'axios';
+import type { Store } from '../../store/store.interface';
+
+import rateLimit from 'axios-rate-limit';
+import cloneDeep from 'lodash/cloneDeep';
+import sumBy from 'lodash/sumBy';
+import times from 'lodash/times';
+import uniqBy from 'lodash/uniqBy';
+import { forEachSeries, mapSeries } from 'p-iteration';
+
+import {
+  Candle,
+  ExchangeName,
+  ExchangeOptions,
+  MarginType,
+  Market,
+  OHLCVOptions,
+  Order,
+  OrderBook,
+  OrderSide,
+  OrderStatus,
+  OrderType,
+  PlaceOrderOpts,
+  Position,
+  PositionMode,
+  PositionSide,
+  Ticker,
+  UpdateOrderOpts,
+  Writable,
+} from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
+import { v } from '../../utils/get-key';
+import { inverseObj } from '../../utils/inverseObj';
+import { loop } from '../../utils/loop';
+import { omitUndefined } from '../../utils/omitUndefined';
+import { adjust, subtract } from '../../utils/safe-math';
+import { virtualClock } from '../../utils/virtualClock';
+import { BaseExchange } from '../base';
+import { createAPI } from './orderly.api';
+import {
+  ACCOUNT_RESPONSE,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  ORDER_SIDE,
+  ORDER_TYPE,
+  PLACE_ORDER_RESPONSE,
+} from './orderly.types';
+import { normalizeSymbol, reverseSymbol } from './orderly.utils';
+import { OrderlyPrivateWebSocket } from './orderly.ws-private';
+import { OrderlyPublicWebsocket } from './orderly.ws-public';
+
+export class OrderlyExchange extends BaseExchange {
+  xhr: Axios;
+
+  publicWebsocket: OrderlyPublicWebsocket;
+  privateWebsocket: OrderlyPrivateWebSocket;
+
+  grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
+  grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
+
+  orderlyExchangeName = 'orderly';
+
+  // Orderly stores leverage per account, not per position
+  // as workaround we store the account leverage here when
+  // we call the ACCOUNT endpoint, and copy this value into positions
+  private accountLeverage = 1;
+  private _accountPositionMode: PositionMode | null = null;
+
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+    // Ensure key and secret have the "ed25519:" prefix
+    const normalizedOpts = { ...opts };
+    if (normalizedOpts.key && !normalizedOpts.key.startsWith('ed25519:')) {
+      normalizedOpts.key = `ed25519:${normalizedOpts.key}`;
+    }
+    if (normalizedOpts.secret && !normalizedOpts.secret.startsWith('ed25519:')) {
+      normalizedOpts.secret = `ed25519:${normalizedOpts.secret}`;
+    }
+
+    super(exchangeName, normalizedOpts, store);
+
+    this.xhr = rateLimit(createAPI(normalizedOpts, this), { maxRPS: 10 });
+
+    this.publicWebsocket = new OrderlyPublicWebsocket(this);
+    this.privateWebsocket = new OrderlyPrivateWebSocket(this);
+  }
+
+  dispose = () => {
+    this.isDisposed = true;
+    this.publicWebsocket.dispose();
+    this.privateWebsocket.dispose();
+  };
+
+  async getPositionMode(): Promise<PositionMode> {
+    if (!this._accountPositionMode) {
+      await this.xhr.get<{ data: ACCOUNT_RESPONSE }>(ENDPOINTS.ACCOUNT);
+      this._accountPositionMode = PositionMode.OneWay;
+    }
+    return this._accountPositionMode;
+  }
+
+  getAccount = async () => {
+    const {
+      data: { data },
+    } = await this.xhr.get<{ data: ACCOUNT_RESPONSE }>(ENDPOINTS.ACCOUNT);
+
+    return {
+      userId: data.account_id,
+      affiliateId: data.account_id || null,
+    };
+  };
+
+  validateAccount = async () => {
+    try {
+      await this.xhr.get(ENDPOINTS.ACCOUNT);
+      return '';
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+    }
+  };
+
+  start = async () => {
+    const publicDataOnly = this.isPublicDataOnly;
+
+    // Validate account at the start (skip for public-only mode)
+    if (!publicDataOnly) {
+      const validationError = await this.validateAccount();
+      if (validationError) {
+        // Account validation failed - emit error and deactivate
+        this.emitAndLogError('API key expired');
+        this.emitter.emit('deactivate');
+        return;
+      }
+    }
+
+    const markets = await this.fetchMarkets();
+    if (this.isDisposed) return;
+
+    this.store.update({
+      markets,
+      loaded: { ...this.store.loaded, markets: true },
+    });
+
+    const tickers = await this.fetchTickers();
+    if (this.isDisposed) return;
+
+    if (!publicDataOnly) {
+      this.fetchAndUpdateAccountLeverage();
+    }
+
+    this.log(`Loaded ${Math.min(tickers.length, markets.length)} ${this.orderlyExchangeName} markets`);
+
+    this.store.update({
+      tickers,
+      loaded: { ...this.store.loaded, tickers: true },
+    });
+
+    this.publicWebsocket.connectAndSubscribe();
+
+    if (publicDataOnly) {
+      this.store.update({
+        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+      });
+      return;
+    }
+
+    this.privateWebsocket.connectAndSubscribe();
+
+    await this.tick();
+    if (this.isDisposed) return;
+
+    this.log(`Ready to trade on ${this.orderlyExchangeName}`);
+
+    const orders = await this.fetchOrders();
+    if (this.isDisposed) return;
+
+    this.log(`Loaded ${this.orderlyExchangeName} orders`);
+
+    this.store.update({
+      orders,
+      loaded: { ...this.store.loaded, orders: true },
+    });
+  };
+
+  tick = async (count = 0) => {
+    if (!this.isDisposed) {
+      if (this.isPublicDataOnly) return;
+
+      try {
+        // after fetch account in case positionMode or leverage updated
+        const positions = await this.fetchPositions();
+        if (this.isDisposed) return;
+        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+
+        // positions will provide the following update:
+        // free: free_collateral,
+        // used: total_collateral_value - free_collateral,
+        // total: total_collateral_value,
+        const upnl = positions.length > 0 ? Math.round(sumBy(positions, 'unrealizedPnl') * 100) / 100 : 0;
+        this.store.update({
+          balance: {
+            total: this.store.balance.total - upnl,
+            used: this.store.balance.used - upnl,
+            free: this.store.balance.free,
+            upnl,
+          },
+          loaded: {
+            ...this.store.loaded,
+            balance: true,
+          },
+        });
+
+        if (count % 4 === 0) {
+          const orders = await this.fetchOrders();
+          if (this.isDisposed) return;
+          this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+        }
+
+        // if (count % 10 === 0) {
+        //   const balance = await this.fetchBalance();
+        //   if (this.isDisposed) return;
+
+        //   // woo doesnt provides unrealized pnl in the account endpoint
+        //   // we are computing this from the positions polling
+        //   (balance as Writable<Balance>).upnl =
+        //     positions.length > 0 ? Math.round(sumBy(positions, 'unrealizedPnl') * 100) / 100 : 0;
+
+        //   // total balance from API already takes in account uPNL
+        //   (balance as Writable<Balance>).total = balance.total - balance.upnl;
+
+        //   this.store.update({
+        //     balance: {
+        //       total: this.store.balance.total,
+        //       used: this.store.balance.used,
+        //       free: this.store.balance.free,
+        //       upnl: balance.upnl,
+        //     },
+        //     loaded: {
+        //       ...this.store.loaded,
+        //       balance: true,
+        //     },
+        //   });
+        // }
+      } catch (err: any) {
+        this.emitAndLogError(err?.message);
+      }
+
+      if (!this.isDisposed) {
+        loop(() => this.tick(count + 1), this.getTickInterval());
+      }
+    }
+  };
+
+  fetchAndUpdateAccountLeverage = async () => {
+    const {
+      data: { data: accountData },
+    } = await this.xhr.get<{ data: ACCOUNT_RESPONSE }>(ENDPOINTS.ACCOUNT);
+
+    // store the account leverage
+    // we will use this value to populate the positions leverage
+    this.accountLeverage = accountData?.max_leverage || 20;
+
+    // same with positionMode
+    this._accountPositionMode = PositionMode.OneWay;
+  };
+
+  fetchMarkets = async () => {
+    // try {
+    const {
+      data: {
+        data: { rows },
+      },
+    } = await this.xhr.get<{ data: { rows: Array<Record<string, any>> } }>(ENDPOINTS.MARKETS);
+
+    const markets: Market[] = rows
+      .filter((r) => r.symbol.startsWith('PERP_'))
+      .map((r) => {
+        const [, baseAsset, quoteAsset] = r.symbol.split('_');
+
+        const minLeverage = Number(v(r, 'min_leverage'));
+        const maxLeverage = Number(v(r, 'max_leverage'));
+        const leverageLimits = {
+          min: Number.isFinite(minLeverage) && minLeverage > 0 ? minLeverage : 1,
+          max: Number.isFinite(maxLeverage) && maxLeverage > 0 ? maxLeverage : 100,
+        };
+
+        return {
+          id: `${baseAsset}/${quoteAsset}:USDC`,
+          symbol: `${baseAsset}${quoteAsset}`,
+          base: baseAsset,
+          quote: quoteAsset,
+          active: true,
+          precision: {
+            amount: v(r, 'base_tick'),
+            price: v(r, 'quote_tick'),
+          },
+          limits: {
+            amount: {
+              min: v(r, 'base_min'),
+              max: v(r, 'base_max'),
+            },
+            leverage: {
+              ...leverageLimits,
+            },
+          },
+          info: cloneDeep(r),
+        };
+      });
+
+    return markets;
+    // } catch (err: any) {
+    //   this.emitAndLogError(err?.response?.data?.message || err?.message);
+    //   return this.store.markets;
+    // }
+  };
+
+  fetchTickers = async () => {
+    try {
+      const {
+        data: {
+          data: { rows },
+        },
+      } = await this.xhr.get<{ data: { rows: Array<Record<string, any>> } }>(ENDPOINTS.TICKERS);
+
+      return rows.reduce((acc: Ticker[], row) => {
+        const symbol = normalizeSymbol(row.symbol);
+        const market = this.store.marketsBySymbol[symbol];
+
+        if (!market) return acc;
+
+        const open = v(row, '24h_open');
+        const close = v(row, '24h_close');
+
+        const percentage = Math.round(((close - open) / open) * 100 * 100) / 100;
+
+        const ticker: Ticker = {
+          id: market.id,
+          symbol: market.symbol,
+          bid: close,
+          ask: close,
+          last: close,
+          index: v(row, 'index_price'),
+          mark: v(row, 'mark_price'),
+          percentage,
+          fundingRate: v(row, 'last_funding_rate'),
+          fundingTime: v(row, 'next_funding_time'),
+          volume: v(row, '24h_volume'),
+          quoteVolume: v(row, '24h_amount'),
+          openInterest: v(row, 'open_interest'),
+          info: row,
+        };
+
+        return [...acc, ticker];
+      }, []);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.tickers;
+    }
+  };
+
+  fetchPositions = async () => {
+    try {
+      const {
+        data: {
+          data: { rows: positions, total_collateral_value, free_collateral },
+        },
+      } = await this.xhr.get<{
+        data: {
+          rows: Array<Record<string, any>>;
+          margin_ratio: number;
+          initial_margin_ratio: number;
+          maintenance_margin_ratio: number;
+          open_margin_ratio: number;
+          current_margin_ratio_with_orders: number;
+          initial_margin_ratio_with_orders: number;
+          maintenance_margin_ratio_with_orders: number;
+          total_collateral_value: number;
+          free_collateral: number;
+        };
+      }>(ENDPOINTS.POSITIONS);
+
+      const positionMode = await this.getPositionMode();
+      const realPositions = positions.reduce<Position[]>((acc, p) => {
+        const symbol = normalizeSymbol(p.symbol);
+        const ticker = this.store.tickersBySymbol[symbol];
+
+        if (!ticker) return acc;
+        if (!p.position_qty) return acc;
+
+        const entryPrice = v(p, 'average_open_price');
+        const holdings = v(p, 'position_qty');
+        const contracts = Math.abs(holdings);
+        const side = holdings > 0 ? PositionSide.Long : PositionSide.Short;
+
+        const priceDiff = Math.max(entryPrice, ticker.mark) - Math.min(entryPrice, ticker.mark);
+
+        const isLoss =
+          (side === PositionSide.Long && ticker.mark < entryPrice) ||
+          (side === PositionSide.Short && ticker.mark > entryPrice);
+
+        const absUPNL = priceDiff * contracts;
+        const upnl = Math.round((isLoss ? -absUPNL : absUPNL) * 100) / 100;
+
+        const position: Position = {
+          id: createPositionId(symbol, side, positionMode),
+          symbol,
+          side,
+          entryPrice,
+          notional: contracts * ticker.mark,
+          leverage: Boolean(+p.imr) ? 1 / +p.imr : this.accountLeverage,
+          unrealizedPnl: upnl,
+          contracts,
+          liquidationPrice: v(p, 'est_liq_price'),
+          positionMode: positionMode,
+          marginType: MarginType.Cross,
+          info: cloneDeep(p),
+        };
+
+        return [...acc, position];
+      }, []);
+
+      const fakePositions: Position[] = this.store.markets.reduce((acc: Position[], m) => {
+        const fakePositionsForSymbol = [
+          {
+            id: createPositionId(m.symbol, PositionSide.Long, positionMode),
+            symbol: m.symbol,
+            side: PositionSide.Long,
+            entryPrice: 0,
+            notional: 0,
+            leverage: this.accountLeverage,
+            unrealizedPnl: 0,
+            contracts: 0,
+            liquidationPrice: 0,
+            positionMode: positionMode,
+            marginType: MarginType.Cross,
+          },
+          {
+            id: createPositionId(m.symbol, PositionSide.Short, positionMode),
+            symbol: m.symbol,
+            side: PositionSide.Short,
+            entryPrice: 0,
+            notional: 0,
+            leverage: this.accountLeverage,
+            unrealizedPnl: 0,
+            contracts: 0,
+            liquidationPrice: 0,
+            positionMode: positionMode,
+            marginType: MarginType.Cross,
+          },
+        ];
+
+        acc.push(...fakePositionsForSymbol);
+        return acc;
+      }, []);
+
+      this.store.update({
+        balance: {
+          ...this.store.balance,
+          free: free_collateral,
+          used: total_collateral_value - free_collateral,
+          total: total_collateral_value,
+        },
+      });
+
+      return uniqBy([...realPositions, ...fakePositions], 'id');
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.positions;
+    }
+  };
+
+  fetchOrders = async () => {
+    const limitOrders = await this.fetchLimitOrders();
+    const algoOrders = await this.fetchAlgoOrders();
+    return [...limitOrders, ...algoOrders];
+  };
+
+  fetchOHLCV = async (opts: OHLCVOptions) => {
+    const {
+      data: {
+        data: { rows },
+      },
+    } = await this.xhr.get<{ data: { rows: Array<Record<string, any>> } }>(ENDPOINTS.KLINE, {
+      params: {
+        symbol: reverseSymbol(opts.symbol),
+        type: opts.interval,
+        limit: Math.min(opts.limit || 500, 1000),
+      },
+    });
+
+    const candles: Candle[] = rows.map((r) => {
+      return {
+        timestamp: r.start_timestamp / 1000,
+        open: r.open,
+        high: r.high,
+        low: r.low,
+        close: r.close,
+        volume: r.volume,
+      };
+    });
+
+    return candles.reverse();
+  };
+
+  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    return this.publicWebsocket.listenOHLCV(opts, callback);
+  };
+
+  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+    return this.publicWebsocket.listenOrderBook(symbol, callback);
+  };
+
+  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    if (this.isAlgoOrder(order.type)) {
+      return this.updateAlgoOrder({ order, update });
+    }
+
+    const newOrder: Writable<PlaceOrderOpts> = {
+      symbol: order.symbol,
+      type: order.type,
+      side: order.side,
+      price: order.price,
+      amount: order.amount,
+      reduceOnly: order.reduceOnly || false,
+    };
+
+    if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
+    if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;
+
+    if ('price' in update) newOrder.price = update.price;
+    if ('amount' in update) newOrder.amount = update.amount;
+
+    await this.cancelOrders([order]);
+    return await this.placeOrder(newOrder);
+
+    // const payload: Record<string, any> = { order_id: +order.id };
+    // if ('price' in update && +update.price !== +order.price) payload.order_price = `${update.price}`;
+    // if ('amount' in update && +update.amount !== +order.amount) payload.order_quantity = `${update.amount}`;
+    // payload.side = order.side === OrderSide.Buy ? 'BUY' : 'SELL';
+    // payload.order_type = 'LIMIT';
+    // payload.symbol = reverseSymbol(order.symbol);
+    // // payload.reduce_only = Boolean(order.reduceOnly);
+
+    // try {
+    //   await this.xhr.put(`${ENDPOINTS.UPDATE_ORDER}`, payload);
+    //   return [order.id];
+    // } catch (err: any) {
+    //   this.emitAndLogError(err?.response?.data?.message || err?.message);
+    //   return [];
+    // }
+  };
+
+  updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const payload: Record<string, any> = {};
+
+    payload.order_id = +(order.parentId || 0);
+
+    if ('price' in update) {
+      payload.child_orders = [{ order_id: order.id, trigger_price: +update.price }];
+    }
+
+    try {
+      await this.xhr.put(`${ENDPOINTS.ALGO_ORDER}`, payload);
+      return [order.id];
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  fetchLimitOrders = async () => {
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: { rows: Array<Record<string, any>> } }>(ENDPOINTS.ORDERS, {
+        params: { status: 'INCOMPLETE' },
+      });
+
+      return data.rows.reduce<Order[]>((acc, o) => {
+        const order = this.mapLimitOrder(o);
+        return order !== null ? [...acc, order] : acc;
+      }, []);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  mapLimitOrder = (o: Record<string, any>) => {
+    const symbol = normalizeSymbol(o.symbol);
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) return null;
+    const quantity = o.quantity || o.order_quantity;
+    const executed = o.executed || 0;
+
+    const order: Order = {
+      id: `${v(o, 'order_id') || v(o, 'orderId')}`,
+      status: OrderStatus.Open,
+      symbol,
+      type: ORDER_TYPE[o.type || o.order_type],
+      side: ORDER_SIDE[o.side],
+      price: o.price || o.order_price,
+      amount: quantity,
+      reduceOnly: v(o, 'reduce_only') || v(o, 'reduceOnly'),
+      filled: executed,
+      remaining: subtract(quantity, executed),
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+      info: o,
+    };
+
+    return order;
+  };
+
+  fetchAlgoOrders = async () => {
+    try {
+      const {
+        data: {
+          data: { rows },
+        },
+      } = await this.xhr.get<{
+        data: { rows: Array<Record<string, any>> };
+      }>(ENDPOINTS.ALGO_ORDERS, { params: { status: 'INCOMPLETE' } });
+
+      return rows.reduce<Order[]>((acc, o) => {
+        const childOrders = this.mapAlgoOrder(o);
+        return [...acc, ...childOrders];
+      }, []);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  mapAlgoOrder = (o: Record<string, any>) => {
+    const symbol = normalizeSymbol(o.symbol);
+    const market = this.store.marketsBySymbol[symbol];
+
+    if (!market) return [];
+
+    const arr = o.childOrders || o.child_orders ? o.childOrders || o.child_orders : [o];
+    return arr
+      .filter(
+        (co: Record<string, any>) =>
+          v(co, 'trigger_price') ||
+          v(co, 'triggerPrice') ||
+          v(co, 'algo_type') === 'TRAILING_STOP' ||
+          v(co, 'algoType') === 'TRAILING_STOP',
+      )
+      .map((co: Record<string, any>) => {
+        const filled = v(co, 'total_executed_quantity') || v(co, 'totalExecutedQuantity');
+        const price =
+          v(co, 'trigger_price') || v(co, 'triggerPrice') || subtract(v(co, 'extreme_price'), v(co, 'callbackValue'));
+
+        return {
+          id: `${v(co, 'algo_order_id')}`,
+          parentId: `${v(o, 'root_algo_order_id') || v(co, 'root_algo_order_id') || v(o, 'rootAlgoOrderId') || v(co, 'rootAlgoOrderId')}`,
+          status: OrderStatus.Open,
+          symbol,
+          type: ORDER_TYPE[v(co, 'algo_type') || v(co, 'algoType')],
+          side: ORDER_SIDE[co.side],
+          price,
+          amount: co.quantity,
+          reduceOnly: v(co, 'reduce_only') || v(co, 'reduceOnly'),
+          filled,
+          remaining: subtract(co.quantity, filled),
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+        };
+      });
+  };
+
+  cancelOrders = async (orders: Order[]) => {
+    await forEachSeries(orders, async (order) => {
+      const isAlgo = this.isAlgoOrder(order.type);
+
+      if (isAlgo) {
+        await this.cancelAlgoOrder(order);
+      } else {
+        await this.xhr.delete(
+          `${ENDPOINTS.CANCEL_ORDER}?order_id=${parseInt(order.id, 10)}&symbol=${reverseSymbol(order.symbol)}`,
+          { data: {} },
+          //   , {
+          //   data: omitUndefined({
+          //     order_id: parseInt(order.id, 10),
+          //     symbol: reverseSymbol(order.symbol),
+          //   }),
+          // }
+        );
+      }
+    });
+  };
+
+  cancelAlgoOrder = async (order: Order) => {
+    try {
+      const sibling = this.store.orders.find((o) => o.parentId === order.parentId && o.id !== order.id);
+
+      const id = order.parentId || order.id;
+      await this.xhr.delete(`${ENDPOINTS.ALGO_ORDER}?order_id=${id}&symbol=${reverseSymbol(order.symbol)}`, {
+        data: {},
+      });
+
+      if (sibling) {
+        const priceKey = sibling.type === OrderType.StopLoss ? 'stopLoss' : 'takeProfit';
+
+        await this.placePositionalAlgoOrder({
+          symbol: sibling.symbol,
+          side: sibling.side,
+          [priceKey]: sibling.price,
+        });
+      }
+    } catch (err: any) {
+      if (err?.response?.data?.message?.includes('already canceled')) {
+        this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+      } else {
+        this.emitAndLogError(err?.response?.data?.message || err?.message);
+      }
+    }
+  };
+
+  getPositionSideForOrder = async (opts: Pick<PlaceOrderOpts, 'side' | 'reduceOnly'>) => {
+    const positionMode = await this.getPositionMode();
+    const reduceOnly = opts.reduceOnly;
+    let positionSide = undefined;
+    if (positionMode === PositionMode.Hedged) {
+      if (reduceOnly) {
+        if (opts.side === OrderSide.Buy) {
+          positionSide = 'SHORT';
+        } else {
+          positionSide = 'LONG';
+        }
+      } else {
+        if (opts.side === OrderSide.Buy) {
+          positionSide = 'LONG';
+        } else {
+          positionSide = 'SHORT';
+        }
+      }
+    }
+    return positionSide;
+  };
+
+  placeOrder = async (opts: PlaceOrderOpts) => {
+    if (this.isAlgoOrder(opts.type)) {
+      return this.placeAlgoOrder(opts);
+    }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+
+    if (!market) {
+      throw new Error(`Market not found: ${opts.symbol}`);
+    }
+
+    const maxSize = market.limits.amount.max;
+    const pPrice = market.precision.price;
+    const pAmount = market.precision.amount;
+
+    const amount = adjust(opts.amount, pAmount);
+
+    const price = opts.price ? adjust(opts.price, pPrice) : null;
+    const type = inverseObj(ORDER_TYPE)[opts.type];
+
+    // Determine order_tag based on exchange type
+    let orderTag = 'TEALSTREET';
+    if (this.orderlyExchangeName === 'SALSADEX') {
+      orderTag = 'TEALSALSA';
+    } else if (this.orderlyExchangeName === 'KODIAKFI') {
+      orderTag = 'TEALKODIAK';
+    } else if (this.orderlyExchangeName === 'MODE') {
+      orderTag = 'TEALMODE';
+    } else if (this.orderlyExchangeName === 'WHAT') {
+      orderTag = 'TEALWHAT';
+    }
+
+    const req = omitUndefined({
+      symbol: reverseSymbol(opts.symbol),
+      order_type: type,
+      order_price: opts.type === OrderType.Limit ? price : undefined,
+      reduce_only: opts.reduceOnly,
+      side: inverseObj(ORDER_SIDE)[opts.side],
+      position_side: await this.getPositionSideForOrder(opts),
+      order_tag: orderTag,
+    });
+
+    const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
+    const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
+
+    const lotSize = adjust((amount - rest) / lots, pAmount);
+    const payloads = times(lots, () => {
+      return { ...req, order_quantity: lotSize };
+    });
+
+    if (rest) payloads.push({ ...req, order_quantity: rest });
+
+    try {
+      const orderIds = await mapSeries(payloads, async (payload) => {
+        const {
+          data: { data },
+        } = await this.xhr.post<PLACE_ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, payload);
+
+        return String(data.order_id);
+      });
+
+      if (opts.stopLoss || opts.takeProfit) {
+        const algoIds = await this.placePositionalAlgoOrder({
+          ...opts,
+          side: opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy,
+        });
+        orderIds.push(...algoIds);
+      }
+
+      return orderIds;
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      throw err;
+    }
+  };
+
+  placeAlgoOrder = async (opts: PlaceOrderOpts) => {
+    if (!opts.price) {
+      this.emitAndLogError('Price is required for algo orders');
+      return [];
+    }
+
+    const sibling = this.store.orders.find(
+      (o) =>
+        o.symbol === opts.symbol &&
+        (o.type === OrderType.StopLoss || o.type === OrderType.TakeProfit) &&
+        o.status === OrderStatus.Open,
+    );
+
+    let stopLoss = opts.type === OrderType.StopLoss ? opts.price : undefined;
+    let takeProfit = opts.type === OrderType.TakeProfit ? opts.price : undefined;
+
+    // TODO: race condition with bulk cancel stops where we recreate sibling stop after cancel all still
+    if (sibling) {
+      if (sibling.type === OrderType.StopLoss) stopLoss = sibling.price;
+      if (sibling.type === OrderType.TakeProfit) takeProfit = sibling.price;
+      await this.cancelAlgoOrder(sibling);
+    }
+
+    const params: Pick<PlaceOrderOpts, 'symbol' | 'side' | 'stopLoss' | 'takeProfit'> = {
+      symbol: opts.symbol,
+      side: opts.side,
+      ...(typeof stopLoss === 'number' ? { stopLoss } : {}),
+      ...(typeof takeProfit === 'number' ? { takeProfit } : {}),
+    };
+
+    return await this.placePositionalAlgoOrder(params);
+  };
+
+  placePositionalAlgoOrder = async (opts: Pick<PlaceOrderOpts, 'side' | 'stopLoss' | 'symbol' | 'takeProfit'>) => {
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      throw new Error(`Market ${opts.symbol} not found`);
+    }
+    const pPrice = market.precision.price;
+    const otherProps = omitUndefined({
+      reduce_only: true,
+      // not supported due to one way
+      // positionSide: await this.getPositionSideForOrder({
+      //   ...opts,
+      //   reduceOnly: true,
+      // }),
+    });
+
+    const req: Record<string, any> = {
+      ...otherProps,
+      symbol: reverseSymbol(opts.symbol),
+      algo_type: 'POSITIONAL_TP_SL',
+      child_orders: [],
+    };
+
+    if (typeof opts.stopLoss === 'number') {
+      req.child_orders.push({
+        ...otherProps,
+        algo_type: 'STOP_LOSS',
+        type: 'CLOSE_POSITION',
+        side: opts.side === OrderSide.Sell ? 'SELL' : 'BUY',
+        trigger_price: `${adjust(opts.stopLoss, pPrice)}`,
+      });
+    }
+
+    if (typeof opts.takeProfit === 'number') {
+      req.child_orders.push({
+        ...otherProps,
+        algo_type: 'TAKE_PROFIT',
+        type: 'CLOSE_POSITION',
+        side: opts.side === OrderSide.Sell ? 'SELL' : 'BUY',
+        trigger_price: `${adjust(opts.takeProfit, pPrice)}`,
+      });
+    }
+
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.post<{
+        data: { rows: Array<Record<string, any>> };
+      }>(ENDPOINTS.ALGO_ORDER, req);
+
+      return data.rows.map((r) => String(r.orderId));
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  cancelAllOrders = async () => {
+    try {
+      await this.xhr.delete(ENDPOINTS.CANCEL_ORDERS);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+    }
+  };
+
+  cancelSymbolOrders = async (symbol: string) => {
+    try {
+      const wooSymbol = reverseSymbol(symbol);
+      await this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
+        params: { symbol: wooSymbol },
+      });
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+    }
+  };
+
+  setLeverage = (_symbol: string, inputLeverage: number) => {
+    return this.setAllLeverage(inputLeverage);
+  };
+
+  setAllLeverage = async (inputLeverage: number) => {
+    const clamped = Math.min(50, Math.max(1, inputLeverage));
+    const leverage = Math.round(clamped);
+
+    if (this.accountLeverage !== leverage && !this.isDisposed) {
+      try {
+        await this.xhr.post(ENDPOINTS.LEVERAGE, { leverage });
+        this.accountLeverage = leverage;
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.message || err?.message);
+      }
+    }
+  };
+
+  private isAlgoOrder = (orderType: OrderType) => {
+    return (
+      orderType === OrderType.StopLoss || orderType === OrderType.TakeProfit || orderType === OrderType.TrailingStopLoss
+    );
+  };
+}

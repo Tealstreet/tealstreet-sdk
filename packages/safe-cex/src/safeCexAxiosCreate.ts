@@ -1,0 +1,420 @@
+import type { ExchangeOptions } from './types';
+
+import axios, { AxiosInstance, CreateAxiosDefaults } from 'axios';
+
+import { getProxyToken } from './accessToken';
+import { BaseExchange } from './exchanges/base';
+import { createRemoteSigningAdapter } from './remoteSigningAdapter';
+import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
+import { getPrivateProxy } from './utils/getPrivateProxy';
+import { isDevelopment } from './utils/isDevelopment';
+
+/**
+ * Tracks the "real" inner adapter for remote signing instances.
+ * When exchange code sets `xhr.defaults.adapter = howAdapter`, it should
+ * call `setInnerAdapterForRemoteSigning(xhr, howAdapter)` instead so the
+ * remote signing adapter can chain to it.
+ */
+const innerAdapterSlots = new WeakMap<AxiosInstance, { adapter: any }>();
+
+/**
+ * Set the inner adapter (e.g. HOW) for an axios instance that uses remote signing.
+ * Call this instead of setting `xhr.defaults.adapter` directly when remote signing is active.
+ */
+export const setInnerAdapterForRemoteSigning = (instance: AxiosInstance, adapter: any): void => {
+  const slot = innerAdapterSlots.get(instance);
+  if (slot) {
+    slot.adapter = adapter;
+  } else {
+    // No remote signing on this instance, set directly
+    instance.defaults.adapter = adapter;
+  }
+};
+
+/**
+ * Install the remote signing adapter on an axios instance if remoteSigner is set.
+ */
+const maybeInstallRemoteSigningAdapter = (
+  axiosInstance: AxiosInstance,
+  options: ExchangeOptions,
+  exchangeName: string,
+): void => {
+  if (!options.remoteSigner) return;
+
+  const slot = { adapter: undefined as any };
+  innerAdapterSlots.set(axiosInstance, slot);
+
+  axiosInstance.defaults.adapter = createRemoteSigningAdapter(
+    options.remoteSigner,
+    exchangeName as any,
+    () => slot.adapter,
+    options.remoteSigner.accountName,
+  );
+};
+
+/**
+ * Rolling window HTTP request stats tracker
+ * Tracks requests per minute using a sliding window
+ */
+class HttpRequestStatsTracker {
+  private timestamps: number[] = [];
+  private windowMs = 60000; // 1 minute window
+  private logIntervalMs = 10000; // Log every 10 seconds
+  private lastLogTime = 0;
+  private totalRequests = 0;
+  private errorCount = 0;
+  private requestsByExchange: Map<string, number> = new Map();
+
+  /**
+   * Record a request being made
+   */
+  recordRequest(exchangeName: string): void {
+    const now = Date.now();
+    this.timestamps.push(now);
+    this.totalRequests++;
+    const current = this.requestsByExchange.get(exchangeName) || 0;
+    this.requestsByExchange.set(exchangeName, current + 1);
+    this.cleanup(now);
+    this.maybeLog(now);
+  }
+
+  /**
+   * Record a request error
+   */
+  recordError(): void {
+    this.errorCount++;
+  }
+
+  /**
+   * Get requests per minute (in rolling window)
+   */
+  getRequestsPerMinute(): number {
+    this.cleanup(Date.now());
+    return this.timestamps.length;
+  }
+
+  /**
+   * Clean up old timestamps outside the window
+   */
+  private cleanup(now: number): void {
+    const cutoff = now - this.windowMs;
+    // Find first valid timestamp index, then slice (O(n) vs O(n²) with shift loop)
+    if (this.timestamps.length > 0 && this.timestamps[0] < cutoff) {
+      let firstValidIndex = 0;
+      while (firstValidIndex < this.timestamps.length && this.timestamps[firstValidIndex] < cutoff) {
+        firstValidIndex++;
+      }
+      if (firstValidIndex > 0) {
+        this.timestamps = this.timestamps.slice(firstValidIndex);
+      }
+    }
+  }
+
+  /**
+   * Log stats periodically (disabled - enable for debugging)
+   */
+  private maybeLog(now: number): void {
+    if (now - this.lastLogTime >= this.logIntervalMs) {
+      // const reqsPerMin = this.getRequestsPerMinute();
+      // const reqsPerSec = (reqsPerMin / 60).toFixed(1);
+      // const byExchange = Array.from(this.requestsByExchange.entries())
+      //   .map(([name, count]) => `${name}:${count}`)
+      //   .join(' ');
+      // console.log(`[DEBUG] 🌐 HTTP stats: ${reqsPerMin}/min (${reqsPerSec}/sec) | total=${this.totalRequests} errors=${this.errorCount} | ${byExchange}`);
+      this.lastLogTime = now;
+    }
+  }
+
+  /**
+   * Get current stats
+   */
+  getStats(): { perMinute: number; total: number; errors: number } {
+    return {
+      perMinute: this.getRequestsPerMinute(),
+      total: this.totalRequests,
+      errors: this.errorCount,
+    };
+  }
+}
+
+// Global HTTP request stats tracker
+export const httpStats = new HttpRequestStatsTracker();
+
+export const getProxyForAxios = (config: CreateAxiosDefaults, options: ExchangeOptions): string =>
+  config.baseURL?.includes('binance') &&
+  (options.publicDataOnly || !Boolean((config?.headers as any)?.['X-MBX-APIKEY']))
+    ? 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy'
+    : options.tealstreetProxy
+      ? getPrivateProxy(config?.baseURL, true, options.proxyRegion === 'JA' ? true : false)
+      : '';
+
+const lastLogReq: { [key: string]: number } = {};
+const lastLogRes: { [key: string]: number } = {};
+
+export const LAST_LOG_PERIODICY = 30 * 1_000;
+
+export const safeCexAxiosCreateNoProxy = (
+  config: CreateAxiosDefaults,
+  options: ExchangeOptions,
+  exchange: BaseExchange,
+): AxiosInstance => {
+  const axiosInstance = axios.create({
+    ...config,
+    timeout: 20_000,
+  });
+
+  // Track HTTP request stats
+  axiosInstance.interceptors.request.use(
+    (config) => {
+      httpStats.recordRequest(exchange.name);
+      return config;
+    },
+    (error) => Promise.reject(error),
+  );
+
+  // Add error interceptor for enhanced error messages
+  axiosInstance.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      httpStats.recordError();
+      // Enhance the error with more context
+      const enhancedError = enhanceAxiosError(error, exchange.name);
+      return Promise.reject(enhancedError);
+    },
+  );
+
+  maybeInstallRemoteSigningAdapter(axiosInstance, options, exchange.name);
+
+  return axiosInstance;
+};
+
+export const safeCexAxiosCreate = (
+  config: CreateAxiosDefaults,
+  options: ExchangeOptions,
+  exchange: BaseExchange,
+): AxiosInstance => {
+  // For GRVT and blofin, use private proxy when either tealstreetTunnel or tealstreetProxy is enabled
+  // (these exchanges don't support the tunnel/HOW adapter)
+  const effectiveOptions =
+    (exchange.name === 'grvt' || exchange.name === 'blofin') && options.tealstreetTunnel
+      ? { ...options, tealstreetProxy: true }
+      : options;
+
+  const privateProxyUrl =
+    options.tealstreetTunnel && exchange.name !== 'blofin' && exchange.name !== 'grvt'
+      ? ''
+      : getProxyForAxios(config, effectiveOptions);
+  const isPrivateProxyEnabled = privateProxyUrl !== '';
+  const baseURLWithProxy = isPrivateProxyEnabled ? `${privateProxyUrl}/${config?.baseURL}` : config?.baseURL;
+  const finalBaseURLWithProxy =
+    (baseURLWithProxy?.includes('fsjnpy143pbz') || baseURLWithProxy?.includes('cors-anywhere-cf-sg')) &&
+    baseURLWithProxy?.includes('www.bitmex.com') &&
+    !options.tealstreetTunnel
+      ? baseURLWithProxy?.replace(/www\.bitmex\.com/, 'api.direct.bitmex.com')
+      : baseURLWithProxy;
+  //const finalBaseURLWithProxy = baseURLWithProxy;
+  const axiosInstance = axios.create({
+    ...config,
+    // 20_000 is more than reasonable just in case
+    timeout: 20_000,
+    baseURL: finalBaseURLWithProxy,
+    ...(options.overrideProxyUrl ? { baseURL: `${options.overrideProxyUrl}/${config?.baseURL}` } : {}),
+  });
+
+  // Track HTTP request stats (first interceptor)
+  axiosInstance.interceptors.request.use(
+    (config) => {
+      httpStats.recordRequest(exchange.name);
+      return config;
+    },
+    (error) => Promise.reject(error),
+  );
+
+  axiosInstance.interceptors.request.use(
+    async (config) => {
+      // console.log(config, privateProxyUrl, options, isPrivateProxyEnabled);
+      if (!isPrivateProxyEnabled) {
+        return config;
+      }
+
+      // Get proxy token from SharedWorker (handles all fetching centrally)
+      const token = await getProxyToken();
+
+      // For GRVT, use Tealstreet-Authorization header to avoid conflict with GRVT's
+      // session-based authentication (Cookie + X-Grvt-Account-Id headers)
+      // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
+      if (exchange.name === 'grvt') {
+        config.headers['Tealstreet-Authorization'] = `Bearer ${token}`;
+      } else {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+
+      // Add browser-like headers for CLI requests to proxy
+      // Cloudflare Worker requires these headers for CORS validation
+      if (typeof window === 'undefined') {
+        config.headers.Origin = 'https://trade.tealstreet.io';
+        config.headers.Referer = 'https://trade.tealstreet.io/';
+        config.headers['User-Agent'] =
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+        config.headers['sec-fetch-mode'] = 'cors';
+        config.headers['sec-fetch-site'] = 'cross-site';
+        config.headers['sec-fetch-dest'] = 'empty';
+      }
+
+      // Token expiration is handled by SharedWorker - it auto-refreshes before expiration
+      return config;
+    },
+    (error) => {
+      return Promise.reject(error);
+    },
+  );
+  // if (exchange.name === 'woofi') {
+  //   axiosInstance.interceptors.request.use((config) => {
+  //     if (config.method === 'DELETE') {
+  //       config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  //     }
+  //     return config;
+  //   });
+  // }
+  axiosInstance.interceptors.request.use(async (config) => {
+    let shouldLog = isDevelopment;
+    if (!shouldLog) {
+      for (const endpoint of exchange.grafanaEndpointsEvery) {
+        if (config.url?.includes(endpoint)) {
+          shouldLog = true;
+          break;
+        }
+      }
+      for (const endpoint of exchange.grafanaEndpointsPeriodic) {
+        if (config.url?.includes(endpoint)) {
+          if (!lastLogReq[endpoint] || Date.now() - lastLogReq[endpoint] >= LAST_LOG_PERIODICY) {
+            shouldLog = true;
+            lastLogReq[endpoint] = Date.now();
+          }
+          break;
+        }
+      }
+    }
+    // TODO: These events are NOT sent to Grafana (handler on main thread skips grafanaLog).
+    // HOW exchanges already log HTTP traffic to Grafana via grafana-pws/grafana-pws-sub.
+    // Decide whether non-HOW exchanges should get parity — would increase Grafana log volume.
+    if (shouldLog) {
+      try {
+        const reqSummary = JSON.stringify({
+          method: config.method?.toUpperCase(),
+          url: config.url,
+          body: config.data,
+          params: config.params,
+        });
+        exchange.emitter.emit(
+          'grafana-http-request',
+          'Request ' + config.method?.toUpperCase() + ' ' + config.url + ' ' + reqSummary,
+        );
+      } catch (e) {
+        console.error('Error emitting grafana-http-request', e);
+      }
+    }
+    return config;
+  });
+  axiosInstance.interceptors.response.use(
+    async (response) => {
+      let shouldLog = isDevelopment;
+      /* Logging */
+      if (!shouldLog) {
+        for (const endpoint of exchange.grafanaEndpointsEvery) {
+          if (response.config.url?.includes(endpoint)) {
+            shouldLog = true;
+            break;
+          }
+        }
+        for (const endpoint of exchange.grafanaEndpointsPeriodic) {
+          if (response.config.url?.includes(endpoint)) {
+            if (!lastLogRes[endpoint] || Date.now() - lastLogRes[endpoint] >= LAST_LOG_PERIODICY) {
+              shouldLog = true;
+              lastLogRes[endpoint] = Date.now();
+            }
+            break;
+          }
+        }
+      }
+      // TODO: Same as grafana-http-request above — not sent to Grafana yet for non-HOW exchanges.
+      if (shouldLog) {
+        try {
+          const resSummary = JSON.stringify({
+            status: response.status,
+            body: response.data,
+          });
+          exchange.emitter.emit(
+            'grafana-http-response',
+            'Response ' +
+              response.config.method?.toUpperCase() +
+              ' ' +
+              response.config.url +
+              ' ' +
+              response.status +
+              ' ' +
+              resSummary,
+          );
+        } catch (e) {
+          console.error('Error emitting grafana-http-response', e);
+        }
+      }
+      /* END of Logging */
+      return response;
+    },
+    function (error) {
+      // Enhance the error with more context
+      const enhancedError = enhanceAxiosError(error, exchange.name);
+
+      const status = error?.response?.status;
+
+      // Detect proxy/tunnel failures — surface them clearly instead of letting
+      // them cascade into cryptic downstream errors or silent broken state.
+      if (isPrivateProxyEnabled && status) {
+        const body = error?.response?.data;
+        const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+        if (status === 403 || status === 401) {
+          const msg = `[${exchange.name}] Proxy auth failed (${status}): ${bodyStr}`;
+          console.error(msg);
+          exchange.emitter.emit('error', msg);
+        } else if (status >= 500) {
+          const msg = `[${exchange.name}] Proxy server error (${status}): ${bodyStr}`;
+          console.error(msg);
+          exchange.emitter.emit('error', msg);
+        }
+      }
+
+      if (global?.window) {
+        // Grafana logging — browser/main-thread only to avoid flooding from server-side exchanges
+        try {
+          const isRateLimit = status === 429 || status === 418;
+          const prefix = isRateLimit ? '[RATE LIMITED] ' : '';
+          exchange.emitter.emit(
+            'grafana-error',
+            prefix +
+              'Response ' +
+              error?.config?.method?.toUpperCase() +
+              ' ' +
+              error?.config?.url +
+              ' ' +
+              (status ? `HTTP ${status}` : 'Error') +
+              ': ' +
+              JSON.stringify({
+                message: enhancedError?.message,
+                context: enhancedError?.context,
+                responseBody: error?.response?.data,
+              }),
+          );
+        } catch (e) {
+          console.error('Error emitting grafana-error', e);
+        }
+      }
+
+      return Promise.reject(enhancedError);
+    },
+  );
+
+  maybeInstallRemoteSigningAdapter(axiosInstance, options, exchange.name);
+
+  return axiosInstance;
+};

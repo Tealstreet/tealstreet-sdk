@@ -1,0 +1,90 @@
+---
+title: Aggr
+description: This module hosts a mini browser that automatically loads up an instance of Aggr for market analysis.
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Aggr from '/img/trading/modules/aggr/modules-aggr.png';
+import Aggr2 from '/img/trading/modules/aggr/modules-aggr2.png';
+import Aggr3 from '/img/trading/modules/aggr/modules-aggr.gif';
+
+The **Aggr modules** are mini-browser panels that embed [Aggr](https://charts.aggr.trade/) dashboards directly in Tealstreet. Two variants are available:
+
+- **Aggr (Ticker)**: follows your active trading symbol (dynamic)
+- **Aggr (BTC)**: always shows BTC markets (static)
+
+<div class="text--center">
+    <img src={Aggr2} alt="Aggr 2" style={{ width: 350 }} />
+</div>
+
+Aggr is an excellent way to keep your finger on the pulse of the market with its extremely low timeframes and tick chart support.
+
+:::note
+Aggr module is **not enabled by default** and needs to be manually activated from your module tile selector.
+:::
+
+---
+
+### Enabling Aggr (Ticker Trades)
+
+- Add the **Aggr (Ticker)** module from the module selector.
+- **Dynamic Symbol**: Automatically follows your active trading symbol.
+- **URL**: Loads from `https://aggr2.tealstreet.io/`.
+- **Use Case**: Keep Aggr in sync with what you’re trading.
+
+Covered markets (as embedded):
+
+- Binance Futures
+- Bybit
+- Binance Spot
+- Coinbase (USD and USDT pairs)
+
+### Enabling Aggr (BTC)
+
+- Add the **Aggr (BTC)** module from the module selector.
+- **Static Symbol**: Always shows BTC regardless of your active symbol.
+- **URL**: Loads from `https://aggr.tealstreet.io/`.
+- **Use Case**: Keep a constant BTC Aggr view alongside your other modules.
+
+---
+
+### Enabling the Aggr modules
+
+<div class="text--center">
+    <img src={Aggr} alt="Aggr 1" style={{ width: 600 }} />
+</div>
+
+- You can enable either **Aggr (Ticker)** or **Aggr (BTC)** under the Modules tab.
+
+:::tip
+Remember to unlock your layout to be able to move the module around.
+:::
+
+:::warning
+These modules are not included in the default layout and must be manually enabled before they appear in your trading interface.
+:::
+
+---
+
+### Using the Aggr modules
+
+<div class="text--center">
+    <img src={Aggr3} alt="Aggr 3" style={{ width: 700 }} />
+</div>
+
+- Once activated and positioned how you like, click the "**...**" button in the lower right-hand corner inside Aggr to open Aggr’s own options.
+
+:::note
+**Behavior recap**
+
+- **Aggr (Ticker)** mirrors your active symbol.
+- **Aggr (BTC)** is always BTC.
+  Both are iframe embeds and work in web and desktop layouts.
+  :::

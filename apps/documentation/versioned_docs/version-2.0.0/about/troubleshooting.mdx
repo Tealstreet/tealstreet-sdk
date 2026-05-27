@@ -1,0 +1,163 @@
+---
+title: Troubleshooting
+description: This page will cover some of the most common issues that users experience when trying to connect their favorite exchange to Tealstreet.
+sidebar_position: 4
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+### Troubleshooting
+
+In this page we will cover some of the most common issues that users experience when trying to connect their favorite exchange to Tealstreet. Before moving on to exchange specific issues, here are a few things you can quickly try:
+
+1. First try refreshing the page.
+
+2. If the problem persists, try clearing your browser storage for Tealstreet by clicking the "Clear Data" button:
+
+<div class="text--center">
+
+![Clear](/img/client/cleardata.png)
+
+</div>
+
+For exchange specific issues, use the Sidebar to quickly navigate to the exchange you are experiencing difficulty with.
+
+:::tip
+Visit your favorite exchanges FAQ page for answers to common questions:
+
+[Binance](https://www.binance.com/en/support/faq/c-3?navId=3#16) |
+[BitMEX](https://www.bitmex.com/app/faq) |
+[Bitget](https://www.bitget.com/en/support/categories/360001236891) |
+[Bybit](https://help.bybit.com/hc/en-us/categories/360002654173-Bybit-FAQ-) |
+[OKEx](https://www.okx.com/help/section/faq-top-questions) |
+[Phemex](https://phemex.com/user-guides)
+:::
+
+:::tip
+If you use a password manager and are having trouble with passwords and logging in, try turning off the 'auto log in' function of your password manager for all domains and subdomains related to Tealstreet.
+:::
+
+## [Bybit](https://teal.link/bybit1)
+
+### One-way mode and Hedge mode
+
+:::info
+One-way mode and Hedge mode apply to linear (USDT) pairs on Bybit. These settings are not available to change on the trade page of an inverse market.
+:::
+
+Bybit allows enabling **Hedge Mode** for trading accounts. This means you can have opposite positions on the same contract (e.g., separate longs and shorts on BTC).
+If this is causing any issues, follow the steps below to disable it:
+
+1. Select the trading pair you would like to disable the Hedge Mode for by navigating to Derivaties > USDT Perpetual > Trading Pair.
+
+<div class="text--center">
+
+![Bybit-pair](/img/connect/troubleshoot/bybit-deriv.png)
+
+</div>
+
+2. Click on the Gear icon found on the left sidebar.
+
+<div class="text--center">
+
+![Bybit-Gear](/img/connect/troubleshoot/bybitgear.png)
+
+</div>
+
+3. Click on Position Mode and select One-Way Mode to disable Hedge Mode for that trading pair.
+
+<div class="text--center">
+
+![Bybit-Mode](/img/connect/troubleshoot/bybitmode.png)
+
+</div>
+
+:::note
+You will need to disable Hedge Mode for each trading pair that you are trading.
+:::
+
+## [Binance](https://teal.link/Binance1)
+
+### Hedge Mode
+
+Binance also allows users to enable Hedge mode for the derivatives trading account. Follow the image guide below to learn how to switch between modes:
+
+![Binance-Mode](/img/connect/troubleshoot/binancemode.png)
+
+If you have difficulty adding size to an open position be sure to double check your leverage limits on Binance's website. You might need to adjust leverage limits for each pair you wish to trade.
+
+:::note
+Binance does not submit position liquidation price point for their Coin-M Inverse pairs via API at this time. So, it will not be visible in the Tealstreet terminal.
+:::
+
+### Order Types
+
+Binance distinguishes between 'Close-on-Trigger' and 'Reduce Only' trigger orders.
+
+#### Close on Trigger
+
+Binance 'Close-on-Trigger' orders have _no size field_, and _always close the entire position_
+
+#### Reduce Only
+
+Binance 'Reduce Only' trigger orders function the way Tealstreet treats 'Close-on-Trigger' orders, namely it will only reduce the position by submitting an order up to the total position size at time of trigger.
+
+:::caution
+Tealstreet treats 'Close-on-Trigger' orders the way Binance uses 'Reduce Only' trigger orders.
+Tealstreet does not ever submit an official Binance 'Close-on-Trigger' order. If you already have a resting Binance 'Close-on-Trigger' order and you modify it on Tealstreet it will be amended and converted to a Binance 'Reduce Only' Trigger order (as if you had submitted it on Tealstreet) and the size will be set to your current position size.
+:::
+
+### Exceeding Max Allowable Position
+
+<div class="text--center">
+
+![Exceeding Leverage](/img/connect/troubleshoot/exlev.png)
+
+</div>
+
+This error happens when on Cross margin, and switching between contracts that have different max leverage settings. To fix it on Tealstreet, the user needs to lower the max leverage using the slider or adjusting on Binance's site
+
+:::note
+On Cross, max leverage may be different per market. If your current Max Cross leverage is too high, or the effective Cross leverage is too high (from trading a market with higher limits), when you navigate to a market with lower max leverage limits, you may get an error telling you leverage is too high.
+:::
+
+## [OKEx](https://teal.link/OKEx)
+
+### I was able to add my API to Tealstreet but I can’t submit orders!
+
+If you are unable to submit orders, ensure you have enabled Derivatives & Futures trading in your Account [settings](/docs/2.0.0/connect/okex#account-mode).
+
+## [Phemex](https://teal.link/Phemex)
+
+:::note
+New Phemex API Keys can take up to 30 minutes to activate. Tealstreet has no influence on the activation time.
+:::
+
+### I can’t get my API keys to submit on Tealstreet!
+
+Double check to make sure you selected the ‘Default API entry’ when you created the Phemex API key.
+If you chose the ‘High rate limit API entry’ then you could not have submitted all the required IP addresses for whitelisting. There are four of them!
+
+<div class="text--center">
+
+![API-Types](/img/connect/troubleshoot/phemexAPItypes.png)
+
+</div>
+
+### My wallet / margin balance displays zero but I know I have money in my account!
+
+Phemex utilizes multiple wallets to help keep funds separate. Make sure you have funds in your ‘Contract Trading Accounts.’
+
+<div class="text--center">
+
+![Wallets](/img/connect/troubleshoot/phemexwallets.png)
+
+</div>
+
+### I successfully linked my Phemex API key to Tealstreet, but the Place Order window in the terminal won’t load!
+
+- Try submitting a test order on the Phemex UI.The position should show in the Open Positions window of Tealstreet and force the Place Order window to load. The issue is caused by new Phemex accounts without trade history.
+- If it still does not load after submitting a test order. Please contact Tealstreet [support](/docs/support/contact-us) either by email or tag us in Discord.

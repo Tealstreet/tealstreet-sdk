@@ -1,0 +1,90 @@
+---
+title: Browser View
+description: Browser View allows you to embed a browser window into Tealstreet. This is useful for keeping an eye on other tools or charts while trading.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import BrowserView from '/img/trading/browser-view/browser-view.png';
+import BrowserView2 from '/img/trading/browser-view/browser-view-highlights.png';
+import BrowserViewExample from '/img/trading/browser-view/browserview-example.png';
+import BrowserViewExample2 from '/img/trading/browser-view/browserview-example2.png';
+import BrowserViewActivation from '/img/trading/browser-view/browserview-activation.png';
+import CommonSettings from '/img/trading/common/common-settings.png';
+
+This section will go over how to activate and start using the **Browser View module**.
+
+<div class="text--center">
+    <img src={BrowserView} alt="Browser View" style={{ width: 550 }} />
+</div>
+
+- Keep an eye on another tool or chart while trading
+    - Embed Aggr to watch the pulse of the asset being traded
+    - Tradingview for its alerts from your own TV account if you have one
+    - KingFisher for liquidation analysis
+    - And more!
+
+---
+
+### Activating the Browser View module
+
+Activate a browser view module by going to your Tealstreet Settings
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Common Settings" style={{ width: 350 }} />
+</div>
+
+Then enable the Browser View module
+
+<div class="text--center">
+    <img src={BrowserViewActivation} alt="Browser View Activation" style={{ width: 350 }} />
+</div>
+
+:::note
+Browser view does not work inside of the web-browser. This feature is for the Desktop version of Tealstreet. (Technical limitations of browser engines)
+:::
+
+---
+
+### Usage
+
+Once activated, you can open a new browser view by clicking the "Open Browser View" button in the top bar
+
+<div class="text--center">
+    <img src={BrowserView2} alt="Browser View (Highlights)" style={{ width: 500 }} />
+</div>
+
+<details open>
+    <summary>More info</summary>
+    <p>
+        <br />
+        1. Browser address to display in the module <br />
+        2. Duplicate/Delete button to add or remove modules
+        <br />
+        3. Adjustable module size and shape to help with positioning
+    </p>
+</details>
+
+---
+
+### Examples
+
+  <details>
+    <summary>
+        Example Layouts
+    </summary>
+    Using Aggr to keep track of the current price movement with Tradingview located on the side
+    <div class="text--center">
+        <img src={BrowserViewExample} alt="Browser View Example" style={{width: 1000}} />
+    </div><br /><br />
+    Using Arkham to track inflows on an altcoin launch
+    <div class="text--center">
+        <img src={BrowserViewExample2} alt="Browser View Example 2" style={{width: 1000}} />
+    </div><br />
+
+</details>

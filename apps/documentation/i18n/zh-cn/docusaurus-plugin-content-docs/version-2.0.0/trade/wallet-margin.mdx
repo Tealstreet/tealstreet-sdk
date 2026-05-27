@@ -1,0 +1,55 @@
+---
+title: 保证金钱包
+description: Aggregated information on your wallet data and margin.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import MarginWallet from '/img/trading/margin-wallet/margin-wallet.gif';
+
+# 保证金和钱包
+
+在本页面中，您将了解 Tealstreet 的保证金/钱包窗口。
+
+## 保证金窗口
+
+一旦您连接了交易所 API，Tealstreet 的保证金窗口将显示您的：
+
+- 当前交易 API 连接
+- 钱包余额
+- 未实现的盈亏
+- 保证金余额
+- 仓位保证金
+- 可用保证金
+- 交易模式（单向 | 套保）
+- 保证金类型（全仓 | 逐仓）
+- 有效杠杆
+- 最大杠杆（多头 | 空头）
+- 一个滑动条，可轻松调整杠杆比例
+- 当前交易资产的资金
+- 当前交易资产的持仓量
+- 当前交易资产的 24 小时成交量变化
+- 当前交易资产的 24 小时价格变化
+
+<div class="text--center">
+    <img src={MarginWallet} alt="保证金钱包" style={{ width: 400 }} />
+</div>
+
+根据您的主要交易设置和市场/交易对的选择，您的窗口可能会有所不同。您可以使用滑块来更改所选交易对的杠杆。
+
+### 其他信息
+
+:::note
+如果您没有看到任何余额，请仔细检查您的交易所 API 是否正确连接。其次，您交易的是哪种加密货币？如果不是 BTC，则需要在主要交易设置中调整市场/交易对。
+
+- 如果您遇到任何问题，请*[联系我们](/docs/support/contact-us)*
+  :::
+
+:::tip
+单击“USD”按钮，以显示您的数字而不是加密货币。单击“合并钱包”以显示当前选择的交易所 API 的整个余额。
+:::

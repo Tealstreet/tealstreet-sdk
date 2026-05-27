@@ -1,0 +1,68 @@
+---
+title: Webhooks
+description: Webhooks are a way for Tealstreet to send you alerts when certain conditions are met or to execute orders through third party partners.
+sidebar_position: 6
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WebHooks1 from '/img/trading/webhooks/webhooks1.png';
+import WebHooks2 from '/img/trading/webhooks/webhooks2.png';
+import WebHooks3 from '/img/trading/webhooks/webhooks3.png';
+import WebHooks4 from '/img/trading/webhooks/webhooks4.png';
+
+Webhooks are a way to extend certain functionality such as alerts or executing orders.
+
+### Creating a webhook
+
+<div class="text--center">
+    <img src={WebHooks1} alt="Web Hooks 1" style={{ width: 750 }} />
+</div>
+
+1. To begin click the Webhooks link at the top of the terminal.
+2. Then click the New Webhook button to begin the creation process.
+
+<div class="text--center">
+    <img src={WebHooks2} alt="Web Hooks 1" style={{ width: 750 }} />
+</div>
+
+:::note
+Note that in the case of **[Runbot](/docs/2.0.0/webhooks/runbot)** you will need to select an appropriate key as they do not support all exchanges. For example, if you are using a **Binance** Runbot strategy you will need to select a **Binance** API key.
+:::
+
+1. First Select the API key you wish to use for the webhook.
+2. Give it a name, this is purely for your own reference.
+3. Enter the encryption key for the API key you are selecting.
+4. Select an expiration date. This is the date at which the webhook will no longer be valid.
+5. Click Create.
+
+---
+
+### Linking the webhook
+
+Once created you will get a popup with the webhook URL. This is the URL you will need to use to link the webhook to other services (such as Runbot).
+
+<div class="text--center">
+    <img src={WebHooks3} alt="Web Hooks 1" style={{ width: 700 }} />
+</div>
+
+You should keep this information safe & secure.
+
+:::caution
+You should not share your webhook with others. Tealstreet team members will **never** ask you for this information.
+:::
+
+<div class="text--center">
+    <img src={WebHooks4} alt="Web Hooks 1" style={{ width: 800 }} />
+</div>
+
+Once activated and ready for use your webhook will look like this inside the terminal.
+
+:::tip
+Check out the **[Runbot](/docs/2.0.0/webhooks/runbot)** documentation for an example of how to use your newly created webhook.
+:::

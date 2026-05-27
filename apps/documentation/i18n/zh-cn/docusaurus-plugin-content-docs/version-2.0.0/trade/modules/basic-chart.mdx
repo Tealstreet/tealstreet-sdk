@@ -1,0 +1,79 @@
+---
+title: 基础图表
+description: 本节将介绍 Tealstreet 的基础图表功能
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import BasicChart from '/img/trading/basicchart.png';
+import BasicChart2 from '/img/trading/basicchart2.png';
+import BasicCharts from '/img/blog/basiccharts.png';
+import BasicChartExample from '/img/trading/basic-charts/basiccharts-example1.png';
+import BasicChartExample2 from '/img/trading/basic-charts/basiccharts-example2.png';
+
+本节将介绍 Tealstreet 的 **基础图表模块**
+
+<div class="text--center">
+    <img src={BasicChart} alt="Basic Chart" style={{ width: 650 }} />
+</div>
+
+使用此工具，您可以在终端上放置任何 TradingView 支持的图表。
+
+---
+
+### 功能
+
+- 可以使用顶部框架上的 + 按钮复制/删除窗口
+- 顶部栏设置在刷新后保留
+- 位置和大小保存在 TS 工作区布局中
+
+<details open>
+    <summary>更多信息</summary>
+    <p>
+        <div class="text--center">
+            <img src={BasicChart2} alt="基础图表（详细）" style={{ width: 500 }} />
+        </div>
+        1. 加号按钮可用于复制或删除基础图表窗口 <br />
+        2. 顶部标题（股票代码和时间框架）是唯一一个在刷新后保留其设置的部分。在图表内进行的更改不会被保留 <br />
+        3. 当工作区被解锁时，您可以拖动底部角来扩展/缩小窗口。这些设置将作为当前活动的工作区配置文件的一部分保存 <br />
+    </p>
+</details>
+
+---
+
+### 其他信息
+
+可以从 _[Sam 的博客文章](https://www.tealstreet.io/tealstreet-1-5-2-release-notes/)_ 中阅读一些其他信息
+
+:::note
+基础图表窗口是一个独立的窗口，可用于显示 TradingView 上任何工具的图表。它的常见用途是显示您感兴趣的其他工具的图表，例如指数或美元。
+:::
+
+:::caution
+您将无法通过基础图表在主图表上交易头寸。
+:::
+
+---
+
+### 示例
+
+<details>
+    <summary>示例布局</summary>
+    <br />
+    <div class="text--center">
+        <img src={BasicCharts} alt="基础图表（详细）" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <div class="text--center">
+        <img src={BasicChartExample} alt="基础图表（详细）" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <div class="text--center">
+        <img src={BasicChartExample2} alt="基础图表（详细）" style={{ width: 1000 }} />
+    </div>
+</details>

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poseidon Crypto WASM Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background-color: #f9f9f9;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #4CAF50;
+            font-family: monospace;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+        .error {
+            border-left-color: #f44336;
+            color: #f44336;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.loading {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status.ready {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>Poseidon Crypto WASM Demo</h1>
+
+    <div id="status" class="status loading">Loading WASM module...</div>
+
+    <!-- Poseidon2 Hash Demo -->
+    <div class="section">
+        <h2>Poseidon2 Hash</h2>
+        <label for="hashInput">Input (hex string, must be multiple of 8 bytes = 16 hex chars):</label>
+        <input type="text" id="hashInput" placeholder="e.g., 0000000000000000000000000000000000000000000000000000000000000000">
+        <button onclick="testHash()">Hash</button>
+        <div id="hashOutput" class="output" style="display:none;"></div>
+    </div>
+
+    <!-- Poseidon2 Hash Two-to-One Demo -->
+    <div class="section">
+        <h2>Poseidon2 Hash Two-to-One</h2>
+        <label for="hash1">First Hash (32 hex chars):</label>
+        <input type="text" id="hash1" placeholder="First hash output">
+        <label for="hash2">Second Hash (32 hex chars):</label>
+        <input type="text" id="hash2" placeholder="Second hash output">
+        <button onclick="testHashTwoToOne()">Combine Hashes</button>
+        <div id="hashTwoOutput" class="output" style="display:none;"></div>
+    </div>
+
+    <!-- Schnorr Signature Demo -->
+    <div class="section">
+        <h2>Schnorr Signature</h2>
+        <button onclick="generateKeys()">Generate New Key Pair</button>
+        <div id="keysOutput" class="output" style="display:none;"></div>
+
+        <label for="message">Message (hex string, must be multiple of 8 bytes):</label>
+        <input type="text" id="message" placeholder="e.g., 0000000000000000000000000000000000000000000000000000000000000001">
+
+        <label for="privateKey">Private Key (hex, 80 chars):</label>
+        <input type="text" id="privateKey" placeholder="Private key from key generation">
+
+        <button onclick="signMessage()">Sign Message</button>
+        <div id="signOutput" class="output" style="display:none;"></div>
+
+        <label for="publicKey">Public Key (hex, 80 chars):</label>
+        <input type="text" id="publicKey" placeholder="Public key from key generation">
+
+        <label for="signature">Signature (hex, 160 chars):</label>
+        <input type="text" id="signature" placeholder="Signature from signing">
+
+        <button onclick="verifySignature()">Verify Signature</button>
+        <div id="verifyOutput" class="output" style="display:none;"></div>
+    </div>
+
+    <script src="wasm_exec.js"></script>
+    <script>
+        let wasmReady = false;
+
+        // Initialize WASM
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("poseidon_crypto.wasm"), go.importObject)
+            .then((result) => {
+                go.run(result.instance);
+                wasmReady = true;
+                document.getElementById('status').textContent = 'WASM module loaded and ready!';
+                document.getElementById('status').className = 'status ready';
+            })
+            .catch((err) => {
+                console.error('Failed to load WASM:', err);
+                document.getElementById('status').textContent = 'Error loading WASM: ' + err.message;
+                document.getElementById('status').className = 'status error';
+            });
+
+        function showOutput(elementId, content, isError = false) {
+            const output = document.getElementById(elementId);
+            output.textContent = content;
+            output.style.display = 'block';
+            if (isError) {
+                output.classList.add('error');
+            } else {
+                output.classList.remove('error');
+            }
+        }
+
+        function testHash() {
+            if (!wasmReady) {
+                showOutput('hashOutput', 'WASM not ready yet', true);
+                return;
+            }
+
+            const input = document.getElementById('hashInput').value.trim();
+            try {
+                const result = poseidon2Hash(input);
+                if (result.error) {
+                    showOutput('hashOutput', 'Error: ' + result.error, true);
+                } else {
+                    showOutput('hashOutput', 'Hash: ' + result);
+                }
+            } catch (err) {
+                showOutput('hashOutput', 'Error: ' + err.message, true);
+            }
+        }
+
+        function testHashTwoToOne() {
+            if (!wasmReady) {
+                showOutput('hashTwoOutput', 'WASM not ready yet', true);
+                return;
+            }
+
+            const hash1 = document.getElementById('hash1').value.trim();
+            const hash2 = document.getElementById('hash2').value.trim();
+            try {
+                const result = poseidon2HashTwoToOne(hash1, hash2);
+                if (result.error) {
+                    showOutput('hashTwoOutput', 'Error: ' + result.error, true);
+                } else {
+                    showOutput('hashTwoOutput', 'Combined Hash: ' + result);
+                }
+            } catch (err) {
+                showOutput('hashTwoOutput', 'Error: ' + err.message, true);
+            }
+        }
+
+        function generateKeys() {
+            if (!wasmReady) {
+                showOutput('keysOutput', 'WASM not ready yet', true);
+                return;
+            }
+
+            try {
+                const keys = schnorrGenerateKeys();
+                if (keys.error) {
+                    showOutput('keysOutput', 'Error: ' + keys.error, true);
+                } else {
+                    const output = `Private Key: ${keys.privateKey}\nPublic Key: ${keys.publicKey}`;
+                    showOutput('keysOutput', output);
+                    document.getElementById('privateKey').value = keys.privateKey;
+                    document.getElementById('publicKey').value = keys.publicKey;
+                }
+            } catch (err) {
+                showOutput('keysOutput', 'Error: ' + err.message, true);
+            }
+        }
+
+        function signMessage() {
+            if (!wasmReady) {
+                showOutput('signOutput', 'WASM not ready yet', true);
+                return;
+            }
+
+            const message = document.getElementById('message').value.trim();
+            const privateKey = document.getElementById('privateKey').value.trim();
+
+            try {
+                const signature = schnorrSign(message, privateKey);
+                if (signature.error) {
+                    showOutput('signOutput', 'Error: ' + signature.error, true);
+                } else {
+                    showOutput('signOutput', 'Signature: ' + signature);
+                    document.getElementById('signature').value = signature;
+                }
+            } catch (err) {
+                showOutput('signOutput', 'Error: ' + err.message, true);
+            }
+        }
+
+        function verifySignature() {
+            if (!wasmReady) {
+                showOutput('verifyOutput', 'WASM not ready yet', true);
+                return;
+            }
+
+            const message = document.getElementById('message').value.trim();
+            const publicKey = document.getElementById('publicKey').value.trim();
+            const signature = document.getElementById('signature').value.trim();
+
+            try {
+                const isValid = schnorrVerify(message, publicKey, signature);
+                if (isValid.error) {
+                    showOutput('verifyOutput', 'Error: ' + isValid.error, true);
+                } else if (isValid === true) {
+                    showOutput('verifyOutput', 'Signature is VALID ✓');
+                } else {
+                    showOutput('verifyOutput', 'Signature is INVALID ✗', true);
+                }
+            } catch (err) {
+                showOutput('verifyOutput', 'Error: ' + err.message, true);
+            }
+        }
+    </script>
+</body>
+</html>

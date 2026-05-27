@@ -1,0 +1,90 @@
+---
+title: PNL 卡片
+description: PnL cards are a new feature that makes it easy to share your trading gains or losses on a Profit & Loss card.
+sidebar_position: 14
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import PNLCard from '/img/trading/pnl-cards/pnlcard.png';
+import PrePNLCard from '/img/trading/pnl-cards/pre-pnlcard.png';
+import PNLCardExample from '/img/trading/pnl-cards/pnlcard-example.png';
+import PNLCardExample2 from '/img/trading/pnl-cards/pnlcard-example2.png';
+import PNLCardFindPepe from '/img/trading/pnl-cards/pnlcard-findpepe.png';
+import PNLCardDetailed from '/img/trading/pnl-cards/pnlcard-detailed.png';
+
+## PNL 卡片
+
+PNL 卡片是一项新功能，可轻松查看您的交易收益或损失。
+
+<div class="text--center">
+    <img src={PNLCard} alt="PNL Card" style={{ width: 450 }} />
+</div>
+
+### 概述
+
+- PNL 卡片是一个强大的工具，可帮助您跟踪：
+    - 使用的杠杆以及交易方向
+    - 快照时的价格
+    - 您的收益或损失
+
+这为您提供了一个可共享的一目了然的交易表现视图，非常适合自我记录和与朋友分享。
+
+---
+
+### 生成 PNL 卡片
+
+- 要生成 PNL 卡片，您需要打开一笔交易。一旦打开交易，您可以单击 Unrealized PNL 显示下方的指示弹出按钮。
+
+    <div class="text--center">
+        <img src={PrePNLCard} alt="Pre PNL Card" style={{ width: 700 }} />
+    </div>
+
+- 这将打开一个新窗口，其中包含 PNL 卡片。然后，您可以单击“生成 PNL 卡片”按钮以生成卡片。
+
+<details open>
+    <summary>详细说明</summary>
+    <p>
+        <div class="text--center">
+            <img src={PNLCardDetailed} alt="PNL Card Detailed" style={{ width: 600 }} />
+        </div>
+        1. 基于 ROE 或 ROI 计算头寸。
+        <br />
+        2. 用于卡片的主题样式（季节选项是临时的）
+        <br />
+        3. 刷新、复制、下载和查找 Pepe。这些可以用于自定义、下载或将图像复制到剪贴板
+        <br />
+    </p>
+</details>
+
+<div class="text--center">
+    <img src={PNLCardFindPepe} alt="PNL Card (Find Pepe)" style={{ width: 300 }} />
+</div>
+
+:::note
+
+- 您可以通过拖动 Pepe 边框的边缘来调整 Pepe 的大小和位置
+  :::
+
+---
+
+### 示例
+
+<details>
+    <summary>示例</summary>
+    <p>
+        1. 简单的设计，带有 Pepe，使用 ROE 进行计算
+        <div class="text--center">
+            <img src={PNLCardExample} alt="PNL Card Example 1" style={{ width: 800 }} />
+        </div>
+        <br />
+        2. 原始设计，带有超大的 Pepe，使用 ROI 进行计算
+        <div class="text--center">
+            <img src={PNLCardExample2} alt="PNL Card Example 2" style={{ width: 800 }} />
+        </div>
+    </p>
+</details>

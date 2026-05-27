@@ -1,0 +1,134 @@
+---
+title: V3 Differences
+description: This is a temporary document to cover the more significant differences between V2 and V3.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import basicV3 from '@site/static/img/about/basic-v3.gif';
+import v3BasicOptions from '@site/static/img/about/v3-basic-options.gif';
+import v3BasicOptions2 from '@site/static/img/about/v3-basic-options-2.gif';
+import v3BasicOptions3 from '@site/static/img/about/v3-basic-options-3.gif';
+import exchangeSetup from '@site/static/img/about/v3-exchange-setup.png';
+import exchangeSetup2 from '@site/static/img/about/v3-exchange-setup-2.png';
+import collapseHeaders from '@site/static/img/about/collapse-headers.png';
+
+---
+
+<div class="text--center">
+
+<iframe
+    width="660"
+    height="315"
+    src="https://www.youtube.com/embed/k0x1LpzwbfQ"
+    frameborder="0"
+    allow="autoplay; encrypted-media"
+    allowfullscreen
+></iframe>
+
+</div>
+
+## Version 3
+
+This document serves as a quick handbook to the V3 changes until the rest of the documents have been retroactively updated.
+
+:::note
+Additional information can be found in the [discord](/docs/support/contact-us)
+:::
+
+### Core changes
+
+Core changes and behavioral updates
+
+- The terminal is now serverless by default when it comes to most functionality.
+
+                    * Users will be able to opt into certain functionalities if they wish to do so on certain exchanges (e.g. api whitelisting)
+                    * API Information is no longer stored on Tealstreet servers.
+                    * Encryption passwords are no longer necessary since the API data never leaves your computer.
+
+- All of its supporting dependencies are fully up to date (latest security patches etc).
+- It is significantly more performant since large swathes of the codebase have been rewritten.
+
+                    * Early impressions before significant backporting of V2 modules suggest somewhere from 200% to 500% faster.
+
+<div class="text--center">
+    <img src={basicV3} alt="Basic V3 Overview" style={{ width: 500 }} />
+</div>
+
+---
+
+### UI/UX changes
+
+- By default layouts have keyboard shortcuts disabled and modules unlocked. You can easily begin to adjust and organize your layout as you desire right from the start.
+
+<div class="text--center">
+    <img src={v3BasicOptions} alt="V3 Basic Options" style={{ width: 500 }} />
+</div>
+
+- Users can click the three-dots button at the top right of each module while in unlocked mode to drag them around.
+- There are various modules you can quickly bring up or toggle off again that dont need to occupy screen real-estate. \* As one example the place order module can be hidden 99% of the time, and only brought up as a floating widget when you wish it to be seen
+
+<div class="text--center">
+    <img src={v3BasicOptions2} alt="V3 Basic Options 2" style={{ width: 600 }} />
+</div>
+
+- Another significant change is the ability to collapse portions of the module headers for more screen real-estate.
+- Most modules can support multiple tabs within themselves that can be switched between.
+
+<div class="text--center">
+    <img src={collapseHeaders} alt="Collapsible module headers" style={{ width: 300 }} />
+</div>
+
+<div class="text--center">
+    <img src={v3BasicOptions3} alt="V3 Basic Options 3" style={{ width: 600 }} />
+</div>
+
+:::warning
+V3 is currently in a state of constant flux. Things may change extremely frequently.
+:::
+
+---
+
+### Account & API changes
+
+The process of linking an API has changed in V3.
+
+For certain exchanges users will be able to opt-in to the Tealstreet network or choose to initiate orders from their own devices
+
+<div class="text--center">
+    <img src={exchangeSetup} alt="Exchange setup" style={{ width: 600 }} />
+</div>
+
+- Some exchanges are better supported then others during this initial launch phase of V3 \* Bybit and Binance are excellent choices for starting out.
+
+<div class="text--center">
+    <img src={exchangeSetup2} alt="Exchange setup 2" style={{ width: 600 }} />
+</div>
+
+---
+
+### Trading related changes
+
+A non exhaustive list of changes to the behavior and feel of trading on the terminal itself.
+
+- Switched from ccxt to safe-cex which has dramatically increased the responsiveness and refresh time of the terminal.
+
+- Chaser orders have been reworked to be more reliable with exchange behavior. \* including adding/reducing existing positions with chase.
+
+- Dom trading is now supported (It can be added by clicking a **+** at the top of the module)
+
+- Native multi-account & multi-chart support.
+
+- CLI has been reworked and simplified. Type **'help'** in it to get a list of commands.
+
+- Modules have been bound together so they can be synced to all trade multiple symbols with multiple charts
+
+- Risk profiler has been integrated directly into the chart. The module itself has been removed.
+
+:::note
+Additional information can be found in the [discord](/docs/support/contact-us)
+:::

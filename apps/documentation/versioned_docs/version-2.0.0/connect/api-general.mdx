@@ -1,0 +1,102 @@
+---
+title: API General
+description: Learn how to connect your API to Tealstreet.
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import Dropdown from '/img/connect/common/dropdown.png';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import Name from '/img/connect/common/name.png';
+import encrypt from '/img/connect/common/encrypt.png';
+
+---
+
+### What is an API?
+
+API stands for **Application Programming Interface** and it is a program that enables one software to interact with the other. The API is a messenger taking requests and telling a system what the user wants it to do then returns the response back to the user. APIs are used extensively in providing data services across a range of fields and contexts.
+
+### How is API used in Tealstreet?
+
+API in trading enables you to interact with the trading system. To be more specific, it allows you to interact directly with your favorite exchange. Connecting your API with Tealstreet enables you to directly connect with the exchange. You can display your wallet balance, place trades and manage your positions.
+
+### How do I connect my API to Tealstreet?
+
+Connecting your API to Tealstreet is the same process for every exchange offered.
+
+- Click the button labeled '**API Keys**' and proceed to click the button labeled '**New API Key**'.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{ width: 700 }} />
+</div>
+
+- Choose the exchange your want to connect to from the dropdown menu.
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 700 }} />
+</div>
+
+- Generate the API key on the exchange you selected and paste it into the Tealstreet terminal to connect it.
+
+For exchange specific tutorials on obtaining your API keys, follow the following links:
+
+- [Binance](/docs/connect/binance)
+- [Bitget](/docs/connect/bitget)
+- [BitMEX](/docs/connect/bitmex)
+- [BingX](/docs/connect/bingx)
+- [Bybit](/docs/connect/bybit)
+- [OKEx](/docs/2.0.0/connect/okex)
+- [Phemex](/docs/connect/phemex)
+- [Woo](/docs/connect/woo)
+- [Kucoin](https://teal.link/kucoin)
+- [Gate.io](https://teal.link/gateio)
+- [Mexc](/docs/2.0.0/connect/mexc)
+
+- After you create your API key you need to whitelist certain IP addresses. Head over to the Tealstreet window where you set the API keys and copy the whitelisted IP(s) and paste them on the exchange website.
+
+:::note
+You can whitelist multiple IP(s).
+
+You do **not** need to manually input IP Addresses on certain exchanges (Bybit, OKX) where Tealstreet is an officially supported 3rd Party App. Theese exchanges have a selector option instead.
+:::
+
+- You can give your API a nickname.
+
+:::tip
+Choose whatever nickname you like! This is useful for traders who use multiple accounts and want to keep track.
+:::
+
+<div class="text--center">
+    <img src={Name} alt="Name" style={{ width: 700 }} />
+</div>
+
+- After choosing a nickname for your API key its time to setup an **Encryption Password.** You can read more about this security feature in the [API Encryption](/docs/2.0.0/connect/api-encryption) section.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{ width: 800 }} />
+</div>
+
+- Once you have filled in all the required information and pasted the Key and Secret from the exchange website you can click the 'Create' button. Its a good idea to double check you've copied the API and Secret correctly or else the accounts will not be linked and you cannot trade until its correct!
+
+:::caution
+**IP Whitelisting** and having an **Encryption Password** is mandatory to save your API in the terminal.
+:::
+
+- You should now see your exchange API listed as an API Key. Click trade to check the connection.
+
+<div class="text--center">
+
+![trade](/img/connect/common/trade.png)
+
+</div>
+
+- Choose your exchange API Key from the dropdown menu as seen below. Your trading / wallet balance should load after a few seconds if there is a proper connection.
+  Click the **Star** icon to add the API Key to your favorites list so you can easily navigate to it.
+
+<div class="text--center">
+
+![apidropdown](/img/connect/common/apidropdown.png)
+
+</div>

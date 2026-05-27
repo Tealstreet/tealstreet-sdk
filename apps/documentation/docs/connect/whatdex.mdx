@@ -1,0 +1,151 @@
+---
+title: WhatDex
+description: Connect your WhatDex account to Tealstreet.
+sidebar_position: 22
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiTeal from '/img/connect/what/api-teal.png';
+import AddingApi from '/img/connect/commonv3/addingapi.jpg';
+import Dropdown from '/img/connect/commonv3/dropdown.png';
+import ExchangeSelection from '/img/connect/commonv3/api-selection.png';
+import WalletConnect from '/img/connect/what/walletconnect.png';
+import WalletConnect2 from '/img/connect/what/walletconnect2.png';
+import ApiDropdown from '/img/connect/what/apidropdown.png';
+import AuthorizeWallet from '/img/connect/what/authorizewallet.png';
+import AuthorizeWallet2 from '/img/connect/what/authorizewallet2.png';
+
+---
+
+<div style={{ maxWidth: 800 }}>
+    <ThemedImage
+        alt="whatdex-logo"
+        sources={{
+            light: useBaseUrl('/img/exchange/whatdex-light.png'),
+            dark: useBaseUrl('/img/exchange/whatdex-dark.png'),
+        }}
+    />
+</div>
+
+## Connecting [WhatDex](https://teal.link/what) to Tealstreet
+
+- Log into your [Tealstreet](http://v3.tealstreet.io/trade) account.
+
+- Click the '**Settings**' button near the top right corner of the terminal.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{width: 900},{height: 75}} />
+</div>
+* Click the '**Add new key**' button at the bottom of the settings page.
+
+<div class="text--center">
+    <img src={Dropdown} alt="TS Dropdown" style={{ width: 600 }} />
+</div>
+* Choose **WhatDex** from the exchange selection menu.
+
+<div class="text--center">
+    <img src={ExchangeSelection} alt="Exchange Selection" style={{ width: 600 }} />
+</div>
+
+Okay lets go back to our **WhatDex** account and create the API Key.
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [WhatDex](https://teal.link/what) and:
+    - Connect your wallet
+
+<div class="text--center">
+    <img src={WalletConnect} alt="Wallet Connect" style={{ width: 500 }} />
+</div>
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **Portfolio** button at the top and choosing **API Keys** from the side menu.
+
+<div class="text--center">
+    <img src={WalletConnect2} alt="Wallet Connect 2" style={{ width: 400 }} />
+</div>
+
+<!-- ::::caution
+What requires you to deposit funds before you can create an API Key. So make sure you take care of that first by using their **Deposit** button at the top right of the page after you have signed in with your wallet.
+:::: -->
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **More** button at the top and choosing **API** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 450 }} />
+</div>
+
+<!-- :::::note
+Paradex requires you to 'Create an Account' before you can create an API Key. You will also need to 'Enable Trading' before you can can finish creating an account.
+:::::
+
+::::tip
+You can get to this page directly by navigating to **[this link](https://salsadex.com/portfolio/api-key?ref=TEALSALSA)**
+:::: -->
+
+- Create your account if you haven't already. It will also enabling trading during the process.
+- After you have created your account and enabled trading you will then need to create the API Key.
+    - Click the **Create API Key** button to begin the process.
+
+<div class="text--center">
+    <img src={AuthorizeWallet2} alt="Authorize Wallet 2" style={{ width: 400 }} />
+</div>
+
+- At the time of this writing you can leave the IP Whitelist option empty.
+- Ensure 'Read' and 'Trading' are selected for the permissions.
+    - Click 'Confirm' to continue and sign the transaction with your wallet.
+
+<div class="text--center">
+    <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 500 }} />
+</div>
+
+<!-- :::::caution
+You will need to have deposited funds before you can finalize the **API Key** creation. If you have not deposited funds you will see a window like the one below.
+::::: -->
+
+- Securely store the API Key information.
+- When done click the **OK** button.
+
+- Now lets return to Tealstreet to resume the API Linking process now that we have the 3 pieces of information we need.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the WhatDex API page.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **Application ID** WhatDex showed you when you created the API Key.
+  - Provide the **API Key** WhatDex created when you created the API Key.
+  - Provide the **API Secret** WhatDex showed you when you created the API Key.
+  - Click done.
+
+:::::caution
+Never share your API Keys with anyone. Tealstreet team members will never ask you what your API key is.
+:::::
+
+:::::info
+Be sure to double check you do not confuse **API Key** and **API Secret.** Connecting your **[WhatDex](https://teal.link/what)** exchange account to Tealstreet will not work if these fields are not entered correctly.
+:::::
+
+If all the details are correct, you will have successfully linked your [WhatDex](https://teal.link/what) account to Tealstreet.
+
+- Close options and navigate to the Main Trading page of the Tealstreet terminal and select the [WhatDex](https://teal.link/what) account you just linked to enable it.
+    - If properly linked, you will see your balance appear in the Margin window of Tealstreet. Happy trading!!!
+
+---
+
+## Frequently Asked Questions
+
+- How do I enable trading on WhatDex? \* WhatDex requires you to enable trading on your account before you can use it. To enable trading, go to the [WhatDex](https://teal.link/what) website and click the **Enable Trading** button after you have signed in with your wallet.

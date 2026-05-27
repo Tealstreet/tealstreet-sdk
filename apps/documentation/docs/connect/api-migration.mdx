@@ -1,0 +1,43 @@
+---
+title: API Migration - DEPRECATED
+description: Migration of API keys (Tealstreet Update 2.0)
+sidebar_position: 99
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+---
+
+With the launch of [Tealstreet 2.0](https://app.tealstreet.io/) in summer 2023 API keys for certain exchanges will need to be edited or remade.
+
+### Migration of API keys (Tealstreet Update 2.0)
+
+- **Binance**: Keys will need to be remade. Please see [Binance](/docs/connect/binance#trading-api)
+- **Bitget**: Keys will need to be remade. Please see [Bitget](/docs/connect/bitget#create-new-api)
+- **Bitmex**: Keys will need to be remade. Please see [Bitmex](/docs/connect/bitmex#api-keys)
+- **Bybit**: Keys should not be affected by this migration.
+- **OkX**: Keys should not be affected by this migration.
+- **Phemex**: Keys will need to be remade. Please see [Phemex](/docs/connect/phemex#api-guide)
+
+:::caution
+Users are encouraged to make **NEW** api keys, as opposed to merely editing existing keys.
+:::
+
+:::danger
+Users will have a 3 day grace-period after the migration is completed to continue using existing trading keys on the legacy version of Tealstreet before it gets phased out.
+:::
+
+---
+
+### Troubleshooting
+
+In this section we will go over some of the common issues that users may encounter during the migration & update process to Tealstreet 2.0.
+
+**My API key is not working / not showing up?**
+
+Due to how the migration of data was processed users who created their API Keys after the data snapshot ( Apr 30) might lose their activated keys during the migration and will need to make new keys.
+
+- If you are having trouble with migrating your API keys, please reach out to us for [support](/docs/support/contact-us).

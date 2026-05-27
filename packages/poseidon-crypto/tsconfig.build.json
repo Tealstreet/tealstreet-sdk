@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "jsx": "preserve",
+    "incremental": false
+  },
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "src/wasm/test_node.js",
+    "src/wasm/validate_wasm.js",
+    "src/wasm/example.html"
+  ]
+}

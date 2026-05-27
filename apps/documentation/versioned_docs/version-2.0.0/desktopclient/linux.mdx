@@ -1,0 +1,117 @@
+---
+title: Linux
+description: Download and install the Tealstreet Desktop Client for Linux.
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+### Linux Desktop Client
+
+<div class="text--center">
+
+![Linux](/img/client/Tux.png)
+
+</div>
+
+This page will go through the download and installation of the Tealstreet Desktop Client for Linux.
+
+- Head on over to the Tealstreet [download page](https://www.tealstreet.io/download/) to download the Tealstreet Desktop client.
+
+- Select the "Download for Linux" Option to automatically start your download
+
+<div class="text--center">
+
+![Download-Windows](/img/client/download-linux.png)
+
+</div>
+
+- The file "Tealstreet-X.X.X.AppImage" will download on your Linux machine.
+
+:::note
+X.X.X represents the current version of the client
+:::
+
+<div class="text--center">
+
+![Setup](/img/client/setup-linux.png)
+
+</div>
+
+---
+
+## Permissions
+
+- Now we need to grant the user account **execution permissions** (Good practice is to not be doing these types of activities on your root account)
+
+<div class="text--center">
+
+![chmod](/img/client/chmod.png)
+
+</div>
+
+```bash
+cd Downloads
+ls
+chmod +x Tealstreet-2.3.5.AppImage
+```
+
+:::caution
+**Ubuntu** users may sometimes require an additional step, they might need to install the **FUSE** package
+:::
+
+```bash
+sudo apt-get install fuse
+```
+
+- You should now be able to run Tealstreet. As an AppImage you do not need to be concerned with '**properly installing**' since Tealstreet just functions like a portable application on most OSes. Double click it within your GUI or else launch it via the command prompt.
+
+<div class="text--center">
+
+![appstart](/img/client/appstart-linux.png)
+
+</div>
+
+```bash
+./Tealstreet-2.3.5.AppImage
+```
+
+:::note
+If you start Tealstreet and it does not load and you are unsure why please try launching it from the terminal so the console can provide additional debugging information. Also please feel free to **[reach out to us](/docs/support/contact-us)** if you have any questions.
+:::
+
+:::caution
+If you do try to run Tealstreet as a root account you might encounter an issue with the sandbox being unable to load which will cause the application to not load. Ideally you should exit root account and run it as a normal user, however if you insist on using root you can run it with the **--no-sandbox** parameter to allow it to run as root.
+:::
+
+---
+
+## Tips
+
+:::tip
+It might be worth your time to setup an **alias** for easier start-up of the terminal. The below screenshot shows a way to create a temporary alias.
+:::
+
+<div class="text--center">
+
+![alias](/img/client/alias-linux.png)
+
+</div>
+
+```bash
+alias terminal="~/Downloads/Tealstreet-2.3.5.AppImage"
+terminal
+```
+
+---
+
+![Tealstreet-Zoom](/img/client/ClientZoom_linux.png)
+
+:::tip
+You can **Zoom** the Tealstreet window in and out by clicking the zoom buttons:
+
+You can also use the keyboard shortcut **Ctrl +** to achieve the same effect.
+:::

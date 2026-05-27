@@ -1,0 +1,86 @@
+---
+title: 复制交易（BETA）
+description: Tealstreet 交叉交易所复制交易
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import CopyTradeTopButton from '/img/trading/copy-trade/copy-trade-setup.png';
+import CopyTradeTraders from '/img/trading/copy-trade/copy-trade-traders.png';
+import CopyTradeCopiers from '/img/trading/copy-trade/copy-trade-copying.png';
+import RequestAccess from '/img/trading/copy-trade/copy-trade-principal.png';
+
+---
+
+<div class="text--center">
+    <img src={CopyTradeTopButton} alt="Copy Trading Setup (Top Button)" style={{ width: 600 }} />
+</div>
+
+Tealstreet **复制交易**是一项允许您复制特定交易者交易的功能。
+
+    * 目前仅适用于TraderSamwise和Pocky。
+    * 目前也仅限于使用Tealstreet反向链接的**Beta**测试组用户。
+      * 您可以在我们的 Discord 上申请进入测试组。[联系我们](/docs/support/contact-us) 获取更多信息。
+
+## 复制交易 - 交易者
+
+<div class="text--center">
+    <img src={CopyTradeTraders} alt="Copy Trading - Traders" style={{ width: 800 }} />
+</div>
+
+- 主要交易员是一组经过精心挑选的交易员，如果您愿意，可以从他们那里复制交易。
+    - 目前，只有某些交易员可以成为主要交易员。
+    - 目前仅指 TraderSamwise。
+    - 主要交易者必须接受您的复制交易请求。
+
+:::note
+复制交易仅限于使用 **[Tealstreet Ref-Link](/docs/ref-links)** 的账户。
+:::
+
+---
+
+### 复制交易 - 复印机
+
+<div class="text--center">
+    <img src={CopyTradeCopiers} alt="Copy Trade - Copiers" style={{ width: 800 }} />
+</div>
+
+- 复**制**部分将显示哪些交易商已在委托人名下注册。
+
+---
+
+## 请求访问主要交易商
+
+<div class="text--center">
+    <img src={RequestAccess} alt="Requesting access to a Principal Copytrader" style={{ width: 800 }} />
+</div>
+
+1. 选择要启用复制交易的 API 密钥。
+2. 重新输入现有的 API 密钥加密密码。
+3. 输入希望使用的大小乘数。
+4. 单击提交。
+
+- 目前，跨交易所复制还处于试验阶段，并不推荐使用。复制与您在同一交易所的交易员可能会达到最佳效果。
+- **大小乘数**： 这是应用于主交易商头寸大小的乘数。如果主交易商开仓 1 BTC，而您的规模乘数为 2，那么您将开仓 2 BTC。
+    - 如果委托人提取/存入保证金，系统将按比例更新乘数。
+        - 发生这种情况时，预计会向所有复印机发送电子邮件。
+
+:::caution
+该功能仍在**BETA**中。请谨慎使用。
+:::
+
+:::note
+您的加密密码不会被共享。您的 API 密钥副本会使用委托人的加密密码重新加密。如需了解更多信息，请参阅我们的 **[API加密页面](/docs/connect/api-encryption)**。
+:::
+
+---
+
+## 常见问题/故障排除
+
+- 创建申请后，能否调整尺寸乘数？
+    - 目前还不能，这一功能预计会在未来的更新中实现。
+        - 目前只需取消当前副本，然后用修改后的倍率申请新副本即可。

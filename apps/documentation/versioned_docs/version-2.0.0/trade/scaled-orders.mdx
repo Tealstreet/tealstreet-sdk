@@ -1,0 +1,175 @@
+---
+title: Scaled Orders
+description: Scaled orders help manage the buying or selling of a large number of contracts at once. They can also be used to improve your average entry or exit price.
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+A Scaled order is an algorithmic tool that enables advanced users to automatically create multiple limit orders across a user-determined price range. This tool also provides control over the diversity and distribution of orders within the price range.
+
+With a scaled buy, orders at lower limits are triggered in sequence as the market price drops; a scaled sell works in reverse, with orders at higher limits getting filled in turn as the market price increases.
+
+:::tip
+Scaled orders help avoid the market impact of buying or selling a large number of contracts in a single transaction. They can also be used to improve your average entry or exit price.
+:::
+
+The Tealstreet Scaled Order is a very powerful tool that you can use to spread your buy and sell orders any ways you like.
+
+<div class="text--center">
+
+_[![ScaledOrders-Video](https://img.youtube.com/vi/gLu-2lx83Hc/hqdefault.jpg)](https://www.youtube.com/watch?v=gLu-2lx83Hc)_
+
+**Watch the video Tutorial on YouTube. Click [Here](https://www.youtube.com/watch?v=gLu-2lx83Hc).**
+
+</div>
+
+To get to the scaled order window: In the **Place Order** tile click the arrow on the "Stop Market" button and select "Scaled".
+
+<div class="text--center">
+
+![Scaled-Drop](/img/trading/scaled-1.gif)
+
+</div>
+
+There are a lot of options in this window each of which are defined below:
+
+<div class="text--center">
+
+![Scaled-BreakDown](/img/trading/scaled-2.png)
+
+</div>
+
+```text
+1. Here you can set the order amount, upper and lower bounds of your scaled order.
+
+2. Action: This determines if you will be placing buy or sell scaled orders.
+
+3. Order Count: This is the number of orders to place.
+
+4. Variance or 'Randomness': You can set the percent variance for price and / or amount or leave both at 0 for no randomness
+
+5. Price Distribution is defined in detail in the next section.
+
+6. The preview button is used to preview your scaled order, the reset button will reset the window and the submit button will submit the order.
+```
+
+---
+
+### How to Place a Scaled Order
+
+:::danger
+Due to the complexities of rounding, please note that scaled orders may submit a Size / Quantity with a ~5% margin of error.
+:::
+
+1. In the scaled order window set your **Upper** and **Lower** price.
+
+2. Input the amount you want to trade and number of orders.
+
+3. Select if you want to place buy or sell orders.
+
+4. Input your preferred amount and price variance percentage (or leave it blank).
+
+5. From the Price Distribution Chart choose how your order is going to be distributed.
+
+6. Use the preview button to preview your order.
+
+:::tip
+You can use the reset button to reset the scaled order window to its default state.
+:::
+
+7. Use the submit button to submit your orders.
+
+<div class="text--center">
+
+![Scaled-Demo](/img/trading/scaled-4.gif)
+
+</div>
+
+---
+
+### Price Distribution
+
+Tealstreet has a unique and powerful way of scaling your orders.
+
+<div class="text--center">
+
+![Price-Distribution](/img/trading/scaled-3.gif)
+
+</div>
+
+The distribution of **Price** and the **Amount** work in very similar ways. The line on the top (red/blue) adjusts the price and the line on the bottom (orange) adjusts the total amount. There are four options:
+
+1. Flat: Set the orders and price in equal divisions across the order count.
+2. Ascending: Set the orders and price in ascending order.
+3. Descending: Set the orders and price in descending order.
+4. Other: You can set the distribution uniquely to your liking by adjusting the nodes individually.
+
+---
+
+### Scaled Orders Hot Keys
+
+:::caution
+If you have never used hotkeys before make sure to enable them in your Trade Settings.
+:::
+
+:::caution
+Please review your hotkey assignments. New hotkey features may conflict with existing saved hotkeys. Your existing hotkeys should have priority meaning new default hotkeys will not work if there are conflicts. Check your settings and change any conflicting hotkeys.
+:::
+
+---
+
+### Scaled Order Preview
+
+In addition to adjusting the scaled order distribution via the preview on the chart, users can utilize hotkeys to adjust individual preview orders or the entire group of preview orders together.
+
+With a set hotkey, users can move only a single order in the scaled order chart preview:
+
+<div class="text--center">
+
+![Modify-Scaled](/img/trading/m-hotkey.png)
+
+</div>
+
+Users can now set a hotkey to move a whole scaled order preview block:
+
+<div class="text--center">
+
+![Move-Scaled](/img/trading/move-scaled.png)
+
+</div>
+
+<div class="text--center">
+
+![Move-Scaled](/img/trading/move-scaled.gif)
+
+</div>
+
+:::tip
+While previewing a scaled buy order use ‘place buy order’ hotkey to submit the orders. Use ‘place sell order’ hotkey for preview scaled sell orders.
+:::
+
+:::tip
+Cancel a scaled order preview with your ‘cancel recent order’ hotkey.
+:::
+
+---
+
+### Two Click Scaled Order
+
+Users can now hold a hotkey and click two prices on the chart, orderbook, or depth chart to create a scaled order preview between these prices.
+
+<div class="text--center">
+
+![Two-Clicked](/img/trading/two-click.png)
+
+</div>
+
+<div class="text--center">
+
+![Two-Clicked](/img/trading/two-click.gif)
+
+</div>

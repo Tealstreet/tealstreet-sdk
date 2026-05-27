@@ -1,0 +1,218 @@
+---
+title: BingX
+description: Connect your BingX account to Tealstreet.
+sidebar_position: 9
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Dropdown from '/img/connect/bingx/dropdown.png';
+import ApiDropdown from '/img/connect/bingx/apidropdown.png';
+import ApiCreate from '/img/connect/bingx/apicreate.png';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import SecVerify from '/img/connect/bingx/secverify.png';
+import ApiCreated from '/img/connect/bingx/apicreated.png';
+import ApiCreated2 from '/img/connect/bingx/apicreated2.png';
+import ActivateFuts from '/img/connect/bingx/activatefuts.png';
+import ActivateFuts2 from '/img/connect/bingx/activatefuts2.png';
+import ApiCreation from '/img/connect/bingx/apicreation.png';
+import ApiCreation2 from '/img/connect/bingx/apicreation2.png';
+import ApiCreation3 from '/img/connect/bingx/apicreation3.png';
+import CrossMargin from '/img/connect/bingx/crossmargin.png';
+import CrossMargin2 from '/img/connect/bingx/crossmargin2.png';
+
+---
+
+<ThemedImage
+    alt="bingx-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bingx-light.png'),
+        dark: useBaseUrl('/img/exchange/bingx-dark.png'),
+    }}
+/>
+
+---
+
+## 连接 [BingX](https://teal.link/bingx20)到Tealstreet
+
+- 首先，请确保您已登录您的 [BingX](https://teal.link/bingx20) 帐户。
+
+:::note
+通过使用推荐链接 _[link](https://teal.link/bingx20)_ 支持 Tealstreet。
+:::
+
+- 接下来，登录您的 [Tealstreet](http://app.tealstreet.io) 帐户。
+
+:::tip
+最好同时打开 Tealstreet 和 [BingX](https://teal.link/bingx20) 标签页。
+:::
+
+1. 成功登录 Tealstreet 后，导航到标题为 **“API Keys”** 的标头。
+
+2. 单击标题为 **“New API Key”** 的蓝色按钮。
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding Api" style={{ width: 750 }} />
+</div>
+
+- 从下拉菜单中选择 [BingX](https://teal.link/bingx20)。
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 500 }} />
+</div>
+
+---
+
+### 创建密钥
+
+- 现在，您已准备好在 BingX 帐户中生成 API 密钥。前往 [BingX](https://teal.link/bingx20) 标签页并：
+    - 单击用户图标。
+    - 从下拉菜单中选择 **API Management**。
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="Api Dropdown" style={{ width: 300 }} />
+</div>
+
+- 在 API 密钥页面上，单击 **Create API** 按钮开始密钥创建过程。
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+:::tip
+您可以通过导航到 **[此链接](https://bingx.com/en-us/account/api/)** 直接访问此页面。
+:::
+
+- 现在，您已准备好选择 [BingX](https://teal.link/bingx20) API 密钥对的设置。
+
+- 如果弹出窗口，请通过安全验证。
+
+<div class="text--center">
+    <img src={SecVerify} alt="Security Verify" style={{ width: 400 }} />
+</div>
+
+- 现在，您的密钥应该已创建，但其设置尚不正确，因此我们需要编辑它：
+
+<div class="text--center">
+    <img src={ApiCreated} alt="API Created" style={{ width: 500 }} />
+</div>
+
+- 在此，我们将选中允许永续期货的框，以及限制 IP 地址的复选框。
+
+<div class="text--center">
+    <img src={ApiCreated2} alt="API Created2" style={{ width: 500 }} />
+</div>
+
+- 现在是时候将您之前离开的 Tealstreet 终端 API 页面带回来，以获取推荐的 IP 地址：
+
+<div class="text--center">
+    <img src={ApiCreation} alt="API Creation" style={{ width: 500 }} />
+</div>
+
+- 使用剪贴板将这些 IP 地址复制到剪贴板中
+    - 将它们粘贴到 BingX API 页面上的受限 IP 框中。
+
+<div class="text--center">
+    <img src={ApiCreation3} alt="API Creation3" style={{ width: 500 }} />
+</div>
+
+- 编辑设置后，单击 **保存** 按钮。
+
+---
+
+### 激活账户期货
+
+- 现在我们需要激活账户上的衍生品期货：
+    - 进入衍生品部分，点击绿色激活按钮
+
+<div class="text--center">
+    <img src={ActivateFuts} alt="Activate Futures" style={{ width: 500 }} />
+</div>
+
+- 接下来，我们需要阅读一些免责声明，并同意条款和条件。
+
+<div class="text--center">
+    <img src={ActivateFuts2} alt="Activate Futures2" style={{ width: 500 }} />
+</div>
+
+- 通过免责声明部分后，您的账户就可以激活期货交易。
+
+:::note
+如果您没有激活您账户上的期货交易，您将无法在Tealstreet上执行期货交易。在您签署免责声明并激活账户期货交易之前，您将在下单模块看到一个旋转的加载图标。
+:::
+
+---
+
+### 将密钥连接到 Tealstreet
+
+现在让我们回到我们离开 Tealstreet API 页面的地方：
+
+<div class="text--center">
+    <img src={ApiCreation2} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- 使用您在 BingX API 页面上创建 API 时获得的信息填写表格。
+    1. 给密钥命名，这可以是任何您想要的名称。
+    2. 提供加密密码。这是您自己创建的额外加密密码。
+
+    :::tip
+    有关加密方式的更多信息，请参见 [API Encryption](/docs/connect/api-encryption)
+    ::: 3. 提供 BingX 在创建 API 时向您显示的 API 密钥。4. 提供 BingX 在创建 API 时向您显示的 API Secret。5. 单击创建。
+
+:::caution
+永远不要与任何人分享您的 API 密钥。Tealstreet 团队成员永远不会询问您的 API 密钥。
+:::
+
+:::note
+请务必仔细检查您不要混淆 **API 密钥** 和 **API Secret**。如果这些字段输入不正确，则无法将您的 **[BingX](https://teal.link/bingx20)** 交易所账户连接到 Tealstreet。
+:::
+
+如果所有详细信息都正确，则已成功将您的 [BingX](https://teal.link/bingx20) 帐户链接到 Tealstreet。
+
+- 导航到 Tealstreet 终端的 **Trade** 页面，并从顶部下拉菜单中选择 [BingX](https://teal.link/bingx20) 帐户。
+    - 如果链接正确，您将在 Tealstreet 的保证金窗口中看到您的余额。愉快的交易！！！
+
+---
+
+### 故障排除
+
+- 当我尝试下单时，我看到有关保证金不足的消息？
+    - 如果您尚未向 **永续期货** 帐户转移任何资金，则可能会发生这种情况。
+    - 默认情况下，资金转移至 **标准期货** 帐户。
+
+- I am seeing a message about "risk forbidden" in my order window?
+    - Please double check your API key permissions you used when making the API.
+        - Some users have reported they fixed it by remaking their API with the correct permissions.
+
+---
+
+### 常见问题解答
+
+- 用户能否通过 Tealstreet 交易 BingX 的标准期货，如股票、外汇和指数？
+    - 不行。不幸的是，BingX 不提供公开 / 开放的标准期货 API。用户可以交易 BingX 的永续期货。
+
+- 我在永续期货中可以使用的杠杆数量有限制吗？
+    - 是的。BingX对于在某些交易对上进行交易时未进行KYC的用户有一定的限制。（BTC和ETH通常不受此限制）
+
+    :::note
+    有关更多信息，请查看[BingX文档](https://bingx.com/en-us/support/articles/360045899754-PerpetualFuturesPasanganPerdaganganLeveragedanLimit/)
+    :::
+
+- 我可以将我的保证金从隔离模式改为全仓模式吗？
+    - 可以。BingX默认将用户设置为隔离模式，但您可以将其更改为全仓模式。在永续期货交易页面的右上角，您将看到一个名为“Margin”的按钮，位于杠杆指示器旁边。单击它。
+
+<div class="text--center">
+    <img src={CrossMargin} alt="Margin Selector" style={{ width: 400 }} />
+</div>
+
+- 在这里，您可以轻松切换您的保证金模式。
+
+<div class="text--center">
+    <img src={CrossMargin2} alt="Margin Selection" style={{ width: 400 }} />
+</div>
+
+- 我可以使用单向交易模式而不是对冲模式吗？
+    - BingX最近实施了单向交易，我们目前正在Tealstreet内支持单向交易。

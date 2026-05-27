@@ -1,0 +1,57 @@
+---
+title: News Feed
+description: The News Feed Module shows the latest news from Tree of Alpha source.
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import NewsFeedSettings from '/img/trading/modules/news-feed/module-news-feed.png';
+import NewsFeed from '/img/trading/modules/news-feed/news-feed.png';
+import NewsFeedTrading from '/img/trading/modules/news-feed/news-feed-trading.png';
+import NewsTradingSettings from '/img/trading/modules/twitter/news-trading-settings.png';
+
+The **News Feed Module** is an additional source of information if you want to keep in touch with crypto and macro news. Similar to the **Twitter Module**, and more curated.
+
+<div class="text--center">
+    <img src={NewsFeed} alt="News Feed" style={{ width: 600 }} />
+</div>
+
+### Activating the News Feed Module
+
+- You can activate it by going to the **Modules** section of your Terminal Settings
+
+<div class="text--center">
+    <img src={NewsFeedSettings} alt="News Feed Module" style={{ width: 400 }} />
+</div>
+
+---
+
+### Trading the News in News Feed
+
+In a recent update to Tealstreet we added the ability to place orders based on keywords inside the twitter & news feed modules. This allows you to quickly place a long or short order without needing to pull up the chart first. A way to potentially get a much quicker entry on a trade.
+
+- You can activate News Trading by going to the **Modules** panel in the terminal settings page.
+
+<div class="text--center">
+    <img src={NewsTradingSettings} alt="News Trading Settings" style={{ width: 500 }} />
+</div>
+
+- Once activated and customized as you like you will now be able to quickly act on trades from within the twitter feed module:
+
+<div class="text--center">
+    <img src={NewsFeedTrading} alt="News Trading" style={{ width: 600 }} />
+</div>
+
+:::caution
+Please be careful when using this feature as it can lead to unintended trades if you are not careful. Sometimes a tweet will come across that has no relation to crypto at all and can still trigger the detection system to generate trade buttons. We are working on ways to improve this feature in the future.
+:::
+
+:::note
+You can also access the News Feed from the button located at the top of the [Twitter module](/docs/trade/modules/twitter) in addition to the Modules panel inside the terminal settings.
+:::

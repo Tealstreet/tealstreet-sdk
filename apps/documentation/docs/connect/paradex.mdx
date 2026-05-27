@@ -1,0 +1,148 @@
+---
+title: Paradex
+description: Connect your Paradex account to Tealstreet.
+sidebar_position: 20
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiTeal from '/img/connect/paradex/api-teal.png';
+import WalletConnect from '/img/connect/paradex/walletconnect.png';
+import WalletConnect2 from '/img/connect/paradex/walletconnect2.png';
+import WalletDropdown from '/img/connect/paradex/walletdropdown.png';
+import Wallet from '/img/connect/paradex/wallet.png';
+import Subkey from '/img/connect/paradex/subkey.png';
+import ApiDropdown from '/img/connect/paradex/apidropdown.png';
+import AuthorizeWallet from '/img/connect/paradex/authorizewallet.png';
+import AuthorizeWallet2 from '/img/connect/paradex/authorizewallet2.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<div style={{ maxWidth: 400 }}>
+    <ThemedImage
+        alt="paradex-logo"
+        sources={{
+            light: useBaseUrl('/img/exchange/paradex-dark.svg'),
+            dark: useBaseUrl('/img/exchange/paradex-light.svg'),
+        }}
+    />
+</div>
+
+## Connecting [Paradex](https://teal.link/paradex) to Tealstreet
+
+<IntroTealstreet exchangeName="Paradex" />
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [Paradex](https://teal.link/paradex) and:
+    - Connect your wallet if the window does not automatically pop up.
+
+<!-- ::::note
+You will not be able to connect to Paradex if you are connecting from a geo-restricted region.
+:::: -->
+
+<div class="text--center">
+    <img src={WalletConnect} alt="Wallet Connect" style={{ width: 400 }} />
+</div>
+
+- Choose the wallet you want to use. We will use Rabby for this example.
+
+<div class="text--center">
+    <img src={WalletConnect2} alt="Wallet Connect 2" style={{ width: 400 }} />
+</div>
+
+- You might be prompted to create an account and enter a display name. Go ahead and do that.
+
+<!-- ::::caution
+Paradex requires you to deposit funds before you can create an API Key. So make sure you take care of that first by using their **Deposit** button at the top right of the page after you have signed in with your wallet.
+:::: -->
+
+- Once you are connected to your wallet and have created an account we need to visit the wallet panel for the first 2 pieces of information we need to link our API Keys.
+
+<div class="text--center">
+    <img src={WalletDropdown} alt="Wallet Dropdown" style={{ width: 300 }} />
+</div>
+
+- Select your profile icon at the top right and then choose **Wallet** from the dropdown menu.
+
+<div class="text--center">
+    <img src={Wallet} alt="Wallet" style={{ width: 400 }} />
+</div>
+
+- Store the **Paradex Address**. We will need this to link our API Keys to Tealstreet later.
+
+- Next Navigate to the API Key page by clicking the **Settings** gear/button at the top right and choosing **Key Management** from the settings window.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 500 }} />
+</div>
+
+<!-- :::::note
+Paradex requires you to 'Create an Account' before you can create an API Key. You will also need to 'Enable Trading' before you can can finish creating an account.
+::::: -->
+
+- Click the **Subkey** category to create a Trading Key. (Read only keys will not permit trading.)
+    - Click the **Add New Key** button to begin the process.
+
+<div class="text--center">
+    <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 500 }} />
+</div>
+
+- Provide a name and set a duration the key should be valid for.
+    - Click 'Continue' to continue and receive your Private Key.
+
+<div class="text--center">
+    <img src={AuthorizeWallet2} alt="Authorize Wallet 2" style={{ width: 400 }} />
+</div>
+
+<!-- :::::caution
+You will need to have deposited funds before you can finalize the **API Key** creation. If you have not deposited funds you will see a window like the one below.
+::::: -->
+
+- Securely store the Private Key. This is the 2nd piece of information we need to connect to Tealstreet.
+    - When done close the pop-up window.
+
+- Now that the key has been created we need to copy the Subkey Address.
+
+<div class="text--center">
+    <img src={Subkey} alt="Subkey" style={{ width: 400 }} />
+</div>
+
+- Copy the Subkey Address. This is the 3rd and final piece of information we need to connect to Tealstreet.
+
+- Now lets return to Tealstreet to resume the API Linking process.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the Paradex API page.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **Subkey Address** Paradex showed you when you created the API Key.
+  - Provide the **Ethereum Private Key** Paradex showed you when you created the API Key.
+    - Also known as the **Subkey Private Key**.
+  - Provide the **Paradex Address** Paradex created when you created the API Key.
+  - Click done.
+
+<OutroTealstreet exchangeName="Paradex" />
+
+---
+
+## Frequently Asked Questions
+
+- I can't trade anymore, it was previously working, what happened?
+  - When creating an API Key, you set a duration for the key to be valid for. Once the key expires, you will need to create a new one.

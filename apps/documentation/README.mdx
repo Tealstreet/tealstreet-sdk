@@ -1,0 +1,49 @@
+# Documentation Workspace
+
+This package is the Tealstreet docs site built with [Docusaurus](https://docusaurus.io/) (monorepo workspace name: `documentation`).
+
+## Install
+
+```bash
+yarn
+```
+
+## Common Commands (run in `apps/documentation`)
+
+```bash
+yarn start
+yarn start:en
+yarn start:zh
+yarn start:zh:fresh
+yarn build
+yarn serve
+yarn lint
+yarn lint:fix
+```
+
+## Monorepo Shortcuts (run from repo root)
+
+```bash
+yarn docs:dev
+yarn docs:build
+yarn docs:serve
+```
+
+## Lint and Validation Scope
+
+- `yarn lint` runs:
+  - `yarn lint:format` (`prettier --check`)
+  - `yarn build` (full Docusaurus build, all configured locales)
+- `lint:format` is intentionally scoped to `js/jsx/ts/tsx/json/css` files and uses `apps/documentation/.prettierignore`.
+- MD/MDX are currently excluded from lint-gating to avoid large incidental churn and known non-idempotent formatting behavior in some docs files.
+
+## Intentional Low-Concern Suppressions
+
+- In `docusaurus.config.js`, preset `svgr` uses `svgo: false` to suppress repeated SVGO v4 `preset-default` override warnings (`removeTitle` / `removeViewBox`) during docs builds.
+- Broken links/anchors are warning-level (`onBrokenLinks`, `onBrokenAnchors`, `onBrokenMarkdownLinks`), so warnings should still be reviewed and fixed when practical.
+
+## Notes
+
+- Prefer localized edits over broad reformatting.
+- Keep V2 docs/versioned docs online unless a retirement path is explicitly requested.
+- See `AGENTS.md` and `DOCS_DEPLOY_RUNBOOK.md` for workflow and deployment guardrails.

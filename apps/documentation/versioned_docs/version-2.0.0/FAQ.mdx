@@ -1,0 +1,155 @@
+---
+title: FAQ
+description: Frequently Asked Questions about the Tealstreet terminal.
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import Home from '/img/tutorial/home-1.png';
+import Button from '/img/tutorial/button.png';
+
+### Is Tealstreet free to use?
+
+Tealstreet is free to use. We make money through deals with the exchange. This is at no extra cost to you, because it works similar to a referral link. This is how all crypto trading terminals work, although many charge their users a monthly fee on top of that. At Tealstreet, we believe if we we provide good free trading tools to our traders, then we will both reap the rewards through shared user & Tealstreet growth without having to charge our users anything extra. It's a positive feedback loop. ![Okayge](/img/social/okayge.png)
+
+---
+
+### Can I trust Tealstreet?
+
+The Tealstreet team has worked very hard on the security side of things. Security was the first aspect developed for the terminal and the number one priority. The security side is hosted by AWS. User information like API keys are encrypted before they get put in the database. AWS manages master’s keys. If someone were to hack Tealstreet they would not be able to get your master API key. In addition, a second layer of security was added in the form of [End to End API User Encryption](/docs/2.0.0/connect/api-encryption). The Tealstreet team believes that the security of the terminal is just as good if not better than other crypto services. Before using Tealstreet be sure to read through the terms of service.
+
+:::tip
+Be sure to read through the _[API Guides](/docs/connect/api-general)!_
+:::
+
+---
+
+### Which exchanges can be used with Tealstreet?
+
+- Tealstreet currently supports [ByBit](/docs/connect/bybit), [BitMex](/docs/connect/bitmex),
+  [Binance](/docs/connect/binance), [Bitget](/docs/connect/bitget), [OKEx](/docs/2.0.0/connect/okex),
+  [BingX](/docs/connect/bingx), and [Phemex](/docs/connect/phemex).
+  More exchanges like [Kucoin](https://teal.link/kucoin), and possibly [Gate.io](https://teal.link/gateio) may come in the future.
+
+---
+
+### Is Tealstreet opensource?
+
+Tealstreet is not open source. Some code for public viewing will be published soon. You can visit the Tealstreet GitHub [here](https://github.com/tealstreetio/).
+
+---
+
+### Do I need to stay logged into an exchange to use Tealstreet?
+
+No, you do not need to stay logged in, however, the exchange will time out eventually. Furthermore, it is strongly recommended you always keep your exchange page open for added safety and peace of mind.
+
+---
+
+### Can I use Tealstreet on a mobile device?
+
+Yes, you can use Tealstreet on most mobile web browsers. A Tealstreet app for iOS and Android is in the works!
+
+---
+
+### How do I add an API to Tealstreet?
+
+Please visit the [API General](/docs/connect/api-general) page to get started.
+
+---
+
+### Does Tealstreet have 2FA?
+
+Yes, the Tealstreet trading terminal supports Two-Factor Authentication 2FA. Read more [here](/docs/2.0.0/connect/2fa)
+
+---
+
+### Can I request new features for Tealstreet?
+
+Yes, you can request new features via the [requests](/docs/requests/feature-requests) page. However, keep in mind that Sam has a very heavy workload so please be patient! Additional functionality will be added as quickly as his schedule (and the market) permits.
+
+---
+
+### Can anyone help me with Tealstreet?
+
+The fastest way to get help with Tealstreet is by getting in touch with the team using any of the links on the [Contact Us](/docs/support/contact-us) page. You can also send us a direct message on Twitter.
+
+---
+
+### I think Tealstreet is showing the wrong PnL. Why is that?
+
+At the moment, Tealstreet displays PnL from the mark price and not the index price. This will change with later updates.
+
+---
+
+### Can I use hotkeys / shortcuts with Tealstreet?
+
+Yes you can! Please visit [this](/docs/trade/shortcuts) page for a tutorial and more information.
+
+---
+
+### Does Tealstreet work on mobile?
+
+Yes, Tealstreet works on mobile browsers. Give it a try using your smart phone or tablet device.
+
+<div class="text--center">
+
+![Mobile-Trading](/img/tutorial/mobile-trade.gif)
+
+</div>
+
+:::tip
+You can add Tealstreet on your homescreen as an app if you use Chrome. Press the three dots at the top and use the "Add to Homescreen" button to add Tealstreet to your mobile homescreen.
+:::
+
+<div class="text--center">
+    <img src={Button} alt="Button" style={{ width: 500 }} />
+</div>
+
+<div class="text--center">
+    <img src={Home} alt="Home" style={{ width: 300 }} />
+</div>
+
+:::note
+Please see our [mobile doc page here](/docs/trade/mobile) for more information.
+:::
+
+---
+
+### Will the Tealstreet Desktop app work on Older versions of Windows?
+
+No, the Tealstreet Windows Desktop app only officially works on Windows 10 and above.
+
+:::note
+In summer 2023 we updated to the latest version of Electron, which is built on top of Chromium. Chromium discontinued support for Windows **7/8/8.1**. You can [read more about it here](https://www.electronjs.org/blog/windows-7-to-8-1-deprecation-notice)
+:::
+
+---
+
+### Where did the name Tealstreet come from?
+
+The name has no meaning it was just a domain Sam had registered already.
+
+---
+
+### I am getting an error downloading updates it mentions an objects.githubusercontent.com?
+
+This is something that github does on their end if a download takes too long it expires the internal download session which causes this error to pop up. It essentially means the download took to long or was too slow. It's suggested that you close the popup, close Tealstreet, and turn off any downloads or streams you may have, then re-launch Tealstreet and try again.
+
+- You can also goto the [downloads](https://www.tealstreet.io/#download) page and download the latest version manually that way.
+
+---
+
+### I am trying to link api to Bybit Testnet and I keep getting an error about IP address being unbound?
+
+Testnets are supported on a best-effort basis. They might not work correctly and can break suddenly.
+
+Since there are such few people using we prioritize live markets at the moment. If you are using a testnet and it breaks please let us know and we will try to fix it.
+
+### I am getting an error where the terminal is constantly trying to reconnect and all of the indicator dots show green?
+
+Some users have reported that resyncing the time on their device fixed it. If you are using Windows you can do this by right-clicking the time in the bottom right corner and selecting "Adjust date/time". Then click "Sync now".

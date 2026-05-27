@@ -1,0 +1,235 @@
+---
+title: Terminal
+description: The main trading window of Tealstreet which houses the core functionality of the terminal.
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import CommonSettings from '/img/trading/common/common-settings.png';
+import Main from '/img/trading/main.gif';
+import Settings from '/img/trading/settings.gif';
+import Market from '/img/trading/marketpair.gif';
+import API from '/img/trading/terminal/api-2.gif';
+import Sound from '/img/trading/sound.gif';
+import Lock from '/img/trading/lock-unlock.gif';
+import SettingsGeneral from '/img/trading/terminal/settings-general.gif';
+import SettingsButtons from '/img/trading/settings-buttons.gif';
+import SettingsQuick from '/img/trading/settings-quick.gif';
+import QuickOffsets from '/img/trading/quick-offsets.png';
+import SettingsShortcuts from '/img/trading/settings-shortcuts.gif';
+import SettingsModules from '/img/trading/terminal/settings-modules.gif';
+import WorkspacesEdit from '/img/trading/terminal/workspaces-edit.png';
+import Workspaces from '/img/trading/terminal/workspaces.png';
+import BellIcon from '/img/trading/bellicon.png';
+
+这是主要的 Tealstreet 交易窗口。您会发现许多不同的功能，帮助您互动和交易。请点击 **TOUR** 按钮，简要了解 Tealstreet 的不同功能。
+
+<div class="text--center">
+    <img src={Main} alt="Main Window" style={{ width: 700 }} />
+</div>
+
+## 主要交易设置
+
+在主交易窗口的右上角，您将找到 Tealstreet 的主要交易设置。您可以选择您的交易对、选择您的 API/交易所、调整声音级别、更改您的主交易设置、锁定/解锁窗口以及在窗口和全屏模式之间切换。
+
+<div class="text--center">
+    <img src={Settings} alt="Settings" style={{ width: 500 }} />
+</div>
+
+---
+
+### 市场/交易对
+
+要更改 '市场' / '交易对' ，请点击下拉菜单。与您的 API 密钥连接的主要市场将显示在中心。您可以从此下拉列表中选择您喜欢的对。
+
+:::tip
+点击对旁边的星星来收藏它。任何收藏夹都会出现在收藏夹列中。
+:::
+
+<div class="text--center">
+    <img src={Market} alt="Market" style={{ width: 500 }} />
+</div>
+
+您可以通过选择 "所有市场" 选项卡并选择 Tealstreet 提供的交易所下的对来查看其他市场对。
+
+:::note
+除非您已将该交易所的 API 密钥添加到 Tealstreet，否则您将无法交易该对。
+:::
+
+---
+
+### API 密钥选择
+
+下一个下拉菜单允许用户选择他们的 API 密钥。如果您还没有添加 API 密钥，此菜单将为空白。如果您只连接了一个 API 密钥，您只会看到一个选项。
+
+<div class="text--center">
+    <img src={API} alt="API" style={{ width: 500 }} />
+</div>
+
+:::tip
+点击 API 密钥旁边的星星来收藏它。任何收藏夹都会出现在收藏夹栏中，以便轻松地在 API 密钥之间切换。
+:::
+
+---
+
+### 声音设置
+
+Tealstreet 为主交易窗口的不同操作提供声音效果。要更改音量级别，请点击扬声器图标并使用滑块找到您喜欢的音频级别。点击图标以静音所有声音。
+
+<div class="text--center">
+    <img src={Sound} alt="Sound" style={{ width: 600 }} />
+</div>
+
+---
+
+### 锁定/解锁按钮
+
+您可以调整 Tealstreet 交易页面内的所有窗口。您可以调整每个窗口的大小和位置。要防止意外移动或更改窗口，只需点击 '锁定' 按钮。当锁图标显示为关闭时，您的窗口设置将被锁定。当锁图标显示为打开时，您的窗口设置可以被调整。
+
+<div class="text--center">
+    <img src={Lock} alt="Lock" style={{ width: 650 }} />
+</div>
+
+---
+
+## 终端设置
+
+您可以通过点击名为 "交易设置" 的齿轮图标来更改您如何使用 Tealstreet 进行互动和交易的各种设置。
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Settings Common" style={{ width: 300 }} />
+</div>
+
+一旦您点击它，一个新窗口会弹出，其中定义了多个部分：
+
+<div class="text--center">
+    <img src={SettingsGeneral} alt="Settings General" style={{ width: 700 }} />
+</div>
+
+---
+
+### 通用
+
+- **通知位置**：这允许您更改在 Tealstreet 上接收通知的位置。通知包括已填订单、已取消订单和错误。
+
+- **显示订单通知**：这允许您打开/关闭订单的通知。
+
+- **显示确认警告**：当您尝试关闭某些位置，例如从打开位置模块时，这将弹出确认框。
+
+- **热键/图表使用当前活动的订单选项卡**：这允许您使用热键在当前活动的选项卡中下订单（例如下订单或快速）
+
+- **点击价格自动填充限价订单**：确定点击 OrderBook 中的价格是否填充当前活动的订单表单，或在下订单模块中的限价订单表单。
+
+- **显示空的 Orderbook 级别**：如果启用，您将在 orderbook 中看到没有休息订单的价格。
+
+- **为所有交易所显示喜欢的市场**：如果禁用，您将只看到您当前连接的交易所的喜欢的市场。
+
+- **显示 Testnet 交易所/市场**：如果启用，您将看到各种 testnet 交易所和市场。这是测试 Tealstreet 或纸质交易的有用方法。
+
+---
+
+### 下订单
+
+- 按钮大小：此设置允许用户调整他们的订单的数量/大小。Teal Street 的 '下订单' 窗口为用户提供了 6 个订单大小的按钮。输入反映您的需求、钱包余额或平均交易大小的数字。一旦您点击 '确定' ，这些更改将显示在 '下订单' 窗口中。
+
+<div class="text--center">
+    <img src={SettingsButtons} alt="Settings Buttons" style={{ width: 700 }} />
+</div>
+
+:::note
+在设置这些数字之前，问问自己您正在交易什么对。选择适当的增量取决于您的余额、平均交易大小和加密货币本身！
+:::
+
+- 快速偏移：这允许用户更改快速订单类型的刻度大小。
+
+<div class="text--center">
+    <img src={SettingsQuick} alt="Settings Quick" style={{ width: 700 }} />
+</div>
+
+对 '快速偏移' 所做的更改将显示在 '下订单' 窗口的快速订单类型中。
+
+<div class="text--center">
+    <img src={QuickOffsets} alt="Quick Offsets" style={{ width: 700 }} />
+</div>
+
+:::tip
+对于 Tealstreet 的新手，我们建议立即更改下订单按钮的大小，以适应您预期的交易大小。
+:::
+
+---
+
+### 快捷方式
+
+在这里，您可以定义与主交易窗口互动的各种键盘快捷方式。
+
+<div class="text--center">
+    <img src={SettingsShortcuts} alt="Settings Shortcuts" style={{ width: 600 }} />
+</div>
+
+:::note
+有关热键和快捷方式的更详细解释，人们可以**[在这里查看](/docs/trade/shortcuts/)**。
+:::
+
+---
+
+### 模块
+
+在这里，您可以设置终端中各种模块的活动状态。
+
+<div class="text--center">
+    <img src={SettingsModules} alt="Settings Modules" style={{ width: 800 }} />
+</div>
+
+:::note
+关闭任何 Teastreet 模块的状态会完全禁用它，这可以降低终端的资源需求并可能提高性能。
+:::
+
+---
+
+### 工作区
+
+在这里，您可以保存和加载不同的工作区。工作区是您可以随时保存和加载的设置和窗口的集合。这允许您为不同的交易策略、环境或交易所拥有不同的工作区。
+
+<div class="text--center">
+    <img src={WorkspacesEdit} alt="Workspaces Topmost Location" style={{ width: 600 }} />
+</div>
+
+<div class="text--center">
+    <img src={Workspaces} alt="Workspaces" style={{ width: 400 }} />
+</div>
+
+- 在这个窗口中，您可以修改现有的工作区
+    - 您可以导入外部工作区（例如来自 discord 或朋友的工作区）
+    - 您可以复制指定的工作区
+    - 您可以删除指定的工作区
+    - 您可以导出指定的工作区，将其保存到磁盘或与他人共享
+
+:::note
+untitled 工作区有时会被 Tealstreet 自动创建。
+:::
+
+---
+
+## 其他信息
+
+<div class="text--center">
+    <img src={BellIcon} alt="铃铛图标" style={{ width: 450 }} />
+</div>
+
+:::tip
+
+- 铃铛图标显示终端的通知窗口。
+  :::
+
+![Tealstreet-Zoom](/img/client/ClientZoom.png)
+
+:::tip
+您可以通过点击缩放按钮放大和缩小 Tealstreet 窗口：
+
+您还可以使用键盘快捷方式 **Ctrl +** 达到同样的效果。
+:::

@@ -1,0 +1,117 @@
+---
+title: Linux
+description: 下载并安装 Tealstreet Linux 桌面客户端。
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+### Linux 桌面客户端
+
+<div class="text--center">
+
+![Linux](/img/client/Tux.png)
+
+</div>
+
+本页将介绍如何下载和安装 Tealstreet Linux 桌面客户端。
+
+- 前往 Tealstreet [下载页面](https://www.tealstreet.io/download/) 下载 Tealstreet 桌面客户端。
+
+- 选择“下载 Linux 版本”选项以自动开始下载。
+
+<div class="text--center">
+
+![Download-Windows](/img/client/download-linux.png)
+
+</div>
+
+- 文件“Tealstreet-X.X.X.AppImage”将下载到您的 Linux 机器上。
+
+:::note
+X.X.X 代表当前客户端版本。
+:::
+
+<div class="text--center">
+
+![Setup](/img/client/setup-linux.png)
+
+</div>
+
+---
+
+## 权限
+
+- 现在我们需要授予用户帐户**执行权限**（最好不要在 root 帐户上执行此类活动）
+
+<div class="text--center">
+
+![chmod](/img/client/chmod.png)
+
+</div>
+
+```bash
+cd Downloads
+ls
+chmod +x Tealstreet-2.3.5.AppImage
+```
+
+:::caution
+**Ubuntu** 用户有时可能需要额外的步骤，他们可能需要安装 **FUSE** 包。
+:::
+
+```bash
+sudo apt-get install fuse
+```
+
+- 现在，您应该能够运行 Tealstreet。作为 AppImage，您不需要担心“**正确安装**”，因为 Tealstreet 在大多数操作系统上只是像便携式应用程序一样运行。在 GUI 中双击它，或者通过命令提示符启动它。
+
+<div class="text--center">
+
+![appstart](/img/client/appstart-linux.png)
+
+</div>
+
+```bash
+./Tealstreet-2.3.5.AppImage
+```
+
+:::note
+如果您启动 Tealstreet，它无法加载并且您不确定原因，请尝试从终端启动它，以便控制台可以提供其他调试信息。如果您有任何问题，请随时**[联系我们](/docs/support/contact-us)**。
+:::
+
+:::caution
+如果您尝试以 root 帐户运行 Tealstreet，则可能会遇到无法加载沙箱的问题，这将导致应用程序无法加载。理想情况下，您应该退出 root 帐户并以普通用户身份运行它，但是如果您坚持使用 root，则可以使用 **--no-sandbox** 参数运行它以允许其作为 root 运行。
+:::
+
+---
+
+## 提示
+
+:::tip
+为了更轻松地启动终端，设置一个 **别名** 可能值得您的时间。下面的截图显示了创建临时别名的方法。
+:::
+
+<div class="text--center">
+
+![alias](/img/client/alias-linux.png)
+
+</div>
+
+```bash
+alias terminal="~/Downloads/Tealstreet-2.3.5.AppImage"
+terminal
+```
+
+---
+
+![Tealstreet-Zoom](/img/client/ClientZoom_linux.png)
+
+:::tip
+您可以通过单击缩放按钮来 **缩放** Tealstreet 窗口：
+
+您还可以使用键盘快捷键 **Ctrl +** 来实现相同的效果。
+:::

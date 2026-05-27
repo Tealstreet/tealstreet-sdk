@@ -1,0 +1,179 @@
+---
+title: Open Positions & Orders
+description: The Open Positions & Orders window of Tealstreet is where you manage all your open positions and orders.
+sidebar_position: 8
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Twap from '/img/trading/openpositions/twap.png';
+import ClosedNonPersist from '/img/trading/openpositions/closed-positions-non-persist.png';
+
+The **Open Positions** window of Tealstreet is where you manage all your open positions. It will show all the current open positions for your selected exchange. You can change the way information is displayed by clicking the buttons at the top right of the window.
+
+Click the **BTC** button to have all open positions quoted in bitcoin for Margin, Unrl PNL, 5min PnL delta and Real PnL. The "=" will show all open positions in their native currencies which is helpful for users trading linear and inverse.
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/openpositions/open-positions.png)
+
+</div>
+
+:::caution
+Clicking the red 'Close' button will close your open positions with a market order.
+:::
+
+#### Position actions
+
+- **BE**: places a reduce-only stop loss at your entry price (breakeven) for that specific position. On supported exchanges a full-position stop is used; otherwise the current position size is used.
+- **BE ALL**: places breakeven stops at the entry price for all your open positions in active accounts.
+- **Close**: closes the single position immediately using a reduce-only market order.
+- **Close All**: closes all open positions across active accounts and symbols using reduce-only market orders.
+
+---
+
+### ROE/ROI Toggle
+
+**ROI (Return on Investment)** represents the PnL as a percent of your total margin balance.
+
+**ROE (Return on Equity)** represents the PnL as a percent of the position initial margin. This will be much higher if you use higher leverage, as the margin required for the same position size will be lower. This is the method used by most exchanges.
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/openpositions/open-positions-roe-roi.gif)
+
+</div>
+
+---
+
+### Percentage (%) Toggle
+
+The percentage (%%) toggle will represent your PnL by either percent of account gain/loss or dollar amount of account gain/loss of the current open position(s).
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/openpositions/open-positions-pct.gif)
+
+</div>
+
+<!-- -   -   -   -
+
+### SL & SL All buttons
+
+The **SL** button will place a Stoploss at your entry price. The **SL All** button does the same just to all open positions.
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/openpositions/SL-SLAll.png)
+</div> -->
+
+---
+
+### Realized PnL
+
+The realized PnL number (UTC daily) comes from the exchange directly and is not calculated by Tealstreet. Unrealized PnL is priced by the Last Trade price, not all exchanges have a daily realized pnl report so this number may not be shown for some exchanges.
+
+---
+
+## Open Orders
+
+The **Open Orders** window of Tealstreet allows you to manage your current open orders. The header has been updated and now includes:
+
+- **View dropdown**: choose which orders to display (see Views below). The label shows the live count for the current selection.
+- **Base / Not. toggle**: switches order values between Base and Notional display.
+- **Close Buys / Close Sells**: quickly cancel all buy or all sell orders for the active market across your connected accounts.
+- **Orders vs All Orders** toggle: selects whether to show only manual orders you created (Orders), or everything including bot‑generated orders like Chaser/TWAP (All Orders).
+
+<div class="text--center">
+
+![Open-Orders](/img/trading/open-orders.gif)
+
+</div>
+
+### Views (tabs)
+
+Depending on the selected mode, the dropdown offers the following views:
+
+- **Orders mode (manual orders only)** - **[Active Market] Active Orders**: manual Limit/Market orders for the active symbol only. - **All Active Orders**: manual Limit/Market orders for all symbols.
+
+- **All Orders mode** - **[Active Market] Active Orders**: all active Limit/Market orders for the active symbol. - **All Active Orders**: all active Limit/Market orders for all symbols. - **[Active Market] Stop Orders**: all non‑Limit/Market orders (e.g., TP/SL/Trailing) for the active symbol. - **All Stop Orders**: all non‑Limit/Market orders across all symbols. - **All Orders Combined**: shows every order type together in one list.
+
+---
+
+### Cancel Orders
+
+There are multiple ways to cancel orders in the Open Orders window.
+
+- The box with **Cancel** will close individual orders that are open.
+
+<div class="text--center">
+
+![Close-Orders](/gifs/trading/openpositions-openorders/close-orders-2.gif)
+
+</div>
+
+- The **(X)** above Cancel will close all orders on the currently displayed tab.
+
+<div class="text--center">
+
+![Close-Orders](/gifs/trading/openpositions-openorders/close-orders.gif)
+
+</div>
+
+- Use the header actions:
+
+            -   **Close Buys**: cancel all open buy orders for the active market across accounts.
+            -   **Close Sells**: cancel all open sell orders for the active market across accounts.
+
+:::note
+When in **Orders** mode, bot‑generated orders (e.g., Chaser/TWAP) are excluded from the lists and bulk actions. Switch to **All Orders** to include them.
+:::
+
+---
+
+### Modify Orders
+
+You can edit the quantity and price of an open order by clicking on their associated numbers.
+
+<div class="text--center">
+
+![Modify-Orders](/gifs/trading/openpositions-openorders/modify-orders.gif)
+
+</div>
+
+:::note
+Your order will automatically cancel if you placed a Post Only Limit Order and you edit the price above the last price (price displayed at the top of the orderbook on Tealstreet)
+:::
+
+---
+
+### TWAP Orders
+
+<div class="text--center">
+
+![TWAP-Orders](/gifs/trading/openpositions-openorders/twap-orders.gif)
+
+</div>
+
+When TWAP orders are active and the option is enabled, the Open Orders module shows a **TWAP** section below your orders with a draggable splitter. You can resize the areas to allocate more space to either your regular orders or the TWAP list.
+
+---
+
+## Closed Positions
+
+The **Closed Positions** window of Tealstreet is where you can view your previously closed positions. However the system is not currently finished and will be updated in the future.
+
+<!-- The **Closed Positions** window of Tealstreet is where you can view your previously closed positions.
+
+<div class="text--center">
+    <img src={ClosedNonPersist} alt="Closed Positions (Non persisting)" style={{width: 800}} />
+</div>
+
+:::note
+The closed positions will keep tracking of your most recent trades, however its not to be confused with the [position history module](/docs/trade/modules/position-history). The closed positions window will not persist in keeping track of your closed positions indefinitely like the position history module intends to do.
+::: -->

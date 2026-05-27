@@ -1,0 +1,145 @@
+---
+title: Backpack
+description: Connect your Backpack account to Tealstreet.
+sidebar_position: 23
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiTeal from '/img/connect/backpack/v3/api-teal.png';
+import ProfileDropdown from '/img/connect/backpack/v3/profile-dropdown.png';
+import ProfileDropdownApi from '/img/connect/backpack/v3/profile-dropdown-api.png';
+import TealApi1 from '/img/connect/backpack/v3/teal-api1.png';
+import TealApi2 from '/img/connect/backpack/v3/teal-api2.png';
+import TealApi3 from '/img/connect/backpack/v3/teal-api3.png';
+import ApiWhitelist from '/img/connect/backpack/v3/api-whitelist.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<ThemedImage
+    alt="backpack-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/backpack-light.png'),
+        dark: useBaseUrl('/img/exchange/backpack-dark.png'),
+    }}
+/>
+
+<!-- <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+  <iframe
+    src="https://www.youtube.com/embed/ZSL0Nz9ijNw"
+    frameBorder="0"
+    allow="autoplay; encrypted-media"
+    allowFullScreen
+    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+  />
+</div> -->
+
+## Connecting [Backpack](https://teal.link/backpack) to Tealstreet
+
+<IntroTealstreet exchangeName="Backpack" />
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [Backpack](https://teal.link/backpack) and:
+    - Login or create you're account if you haven't already.
+
+:::note
+You will need to perform KYC before you can deposit and trade on the platform.
+:::
+
+Once you have logged in select the **Portfolio** option at the top right of the page and then select the **Settings** option.
+
+<div class="text--center">
+    <img src={ProfileDropdown} alt="Profile Dropdown" style={{ width: 500 }} />
+</div>
+
+- Once you are logged in navigate to the **API Management** section of the profile dropdown.
+
+<div class="text--center">
+    <img src={ProfileDropdownApi} alt="API Dropdown" style={{ width: 600 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://backpack.exchange/portfolio/settings/api-keys)**
+:::
+
+Click the **New Api Key** button at the right side of the API Management page.
+
+:::note
+You will need to have 2FA enabled on your account to create an API Key. This can be enabled by navigating to the **Security** section of the account settings page and then using the **2FA** option.
+:::
+
+If you have enabled 2FA when you click **New Api Key** you will see the **Create API Key** window.
+
+<div class="text--center">
+    <img src={TealApi1} alt="API Creation 1" style={{ width: 400 }} />
+</div>
+
+- Give the key a name, it can be whatever you want.
+- Provide a base64 encoded key if you wish to do so, otherwise a random one will be generated for you.
+- Do **NOT** enable the **Read-only** if you wish to use Tealstreet to trade on Backpack.
+
+You will be prompted by the security prompt to verify your 2FA code to continue.
+
+<div class="text--center">
+    <img src={TealApi2} alt="API Creation 2" style={{ width: 400 }} />
+</div>
+
+Backpack will generate you an API Key and API Secret. Copy these down.
+
+Lastly we will need to setup IP Whitelisting. After the key is created you will see an option to the right of the key that says **IP/CIDR** click this to setup IP Whitelisting.
+
+<div class="text--center">
+    <img src={TealApi3} alt="API Creation 3" style={{ width: 700 }} />
+</div>
+
+You can find these IP's in the Tealstreet API page we left open earlier.
+
+<div class="text--center">
+    <img src={ApiWhitelist} alt="Tealstreet Whitelist IP's" style={{ width: 600 }} />
+</div>
+
+:::warning
+At this time Backpack does not support pasting the IP addresses in one single block. You will need to paste the IP addresses in one by one.
+:::
+
+- Now that we have the API Key and the API Secret we can proceed back to the Tealstreet terminal.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the Backpack API page.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **API Key** Backpack showed you when you created the key.
+  - Provide the **API Secret** Backpack showed you when you created the key.
+  - Click the **Done** button.
+
+<OutroTealstreet exchangeName="Backpack" />
+
+---
+
+## Troubleshooting
+
+If you encounter any issues connecting your Backpack account to Tealstreet, please refer to the [Backpack Support Documentation](https://support.backpack.exchange/exchange/) for additional help and troubleshooting steps.
+
+---
+
+## Frequently Asked Questions
+
+- Does backpack require KYC?
+    - Yes, Backpack requires users to complete KYC before they can deposit and trade on the platform.

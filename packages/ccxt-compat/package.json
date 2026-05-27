@@ -1,0 +1,29 @@
+{
+  "name": "@tealstreet/ccxt-compat",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'build-force' to test a build.\"",
+    "build-force": "tsup",
+    "clean": "rimraf ./dist ./coverage ./tsconfig.tsbuildinfo",
+    "dev": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'dev-force' to watch a dev version.\"",
+    "dev-force": "tsup --watch",
+    "fix-all-files": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --fix",
+    "lint": "echo \"Linting disabled for ccxt-compat (third-party compatibility package)\"",
+    "test": "run-s test-unit",
+    "test-unit": "vitest run",
+    "test-unit-watch": "vitest watch --ui",
+    "typecheck": "tsc --project ./tsconfig.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+    "@tealstreet/prettierrc": "*",
+    "npm-run-all2": "^9.0.1",
+    "prettier": "^3.8.3",
+    "rimraf": "^6.1.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "eslint": "^9.28.0"
+  }
+}

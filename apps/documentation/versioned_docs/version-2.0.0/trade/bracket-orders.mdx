@@ -1,0 +1,101 @@
+---
+title: Bracket Orders (RR Tool)
+description: Bracket Orders (RR tool) are a way to help traders determine their position size and manage their risk more effectively using some predefined parameters.
+sidebar_position: 15
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import PlaceOrder from '/img/trading/bracket-orders/placeorder.png';
+import EnableSettings from '/img/trading/bracket-orders/enablesettings.png';
+import Example from '/img/trading/bracket-orders/example.png';
+import PreviewDrag from '/img/trading/bracket-orders/preview-drag.gif';
+import AddDrawing from '/img/trading/bracket-orders/add-drawing.gif';
+
+What are Bracket Orders (RR tool)?
+
+<div class="text--center">
+    <img src={Example} alt="Bracket Orders Example Order" style={{ width: 750 }} />
+</div>
+
+The RR Tool (also known as Bracket Orders) calculates the potential risk and reward of a trade based on predefined parameters such as **risk amount**, **stop loss** and **take profit** levels. It can be used to help traders determine their position size and manage their risk more effectively.
+
+:::tip
+You can read some more here from Tradingviews page on the **[Long/Short position tool](https://www.tradingview.com/support/solutions/43000475660-how-to-use-long-and-short-position-drawing-tools/)**
+:::
+
+---
+
+### Enabling the RR Tool
+
+<div class="text--center">
+    <img src={EnableSettings} alt="Bracket Orders Enable Settings" style={{ width: 450 }} />
+</div>
+
+To enable the RR tool go into your **trade settings** under the **beta** category and enable the **Bracket Orders** option.
+
+:::tip
+**NEW:** In a recent update we implemented support for preconfiguring your Risk Reward ratio as well as the amount you wish to risk. Such as a specific amount of margin or a % of balance.
+:::
+
+:::note
+By default TP's will use market orders. If you wish to use limits tick the second box **Replace TP w/ Limit When Entry Filled**
+:::
+
+---
+
+### Activating the RR Tool
+
+<div class="text--center">
+    <img src={PlaceOrder} alt="Bracket Orders Placing Order" style={{ width: 450 }} />
+</div>
+
+After enabling it in the previous section you can now activate the RR tool by ticking the TP/SL button(s) in the place order module as shown in this screenshot.
+
+:::note
+Lock size will use a fixed trade size rather then your risk % when calculating orders
+:::
+
+---
+
+### Using the RR Tool
+
+<div class="text--center">
+    <img src={AddDrawing} alt="Bracket Orders Add Drawing" style={{ width: 450 }} />
+</div>
+
+One way to add a bracket order to your chart is to use the side panel TradingView drawing for a Long or Short position like shown in this gif.
+
+<div class="text--center">
+    <img src={PreviewDrag} alt="Bracket Orders Preview Drag" style={{ width: 450 }} />
+</div>
+
+Once you have activated a **preview** from the place order module, or applied a **Long / Short drawing** to the chart you will be able to easily drag the entry, stop-loss, and take-profit prices to where you desire them to be.
+
+:::note
+If you wish to cancel the bracket order you can either hit **Cancel** in the **place order module** or left click and delete the drawing from the chart.
+:::
+
+---
+
+### Questions about the RR Tool
+
+- Why does the RR Tool disappear from the chart when I press cancel or preview buttons?
+    - The disappearance of the RR Tool from the chart when canceling or previewing orders is a normal behavior. It allows you to review and modify your orders without cluttering the chart with unnecessary information.
+
+- What should I do if the RR Tool disappears from the chart?
+    - If the RR Tool disappears from the chart, you can simply re-enable it by pressing the preview button in the place order form (assuming you enabled it. See above section for enablement details.) You can also hold the hotkey (default key **r**) and click on the chart to bring it back if hotkeys are enabled.
+
+- Can I customize the risk calculation in the RR Tool?
+    - Yes, the RR Tool usually calculates risk based on the predefined settings. However, if you lock the position size, the RR Tool will calculate based on the fixed trade size instead of a defined risk amount. This allows for more flexibility in risk management.
+
+- How can I adjust the risk and reward parameters in the RR Tool?
+    - To adjust the risk and reward parameters in the RR Tool, adjust the TP & SL sections of the limit order -> place order module when enabled. Refer to above example images for more details.
+
+- Why can't I use bracket orders on Bitget?
+    - Bitget recently changed their API requiring users to have a position open before a stoploss can be placed. Due to this specific requirement change, bracket orders sometimes behave unexpectedly on Bitget.
+    - There is a [Bitget Specific Setting](/docs/2.0.0/connect/bitget) you can change to help mitigate this issue.

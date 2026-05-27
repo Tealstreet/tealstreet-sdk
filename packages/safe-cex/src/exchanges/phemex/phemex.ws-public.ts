@@ -1,0 +1,371 @@
+import type { Candle, OHLCVOptions, OrderBook } from '../../types';
+import type { PhemexExchange } from './phemex.exchange';
+
+import { nanoid } from 'nanoid';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { calcOrderBookTotal } from '../../utils/orderbook';
+import { BaseWebSocket } from '../base.ws';
+import { BASE_WS_URL, ENDPOINTS } from './phemex.types';
+
+type Data = Array<Record<string, any>>;
+type MessageHandlers = {
+  [topic: string]: Array<(json: any) => void>;
+};
+
+export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
+  messageHandlers: MessageHandlers = {
+    'perp_market24h_pack_p.update': [(d: Data) => this.handleTickerStreamEvents(d)],
+  };
+
+  topics: { [key: string]: number } = {};
+
+  requestId: number = 1200;
+
+  connectAndSubscribe = () => {
+    if (!this.isDisposed) {
+      this.ws = this.createWebsocket(BASE_WS_URL.public[this.parent.options.testnet ? 'testnet' : 'livenet']);
+      this.ws.addEventListener('open', this.onOpen);
+      this.ws.addEventListener('message', this.onMessage);
+      this.ws.addEventListener('close', this.onClose);
+    }
+  };
+
+  onOpen = () => {
+    if (!this.isDisposed) {
+      const payload = {
+        id: 1,
+        method: 'perp_market24h_pack_p.subscribe',
+        params: [],
+      };
+
+      this.send(JSON.stringify(payload));
+
+      this.resetOrderbook();
+      this.subscribe();
+      this.ping();
+    }
+  };
+
+  subscribe = () => {
+    let id = 10;
+    for (const topic of Object.keys(this.topics)) {
+      const [method, ...params] = topic.split('|||');
+      this.send(
+        JSON.stringify({
+          method: method,
+          // kline requires second arg to be a number
+          params: method === 'kline_p.subscribe' ? [params[0], +params[1]] : params,
+          id: id++,
+        }),
+      );
+    }
+  };
+
+  ping = () => {
+    if (!this.isDisposed) {
+      this.pingAt = performance.now();
+      this.send(`{"id":${this.requestId++},"method":"server.ping","params":[]}`);
+    }
+  };
+
+  onMessage = ({ data }: MessageEvent) => {
+    if (!this.isDisposed) {
+      this.trackLastReceived();
+      const handlers = Object.entries(this.messageHandlers);
+
+      const json = jsonParse(data);
+
+      if (json?.method === 'server.ping' || json?.result === 'pong') {
+        this.handlePongEvent();
+        return;
+      }
+
+      const jsonSymbol = json?.symbol;
+
+      for (const [topic, callbacks] of handlers) {
+        if (topic.startsWith('kline_p')) {
+          if (json?.kline_p) {
+            // interval is field #1 (not #0)
+            const [, , symbol] = topic.split('.');
+            if (jsonSymbol === symbol) {
+              this.recordMessageHandlerStats(topic);
+              for (const callback of callbacks) {
+                callback(json?.kline_p || []);
+              }
+            }
+          }
+        } else if (topic.startsWith('orderbook_p')) {
+          if (json?.orderbook_p) {
+            // interval is field #1 (not #0)
+            const [, symbol] = topic.split('.');
+            if (jsonSymbol === symbol) {
+              this.recordMessageHandlerStats(topic);
+              for (const callback of callbacks) {
+                callback(json?.orderbook_p || { bids: [], asks: [], sequence: json?.sequence });
+              }
+            }
+          }
+        } else if (data.includes(topic)) {
+          for (const callback of callbacks) {
+            this.recordMessageHandlerStats(topic);
+
+            if (json) callback(Array.isArray(json) ? json : [json]);
+          }
+        }
+      }
+    }
+  };
+
+  handleTickerStreamEvents = (events: Array<Record<string, any>>) => {
+    events.forEach((event) => {
+      if (event?.data?.length) {
+        for (const row of event?.data) {
+          const [
+            rawSymbol,
+            openRp,
+            ,
+            ,
+            lastRp,
+            volumeRq,
+            ,
+            openInterestRv,
+            indexRp,
+            markRp,
+            fundingRateRr,
+            ,
+            bid,
+            ask,
+          ] = row;
+
+          const symbol = this.parent.formatSymbolIn(rawSymbol);
+
+          const ticker = this.parent.store.tickersBySymbol[symbol];
+          if (ticker) {
+            const last = parseFloat(lastRp);
+            this.store.updateTicker(ticker, {
+              last,
+              volume: parseFloat(volumeRq),
+              quoteVolume: parseFloat(volumeRq) * parseFloat(lastRp),
+              percentage: ((parseFloat(lastRp) - parseFloat(openRp)) / parseFloat(openRp)) * 100,
+              fundingRate: parseFloat(fundingRateRr),
+              mark: parseFloat(markRp),
+              index: parseFloat(indexRp),
+              openInterest: parseFloat(openInterestRv),
+              ...(bid ? { bid: parseFloat(bid) } : {}),
+              ...(ask ? { ask: parseFloat(ask) } : {}),
+            });
+          }
+        }
+      }
+    });
+  };
+
+  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    const topic = `kline_p.subscribe|||${opts.symbol}|||${+this.parent.timeframes[opts.interval]}`;
+    const handler = `kline_p.${opts.interval}.${opts.symbol}`;
+
+    const parser = (allRows: number[][]) => {
+      // [ <timestamp>, "<interval>", <lastClose>, <open>, <high>, <low>, <close>, <volume>, <turnover>, ]
+
+      const rows = [];
+      if (allRows?.[1]) rows.push(allRows[1]);
+      if (allRows?.[0]) rows.push(allRows[0]);
+
+      for (const json of rows) {
+        const [timestamp, interval, , open, high, low, close, volume] = json;
+        if (interval === +this.parent.timeframes[opts.interval]) {
+          callback({
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume: volume,
+          });
+        }
+      }
+    };
+
+    const waitForConnectedAndSubscribe = () => {
+      if (this.isConnected) {
+        this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+
+        this.topics[topic] = (this.topics[topic] || 0) + 1;
+
+        const payload = {
+          method: 'kline_p.subscribe',
+          params: [opts.symbol, +this.parent.timeframes[opts.interval]],
+          id: 2,
+        };
+        this.send(JSON.stringify(payload));
+        //this.parent.log(`Switched to [${opts.symbol}:${opts.interval}]`);
+      } else {
+        setTimeout(() => waitForConnectedAndSubscribe(), 100);
+      }
+    };
+
+    waitForConnectedAndSubscribe();
+
+    return () => {
+      this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
+
+      this.topics[topic]--;
+
+      if (this.isConnected && !this.messageHandlers[handler].length) {
+        const payload = {
+          method: 'kline_p.unsubscribe',
+          params: [opts.symbol, +this.parent.timeframes[opts.interval]],
+          id: 2,
+        };
+        this.cleanupMessageHandlerStats(handler);
+        this.send(JSON.stringify(payload));
+      }
+    };
+  };
+
+  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    const topic = `orderbook_p.subscribe|||${symbol}`;
+    const handler = `orderbook_p.${symbol}`;
+    const orderBook: OrderBook = { bids: [], asks: [] };
+
+    const innerId = nanoid();
+
+    if (!this.orderBookInnerState[innerId]) {
+      this.orderBookInnerState[innerId] = {
+        updates: [],
+        isSnapshotLoaded: false,
+      };
+    }
+
+    const innerState = this.orderBookInnerState[innerId];
+
+    const fetchSnapshot = async () => {
+      const { data } = await this.parent.xhr.get(ENDPOINTS.ORDERBOOK, {
+        params: { symbol, limit: 1000 },
+      });
+
+      const { orderbook_p, sequence } = data.result;
+
+      if (!this.isDisposed) {
+        // save snapshot into orderBook object
+        orderBook.bids = orderbook_p.bids.map(([price, amount]: string[]) => ({
+          price: parseFloat(price),
+          amount: parseFloat(amount),
+          total: 0,
+        }));
+
+        orderBook.asks = orderbook_p.asks.map(([price, amount]: string[]) => ({
+          price: parseFloat(price),
+          amount: parseFloat(amount),
+          total: 0,
+        }));
+
+        // drop events where u < lastUpdateId
+        innerState.updates = innerState.updates.filter((update: Record<string, any>) => update.sequence > sequence);
+
+        // apply all updates
+        innerState.updates.forEach((update: Record<string, any>) => {
+          this.processOrderBookUpdate(orderBook, update);
+        });
+
+        calcOrderBookTotal(orderBook);
+
+        innerState.isSnapshotLoaded = true;
+        innerState.updates = [];
+
+        callback(orderBook);
+      }
+    };
+
+    const parser = (data: Data) => {
+      // first update, request snapshot
+      if (!innerState.isSnapshotLoaded && innerState.updates.length === 0) {
+        fetchSnapshot();
+        innerState.updates = [data];
+        return;
+      }
+
+      // more updates, but snapshot is not loaded yet
+      if (!innerState.isSnapshotLoaded) {
+        innerState.updates.push(data);
+        return;
+      }
+      // snapshot is loaded, apply updates and callback
+      this.processOrderBookUpdate(orderBook, data);
+      calcOrderBookTotal(orderBook);
+
+      callback(orderBook);
+    };
+
+    const waitForConnectedAndSubscribe = () => {
+      if (this.isConnected) {
+        // 1. subscribe to the topic
+        // 2. wait for the first message and send request to snapshot
+        // 3. store all incoming updates in an array
+        // 4. when the snapshot is received, apply all updates and send the order book to the callback
+        // 5. then on each update, apply it to the order book and send it to the callback
+        this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+
+        this.topics[topic] = (this.topics[topic] || 0) + 1;
+
+        const payload = { method: 'orderbook_p.subscribe', params: [symbol], id: 3 };
+        this.send(JSON.stringify(payload));
+      } else {
+        timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);
+      }
+    };
+
+    waitForConnectedAndSubscribe();
+
+    return () => {
+      this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
+      orderBook.asks = [];
+      orderBook.bids = [];
+      innerState.updates = [];
+      innerState.isSnapshotLoaded = false;
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      this.topics[topic]--;
+
+      if (this.isConnected && !this.messageHandlers[handler].length) {
+        const payload = { method: 'orderbook_p.unsubscribe', params: [symbol], id: 3 };
+        this.cleanupMessageHandlerStats(handler);
+        this.send(JSON.stringify(payload));
+      }
+    };
+  };
+
+  private processOrderBookUpdate = (orderBook: OrderBook, update: Record<string, any>) => {
+    const sides = { bids: update.bids, asks: update.asks };
+
+    Object.entries(sides).forEach(([side, data]) => {
+      // we need this for ts compile
+      if (side !== 'bids' && side !== 'asks') return;
+
+      data.forEach(([p, a]: string[]) => {
+        const price = parseFloat(p);
+        const amount = parseFloat(a);
+        const index = orderBook[side].findIndex((b) => b.price === price);
+
+        if (index === -1 && amount > 0) {
+          orderBook[side].push({ price, amount, total: 0 });
+          return;
+        }
+
+        if (amount === 0) {
+          orderBook[side].splice(index, 1);
+          return;
+        }
+
+        orderBook[side][index].amount = amount;
+      });
+    });
+  };
+}

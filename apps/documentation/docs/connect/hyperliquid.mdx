@@ -1,0 +1,252 @@
+---
+title: Hyperliquid
+description: Connect your Hyperliquid account to Tealstreet.
+sidebar_position: 13
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WalletConnect from '/img/connect/hyperliquid/v3/walletconnect.png';
+import ApiDropdown from '/img/connect/hyperliquid/v3/apidropdown.png';
+import AuthorizeWallet from '/img/connect/hyperliquid/v3/authorizewallet.png';
+import AuthorizeWallet2 from '/img/connect/hyperliquid/v3/authorizewallet2.png';
+import MustDeposit from '/img/connect/hyperliquid/v3/mustdeposit.png';
+import MasterAccount from '/img/connect/hyperliquid/v3/masteraccount.png';
+import ApiTeal from '/img/connect/hyperliquid/v3/api-teal.png';
+import EnableTrading from '/img/connect/hyperliquid/v3/enable-trading.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<ThemedImage
+    alt="hyperliquid-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/hyperliquid-light.png'),
+        dark: useBaseUrl('/img/exchange/hyperliquid-dark.png'),
+    }}
+/>
+
+<!-- <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+  <iframe
+    src="https://www.youtube.com/embed/TBlybqFeHBs"
+    frameBorder="0"
+    allow="autoplay; encrypted-media"
+    allowFullScreen
+    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+  />
+</div> -->
+
+## Connecting [Hyperliquid](https://teal.link/hyperliquid) to Tealstreet
+
+<IntroTealstreet exchangeName="Hyperliquid" />
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [Hyperliquid](https://teal.link/hyperliquid) and:
+    - Login or connect your wallet when the window pops up
+        - If a window did not automatically pop up click the connect button at the top right of the page
+
+:::note
+You will not be able to connect to Hyperliquid if you are connecting from a geo-restricted region.
+:::
+
+<div class="text--center">
+    <img src={WalletConnect} alt="Wallet Connect" style={{ width: 500 }} />
+</div>
+
+:::caution
+Hyperliquid requires you to deposit funds before you can create an API Key. So make sure you take care of that first by using their **Deposit** button at the top right of the page after you have signed in with your wallet.
+:::
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **More** button at the top and choosing **API** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 600 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://app.hyperliquid.xyz/API)**
+:::
+
+- Name your key and click the **Generate** button to begin the process. This will provide you the **Agent Wallet API** we will need later.
+    - This is 1 of the 3 pieces of information we need to link our Hyperliquid account to Tealstreet.
+
+- Next click on the **Generate API Wallet** Button to continue the key creation process.
+
+<div class="text--center">
+    <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 700 }} />
+</div>
+
+- Choose how long you want your key to be active for. Up to a maximum of 180 days as of this writing.
+
+- Securely store your Private Key. You can copy it to clipboard by clicking the button highlighted in the image below.
+    - This is the 2nd of the 3 pieces of information we need to link our Hyperliquid account to Tealstreet.
+    - When done click the **Authorize** button and sign the transaction with your wallet.
+
+<div class="text--center">
+    <img src={AuthorizeWallet2} alt="Authorize Wallet 2" style={{ width: 400 }} />
+</div>
+
+:::caution
+You will need to have deposited funds before you can finalize the **API Key** creation. If you have not deposited funds you will see a window like the one below.
+:::
+
+<div class="text--center">
+    <img src={MustDeposit} alt="Deposit Funds First" style={{ width: 400 }} />
+</div>
+
+- Once you have authorized the API Key click on the dropdown next to your connected wallet at the top right near the deposit button.
+
+<div class="text--center">
+    <img src={MasterAccount} alt="Master Account" style={{ width: 500 }} />
+</div>
+
+- This is your **Master Account** address make sure to securely store it.
+    - This will be the 3rd and final piece of information we need to link our Hyperliquid account to Tealstreet.
+
+- Now lets return to Tealstreet to resume the API Linking process now that we have the 3 pieces of information we need.
+
+<!-- 
+<div class="text--center">
+  <img src={ApiWhitelist} alt="API Creation" style={{width: 500}} />
+</div>
+
+* Copy these IP addresses to your clipboard with the clip button
+  * paste them into the restricted IP's box on the Hyperliquid API page.
+
+<div class="text--center">
+  <img src={ApiCreation3} alt="API Creation3" style={{width: 500}} />
+</div>
+
+* After editing the settings, click the **Save** button. -->
+
+<!-- -   -   -   -
+
+### Activating Futures on the account
+
+* Now we need to activate the derivatives futures on the account:
+  * Go to the derivatives section and click the green activate button
+
+<div class="text--center">
+  <img src={ActivateFuts} alt="Activate Futures" style={{width: 500}} />
+</div>
+
+* Next we will have to go through some disclaimer stuff and agree to the terms and conditions.
+
+<div class="text--center">
+  <img src={ActivateFuts2} alt="Activate Futures2" style={{width: 500}} />
+</div>
+
+* Once you pass through the disclaimer portion you're account should be activated for futures trading.
+
+:::note
+If you do not activate futures trading on your account you will not be able to execute futures trades on Tealstreet.
+::: -->
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the Hyperliquid API page.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **Main Wallet Address** Hyperliquid showed you in the Sub-Accounts window.
+    - Referred to as the Master Account.
+  - Provide the **Agent Wallet Address** Hyperliquid created when you clicked the Generate button when making the API Key.
+    - You received this when you hit the **Generate** button on the API Key page.
+  - Provide the **Private Key** Hyperliquid showed you when you Authorized your API Key.
+    - You received this when you finally authorized the key.
+  - Provide the **Vault Key** if you will be trading from a vault account. (Leave blank if not using a vault account.)
+  - Click done.
+
+- After you click **Done**, Tealstreet requires a **Builder Fee Approval** before the Hyperliquid key can be fully linked and used for trading.
+  - Click **Approve Builder Fee** and sign the approval message with your wallet.
+  - The approval must be signed by the same wallet as your **Main Wallet Address**.
+  - This approval is signed on Arbitrum and authorizes Tealstreet's builder fee rate of **0.01% (1 bps)**.
+  - On desktop app, use **Approve in Browser**, complete the wallet signature there, then return and click **Recheck** if needed.
+
+<OutroTealstreet exchangeName="Hyperliquid" />
+
+---
+
+### Trading from a Vault (optional but recommended for shared strategies)
+
+When connecting a vault, make sure the addresses go in the correct fields:
+
+- Main Wallet Address: Your EOA "Master Account" address (42-char 0x...).
+- Agent Wallet Address: The Agent (API) wallet created on Hyperliquid's API page.
+- Subkey Private Key: Private key for the Agent wallet.
+- Vault: The vault contract address (42-char 0x...).
+
+How Tealstreet uses these under the hood:
+
+    -   Tealstreet subscribes to private data with user = Vault if provided; otherwise it uses the Main Wallet Address (EOA).
+    -   Balances and positions are updated from Hyperliquid’s webData2 stream (clearinghouseState). If the “user” is wrong, data comes back empty and your balance can remain 0.
+
+#### Troubleshooting: Vault shows 0 balance
+
+If your vault appears empty after linking:
+
+    -   Verify addresses are in the right fields:
+    -   Main Wallet Address = your EOA “Master Account”
+    -   Vault = the vault contract address
+    -   Do not put the Agent wallet in the Main Wallet Address field
+    -   Ensure funds are actually in the vault (not just the EOA)
+    -   Refresh after a few seconds (balance initializes to 0 until webData2 arrives)
+    -   Network/tunnel: Hyperliquid requires a working private WebSocket; allow connections and try again
+    -   Quick API check: query HL’s info endpoint with your vault address
+
+    ```bash
+
+curl -sX POST <https://api.hyperliquid.xyz/info> \
+ -H 'content-type: application/json' \
+ -d '{"type":"clearinghouseState","user":"0xYourVaultAddress"}'
+
+```
+
+    -   If this returns marginSummary/assetPositions, the vault is valid. If it returns an empty result, the address is likely incorrect.
+    -   Note: Some historical endpoints (e.g., userFills) may be empty when queried with the EOA while trading via a vault. Positions, orders, and balances will still update correctly via webData2.
+
+Helpful references:
+
+- Hyperliquid Info endpoint – User address and Vault sections: [Hyperliquid Docs](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#vault)
+- The “User address” note: ensure you pass the actual account (EOA or vault) you intend to query
+
+## Frequently Asked Questions
+
+- I see a banner pop-up sometimes when trading on Hyperliquid asking if I want to enable builder-fee support?
+    - This approval is now required to link and use Hyperliquid on Tealstreet.
+    - You must sign it with your Ethereum wallet (the same address used as your **Main Wallet Address** in Tealstreet).
+    - If you are prompted to switch networks, switch to the required Arbitrum network and try again.
+    - The approved Tealstreet builder fee rate is **0.01% (1 bps)**.
+
+- Hyperliquid says I'm from a restricted jurisdiction?
+    - Hyperliquid has restrictions on users from certain jurisdictions such as the United States. Please see their [Terms of Service](https://app.hyperliquid.xyz/terms) for more info.
+
+- How do I enable trading on Hyperliquid?
+    - Hyperliquid requires you to enable trading on your account before you can use it. To enable trading, go to the [Hyperliquid](https://teal.link/hyperliquid) website and click the **Enable Trading** button after you have signed in with your wallet.
+
+<div class="text--center">
+    <img src={EnableTrading} alt="Enable Trading" style={{ width: 500 }} />
+</div>
+
+- I'm getting an error that my API Wallet doesn't exist?
+    - If an account was previously linked and now shows `User or API Wallet does not exist`, the Hyperliquid key has most likely expired.
+    - Hyperliquid keys can be set for up to 180 days, but shorter durations (often around 30 days) are common.
+    - Revisit your Hyperliquid API page, verify key status, and create a new API key if needed, then relink/update it in Tealstreet.
+
+:::note
+If a previously linked Hyperliquid account starts showing `User or API Wallet does not exist`, the linked key is usually expired. Hyperliquid keys can be configured up to 180 days, but shorter durations (commonly around 30 days) are often used. Revisit your Hyperliquid API settings, verify the key status, and create/relink a new key if needed.
+:::

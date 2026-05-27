@@ -1,0 +1,71 @@
+---
+title: Custom Module
+description: Build and run your own mini React modules inside Tealstreet.
+sidebar_position: 99
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+The **Custom Module** lets you run lightweight React code inside Tealstreet. You can start from a template or load a saved module, edit the code, and render it directly in a panel.
+
+::::caution
+Custom code runs in an iframe-style sandbox but can still affect your layout. Use trusted code only.
+::::
+
+---
+
+### Enabling the Custom Module
+
+- Add **Custom Module** from the module selector (web or desktop).
+- Unlock your layout if you need to resize or move it.
+
+---
+
+### Creating or Loading a Module
+
+- Open the module settings (gear icon) to choose what to render:
+    - **Templates**: Quick start examples (prefixed with `template:`).
+    - **Saved modules**: Items stored in your account (persisted via cloud storage).
+    - **Temp modules**: Session-only items (prefixed with `temp-`).
+- If nothing is selected, a helper message appears with a prompt to pick a module.
+
+---
+
+### Editing Code
+
+- The editor supports React + TypeScript. Define a `Component` and return JSX.
+- The API exposes React, Ant Design (`antd`), icons, translations, and helpers via `api`.
+- Type imports are stripped at build time; keep runtime imports inside the module body.
+- The system transpiles your code with Babel before execution; errors show inline with a friendly explanation.
+
+---
+
+### Console & Errors
+
+- `console.log`, `warn`, `error`, and `info` are captured and surfaced in the module console.
+- Runtime errors are wrapped in an error boundary and displayed with suggestions.
+- The renderer warns when the module API version used to save the module differs from the current runtime.
+
+---
+
+### Behavior & Limitations
+
+- Modules render inside the panel you place; width/height are provided as props.
+- If the selected module is deleted or missing, the module clears and shows an empty state.
+- Version mismatches still run, but update your code to the latest API when warned.
+- Temp modules are not synced; saved modules are stored in the registry and reloaded automatically.
+
+---
+
+### Troubleshooting
+
+1. **Blank panel**: Ensure a module is selected and code is not empty.
+2. **Hooks errors**: Verify hooks are called inside `Component` and dependency arrays are valid.
+3. **Map/length errors**: Check that data sources are arrays before mapping.
+4. **Version warning**: Update your module to the current API version to avoid future issues.

@@ -1,0 +1,95 @@
+---
+title: Mobile
+description: Trading with Tealstreet on your mobile device
+sidebar_position: 4
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import MobileGeneral from '/img/trading/mobile/mobile-general.png';
+import MobileGeneral2 from '/img/trading/mobile/mobile-general2.png';
+import MobileAddToHomeScreen from '/img/trading/mobile/mobile-addtohomescreen.png';
+import MobileOptionsScrollbar from '/img/trading/mobile/mobile-options-scrollbar.png';
+import MobileTapToTrade from '/img/trading/mobile/mobile-tap-to-trade.png';
+import MobileLock from '/img/trading/mobile/mobile-lock.png';
+
+Tealstreet supports trading on your mobile device. While a native iOS & Android app is being developed you can still trade on your mobile device while on the go.
+
+## Trading on Mobile
+
+<div class="text--center">
+    <img src={MobileGeneral} alt="Mobile General" style={{ width: 250 }} />
+</div>
+
+Due to how Tealstreet is designed you will find mostly the same functionality on mobile as you would on a desktop app or browser. The main difference is that the layout is optimized for mobile devices.
+
+All the tools you would expect to have to manage your trades will work while on the go.
+
+<div class="text--center">
+    <img src={MobileGeneral2} alt="Mobile General2" style={{ width: 300 }} />
+</div>
+
+- In this screenshot take note of the 'lock' mechanism, while similar to the lock mechanism which controls the resizing of modules on the options scrollbar, this lock is to prevent you from accidentally making changes to trades or orders while the phone is for example in your pocket or bag.
+    - Note that the Tealstreet Module lock is different from the mobile lock you see on the left hand side of the screen.
+
+---
+
+### Improving the mobile experience
+
+<div class="text--center">
+    <img src={MobileAddToHomeScreen} alt="Mobile Add To Homescreen" style={{ width: 250 }} />
+</div>
+
+When you first use the mobile version of the app you might consider using the "Add to Homescreen" option to make it more like an application then a web browser.
+
+It still runs in your web browser, this just hides some of the elements that may be unnecessary and taking up screen real estate. Such as the browser navigation options & buttons.
+
+---
+
+### Frequently asked questions
+
+I can't adjust the sizes of the modules on mobile?
+
+- There is a **Lock** mechanism on the right side of the top-most options scrollbar. You will need to unlock it in order to adjust the sizes of your modules. Conversely it can be used to lock your existing layout so it doesn't get accidentally moved.
+
+<div class="text--center">
+    <img src={MobileOptionsScrollbar} alt="Mobile Options Scrollbar" style={{ width: 300 }} />
+</div>
+
+- Note that there are scrollbars which might be difficult to see on mobile. You can scroll them to see additional options or functions.
+    - In the above screenshot for example you can see the module locking mechanism which when unlocked will let you resize & reposition the modules as you desire.
+
+<div class="text--center">
+    <img src={MobileLock} alt="Mobile lock and module lock" style={{ width: 300 }} />
+</div>
+
+- In this screenshot you can see both lock mechanisms. The one on the left is the mobile lock which prevents accidental inputs such as when the device is in your pocket. The one on the right is the module lock which prevents you from accidentally moving or resizing your modules.
+
+---
+
+I can't find my API key on mobile?
+
+- Similar to the last question & answer example it might be that you need to scroll the options bar to see the API key option.
+
+---
+
+Do I need to make an API key just for mobile?
+
+- No the API keys you create are not specific to a device or browser. You can use the same API key on multiple devices or browsers.
+
+---
+
+Is there an easier way to place orders? I'm having difficulty placing them with my fingers.
+
+- There is a new feature we call Tap-to-Trade which you can enable to assist you with placing orders on mobile.
+    - Mobile Lock on the left hand side must be disabled since this lock prevents accidental inputs such as when device is in a pocket.
+    - Press an hold for 1.2seconds to place an order, if you dont hold your press for the duration it will reset and not place an order.
+
+<div class="text--center">
+    <img src={MobileTapToTrade} alt="Mobile Tap to Trade" style={{ width: 300 }} />
+</div>

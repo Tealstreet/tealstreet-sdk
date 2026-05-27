@@ -1,0 +1,93 @@
+---
+title: Runbot
+description: Runbot is a trading bot platform that allows you to run your own trading strategies.
+sidebar_position: 3
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import RunBot1 from '/img/trading/webhooks/runbot/runbot1.png';
+import RunBot2 from '/img/trading/webhooks/runbot/runbot2.png';
+import RunBot3 from '/img/trading/webhooks/runbot/runbot3.png';
+import RunBot4 from '/img/trading/webhooks/runbot/runbot4.png';
+
+### Runbot
+
+This section will go over how to link a [Tealstreet Webhook](/docs/webhooks) to Runbot.
+
+:::tip
+Please consider using our **[ref link for Runbot](https://app.runbot.io/#QJQzXelz0w)**.
+:::
+
+:::note
+Runbot has a docs section especially tailored to Tealstreet which you can **[view here](https://docs.runbot.io/webhooks-alert-bots/tealstreet.io-free)**.
+:::
+
+---
+
+### Linking a Tealstreet Webhook to Runbot
+
+- Navigate to the **[Runbot Trading Bots](https://app.runbot.io/Bot/)** page.
+
+<div class="text--center">
+    <img src={RunBot1} alt="Runbot 1" style={{ width: 650 }} />
+</div>
+
+- In this example you can see I created two unlimited webhooks and deleted another already. Click the link to add a new webhook in accordance with your plan or available token balance.
+
+<div class="text--center">
+    <img src={RunBot3} alt="Runbot 3" style={{ width: 400 }} />
+</div>
+
+- Provide a name for your webhook. This is your own personal preference.
+
+<div class="text--center">
+    <img src={RunBot2} alt="Runbot 2" style={{ width: 550 }} />
+</div>
+
+1. First load your strategy.
+2. Select Tealstreet from the alerts dropdown.
+3. Enter the webhook URL you got when you created the Webhook in Tealstreet. See [Webhooks](/docs/webhooks) for more info.
+4. Save changes.
+
+:::note
+Your bot is not yet running until you toggle the switch for **'Run this strategy'** underneath the strategy selector.
+:::
+
+---
+
+### Activating the bot strategy
+
+At this point you should adjust your strategy if you haven't already done so. Navigate to it **[here](https://app.runbot.io/Strategies)**.
+
+<div class="text--center">
+    <img src={RunBot4} alt="Runbot 4" style={{ width: 550 }} />
+</div>
+
+1. Select the strategy you wish to edit, or make a new one if you wish to do so.
+2. Edit the configuration to your situation and preference.
+
+:::tip
+Not every exchange is supported, so make sure you match the appropriate API Key with the correct exchange in this strategy configurator. You don't want to try and use a **Phemex** API key for a **Bitget** Strategy for example.
+:::
+
+Proceed to adjust the other settings to your preferences such as when to enter or exit position and how far away tp's and stops should be.
+
+Once this setup is done you can go back to the Bot section and toggle the button for 'Run this strategy' and after saving it will proceed to run.
+
+You can monitor its status on the Trading bots page to see how well its doing, what trades its taking and when. Happy Botting!
+
+:::note
+If your setup is incorrect you might receive an email from Runbot to the address you signed up on with additional information as to what went wrong.
+:::
+
+:::tip
+For additional information on how to use Runbot, please refer to **[their documentation](https://docs.runbot.io/)**.
+:::
+
+---

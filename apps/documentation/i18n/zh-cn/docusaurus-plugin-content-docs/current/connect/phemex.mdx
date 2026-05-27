@@ -1,0 +1,269 @@
+---
+title: Phemex
+description: Learn how to connect your Phemex API to Tealstreet.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WhitelistTroubleshooting from '/img/connect/phemex/whitelist-troubleshooting.png';
+
+<ThemedImage
+    alt="Phemex-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/phemex-light.png'),
+        dark: useBaseUrl('/img/exchange/phemex-dark.png'),
+    }}
+/>
+
+## 连接 [Phemex](https://teal.link/Phemex) 到 Tealstreet
+
+您可以观看以下视频或按照以下步骤操作：
+
+<div class="text--center">
+
+_[![Phemex-Connect](https://img.youtube.com/vi/7CciJVs75AA/hqdefault.jpg)](https://www.youtube.com/watch?v=7CciJVs75AA)_
+
+**观看YouTube上的视频教程。[点击这里](https://www.youtube.com/watch?v=7CciJVs75AA)。**
+
+</div>
+
+---
+
+## API创建过程
+
+:::tip
+在设置API的时候，建议同时保持Tealstreet和Phemex标签打开来复制和粘贴相关信息。
+:::
+
+- 首先，请确保您已登录您的[Phemex](https://teal.link/Phemex)帐户。
+
+- 第二，登录您的Tealstreet帐户。
+    1. 成功登录Tealstreet后，导航到标题为“API密钥”的标签页
+
+    2. 单击名为**“New API Key”**的蓝色按钮
+
+![addingapi](/img/connect/common/addingapi.jpg)
+
+- 从下拉菜单中选择Phemex。
+
+<div class="text--center">
+
+![dropdown](/img/connect/phemex/dropdown.png)
+
+</div>
+
+- 在Tealstreet上保留“New API”窗口，因为我们需要其中的IP地址来创建API密钥。
+
+---
+
+### Phemex API 创建
+
+- 现在，您已准备好在Phemex帐户中生成API密钥。前往Phemex标签页：
+    1. 单击用户图标。
+    2. 从下拉菜单中选择**API管理**。
+
+<div class="text--center">
+
+![API-Dropdown](/img/connect/phemex/apidropdown.png)
+
+</div>
+
+:::tip
+您可以直接导航到此页面，方法是导航**[此处](https://www.phemex.com/account/api-management)**
+:::
+
+您可以通过点击 **[此处](https://www.phemex.com/account/api-management)**直达此页面,
+
+- 在API管理页面上，单击**创建新的API密钥**按钮以开始密钥创建过程。
+
+<div class="text--center">
+
+![API-Create](/img/connect/phemex/apicreate.png)
+
+</div>
+
+- 在**创建API**弹出窗口上
+    1. 选择“高速率限制API”
+    2. 选择下一步
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/phemex/apimore.png)
+
+</div>
+
+- 现在，您已准备好选择Phemex API密钥的设置。
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/phemex/apidetails2.png)
+
+</div>
+
+1. “名称”-您可以为此部分选择任何名称。如果您有许多用于不同服务的API密钥，则使用与Tealstreet相关的名称可能会有所帮助。
+2. 复制Tealstreet提供的IP地址白名单（在新API密钥页面上），并将其粘贴到此字段中。
+3. 选择 **‘读取和交易权限’**。
+4. “确认” - 完成所需字段后，按“确认”按钮。
+
+:::caution
+永远不要与任何人分享您的API密钥。
+:::
+
+---
+
+### 将API链接到Tealstreet
+
+- 在Phemex网站上创建API密钥后，您可以填写到Tealstreet的API KEYS页面的相关空格内。
+
+返回到我们之前留开的终端内的API密钥页面。
+
+<div class="text--center">
+
+![API-Tealstreet](/img/connect/phemex/apiteal.png)
+
+</div>
+
+- 单击交易所下拉菜单并选择Phemex。
+    1. “名称”-在此处，您可以为API密钥选择任何名称。这对于使用多个交易所和/或子帐户的交易者非常有帮助，并希望在交易终端页面上轻松区分它们。
+
+    2. 选择加密密码。记得把它保存在某个地方！当您返回交易终端的交易页面时，您需要输入此密码。
+
+    3. 在此处粘贴Phemex提供的API密钥。
+
+    4. 在此处粘贴Phemex提供的API Secret。
+
+    5. 单击“创建”。
+
+- 如果所有详细信息都正确，则已成功将您的Phemex帐户链接到Tealstreet。导航到Tealstreet的“交易”页面，并从下拉菜单中选择Phemex帐户。如果正确链接，您将在Tealstreet的保证金窗口中看到您的余额/保证金。
+
+:::caution
+Phemex要求帐户在网页或手机客户端上至少执行过一次交易操作，才能通过其API进行远程交易。
+:::
+
+---
+
+## 支持的市场
+
+Phemex支持三种保证金类型的永续市场：
+
+1. **COIN-M**：币本位（反向合约）。
+
+- BTC保证金和ETH保证金合约。
+
+2. **USD-M**：Phemex的美元合约市场。
+
+- 您必须在合约交易账户中持有美元（而不是USDT）才能在Phemex上交易USD-M市场。
+
+3. **USDT**：Phemex的USDT合约市场。
+
+- 您必须在合约交易账户中持有USDT（而不是美元）才能在Phemex上交易USDT市场。
+
+:::note
+自[Tealstreet 2.0](https://app.tealstreet.io/)升级后，已经支持USDT交易对。
+:::
+
+:::note
+
+- 线性永续合约使用美元或USDT作为保证金。
+- 反向永续合约使用币本位（BTC或ETH）。
+- 在Tealstreet上，BTC线性永续合约称为“BTCUSD”，BTC反向永续合约称为“BTCUSD Perp”。请参见下面的图片：
+
+<div class="text--center">
+
+![LinPerp](/img/connect/phemex/linperp.png)
+
+</div>
+:::
+
+---
+
+## 获取Phemex USD
+
+观看Phemex的Youtube视频，了解如何使用他们的加密货币转换工具：
+
+<div class="text--center">
+
+_[![Phemex-Connect](https://img.youtube.com/vi/33MOUAwraOo/hqdefault.jpg)](https://www.youtube.com/watch?v=33MOUAwraOo)_
+
+</div>
+
+:::note
+如果您持有USDC或USDT并想交易Phemex的“USD-M”，则需要先将保证金转换为Phemex USD！
+:::
+
+---
+
+### 转移到合约账户
+
+一旦您拥有USD、USDT、BTC或ETH，将您拥有的资产转移到“**合约交易账户**”。按照以下说明将保证金从现货钱包转移到合约交易钱包。
+
+操作步骤如下：
+
+1. 打开资产菜单
+2. 点击“**转账**”
+3. 选择要转移的保证金类型（例如USD）
+4. 确保转移的位置（例如从现货到合约交易）
+5. 输入要转移的保证金金额（例如100美元，全部）
+6. 点击“确认”
+
+<div class="text--center">
+
+![Transfer](/img/connect/phemex/transfer.png)
+
+</div>
+
+<div class="text--center">
+
+![Transfer](/img/connect/phemex/transfer2.png)
+
+</div>
+
+---
+
+## 故障排除
+
+### API在加载的时候卡住
+
+:::danger
+在Tealstreet中无法加载Phemex API？例如尝试下单时出现**旋转的轮子**图标？
+:::
+
+1. 确保Phemex帐户已经完成至少一笔交易以生成历史记录并解锁API
+2. 确保您正在使用支持的市场。
+3. 如果您有问题，请**[联系我们](/docs/support/contact-us/)**。
+
+---
+
+### 零余额
+
+Tealstreet的**保证金钱包**没有显示任何余额？
+
+1. 确认您在Phemex的**“合约交易账户”**中持有适当的保证金。
+2. 确认您在Tealstreet中打开了适当的市场（U本位或者币本位）。
+
+- 如果您持有Phemex USD并想交易BTC，请转到“BTCUSD”线性。
+- 如果您持有BTC并想交易BTC保证金合约，请转到“BTCUSD”反向。
+- 如果您持有ETH并想交易ETH保证金合约，请转到“cETHUSD”反向。
+
+---
+
+### 无法下达止损订单
+
+- Phemex要求您必须有一个开着的仓位才能设置止损订单。这是交易所引擎的限制。
+
+---
+
+### 其他API问题
+
+1. 仔细检查您没有混淆API密钥和API密钥密钥。
+2. 确保您正确地将终端中列出的所有IP地址列入白名单，在**新API密钥-Phemex**窗口中显示。
+
+<div class="text--center">
+    <img src={WhitelistTroubleshooting} alt="Troubleshooting IP Whitelist" style={{ width: 450 }} />
+</div>

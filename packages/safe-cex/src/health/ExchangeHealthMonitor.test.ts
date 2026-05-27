@@ -1,0 +1,313 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ExchangeHealthMonitor } from './ExchangeHealthMonitor';
+
+describe('ExchangeHealthMonitor', () => {
+  let monitor: ExchangeHealthMonitor;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    monitor = new ExchangeHealthMonitor('test');
+  });
+
+  afterEach(() => {
+    monitor.dispose();
+    vi.useRealTimers();
+  });
+
+  describe('constructor', () => {
+    it('should initialize with healthy status', () => {
+      expect(monitor.isHealthy()).toBe(true);
+      expect(monitor.getState().status).toBe('healthy');
+    });
+
+    it('should initialize with empty error counts', () => {
+      const state = monitor.getState();
+      expect(Object.keys(state.errorCounts).length).toBe(0);
+    });
+
+    it('should initialize with empty recent errors', () => {
+      expect(monitor.getState().recentErrors).toEqual([]);
+    });
+
+    it('should accept custom max recent errors option', () => {
+      const customMonitor = new ExchangeHealthMonitor('test', { maxRecentErrors: 5 });
+      // Add 10 errors
+      for (let i = 0; i < 10; i++) {
+        customMonitor.processMessage('invalid api key');
+      }
+      expect(customMonitor.getState().recentErrors.length).toBe(5);
+      customMonitor.dispose();
+    });
+
+    it('should merge exchange-specific patterns for known exchanges', () => {
+      const binanceMonitor = new ExchangeHealthMonitor('binance');
+      // Binance-specific error code should be recognized
+      const category = binanceMonitor.processMessage('error code -2014');
+      expect(category).toBe('auth_invalid');
+      binanceMonitor.dispose();
+    });
+  });
+
+  describe('processMessage', () => {
+    it('should detect auth_invalid errors', () => {
+      const category = monitor.processMessage('invalid api key');
+      expect(category).toBe('auth_invalid');
+    });
+
+    it('should detect rate_limit errors', () => {
+      const category = monitor.processMessage('rate limit exceeded');
+      expect(category).toBe('rate_limit');
+    });
+
+    it('should detect network errors', () => {
+      const category = monitor.processMessage('ECONNREFUSED');
+      expect(category).toBe('network');
+    });
+
+    it('should detect time_sync errors', () => {
+      const category = monitor.processMessage('recv window error');
+      expect(category).toBe('time_sync');
+    });
+
+    it('should detect exchange_down errors', () => {
+      const category = monitor.processMessage('service unavailable');
+      expect(category).toBe('exchange_down');
+    });
+
+    it('should return null for non-matching messages', () => {
+      const category = monitor.processMessage('everything is fine');
+      expect(category).toBeNull();
+    });
+
+    it('should return unknown for explicit errors that do not match patterns', () => {
+      const category = monitor.processMessage('something went wrong', true);
+      expect(category).toBe('unknown');
+    });
+
+    it('should handle empty messages', () => {
+      const category = monitor.processMessage('');
+      expect(category).toBeNull();
+    });
+
+    it('should handle null-ish messages', () => {
+      const category = monitor.processMessage(null as any);
+      expect(category).toBeNull();
+    });
+
+    it('should be case insensitive for string patterns', () => {
+      const category = monitor.processMessage('INVALID API KEY');
+      expect(category).toBe('auth_invalid');
+    });
+  });
+
+  describe('health status transitions', () => {
+    it('should transition to error on critical errors', () => {
+      monitor.processMessage('invalid api key'); // critical
+      expect(monitor.getState().status).toBe('error');
+    });
+
+    it('should transition to degraded on warning errors from healthy', () => {
+      monitor.processMessage('rate limit exceeded'); // warning
+      expect(monitor.getState().status).toBe('degraded');
+    });
+
+    it('should stay in error status after critical error', () => {
+      monitor.processMessage('invalid api key'); // critical
+      monitor.processMessage('rate limit exceeded'); // warning
+      expect(monitor.getState().status).toBe('error');
+    });
+
+    it('should auto-recover from degraded after recovery window', () => {
+      monitor.processMessage('rate limit exceeded'); // warning
+      expect(monitor.getState().status).toBe('degraded');
+
+      vi.advanceTimersByTime(60_000); // default recovery window
+
+      expect(monitor.getState().status).toBe('healthy');
+    });
+
+    it('should not auto-recover from error status', () => {
+      monitor.processMessage('invalid api key'); // critical
+      expect(monitor.getState().status).toBe('error');
+
+      vi.advanceTimersByTime(60_000);
+
+      expect(monitor.getState().status).toBe('error');
+    });
+
+    it('should use custom recovery window', () => {
+      const customMonitor = new ExchangeHealthMonitor('test', { recoveryWindowMs: 5000 });
+      customMonitor.processMessage('rate limit exceeded');
+      expect(customMonitor.getState().status).toBe('degraded');
+
+      vi.advanceTimersByTime(5000);
+
+      expect(customMonitor.getState().status).toBe('healthy');
+      customMonitor.dispose();
+    });
+  });
+
+  describe('error tracking', () => {
+    it('should increment error counts', () => {
+      monitor.processMessage('invalid api key');
+      monitor.processMessage('invalid api key');
+      expect(monitor.getErrorCount('auth_invalid')).toBe(2);
+    });
+
+    it('should track different error categories separately', () => {
+      monitor.processMessage('invalid api key');
+      monitor.processMessage('rate limit exceeded');
+      expect(monitor.getErrorCount('auth_invalid')).toBe(1);
+      expect(monitor.getErrorCount('rate_limit')).toBe(1);
+    });
+
+    it('should store last error', () => {
+      monitor.processMessage('invalid api key');
+      const lastError = monitor.getLastError();
+      expect(lastError).toBeDefined();
+      expect(lastError?.category).toBe('auth_invalid');
+      expect(lastError?.message).toBe('invalid api key');
+    });
+
+    it('should update last error on new error', () => {
+      monitor.processMessage('invalid api key');
+      monitor.processMessage('rate limit exceeded');
+      const lastError = monitor.getLastError();
+      expect(lastError?.category).toBe('rate_limit');
+    });
+
+    it('should limit recent errors to maxRecentErrors', () => {
+      for (let i = 0; i < 15; i++) {
+        monitor.processMessage(`error ${i}`, true);
+      }
+      expect(monitor.getState().recentErrors.length).toBe(10); // default max
+    });
+  });
+
+  describe('hasAuthError', () => {
+    it('should return false when no auth errors', () => {
+      expect(monitor.hasAuthError()).toBe(false);
+    });
+
+    it('should return true for auth_invalid', () => {
+      monitor.processMessage('invalid api key');
+      expect(monitor.hasAuthError()).toBe(true);
+    });
+
+    it('should return true for auth_expired', () => {
+      monitor.processMessage('token expired');
+      expect(monitor.hasAuthError()).toBe(true);
+    });
+
+    it('should return true for auth_permissions', () => {
+      monitor.processMessage('permission denied');
+      expect(monitor.hasAuthError()).toBe(true);
+    });
+  });
+
+  describe('hasError', () => {
+    it('should return false for category with no errors', () => {
+      expect(monitor.hasError('network')).toBe(false);
+    });
+
+    it('should return true for category with errors', () => {
+      monitor.processMessage('ECONNREFUSED');
+      expect(monitor.hasError('network')).toBe(true);
+    });
+  });
+
+  describe('getErrorsByCategory', () => {
+    it('should return empty array when no errors', () => {
+      expect(monitor.getErrorsByCategory('network')).toEqual([]);
+    });
+
+    it('should return errors for specific category', () => {
+      monitor.processMessage('invalid api key');
+      monitor.processMessage('rate limit exceeded');
+      const authErrors = monitor.getErrorsByCategory('auth_invalid');
+      expect(authErrors.length).toBe(1);
+      expect(authErrors[0].category).toBe('auth_invalid');
+    });
+  });
+
+  describe('reset', () => {
+    it('should reset to healthy status', () => {
+      monitor.processMessage('invalid api key');
+      monitor.reset();
+      expect(monitor.isHealthy()).toBe(true);
+    });
+
+    it('should clear error counts', () => {
+      monitor.processMessage('invalid api key');
+      monitor.reset();
+      expect(monitor.getErrorCount('auth_invalid')).toBe(0);
+    });
+
+    it('should clear recent errors', () => {
+      monitor.processMessage('invalid api key');
+      monitor.reset();
+      expect(monitor.getState().recentErrors).toEqual([]);
+    });
+
+    it('should clear last error', () => {
+      monitor.processMessage('invalid api key');
+      monitor.reset();
+      expect(monitor.getLastError()).toBeUndefined();
+    });
+  });
+
+  describe('setStatus', () => {
+    it('should set status to degraded', () => {
+      monitor.setStatus('degraded');
+      expect(monitor.getState().status).toBe('degraded');
+    });
+
+    it('should set status to error', () => {
+      monitor.setStatus('error');
+      expect(monitor.getState().status).toBe('error');
+    });
+
+    it('should set status to healthy', () => {
+      monitor.processMessage('invalid api key');
+      monitor.setStatus('healthy');
+      expect(monitor.isHealthy()).toBe(true);
+    });
+
+    it('should schedule recovery when set to degraded', () => {
+      monitor.setStatus('degraded');
+      vi.advanceTimersByTime(60_000);
+      expect(monitor.isHealthy()).toBe(true);
+    });
+  });
+
+  describe('getSummary', () => {
+    it('should return "OK" when healthy', () => {
+      expect(monitor.getSummary()).toBe('OK');
+    });
+
+    it('should return status and error info when not healthy', () => {
+      monitor.processMessage('invalid api key');
+      const summary = monitor.getSummary();
+      expect(summary).toContain('ERROR');
+      expect(summary).toContain('auth_invalid');
+    });
+
+    it('should truncate long messages', () => {
+      const longMessage = 'A'.repeat(100);
+      monitor.processMessage(`invalid api key ${longMessage}`);
+      const summary = monitor.getSummary();
+      expect(summary.length).toBeLessThan(150);
+      expect(summary).toContain('...');
+    });
+  });
+
+  describe('getState', () => {
+    it('should return a copy of state', () => {
+      const state1 = monitor.getState();
+      const state2 = monitor.getState();
+      expect(state1).not.toBe(state2);
+      expect(state1.recentErrors).not.toBe(state2.recentErrors);
+      expect(state1.errorCounts).not.toBe(state2.errorCounts);
+    });
+  });
+});

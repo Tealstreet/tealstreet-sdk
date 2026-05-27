@@ -1,0 +1,270 @@
+---
+title: FAQ
+description: Frequently Asked Questions about the Tealstreet terminal.
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import Home from '/img/faq/home-1.png';
+import Button from '/img/faq/button.png';
+import AddingApi from '/img/connect/commonv3/addingapi.jpg';
+
+### Is Tealstreet free to use?
+
+Tealstreet is free to use. We make money through deals with the exchange. This is at no extra cost to you, because it works similar to a referral link. This is how all crypto trading terminals work, although many charge their users a monthly fee on top of that. At Tealstreet, we believe if we we provide good free trading tools to our traders, then we will both reap the rewards through shared user & Tealstreet growth without having to charge our users anything extra. It's a positive feedback loop. ![Okayge](/img/social/okayge.png)
+
+---
+
+### Can I trust Tealstreet?
+
+The Tealstreet team has worked very hard on the security side of things. Security was the first aspect developed for the terminal and the number one priority. The security side is hosted by AWS. User information like API keys are encrypted before they get put in the database. AWS manages master’s keys. If someone were to hack Tealstreet they would not be able to get your master API key. In addition, a second layer of security was added in the form of End to End API User Encryption. The Tealstreet team believes that the security of the terminal is just as good if not better than other crypto services. Before using Tealstreet be sure to read through the terms of service.
+
+:::tip
+Be sure to read through the _[API Guides](/docs/connect/api-general)!_
+:::
+
+---
+
+### Does Tealstreet use or sell my order data?
+
+Tealstreet does not sell or share your order data. Our Terms of Service do not grant Tealstreet any rights to sell order flow data or to re-route orders in any way. Some trading terminals may engage in practices like liquidity harvesting, but Tealstreet does not. Order and position data is only used to provide features such as position history, and this information is accessible solely to the individual user.
+
+---
+
+### Which exchanges can be used with Tealstreet?
+
+- Tealstreet currently supports:
+[ByBit](/docs/connect/bybit),
+[BitMex](/docs/connect/bitmex),
+[Binance](/docs/connect/binance),
+[Bitget](/docs/connect/bitget),
+[OKX](/docs/connect/okx),
+[BingX](/docs/connect/bingx),
+[Phemex](/docs/connect/phemex),
+[WOOX](/docs/connect/woo),
+[WOOFi](/docs/connect/woofi),
+[BloFin](/docs/connect/blofin),
+[Coinbase](/docs/connect/coinbase),
+[Bitrue](/docs/connect/bitrue),
+[ApeX-Omni](/docs/connect/apex-omni),
+[Apex-Pro](/docs/connect/apex),
+[HyperLiquid](/docs/connect/hyperliquid),
+[CoinCatch](https://teal.link/coincatch),
+[Bitunix](/docs/connect/bitunix),
+[AsterDex](/docs/connect/asterdex),
+[Kraken Futures](/docs/connect/kraken-futures),
+[Lighter](/docs/connect/lighter).
+    <!-- [Breakout](/docs/connect/breakout), -->
+
+<!-- More exchanges like [Mexc](/docs/connect/kucoin) are planned. -->
+
+---
+
+### Is Tealstreet opensource?
+
+Tealstreet is not open source. Some code for public viewing will be published. You can visit the Tealstreet GitHub repositories for the main organization [Tealstreetio](https://github.com/tealstreetio/) and the public projects [Tealstreet](https://github.com/tealstreet/).
+
+---
+
+### Do I need to stay logged into an exchange to use Tealstreet?
+
+No, you do not need to stay logged in, however, the exchange will time out eventually. Furthermore, it is strongly recommended you always keep your exchange page open for added safety and peace of mind.
+
+---
+
+### Can I use Tealstreet on a mobile device?
+
+Yes, you can use Tealstreet on most mobile web browsers. A Tealstreet app for iOS and Android is in the works!
+
+---
+
+### How do I add an API to Tealstreet?
+
+Please visit the [API General](/docs/connect/api-general) page to get started.
+
+---
+
+### Does Tealstreet have 2FA?
+
+Yes, the Tealstreet trading terminal supports Two-Factor Authentication. You can enable it when creating a new account, or you can find it inside your **General Settings** window.
+
+---
+
+### Can I request new features for Tealstreet?
+
+Yes, you can request new features via the [requests](/docs/requests/feature-requests) page. However, keep in mind that Sam has a very heavy workload so please be patient! Additional functionality will be added as quickly as his schedule (and the market) permits.
+
+---
+
+### Can anyone help me with Tealstreet?
+
+The fastest way to get help with Tealstreet is by getting in touch with the team using any of the links on the [Contact Us](/docs/support/contact-us) page. You can also send us a direct message on Twitter.
+
+---
+
+### Can I use hotkeys / shortcuts with Tealstreet?
+
+Yes you can! Please visit [this](/docs/trade/shortcuts) page for a tutorial and more information.
+
+---
+
+### Does Tealstreet work on mobile?
+
+Yes, Tealstreet works on mobile browsers. Give it a try using your smart phone or tablet device.
+
+<div class="text--center">
+
+![Mobile-Trading](/img/tutorial/mobile-trade.gif)
+
+</div>
+
+:::tip
+You can add Tealstreet on your homescreen as an app if you use Chrome. Press the three dots at the top and use the "Add to Homescreen" button to add Tealstreet to your mobile homescreen.
+:::
+
+<div class="text--center">
+    <img src={Button} alt="Button" style={{ width: 500 }} />
+</div>
+
+<div class="text--center">
+    <img src={Home} alt="Home" style={{ width: 300 }} />
+</div>
+
+:::note
+Please see our [mobile doc page here](/docs/trade/mobile) for more information.
+:::
+
+---
+
+### Will the Tealstreet Desktop app work on Older versions of Windows?
+
+No, the Tealstreet Windows Desktop app only officially works on Windows 10 and newer.
+
+:::note
+In summer 2023 we updated to the latest version of Electron, which is built on top of Chromium. Chromium discontinued support for Windows **7/8/8.1**. You can [read more about it here](https://www.electronjs.org/blog/windows-7-to-8-1-deprecation-notice)
+:::
+
+---
+
+### Where did the name Tealstreet come from?
+
+The name has no meaning it was just a domain Sam had registered already.
+
+---
+
+### I am getting an error downloading updates it mentions an objects.githubusercontent.com?
+
+This is something that github does on their end if a download takes too long it expires the internal download session which causes this error to pop up. It essentially means the download took to long or was too slow. It's suggested that you close the popup, close Tealstreet, and turn off any downloads or streams you may have, then re-launch Tealstreet and try again.
+
+- You can also goto the [downloads](https://www.tealstreet.io/#download) page and download the latest version manually that way.
+
+---
+
+### I am trying to link api to Bybit Testnet and I keep getting an error about IP address being unbound?
+
+Testnets are supported on a best-effort basis. They might not work correctly and can break suddenly.
+
+Since there are such few people using we prioritize live markets at the moment. If you are using a testnet and it breaks please let us know and we will try to fix it.
+
+---
+
+### I am getting an error where the terminal is constantly trying to reconnect and all of the indicator dots show green?
+
+Some users have reported that resyncing the time on their device fixed it. If you are using Windows you can do this by right-clicking the time in the bottom right corner and selecting "Adjust date/time". Then click "Sync now".
+
+---
+
+### How do I know if my bybit is now under Tealstreet partner account and can get the perks on Bybit?
+
+In your profile dashboard area you should be able to find an AID# and if it says '26960' then you are partnered with Tealstreet.
+
+---
+
+### How can I get my Tealstreet UserID to help with support?
+
+When logged in you can click the options gear at the top right of your screen
+
+![Options](/img/faq/tsV3-options.png)
+
+Then click on the "Developer" category and you will see your UserID near the top.
+
+![UserID](/img/faq/tsV3-userid.png)
+
+---
+
+### I connected my API Key but nothing is working and I'm not receiving any data?
+
+Try resyncing the clock on your device. Some PC's have a lag on their system-clock which can mess up the connection to the server.
+
+- Windows users can try the [Time Sync Tool website](https://www.timesynctool.com/) to synchronize their system clock.
+- Mac users can try this [guide](https://www.macworld.com/article/3261177/how-to-set-up-time-machine-on-your-mac.html)
+
+---
+
+### My Chart is blank and telling me to activate my linked account?
+
+This happens when you link a chart to a specific api key and then deactivate or delete that key.
+
+- Right click the charts header tab and click the 'X' to unlink the chart.
+
+---
+
+### I favorited a ticker which has since been delisted, how do I remove it?
+
+At the time of this writing, you can't remove a favorite that has been delisted. You can however make a new profile and start fresh without the favorite being stuck.
+
+---
+
+### I am encountering mouse input latency on the terminal?
+
+If you are using Windows 11 with an Nvidia graphics card some users have reported that disabling the 'Nvidia Displayer Container' in services.msc will fix the issue.
+
+---
+
+### I am missing the scrollbar in my positions window?
+
+There might be an issue with your profile, perhaps it got corrupted. Try creating a new profile and see if the scrollbar appears.
+
+- Inside your terminal settings window you can create a new profile in the "Profiles" tab.
+
+---
+
+### I am getting some performance issues on the terminal, laggy UI etc?
+
+There are a couple of things you can try to improve performance:
+
+- Install [Time Sync Tool](https://timesynctool.com/) to keep your time in sync, Windows internal time syncing is not as reliable / quick, set time.aws.com as your primary NTP server as it is what 99.9% of exchanges are using
+
+- Corsair iCUE is causing micro-stutter, SignalRGB is recommended instead, you can also google Corsair iCUE and RemoteCpuId to try to fix
+
+- Disable Dynamic Lighting in Personalization > Dynamic Lighting as it causes a lot of stutter
+
+- Bluetooth headset might be causing stutter with some drivers combinations, you can test by simply disabling bluetooth adapter in Device Manager temporary
+
+---
+
+### How can I remove the Tealstreet app data from my computer?
+
+If you want to remove all Tealstreet app data from your computer, you can do so by following these steps:
+
+1. Close the Tealstreet app.
+2. Open the Run dialog by pressing `Windows + R` on your keyboard.
+3. Type `%appdata%\Tealstreet` and press Enter.
+4. Delete the data inside the folder that appears.
+
+---
+
+<!-- ### How can I get my User-ID to help with support?
+
+When logged in you can click the options gear at the top right of your screen.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{width: 900, height: 75}} />
+</div>
+
+Then click on the "Developer" category and you will see your UserID near the top. -->

@@ -1,0 +1,9 @@
+import { BybitExchange } from '../bybit/bybit.exchange';
+
+export class BybitDemoExchange extends BybitExchange {
+  isDemo = true;
+
+  get supportedCategories() {
+    return ['linear'];
+  }
+}

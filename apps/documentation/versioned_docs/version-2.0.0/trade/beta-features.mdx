@@ -1,0 +1,109 @@
+---
+title: Beta Features & Settings
+description: This section will go over various systems and features that are considered to be in Beta (Work-in-Progress).
+sidebar_position: 20
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import CommonSettings from '/img/trading/common/common-settings.png';
+import BetaSettings from '/img/trading/beta-features/beta-settings.png';
+import TWAP from '/img/trading/beta-features/twap.png';
+import TwapStop from '/img/trading/beta-features/twap-stop.png';
+
+---
+
+This section will go over various settings or features that are considered to be Beta (Work in Progress, sometimes with unexpected or buggy behavior). These features are not recommended for users who are not comfortable with testing things and sometimes encountering bugs.
+
+### Accessing the Beta Settings Panel
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Common Settings" style={{ width: 350 }} />
+</div>
+
+- You can access the Beta Settings page by clicking the gear icon on the top right of the terminal.
+
+<div class="text--center">
+    <img src={BetaSettings} alt="Common Settings" style={{ width: 500 }} />
+</div>
+
+<details>
+    <summary>Click for more information on Beta Settings</summary>
+    <p>
+        <b>Enable Kline Popover Charts</b>: Enables a <b>Kline Chart</b> pop-over when hovering over a symbol in the{' '}
+        <b>Screener Module</b>. <br />
+        <b>Enable Multi Account Streaming</b>: Allows you to monitor and track positions across multiple exchanges
+        without needing to switch exchange API keys <br />
+        <b>Show Multi Accounts on Chart</b>: Shows your other exchange account positions on currently in-use chart.{' '}
+        <br />
+        <b>Enable Object Tree in Tradingview (refresh)</b>: This un-hides the object tree letting you hide or show
+        specific indicators or drawings on chart. Requires a chart refresh after enabling it. <br />
+        <b>Enable Chaser Quick Order</b>: Enables the use of the Limit Chaser system inside the{' '}
+        <b>Place Order module</b>. <br />
+        <b>Chaser Order Poll Rate (ms)</b>: The rate (speed) at which the chaser orders will chase price (Lower # is
+        faster). <br />
+        <b>Bracket Orders (TP/SL Drawing/Limits)</b>: Extends the Limit Order section of the <b>Place Order module</b>{' '}
+        to support using the Long / Short tool on chart to manage your order placement. <br />
+        <b>Replace TP w/ Limit When Entry Filled</b>: By default TP's with Bracket Orders use Maker / Taker orders. This
+        changes that to Limit / Maker orders. This occurs on the client's side.
+        <br />
+        <b>High data resampling rate (~20/s)</b>: Increases the rate at which Tealstreet updates and refreshes data on
+        the screen. You can think of this like the FPS in a game. <br />
+        <b>Highest data resampling rate (~60/s)</b>: Further Increases the rate at which Tealstreet updates and
+        refreshes data on the screen. This setting will have a noticeable impact on system resource usage. <br />
+    </p>
+</details>
+
+---
+
+## Other Beta Features
+
+These are some of the beta systems we have which are not located specifically within the Beta tab of the Settings panel.
+
+### TWAP Orders
+
+In the Place Order module if you tick the checkbox at the top right you can roll out some additional features, one of which is TWAP.
+
+TWAP is a powerful tool that can be used to help you average in or out of a position. In this window you can adjust the size you would like it to buy, which can be specified like how you would normally place an order such as with the pre-set size buttons, manually typing in a size, or using the margin slider.
+
+<div class="text--center">
+    <img src={TWAP} alt="TWAP Orders" style={{ width: 400 }} />
+</div>
+
+The changes which turn this from a normal order system into TWAP are the following:
+
+- **Order Count**:
+    - This is how many total orders you want TWAP to do. If you set 10, it will place 10 orders once activated.
+- **Minutes**: \* How many minutes in between each of the orders. If you set 10 orders and set Minutes to 1, you will execute 10 orders over 10 minutes.
+- **Rand. %**:
+    - Introduces randomness into your orders. This will vary your order count, size, and time between orders by a Random amount you specify which can help you avoid being too predictable for anyone monitoring the Orderbooks.
+        - Be careful setting Randomness too high, a value of 100% could theoretically end up placing no orders, since this is within the bounds of 100% randomness.
+
+:::note
+TWAP session is preserved even when you refresh your browser.
+:::
+
+---
+
+### Stopping a TWAP Order
+
+Once a TWAP order has been started, you can go to your Open Positions & orders panel to monitor it as well as control it.
+
+<div class="text--center">
+    <img src={TwapStop} alt="Stop TWAP Orders" style={{ width: 800 }} />
+</div>
+
+:::note
+Currently TWAP only supports **Market** / **Taker** orders. We are working on adding support for **Limit** / **Maker** chase orders as well.
+:::
+
+:::caution
+TWAP is an experimental feature and may not work as expected. While we will try our best to make it stable issues might arise. If you encounter anything you suspect is a bug please contact us at **[our Discord](/docs/support/contact-us)**.
+:::
+
+:::danger
+Not every exchange behaves identically. They all have slight differences in things like their API data or latency, or even rate-limiting. It makes it very difficult to unite this features behavior across every exchange. Please exercise caution by testing the amount of orders or duration of twap execution before using it for live & full-size trading.
+:::

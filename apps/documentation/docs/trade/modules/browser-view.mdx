@@ -1,0 +1,145 @@
+---
+title: Browser View
+description: Browser View allows you to embed a browser window into Tealstreet. This is useful for keeping an eye on other tools or charts while trading.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import BrowserView from '/img/trading/browser-view/browser-view.png';
+import BrowserView2 from '/img/trading/browser-view/browser-view-highlights.png';
+import BrowserViewExample from '/img/trading/browser-view/browserview-example.png';
+import BrowserViewExample2 from '/img/trading/browser-view/browserview-example2.png';
+import BrowserViewActivation from '/img/trading/browser-view/browserview-activation.png';
+import CommonSettings from '/img/trading/common/common-settings.png';
+
+This section will go over how to activate and start using the **Browser View module**.
+
+:::caution
+This module is only available in the Desktop version of Tealstreet.
+:::
+
+<div class="text--center">
+    <img src={BrowserView} alt="Browser View" style={{ width: 550 }} />
+</div>
+
+- Keep an eye on another tool or chart while trading
+    - Embed Aggr to watch the pulse of the asset being traded
+    - Tradingview for its alerts from your own TV account if you have one
+    - KingFisher for liquidation analysis
+    - And more!
+
+---
+
+### Activating the Browser View module
+
+Activate the module in Settings (Desktop app only), then add it from the module selector in your layout.
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Common Settings" style={{ width: 350 }} />
+</div>
+
+<div class="text--center">
+    <img src={BrowserViewActivation} alt="Browser View Activation" style={{ width: 350 }} />
+</div>
+
+:::note
+Browser view does not work inside of the web-browser. This feature is for the Desktop version of Tealstreet. (Technical limitations of browser engines)
+:::
+
+:::info
+**Technical Details:**
+
+- The Browser View module uses Electron's `<webview>` element for rendering web content
+- Popup windows are automatically enabled for full web functionality
+- URLs are automatically formatted - if you enter a domain without protocol, `https://` will be added
+- The module includes error boundary protection for stability
+  :::
+
+---
+
+### Usage
+
+Once the module is placed, use the search bar in the module header to load a URL. The module:
+
+- Auto-adds `https://` if missing
+- Remembers the last URL per tab
+- Allows popups (Electron `<webview>`)
+
+<div class="text--center">
+    <img src={BrowserView2} alt="Browser View (Highlights)" style={{ width: 500 }} />
+</div>
+
+<details open>
+    <summary>More info</summary>
+    <p>
+        <br />
+        1. **URL Input Field**: Enter any web address to display in the module. The default URL is google.com
+        <br />
+        2. **Duplicate/Delete button**: Add or remove browser view modules
+        <br />
+        3. **Adjustable module size and shape**: Resize and position the module as needed
+    </p>
+</details>
+
+#### URL Input Features
+
+The Browser View module includes a search input field that allows you to:
+
+- **Enter any web address**: Full URLs (https://example.com) or just domains (example.com)
+- **Automatic URL formatting**: If you enter a domain without a protocol, `https://` will be automatically added
+- **Clear functionality**: Use the clear button to reset the URL input
+- **Search integration**: The input field supports search functionality for easy navigation
+
+:::tip
+**Default Behavior:**
+
+- If no URL is specified, the module defaults to `https://google.com/`
+- The module remembers your last used URL per tab
+- Popup windows are enabled by default for full web functionality
+  :::
+
+---
+
+### Examples
+
+  <details>
+    <summary>
+        Example Layouts
+    </summary>
+    Using Aggr to keep track of the current price movement with Tradingview located on the side
+    <div class="text--center">
+        <img src={BrowserViewExample} alt="Browser View Example" style={{width: 1000}} />
+    </div><br /><br />
+    Using Arkham to track inflows on an altcoin launch
+    <div class="text--center">
+        <img src={BrowserViewExample2} alt="Browser View Example 2" style={{width: 1000}} />
+    </div><br />
+
+</details>
+
+### Platform Limitations
+
+:::warning
+**Desktop App Only:**
+The Browser View module is only available in the Tealstreet Desktop application. When using Tealstreet in a web browser, this module will be hidden from the module selection menu and will display an error message if somehow accessed.
+
+This limitation exists because:
+
+- Web browsers cannot embed other web content using `<webview>` elements
+- Security restrictions prevent cross-origin iframe embedding
+- The module requires Electron's webview API for full functionality
+  :::
+
+### Troubleshooting
+
+**Common Issues:**
+
+1. **Module not appearing in menu**: Ensure you're using the Desktop app, not the web version
+2. **URL not loading**: Check that the URL is valid and accessible
+3. **Popup windows blocked**: Popups are enabled by default, but some websites may still block them
+4. **Module crashes**: The module includes error boundary protection, but if issues persist, try refreshing the module or restarting the application

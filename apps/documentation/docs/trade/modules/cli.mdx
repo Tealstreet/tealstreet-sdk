@@ -1,0 +1,599 @@
+---
+title: CLI Trading
+description: Command Line Interface (CLI) trading for Tealstreet
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+---
+
+## Introduction
+
+The Command Line Interface (CLI) provides a powerful set of commands for trading operations in Tealstreet. The CLI supports market orders, limit orders, stop orders, position management, and various utility commands.
+
+Type `help` to see all available commands, or `help <command>` to see examples for a specific command.
+
+## Table of Contents
+
+1. [Using the CLI Module](#using-the-cli-module)
+2. [Session & Status Commands](#session--status-commands)
+3. [Trading Commands](#trading-commands)
+4. [Position Management](#position-management)
+5. [Order Management](#order-management)
+6. [Price Information](#price-information)
+7. [Account Management in Web](#account-management-in-web)
+8. [Prompt Customization](#prompt-customization)
+9. [Utility Commands](#utility-commands)
+10. [Variables & Constants](#variables--constants)
+11. [Price and Size Formats](#price-and-size-formats)
+12. [Command Chaining](#command-chaining)
+13. [Notes](#notes)
+
+## Using the CLI Module
+
+- Add the CLI module from the module selector, then click inside the terminal to focus input.
+- The module uses the active account and symbol from the current tab; change them from the toolbar, not via CLI commands.
+- Commands that require an exchange will show an error if the tab is not connected.
+- Order utilities (`orders`, `move`, `bump`) operate on open limit orders for the active symbol unless noted.
+
+## Session & Status Commands
+
+### Status Command
+
+Shows the currently connected account, exchange, and symbol.
+
+```bash
+status
+```
+
+### Connection Command
+
+Displays WebSocket health and loaded data for the active exchange. Use `reconnect` to force a socket reconnect.
+
+```bash
+connection
+connection reconnect
+```
+
+### Markets Command
+
+Lists all markets on the connected exchange. Requires a connected account.
+
+```bash
+markets
+```
+
+### Symbol Command
+
+Displays or sets the working symbol. In the web app, use the toolbar to change symbols; this command is informational.
+
+```bash
+symbol
+symbol BTCUSDT
+```
+
+## Trading Commands
+
+### Buy Command
+
+Places a buy order (market or limit).
+
+**Syntax:**
+
+```bash
+buy <size> [at <price>] [reduce]
+buy <symbol> <size> [at <price>] [reduce]
+buy <symbol1,symbol2,...> <size> [at <price>] [reduce]
+```
+
+**Examples:**
+
+```bash
+buy $100
+buy $100 reduce
+buy WIFUSDT $100
+buy WIFUSDT,ENAUSDT $100
+buy WIFUSDT,ETHUSDT $100 reduce
+buy $500 at 50000
+buy BTCUSDT $500 at 50000 reduce
+```
+
+**Parameters:**
+
+- `size`: Order size in USD notional (e.g., `$100`, `$1000.50`)
+- `symbol`: Trading symbol(s) - optional, uses current symbol if not specified. Multiple symbols can be comma-separated.
+- `at <price>`: For limit orders, specifies the price. Supports absolute prices, percentages (`+1%`, `-0.5%`), or relative offsets (`+100`, `-50`).
+- `reduce`: Makes the order reduce-only
+
+### Sell Command
+
+Places a sell order (market or limit).
+
+**Syntax:**
+
+```bash
+sell <size> [at <price>] [reduce]
+sell <symbol> <size> [at <price>] [reduce]
+sell <symbol1,symbol2,...> <size> [at <price>] [reduce]
+```
+
+**Examples:**
+
+```bash
+sell $100
+sell $100 reduce
+sell WIFUSDT $100
+sell WIFUSDT,ENAUSDT $100
+sell WIFUSDT,ETHUSDT $100 reduce
+sell $500 at 52000
+sell BTCUSDT $500 at -1% reduce
+```
+
+**Parameters:**
+
+- `size`: Order size in USD notional (e.g., `$100`, `$1000.50`)
+- `symbol`: Trading symbol(s) - optional, uses current symbol if not specified. Multiple symbols can be comma-separated.
+- `at <price>`: For limit orders, specifies the price. Supports absolute prices, percentages (`+1%`, `-0.5%`), or relative offsets (`+100`, `-50`).
+- `reduce`: Makes the order reduce-only
+
+### Chase Command
+
+Chases the price to execute orders at the best bid/ask prices. The chaser continuously updates limit orders to stay at the top of the book until filled.
+
+**Syntax:**
+
+```bash
+chase <buy|sell> <size> [reduce]
+chase <buy|sell> <symbol> <size> [reduce]
+chase <buy|sell> <symbol1,symbol2,...> <size> [reduce]
+chase <buy|sell> %all% <percentage>% reduce
+```
+
+**Examples:**
+
+```bash
+chase buy $100
+chase buy $100 reduce
+chase buy WIFUSDT $100
+chase buy WIFUSDT,ENAUSDT $100
+chase buy WIFUSDT,ETHUSDT $100 reduce
+chase sell $120
+chase sell $120 reduce
+chase sell %all% 20% reduce
+chase sell ETHUSDT,ENAUSDT $100
+```
+
+**Parameters:**
+
+- `buy|sell`: Order side (required)
+- `size`: Order size in USD notional (e.g., `$100`) or percentage of position (e.g., `20%` - only for reduce-only orders)
+- `symbol`: Trading symbol(s) - optional, uses current symbol if not specified
+- `%all%`: Special keyword to target all positions of the specified side
+- `reduce`: Makes the order reduce-only
+
+### Scale Command
+
+Creates a set of scaled orders distributed across a price range.
+
+**Syntax:**
+
+```bash
+scale <buy|sell> <total_size> into <count> from <start_price> to <end_price> [reduce] [taker]
+```
+
+**Examples:**
+
+```bash
+scale buy 10 into 10 from 31000 to 32000
+scale sell $10000 into 25 from 50000 to 48500 reduce
+scale sell $10000 into 25 from 50000 to 48500 reduce taker
+scale buy $1000 into 10 from -0.25% to -1%
+scale sell 1 into 5 from +1% to 32000 reduce
+```
+
+**Parameters:**
+
+- `buy|sell`: Order side
+- `total_size`: Total size to distribute across orders (USD notional with `$` prefix)
+- `count`: Number of orders to create
+- `start_price`: Starting price (absolute, percentage like `+1%`, `-0.25%`, or relative offset)
+- `end_price`: Ending price (same format as start_price)
+- `reduce`: Makes orders reduce-only
+- `taker`: Allows taker orders (default is post-only/maker)
+
+### Stop Command
+
+Places stop orders (take profit or stop loss) for position management. The order type (TP or SL) is automatically determined based on the price relative to the current mark price.
+
+**Syntax:**
+
+```bash
+stop at <price>
+stop <buy|sell> at <price>
+stop <size> at <price>
+stop <buy|sell> <size> at <price>
+```
+
+**Examples:**
+
+```bash
+stop at 0.1%
+stop at -100
+stop at 18500
+stop buy at +100
+stop sell at 1%
+stop $500 at 1%
+stop buy $500 at 1%
+stop sell 0.01 at -100
+```
+
+**Parameters:**
+
+- `buy|sell`: Order side - optional, inferred from current position if not specified. Required if you have both long and short positions.
+- `size`: Order size (USD notional with `$` or raw amount) - optional, uses full position size if not specified (size=0 means infinity/full position)
+- `at <price>`: Stop trigger price (required). Supports:
+    - Absolute price: `18500`
+    - Percentage from current: `0.1%`, `1%`, `-0.5%`
+    - Relative offset: `+100`, `-500`
+
+## Position Management
+
+### Close Command
+
+Closes positions with a market order.
+
+**Syntax:**
+
+```bash
+close
+close <long|short>
+close <symbol>
+close <long|short> <symbol>
+close <long|short> <symbol1,symbol2,...>
+```
+
+**Examples:**
+
+```bash
+close
+close short
+close short WIFUSDT
+close short WIFUSDT,ETHUSDT
+close long
+close long BTCUSDT
+close BTCUSDT
+```
+
+**Parameters:**
+
+- `long|short`: Close only long or short positions (optional)
+- `symbol`: Trading symbol(s) to close (optional, uses current symbol if not specified). Multiple symbols can be comma-separated.
+
+### Nuke Command
+
+Instantly closes all positions and/or cancels all orders across all symbols.
+
+**Syntax:**
+
+```bash
+nuke
+nuke all
+nuke positions
+nuke pos
+nuke orders
+nuke ord
+```
+
+**Examples:**
+
+```bash
+nuke
+nuke all
+nuke positions
+nuke pos
+nuke orders
+nuke ord
+```
+
+**Parameters:**
+
+- No argument or `all`: Nuke everything (positions and orders)
+- `positions` or `pos`: Close all positions only
+- `orders` or `ord`: Cancel all orders only
+
+## Order Management
+
+### Orders Command
+
+Shows open limit orders. Use `--all` (or `all`) to include every symbol; otherwise filters to the active symbol.
+
+```bash
+orders
+orders --all
+orders all
+```
+
+### Move Command
+
+Moves a specific open limit order to a new price or relative offset.
+
+```bash
+move <order_id> <new_price>
+move <order_id> +10
+move <order_id> -5
+```
+
+### Bump Command
+
+Shifts all open limit orders on the active symbol by a price amount. Add `--buys` or `--sells` to filter sides.
+
+```bash
+bump +10
+bump -5 --buys
+bump 15 --sells
+```
+
+### Cancel Command
+
+Cancels orders for the current symbol.
+
+**Syntax:**
+
+```bash
+cancel
+cancel buys
+cancel sells
+cancel stops
+cancel buy stops
+cancel sell stops
+```
+
+**Examples:**
+
+```bash
+cancel
+cancel buys
+cancel sells
+cancel stops
+cancel buy stops
+cancel sell stops
+```
+
+**Parameters:**
+
+- No argument: Cancel all orders for current symbol
+- `buys`: Cancel all buy limit orders
+- `sells`: Cancel all sell limit orders
+- `stops`: Cancel all stop orders (TP/SL)
+- `buy stops`: Cancel all buy stop orders
+- `sell stops`: Cancel all sell stop orders
+
+## Price Information
+
+### Last Price Command
+
+Returns the current last traded price of given ticker(s).
+
+**Syntax:**
+
+```bash
+last-price
+last-price <symbol>
+last-price <symbol1,symbol2,...>
+```
+
+**Examples:**
+
+```bash
+last-price
+last-price BTCUSDT
+last-price BTCUSDT,ETHUSDT
+```
+
+### Mark Price Command
+
+Returns the current mark price of given ticker(s).
+
+**Syntax:**
+
+```bash
+mark-price
+mark-price <symbol>
+mark-price <symbol1,symbol2,...>
+```
+
+**Examples:**
+
+```bash
+mark-price
+mark-price BTCUSDT
+mark-price BTCUSDT,ETHUSDT
+```
+
+### Index Price Command
+
+Returns the current index price of given ticker(s).
+
+**Syntax:**
+
+```bash
+index-price
+index-price <symbol>
+index-price <symbol1,symbol2,...>
+```
+
+**Examples:**
+
+```bash
+index-price
+index-price BTCUSDT
+index-price BTCUSDT,ETHUSDT
+```
+
+## Account Management in Web
+
+Account creation, import, and switching are handled in Settings → Accounts and the top toolbar. CLI account commands inside the web module are read-only and will remind you to use the UI; they do not change the active account.
+
+### Balance Command
+
+Shows available balances for the connected account, including USD available margin, total balance, and spot coin holdings.
+
+```bash
+balance
+```
+
+### Account Command (read-only)
+
+Displays account information. Use the UI to add/remove or switch accounts.
+
+```bash
+account list
+account 1
+```
+
+## Prompt Customization
+
+Use `prompt` to inspect available prompt tokens and presets. In the web module this is informational; prompt formatting changes are not persisted and symbol/account changes should be made via the toolbar.
+
+```bash
+prompt
+prompt list
+prompt preview
+```
+
+## Utility Commands
+
+### Echo Command
+
+Echoes the message back. Useful for testing variable substitution.
+
+**Syntax:**
+
+```bash
+echo <message>
+```
+
+**Example:**
+
+```bash
+echo Hello World
+echo Current position size: $size
+echo Entry price: $entry
+```
+
+### Help Command
+
+Shows available commands or examples for a specific command.
+
+**Syntax:**
+
+```bash
+help
+help <command>
+```
+
+**Examples:**
+
+```bash
+help
+help buy
+help scale
+help chase
+```
+
+## Variables & Constants
+
+The CLI supports special variables that are replaced with current position/market data:
+
+### Position Variables (Current Position)
+
+| Variable   | Description                           |
+| ---------- | ------------------------------------- |
+| `$size`    | Current position size in contracts    |
+| `$sizeusd` | Current position size in USD notional |
+| `$entry`   | Current position entry price          |
+
+### Long Position Variables
+
+| Variable    | Description                        |
+| ----------- | ---------------------------------- |
+| `$lsize`    | Long position size in contracts    |
+| `$lsizeusd` | Long position size in USD notional |
+| `$lentry`   | Long position entry price          |
+
+### Short Position Variables
+
+| Variable    | Description                         |
+| ----------- | ----------------------------------- |
+| `$ssize`    | Short position size in contracts    |
+| `$ssizeusd` | Short position size in USD notional |
+| `$sentry`   | Short position entry price          |
+
+**Example Usage:**
+
+```bash
+echo My position size is $size contracts worth $sizeusd USD
+echo Entry price was $entry
+stop at $entry
+```
+
+## Price and Size Formats
+
+### Price Formats
+
+The CLI supports various price formats:
+
+| Format     | Example         | Description               |
+| ---------- | --------------- | ------------------------- |
+| Absolute   | `50000`         | Exact price               |
+| Percentage | `+1%`, `-0.25%` | Relative to current price |
+| Offset     | `+100`, `-500`  | Added to current price    |
+
+### Size Formats
+
+| Format       | Example            | Description                                                          |
+| ------------ | ------------------ | -------------------------------------------------------------------- |
+| USD Notional | `$100`, `$1000.50` | Size in USD value                                                    |
+| Percentage   | `20%`, `50%`       | Percentage of position (reduce-only orders only, with chase command) |
+
+:::note
+For safety reasons, only USD notional sizes (with `$` prefix) are supported for opening new positions. Percentage sizes are only available for reduce-only orders with the chase command.
+:::
+
+## Command Chaining
+
+### Sequential Execution
+
+Chain multiple commands with semicolons. Commands execute one after another:
+
+```bash
+buy btc $200; sell sol $100
+close long; close short
+cancel; nuke positions
+```
+
+### Parallel Execution
+
+Prefix commands with `@` to execute them in parallel (non-blocking):
+
+```bash
+@buy btc $200; @sell sol $100
+@chase buy BTCUSDT $500; @chase sell ETHUSDT $300
+```
+
+:::tip
+Parallel execution is useful when you want to place orders on multiple symbols simultaneously without waiting for each to complete.
+:::
+
+## Notes
+
+- All commands operate in the context of the current active symbol and account (shown at the top of the CLI)
+- Symbol matching is flexible - `btc` will match `BTCUSDT`, `BTC-PERP`, etc. based on your exchange
+- Multiple symbols can be specified with comma separation (e.g., `BTCUSDT,ETHUSDT`)
+- The CLI automatically handles symbol transformation and validation
+- Commands are case-insensitive for keywords (`buy`, `sell`, `BUY`, `SELL` all work)

@@ -1,0 +1,204 @@
+---
+title: Bybit
+description: Connecting Bybit to Tealstreet
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import BybitPermissions from '/img/connect/bybit/bybit-permissions-jun22.png';
+import ApiTealstreet from '/img/connect/bybit/apiteal.png';
+import ApiDropdown from '/img/connect/bybit/apidropdown.png';
+import Dropdown from '/img/connect/bybit/dropdown.png';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import ApiCreate from '/img/connect/bybit/apicreate.png';
+import SystemApi from '/img/connect/bybit/system-api.png';
+import InverseDerivs from '/img/connect/bybit/inverse-derivs.jpg';
+import BybitSpecific from '/img/connect/bybit/bybit-specific-settings.png';
+
+<ThemedImage
+    alt="bybit-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bybit-light.png'),
+        dark: useBaseUrl('/img/exchange/bybit-dark.png'),
+    }}
+/>
+
+## 将Bybit连接到Tealstreet
+
+你可以在视频或以下步骤中跟随：
+
+<div class="text--center">
+
+_[![Bybit-Connect](https://img.youtube.com/vi/dTp3aNL-DTQ/hqdefault.jpg)](https://www.youtube.com/watch?v=dTp3aNL-DTQ)_
+
+**观看YouTube视频教程。点击[这里](https://www.youtube.com/watch?v=dTp3aNL-DTQ)。**
+
+</div>
+
+- 首先，请确保您已登录到您的 **[Bybit](https://teal.link/bybit1)** 帐户。
+    - 接下来登录到您的 Tealstreet 帐户。
+
+:::tip
+保持 Tealstreet 和 **[Bybit](https://teal.link/bybit1)** 标签页都打开是个好主意。
+:::
+
+- 成功登录 Tealstreet 后，导航到标题为 **‘API Keys’** 的标头
+    - 单击名为 **‘New API Key’** 的蓝色按钮
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{ width: 550 }} />
+</div>
+
+- 从下拉菜单中选择Bybit。
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 550 }} />
+</div>
+
+- 现在您已经准备好在您的Bybit账户中生成API密钥。前往Bybit选项卡：
+    - 点击用户图标。
+    - 从下拉菜单中选择**API**。
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 550 }} />
+</div>
+
+- 在 API 密钥页面上，单击 **“创建新密钥”** 按钮以开始密钥创建过程。
+
+<div class="text--center">
+    <img src={ApiCreate} alt="API Create" style={{ width: 550 }} />
+</div>
+
+:::tip
+您可以通过导航到 **[此链接](https://www.bybit.com/app/user/api-management)** 直接访问此页面
+:::
+
+- 选择系统生成的API密钥。
+
+<div class="text--center">
+    <img src={SystemApi} alt="System Api" style={{ width: 400 }} />
+</div>
+
+---
+
+### 创建 Bybit API
+
+- 现在您可以选择您的 Bybit API 密钥对的设置。
+
+<div class="text--center">
+    <img src={BybitPermissions} alt="API Details" style={{ width: 550 }} />
+</div>
+
+```text
+1. 选择“连接第三方应用程序”。
+
+2. 在应用程序名称中选择“Tealstreet”。
+
+3. 选择“读写”权限。
+
+4. 在权限部分选择“订单”、“持仓”、“USDC衍生品交易”和“交易”。
+
+5. 仔细检查所有选择是否正确，然后单击“提交”。
+
+  a. 如果您的 Bybit 帐户已链接到 2FA，则会出现弹出窗口，提示您提交 2FA 代码。
+
+  b. 提交 2FA 代码后，您将看到来自 Bybit 的新弹出窗口，其中包含您的 API 密钥详细信息。 您需要将这些详细信息粘贴到 Tealstreet 的 API 密钥页面中。
+```
+
+:::tip
+在此处阅读有关 Tealstreet 密码加密系统的更多信息 **[here](/docs/connect/api-encryption)**。
+:::
+
+:::caution
+永远不要与任何人分享您的 API 密钥。
+:::
+
+---
+
+### Tealstreet API 创建
+
+- 在 Bybit 网站上创建 API 密钥后，您可以填写 Tealstreet 的 API KEYS 页面上的信息。
+
+<div class="text--center">
+
+<img src={ApiTealstreet} alt="Tealstreet API" style={{width: 650}} />
+</div>
+
+```text
+1.  确保您已选择 Bybit 作为交易所。
+
+2.  考虑通过推荐链接支持 Tealstreet。交易者将获得 10% 的费用折扣（更低的费用有助于交易者的盈利能力！）。
+
+3.  确保从系统生成的密钥（而不是自动生成的密钥）中选择 Tealstreet 作为应用程序名称。
+
+4.  为您的 Bybit 账户选择一个名称。您可以选择任何名称。对于使用多个账户和/或子账户的交易者来说，这是有帮助的。
+
+5.  选择您的加密密码。记得将其保存在某个地方！当您返回到交易终端的交易页面时，您需要输入此密码。
+
+6.  在此处粘贴 Bybit 提供的 API 密钥。
+
+7.  在此处粘贴 Bybit 提供的 API 密钥密钥。
+
+8.  点击“创建”。
+```
+
+- 如果所有细节都正确，您将成功将您的 Bybit 账户连接到 Tealstreet。在 Tealstreet 的“交易”页面中选择 Bybit 账户，如果连接正确，您将在 Tealstreet 的保证金窗口中看到您的余额/抵押品。祝您交易愉快！
+
+:::note
+请务必仔细检查您的 API 密钥和 API 密钥密钥，确保不要混淆它们。如果这些字段输入不正确，则无法将您的 Bybit 交易所账户连接到 Tealstreet。
+:::
+
+:::caution
+无限制止损单无法覆盖Bybit的最大订单规则。
+:::
+
+---
+
+## 统一保证金交易
+
+最近引入了统一保证金支持，有几个重要事项需要注意：
+
+<div class="text--center">
+    <img src={InverseDerivs} alt="Inverse Derivatives account" style={{ width: 550 }} />
+</div>
+
+- 统一保证金账户不支持反向合约，您需要确保已经为反向衍生品账户提供资金，以在统一保证金账户上交易反向合约。
+
+- 如果用户的USDT余额为负，则无法切换到孤立保证金。
+
+:::note
+如果您不想使用统一保证金账户，则可以创建子账户作为解决方法。它们默认为非统一保证金账户。
+:::
+
+---
+
+## Bybit 特定设置
+
+<!---
+TODO: This is a hacked together image, we need to make a better one.
+!--->
+
+<div class="text--center">
+    <img src={BybitSpecific} alt="Bybit Specific settings" style={{ width: 550 }} />
+</div>
+
+- **自动切换为单向模式**：
+  当您选择一个新的交易对时，这将自动尝试将您的账户切换到单向模式，以确保您不会意外地进行对冲交易。
+- **支持部分止损**：
+  启用部分止损的使用，而不是完全关闭止损。这是默认交易所行为的扩展。
+- **将止损绑定到持仓**：
+  启用此功能可防止用户在没有活动持仓的情况下放置止损单。
+
+---
+
+## 故障排除
+
+:::warning
+2023年5月8日，Bybit要求所有用户进行KYC，并在此之前开始禁止美国IP地址。如果您来自受限制的国家或未进行KYC，则将无法执行订单，即使您之前能够执行。
+:::

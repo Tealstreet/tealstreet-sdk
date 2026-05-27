@@ -1,0 +1,132 @@
+---
+title: Shortcuts & Hotkeys
+description: Tealstreet supports customizing your own shortcuts/hotkeys to make trading faster and easier.
+sidebar_position: 9
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+### Video Guide
+
+To setup your shortcuts/hotkeys you can either follow along in the video or see the steps below:
+
+<div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+    <iframe
+        src="https://www.youtube.com/embed/watch?v=85b29GIRvsA"
+        frameBorder="0"
+        allow="autoplay; encrypted-media"
+        allowFullScreen
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+    />
+</div>
+
+:::note
+The video is for V2 however the steps are the same for V3.
+:::
+
+---
+
+### Hotkey setup and their usage
+
+<div class="text--center">
+
+![Hot-Keys](/img/trading/v3/hotkeys.gif)
+
+</div>
+
+This section will go over the shortcuts/hotkeys available in Tealstreet. Head on over to the **Trade Settings** by clicking on the gear icon on the top left of the terminal. From there navigate to the **Shortcuts** tab.
+
+<div class="text--center">
+
+![Trade-Settings](/img/trading/v3/tradesettings.png)
+
+</div>
+
+<div class="text--center">
+
+![Settings-Shortcuts](/img/trading/v3/settings-shortcuts.gif)
+
+</div>
+
+To enable the use of shortcuts/hotkeys, ensure that "Enable hotkeys" is turned on.
+
+<div class="text--center">
+
+![Trade-Settings](/img/trading/v3/hotkeys.png)
+
+</div>
+
+---
+
+### Hotkey Definitions
+
+Once turned on, the hotkeys set for the different actions will start working in the terminal. The following is a list of hotkeys supported in Tealstreet:
+
+| Hotkey       | Shortcut                     | Description                                                                                        |
+| ------------ | ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| S            | Limit at clicked price       | Place limit at clicked price on Chart, Depth Chart or Orderbook (buy if below mid, sell if above). |
+| A            | Buy at clicked price         | Hold and click price on Chart, Depth Chart or Orderbook to place limit buy.                        |
+| D            | Sell at clicked price        | Hold and click price on Chart, Depth Chart or Orderbook to place limit sell.                       |
+| V            | Place SL at clicked price    | Hold and click to place a Stop‑Loss at clicked price.                                              |
+| B            | Place TP at clicked price    | Hold and click to place a Take‑Profit at clicked price.                                            |
+|              | Market buy                   | Submit a Market buy using the Market Order form size.                                              |
+|              | Market sell                  | Submit a Market sell using the Market Order form size.                                             |
+| Alt+Shift+A  | Place buy order              | Place a buy limit order using the Place Order module.                                              |
+| Alt+Shift+D  | Place sell order             | Place a sell limit order using the Place Order module.                                             |
+| X            | Cancel recent order          | Cancel the most recent resting limit order on the active market.                                   |
+| U            | Cancel buy orders            | Cancel resting buy orders for the active market.                                                   |
+| I            | Cancel sell orders           | Cancel resting sell orders for the active market.                                                  |
+| O            | Cancel active market orders  | Cancel all resting orders for the active market.                                                   |
+| P            | Cancel all orders            | Cancel all resting orders across all active accounts and markets.                                  |
+| Ctrl+Alt+A   | Buy at top of orderbook      | Place buy at the best bid.                                                                         |
+| Ctrl+Alt+D   | Sell at top of orderbook     | Place sell at the best ask.                                                                        |
+| Ctrl+Shift+A | Buy at mid‑bid               | Place buy near the bid using a small offset from top of book.                                      |
+| Ctrl+Shift+D | Sell at mid‑ask              | Place sell near the ask using a small offset from top of book.                                     |
+| Z            | Set order price from Chart   | Click the Chart to auto‑populate the price in the Place Order module.                              |
+| E            | Toggle track price           | Toggle track price on both buy/sell limit forms.                                                   |
+| Q            | Toggle post only             | Toggle Post Only on both buy/sell limit forms.                                                     |
+| W            | Toggle reduce                | Toggle Reduce Only on both buy/sell limit forms.                                                   |
+| T            | Place scaled preview         | Click twice on the Chart to define a scaled order price range.                                     |
+|              | Flatten positions            | Flatten all open positions with market orders.                                                     |
+|              | Market close active position | Market‑close the currently active position.                                                        |
+|              | Limit close active position  | Place a reduce‑only limit to close the currently active position.                                  |
+|              | Chase close active position  | Chase close the active position (only on exchanges that support chase orders).                     |
+| F            | Move track price farther     | Move track price offsets farther from top of book.                                                 |
+| G            | Move track price closer      | Move track price offsets closer to top of book.                                                    |
+| N            | Modify single scaled order   | Hold to modify a single scaled order in preview (may be limited in current version).               |
+| H            | Toggle Place Order overlay   | Show/hide the Place Order overlay.                                                                 |
+|              | Set Size Preset 1            | Set order size to preset amount (default $1,000).                                                  |
+|              | Set Size Preset 2            | Set order size to preset amount (default $5,000).                                                  |
+|              | Set Size Preset 3            | Set order size to preset amount (default $10,000).                                                 |
+|              | Set Size Preset 4            | Set order size to preset amount (default $25,000).                                                 |
+|              | Set Size Preset 5            | Set order size to preset amount (default $50,000).                                                 |
+|              | Set Size Preset 6            | Set order size to preset amount (default $100,000).                                                |
+
+You don't have to use every available hotkey action to benefit. Try getting started by using just a few of your most common actions and add more as you get more comfortable.
+
+:::tip
+Hotkeys are a very powerful tool that can help you trade faster, especially in volatile markets. Make sure to go over each of the provided hotkeys carefully.
+:::
+
+To change a hotkey assignment action, simply use your cursor and click the key field next to the action you wish to change. Then, press the new key you would like assigned. There is no need to press delete or backspace!
+
+- If you make changes and want them to save, press the blue 'OK' button.
+- If you made a change but do not want it saved, simply press the 'Cancel' button.
+
+:::tip
+If you have trouble remembering the actions and key assignments, some users report success by referencing a printed copy.
+:::
+
+---
+
+### Reserved Hotkeys
+
+:::caution
+The following hotkeys are reserved by the main Tradingview chart. We highly recommend **not** setting these keys as your hotkeys/shortcuts for any actions:
+
+- Shift + B
+- Shift + S
+  :::

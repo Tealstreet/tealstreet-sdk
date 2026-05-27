@@ -1,0 +1,46 @@
+{
+  "name": "@tealstreet/math",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'build-force' to test a build.\"",
+    "build-force": "tsup",
+    "clean": "rimraf ./dist ./coverage ./tsconfig.tsbuildinfo",
+    "dev": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'dev-force' to watch a dev version.\"",
+    "dev-force": "tsup --watch",
+    "fix-all-files": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --fix",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/core-lib.eslintcache",
+    "test": "run-s test-unit",
+    "test-unit": "vitest run",
+    "test-unit-watch": "vitest watch --ui",
+    "typecheck": "tsc --project ./tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "dequal": "^2.0.3"
+  },
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+    "@tealstreet/prettierrc": "*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^18.3.6",
+    "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/ui": "^4.1.7",
+    "cross-env": "^7.0.3",
+    "eslint": "^9.28.0",
+    "npm-run-all2": "^9.0.1",
+    "prettier": "^3.8.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "rimraf": "^6.1.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
+    "vite-tsconfig-paths": "^5.0.1",
+    "vitest": "^4.1.7"
+  }
+}

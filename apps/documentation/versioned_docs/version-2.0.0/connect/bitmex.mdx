@@ -1,0 +1,147 @@
+---
+title: Bitmex
+description: Connecting Bitmex to Tealstreet
+sidebar_position: 6
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiMore from '/img/connect/bitmex/apimore.png';
+import BitmexSubaccApi from '/img/connect/bitmex/bitmex-subacc-api.png';
+
+<ThemedImage
+    alt="bitmex-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bitmex-light.png'),
+        dark: useBaseUrl('/img/exchange/bitmex-dark.png'),
+    }}
+/>
+
+## Connecting [Bitmex](https://teal.link/BitMEX) to Tealstreet
+
+:::note
+IP Whitelisting is mandatory to connect your BitMEX API to Tealstreet
+:::
+
+Follow the steps below:
+
+- First, make sure you are logged into your **[Bitmex](https://teal.link/BitMEX)** account.
+
+- Second, log into your Tealstreet account.
+
+:::tip
+Its a good idea to keep both Tealstreet and Bitmex tabs open when managing trades.
+:::
+
+1. Once you have successfully logged into Tealstreet, navigate to the header titled **‘API Keys’**
+
+2. Click the blue button titled **‘New API Key’**
+
+![addingapi](/img/connect/common/addingapi.jpg)
+
+---
+
+### API Keys
+
+- Choose Bitmex from the dropdown menu.
+
+<div class="text--center">
+
+![dropdown](/img/connect/bitmex/dropdown.png)
+
+</div>
+
+- Now you are ready to generate the API Keys within your Bitmex Account. Head on over to the Bitmex tab and:
+
+1. Click on account.
+
+2. Select API Keys.
+
+<div class="text--center">
+
+![api-connect](/img/connect/bitmex/api-connect.png)
+
+</div>
+
+:::note
+Visit the **[Bitmex API](https://www.bitmex.com/app/apiKeysUsage)** documentation page if you want more information.
+:::
+
+---
+
+### Bitmex API Settings
+
+- Now you are ready to create the API. On the Create an API Key page:
+
+<div class="text--center">
+    <img src={ApiMore} alt="API Detailed" style={{ width: 700 }} />
+</div>
+
+1. First, choose a name for your API Key. This is helpful for traders who utilize multiple exchanges and/or sub accounts and want to distinguish between them. This name is visible only on the BitMEX website.
+
+2. Copy the **Whitelist IP Addresses** supplied by the **Tealstreet trading terminal** (on the new API key page) and paste them into the CIDR field.
+
+3. Choose order on 'Key Permissions.'
+
+4. Ensure that 'Withdraw' is unchecked.
+
+5. Click ‘Create API Key.’
+
+6. Now you have your API Key. The **API secret code** will not be available once you leave the page so either write it down or copy and paste.
+
+<div class="text--center">
+
+![api-example](/img/connect/bitmex/apiex.png)
+
+</div>
+
+:::caution
+Do not share your API keys with anyone. Make sure you stored your **key secrets** in a safe place.
+:::
+
+- Once you have created the API Key on Bitmex’s website, you are ready to fill out the information on Tealstreet’s **API Keys** page.
+
+<div class="text--center">
+
+![API-Tealstreet](/img/connect/bitmex/apiteal.png)
+
+</div>
+
+```text
+1. Ensure you have selected ‘Bitmex’ in the Exchange dropdown menu.
+
+2. Choose a name for this API connection. You will see the name on an API dropdown list on the trading page of the Tealstreet terminal. This is helpful for traders who utilize multiple accounts and/or sub accounts per exchange and want to distinguish between them.
+
+3. Choose your Encryption Password. Remember to save this somewhere!
+
+4. Paste the API Key provided by Bitmex here.
+
+5. Paste the API Secret provided by Bitmex here.
+
+6. Click ‘Create.’
+```
+
+:::caution
+Be sure to double check you do not confuse **API Key** and **API Secret**. Connecting your Bitmex exchange account to Tealstreet will not work if these fields are not entered correctly.
+:::
+
+:::note
+If all the details are correct, you will have successfully linked your Bitmex account to Tealstreet. Navigate to the ‘Trade’ page of Tealstreet and select the Bitmex account from the dropdown menu. If properly linked, you will see your balance/collateral appear in the Margin window of Tealstreet.
+:::
+
+---
+
+## Frequently Asked Questions
+
+<!-- Can I trade on TS with a Bitmex sub-account?
+
+* Unfortunately no, Bitmex does not support sub-accounts having API keys.
+
+<div class="text--center">
+  <img src={BitmexSubaccApi} alt="Bitmex Subaccount API" style={{width: 700}} />
+</div> -->

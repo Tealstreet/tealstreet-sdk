@@ -1,0 +1,1 @@
+export const INITIAL_LOADED_NEWS_LIMIT = 150;

@@ -1,0 +1,316 @@
+---
+title: Order Types & Placing Orders
+description: This section will go over the functionality within the Place Order module of Tealstreet.
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import LimitChasers from '/img/trading/placing-orders/limit-chasers.png';
+import LimitChasersSettings from '/img/trading/placing-orders/limit-chasers-settings.png';
+import PlaceOrderSettings from '/img/trading/placing-orders/place-order-settings.png';
+import TrailingStop from '/img/trading/placing-orders/btc-trailing-stop.png';
+import SpeedDial from '/img/trading/placing-orders/speed-dial.png';
+
+This section will go over the functionality within the **Place Order** window of Tealstreet.
+
+<div class="text--center">
+
+![Place-Order](/img/trading/place-order.gif)
+
+</div>
+
+## Order Types
+
+Before we get into how to use the Place Order window of Tealstreet it is important to understand the different order types:
+
+---
+
+### Market order
+
+The market order will be executed at the best price available in the order book at the execution time. Traders do not need to set the price which allows the order to be immediately executed. Although market order guarantees the execution of the order, the execution price cannot be guaranteed because the market price may fluctuate rapidly. When traders need to enter or exit a volatile fast-moving price market, market orders are generally used. Market orders fill as a 'Taker' order and almost always have the highest fees.
+
+---
+
+### Limit order
+
+Limit Order allows traders to set the order price, and the order will be filled at the order price or an executed price better than the order price.
+
+- Buy Limit Orders: the order price must be set at a price lower than the last traded price.
+- Sell Limit Orders: the order price must be set at a price higher than the last traded price.
+
+When submitting a limit order, if there are no orders in the order book that are better than or equal to the order price to be matched, the limit order will enter the order book to await execution which in turn will increase the depth of the market. In addition, limit orders can also be used to partially or fully close a position.
+
+:::caution
+The advantage of a limit order is that it can help guarantee the transaction at the specified price, but it also faces the risk of the order failing to be executed if using _[Post](/docs/trade/placing-orders#post-orders)_ mode.
+:::
+
+---
+
+### Post Orders
+
+Post-Only Orders serve to strictly ensure that your Limit Orders will be placed into the order book. With Post selected the system will automatically cancel the limit order, if it detects that it will be executed immediately upon the order placement.
+
+By selecting the Post-Only option with your Limit Orders, traders can ensure that their Limit Orders will enter the order book. What this means for traders is that they can now have more control over their trading fees, which is particularly sensitive for large volume or scalp traders.
+
+<!---
+TODO: Is the maker rebate still active?
+-->
+
+:::note
+Each exchange has its own formula and rules for the fees on orders. For example, on Bybit the trader is charged a 0.075% Taker fee if the order is executed as a Market Order and the trader receives a 0.025% Maker fee rebate if the order is executed as a Limit Order. Its important to understand the fee structure for order executions and can be found in the documentation for your favorite exchange.
+:::
+
+---
+
+### Reduce Orders
+
+Reduce orders serve to strictly reduce your position size by dynamically reducing or adjusting your order's contract quantity to match the contract size of the open position. This ensures that your position will not be unintentionally increased.
+
+By selecting the Reduce-only option with your orders, traders can ensure a order set to take profit will not be unintentionally executed as a new position with the opposite direction in the case that the current position has been already closed/stopped out/liquidated.
+
+## Placing Orders
+
+There are many functions and options in the **Place Order** window of Tealstreet. Give yourself plenty of time to learn the features and gain comfort/confidence.
+
+<div class="text--center">
+
+![Place-Order](/img/trading/place-order.gif)
+
+</div>
+
+---
+
+### Limit Orders
+
+Lets start learning by using a Limit order so we can go over features and functionality of Tealstreet.
+
+<div class="text--center">
+
+![Place-Order](/img/trading/limit-order.png)
+
+</div>
+
+1. This is the current order type. It's active because it is highlighted in blue.
+
+2. This is your current position size. You can set it either in terms of the asset you have selected or in terms of USD. They are both linked, so changing one automatically changes the other.
+
+3. If you check the Track Delta box, the price in the Place Order window will follow the index price of the exchange and update as it changes.
+
+4. The box on the top allows you to adjust the price offset of your order. The price of your order (bottom box) will be set depending on the delta (+/-) noted in the top box. An example of price offset is show below.
+
+5. The numbers shown here are quick order sizes that you can set. Clicking the numbers will adjust your order size. Clicking a number twice acts like addition. For example, if you click 500 twice, your order size will be 1000. The CC button will clear the order size. These numbers can be adjusted based on your preference, refer to the [Trade Window](/docs/trade/terminal) under Main settings > 2. Place Order.
+
+:::note
+The order will not be submitted until you click the large blue/red button.
+:::
+
+6. If you check the Post box, the order will be placed into the Orderbook and will only be executed as a Limit Order. Using this option is helpful for multiple reasons. It prevents an order from being filled immediately and can prevent accidental market orders or under/over paying depending on position. It also helps to ensure you receive a maker rebate/pay fewer fees.
+
+7. The Reduce box is for reducing your position.
+
+- If you are short and want to reduce the size of your position, click the Reduce on the left side of the window and place your buy orders. Orders that are filled will subtract from your current position.
+- If you are long and want to reduce the size of your position, click the Reduce on the right side and place your sell orders. Orders that are filled will subtract from your current position.
+
+8. Pressing this button will execute your order based on your settings.
+
+---
+
+### Example of Using Price Offset
+
+For an example of using Offset, see the picture below.
+
+<div class="text--center">
+
+![Offset](/img/trading/offset.gif)
+
+</div>
+
+The index price at the time of the screen shot is 37,567.5, displayed at the top of the Orderbook. Next, look at the offset box in the Place Order window and you will see (-100, -200.0, -1500). You can see that Track is checked so the Index price is being followed (+/-) the offset number inputted.
+
+:::tip
+Be Careful when using Offsets, using a positive offset on a buy order or negative offset on a sell order will act like a market order. Depending on your price settings, you might overpay + fees!
+:::
+
+---
+
+### Market Orders
+
+Market orders are filled using the index price the moment you submit the order. You can adjust the size of your order by typing in the size box or by clicking one of the five number boxes.
+
+<div class="text--center">
+
+![Market-Order](/img/trading/market-order.gif)
+
+</div>
+
+---
+
+### Quick Orders
+
+The Quick Order section is used to quickly place orders based on set values. It is very helpful when trading on mobile.
+
+<div class="text--center">
+
+![Quick-Order](/img/trading/quick-order.gif)
+
+</div>
+
+:::note
+The order buttons will not work until you have specified a size for your order.
+:::
+
+The buttons are fairly straightforward and self-explanatory.
+
+- Offer Bid on the left side will place your buy order at the highest price on the Bids side of the order book.
+- Offer Ask on the left will place your sell order at the lowest price on the Asks side of the order book.
+- Take Ask and Take Bid act like market orders, where Take Ask is a buy/reduce and Take Bid is a sell/reduce. Keep the Post box checked if you want to prevent the order filling as a taker.
+
+Order(s) will fill based on your settings and market conditions/price action. Quick order buttons can be set in the settings under place orders.
+
+<div class="text--center">
+
+![Settings-Quick](/img/trading/settings-quick.gif)
+
+</div>
+
+---
+
+### Limit Chasers (Beta)
+
+:::note
+This feature is currently in the beta phase and available on the Beta Version of the Tealstreet Terminal.
+:::
+
+This feature allows users to place a limit order that will chase the market price as it moves. This is useful for traders who want to help automate their entries and exits.
+
+<div class="text--center">
+    <img src={LimitChasers} alt="Limit Chasers" style={{ width: 400 }} />
+</div>
+
+You can activate it by turning it on in the settings page on the beta version of the terminal.
+
+<div class="text--center">
+    <img src={LimitChasersSettings} alt="Limit Chasers Settings" style={{ width: 400 }} />
+</div>
+
+:::caution
+This feature is is still being iterated on and its behavior might change.
+:::
+
+:::note
+As of this writing and subject to change in the future, the limit chasers will try for 2minutes, if you are not filled within 1s it picks next best orderbook price and if the exchange cancels your order (such as due to post only) it will try again within under 1 second with next best orderbook price.
+:::
+
+---
+
+### Speed Dial
+
+The Speed Dial feature allows you to quickly place orders based on the settings you have saved. It will allow you to use pre-selected settings such as how near you want your TP/SL, the size of your order, and the type of order you want to place.
+
+<div class="text--center">
+    <img src={SpeedDial} alt="Speed Dial" style={{ width: 400 }} />
+</div>
+
+It will tell you approximately how much profit or loss you will suffer based on your settings in the preview windows. Upon activating a position it will market order in on the side you chose and automatically place TP/SL at a specific distance. You can of course drag/change the orders on the chart without overwriting your settings so the next time you use Speed Dial it will function exactly how you set it up.
+
+---
+
+### Stop Orders
+
+Similar to a stop loss or take profit order you frequently find on exchanges, Tealstreet has similar functionality with a few more options.
+
+<div class="text--center">
+
+![Stop-Orders](/img/trading/stop-orders.gif)
+
+</div>
+
+:::note
+Having **Close on Trigger** checked on market-stop orders will ensure that the position is closed when the target price is hit and not open another position in the opposite direction.
+:::
+
+Users can submit **Stop Orders** as either Market Orders or Limit Orders. The two windows work similar to the limit or market order windows with some additional options. When placing stop-orders the user will need to specify how the orders are triggered:
+
+- Index: Index price is derived from the sum of the prices from various spot exchanges multiplied by their respective weighage.
+- Last: This is the platform's current market price.
+- Mark: Mark price refers to a global spot price index plus a decaying funding basis rate.
+- Close-On-Trigger: This option will close the position when the target price is hit and ensure an opposite position is not opened if in hedge-mode.
+
+:::warning
+A limit stop-loss order is essentially just a trigger to drop a reduce limit-order onto the chart if price reaches it. While limit can be good for taking profit it is not ideal as far as exiting out of a position that you believe is about to do a significant move against you. You should use a market order if you want to be certain you get out when the price is hit.
+:::
+
+:::info
+Please visit the exchange websites to learn more about the different types of stop orders.
+
+**[Binance](https://www.binance.com/en/support/faq/what-is-stop-order-360036351051)** |
+**[Bitget](https://www.bitget.com/academy/take-profit-and-stop-loss-answers-to-the-most-commonly-asked-questions)** |
+**[BingX](https://support.bingx.com/hc/en-001/articles/6693665893017-An-Introduction-to-Partial-Take-Profit-Stop-Loss-TP-SL-)** |
+**[Phemex](https://phemex.com/help-center/how-do-i-set-a-take-profit-or-stop-loss-order)**
+:::
+
+---
+
+### Trailing Stop orders
+
+On Bybit you can place a trailing stop order by clicking the Plus (+) icon on the main chart and selecting Trailing Stop from the popup window.
+
+<div class="text--center">
+    <img src={TrailingStop} alt="Bybit Trailing Stop" style={{ width: 400 }} />
+</div>
+
+:::note
+Support for trailing stop on exchanges other then Bybit has not been implemented yet.
+:::
+
+---
+
+### Open Positions
+
+When you have an open position you will see three numbers on the top right. From left to right, you see the current position size, entry price and unrealized PnL. The numbers displayed are based on your currently selected viewing type (Exchange default, $, BTC) from the Open Positions window.
+
+<div class="text--center">
+
+![Place-Number](/img/trading/place-numbers.gif)
+
+</div>
+
+---
+
+### View Modes
+
+You can view Open Positions and Orders in three to four modes depending on whether the selected exchange supports Contract trading.
+
+<div class="text--center">
+
+![Open-View](/img/trading/openviewtypes.gif)
+
+</div>
+
+---
+
+## Placing Order Settings
+
+The settings window for Placing Orders has undergone an upgrade recently
+
+<div class="text--center">
+    <img src={PlaceOrderSettings} alt="PlaceOrder Settings" style={{ width: 600 }} />
+</div>
+
+- At the top are the Quick Order button sizes, to let you adjust your order sizing accurately
+
+- Next are the Quick Offset settings
+    - **Tick Offsets**: Ticks are the smallest incremental offset size for orders of the asset
+    - **Percentage Offsets**: Percentage offsets are based off of the current price of the asset
+    - **Volatility Offsets**: Measurement multiplier of the ATR of an asset over the selected timeframe
+    - **Volatility Timeframe (ATR)**: The timeframe used to calculate the volatility (ATR) of the asset
+    - **Active Quick order Type**: This setting changes which of the modes are currently active
+
+:::note
+Once these settings have been customized you can easily switch between the quick-order modes using the dropdown selector inside the quick orders module
+:::

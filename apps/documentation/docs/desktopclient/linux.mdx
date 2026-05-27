@@ -1,0 +1,117 @@
+---
+title: Linux
+description: Download and install the Tealstreet Desktop Client for Linux.
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+## Linux Desktop Client
+
+<div class="text--center">
+
+![Linux](/img/client/Tux.png)
+
+</div>
+
+This page covers downloading and running the Tealstreet Desktop Client on Linux.
+
+- Go to the Tealstreet [download page](https://www.tealstreet.io/download/) to download the desktop client.
+
+- Select the "Download for Linux" Option to automatically start your download
+
+<div class="text--center">
+
+![Download-Linux](/img/client/Linux/download-linux.png)
+
+</div>
+
+- The file `TealstreetV3-X.X.X.AppImage` will download to your Linux machine.
+
+:::note
+X.X.X represents the current version of the client
+:::
+
+<div class="text--center">
+
+![Setup](/img/client/setup-linux.png)
+
+</div>
+
+---
+
+## Permissions
+
+- Grant execute permission to the AppImage:
+
+<div class="text--center">
+
+![chmod](/img/client/chmod.png)
+
+</div>
+
+```bash
+cd Downloads
+ls
+chmod +x TealstreetV3-X.X.X.AppImage
+```
+
+:::caution
+**Ubuntu** users may sometimes require an additional step, they might need to install the **FUSE** package
+:::
+
+```bash
+sudo apt-get install fuse
+```
+
+- You should now be able to run Tealstreet. AppImage runs as a portable application, so no full installer flow is required.
+
+<div class="text--center">
+
+![appstart](/img/client/appstart-linux.png)
+
+</div>
+
+```bash
+./TealstreetV3-X.X.X.AppImage
+```
+
+:::note
+If you start Tealstreet and it does not load and you are unsure why please try launching it from the terminal so the console can provide additional debugging information. Also please feel free to **[reach out to us](/docs/support/contact-us)** if you have any questions.
+:::
+
+:::caution
+Running the client as root is not recommended and may fail because of sandbox restrictions. Use a normal user account whenever possible.
+:::
+
+---
+
+## Tips
+
+:::tip
+You can set an alias for quicker startup.
+:::
+
+<div class="text--center">
+
+![alias](/img/client/alias-linux.png)
+
+</div>
+
+```bash
+alias terminal="~/Downloads/TealstreetV3-X.X.X.AppImage"
+terminal
+```
+
+---
+
+![Tealstreet-Zoom](/img/client/ClientZoom_linux.png)
+
+:::tip
+You can **Zoom** the Tealstreet window in and out by clicking the zoom buttons:
+
+You can also use the keyboard shortcut **Ctrl +** to achieve the same effect.
+:::

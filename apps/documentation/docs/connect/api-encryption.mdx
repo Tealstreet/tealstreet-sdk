@@ -1,0 +1,46 @@
+---
+title: API Encryption - DEPRECATED
+description: Learn how to encrypt your API keys for added security.
+sidebar_position: 99
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+## End-to-End User API Key Encryption
+
+Tealstreet is proud to announce the implementation of our new security feature named **‘Encryption Password.’** At Tealstreet, the security of our users is our number one priority. We strive to improve our security practices and infrastructure at all times.
+
+### So, what exactly is the Encryption Password?
+
+When adding API Keys, Tealstreet users will now be required to input a unique password. This password is known ONLY by the individual user. The **Encryption Password** is used in conjunction with Tealstreet’s database level encryption for API Key pairs.
+
+As a result, even in the absolute worst case scenario, it is near impossible for any actor to access your API Keys (this includes Tealstreet!) as the user has the final puzzle piece necessary to decrypt the key pair. This **Encryption Password** is never stored on the Tealstreet servers, which means it cannot be ‘hacked’ on Tealstreet’s side.
+
+:::caution
+This password is **NOT** provided by the exchange. It is up to you, the user, to create a password.
+:::
+
+:::note
+This password should **NOT** be your Tealstreet login password. However, the encryption password can be reused for multiple API Key pairs.
+:::
+
+### How does the Encryption Password work?
+
+Users are required to re-enter this password (or use the Remember Password client side feature) so the Tealstreet backend can cache the API keys in memory. The cache lasts one hour and is continuously refreshed during the duration of the session. This means you will not have to keep typing in this password so long as you have not disconnected for more than one hour.
+
+This security implementation includes a ‘Remember Password’ checkbox. This functions by caching your password in YOUR browser’s local storage so you do not have to type it in. However, if you clear your browser’s storage you will need to reenter the password. If the password does get cleared, it will be cached again once reentered.
+
+:::note
+For some additional context you can see a tweet series by Sam _[here](https://twitter.com/TraderSamwise/status/1601660140859846656)_
+:::
+
+### Will the Encryption Password always be required?
+
+For the time being, we have decided to make this a mandatory feature to ensure Tealstreet’s security is as strong as possible. This new implementation is an addition to Tealstreet’s database encryption and IP whitelisting infrastructure.
+
+### What happens if I forget or lose my Encryption Password?
+
+If you forget or lose your API encryption password, you will have to delete the API key from Tealstreet (and delete it on the exchange website) and create/add a new API Key pair. Tealstreet is unable to decrypt your API key pair without the original password so it is not possible to be reset.

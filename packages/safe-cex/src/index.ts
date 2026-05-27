@@ -1,0 +1,287 @@
+/**
+ * Safe-CEX Exchange Factory
+ *
+ * This module provides the main entry point for creating exchange instances.
+ * All exchanges are dynamically imported to reduce initial bundle size.
+ * Exchange implementations are only loaded when createExchange() is called.
+ */
+
+import type { BaseExchange } from './exchanges/base';
+import type { Store } from './store/store.interface';
+import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './types';
+
+import { getExchangeMetadata } from './exchangeMetadata';
+import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
+import { DefaultStore } from './store/store.base';
+import { virtualClock } from './utils/virtualClock';
+
+// Cache for loaded exchange classes
+const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
+
+/**
+ * Load an exchange class dynamically
+ * Returns cached class if already loaded
+ */
+async function loadExchange(name: ExchangeName): Promise<typeof BaseExchange> {
+  // Return cached if already loaded
+  const cached = exchangeCache.get(name);
+  if (cached) return cached;
+
+  const loader = exchangeRegistry[name];
+  if (!loader) {
+    throw new Error(`Unknown exchange: ${name}`);
+  }
+
+  const Exchange = await loader();
+  exchangeCache.set(name, Exchange);
+  return Exchange;
+}
+
+/**
+ * Create an exchange instance
+ *
+ * Exchanges are dynamically imported on first use to reduce initial bundle size.
+ * Subsequent calls for the same exchange type use the cached class.
+ *
+ * @param exchangeName - The name of the exchange to create
+ * @param options - Exchange configuration options
+ * @param store - Optional store instance (defaults to DefaultStore)
+ * @returns Promise resolving to the exchange instance
+ *
+ * @example
+ * ```typescript
+ * const exchange = await createExchange('binance', {
+ *   key: 'your-api-key',
+ *   secret: 'your-api-secret',
+ * });
+ * await exchange.start();
+ * ```
+ */
+export const createExchange = async (
+  exchangeName: ExchangeName,
+  options: ExchangeOptions,
+  store?: Store,
+): Promise<BaseExchange> => {
+  // Start the virtual clock to synchronize with exchange servers
+  virtualClock.start();
+
+  const Exchange = await loadExchange(exchangeName);
+  return new Exchange(exchangeName, options, store || new DefaultStore());
+};
+
+/**
+ * Preload an exchange module before it's needed
+ *
+ * Call this early if you know a user will need a specific exchange soon,
+ * such as when they hover over an exchange selector in the UI.
+ *
+ * @param name - The exchange name to preload
+ *
+ * @example
+ * ```typescript
+ * // Preload on hover
+ * onMouseEnter={() => preloadExchange('binance')}
+ * ```
+ */
+export const preloadExchange = async (name: ExchangeName): Promise<void> => {
+  await loadExchange(name);
+};
+
+/**
+ * Preload multiple exchange modules
+ *
+ * @param names - Array of exchange names to preload
+ */
+export const preloadExchanges = async (names: ExchangeName[]): Promise<void> => {
+  await Promise.all(names.map(loadExchange));
+};
+
+/**
+ * Check if an exchange class has been loaded
+ *
+ * @param name - The exchange name to check
+ * @returns true if the exchange class is cached
+ */
+export const isExchangeLoaded = (name: ExchangeName): boolean => {
+  return exchangeCache.has(name);
+};
+
+/**
+ * Get list of all available exchange names
+ *
+ * @returns Array of all registered exchange names
+ */
+export const getAvailableExchanges = (): ExchangeName[] => {
+  return getRegisteredExchangeNames();
+};
+
+/**
+ * Create a public-data-only exchange instance (no API keys required)
+ *
+ * Convenience factory that sets `publicDataOnly: true` and provides
+ * empty key/secret defaults. The resulting exchange will only connect
+ * public WebSockets and fetch public REST data.
+ *
+ * @param exchangeName - The name of the exchange to create
+ * @param options - Optional exchange configuration (key/secret not required)
+ * @param store - Optional store instance (defaults to DefaultStore)
+ * @returns Promise resolving to the exchange instance
+ *
+ * @example
+ * ```typescript
+ * const exchange = await createPublicExchange('binance');
+ * await exchange.start();
+ * ```
+ */
+export const createPublicExchange = async (
+  exchangeName: ExchangeName,
+  options?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly'>>,
+  store?: Store,
+): Promise<BaseExchange> => {
+  const metadata = getExchangeMetadata(exchangeName);
+  const { forceAllProxiesOff, ...exchangeOptions } = options || {};
+
+  // Exchanges with requiresCors/enforceWsTunnel have IP-whitelisted APIs.
+  // On server-side, route REST calls through the exchange proxy (whose IPs
+  // are whitelisted on the exchange side). The proxy itself must accept the
+  // caller's IP without JWT (e.g. K8s NAT gateway whitelisted in Lambda@Edge).
+  const needsProxy = !forceAllProxiesOff && (metadata.requiresCors || metadata.enforceWsTunnel);
+  const proxyOpts: Partial<ExchangeOptions> = needsProxy
+    ? { overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy' }
+    : {};
+  const disabledProxyOpts: Partial<ExchangeOptions> = forceAllProxiesOff
+    ? {
+        overrideProxyUrl: undefined,
+        tealstreetProxy: false,
+        tealstreetTunnel: false,
+        tealstreetWsRoute: false,
+      }
+    : {};
+
+  return createExchange(
+    exchangeName,
+    {
+      key: '',
+      secret: '',
+      ...proxyOpts,
+      ...exchangeOptions,
+      ...disabledProxyOpts,
+      publicDataOnly: true,
+    },
+    store,
+  );
+};
+
+/**
+ * Account-based exchange creation
+ */
+export { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
+export type { ExchangeAccountConfig, PublicExchangeOptions } from './types';
+
+/**
+ * Hyperliquid builder fee utilities
+ * Used for builder code integration (fee sharing)
+ */
+export {
+  approveBuilderFeeWithBrowserWallet,
+  checkBuilderFeeApproved,
+  createBuilderInfo,
+  DEFAULT_BUILDER_FEE_RATE,
+  DEFAULT_BUILDER_FEE_TENTHS_BPS,
+  getBuilderAddress,
+  signBuilderFeeApproval,
+  submitBuilderFeeApproval,
+  TEALSTREET_BUILDER_ADDRESS_MAINNET,
+  TEALSTREET_BUILDER_ADDRESS_TESTNET,
+} from './exchanges/hyperliquid/hyperliquid.builderFee';
+
+export { isBuilderFeeEnabled } from './exchanges/hyperliquid/hyperliquid.signing';
+
+export type {
+  BuilderFeeApprovalResult,
+  BuilderFeeCheckResult,
+  BuilderInfo,
+} from './exchanges/hyperliquid/hyperliquid.types';
+
+/**
+ * Hyperliquid agent (API) wallet utilities
+ * Used for in-app API wallet creation
+ */
+export {
+  connectBrowserWallet,
+  createAgentWalletWithBrowserWallet,
+  generateAgentWalletName,
+  hasEthereumWallet,
+} from './exchanges/hyperliquid/hyperliquid.agent';
+
+export type { AgentWalletCreationResult } from './exchanges/hyperliquid/hyperliquid.agent';
+
+/**
+ * GRVT builder authorization utilities
+ * Used for builder code integration (fee sharing)
+ */
+export {
+  authorizeGrvtBuilderWithBrowserWallet,
+  checkGrvtBuilderAuthorized,
+  createGrvtBuilderInfo,
+  DEFAULT_GRVT_BUILDER_FEE_RATE,
+  getConnectedWalletAddress,
+  getGrvtBuilderAddress,
+  grvtBuilderFeeRateToRaw,
+  GrvtBuilderUnauthorizedError,
+  isBrowserWalletAvailable,
+  requestWalletConnection,
+  TEALSTREET_GRVT_BUILDER_ADDRESS,
+  TEALSTREET_GRVT_BUILDER_ADDRESS_MAINNET,
+  TEALSTREET_GRVT_BUILDER_ADDRESS_TESTNET,
+} from './exchanges/grvt/grvt.builder';
+
+export type {
+  GrvtBuilderAuthorizationResult,
+  GrvtBuilderCheckResult,
+  GrvtBuilderInfo,
+  GrvtBuilderUnauthorizedReason,
+} from './exchanges/grvt/grvt.builder';
+
+/**
+ * Lighter builder/integrator approval utilities
+ */
+export {
+  approveLighterBuilderFeeWithBrowserWallet,
+  buildLighterApproveIntegratorL1Message,
+  checkLighterBuilderApproved,
+  createLighterL1SignatureHelperUrl,
+  DEFAULT_LIGHTER_APPROVAL_FEE_VALUE,
+  prepareLighterBuilderApprovalContext,
+  signLighterApproveIntegratorWithBrowserWallet,
+  submitLighterBuilderApprovalWithL1Signature,
+} from './exchanges/lighter/lighter.builder-approval';
+
+export type {
+  LighterBuilderApprovalCheckResult,
+  LighterBuilderApprovalContext,
+  LighterBuilderApprovalResult,
+} from './exchanges/lighter/lighter.builder-approval';
+
+export {
+  CandleCache,
+  cleanCandles,
+  createExchangeCandleFetcher,
+  fetchOHLCVWithExchange,
+  getCandleCacheKey,
+  KeyValueCandleCacheBackend,
+  MemoryCandleCacheBackend,
+} from './candleCache';
+
+export type {
+  CandleCacheBackend,
+  CandleCacheBackendReadMode,
+  CandleCacheChunkAccessOptions,
+  CandleCacheChunkRecord,
+  CandleCacheExchangeFetchRequest,
+  CandleCacheFetchRequest,
+  CandleCacheKeyValueStore,
+  CandleCacheOptions,
+  CandleCacheRangeLookup,
+  CandleCacheSparseChunk,
+} from './candleCache';

@@ -1,0 +1,49 @@
+---
+title: 多账户流
+description: Multi Account Streaming is a beta feature which allows you to see the positions you hold on all of your selected accounts in one place.
+sidebar_position: 17
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import MultiStreamActivate from '/img/trading/multi-acc-stream/multi-acc-stream-activate.png';
+import MultiStreamActivate2 from '/img/trading/multi-acc-stream/multi-acc-stream-activate2.png';
+import MultiStreamPositions from '/img/trading/multi-acc-stream/multi-acc-stream-positions2.png';
+
+## 多账户流
+
+<div class="text--center">
+    <img src={MultiStreamPositions} alt="Multi Acc Streaming Positions" style={{ width: 700 }} />
+</div>
+
+多账户流是一个测试版功能，它允许你在一个地方查看你在选定账户上持有的位置。
+
+## 启用多账户流
+
+要启用多账户流，你需要去到测试设置类别并启用该功能。
+
+<div class="text--center">
+    <img src={MultiStreamActivate} alt="Multi Acc Streaming Activate 1" style={{ width: 400 }} />
+</div>
+
+- 启用多账户流
+- 在图表上显示多账户是可选的，并将在图表上显示位置。（这个功能还在开发中，目前可能不稳定）
+
+### 激活多账户流
+
+一旦启用，我们现在必须激活我们想要从中流式传输数据的密钥。
+
+<div class="text--center">
+    <img src={MultiStreamActivate2} alt="Multi Acc Streaming Activate 1" style={{ width: 400 }} />
+</div>
+
+在你的API密钥选择窗口中，勾选你希望从中流数据的账户。
+
+:::note
+多账户流是一个测试版功能，有时可能会导致其他问题。如果你在使用Tealstreet时遇到问题，你应该尝试禁用多账户流，并确认问题是否仍然存在。
+:::

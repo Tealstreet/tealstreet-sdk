@@ -1,0 +1,43 @@
+---
+title: Bybit V5 (API Upgrade) - DEPRECATED
+description: Detailing the upgrade to the Bybit V5 API
+sidebar_position: 99
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+<ThemedImage
+    alt="bybit-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bybit-light.png'),
+        dark: useBaseUrl('/img/exchange/bybit-dark.png'),
+    }}
+/>
+
+## Bybit V5 API Upgrade
+
+On October 16th Bybit will be upgrading their API to V5. They will also be turning off the Legacy V2 API which Tealstreet has been making use of for classic (non-UM) accounts.
+
+- This will affect all users who are using Bybit Classic (Non-Unified) accounts on Tealstreet.
+
+In the interrim period, we will be migrating all Bybit Classic accounts to the new v5 system. This will allow us to continue to support Bybit accounts on Tealstreet.
+
+You can read more about it from Bybit's official documentation [here](https://announcements.bybit.com/en-US/article/bybit-openapi-services-transition-from-legacy-version-to-new-v5-api-blt25b43a5738c00765/?category=product_updates)
+
+:::note
+Existing Unified Accounts will not be affected by this migration & upgrade
+:::
+
+---
+
+### Troubleshooting
+
+- API Keys may need to be [regenerated](/docs/connect/bybit) after the upgrade if you are having trouble connecting to Bybit.
+
+- If you are having trouble with accessing Bybit after the upgrade, please reach out to us for [support](/docs/support/contact-us).

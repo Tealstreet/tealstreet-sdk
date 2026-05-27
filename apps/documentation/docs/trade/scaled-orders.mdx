@@ -1,0 +1,246 @@
+---
+title: Scaled Orders
+description: Scaled orders help manage the buying or selling of a large number of contracts at once. They can also be used to improve your average entry or exit price.
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import TwoClick from '/img/trading/scaled-orders/v3/two-click.png';
+import MHotkey from '/img/trading/scaled-orders/v3/m-hotkey.png';
+
+---
+
+A Scaled order is an algorithmic tool that enables advanced users to automatically create multiple limit orders across a user-determined price range. This tool also provides control over the diversity and distribution of orders within the price range.
+
+With a scaled buy, orders at lower limits are triggered in sequence as the market price drops; a scaled sell works in reverse, with orders at higher limits getting filled in turn as the market price increases.
+
+:::tip
+Scaled orders help avoid the market impact of buying or selling a large number of contracts in a single transaction. They can also be used to improve your average entry or exit price.
+:::
+
+The Tealstreet Scaled Order is a very powerful tool that you can use to spread your buy and sell orders any ways you like.
+
+<!-- <div class="text--center">
+
+_[![ScaledOrders-Video](https://img.youtube.com/vi/gLu-2lx83Hc/hqdefault.jpg)](https://www.youtube.com/watch?v=gLu-2lx83Hc)_
+
+**Watch the video Tutorial on YouTube. Click [Here](https://www.youtube.com/watch?v=gLu-2lx83Hc).**
+
+</div> -->
+
+To get to the scaled order window: In the **Place Order** tile click the arrow on the "Stop Market" button and select "Scaled".
+
+<div class="text--center">
+
+![Scaled-Drop](/img/trading/scaled-orders/v3/scaled-1.gif)
+
+</div>
+
+There are a lot of options in this window each of which are defined below:
+
+<div class="text--center">
+
+![Scaled-BreakDown](/img/trading/scaled-orders/v3/scaled-2.png)
+
+</div>
+
+```text
+1. Amount, Range and Mode:
+   - Set the total Amount and choose a Range.
+   - Mode: Price (explicit bounds), Percent (bound + %), or Offset (bound + Δ price).
+
+2. Action: Buy or Sell.
+
+3. Order Count: Number of limit orders to create (1–100).
+
+4. Variance (Randomness):
+   - Price ±% and Amount ±% (0–10%).
+
+5. Track Price (Δ):
+   - Anchor one bound to live price with an Offset distance. Buy: Upper = near touch − Δ; Sell: Lower = near touch + Δ.
+
+6. Post‑Only / Reduce‑Only:
+   - Post‑Only sends maker‑only orders; Reduce‑Only prevents increasing exposure (hidden on Spot).
+
+7. Risk Tools (optional):
+   - Preview Take Profit / Stop Loss for the scaled entry.
+
+7a. Preview / Reset / Submit:
+   - Preview shows draggable lines on the chart; Reset clears scaled fields (your selected Mode is preserved); Submit places all orders.
+```
+
+---
+
+### Modes
+
+- Price: Place a ladder between explicit Upper/Lower prices.
+- Percent: Use a bound plus ±% range to generate the ladder.
+- Offset: Use a bound plus Δ price range.
+
+Note: With Track Price enabled, one bound follows the near‑touch price using your Δ offset.
+
+---
+
+### Track Price (Δ)
+
+Anchors your range to the near‑touch price:
+
+- Buy: Upper = near touch − Offset (Δ).
+- Sell: Lower = near touch + Offset (Δ).
+
+When enabled, the anchored bound is disabled for manual entry.
+
+---
+
+### Post‑Only / Reduce‑Only
+
+- Post‑Only: maker‑only; prevents taker execution on entry.
+- Reduce‑Only: only decreases position size (hidden for Spot markets).
+
+---
+
+### Size & Margin Sliders
+
+- If Reduce‑Only (or Spot), a Reduce slider helps match open position size.
+- Otherwise, a Margin slider helps target notional with available balance and leverage.
+
+---
+
+### Risk Controls & Limits
+
+- Insufficient Margin Guard (optional in settings): blocks oversized orders before submission.
+- Fat‑Finger Protection: blocks submissions exceeding your configured notional limit; a toast explains the limit.
+
+---
+
+### How to Place a Scaled Order
+
+::::caution
+Per‑order amounts and prices are rounded to instrument precision. The total size is preserved; if rounding would drive an order to 0 size you’ll see a warning—adjust your amount, order count, or distribution.
+::::
+
+1. Choose Mode (Price / Percent / Offset) and set your bounds:
+    - Price: set both bounds.
+    - Percent: set one bound and % range.
+    - Offset: set one bound and Δ price range.
+
+2. (Optional) Enable Track Price (Δ) and set the Offset distance to follow live price.
+
+3. Input the amount you want to trade and number of orders (1–100).
+
+4. Select if you want to place buy or sell orders.
+
+5. (Optional) Set Price and/or Amount Variance (0–10%).
+
+6. From the Price/Amount Distribution chart choose how your ladder is distributed (Flat, Ascending, Descending, or edit nodes under Other).
+
+7. Click Preview to open the chart preview; drag edges to stretch the range, or drag the Average Fill line to move the whole block.
+
+::::tip
+You can use the reset button to reset the scaled order window to its default state.
+::::
+
+8. Submit from either the form’s Buy/Sell button or the chart’s Average Fill line submit button.
+
+<div class="text--center">
+
+![Scaled-Demo](/img/trading/scaled-orders/v3/scaled-4.gif)
+
+</div>
+
+---
+
+### Price Distribution
+
+Tealstreet has a unique and powerful way of scaling your orders.
+
+<div class="text--center">
+
+![Price-Distribution](/img/trading/scaled-orders/v3/scaled-3.gif)
+
+</div>
+
+The distribution of **Price** and **Amount** work in very similar ways. The line on the top (red/blue) adjusts the price and the line on the bottom (orange) adjusts the total amount. Price and Amount distributions are independent and can be combined. There are four options:
+
+1. Flat: Set the orders and price in equal divisions across the order count.
+2. Ascending: Set the orders and price in ascending order.
+3. Descending: Set the orders and price in descending order.
+4. Other: You can set the distribution uniquely to your liking by adjusting the nodes individually.
+
+---
+
+### Scaled Orders Hot Keys
+
+:::caution
+If you have never used hotkeys before make sure to enable them in your Trade Settings.
+:::
+
+:::caution
+Please review your hotkey assignments. New hotkey features may conflict with existing saved hotkeys. Your existing hotkeys should have priority meaning new default hotkeys will not work if there are conflicts. Check your settings and change any conflicting hotkeys.
+:::
+
+---
+
+### Scaled Order Preview
+
+In addition to adjusting the scaled order distribution via the preview on the chart, users can utilize hotkeys to adjust individual preview orders or the entire group of preview orders together.
+
+- Drag either edge line to stretch/compress the range; middle lines re‑distribute smoothly.
+- Drag the Average Fill line to bulk‑move the entire block; use its submit button to place all orders from the chart.
+
+With a set hotkey, users can move only a single order in the scaled order chart preview:
+
+<!-- <div class="text--center">
+
+![Modify-Scaled](/img/trading/scaled-orders/v3/m-hotkey.png)
+</div> -->
+
+<div class="text--center">
+    <img src={MHotkey} alt="Modify-Hotkey" style={{ width: 1000 }} />
+</div>
+
+Users can now set a hotkey to move a whole scaled order preview block:
+
+<!-- <div class="text--center">
+
+![Move-Scaled](/img/trading/scaled-orders/v3/move-scaled.png)
+</div> -->
+
+<div class="text--center">
+
+![Move-Scaled](/img/trading/scaled-orders/v3/move-scaled.gif)
+
+</div>
+
+:::tip
+While previewing a scaled buy order use ‘place buy order’ hotkey to submit the orders. Use ‘place sell order’ hotkey for preview scaled sell orders.
+:::
+
+:::tip
+Cancel a scaled order preview with your ‘cancel recent order’ hotkey.
+:::
+
+---
+
+### Two Click Scaled Order
+
+Users can now hold a hotkey and click two prices on the chart, orderbook, or depth chart to create a scaled order preview between these prices.
+
+You can still drag the edges and the Average Fill line after creating the preview.
+
+<!-- <div class="text--center">
+
+![Two-Clicked](/img/trading/scaled-orders/v3/two-click.png)
+</div> -->
+
+<div class="text--center">
+    <img src={TwoClick} alt="Two-Clicked-Order-Preview" style={{ width: 1000 }} />
+</div>
+
+<div class="text--center">
+
+![Two-Clicked](/img/trading/scaled-orders/v3/two-click.gif)
+
+</div>

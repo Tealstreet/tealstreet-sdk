@@ -1,0 +1,159 @@
+---
+title: Basic Charts
+description: This section will go over the Basic Chart functionality of Tealstreet
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import BasicChart from '/img/trading/basicchart.png';
+import BasicChart2 from '/img/trading/basicchart2.png';
+import BasicCharts from '/img/blog/basiccharts.png';
+import BasicChartExample from '/img/trading/basic-charts/basiccharts-example1.png';
+import BasicChartExample2 from '/img/trading/basic-charts/basiccharts-example2.png';
+
+This section will go over the **Basic Charts module** of Tealstreet
+
+<div class="text--center">
+    <img src={BasicChart} alt="Basic Chart" style={{ width: 650 }} />
+</div>
+
+With this tool you can put any chart supported by TradingView on your terminal. The Basic Chart module provides a standalone TradingView chart widget that can display any instrument, timeframe, and technical indicators.
+
+---
+
+### Functionality
+
+- Can duplicate/remove windows with the + button at top of frame
+- Top bar settings persist through refreshes
+- Position & Size saved in TS workspace layout
+- **Custom Symbol Input**: Enter any TradingView-supported symbol (e.g., `BINANCE:BTCUSDT`, `NASDAQ:AAPL`)
+- **Multiple Timeframes**: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 1D, 1W, 1M
+- **Technical Indicators**: 100+ indicators including RSI, MACD, Bollinger Bands, and more
+- **Theme Integration**: Automatically matches your Tealstreet theme (Light/Dark)
+- **Error Recovery**: Built-in error handling with automatic retry mechanism
+
+<details open>
+    <summary>More info</summary>
+    <p>
+        <div class="text--center">
+            <img src={BasicChart2} alt="Basic Chart (Detailed)" style={{ width: 500 }} />
+        </div>
+        1. The Plus button can be used to duplicate or remove a Basic Chart window <br />
+        2. The top header (Ticker & Timeframe) is the only section that preserves its settings across refreshes. Changes
+        made inside the chart will not be preserved <br />
+        3. When the workspace is unlocked you can drag bottom corner to expand/shrink the window. These settings will be
+        saved as part of the workspace profile that is currently active <br />
+    </p>
+</details>
+
+---
+
+### Settings
+
+The Basic Chart module includes several configurable settings accessible through the module settings panel:
+
+- **Show Top Bar**: Toggle the TradingView top toolbar visibility
+- **Show Legend**: Toggle the chart legend display
+- **Show Volume Overlay**: Enable/disable volume indicator overlay on the chart
+
+These settings are saved per tab and persist across browser refreshes.
+
+---
+
+### Available Timeframes
+
+The Basic Chart supports the following time intervals:
+
+- **1m, 3m, 5m, 15m, 30m** - Intraday timeframes
+- **1h, 2h, 3h, 4h** - Hourly timeframes
+- **1D** - Daily timeframe
+- **1W** - Weekly timeframe
+- **1M** - Monthly timeframe
+
+---
+
+### Technical Indicators
+
+The Basic Chart module supports over 100 technical indicators, including:
+
+**Popular Indicators:**
+
+- RSI (Relative Strength Index)
+- MACD (Moving Average Convergence Divergence)
+- Bollinger Bands
+- Moving Averages (SMA, EMA, WMA, DEMA, TEMA)
+- Stochastic Oscillator
+- Volume indicators
+- Ichimoku Cloud
+- Williams %R
+- ATR (Average True Range)
+- VWAP (Volume Weighted Average Price)
+
+**Advanced Indicators:**
+
+- Supertrend
+- Parabolic SAR
+- Keltner Channels
+- Donchian Channels
+- Fisher Transform
+- Ultimate Oscillator
+- And many more...
+
+To add indicators, use the indicators dropdown in the chart header and select from the available options.
+
+---
+
+### Custom Symbols
+
+You can display any TradingView-supported symbol by entering it in the search field. Examples:
+
+- **Crypto**: `BINANCE:BTCUSDT`, `COINBASE:ETHUSD`
+- **Stocks**: `NASDAQ:AAPL`, `NYSE:TSLA`
+- **Forex**: `FX:EURUSD`, `FX:GBPJPY`
+- **Commodities**: `TVC:GOLD`, `TVC:SILVER`
+- **Indices**: `SP:SPX`, `NASDAQ:NDX`
+
+If no custom symbol is specified, the chart will display the currently active trading symbol.
+
+---
+
+### Additional Information
+
+Some additional information can be read about here from the _[blog post by Sam](https://www.tealstreet.io/tealstreet-1-5-2-release-notes/)_
+
+:::note
+The Basic Chart window is a standalone window that can be used to display a chart of any instrument on TradingView. A common use of it is to display a chart of some other instrument you are interested in such as an index or the dollar.
+:::
+
+:::caution
+You will not be able to trade positions on the main chart through the basic chart.
+:::
+
+:::tip
+The Basic Chart automatically adapts to your Tealstreet theme settings and provides a consistent visual experience with the rest of the application.
+:::
+
+---
+
+### Examples
+
+<details>
+    <summary>Example Layouts</summary>
+    <br />
+    <div class="text--center">
+        <img src={BasicCharts} alt="Basic Chart (Detailed)" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <div class="text--center">
+        <img src={BasicChartExample} alt="Basic Chart (Detailed)" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <div class="text--center">
+        <img src={BasicChartExample2} alt="Basic Chart (Detailed)" style={{ width: 1000 }} />
+    </div>
+</details>

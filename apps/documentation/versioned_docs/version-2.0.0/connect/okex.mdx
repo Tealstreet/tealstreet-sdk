@@ -1,0 +1,232 @@
+---
+title: OKEX
+description: Learn how to connect your OKEX API to Tealstreet.
+sidebar_position: 9
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+<ThemedImage
+    alt="OKEx-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/okex-light.png'),
+        dark: useBaseUrl('/img/exchange/okex-dark.png'),
+    }}
+/>
+
+## Connecting [OKEX](https://teal.link/OKEx) to Tealstreet
+
+### Account Mode
+
+Before you can trade futures / derivatives on [OKEX](https://teal.link/OKEx), users must change their Account Mode.
+
+:::note
+Users cannot trade futures / derivatives if their OKX account is in **‘Simple Mode.’**
+:::
+
+You can follow along in the video or the steps below:
+
+<div class="text--center">
+
+_[![Binance-Connect](https://img.youtube.com/vi/SN1dIPcEFQE/hqdefault.jpg)](https://www.youtube.com/watch?v=SN1dIPcEFQE)_
+
+**Watch the video Tutorial on YouTube. Click [Here](https://www.youtube.com/watch?v=SN1dIPcEFQE).**
+
+</div>
+
+1. Log into your [OKEX](https://teal.link/OKEx) account.
+
+2. Navigate from Trade to Margin Trading
+
+<div class="text--center">
+
+![MarginTrading](/img/connect/okex/margintrading.png)
+
+</div>
+
+- Click the Gear icon on the upper right of the screen
+
+<div class="text--center">
+
+![MarginTrading-Settings](/img/connect/okex/margintradingsettings.png)
+
+</div>
+
+- Next, click the option titled ‘Account Mode.’
+    - Then, select and activate **Simple** account mode.’
+
+<div class="text--center">
+
+![MarginTrading-Accountmode](/img/connect/okex/margintradingaccountmode.png)
+
+</div>
+
+- Then, select and activate ‘Single-currency margin.’
+
+<div class="text--center">
+
+![MarginTrading-Activate](/img/connect/okex/margintradingactivate.png)
+
+</div>
+
+- Once activated, you will have successfully enabled futures trading and will be able to trade with the Tealstreet terminal.
+
+:::info
+Continue reading to learn how to create and connect an **[OKEX](https://teal.link/OKEx)** API to the Tealstreet trading Terminal
+:::
+
+---
+
+### Connecting API to Tealstreet
+
+Follow the steps below:
+
+:::tip
+Its a good idea to keep both Tealstreet and OKX tabs open.
+:::
+
+- First, make sure you are logged into your [OKX](https://teal.link/OKEx) account.
+
+- Next, log into your Tealstreet account.
+    - Once you have successfully logged into Tealstreet, navigate to the header titled **‘API Keys’**
+
+    - Click the blue button titled **‘New API Key’**
+
+<div class="text--center">
+
+![addingapi](/img/connect/common/addingapi.jpg)
+
+</div>
+
+- Choose OKX from the dropdown menu.
+
+<div class="text--center">
+
+![dropdown](/img/connect/okex/dropdown.png)
+
+</div>
+
+:::note
+Do not choose the OKX testnet unless you are certain it's what you need.
+:::
+
+---
+
+### Creating the exchange API
+
+- Now you are ready to generate the API Keys within your OKX Account. Head on over to the OKX tab and:
+    - Click on the User Icon.
+    - Select **API** from the dropdown menu.
+
+<div class="text--center">
+
+![API-Dropdown](/img/connect/okex/apidropdown.png)
+
+</div>
+
+:::tip
+You can get to this page directly by navigating **[here](https://www.okex.com/account/my-api)**
+:::
+
+- On the API Key page click on the **Create V5 API Key** Button to start the key creation process.
+
+![API-Create](/img/connect/okex/apicreate.png)
+
+- Now you are ready to create the API key for Tealstreet.
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/okex/binding.png)
+
+</div>
+
+- Choose ‘Connect to Third-Party Applications.’
+
+- Select 'Tealstreet' From the drop down menu.
+
+- Now you are ready to set the settings of your [OKX](https://teal.link/OKEx) API Key pair.
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/okex/apimore.png)
+
+</div>
+
+1. Ensure "Binding third-party apps is selected.
+
+2. Ensure the App name says Tealstreet.
+
+3. ‘API Name’ You can choose any name you like for this section. It can be helpful to use a name related to Tealstreet in case you have many API keys for different services.
+
+4. ‘Passphrase’ OKX requires users to choose a password for each API key.
+
+5. Ensure "Trade" is ticked. This will ensure you can trade on Tealstreet.
+
+6. Double check all the selections are correct and then click 'Confirm'.
+    - A popup will appear next and prompt you to submit the email code and the 2FA from your Authentication App.
+
+---
+
+### Two-Factor Authentication
+
+<div class="text--center">
+
+![Auth](/img/connect/okex/auth.png)
+
+</div>
+
+:::note
+
+- Using a phone number for 2-factor authentication (2FA) is not recommended. Consider keeping a paper copy of your 2FA backup codes in case you ever lose access to your 2FA device.
+
+- Once you submit the 2FA code, you will see a new popup from OKX with your API Key details. You need to paste those details into the API Key page of Tealstreet.
+  :::
+
+:::tip
+You will need to input this on the Tealstreet terminal website so it is a good idea to keep and/or save this passphrase.
+:::
+
+:::caution
+Never share your API Keys with anyone.
+:::
+
+---
+
+### Tealstreet API settings
+
+- Once you have created the API Key on OKEx’s website, you are ready to fill out the information on Tealstreet’s API KEYS page.
+
+<div class="text--center">
+
+![API-Tealstreet](/img/connect/okex/apiteal.png)
+
+</div>
+
+- Select the **exchange** drop down and select **OKX**.
+    1. ‘Name’ - Here you can choose a name for your API Key. This is helpful for traders who utilize multiple exchanges and/or sub accounts and want to distinguish between them.
+
+    2. Choose your Encryption Password. Remember to save this somewhere! You will need to input this password when you navigate back to the trade page of the trading terminal.
+
+    3. ‘API Password’ - This field coincides with ‘Passphrase’ you chose on the OKX Create API key page.
+
+    4. ‘Key’ - Paste the API Key provided by OKX here.
+
+    5. ‘Secret’ - Paste the API Secret provided by OKX here.
+
+    6. Click ‘Create’
+
+:::tip
+If you ever forget your API Key Passphrase you can always create another API Key on the **[OKX](https://www.okex.com/)** website.
+:::
+
+:::note
+Be sure to double check you do not confuse API Key and API Secret. Connecting your OKX exchange account to Tealstreet will not work if these fields are not inputted correctly.
+:::
+
+- If all the details are correct, you will have successfully linked your OKX account to Tealstreet. Navigate to the ‘Trade’ page of Tealstreet and select the OKX account from the dropdown menu. If properly linked, you will see your balance/collateral appear in the Margin window of Tealstreet.

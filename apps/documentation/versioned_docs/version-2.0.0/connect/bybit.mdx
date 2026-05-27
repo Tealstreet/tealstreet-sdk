@@ -1,0 +1,224 @@
+---
+title: Bybit
+description: Connecting Bybit to Tealstreet
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import BybitPermissions from '/img/connect/bybit/bybit-permissions-1-mar2024.png';
+import BybitPermissions2 from '/img/connect/bybit/bybit-permissions-2-mar2024.png';
+import BybitPermissionsUM from '/img/connect/bybit/bybit-perms-um-mar13.png';
+import ApiTealstreet from '/img/connect/bybit/apiteal.png';
+import ApiDropdown from '/img/connect/bybit/apidropdown.png';
+import Dropdown from '/img/connect/bybit/dropdown.png';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import ApiCreate from '/img/connect/bybit/apicreate.png';
+import SystemApi from '/img/connect/bybit/system-api.png';
+import InverseDerivs from '/img/connect/bybit/inverse-derivs.jpg';
+import BybitSpecific from '/img/connect/bybit/bybit-specific-settings.png';
+
+<ThemedImage
+    alt="bybit-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bybit-light.png'),
+        dark: useBaseUrl('/img/exchange/bybit-dark.png'),
+    }}
+/>
+
+## Connecting [Bybit](https://teal.link/bybit1) to Tealstreet
+
+You can follow along in the video or the steps below:
+
+<div class="text--center">
+
+_[![Bybit-Connect](/img/logos/tealstreet-square-logo.png)](https://www.youtube.com/watch?v=dTp3aNL-DTQ)_
+
+**A video was made for a previous version of Tealstreet** You can click [here](https://www.youtube.com/watch?v=dTp3aNL-DTQ) to watch it.
+
+</div>
+
+- First, make sure you are logged into your **[Bybit](https://teal.link/bybit1)** account.
+    - next log into your Tealstreet account.
+
+:::tip
+Its a good idea to keep both Tealstreet and **[Bybit](https://teal.link/bybit1)** tabs open.
+:::
+
+- Once you have successfully logged into Tealstreet, navigate to the header titled **‘API Keys’**
+    - Click the blue button titled **‘New API Key’**
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{ width: 550 }} />
+</div>
+
+- Choose Bybit from the dropdown menu.
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 550 }} />
+</div>
+
+- Now you are ready to generate the API Keys within your Bybit Account. Head on over to the Bybit tab and:
+    - Click on the User Icon.
+    - Select **API** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 550 }} />
+</div>
+
+- On the API Key page click on the **Create New Key** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="API Create" style={{ width: 550 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://www.bybit.com/app/user/api-management)**
+:::
+
+- Choose system generated API key.
+
+<div class="text--center">
+    <img src={SystemApi} alt="System Api" style={{ width: 400 }} />
+</div>
+
+---
+
+### Bybit API Creation
+
+- Now you are ready to choose the settings of your Bybit API Key pair.
+
+<div class="text--center">
+    <img src={BybitPermissions} alt="API Permissions 1" style={{ width: 550 }} />
+</div>
+
+<div class="text--center">
+    <img src={BybitPermissions2} alt="API Permissions 2" style={{ width: 550 }} />
+</div>
+
+1. Choose ‘Connect to Third-Party Applications.’
+2. In the Application Name select 'Tealstreet'
+3. Choose the ‘Read-Write’ permission.
+4. Select ‘Orders’ 'Positions' 'USDC Derivatives Trading' and ‘Trade’ in the permission section.
+5. Double check all the selections are correct and then click ‘Submit’.
+    - A popup will appear next and prompt you to submit your 2FA code if its linked to your Bybit account.
+    - Once you submit the 2FA code, you will see a new popup from Bybit with your API Key details. You need to paste those details into the API Key page of Tealstreet.
+
+<details hide>
+    <summary>Unified Account API permissions</summary>
+    Unified Margin accounts have a slightly different screen.
+    <div class="text--center">
+        <img src={BybitPermissionsUM} alt="Bybit Permissions UM" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <br />
+    <p>
+        <br />
+        Select ‘Orders’ 'Positions' 'USDC Derivatives Trading' and ‘Trade’ in the permission section.
+    </p>
+</details>
+
+:::tip
+Read more about Tealstreet's password encryption system **[here](/docs/2.0.0/connect/api-encryption)**.
+:::
+
+:::caution
+Never share your API Keys with anyone.
+:::
+
+---
+
+### Tealstreet API Creation
+
+- Once you have created the API Key on Bybit’s website, you are ready to fill out the information on Tealstreet’s API KEYS page.
+
+<div class="text--center">
+    <img src={ApiTealstreet} alt="Tealstreet API" style={{ width: 650 }} />
+</div>
+
+```text
+1.  Ensure you have Bybit selected as the exchange.
+
+2.  Consider supporting Tealstreet by using the referral link. Traders will receive 10% off fees (lower fees helps trader profitability!).
+
+3.  Be sure to choose Tealstreet under Application Name from a System Generated Key (Not a Self Generated Key).
+
+4.  Choose a name for your Bybit account. You can choose any name you like. It is helpful for traders who utilize multiple accounts and/or subaccounts.
+
+5.  Choose your Encryption Password. Remember to save this somewhere! You will need to input this password when you navigate back to the trade page of the trading terminal.
+
+6.  Paste the API Key provided by Bybit here.
+
+7.  Paste the API Secret provided by Bybit here.
+
+8.  Click ‘Create.’
+```
+
+- If all the details are correct, you will have successfully linked your Bybit account to Tealstreet. Navigate to the ‘Trade’ page of Tealstreet and select the Bybit account from the dropdown menu. If properly linked, you will see your balance/collateral appear in the Margin window of Tealstreet. Happy trading!!!
+
+:::note
+Be sure to double check you do not confuse API Key and API Secret. Connecting your Bybit exchange account to Tealstreet will not work if these fields are not entered correctly.
+:::
+
+:::caution
+An infinity stop cannot override Bybits maximum order size rule.
+:::
+
+---
+
+## Unified Margin trading
+
+Unified Margin support has recently been introduced and there are a few things that are important to take note of:
+
+<div class="text--center">
+    <img src={InverseDerivs} alt="Inverse Derivatives account" style={{ width: 550 }} />
+</div>
+
+- Unified Margin does not support inverse futures, you will need to make sure you have funded your Inverse Derivatives account to trade Inverse on a UM account.
+
+- Users will be unable to switch to isolated margin if they have a negative USDT balance.
+
+:::note
+If you do not wish to use a Unified Margin account you can create a sub-account as a workaround. They default to non Unified Margin.
+:::
+
+---
+
+## Bybit Specific Settings
+
+<!---
+TODO: This is a hacked together image, we need to make a better one.
+!--->
+
+<div class="text--center">
+    <img src={BybitSpecific} alt="Bybit Specific settings" style={{ width: 550 }} />
+</div>
+
+- **Auto Switch to One-Way Mode**:
+  This will automatically try to switch your account to one-way mode when you select a new ticker to ensure you don't accidentally end up unexpectedly hedged.
+- **Support Partial Stops**:
+  Enables the usage of partial stops instead of full-close stops. This is an extension to the default exchanges behavior.
+- **Bind Stops to Position**:
+  Enabling this Prevents the user from being able to place stops without an active position
+
+---
+
+## Troubleshooting
+
+:::warning
+On May-8-2023 Bybit mandated KYC for all users, and shortly before that it started banning US IP addresses. If you are trying to trade from a restricted country or did not do the KYC you will not be permitted to execute orders even if you previously were able to.
+:::
+
+:::note
+In March 2024 Bybit phased out support for Perpetual Futures for users in the Netherlands due to regulatory reasons.
+You can find more info [here](https://announcements.bybit.com/article/introducing-bybit-netherlands-bybit-nl-platform-blt32bff64c58963ac7/).
+:::
+
+## Why am I getting an error about unmatched IP when trying to use testnet? I used the system generated option
+
+- Testnets are generally provided on a best-effort basis and are not guaranteed to work.

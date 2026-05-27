@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "jsx": "react-jsx",
+    "incremental": false // dts with tsup requires rootDir if incremental (which does not work well aliases)
+  },
+  "paths": {
+    "@tealstreet/data-structures/src": [
+      "../data-structures/src"
+    ],
+    "@tealstreet/proxy-ips-lists/src": [
+      "../proxy-ips-lists/src"
+    ],
+    "@tealstreet/ccxt-compat/src": [
+      "../ccxt-compat/src"
+    ]
+  },
+  "exclude": [
+    "**/*.stories.tsx",
+    "**/*.stories.ts",
+    "**/*.stories.mdx",
+    ".storybook/**"
+  ]
+}

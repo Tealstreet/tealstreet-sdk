@@ -1,0 +1,1981 @@
+import type { Axios } from 'axios';
+import type { ManipulateType } from 'dayjs';
+import type { Store } from '../../store/store.interface';
+
+import dayjs from 'dayjs';
+import chunk from 'lodash/chunk';
+import flatten from 'lodash/flatten';
+import partition from 'lodash/partition';
+import sumBy from 'lodash/sumBy';
+import times from 'lodash/times';
+import uniqBy from 'lodash/uniqBy';
+import { nanoid } from 'nanoid';
+import { forEachSeries, mapSeries } from 'p-iteration';
+
+import { sleep } from '@tealstreet/sleep/src/sleep';
+import {
+  Balance,
+  Candle,
+  Execution,
+  ExecutionsOptions,
+  ExchangeName,
+  ExchangeOptions,
+  FetchedLeverage,
+  LogSeverity,
+  MarginType,
+  OHLCVOptions,
+  Order,
+  OrderBook,
+  OrderSide,
+  OrderStatus,
+  OrderTimeInForce,
+  OrderType,
+  PlaceOrderOpts,
+  Position,
+  PositionMode,
+  PositionSide,
+  Ticker,
+  UpdateOrderOpts,
+  Writable,
+} from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
+import { inverseObj } from '../../utils/inverseObj';
+import { loop } from '../../utils/loop';
+import { omitUndefined } from '../../utils/omitUndefined';
+import { roundUSD } from '../../utils/roundUSD';
+import { add, adjust, multiply, subtract } from '../../utils/safe-math';
+import { uuid } from '../../utils/uuid';
+import { virtualClock } from '../../utils/virtualClock';
+import { BaseExchange, CallableMethodsInWorker } from '../base';
+import { createAPI } from './blofin.api';
+import {
+  BROKER_ID,
+  ENDPOINTS,
+  FETCH_BATCH_LEV_RESPONSE,
+  FETCH_MARGIN_MODE_RESPONSE,
+  FETCH_POSITION_RESPONSE,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TYPE,
+  ORDERS_RESPONSE,
+  POSITION_MODE_RESPONSE,
+  POSITION_SIDE,
+  REVERSE_ORDER_TYPE,
+  USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY,
+} from './blofin.types';
+import { BlofinPrivateWebsocket } from './blofin.ws-private';
+import { BlofinPublicWebsocket } from './blofin.ws-public';
+
+const BLOFIN_SUPPORTED_INST_TYPE = 'SWAP';
+const BLOFIN_SUPPORTED_CONTRACT_TYPE = 'linear';
+const BLOFIN_ACTIVE_ORDERS_PAGE_SIZE = 100;
+// Safety cap on order pagination. BloFin caps orders-pending / orders-tpsl-pending
+// at ~20 rows per page regardless of the requested `limit`, so we page via the
+// `after` cursor until an empty page. This bounds the loop if the cursor ever
+// fails to advance (e.g. exchange ignores `after`). 50 pages is far beyond any
+// realistic open-order count.
+const BLOFIN_MAX_ORDER_PAGES = 50;
+
+const getNormalizedInstType = (payload: Record<string, any>) => String(payload.instType || '').toUpperCase();
+
+const isBlofinLinearSwapMarket = (payload: Record<string, any>) =>
+  getNormalizedInstType(payload) === BLOFIN_SUPPORTED_INST_TYPE &&
+  String(payload.contractType || '').toLowerCase() === BLOFIN_SUPPORTED_CONTRACT_TYPE;
+
+const isKnownNonSwapInstrument = (payload: Record<string, any>) => {
+  const instType = getNormalizedInstType(payload);
+  return !!instType && instType !== BLOFIN_SUPPORTED_INST_TYPE;
+};
+
+export class BlofinExchange extends BaseExchange {
+  xhr: Axios;
+
+  publicWebsocket: BlofinPublicWebsocket;
+  privateWebsocket: BlofinPrivateWebsocket;
+
+  grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
+  grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
+
+  private _accountMarginType: MarginType | null = null;
+  private _accountPositionMode: PositionMode | null = null;
+
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+    super(exchangeName, opts, store);
+
+    this.xhr = createAPI(opts, this);
+    this.publicWebsocket = new BlofinPublicWebsocket(this);
+    this.privateWebsocket = new BlofinPrivateWebsocket(this);
+  }
+
+  validateAccount = async () => {
+    try {
+      const { data } = await this.xhr.get(ENDPOINTS.BALANCE, {
+        params: {
+          accountType: 'futures',
+        },
+      });
+      if (data.code !== '0') {
+        throw new Error(data.msg);
+      }
+      return '';
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return err?.response?.data?.msg || err?.message || err?.message || 'Invalid API key or secret';
+    }
+  };
+
+  dispose = () => {
+    super.dispose();
+    this.publicWebsocket.dispose();
+    this.privateWebsocket.dispose();
+  };
+
+  start = async () => {
+    const useExternalPublicData = await this.initExternalPublicData();
+    const publicDataOnly = this.isPublicDataOnly;
+
+    if (!useExternalPublicData) {
+      const [, rawTickers] = await Promise.all([
+        this.fetchMarkets().then((markets) => {
+          this.store.update({
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          });
+
+          // start public websocket streams as soon as markets loaded.
+          this.publicWebsocket.connectAndSubscribe();
+
+          return markets;
+        }),
+        this.fetchTickersRaw(),
+      ]);
+
+      if (this.isDisposed) return;
+      const tickers = this.formatTickers(rawTickers);
+      this.store.update({
+        tickers,
+        loaded: { ...this.store.loaded, tickers: true },
+      });
+    }
+
+    if (publicDataOnly) return;
+    this.privateWebsocket.connectAndSubscribe();
+
+    await Promise.all([this.getOrFetchMarginType(undefined, true), this.getOrFetchPositionMode(undefined, true)]);
+
+    await Promise.all([
+      this.fetchBalanceAndPositions().then(({ balance, positions }) => {
+        this.store.update({
+          balance,
+          positions,
+          loaded: { ...this.store.loaded, balance: true, positions: true },
+        });
+      }),
+      this.fetchOrders().then((orders) => {
+        this.store.update({
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        });
+      }),
+    ]);
+
+    // Start the tick loop for periodic updates
+    await this.tick();
+  };
+
+  tick = async (count = 0) => {
+    if (!this.isDisposed) {
+      // Fetch balance and positions
+      try {
+        const { balance, positions } = await this.fetchBalanceAndPositions();
+        if (this.isDisposed) return;
+
+        // Use addOrUpdatePositionsFull instead of a wholesale replace so that closed-symbol
+        // position records (which the WS layer keeps around to retain leverage / margin context)
+        // aren't wiped every 10 seconds. This previously caused the place-order % slider to
+        // jitter because the React fallback would briefly land on 1x between tick and WS update.
+        this.store.addOrUpdatePositionsFull(positions);
+        this.store.update({
+          balance,
+          loaded: {
+            ...this.store.loaded,
+            balance: true,
+            positions: true,
+          },
+        });
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        // Continue to orders fetch even if balance/positions failed
+      }
+
+      // Fetch orders (separately to ensure one failure doesn't block the other)
+      try {
+        const orders = await this.fetchOrders();
+        if (this.isDisposed) return;
+        // Only update if we got valid orders (fetchOrders now returns existing on failure)
+        if (orders.length > 0 || this.store.orders.length === 0) {
+          this.store.update({ orders });
+        }
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        // Don't update orders on complete failure to preserve existing state
+      }
+
+      // Schedule next tick after 10 seconds
+      if (!this.isDisposed) {
+        loop(() => this.tick(count + 1), 10_000);
+      }
+    }
+  };
+
+  fetchMarkets = async () => {
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(`${ENDPOINTS.MARKETS}?${nanoid()}`);
+
+      return data
+        .filter(isBlofinLinearSwapMarket)
+        .map((m) => {
+          const maxAmount = Math.min(parseFloat(m.maxLimitSize), parseFloat(m.maxMarketSize));
+          const contractValue = parseFloat(m.contractValue);
+          const lotSize = m.lotSize ? parseFloat(m.lotSize) : parseFloat(m.minSize);
+
+          return {
+            id: m.instId,
+            symbol: m.instId.replace(/-SWAP$/, '').replace(/-/g, ''),
+            base: m.baseCurrency,
+            quote: m.quoteCurrency,
+            active: m.state === 'live',
+            precision: {
+              // Native order size precision (contracts).
+              amount: lotSize,
+              price: parseFloat(m.tickSize),
+            },
+            limits: {
+              amount: {
+                min: parseFloat(m.minSize) * contractValue,
+                max: maxAmount,
+              },
+              leverage: {
+                min: 1,
+                max: parseFloat(m.maxLeverage),
+              },
+            },
+            contractSize: contractValue,
+            info: {
+              ...m,
+              // Keep raw instrument values for exchange-specific sizing logic.
+              contractValue: contractValue,
+              lotSize: lotSize,
+            },
+          };
+        });
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return this.store.markets;
+    }
+  };
+
+  fetchTickers = async () => {
+    const rawTickers = await this.fetchTickersRaw();
+    return this.formatTickers(rawTickers);
+  };
+
+  fetchTickersRaw = async () => {
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.get(ENDPOINTS.TICKERS);
+
+      return data;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  formatTickers = (data: any) => {
+    try {
+      const tickers: Ticker[] = data.reduce((acc: Ticker[], t: Record<string, any>) => {
+        const market = this.store.marketsById[t.instId];
+
+        if (!market) return acc;
+
+        const open = parseFloat(t.open24h);
+        const last = parseFloat(t.last);
+        const percentage = roundUSD(((last - open) / open) * 100);
+
+        const ticker = {
+          id: market.id,
+          symbol: market.symbol,
+          bid: parseFloat(t.bidPrice),
+          ask: parseFloat(t.askPrice),
+          last,
+          mark: last,
+          index: last,
+          percentage,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: parseFloat(t.volCurrency24h),
+          quoteVolume: parseFloat(t.vol24h),
+          openInterest: 0,
+          info: t,
+        };
+
+        return [...acc, ticker];
+      }, []);
+
+      return tickers;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return this.store.tickers;
+    }
+  };
+
+  fetchPositions = async (symbols?: string[]) => {
+    const openPositions = await this.fetchPositionsHelper();
+    if (symbols) {
+      const openPositionsForSymbols = openPositions.filter((p) => symbols.includes(p.symbol));
+      const remainingSymbols = symbols.filter((s) => !openPositionsForSymbols.some((p) => p.symbol === s));
+      let fakePositions: Position[] = [];
+      if (remainingSymbols.length > 0) {
+        // refetch margin type and pos mode for newest data...
+        const [marginType, positionMode] = await Promise.all([
+          this.getOrFetchMarginType(undefined, true),
+          this.getOrFetchPositionMode(undefined, true),
+        ]);
+        const positionMetadatas = await this.fetchPositionMetadata(remainingSymbols);
+        fakePositions = positionMetadatas.map((p) => ({
+          positionMode,
+          marginType,
+          ...p,
+          id: createPositionId(p.symbol, p.side, p.positionMode || positionMode),
+          entryPrice: 0,
+          leverage: p.leverage,
+          notional: 0,
+          unrealizedPnl: 0,
+          contracts: 0,
+          liquidationPrice: 0,
+          info: {},
+        }));
+      }
+      // uniqBy should not be needed...
+      return uniqBy([...openPositionsForSymbols, ...fakePositions], 'id');
+    } else {
+      return openPositions;
+    }
+  };
+
+  // WARNING will return [] for symbol with no open position
+  fetchPositionsHelper = async (symbol?: string) => {
+    try {
+      const { data } = await this.xhr.get<FETCH_POSITION_RESPONSE>(ENDPOINTS.POSITIONS, {
+        params: symbol ? { instId: this.symbolToMarketId(symbol) } : {},
+      });
+      if (!data.data) {
+        this.emitAndLogError(data.msg || 'No data found');
+        return symbol ? this.store.positions.filter((p) => p.symbol === symbol) : this.store.positions;
+      }
+      return this.mapPositions(data.data);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return symbol ? this.store.positions.filter((p) => p.symbol === symbol) : this.store.positions;
+    }
+  };
+
+  fetchBalanceAndPositions = async () => {
+    try {
+      const positions = await this.fetchPositions();
+
+      const {
+        data: { data: bal },
+      } = await this.xhr.get<{
+        data: Array<Record<string, any>>;
+      }>(ENDPOINTS.BALANCE, {
+        params: {
+          accountType: 'futures',
+        },
+      });
+
+      const totalCollateral = add(
+        roundUSD(sumBy(bal, (b) => parseFloat(b.available))),
+        roundUSD(sumBy(bal, (b) => parseFloat(b.frozen))),
+      );
+      const used = roundUSD(sumBy(positions, (p) => parseFloat(p.info.maintenanceMargin)));
+      const upnl = roundUSD(sumBy(positions, (p) => p.unrealizedPnl));
+
+      const balance: Balance = {
+        used,
+        free: subtract(totalCollateral, used),
+        total: subtract(totalCollateral, upnl),
+        upnl,
+        info: bal,
+      };
+
+      return {
+        balance,
+        positions,
+      };
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return {
+        balance: this.store.balance,
+        positions: this.store.positions,
+      };
+    }
+  };
+
+  symbolToMarketId = (symbol: string) => {
+    const market = this.store.marketsBySymbol[symbol];
+    return market ? market.id : symbol;
+  };
+
+  marketIdToSymbol = (marketId: string) => {
+    const market = this.store.marketsById[marketId];
+    return market ? market.symbol : marketId;
+  };
+
+  getOrFetchPositionMode = async (symbol?: string, refetch = false): Promise<PositionMode> => {
+    if (symbol) {
+      const position = this.store.positions.find((p) => p.symbol === symbol);
+      if (position?.positionMode) return position.positionMode;
+    }
+    if (this._accountPositionMode && !refetch) return this._accountPositionMode;
+    const { data } = await this.xhr.get<POSITION_MODE_RESPONSE>(ENDPOINTS.POSITION_MODE);
+    if (data.code !== '0') {
+      this.emitAndLogError(data.msg);
+      return PositionMode.OneWay;
+    }
+    this._accountPositionMode = data.data.positionMode === 'net_mode' ? PositionMode.OneWay : PositionMode.Hedged;
+    return this._accountPositionMode;
+  };
+
+  getOrFetchMarginType = async (symbol?: string, refetch = false): Promise<MarginType> => {
+    if (symbol) {
+      const position = this.store.positions.find((p) => p.symbol === symbol && p.contracts > 0);
+      if (position?.marginType) return position.marginType;
+    }
+    if (this._accountMarginType && !refetch) return this._accountMarginType;
+    const { data } = await this.xhr.get<FETCH_MARGIN_MODE_RESPONSE>(ENDPOINTS.MARGIN_MODE);
+    if (data.code !== '0') {
+      this.emitAndLogError(data.msg);
+      return MarginType.Cross;
+    }
+    this._accountMarginType = data.data.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
+    return this._accountMarginType;
+  };
+
+  fetchPositionMetadata = async (
+    symbols: string[],
+  ): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode'>[]> => {
+    try {
+      const [marginType, positionMode] = await Promise.all([
+        this.getOrFetchMarginType(),
+        this.getOrFetchPositionMode(),
+      ]);
+      const res = flatten(
+        await mapSeries(chunk(symbols, 20), async (batch) => {
+          if (this.isDisposed) return [];
+
+          const { data } = await this.xhr.get<FETCH_BATCH_LEV_RESPONSE>(ENDPOINTS.LEVERAGE, {
+            params: {
+              instId: batch.map((symbol) => this.symbolToMarketId(symbol)).join(','),
+              marginMode: marginType === MarginType.Isolated ? 'isolated' : 'cross',
+            },
+          });
+
+          // {
+          //   "code": "152406",
+          //   "msg": "Your IP is not included in your API key's IP whitelist"
+          // }
+          if (data.code !== '0') {
+            this.emitAndLogError(data.msg);
+          } else if (!data.data) console.warn('No leverage data found');
+
+          return (data.data || []).map((d: FETCH_BATCH_LEV_RESPONSE['data'][0]) => ({
+            symbol: this.marketIdToSymbol(d.instId),
+            leverage: parseFloat(d.leverage),
+            marginType: d.marginMode === 'cross' ? MarginType.Cross : MarginType.Isolated,
+            positionMode: d.positionSide === 'net' ? PositionMode.OneWay : PositionMode.Hedged,
+            side: d.positionSide === 'net' || d.positionSide === 'long' ? PositionSide.Long : PositionSide.Short,
+          }));
+        }),
+      );
+
+      return res.filter((r) => r.positionMode === positionMode);
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+    try {
+      const market = this.store.marketsBySymbol[symbol];
+      if (!market) {
+        this.log(`Market ${symbol} not found`, LogSeverity.Warning);
+        return null;
+      }
+
+      const marginType = await this.getOrFetchMarginType();
+      const { data } = await this.xhr.get<FETCH_BATCH_LEV_RESPONSE>(ENDPOINTS.LEVERAGE, {
+        params: {
+          instId: market.id,
+          marginMode: marginType === MarginType.Isolated ? 'isolated' : 'cross',
+        },
+      });
+
+      if (data.code !== '0') {
+        this.emitAndLogError(data.msg);
+        return null;
+      }
+
+      const rows = data.data || [];
+      if (rows.length === 0) {
+        return null;
+      }
+
+      // Hedged isolated returns separate `long`/`short` rows; net mode returns a single `net` row.
+      const netRow = rows.find((r) => r.positionSide === 'net');
+      const longRow = rows.find((r) => r.positionSide === 'long') || netRow || rows[0];
+      const shortRow = rows.find((r) => r.positionSide === 'short') || netRow || rows[0];
+
+      const buyLeverage = parseFloat(longRow.leverage);
+      const sellLeverage = parseFloat(shortRow.leverage);
+
+      if (!Number.isFinite(buyLeverage) || !Number.isFinite(sellLeverage)) {
+        return null;
+      }
+
+      const leverageObj: FetchedLeverage = { buyLeverage, sellLeverage };
+
+      this.store.update({
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: leverageObj,
+        },
+      });
+
+      return leverageObj;
+    } catch (err: any) {
+      this.log(
+        `Error fetching leverage for ${symbol}: ${err?.response?.data?.msg || err?.message || err}`,
+        LogSeverity.Warning,
+      );
+      return null;
+    }
+  };
+
+  fetchOrders = async (_symbols?: string[]) => {
+    return this.fetchOrdersWithRetry(3);
+  };
+
+  private fetchOrdersWithRetry = async (retries: number): Promise<Order[]> => {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const [orders, algoOrders] = await Promise.all([this.fetchNormalOrders(), this.fetchAlgoOrders()]);
+        const allOrders = this.addInlineTpSlFallbackOrders([...orders, ...algoOrders]);
+
+        // If both fetches returned empty but we had orders before, something might be wrong
+        // Log a warning but still return the result (empty is valid if user has no orders)
+        if (allOrders.length === 0 && this.store.orders.length > 0) {
+          this.log(
+            'Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.',
+            LogSeverity.Warning,
+          );
+        }
+
+        return allOrders;
+      } catch (err: any) {
+        lastError = err;
+        if (attempt < retries) {
+          this.log(`fetchOrders attempt ${attempt} failed, retrying...`, LogSeverity.Warning);
+          await sleep(1000 * attempt); // Exponential-ish backoff
+        }
+      }
+    }
+
+    // All retries failed
+    this.emitAndLogError(lastError?.message || 'fetchOrders failed after retries');
+    // On complete failure, return existing orders to avoid losing data
+    return this.store.orders;
+  };
+
+  fetchNormalOrders = async () => {
+    const recursiveFetch = async (
+      orders: Array<Record<string, any>> = [],
+      page = 0,
+    ): Promise<Array<Record<string, any>>> => {
+      try {
+        const cursor = orders.length ? orders[orders.length - 1].orderId : undefined;
+        const { data } = await this.xhr.get<ORDERS_RESPONSE>(ENDPOINTS.UNFILLED_ORDERS, {
+          params: {
+            after: cursor,
+            limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
+          },
+        });
+
+        if (!data.data) {
+          this.emitAndLogError(data.msg || 'No data found');
+          // Return previously fetched orders instead of empty array to avoid losing data
+          return orders;
+        }
+
+        if (data.data.length === 0) return orders;
+
+        // BloFin caps orders-pending at ~20 rows/page regardless of `limit`, so we
+        // can't detect "more pages" by comparing the count to the requested size.
+        // Page via the `after` cursor until an empty page.
+        const lastRow = data.data[data.data.length - 1] as Record<string, any>;
+        const nextCursor = lastRow.orderId;
+        // Defensive: if a non-first page didn't advance the cursor, the exchange
+        // ignored `after` and re-sent the same page. Stop WITHOUT merging it so the
+        // repeated rows can't duplicate into the store.
+        if (cursor !== undefined && nextCursor === cursor) return orders;
+
+        const merged: Array<Record<string, any>> = [...orders, ...data.data];
+        if (nextCursor && page + 1 < BLOFIN_MAX_ORDER_PAGES) {
+          return recursiveFetch(merged, page + 1);
+        }
+
+        return merged;
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        // On error, return previously fetched orders instead of failing completely
+        return orders;
+      }
+    };
+
+    const blofinOrders = await recursiveFetch();
+    return this.mapOrders(blofinOrders);
+  };
+
+  fetchAlgoOrders = async () => {
+    const recursiveFetch = async (
+      orders: Array<Record<string, any>> = [],
+      page = 0,
+    ): Promise<Array<Record<string, any>>> => {
+      try {
+        const cursor = orders.length ? orders[orders.length - 1].tpslId : undefined;
+        const { data } = await this.xhr.get<ORDERS_RESPONSE>(ENDPOINTS.UNFILLED_ALGO_ORDERS, {
+          params: {
+            after: cursor,
+            limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
+          },
+        });
+
+        if (!data.data) {
+          this.emitAndLogError(data.msg || 'No data found');
+          // Return previously fetched orders instead of empty array to avoid losing data
+          return orders;
+        }
+
+        if (data.data.length === 0) return orders;
+
+        // Same cursor-based pagination as fetchNormalOrders - orders-tpsl-pending
+        // is likewise capped per page and keyed by `tpslId`.
+        const lastRow = data.data[data.data.length - 1] as Record<string, any>;
+        const nextCursor = lastRow.tpslId;
+        // Defensive: non-advancing cursor on a non-first page means `after` was
+        // ignored and the same page came back. Stop without merging the duplicate.
+        if (cursor !== undefined && nextCursor === cursor) return orders;
+
+        const merged: Array<Record<string, any>> = [...orders, ...data.data];
+        if (nextCursor && page + 1 < BLOFIN_MAX_ORDER_PAGES) {
+          return recursiveFetch(merged, page + 1);
+        }
+
+        return merged;
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        // On error, return previously fetched orders instead of failing completely
+        return orders;
+      }
+    };
+
+    const blofinOrders = await recursiveFetch();
+    return this.mapOrders(blofinOrders);
+  };
+
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const { symbol, orderId, from, to, limit = 100 } = opts;
+    if (!symbol) {
+      return [];
+    }
+
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) {
+      return [];
+    }
+
+    const contractSize = market.contractSize || parseFloat(market.info?.contractValue || '1');
+    const maxLimit = Math.min(Math.max(limit, 1), 100);
+
+    const normalizeToMilliseconds = (value?: number) => {
+      if (value === undefined || value === null || !Number.isFinite(value)) {
+        return undefined;
+      }
+      return value > 1_000_000_000_000 ? Math.floor(value) : Math.floor(value * 1000);
+    };
+
+    const normalizeToSeconds = (value: unknown) => {
+      const parsed = Number.parseInt(String(value ?? '0'), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return undefined;
+      }
+      return parsed > 1_000_000_000_000 ? Math.floor(parsed / 1000) : parsed;
+    };
+
+    const fromMilliseconds = normalizeToMilliseconds(from);
+    const toMilliseconds = normalizeToMilliseconds(to);
+
+    const parseFirstNumeric = (...values: unknown[]) => {
+      for (const value of values) {
+        if (value === undefined || value === null || value === '') continue;
+        const parsed = Number.parseFloat(String(value));
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+      return undefined;
+    };
+
+    const mapRowsToExecutions = (rows: Array<Record<string, any>>) =>
+      rows.reduce<Execution[]>((acc, row) => {
+        if (isKnownNonSwapInstrument(row)) {
+          return acc;
+        }
+
+        const normalizedSide = String(row.side || row.actualSide || '').toLowerCase();
+        const side = ORDER_SIDE[normalizedSide];
+        if (!side) {
+          return acc;
+        }
+
+        const rowSymbol = this.marketIdToSymbol(row.instId || row.symbol || '');
+        if (rowSymbol !== market.symbol) {
+          return acc;
+        }
+
+        // Keep execution parsing strict to avoid treating generic order payload
+        // fields (e.g. algo sentinel size = -1) as real fills.
+        const price = parseFirstNumeric(
+          row.fillPrice,
+          row.fillPx,
+          row.avgFillPrice,
+          row.averagePrice,
+          row.avgPx,
+          row.execPrice,
+          row.executedPrice,
+        );
+        const qtyNativeRaw = parseFirstNumeric(
+          row.fillSize,
+          row.filledSize,
+          row.actualSize,
+          row.fillSz,
+          row.tradeQty,
+          row.execQty,
+          row.executedQty,
+          row.accFillSz,
+        );
+        const qtyNative = qtyNativeRaw === undefined ? undefined : Math.abs(qtyNativeRaw);
+        if (
+          price === undefined ||
+          qtyNative === undefined ||
+          !Number.isFinite(price) ||
+          !Number.isFinite(qtyNative) ||
+          price <= 0 ||
+          qtyNative <= 0
+        ) {
+          return acc;
+        }
+
+        const timestamp = normalizeToSeconds(
+          row.fillTime || row.execTime || row.tradeTime || row.uTime || row.updateTime || row.ts || row.ctime,
+        );
+        if (!timestamp) {
+          return acc;
+        }
+
+        const executionOrderId = String(row.orderId || row.ordId || row.algoId || row.tpslId || '');
+        if (orderId && executionOrderId && executionOrderId !== String(orderId)) {
+          return acc;
+        }
+
+        const qty = multiply(qtyNative, contractSize);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return acc;
+        }
+
+        const feeRaw = parseFirstNumeric(row.fee, row.fillFee, row.execFee, row.tradeFee, row.actualFee);
+        const commission = feeRaw !== undefined && Number.isFinite(feeRaw) ? Math.abs(feeRaw) : undefined;
+        acc.push(
+          omitUndefined({
+            timestamp,
+            symbol: market.symbol,
+            orderId: executionOrderId || undefined,
+            price,
+            qty,
+            side,
+            commission,
+            commissionAsset: row.feeCurrency || row.feeCcy || row.feeAsset || row.ccy || undefined,
+          }),
+        );
+        return acc;
+      }, []);
+
+    const getErrorMessage = (error: any) =>
+      error?.response?.data?.msg || error?.response?.data?.message || error?.message || 'Unknown Blofin error';
+
+    const isUnsupportedOperationError = (error: any) =>
+      `${getErrorMessage(error)}`.toLowerCase().includes('operation is not supported');
+
+    const fetchRows = async (endpoint: string) => {
+      const fillsParams = omitUndefined({
+        instId: this.symbolToMarketId(symbol),
+        orderId,
+        begin: fromMilliseconds,
+        end: toMilliseconds,
+        limit: maxLimit,
+      });
+      const ordersHistoryParams = omitUndefined({
+        instId: this.symbolToMarketId(symbol),
+        state: 'filled',
+        begin: fromMilliseconds,
+        end: toMilliseconds,
+        limit: maxLimit,
+      });
+      const params = endpoint === ENDPOINTS.FILLS ? fillsParams : ordersHistoryParams;
+      const { data } = await this.xhr.get<any>(endpoint, { params });
+      const isSuccess = data?.code === '0' || data?.code === 0;
+      if (!isSuccess) {
+        throw new Error(data?.msg || `Failed to fetch Blofin executions from ${endpoint}`);
+      }
+      return Array.isArray(data?.data) ? data.data : [];
+    };
+
+    try {
+      let primaryRows: Array<Record<string, any>> = [];
+      try {
+        primaryRows = await fetchRows(ENDPOINTS.FILLS);
+      } catch (error: any) {
+        if (isUnsupportedOperationError(error)) {
+          this.log(`Blofin fills endpoint not supported for this account: ${getErrorMessage(error)}`, LogSeverity.Warning);
+          primaryRows = [];
+        } else {
+          throw error;
+        }
+      }
+
+      let fallbackRows: Array<Record<string, any>> = [];
+      if (primaryRows.length === 0) {
+        try {
+          fallbackRows = await fetchRows(ENDPOINTS.ORDERS_HISTORY);
+        } catch (error: any) {
+          if (isUnsupportedOperationError(error)) {
+            this.log(`Blofin execution fallback not supported: ${getErrorMessage(error)}`, LogSeverity.Warning);
+            fallbackRows = [];
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      const deduped = new Map<string, Execution>();
+
+      for (const execution of [...mapRowsToExecutions(primaryRows), ...mapRowsToExecutions(fallbackRows)]) {
+        if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
+          continue;
+        }
+        if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
+          continue;
+        }
+        const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        deduped.set(key, execution);
+      }
+
+      return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxLimit);
+    } catch (err: any) {
+      this.emitAndLogError(getErrorMessage(err));
+      return [];
+    }
+  };
+
+  fetchOHLCV = async (opts: OHLCVOptions) => {
+    const limit = Math.min(opts.limit || 1440, 1440);
+    const [, amount, unit] = opts.interval.split(/(\d+)/);
+
+    const end = opts.to ? dayjs(opts.to) : dayjs();
+    const start =
+      !opts.limit && opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+
+    if (market) {
+      try {
+        const {
+          data: { data },
+        } = await this.xhr.get(ENDPOINTS.KLINE, {
+          params: {
+            instId: market.id,
+            bar: INTERVAL[opts.interval],
+            // limit,
+            before: start.valueOf(),
+            after: end.valueOf(),
+          },
+        });
+
+        const candles: Candle[] = data.map((c: string[]) => {
+          return {
+            timestamp: parseInt(c[0], 10) / 1000,
+            open: parseFloat(c[1]),
+            high: parseFloat(c[2]),
+            low: parseFloat(c[3]),
+            close: parseFloat(c[4]),
+            volume: parseFloat(c[7]),
+          };
+        });
+
+        candles.sort((a, b) => a.timestamp - b.timestamp);
+
+        return candles;
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        return [];
+      }
+    }
+
+    this.emitAndLogError(`Market ${opts.symbol} not found on Blofin`);
+    return [];
+  };
+
+  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    return this.publicWebsocket.listenOHLCV(opts, callback);
+  };
+
+  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+    return this.publicWebsocket.listenOrderBook(symbol, callback);
+  };
+
+  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const realId = order.id.split('__')[0];
+    const relativeOrders = this.store.orders.filter((o) => o.id.startsWith(realId));
+    const orderAmountNative = order.extra?.remainingNative ?? order.amount;
+
+    let updatePrice;
+    let updateAmount;
+    if ('price' in update) updatePrice = update.price;
+    if ('amount' in update) updateAmount = update.amount;
+
+    const newOrder: Writable<PlaceOrderOpts> = {
+      ...order,
+      symbol: order.symbol,
+      type: order.type,
+      side: order.side,
+      // BloFin place payload expects native contracts. Prefer mapped native remaining when available.
+      amount: updateAmount ?? orderAmountNative,
+      price: updatePrice ?? order.price,
+      reduceOnly: order.reduceOnly || false,
+    };
+
+    if (relativeOrders.length > 1) {
+      const parent = relativeOrders.find((o) => !o.id.includes('__'));
+      const stoploss = relativeOrders.find((o) => o.id.endsWith('__stop_loss'));
+      const takeprofit = relativeOrders.find((o) => o.id.endsWith('__take_profit'));
+      if (parent && parent.status === OrderStatus.Open) {
+        const parentAmountNative = parent.extra?.remainingNative ?? parent.amount;
+        newOrder.type = parent.type;
+        newOrder.side = parent.side;
+        newOrder.amount = parentAmountNative ?? newOrder.amount;
+        newOrder.price = parent.price;
+        newOrder.reduceOnly = parent.reduceOnly;
+      } else {
+        newOrder.price = undefined;
+        // When only virtual TP/SL legs exist (no parent normal order in store),
+        // preserve the edited leg type instead of always coercing to StopLoss.
+        if (order.id.endsWith('__take_profit')) {
+          newOrder.type = OrderType.TakeProfit;
+        } else if (order.id.endsWith('__stop_loss')) {
+          newOrder.type = OrderType.StopLoss;
+        }
+      }
+      if (stoploss?.price) newOrder.stopLoss = stoploss.price;
+      if (stoploss?.slTriggerType) newOrder.slTriggerType = stoploss.slTriggerType;
+      if (takeprofit?.price) newOrder.takeProfit = takeprofit.price;
+      if (takeprofit?.tpTriggerType) newOrder.tpTriggerType = takeprofit.tpTriggerType;
+      if (updatePrice !== undefined) {
+        if (order.id.endsWith('__stop_loss')) newOrder.stopLoss = updatePrice;
+        else if (order.id.endsWith('__take_profit')) newOrder.takeProfit = updatePrice;
+        else newOrder.price = updatePrice;
+      }
+    }
+    // if (newOrder.amount === 0 && (newOrder.type === OrderType.StopLoss || newOrder.type === OrderType.TakeProfit)) {
+    //   newOrder.amount = -1;
+    // }
+
+    const isVirtualTpSl = order.id.includes('__');
+    if (!isVirtualTpSl && order.type !== OrderType.Limit) {
+      await this.cancelAlgoOrders(relativeOrders);
+    } else {
+      await this.cancelOrders(relativeOrders);
+    }
+    return await this.placeOrder(newOrder);
+  };
+
+  cancelOrders = async (_orders: Order[]) => {
+    // Check if we're canceling a single TP/SL order with amount=0
+    let orderToPreserve: Order | undefined;
+    if (_orders.length === 1 && _orders[0].id.includes('__') && (!_orders[0].amount || _orders[0].amount === 0)) {
+      const cancelingOrder = _orders[0];
+      const realId = cancelingOrder.id.split('__')[0];
+      const relativeOrders = this.store.orders.filter((o) => o.id.startsWith(realId));
+
+      const isCancelingTp = cancelingOrder.id.endsWith('__take_profit');
+      const isCancelingSl = cancelingOrder.id.endsWith('__stop_loss');
+
+      if ((isCancelingTp || isCancelingSl) && relativeOrders.length > 1) {
+        // Find the opposite order that should be preserved
+        const oppositeOrder = relativeOrders.find((o) => {
+          if (isCancelingTp) {
+            return o.id.endsWith('__stop_loss') && (!o.amount || o.amount === 0);
+          } else {
+            return o.id.endsWith('__take_profit') && (!o.amount || o.amount === 0);
+          }
+        });
+
+        if (oppositeOrder) {
+          orderToPreserve = oppositeOrder;
+        }
+      }
+    }
+
+    // replace child orders with parent and remove dupes introduced
+    const orders = uniqBy(
+      _orders.map((o) => {
+        const isVirtualTpSl = o.id.includes('__');
+        if (isVirtualTpSl) {
+          const realId = o.id.split('__')[0];
+          return (
+            this.store.orders.find((o) => o.id === realId) || {
+              ...o,
+              id: realId,
+            }
+          );
+        }
+        return o;
+      }),
+      'id',
+    );
+
+    const [algoOrders, normalOrders] = partition(orders, (o) => this.isAlgoOrder(o.type));
+
+    if (normalOrders.length) await this.cancelNormalOrders(normalOrders);
+    if (algoOrders.length) await this.cancelAlgoOrders(algoOrders);
+
+    // If we need to preserve an order, re-create it
+    if (orderToPreserve) {
+      const preserveOrder: PlaceOrderOpts = {
+        symbol: orderToPreserve.symbol,
+        side: orderToPreserve.side,
+        type: orderToPreserve.type,
+        price: orderToPreserve.price,
+        amount: 0, // Full position amount
+        reduceOnly: true,
+      };
+
+      // Add trigger type if available
+      if (orderToPreserve.type === OrderType.StopLoss && orderToPreserve.slTriggerType) {
+        (preserveOrder as any).slTriggerType = orderToPreserve.slTriggerType;
+      } else if (orderToPreserve.type === OrderType.TakeProfit && orderToPreserve.tpTriggerType) {
+        (preserveOrder as any).tpTriggerType = orderToPreserve.tpTriggerType;
+      }
+
+      // Place the preserved order after a short delay to ensure the cancellation is processed
+      await sleep(500);
+      await this.placeOrder(preserveOrder);
+    }
+  };
+
+  cancelSymbolOrders = async (symbol: string) => {
+    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    await this.cancelOrders(orders);
+  };
+
+  setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market ${symbol} not found on Blofin`);
+
+    const leverage = Math.min(Math.max(inputLeverage, market.limits.leverage.min), market.limits.leverage.max);
+
+    // Skip the round-trip if we already know the requested leverage is set.
+    // Prefer position records (live truth from WS); fall back to the per-symbol
+    // fetchedLeverage cache when there's no open position for this symbol.
+    const existingPositions = this.store.positions.filter((p) => p.symbol === symbol);
+    if (existingPositions.length > 0 && existingPositions.every((p) => p.leverage === leverage)) {
+      return;
+    }
+    const fetchedLev = this.store.fetchedLeverage[symbol];
+    if (
+      existingPositions.length === 0 &&
+      fetchedLev &&
+      !fetchedLev.isFetching &&
+      fetchedLev.buyLeverage === leverage &&
+      fetchedLev.sellLeverage === leverage
+    ) {
+      return;
+    }
+
+    // Both margin type and position mode are account-global on Blofin, so the
+    // cached values populated during `start()` are reused here without REST.
+    const [marginType, positionMode] = await Promise.all([
+      this.getOrFetchMarginType(),
+      this.getOrFetchPositionMode(),
+    ]);
+
+    const baseRequest = {
+      instId: market.id,
+      leverage: `${leverage}`,
+      marginMode: marginType === MarginType.Isolated ? 'isolated' : 'cross',
+    };
+
+    let datas: Array<{ code: string; msg: string }>;
+    if (marginType === MarginType.Isolated && positionMode === PositionMode.Hedged) {
+      // Hedged isolated requires per-side leverage updates; fire them in parallel
+      // to stay well within the worker-call timeout budget.
+      const [longRes, shortRes] = await Promise.all([
+        this.xhr.post(ENDPOINTS.SET_LEVERAGE, { ...baseRequest, positionSide: 'long' }),
+        this.xhr.post(ENDPOINTS.SET_LEVERAGE, { ...baseRequest, positionSide: 'short' }),
+      ]);
+      datas = [longRes.data, shortRes.data];
+    } else {
+      const { data } = await this.xhr.post(ENDPOINTS.SET_LEVERAGE, omitUndefined(baseRequest));
+      datas = [data];
+    }
+
+    // Surface API-level errors immediately, before any optimistic store mutation.
+    for (const data of datas) {
+      if (data.code !== '0') {
+        this.emitAndLogError(data.msg);
+        throw new Error(data.msg);
+      }
+    }
+
+    // Optimistically patch the store so the UI reflects the new leverage right away.
+    // The WS positions stream will deliver the authoritative value shortly, and the
+    // fetchedLeverage cache covers the no-open-position fallback used by the place-order
+    // % slider.
+    if (existingPositions.length > 0) {
+      const updates = existingPositions.map((p) => ({ ...p, leverage }));
+      this.store.addOrUpdatePositions(updates);
+    }
+    this.store.update({
+      fetchedLeverage: {
+        ...this.store.fetchedLeverage,
+        [symbol]: { buyLeverage: leverage, sellLeverage: leverage },
+      },
+    });
+  };
+
+  placeOrder = async (opts: PlaceOrderOpts) => {
+    if (this.isAlgoOrder(opts.type)) {
+      const payload = await this.formatAlgoOrder(opts);
+      return await this.placeAlgoOrderBatch([payload]);
+    }
+
+    const payloads = await this.formatNormalOrder(opts);
+
+    if (payloads.some((o) => parseFloat(o.size) === 0)) {
+      this.emitAndLogError(`Order amount is too small`);
+      throw new Error(`Order amount is too small`);
+    }
+
+    return await this.placeOrderBatch(payloads);
+  };
+
+  placeOrders = async (opts: PlaceOrderOpts[]) => {
+    const [algoOrders, normalOrders] = partition(opts, (o) => this.isAlgoOrder(o.type));
+
+    // force fetch here before map
+    await Promise.all([this.getOrFetchPositionMode(), this.getOrFetchMarginType()]);
+    const normalOrdersOpts = (await Promise.all(normalOrders.map((o) => this.formatNormalOrder(o)))).flat();
+
+    if (normalOrdersOpts.some((o) => parseFloat(o.size) === 0)) {
+      this.emitAndLogError(`Total order amount is too small`);
+      return [];
+    }
+
+    // Blofin supports TP/SL fields directly on normal order payloads.
+    // Deriving extra algo orders from the same normal orders duplicates TP/SL
+    // placement and can cause trigger validation failures in batch flow.
+    const algoOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatAlgoOrder(o)));
+
+    // For batch orders, we don't have the original opts context, so we use the basic batch method
+    return [...(await this.placeOrderBatch(normalOrdersOpts)), ...(await this.placeAlgoOrderBatch(algoOrdersOpts))];
+  };
+
+  mapOrders = (orders: Array<Record<string, any>>) => {
+    return orders.reduce<Order[]>((acc, o: Record<string, any>) => {
+      if (isKnownNonSwapInstrument(o)) return acc;
+
+      const market = this.store.marketsById[o.instId];
+      if (!market) return acc;
+
+      const tmpOrders: Order[] = [];
+      // BloFin echoes inline TP/SL prices on both the normal order record
+      // (orders-pending) and the auto-generated algo record
+      // (orders-tpsl-pending). Emitting virtual TP/SL from both produces two
+      // protective stops per placement (one keyed by orderId, one by tpslId).
+      // Algo records are the authoritative source — they carry the tpslId
+      // needed to cancel, and they map 1:1 with the trigger order BloFin
+      // actually placed. Only emit from algo records.
+      const isAlgoRecord = !!o.tpslId;
+
+      const orderSide = ORDER_SIDE[o.side];
+      const inverseSide = orderSide === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+      // o.size is already the contract count from the API, convert to base currency amount
+      const contractValue = market.contractSize || parseFloat(market.info.contractValue) || 1;
+      const amountNative = parseFloat(o.size || '0');
+      const amount = multiply(amountNative, contractValue);
+
+      if (isAlgoRecord && o.tpTriggerPrice) {
+        tmpOrders.push({
+          id: `${o.tpslId}__take_profit`,
+          status: OrderStatus.Open,
+          symbol: market.symbol,
+          type: OrderType.TakeProfit,
+          side: o.orderId ? inverseSide : orderSide,
+          price: parseFloat(o.tpTriggerPrice),
+          amount: amount,
+          filled: 0,
+          remaining: amount,
+          extra: {
+            remainingNative: amountNative,
+          },
+          reduceOnly: true,
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+          info: o,
+        });
+      }
+
+      if (isAlgoRecord && o.slTriggerPrice) {
+        tmpOrders.push({
+          id: `${o.tpslId}__stop_loss`,
+          status: OrderStatus.Open,
+          symbol: market.symbol,
+          type: OrderType.StopLoss,
+          side: o.orderId ? inverseSide : orderSide,
+          price: parseFloat(o.slTriggerPrice),
+          amount: amount,
+          filled: 0,
+          remaining: amount,
+          extra: {
+            remainingNative: amountNative,
+          },
+          reduceOnly: true,
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+          info: o,
+        });
+      }
+
+      // Only emit the main Limit from true normal records. An algo record
+      // (has tpslId) must never produce a Limit, even if its payload happens
+      // to set orderCategory='normal' and carry an orderId reference.
+      if (o.orderId && o.orderCategory === 'normal' && !isAlgoRecord) {
+        // o.filledSize is already the contract count from the API, convert to base currency amount
+        const filledNative = parseFloat(o.filledSize || '0');
+        const filled = multiply(filledNative, contractValue);
+
+        const remaining = subtract(amount, filled);
+        const remainingNative = subtract(amountNative, filledNative);
+
+        tmpOrders.push({
+          id: o.orderId,
+          status: ORDER_STATUS[o.state],
+          symbol: market.symbol,
+          type: ORDER_TYPE[o.orderType],
+          side: ORDER_SIDE[o.side],
+          price: parseFloat(o.price),
+          amount,
+          filled,
+          remaining,
+          extra: {
+            remainingNative,
+          },
+          reduceOnly: o.reduceOnly === 'true',
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+          timeInForce: o.orderType === 'post_only' ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
+          info: o,
+        });
+      }
+
+      return [...acc, ...tmpOrders];
+    }, []);
+  };
+
+  mapPositions = (data: FETCH_POSITION_RESPONSE['data']) => {
+    const supportedPositions = data.filter((p) => !isKnownNonSwapInstrument(p));
+
+    // check if iso and cross position open at same time for same symbol
+    // const positionMode = this._accountPositionMode;
+    // const marginMode = this._accountMarginType;
+    if (
+      supportedPositions.some((p) =>
+        supportedPositions.some(
+          (p2) =>
+            (p2.marginMode !== p.marginMode || (p2.positionSide === 'net' && p.positionSide !== 'net')) &&
+            p.instId === p2.instId &&
+            p.positionSide === p2.positionSide &&
+            p.positions !== p2.positions,
+        ),
+      )
+    ) {
+      this.emitAndLogError(
+        `Isolated and cross positions open at the same time for ${data[0].instId}. Close one on Blofin site to use Tealstreet.`,
+      );
+    }
+
+    return supportedPositions.reduce((acc: Position[], p) => {
+      const market = this.store.marketsById[p.instId];
+      if (!market) return acc;
+
+      const pos = parseFloat(p.positions);
+      // p.positions is already the contract count from the API, convert to base currency amount
+      const contractValue = market.contractSize || parseFloat(market.info.contractValue) || 1;
+      const contracts = pos && contractValue ? multiply(pos, contractValue) : 0;
+
+      const markPrice = parseFloat(p.markPrice);
+      const notionalUsd = multiply(contracts, markPrice);
+
+      let side = POSITION_SIDE[p.positionSide];
+
+      if (contracts > 0) side = PositionSide.Long;
+      if (contracts < 0) side = PositionSide.Short;
+
+      // FALLBACK TO LONG POSITION IF SENT FROM OKX
+      // THIS SHOULD NOT OVERRIDE THE "VIRTUAL SHORT" POSITION
+      if (!side) side = PositionSide.Long;
+      const positionMode = p.positionSide === 'net' ? PositionMode.OneWay : PositionMode.Hedged;
+
+      // force position side if api explicitly says if it's short or long
+      side = p.positionSide === 'short' ? PositionSide.Short : p.positionSide === 'long' ? PositionSide.Long : side;
+
+      const positionId = createPositionId(market.symbol, side, positionMode);
+      const existingPosition = this.store.positions.find((sp) => sp.id === positionId);
+
+      // Preserve a previously-known leverage when the payload omits it (or sends 0/NaN).
+      // Blofin occasionally pushes partial position events without a usable `leverage`,
+      // and writing 0 here causes the place-order % slider to jitter via the React fallback.
+      const parsedLeverage = parseFloat(p.leverage);
+      let leverage = Number.isFinite(parsedLeverage) && parsedLeverage > 0 ? parsedLeverage : 0;
+      if (!leverage) {
+        if (existingPosition && existingPosition.leverage > 0) {
+          leverage = existingPosition.leverage;
+        } else {
+          const fetched = this.store.fetchedLeverage[market.symbol];
+          if (fetched && !fetched.isFetching) {
+            leverage = side === PositionSide.Long ? fetched.buyLeverage : fetched.sellLeverage;
+          }
+        }
+      }
+      const parsedLiquidationPrice = parseFloat(p.liquidationPrice);
+      const liquidationPrice = Number.isFinite(parsedLiquidationPrice)
+        ? parsedLiquidationPrice
+        : existingPosition?.liquidationPrice || 0;
+
+      const position: Position = {
+        id: positionId,
+        symbol: market.symbol,
+        side,
+        entryPrice: contracts ? parseFloat(p.averagePrice) : 0,
+        notional: contracts ? Math.abs(adjust(parseFloat(String(notionalUsd)), market.precision.price)) : 0,
+        leverage,
+        unrealizedPnl: contracts ? adjust(parseFloat(p.unrealizedPnl), market.precision.price) : 0,
+        contracts: Math.abs(contracts),
+        liquidationPrice,
+        marginType: p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross,
+        positionMode,
+        extra: {
+          contractsNative: Math.abs(pos),
+        },
+        info: p,
+      };
+
+      return [...acc, position];
+    }, []);
+  };
+
+  changePositionMode = async (hedged: boolean, symbol?: string) => {
+    const targetMode = hedged ? 'long_short_mode' : 'net_mode';
+    this.log(`Attempting to change position mode to ${targetMode}`, LogSeverity.Info);
+    this.log(
+      `Current positions count: ${this.store.positions.filter((p) => p.contracts > 0).length}`,
+      LogSeverity.Info,
+    );
+    this.log(`Current orders count: ${this.store.orders.length}`, LogSeverity.Info);
+
+    const { data } = await this.xhr.post(ENDPOINTS.SET_POSITION_MODE, {
+      positionMode: targetMode,
+    });
+
+    // {
+    //   "code": "0",
+    //   "msg": "success",
+    //   "data": {
+    //   "positionMode": "net_mode"
+    // }
+    // }
+
+    // Check for errors BEFORE updating positions
+    if (data.code !== '0') {
+      this.log(`Failed to change position mode: ${data.msg} (code: ${data.code})`, LogSeverity.Error);
+      this.emitAndLogError(`${data.msg} (BloFin error code: ${data.code})`);
+      throw new Error(`${data.msg} (BloFin error code: ${data.code})`);
+    }
+
+    this.log(`Position mode change successful, refetching data`, LogSeverity.Info);
+
+    await this.getOrFetchPositionMode(undefined, true);
+    const positions = await this.fetchPositions();
+    this.store.update({ positions });
+
+    if (symbol) {
+      const positions = await this.fetchPositions([symbol]);
+      this.store.addOrUpdatePositions(positions);
+    }
+  };
+
+  changeMarginType = async (isolated: boolean, symbol?: string) => {
+    // if positions / orders open emit warning
+    if (
+      this.store.positions.filter((p) => p.contracts > 0).length ||
+      this.store.orders.filter((o) => o.status === OrderStatus.Open).length
+    ) {
+      this.emitAndLogError(
+        'Changing margin type with open positions / orders is allowed but can cause unexpected behavior.' +
+          ' Symbols with open positions will remain synced to previous mode until position is closed.',
+      );
+    }
+
+    const { data } = await this.xhr.post(ENDPOINTS.SET_MARGIN_MODE, {
+      marginMode: isolated ? 'isolated' : 'cross',
+    });
+    await this.getOrFetchMarginType(undefined, true);
+    if (symbol) {
+      const positions = await this.fetchPositions([symbol]);
+      this.store.addOrUpdatePositions(positions);
+    }
+
+    // {
+    //   "code": "0",
+    //   "msg": "success",
+    //   "data": {
+    //   "marginMode": "isolated"
+    // }
+    // }
+
+    if (data.code !== '0') {
+      this.emitAndLogError(data.msg);
+      throw new Error(data.msg);
+    }
+  };
+
+  afterMethodCalledInWorker = <M extends CallableMethodsInWorker>(
+    result: ReturnType<this[M]>,
+    method: M,
+    ...args: Parameters<this[M]>
+  ) => {
+    if (method === 'changePositionMode') {
+      this._accountPositionMode = args[0] ? PositionMode.Hedged : PositionMode.OneWay;
+    } else if (method === 'changeMarginType') {
+      this._accountMarginType = args[0] ? MarginType.Isolated : MarginType.Cross;
+    }
+  };
+
+  private formatAlgoOrder = async (opts: PlaceOrderOpts) => {
+    const market = this.store.marketsBySymbol[opts.symbol];
+
+    if (!market) {
+      throw new Error(`Market ${opts.symbol} not found on Blofin`);
+    }
+
+    // PlaceOrderOpts.amount is native contracts in app order flow.
+    const lotSize = market.info.lotSize ? parseFloat(market.info.lotSize) : parseFloat(market.info.minSize);
+    const amount = adjust(opts.amount, lotSize);
+
+    const pPrice = market.precision.price;
+    const price = opts.price ? adjust(opts.price, pPrice) : null;
+
+    const req: Record<string, any> = omitUndefined({
+      instId: market.id,
+      marginMode: await this.getOrFetchMarginType(market.symbol),
+      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      ...(process.env.NODE_ENV === 'production' || this.options.tealstreetProxy
+        ? {
+            brokerId: BROKER_ID,
+          }
+        : {}),
+      side: inverseObj(ORDER_SIDE)[opts.side],
+      positionSide: await this.getPositionSide(opts),
+      size: `${amount === 0 ? -1 : amount}`,
+    });
+
+    if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
+      if ((await this.getOrFetchPositionMode(market.symbol)) === PositionMode.OneWay) {
+        req.closeFraction = '1';
+        req.reduceOnly = true;
+      }
+    }
+
+    if (opts.stopLoss) {
+      req.slTriggerPrice = `${opts.stopLoss}`;
+      req.slOrderPrice = '-1';
+    } else if (opts.type === OrderType.StopLoss) {
+      req.slTriggerPrice = `${price}`;
+      req.slOrderPrice = '-1';
+    }
+
+    if (opts.takeProfit) {
+      req.tpTriggerPrice = `${opts.takeProfit}`;
+      req.tpOrderPrice = '-1';
+    } else if (opts.type === OrderType.TakeProfit) {
+      req.tpTriggerPrice = `${price}`;
+      req.tpOrderPrice = '-1';
+    }
+
+    if (!opts.amount) {
+      // if existing opposite algo order on same symbol, cancel and place as single order
+      const oppositeType = opts.type === OrderType.StopLoss ? OrderType.TakeProfit : OrderType.StopLoss;
+      const oppositeOrders = this.store.orders.filter(
+        (o) =>
+          o.symbol === opts.symbol &&
+          o.type === oppositeType &&
+          o.side === opts.side &&
+          o.status === OrderStatus.Open &&
+          !o.amount,
+      );
+      if (oppositeOrders.length) {
+        await this.cancelAlgoOrders(oppositeOrders);
+        const oppositeOrder = oppositeOrders[0];
+        if (oppositeOrder.type === OrderType.StopLoss) {
+          req.slTriggerPrice = `${oppositeOrder.price}`;
+          req.slOrderPrice = '-1';
+        } else {
+          req.tpTriggerPrice = `${oppositeOrder.price}`;
+          req.tpOrderPrice = '-1';
+        }
+      }
+    }
+
+    return req;
+  };
+
+  private formatNormalOrder = async (opts: PlaceOrderOpts) => {
+    const market = this.store.marketsBySymbol[opts.symbol];
+
+    if (!market) {
+      throw new Error(`Market ${opts.symbol} not found on Blofin`);
+    }
+
+    const maxSize = market.limits.amount.max;
+    const pPrice = market.precision.price;
+
+    // PlaceOrderOpts.amount is native contracts in app order flow.
+    const lotSize = market.info.lotSize ? parseFloat(market.info.lotSize) : parseFloat(market.info.minSize);
+    const amount = adjust(opts.amount, lotSize);
+    const price = opts.price ? adjust(opts.price, pPrice) : null;
+    const marginMode = await this.getOrFetchMarginType(market.symbol);
+
+    const req: Record<string, any> = omitUndefined({
+      instId: market.id,
+      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      side: inverseObj(ORDER_SIDE)[opts.side],
+      orderType:
+        opts.timeInForce === OrderTimeInForce.PostOnly && opts.type === 'limit'
+          ? 'post_only'
+          : REVERSE_ORDER_TYPE[opts.type],
+      size: `${amount}`,
+      price: opts.type === OrderType.Limit ? `${price}` : undefined,
+      reduceOnly: opts.reduceOnly || undefined,
+      positionSide: await this.getPositionSide(opts),
+      marginMode,
+      ...(process.env.NODE_ENV === 'production' || this.options.tealstreetProxy
+        ? {
+            brokerId: BROKER_ID,
+          }
+        : {}),
+    });
+    const attachAlgoOrder: Record<string, string> = {};
+
+    if (opts.stopLoss) {
+      req.slTriggerPrice = `${opts.stopLoss}`;
+      req.slOrderPrice = `-1`;
+      attachAlgoOrder.slTriggerPrice = `${opts.stopLoss}`;
+      attachAlgoOrder.slOrderPrice = '-1';
+    }
+
+    if (opts.takeProfit) {
+      req.tpTriggerPrice = `${opts.takeProfit}`;
+      req.tpOrderPrice = `-1`;
+      attachAlgoOrder.tpTriggerPrice = `${opts.takeProfit}`;
+      attachAlgoOrder.tpOrderPrice = '-1';
+    }
+
+    if (Object.keys(attachAlgoOrder).length > 0) {
+      // BloFin has evolved TP/SL attachment schemas over time.
+      // Keep legacy top-level fields above for compatibility, and also send
+      // the newer attachAlgoOrders shape so attached protection is not dropped.
+      req.attachAlgoOrders = [attachAlgoOrder];
+    }
+
+    // If the order fits within maxSize, return a single payload
+    if (amount <= maxSize) {
+      return [
+        {
+          ...req,
+          size: `${amount}`,
+          clientOrderId: req.clientOrderId,
+        },
+      ];
+    }
+
+    // Otherwise, split into multiple orders
+    const lots = Math.ceil(amount / maxSize);
+    const rest = adjust(amount % maxSize, lotSize);
+    const lotSizePerBatch = adjust((amount - rest) / lots, lotSize);
+
+    const payloads: Array<Record<string, any>> = times(lots, () => {
+      return {
+        ...req,
+        size: `${lotSizePerBatch}`,
+        clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      };
+    });
+
+    if (rest)
+      payloads.push({
+        ...req,
+        size: `${rest}`,
+        clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      });
+
+    return payloads;
+  };
+
+  private placeOrderBatch = async (payloads: Array<Record<string, any>>) => {
+    // Keep batch placement for normal orders (including attached TP/SL) to avoid
+    // slow sequential submissions in scaled ladders. Only force single-order
+    // endpoint where BloFin requires it (reduce-only compatibility switch).
+    const shouldUseSingleOrderEndpoint = (payload: Record<string, any>) =>
+      USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY && !!payload.reduceOnly;
+
+    const eligiblePayloads = payloads.filter((p) => !shouldUseSingleOrderEndpoint(p));
+    const noneligiblePayloads = payloads.filter((p) => shouldUseSingleOrderEndpoint(p));
+    const isSuccessfulPlacementMessage = (msg: unknown): boolean => {
+      if (msg === undefined || msg === null) {
+        return true;
+      }
+      const normalized = String(msg).trim().toLowerCase();
+      return normalized === 'success' || normalized === 'order placed';
+    };
+
+    const responses = await mapSeries(chunk(eligiblePayloads, 20), async (batch) => {
+      const {
+        data: { data, code, msg },
+      } = await this.xhr.post<{ code: string; msg: string; data: Array<Record<string, any>> }>(
+        ENDPOINTS.PLACE_ORDERS_BATCH,
+        batch,
+      );
+
+      if (code !== '0') {
+        this.emitAndLogError(data?.[0]?.msg || msg);
+        throw new Error(data?.[0]?.msg || msg);
+      }
+
+      return data.reduce((acc: string[], o) => {
+        if (!isSuccessfulPlacementMessage(o.msg)) {
+          this.emitAndLogError(o.msg);
+          throw new Error(o.msg);
+        }
+        if (o.orderId) {
+          return [...acc, o.orderId];
+        }
+
+        return acc;
+      }, []);
+    });
+
+    // executing reduce-only separately from batch now
+    for (const payload of noneligiblePayloads) {
+      const {
+        data: { data },
+      } = await this.xhr.post<{ data: Array<Record<string, any>> }>(ENDPOINTS.PLACE_ORDERS, payload);
+
+      responses.push(
+        data.reduce((acc: string[], o) => {
+          if (o.orderId) {
+            if (!isSuccessfulPlacementMessage(o.msg)) {
+              this.emitAndLogError(o.msg);
+              throw new Error(o.msg);
+            }
+            return [...acc, o.orderId];
+          }
+
+          this.emitAndLogError(o.msg);
+          throw new Error(o.msg);
+        }, [] as string[]),
+      );
+    }
+
+    const flatResponses = responses.flat();
+    return flatResponses.filter((res: any): res is string => {
+      if (typeof res === 'object') throw new Error(res.msg);
+      return typeof res === 'string';
+    });
+  };
+
+  private placeAlgoOrderBatch = async (payloads: Array<Record<string, any>>) => {
+    // blofin doesn't support batched algo orders, so we do 1 by 1
+
+    const responses: string[] = [];
+    for (const payload of payloads) {
+      const {
+        data: { data, code, msg },
+      } = await this.xhr.post<{ code: string; msg: string; data: any }>(ENDPOINTS.PLACE_TPSL_ORDER, payload);
+
+      if (code !== '0') {
+        this.emitAndLogError(data?.[0]?.msg || msg);
+        throw new Error(data?.[0]?.msg || msg);
+      }
+
+      responses.push(data?.tpslId);
+    }
+    return responses;
+  };
+
+  private addInlineTpSlFallbackOrders = (orders: Order[]): Order[] => {
+    const hasProtectiveByParentAndType = new Set<string>();
+
+    const markProtectiveOrder = (order: Order) => {
+      if (order.type !== OrderType.TakeProfit && order.type !== OrderType.StopLoss) {
+        return;
+      }
+      const parentOrderId = String((order.info as Record<string, any> | undefined)?.orderId || '').trim();
+      if (parentOrderId) {
+        hasProtectiveByParentAndType.add(`${parentOrderId}:${order.type}`);
+      }
+      if (order.id.includes('__')) {
+        const [rawParentId] = order.id.split('__');
+        if (rawParentId) {
+          hasProtectiveByParentAndType.add(`${rawParentId}:${order.type}`);
+        }
+      }
+    };
+    orders.forEach(markProtectiveOrder);
+
+    const fallbackOrders: Order[] = [];
+    for (const order of orders) {
+      if (order.type !== OrderType.Limit || !order.id) {
+        continue;
+      }
+      const rawInfo = (order.info || {}) as Record<string, any>;
+      const isNormalOrderRecord = !rawInfo.tpslId && rawInfo.orderCategory === 'normal';
+      if (!isNormalOrderRecord) {
+        continue;
+      }
+
+      const remainingAmount = Number.isFinite(Number(order.remaining)) && Number(order.remaining) > 0 ? order.remaining : order.amount;
+      if (!Number.isFinite(Number(remainingAmount)) || Number(remainingAmount) <= 0) {
+        continue;
+      }
+      const remainingNative =
+        Number.isFinite(Number(order.extra?.remainingNative)) && Number(order.extra?.remainingNative) > 0
+          ? Number(order.extra?.remainingNative)
+          : Number(remainingAmount);
+      const protectiveSide = order.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+      const parentOrderId = String(order.id);
+
+      const tpTriggerRaw = rawInfo.tpTriggerPrice;
+      const tpTriggerPrice = Number.parseFloat(String(tpTriggerRaw ?? ''));
+      if (Number.isFinite(tpTriggerPrice) && tpTriggerPrice > 0) {
+        const key = `${parentOrderId}:${OrderType.TakeProfit}`;
+        if (!hasProtectiveByParentAndType.has(key)) {
+          fallbackOrders.push({
+            id: `${parentOrderId}__take_profit`,
+            status: OrderStatus.Open,
+            symbol: order.symbol,
+            type: OrderType.TakeProfit,
+            side: protectiveSide,
+            price: tpTriggerPrice,
+            amount: remainingAmount,
+            filled: 0,
+            remaining: remainingAmount,
+            extra: {
+              remainingNative,
+            },
+            reduceOnly: true,
+            lastUpdate: virtualClock.getCurrentTimeMs(),
+            info: rawInfo,
+          });
+          hasProtectiveByParentAndType.add(key);
+        }
+      }
+
+      const slTriggerRaw = rawInfo.slTriggerPrice;
+      const slTriggerPrice = Number.parseFloat(String(slTriggerRaw ?? ''));
+      if (Number.isFinite(slTriggerPrice) && slTriggerPrice > 0) {
+        const key = `${parentOrderId}:${OrderType.StopLoss}`;
+        if (!hasProtectiveByParentAndType.has(key)) {
+          fallbackOrders.push({
+            id: `${parentOrderId}__stop_loss`,
+            status: OrderStatus.Open,
+            symbol: order.symbol,
+            type: OrderType.StopLoss,
+            side: protectiveSide,
+            price: slTriggerPrice,
+            amount: remainingAmount,
+            filled: 0,
+            remaining: remainingAmount,
+            extra: {
+              remainingNative,
+            },
+            reduceOnly: true,
+            lastUpdate: virtualClock.getCurrentTimeMs(),
+            info: rawInfo,
+          });
+          hasProtectiveByParentAndType.add(key);
+        }
+      }
+    }
+
+    return [...orders, ...fallbackOrders];
+  };
+
+  // A blofin cancel row can come back "failed" only because the order is already
+  // gone on the exchange — filled / triggered / canceled / does-not-exist (per-row
+  // code "1000"). That's not a real failure: the order is no longer open, so it must
+  // be reconciled out of the store rather than thrown. Otherwise a stale store order
+  // makes flatten/cancel-all loops spin forever re-issuing cancels that always
+  // "fail" (the order never leaves the store), which is exactly how the e2e cleanup
+  // step timed out on blofin.
+  private isAlreadyGoneCancelRow = (row?: { code?: string; msg?: string }) =>
+    row?.code === '1000' || /filled, triggered, canceled or does not exist/i.test(row?.msg ?? '');
+
+  private cancelNormalOrders = async (orders: Order[]) => {
+    const batches = orders
+      .filter((o) => !this.isAlgoOrder(o.type))
+      .reduce((acc: Array<Record<string, any>>, o) => {
+        const market = this.store.marketsBySymbol[o.symbol];
+        if (!market) return acc;
+        return [...acc, { instId: market.id, orderId: o.id }];
+      }, []);
+
+    await forEachSeries(chunk(batches, 20), async (batch) => {
+      let res;
+      try {
+        res = await this.xhr.post(ENDPOINTS.CANCEL_ORDERS, batch);
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw new Error(err?.response?.data?.msg || err?.message);
+      }
+
+      if (res?.data.code !== '0') {
+        const rows: Array<{ orderId?: string; code?: string; msg?: string }> = res?.data?.data ?? [];
+        // Rows the exchange reports as already gone *and that we can map back to a
+        // store order* are removed and treated as canceled. Everything else —
+        // genuine errors, and already-gone rows with no orderId we could reconcile —
+        // throws, so we never silently swallow a row while leaving a stale order open.
+        const realFailures: typeof rows = [];
+        for (const row of rows) {
+          if (this.isAlreadyGoneCancelRow(row) && row.orderId) {
+            this.store.removeOrders([{ id: row.orderId }]);
+          } else {
+            realFailures.push(row);
+          }
+        }
+        if (rows.length === 0 || realFailures.length > 0) {
+          const msg = realFailures[0]?.msg || res?.data?.data?.[0]?.msg || res?.data?.msg;
+          this.emitAndLogError(msg);
+          throw new Error(msg);
+        }
+      }
+    });
+  };
+
+  private cancelAlgoOrders = async (orders: Order[]) => {
+    const batches = orders
+      .filter((o) => this.isAlgoOrder(o.type))
+      .reduce((acc: Array<Record<string, any>>, o) => {
+        const market = this.store.marketsBySymbol[o.symbol];
+        if (!market) return acc;
+        const tpslId = o.id.split('__')[0];
+        return [...acc, { instId: market.id, tpslId }];
+      }, []);
+
+    await forEachSeries(chunk(batches, 10), async (batch) => {
+      let res;
+      try {
+        res = await this.xhr.post(ENDPOINTS.CANCEL_ALGO_ORDER, batch);
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw new Error(err?.response?.data?.msg || err?.message);
+      }
+      if (res?.data.code !== '0') {
+        const rows: Array<{ tpslId?: string; algoId?: string; code?: string; msg?: string }> = res?.data?.data ?? [];
+        // Algo orders the exchange reports as already gone are reconciled out of the
+        // store. Store ids are `${tpslId}__take_profit` / `__stop_loss`; match on the
+        // exact tpslId segment (`id.split('__')[0]`), not a raw prefix, so `12` can't
+        // sweep away `123`'s legs. Genuine errors and already-gone rows with no
+        // reconcile id throw.
+        const realFailures: typeof rows = [];
+        for (const row of rows) {
+          const goneId = row.tpslId || row.algoId;
+          if (this.isAlreadyGoneCancelRow(row) && goneId) {
+            const storeIds = this.store.orders.filter((o) => o.id.split('__')[0] === goneId).map((o) => ({ id: o.id }));
+            if (storeIds.length) this.store.removeOrders(storeIds);
+          } else {
+            realFailures.push(row);
+          }
+        }
+        if (rows.length === 0 || realFailures.length > 0) {
+          const msg = realFailures[0]?.msg || res?.data?.data?.[0]?.msg || res?.data?.msg;
+          this.emitAndLogError(msg);
+          throw new Error(msg);
+        }
+      }
+      await sleep(1_000);
+    });
+  };
+
+  private isAlgoOrder = (orderType: OrderType) => {
+    return (
+      orderType === OrderType.StopLoss || orderType === OrderType.TakeProfit || orderType === OrderType.TrailingStopLoss
+    );
+  };
+
+  private getPositionSide = async (opts: Pick<PlaceOrderOpts, 'reduceOnly' | 'side' | 'type' | 'symbol'>) => {
+    if ((await this.getOrFetchPositionMode(opts.symbol)) === PositionMode.OneWay) return undefined;
+
+    let side = opts.side === OrderSide.Buy ? 'long' : 'short';
+
+    if (
+      opts.type === OrderType.StopLoss ||
+      opts.type === OrderType.TakeProfit ||
+      opts.type === OrderType.TrailingStopLoss ||
+      opts.reduceOnly
+    ) {
+      side = side === 'long' ? 'short' : 'long';
+    }
+
+    return side;
+  };
+}

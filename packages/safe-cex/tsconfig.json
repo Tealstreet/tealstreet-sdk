@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "skipLibCheck": true,
+    "types": ["vitest/globals", "node"],
+    "paths": {
+      "@tealstreet/logging/src": ["../logging/src"],
+      "@tealstreet/logging/src/*": ["../logging/src/*"],
+      "@tealstreet/eye-websocket/*": ["../eye-websocket/*"],
+      "@tealstreet/http-over-websocket/*": ["../http-over-websocket/*"],
+      "@tealstreet/json-parse/*": ["../json-parse/*"],
+      "@tealstreet/sleep/*": ["../sleep/*"],
+      "@tealstreet/data-structures/src": ["../data-structures/src"],
+      "@tealstreet/reconnecting-websocket/src": ["../reconnecting-websocket/src"],
+      "@tealstreet/proxy-ips-lists/src": ["../proxy-ips-lists/src"],
+      "@tealstreet/ccxt-compat/src": ["../ccxt-compat/src"],
+      "@tealstreet/lighter-sdk": ["../lighter-sdk/src/index.ts"],
+      "@tealstreet/lighter-sdk/src": ["../lighter-sdk/src"],
+      "@tealstreet/poseidon-crypto": ["../poseidon-crypto/src/index.ts"],
+      "@tealstreet/poseidon-crypto/src": ["../poseidon-crypto/src"]
+    }
+  },
+  "exclude": ["**/node_modules", "**/.*/*", "dist"],
+  "include": [
+    ".eslintrc.*",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts",
+    "**/*.cjs",
+    "**/*.mjs",
+    "**/*.jsx",
+    "**/*.json",
+    "../ccxt-compat/src/Precise.ts",
+    "../ccxt-compat/src/types.ts"
+  ]
+}

@@ -1,0 +1,249 @@
+---
+title: Breakout
+description: Connect your Breakout account to Tealstreet.
+sidebar_position: 13
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiDropdown from '/img/connect/bingx/apidropdown.png';
+import AddingApi from '/img/connect/commonv3/addingapi.jpg';
+import Dropdown from '/img/connect/commonv3/dropdown.png';
+import ExchangeSelection from '/img/connect/commonv3/api-selection.png';
+import ApiWhitelist from '/img/connect/bingx/v3/apiwhitelist.png';
+import ApiTeal from '/img/connect/breakout/v3/api-teal.png';
+import ApiCreate from '/img/connect/bingx/apicreate.png';
+import SecVerify from '/img/connect/bingx/secverify.png';
+import ApiCreated from '/img/connect/bingx/apicreated.png';
+import ApiCreated2 from '/img/connect/bingx/apicreated2.png';
+import ActivateFuts from '/img/connect/bingx/activatefuts.png';
+import ActivateFuts2 from '/img/connect/bingx/activatefuts2.png';
+import ApiCreation from '/img/connect/bingx/apicreation.png';
+import ApiCreation2 from '/img/connect/bingx/apicreation2.png';
+import ApiCreation3 from '/img/connect/bingx/apicreation3.png';
+import CrossMargin from '/img/connect/bingx/crossmargin.png';
+import CrossMargin2 from '/img/connect/bingx/crossmargin2.png';
+
+<ThemedImage
+    alt="bingx-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bingx-light.png'),
+        dark: useBaseUrl('/img/exchange/bingx-dark.png'),
+    }}
+/>
+
+<!-- <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+  <iframe
+    src="https://www.youtube.com/embed/TBlybqFeHBs"
+    frameBorder="0"
+    allow="autoplay; encrypted-media"
+    allowFullScreen
+    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+  />
+</div> -->
+
+## Connecting [Breakout](https://teal.link/breakout) to Tealstreet
+
+- First, make sure you are logged into your [Breakout](https://teal.link/breakout) account.
+
+:::note
+Consider supporting Tealstreet by using the referral _[link](https://teal.link/breakout)._
+:::
+
+- Next, log into your [Tealstreet](http://v3.tealstreet.io/trade) account.
+
+:::tip
+It's a good idea to keep both Tealstreet and [Breakout](https://teal.link/breakout) tabs open.
+:::
+
+- Click the '**Settings**' button near the top right corner of the terminal.
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding API" style={{width: 900},{height: 75}} />
+</div>
+
+- Click the '**Add new key**' button at the bottom of the settings page.
+
+<div class="text--center">
+    <img src={Dropdown} alt="TS Dropdown" style={{ width: 600 }} />
+</div>
+
+- Choose **Breakout** from the exchange selection menu.
+
+<div class="text--center">
+    <img src={ExchangeSelection} alt="Exchange Selection" style={{ width: 600 }} />
+</div>
+
+Okay lets go back to our **Breakout** account and create the API Key.
+
+---
+
+### Creating the key
+
+- Now you are ready to generate the API Keys within your Breakout Account. Head on over to the [Breakout](https://teal.link/breakout) tab and:
+    - Click on the User Icon.
+    - Select **API Management** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="Api Dropdown" style={{ width: 300 }} />
+</div>
+
+- On the API Key page click on the **Create API** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+<!-- :::tip
+You can get to this page directly by navigating to **[this link](https://bingx.com/en-us/account/api/)**
+::: -->
+
+- Now you are ready to choose the settings of your [Breakout](https://teal.link/breakout) API Key pair.
+
+- Pass your security verification if the window pops up.
+
+<div class="text--center">
+    <img src={SecVerify} alt="Security Verify" style={{ width: 400 }} />
+</div>
+
+- Now you're key shouldve be created, however its settings will not be correct yet so we need to edit it:
+
+<div class="text--center">
+    <img src={ApiCreated} alt="API Created" style={{ width: 500 }} />
+</div>
+
+- Here we will be ticking the box to permit perpetual futures, as well as the checkbox to restrict IP addresses.
+
+<div class="text--center">
+    <img src={ApiCreated2} alt="API Created2" style={{ width: 500 }} />
+</div>
+
+- Now would be a good time to bring back your Tealstreet terminal API page from where we left off earlier to get the recommended IP addresses:
+
+<div class="text--center">
+    <img src={ApiWhitelist} alt="API Creation" style={{ width: 500 }} />
+</div>
+
+- Copy these IP addresses to your clipboard with the clip button
+    - paste them into the restricted IP's box on the Breakout API page.
+
+<div class="text--center">
+    <img src={ApiCreation3} alt="API Creation3" style={{ width: 500 }} />
+</div>
+
+- After editing the settings, click the **Save** button.
+
+<!-- -   -   -   -
+
+### Activating Futures on the account
+
+* Now we need to activate the derivatives futures on the account:
+  * Go to the derivatives section and click the green activate button
+
+<div class="text--center">
+  <img src={ActivateFuts} alt="Activate Futures" style={{width: 500}} />
+</div>
+
+* Next we will have to go through some disclaimer stuff and agree to the terms and conditions.
+
+<div class="text--center">
+  <img src={ActivateFuts2} alt="Activate Futures2" style={{width: 500}} />
+</div>
+
+* Once you pass through the disclaimer portion you're account should be activated for futures trading.
+
+:::note
+If you do not activate futures trading on your account you will not be able to execute futures trades on Tealstreet.
+::: -->
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the Breakout API page.
+  - Ensure **Use TS Network** is checked unless you intend handle IP Whitelisting in some other way.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **API Key** Breakout showed you when you created the API.
+  - Provide the **API Secret** Breakout showed you when you created the API.
+  - Click Done.
+
+:::caution
+Never share your API Keys with anyone. Tealstreet team members will never ask you what your API key is.
+:::
+
+:::info
+Be sure to double check you do not confuse **API Key** and **API Secret.** Connecting your **[Breakout](https://teal.link/breakout)** exchange account to Tealstreet will not work if these fields are not entered correctly.
+:::
+
+If all the details are correct, you will have successfully linked your [Breakout](https://teal.link/breakout) account to Tealstreet.
+
+- Close options and navigate to the Main Trading page of the Tealstreet terminal and select the [Breakout](https://teal.link/breakout) account you just linked to enable it.
+    - If properly linked, you will see your balance appear in the Margin window of Tealstreet. Happy trading!!!
+
+<!-- -   -   -   -
+
+## Troubleshooting -->
+
+<!-- * During May 2022 **BingX** deprecated their old API. If you are receiving an error about inability to decrypt the password and the API stopped working please switch to the upcoming V3 release of Tealstreet. Read more about it [here](/docs/about/version-3).
+
+* I am seeing a message about insufficient margin when trying to place an order?
+
+  * This is likely to have occurred if you have not transferred any funds to your __Perpetual Futures__ account.
+    * By default funds transfer into the **Standard Futures** account.
+
+* I am seeing a message about "risk forbidden" in my order window?
+
+  * Please double check your API key permissions you used when making the API.
+    * Some users have reported they fixed it by remaking their API with the correct permissions. -->
+
+<!-- -   -   -   -
+
+## Frequently Asked Questions -->
+
+<!-- * Can I trade all of BingX's perpetual tickers in Tealstreet?
+      * Unfortunately around Aug 23 2024 BingX started restricting certain pairs for trading via the api to encourage users to use the website. Can read more about it [here](https://bingx.com/en/support/articles/36745491595801/)
+
+* I am getting an error trying to link my API key on BingX it keeps saying refresh browser?
+      * Around July 2024 BingX upgraded their API which broke support for V2 of Tealstreet. Please switch to [V3](https://preview.tealstreet.io/trade)
+
+* Can users trade BingX's Standard Futures like Stocks, Forex, and Indices through Tealstreet?
+
+  * No. At the time of this writing **BingX** does not offer a open API for their Standard Futures. Tealstreet users can only trade BingX's Perpetuals.
+
+* Am I limited in the amount of leverage I can use in perp futures?
+
+  * Yes. BingX has certain restrictions for users who do not KYC when trading on certain pairs. (BTC and ETH are generally exempt from this restriction)
+
+  :::note
+  For more info please check out the [BingX Documentation](https://bingx.com/en-us/support/articles/360045899754-PerpetualFuturesPasanganPerdaganganLeveragedanLimit/)
+  :::
+
+* Can I change my margin from Isolated to Cross?
+
+  * Yes. BingX defaults users to isolated but you can change it to cross. In the top right corner of the perp trading page you will see a button called Margin next to the Leverage indicator. Click it.
+
+<div class="text--center">
+  <img src={CrossMargin} alt="Margin Selector" style={{width: 400}} />
+</div>
+
+* Here you can easily switch your margin mode.
+
+<div class="text--center">
+  <img src={CrossMargin2} alt="Margin Selection" style={{width: 400}} />
+</div> -->
+
+<!-- * Can I use One-Way mode for trading instead of hedged?
+
+  * Yes you can use One-Way mode. -->

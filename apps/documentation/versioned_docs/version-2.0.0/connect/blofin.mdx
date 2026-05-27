@@ -1,0 +1,169 @@
+---
+title: BloFin
+description: BloFin
+sidebar_position: 11
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import Dropdown from '/img/connect/blofin/dropdown.png';
+import ApiDropdown from '/img/connect/blofin/apidropdown.png';
+import ApiCreate from '/img/connect/blofin/apicreate.png';
+import ApiCreate2 from '/img/connect/blofin/apicreate2.png';
+import ApiCreate4 from '/img/connect/blofin/apicreate4.png';
+import ApiCreation2 from '/img/connect/blofin/apicreation2.png';
+import SecVerify from '/img/connect/blofin/secverify.png';
+
+<ThemedImage
+    alt="BloFin-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/blofin-light.png'),
+        dark: useBaseUrl('/img/exchange/blofin-dark.png'),
+    }}
+/>
+
+## Connecting [BloFin](https://teal.link/blofin) to Tealstreet
+
+- First, make sure you are logged into your [BloFin](https://teal.link/blofin) account.
+
+:::note
+Consider supporting Tealstreet by using the referral _[link](https://teal.link/blofin)._
+:::
+
+- Next, log into your [Tealstreet](http://app.tealstreet.io) account.
+
+:::tip
+It's a good idea to keep both Tealstreet and [BloFin](https://teal.link/blofin) tabs open.
+:::
+
+1. Once you have successfully logged into Tealstreet, navigate to the header titled **‘API Keys’**
+
+2. Click the blue button titled **‘New API Key’**
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding Api" style={{ width: 750 }} />
+</div>
+
+- Choose [BloFin](https://teal.link/blofin) from the dropdown menu.
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 500 }} />
+</div>
+
+Keep this window open, it will be used later when we create the API Key on the BloFin site.
+
+---
+
+### Create the API Key
+
+- Now you are ready to generate the API Keys within your BloFin Account. Head on over to the [BloFin](https://teal.link/blofin) page and:
+    - Click on the User Icon.
+    - Select **API** from the dropdown menu.
+
+<!-- :::note
+At the time of this writing, API access is currently available on a white-list basis. Please contact a Tealstreet staff member to be added to the white-list. [Contact us here](/docs/support/contact-us)
+::: -->
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="Api Dropdown" style={{ width: 300 }} />
+</div>
+
+- On the API Management page click on the **Create API Key** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://blofin.com/account/apis)**
+:::
+
+- Now you are ready to choose the settings of your [BloFin](https://teal.link/blofin) API Key.
+
+- To create the API Key please proceed to fill out the form with the information its requesting
+
+<div class="text--center">
+    <img src={ApiCreate2} alt="API Created" style={{ width: 500 }} />
+</div>
+
+1. Choose the **Connect to Third-Party application** option.
+2. Fill out the **API key name** with whatever name you want.
+3. Enable the **Trade** permission
+
+:::warning
+Do **not** activate the **Withdraw** or **Transfer** permissions.
+:::
+
+4. Create and enter a **Passphrase**. This is something solely for you to create as an extra layer of security.
+    - This will be used later when we link the key into Tealstreet.
+5. Choose the **Tealstreet** Application
+ <!-- 5. Provide the **IP Addresses** that are to be whitelisted. You can get these from inside the Tealstreet **API Keys** window we opened earlier.
+     * You can click the 'clipboard' button to copy the IP's to your clipboard -->
+
+<!-- <div class="text--center">
+  <img src={ApiCreate4} alt="API Created" style={{width: 500}} />
+</div> -->
+
+6. When you are finished entering the information click **Next**.
+
+<div class="text--center">
+    <img src={SecVerify} alt="Security Verification" style={{ width: 500 }} />
+</div>
+
+- You will be presented with a security prompt to verify a code that will be sent to your email.
+- Also if you have an authenticator attached you will be prompted to provide the 2FA code.
+    - When done click the **Submit** button.
+
+- You will be presented with a summary of the API Key you are about to create.
+    - Make sure the permissions and IP addresses are correct.
+    - Copy your API Key and Secret Key to a safe place. These will be needed for the next step.
+- If everything looks correct click **Confirm**.
+
+---
+
+### Connecting the API Key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiCreation2} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API Key on the **BloFin API** page.
+    1. Give the key a name, this can be anything you want.
+    2. Create and provide an **encryption password**. This is something solely for you to create as an extra layer of security.
+        - This is separate from the API Passphrase.
+
+    :::tip
+    For more info about how the encryption works please see **[API Encryption](/docs/2.0.0/connect/api-encryption)**
+    ::: 3. Provide the **API Passphrase** you used when you created the BloFin API Key. 4. Provide the **API Key** BloFin showed you when you finished creating the API Key. 5. Provide the **API Secret** BloFin showed you when you finished creating the API Key. 6. Click Create.
+
+:::caution
+Never share your API Keys with anyone. Tealstreet team members will never ask you what your API key is.
+:::
+
+:::note
+Be sure to double check you do not confuse **API Key** and **API Secret.** Connecting your **[BloFin](https://teal.link/blofin)** exchange account to Tealstreet will not work if these fields are not entered correctly.
+:::
+
+If all the details are correct, you will have successfully linked your [BloFin](https://teal.link/blofin) account to Tealstreet.
+
+- Navigate to the **Trade** page of the Tealstreet terminal and select the [BloFin](https://teal.link/blofin) account from the top dropdown menu.
+    - If properly linked, you will see your balance appear in the Margin window of Tealstreet. Happy trading!!!
+
+---
+
+## Troubleshooting
+
+- Is there more information about the BloFin API Keys I can read?
+    - You can visit BloFin's official documentation about API Keys **[here](https://blofin.com/docs#general-information-on-endpoints)**
+
+<!-- * When I try to switch from One-Way to Hedged I get an error about "Bad Request" ?
+  * This is a whitelisting restriction being utilized by BloFin. Contact a Tealstreet staff member with your BloFin account UID# to be added to the whitelist.
+   -->

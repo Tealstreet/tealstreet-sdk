@@ -1,0 +1,233 @@
+---
+title: OKEX
+description: Learn how to connect your OKEX API to Tealstreet.
+sidebar_position: 9
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+<ThemedImage
+    alt="OKEx-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/okex-light.png'),
+        dark: useBaseUrl('/img/exchange/okex-dark.png'),
+    }}
+/>
+
+## 连接[OKX](ttps://teal.link/OKEx)到Tealstreet
+
+### 账户模式
+
+在您可以在 [OKX](https://teal.link/OKEx) 上交易期货/衍生品之前，用户必须更改其账户模式。
+
+用户需要改变他们的账号模式来参与合约和衍生品的交易。
+注意
+
+:::note
+如果用户的 OKX 账户处于“简单模式”，则无法交易期货/衍生品。
+:::
+
+您可以在视频或以下步骤中跟随操作：
+
+<div class="text--center">
+
+_[![Binance-Connect](https://img.youtube.com/vi/SN1dIPcEFQE/hqdefault.jpg)](https://www.youtube.com/watch?v=SN1dIPcEFQE)_
+
+**观看YouTube上的视频教程。点击[这里](https://www.youtube.com/watch?v=SN1dIPcEFQE)。**
+
+</div>
+
+1. 登录您的[OKX](https://teal.link/OKEx)账户。
+2. 从交易页面进入杠杆交易页面
+
+<div class="text--center">
+
+![MarginTrading](/img/connect/okex/margintrading.png)
+
+</div>
+
+- 点击页面右上角的齿轮图标
+
+<div class="text--center">
+
+![MarginTrading-Settings](/img/connect/okex/margintradingsettings.png)
+
+</div>
+
+- 点击“账户模式”选项
+    - 然后选择并激活**简单**账户模式。
+
+<div class="text--center">
+
+![MarginTrading-Accountmode](/img/connect/okex/margintradingaccountmode.png)
+
+</div>
+
+- 然后选择并激活“单币种杠杆”。
+
+<div class="text--center">
+
+![MarginTrading-Activate](/img/connect/okex/margintradingactivate.png)
+
+</div>
+
+- 激活后，您将成功启用期货交易，并能够使用Tealstreet终端进行交易。
+
+:::info
+继续阅读以了解如何创建并连接**[OKX](https://teal.link/OKEx)** API到Tealstreet交易终端
+:::
+
+---
+
+### 连接API到Tealstreet
+
+按照以下步骤操作：
+
+:::tip
+最好同时打开Tealstreet和OKX标签页。
+:::
+
+- 首先，确保您已登录您的[OKX](https://teal.link/OKEx)账户。
+
+- 接下来，登录您的Tealstreet账户。
+    - 成功登录Tealstreet后，导航到标题为**“API密钥”**的页面
+
+    - 点击蓝色按钮**“新建API密钥”**
+
+<div class="text--center">
+
+![addingapi](/img/connect/common/addingapi.jpg)
+
+</div>
+
+- 从下拉菜单中选择OKX。
+
+<div class="text--center">
+
+![dropdown](/img/connect/okex/dropdown.png)
+
+</div>
+
+:::note
+除非您确定需要，否则不要选择OKX测试网。
+:::
+
+---
+
+### 创建交易所API
+
+- 现在，您已准备好在OKX账户中生成API密钥。前往OKX标签页：
+    - 点击用户图标。
+    - 从下拉菜单中选择**API**。
+
+<div class="text--center">
+
+![API-Dropdown](/img/connect/okex/apidropdown.png)
+
+</div>
+
+:::tip
+您可以通过直接导航到**[此处](https://www.okex.com/account/my-api)**来直接访问此页面。
+:::
+
+- 在API密钥页面上，点击**创建V5 API密钥**按钮开始密钥创建过程。
+
+![API-Create](/img/connect/okex/apicreate.png)
+
+- 现在，您已准备好为Tealstreet创建API密钥。
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/okex/binding.png)
+
+</div>
+
+- 选择“连接到第三方应用程序”。
+
+- 从下拉菜单中选择'Tealstreet'。
+
+- 现在，您已准备好设置您的[OKX](https://teal.link/OKEx) API密钥对的设置。
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/okex/apimore.png)
+
+</div>
+
+1. 确保选择“绑定第三方应用程序”。
+
+2. 确保应用程序名称为Tealstreet。
+
+3. “API名称”-您可以选择任何您喜欢的名称。如果您有多个不同服务的API密钥，使用与Tealstreet相关的名称可能有助于区分它们。
+
+4. “Passphrase”-OKX要求用户为每个API密钥选择Passphrase。
+
+5. 确保选中“交易”。这将确保您可以在Tealstreet上交易。
+
+6. 仔细检查所有选择是否正确，然后单击“确认”。
+    - 接下来，弹出窗口将提示您提交来自身份验证应用程序的电子邮件代码和2FA。
+
+---
+
+### 双重身份验证
+
+<div class="text--center">
+
+![Auth](/img/connect/okex/auth.png)
+
+</div>
+
+:::note
+
+- 不建议使用电话号码进行双重身份验证（2FA）。考虑保留2FA备份代码的纸质副本，以防您失去对2FA设备的访问权限。
+- 提交2FA代码后，您将看到来自OKX的新弹出窗口，其中包含您的API密钥详细信息。您需要将这些详细信息粘贴到Tealstreet的API密钥页面中。
+  :::
+
+:::tip
+您需要在Tealstreet终端网站上输入此内容，因此最好将其保存在某处和/或保存此密码。
+:::
+
+:::caution
+永远不要与任何人分享您的API密钥。
+:::
+
+---
+
+### Tealstreet API设置
+
+- 在OKEx网站上创建API密钥后，您已准备好在Tealstreet的API KEYS页面上填写信息。
+
+<div class="text--center">
+
+![API-Tealstreet](/img/connect/okex/apiteal.png)
+
+</div>
+
+- 选择**交易所**下拉菜单并选择**OKX**。
+    1. “名称”-在此处，您可以为API密钥选择名称。这对于使用多个交易所和/或子帐户的交易者很有帮助，并希望在它们之间进行区分。
+
+    2. 选择您的加密密码。记得将其保存在某处！当您返回到交易终端的交易页面时，您需要输入此密码。
+
+    3. API密码”-此字段与您在OKX创建API密钥页面上选择的“Passphrase”相对应。
+
+    4. “密钥”-在此处粘贴OKX提供的API密钥。
+
+    5. Secret”-在此处粘贴OKX提供的API Secret。
+
+    6. 单击“创建”
+
+:::tip
+如果您忘记了API密钥Passphrase，您可以随时在 **[OKX](https://www.okex.com/)**网站上创建另一个API。
+:::
+
+:::note
+请务必仔细检查您不要混淆API密钥和API Secret。如果这些字段未正确输入，则无法将您的OKX交易所帐户连接到Tealstreet。
+:::
+
+- 如果所有详细信息都正确，则您已成功将您的OKX帐户链接到Tealstreet。在Tealstreet的“交易”页面上选择OKX帐户。如果正确链接，您将在Tealstreet的保证金窗口中看到您的余额/维持保证金。

@@ -1,0 +1,182 @@
+# CLAUDE.md - safe-cex/src/utils
+
+Utility functions for exchange operations.
+
+## Symbol Format Reference
+
+Each exchange normalizes market symbols differently. The `symbol` field on market objects is what gets used throughout the app. Real samples are in `__testdata__/market-samples.json`.
+
+### Symbol Formats by Exchange
+
+| Exchange                              | Format             | Example          | Default Quote | Notes                                                    |
+| ------------------------------------- | ------------------ | ---------------- | ------------- | -------------------------------------------------------- |
+| binance, binancepm, binancespot       | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, from API                                   |
+| bybit, bybitdemo, bybitspot           | `{B}{Q}`           | `BTCUSDT`        | USDT          | USDC perps: `BCHPERP`                                    |
+| bitget                                | `{B}{Q}`           | `BTCUSDT`        | USDT          | From API `m.symbol`                                      |
+| bitgetusdc                            | `{B}PERP`          | `BTCPERP`        | USDC          | NOT `{B}{Q}` — uses PERP suffix                          |
+| bitgetinverse                         | `{B}USD`           | `BTCUSD`         | USD           | Filters quoteCoin==='USD'                                |
+| asterdex, bitunix, btcc, phemex, weex | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, WEEX Contract V3 `symbol`                  |
+| bingx                                 | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT` but symbol is concat                |
+| apexomni                              | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT`                                     |
+| breakoutprop                          | `{B}USD`           | `BTCUSD`         | USD           | Quote hardcoded to 'USD'                                 |
+| blofin                                | `{B}{Q}`           | `BTCUSDC`        | USDC          | API id is `BTC-USDC`                                     |
+| bitmex                                | `{B}{Q}`           | `SUIUSDT`        | USDT          | USD pairs: `WLDUSD`                                      |
+| okx                                   | `{B}{Q}`           | `ACTUSDT`        | USDT          | API id `ACT-USDT-SWAP`, normalized                       |
+| woo                                   | `{B}{Q}`           | `BCHUSDT`        | USDT          |                                                          |
+| bitrue                                | `E-{B}-{Q}`        | `E-BTC-USDT`     | USDT          | E- prefix, dash-separated                                |
+| coinbase                              | `{B}-PERP-INTX`    | `ETH-PERP-INTX`  | USDC          | Perp suffix `-PERP-INTX`                                 |
+| coinbasespot                          | `{B}-{Q}`          | `BTC-USD`        | USD           | Dash-separated, from product_id                          |
+| dydx                                  | `{B}-{Q}`          | `BTC-USD`        | USD           | Dash-separated, API dict keys                            |
+| paradex                               | `{B}-{Q}-PERP`     | `AAVE-USD-PERP`  | USD           | Dash-separated with PERP suffix                          |
+| hyperliquid                           | `{B}-PERP`         | `BTC-PERP`       | USDC          | Quote omitted, also `PREFIX\|{B}-PERP`                   |
+| hyperliquidspot                       | `{B}/USDC`         | `PURR/USDC`      | USDC          | Slash-separated                                          |
+| kraken                                | `PF_{B}{Q}`        | `PF_XBTUSD`      | USD           | PF\_ prefix, XBT alias for BTC                           |
+| krakenspot                            | `{B}/{Q}`          | `BTC/USD`        | USD           | Slash-separated wsname format                            |
+| kucoin                                | `{B}{Q}M`          | `XBTUSDTM`       | USDT          | M suffix, XBT alias for BTC                              |
+| grvt                                  | `{B}_{Q}_PERP`     | `AAVE_USDT_PERP` | USDT          | Underscore-sep with PERP                                 |
+| arkham                                | `{B}_{Q}_PERP`     | `BTC_USDT_PERP`  | USDT          | Underscore-sep, API baseSymbol has `.P` suffix for perps |
+| backpack                              | `{B}_{Q}_PERP`     | `BTC_USDC_PERP`  | USDC          | Underscore-sep, spot: `{B}_{Q}`                          |
+| cryptocom                             | `{B}{Q}-PERP`      | `BTCUSD-PERP`    | USD           | Concat base+quote then `-PERP`                           |
+| lighter                               | `{B}`              | `APT`            | USDT          | Just base, some have `{B}/USDC`                          |
+| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, salsadex, what, tealstreet-dex    |
+| polymarket                            | `{slug}-{outcome}` | `slug-Yes`       | USDC          | Non-standard, not convertible                            |
+
+### Key Gotchas
+
+- **bitgetusdc** uses `BTCPERP` format (NOT `BTCUSDC`) — confirmed via API
+- **Arkham** perps are `BTC_USDT_PERP` (NOT `BTC_PERP`) — confirmed via API and `__testdata__/market-samples.json`. Some older `exchanges/arkham/__tests__/*.ts` files still use `BTC_PERP`; those fixtures are stale.
+- **KuCoin** symbols have `M` suffix (`XBTUSDTM`) and use XBT for BTC — code does `split('_')[0]` which is a noop since no underscore exists
+- **KuCoin** code has a bug: uses `m.rootSymbol` for base which returns `USDT` (the margin coin), not the base asset. `baseCurrency` field has the correct value (`XBT`)
+- **Coinbase** perps use `-PERP-INTX` suffix, NOT `-USD` — very different from coinbasespot
+- **Lighter** has no separator or quote in many symbols — just the base asset
+- **Hyperliquid** has vendor-prefixed symbols: `XYZ|NFLX-PERP`, `FLX|USA500-PERP`
+
+### Base Asset Aliases
+
+| Standard | Alias | Used by                             |
+| -------- | ----- | ----------------------------------- |
+| BTC      | XBT   | kraken, kucoin, bitmex (in id only) |
+
+## `v()` / `vn()` helpers (`get-key.ts`)
+
+These are the field lookup helpers used by every exchange adapter to
+read values off raw API/WS payloads. They have a subtle failure mode
+that has silently corrupted data in more than one adapter.
+
+```ts
+export const v = (obj, key) => {
+  if (key in obj) return obj[key];
+  if (snakeCase(key) in obj) return obj[snakeCase(key)];
+  if (camelCase(key) in obj) return obj[camelCase(key)];
+  return undefined;
+};
+```
+
+**What it does:** tries literal / snake_case / camelCase forms of the
+**key** against the object.
+
+**What it does NOT do:** normalize the **haystack**. The helper can
+only match field names that are exact case conversions of the key you
+pass in.
+
+### The trap
+
+Calling `v(t, 'mark')` does **not** match a field named `markPrice`,
+because `snakeCase('mark')` is `mark` and `camelCase('mark')` is
+`mark` — neither is `markPrice`. The lookup silently returns
+`undefined`, which turns into `parseFloat(undefined) || 0 = 0`, and
+the bug is invisible at runtime.
+
+**Real-world incident:** Kraken Futures REST (`/v3/tickers`)
+publishes `markPrice`, `indexPrice`, `vol24h`, `volumeQuote`,
+`change24h`, `openInterest`. The Kraken adapter was reading them via
+`v(t, 'mark')`, `v(t, 'volume')`, etc., which **all returned 0** on
+every REST fetch. Mark/index/volume/quoteVolume were only ever
+populated after the first WS tick overwrote them. This had been live
+in production since the adapter was written.
+
+### When to use which
+
+- **`v(obj, key)`** — use when the exchange publishes the field under
+  a name that is a simple literal / snake / camel conversion of `key`
+  (e.g. `last_price` ↔ `lastPrice` ↔ `last_price`).
+- **`vn(obj, key1, key2, ...)`** — use when the exchange publishes
+  the same field under multiple names across endpoints/feeds and you
+  need to try them in order.
+- **Read directly** (`parseFloat(t.markPrice)`) — use when the field
+  name is a compound word that `camelCase()` of some shorter key
+  can't produce. There is no magic here; the adapter author has to
+  know.
+
+When adding a new exchange, **spot-check every `v()` call against a
+real payload** before trusting it. The fastest way is to log the raw
+object and compare key-by-key.
+
+## Orderbook utilities — two API shapes
+
+`updateOrderBook.ts` exports two functions with the same semantics
+but different argument shapes:
+
+- **`updateOrderBook(orderBook, side, { price, amount, total: 0 })`** —
+  the original object-arg form. Most exchanges still call this.
+- **`updateOrderBookByPrice(orderBook, side, price, amount)`** — the
+  primitive-arg form added for hot paths (Bybit V5 1000-level
+  deltas at 30–60 Hz/symbol).
+
+Both use the same internal `binarySearchPrice` and produce the same
+mutations. The difference is **where the per-level wrapper object
+is allocated**:
+
+- **Object form:** caller allocates `{ price, amount, total: 0 }`
+  per delta level, then the function uses `.price` for binary search
+  and `.amount` for dispatch. On update / delete paths (~95% of
+  delta levels) the wrapper is discarded immediately.
+- **Primitive form:** caller passes raw numbers; the wrapper is
+  allocated **inside** the function only on the insertion path,
+  where it actually persists in the book.
+
+Use the primitive form on per-level hot loops where the discard
+ratio is high (orderbook deltas). Either form is fine for one-shot
+updates (snapshot rebuilds typically use `levels.push(...)`
+directly anyway).
+
+`orderbook.ts` exports `calcOrderBookTotal` — runs once per
+orderbook frame and walks both sides via indexed for-loops. It
+accumulates with plain `+`, **not** `safe-math.add`. The cumulative
+`total` field is consumed only by `Orderbook.tsx` /
+`useSmoothOrderbook.ts` / depth chart for relative bar-fill
+rendering, where IEEE-754 drift is invisible. See `../exchanges/CLAUDE.md`
+→ "Public WebSocket Hot-Path Patterns" for the broader rule on
+when `safe-math` is and isn't load-bearing.
+
+## `virtualClock` time-source order — don't lead with direct `api.bybit.com`
+
+`virtualClock.ts` syncs a client↔server clock offset (applied only when
+drift > 1s). The fetch fallback chains **must not lead with a direct
+`https://api.bybit.com/v5/market/time` call**: that endpoint sits behind
+CloudFront and returns **403 "blocked access from your country"** from any
+geo-blocked region (e.g. CI runners, SG/US IPs). The error is caught and
+the chain falls through, so sync still works — but the browser logs a
+**failed request + console error on every page load** for those users, and
+it inflates the e2e load-gate's diagnostic counters.
+
+- `fetchServerTime` (generic) leads with same-origin **`${origin}/api/time`**
+  (no CORS, no geo-block, always reachable), then the JP proxy, then
+  worldtimeapi.
+- `fetchBybitTime` (bybit-specific, wants Bybit's real clock) leads with the
+  **JP proxy** (`exchange-proxy.jp.tealstreet.io/...` — Bybit's real time via
+  non-blocked egress), then `/api/time`.
+
+If you "simplify" either chain back to a direct Bybit lead, you reintroduce
+the 403 noise for every geo-blocked user. The offset only needs ~1s
+accuracy, so the edge `/api/time` clock is plenty.
+
+## Files
+
+- `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
+- `convertSymbol.ts` — Old pure converter (hand-wavy, being replaced)
+- `currencyUtils.ts` — USD/BTC equivalence helpers
+- `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
+- `orderbook.ts` — `sortOrderBook` (full sort, snapshot-only) + `calcOrderBookTotal` (cumulative, hot-path safe)
+- `safe-math.ts` — Decimal-aware arithmetic; for placement/display only — see `../exchanges/CLAUDE.md` for hot-path rules
+- `__testdata__/market-samples.json` — Real symbol samples from supported exchanges

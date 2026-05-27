@@ -1,0 +1,84 @@
+---
+title: Position History
+description: Position History module is a type of journaling tool that helps you to keep track of your trades and positions as well as trading fee's. It is a great way to keep track of your trading performance and to review your trades at a later date.
+sidebar_position: 9
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import PosHistory from '/img/trading/modules/pos-history/modules-posthistory2.png';
+import PosHistory2 from '/img/trading/modules/pos-history/modules-posthistory.png';
+import PosHistoryUsage from '/img/trading/modules/pos-history/modules-poshistory-usage.gif';
+
+### Position History Module
+
+**Position History module** is a type of journaling tool that helps you to keep track of your trades and positions as well as trading fee's. It is a great way to keep track of your trading performance and to review your trades at a later date.
+
+<div class="text--center">
+    <img src={PosHistory} alt="Pos History" style={{ width: 1000 }} />
+</div>
+
+---
+
+### Enabling Position History
+
+<div class="text--center">
+    <img src={PosHistory2} alt="Pos History Settings" style={{ width: 600 }} />
+</div>
+
+- You can enable the **Position History** module under the Modules tab in your **Trade Settings** configuration window.
+
+:::tip
+Remember to unlock your layout to be able to move the module around.
+:::
+
+---
+
+### Using the Position History Module
+
+<div class="text--center">
+    <img src={PosHistoryUsage} alt="Pos History Usage" style={{ width: 1000 }} />
+</div>
+
+The Position History module displays a comprehensive table of your closed positions with the following information:
+
+- **Symbol** - The trading pair with visual indicators for long/short positions
+- **Size** - The position size in the base currency
+- **Entry Price** - The average entry price of the position
+- **Exit Price** - The average exit price when the position was closed
+- **Realized PnL** - The actual profit or loss from the closed position
+    - Click the external link icon next to the PnL value to open a detailed PnL card
+- **Closed Time** - When the position was closed
+- **Account** - The exchange account used for the trade
+
+### Position History Master Feature
+
+The module includes a **Position History Master** toggle that enables advanced synchronization:
+
+- **Enable on a single desktop device** - This feature should be enabled on only one desktop device
+- **Cross-device synchronization** - When enabled, it records position history and syncs across all your devices
+- **Continuous recording** - The device should remain running to maintain the position history database
+
+### Additional Features
+
+- **Pagination** - Navigate through large numbers of closed positions with configurable page sizes
+- **Sorting** - Click any column header to sort the data
+- **Privacy Mode** - Sensitive data is hidden when privacy mode is enabled
+- **Responsive Design** - The table adapts to different screen sizes
+
+:::caution
+At the time of this writing, the Position History module is only fully working for Bybit, other exchanges will get improved support in the future.
+:::
+
+:::note
+Not every exchange provides the data needed to calculate the position history. If you are using an exchange that does not provide this data, you will not be able to use this module for the time being.
+:::
+
+<!-- :::tip
+The Position History Master feature is particularly useful for traders who use multiple devices and want to maintain a complete record of their trading history across all platforms.
+::: -->

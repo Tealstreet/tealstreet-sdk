@@ -1,0 +1,131 @@
+---
+title: 双 API
+description: Tealstreet's Dual API Key System for certain exchanges.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+## 什么是双 API？
+
+为了提供更高的稳定性，Tealstreet 团队引入了新的双（2）API 密钥系统。
+
+通过结合“只读”API密钥和“交易/读写”API密钥，用户可以期望在 Tealstreet 的数据密集型功能中获得更快的响应和性能，而不会受到交易所的[速率限制](/docs/2.0.0/connect/dual-api)的干扰。
+
+当将其交易所帐户连接到 Tealstreet 时，用户需要提交两个（2）密钥的详细信息：
+
+- 一个“交易/读写”API密钥（带有 Tealstreet 提供的 IP 地址白名单）
+- 一个“只读”API密钥（没有 IP 白名单）
+
+<div class="text--center">
+
+![API-Main](/img/connect/dual/dualapi-main.png)
+
+</div>
+
+:::danger
+第二个 API 密钥必须是“只读”模式。请勿在此处添加读/写 API 密钥！
+
+- 使用 Tealstreet，即表示您同意/确认第二个 API 密钥是只读的。
+  :::
+
+## API 创建审核
+
+在继续本节之前，重要的是要查看交易所有关 API 和 API 交易的文档。
+
+- [Binance](https://www.binance.com/en/support/faq/360002502072)
+- [Bitget](https://www.bitget.com/en/support/articles/360038968251-API%20Creation%20Guide)
+- [BitMEX](https://www.bitmex.com/app/apiKeysUsage)
+- [BingX](/docs/connect/bingx)（即将推出）
+- [Bybit](https://www.bybithelp.com/HelpCenterKnowledge/bybitHC_SubCategories?id=a005g000031G2OTAA0&language=en_US)
+- [Gate.io](https://support.gate.io/hc/en-us/articles/900000114363-What-are-APIKey-and-APIV4keys-for-)（即将推出）
+- [Kucoin](https://www.kucoin.com/support/360015102174)（即将推出）
+- [OKEx](https://www.okx.com/docs-v5/en/#overview)
+- [Phemex](https://phemex.com/user-guides/how-do-i-create-an-api-key)
+
+## 交易 API
+
+交易 API 是您需要添加到帐户的第一个 API。确保这是读/写模式的API。
+
+:::caution
+用户必须在创建此 API 时使用白名单 IP 地址。请确保所有 IP 地址都正确，如 Tealstreet 终端添加API的窗口中所示（上面/下面的图像仅供参考）
+:::
+
+<div class="text--center">
+
+![API-Trade](/img/connect/dual/dualapi-white.png)
+
+</div>
+
+## 只读 API
+
+只读 API 是您需要添加到帐户的第二个 API。确保此 API 是“只读”模式的API。
+
+:::caution
+用户不得为只读 API 密钥使用 IP 白名单
+:::
+
+在 Binance 上选择您的只读 API 密钥对的以下设置（划红色删除线的选项请勿勾选）
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/binance/api-read.png)
+
+</div>
+
+<div class="text--center">
+
+![API-Read](/img/connect/dual/dualapi-nowhite.png)
+
+</div>
+
+对于现有用户：
+
+<div class="text--center">
+
+![API-Read-Ex](/img/connect/dual/dualapi-existing.png)
+
+</div>
+
+## 双 API 密钥系统是否强制执行？
+
+是的，对于 [Binance](https://teal.link/Binance1) 用户，双 API 密钥系统是强制执行的。
+
+:::note
+重要的是要注意，添加双 API 密钥对于新的和现有的活动 [Binance](https://teal.link/Binance1) x Tealstreet 用户都是强制性的。对于现有用户，他们只需要添加其只读 API 密钥即可继续使用 Tealstreet 在 [Binance](https://teal.link/Binance1) 上交易。
+:::
+
+## 所有交易所是否都必须使用双 API 密钥系统？
+
+不是，目前只有 Binance 必须使用双 API。但是，将来我们可能会要求某些交易所使用双 API 密钥。
+
+## 如何设置双 API？
+
+由于双 API 对于 [Binance](https://teal.link/Binance1) 用户是强制性的，请参阅 Binance 连接指南中的该部分。
+
+## 速率限制
+
+速率限制按定义用于控制网络接口控制器发送或接收的请求速率。在 Tealstreet 终端的上下文中，“速率限制”是 Tealstreet 可以发送到交易所的请求数量的限制。
+
+:::note
+重要的是要注意，速率限制是由交易所自己设置的，它因交易所而异。
+:::
+
+您可以在下面阅读有关不同交易所设置的速率限制的更多信息：
+
+- [Binance](https://www.binance.com/en-GB/support/faq/281596e222414cdd9051664ea621cdc3)
+
+- [Bybit](https://bybit-exchange.github.io/docs/v5/rate-limit)
+
+- [Phemex](https://phemex.com/user-guides/order-spamming-limitations)
+
+### 什么会导致“速率限制”？
+
+如果从 Tealstreet 终端到交易所的总请求量超过交易所设置的限制，则用户会收到“速率限制”错误。
+
+### 如何修复速率限制错误？
+
+通过实施双 API 系统，极少会出现“速率限制”的情况。如果您即使使用双 API 仍然遇到速率限制，请[联系我们](/docs/support/contact-us)。

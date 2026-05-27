@@ -1,0 +1,260 @@
+---
+title: Binance
+description: 连接 Binance 和 Tealstreet
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiMore from '/img/connect/binance/apimore.png';
+import ApiRest from '/img/connect/binance/apirest.png';
+import ApiDropdown from '/img/connect/binance/apidropdown.png';
+import Dropdown from '/img/connect/binance/dropdown.png';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import TradeApi from '/img/connect/binance/trade-api.png';
+import SysGen from '/img/connect/binance/sys-gen.png';
+import UnifiedAssets from '/img/connect/binance/multiassetmode.png';
+import PositionSide from '/img/connect/binance/position-side.png';
+import AccountTypeError from '/img/connect/binance/account-type-error.png';
+
+---
+
+<ThemedImage
+    alt="binance-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/binance-light.png'),
+        dark: useBaseUrl('/img/exchange/binance-dark.png'),
+    }}
+/>
+
+## 连接[Binance](https://teal.link/Binance1) 到Tealstreet
+
+:::note
+在创建新的交易API密钥之前，必须完成Binance用户的KYC认证。
+:::
+
+:::caution
+要在Tealstreet上使用您的Binance帐户进行交易，用户必须设置双API密钥。有关更多信息，请查看[双API](/docs/connect/dual-api) 部分。
+:::
+
+- 首先，请确保您已登录[Binance](https://teal.link/Binance1) 帐户。
+
+- 其次，请登录您的Tealstreet帐户。
+
+:::tip
+保持Tealstreet和Binance选项卡打开是个好主意。
+:::
+
+1. 成功登录Tealstreet后，请导航到标题为 **“API密钥”** 的标头
+
+2. 单击标题为 **“新API密钥”** 的蓝色按钮
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding Api" style={{ width: 550 }} />
+</div>
+
+- 从下拉菜单中选择Binance。
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 550 }} />
+</div>
+
+- \*现在，您已准备好在Binance帐户中生成API密钥。前往Binance网站选项卡：：
+
+    *单击用户图标。
+    *从下拉菜单中选择**API管理**。
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 550 }} />
+</div>
+
+- 选择 "系统生成"，然后点击 "下一步"。
+
+<div class="text--center">
+    <img src={SysGen} alt="System Generated Key" style={{ width: 550 }} />
+</div>
+
+- 现在，你已经准备好创建使用Tealstreet进行交易所需的API了。首先，我们将从 "交易 "API密钥开始。
+
+:::note
+请查看[双API](/docs/connect/dual-api)部分，了解更多关于为什么使用Tealstreet的Binance用户需要使用只读API的信息。
+:::
+
+---
+
+### 交易API
+
+在创建API页面上：
+
+- 为 API 密钥选择一个名称。选择类似 Trading-Tealstreet 这样的名称，有助于区分交易和读取 API。您只能在 Binance 网站上看到此标签。
+    - 完成后点击**下一步**按钮，开始密钥创建过程。
+
+<div class="text--center">
+
+![API-Create](/img/connect/binance/apicreate.png)
+
+</div>
+
+:::tip
+您可以通过此链接直接访问此页面 [link](https://www.binance.com/en/my/settings/api-management)
+:::
+
+1. 在Binance上创建API密钥后，您需要单击标题为“编辑限制”的黄色按钮。
+
+<div class="text--center">
+    <img src={ApiRest} alt="API Restrictions" style={{ width: 550 }} />
+</div>
+
+- 现在，您可以选择您的交易API密钥对的详细设置。
+
+<div class="text--center">
+    <img src={ApiMore} alt="API Details" style={{ width: 650 }} />
+</div>
+
+1. 选择“启用合约”选项（图中1）。不要启用其他权限。
+2. 将Tealstreet中的IP地址列表复制，然后将其粘贴到Binance的编辑权限窗口中的“仅限受信任的IP访问”字段中（图中2）。
+3. “API密钥”-这是将粘贴到Tealstreet的密钥字段中的密钥。
+4. “Secret Key”-这是将粘贴到Tealstreet的Secret字段中的密钥。
+5. 单击“保存”
+
+:::caution
+用户**必须**在创建此API时使用白名单IP地址。请确保所有IP地址都正确，如**Tealstreet终端**窗口中所示（下面/上面的图像仅供参考）
+:::
+
+<div class="text--center">
+
+![API-Whitelist](/img/connect/binance/apiwhitelist.png)
+
+</div>
+
+:::note
+编辑密钥权限后，右上角的下拉箭头将最小化可编辑字段。一旦您最小化了此区域，您将无法再看到您的**API密钥**。确保您已将其提前保存！
+:::
+
+:::caution
+永远不要与任何人分享您的API密钥。
+:::
+
+在Binance网站上创建API密钥后，您可以填写Tealstreet的API KEYS页面上的信息。
+
+1. 确保您已在交易所下拉菜单中选择“Binance”。
+
+<div class="text--center">
+    <img src={TradeApi} alt="Trade Api" style={{ width: 650 }} />
+</div>
+
+2. 考虑使用Tealstreet推荐链接来帮助支持Tealstreet开发。
+
+3. 为此API连接输入一个名称。您将在Tealstreet终端的交易页面上的API下拉列表中看到该名称。这对于利用多个帐户和/或子帐户的交易者并想区分它们的交易者非常有帮助。
+
+4. 选择您的加密密码。记得把它保存在某个地方！
+
+5. 在此处粘贴Binance提供的Trade API密钥。
+
+6. 在此处粘贴Binance提供的Trade API Secret。
+
+:::caution
+现在不要按确认，我们还需要创建只读模式的API密钥。
+:::
+
+现在，您已准备好创建“只读”API密钥。前往Binance选项卡：
+
+- 单击用户图标。
+- 从下拉菜单中选择**API管理**。
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 550 }} />
+</div>
+
+---
+
+### 只读API
+
+:::note
+请查看 [Dual API](/docs/connect/dual-api)部分，了解有关为什么需要只读 API 的更多信息。
+:::
+
+在创建API页面上：
+
+- 为您的API密钥选择一个名称。选择一个名称，例如“只读-Tealstreet”，以区分交易和读取API之间的区别。您只会在Binance网站上看到此名称。
+- 单击**创建API**按钮开始密钥创建过程。
+
+<div class="text--center">
+
+![API-Create](/img/connect/binance/apicreate.png)
+
+</div>
+
+:::tip
+您可以通过此链接直接访问此页面 _[this link](https://www.binance.com/en/my/settings/api-management)_
+:::
+
+- 在Binance上创建API密钥后，您需要单击标题为“编辑限制”的黄色按钮。
+
+<div class="text--center">
+
+![API-Restrictions](/img/connect/binance/apirest.png)
+
+</div>
+
+- 现在，您可以选择只读API密钥对的设置。
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/binance/api-read.png)
+
+</div>
+
+- 确保仅选择“读取”和“无限制”（不要勾选允许合约选项）
+- “API密钥”-这是将粘贴到Tealstreet的密钥字段中的密钥。
+- “Secret Key”-这是将粘贴到Tealstreet的Secret字段中的密钥。
+- 单击“保存”
+- 在Binance网站上创建API密钥后，您可以填写Tealstreet的API KEYS页面上的信息。
+
+<div class="text--center">
+
+![Trade-Tealstreet](/img/connect/binance/dualapi-nowhite.png)
+
+</div>
+
+- 一旦您填写了所有信息，包括两个API密钥。按“创建”。
+
+- 如果所有详细信息都正确，则已成功将您的Binance帐户链接到Tealstreet。导航到Tealstreet的“交易”页面，并从下拉菜单中选择Binance帐户。如果正确链接，则您将在Tealstreet的保证金窗口中看到您的余额/维持保证金等信息。
+
+:::note
+请务必仔细检查您不要混淆API密钥和API Secret。如果这些字段输入不正确，则无法将您的Binance交易所帐户连接到Tealstreet。
+:::
+
+---
+
+## 故障排除
+
+在本节中，我们将介绍可能出现的一些Binance特定问题。
+
+### 关于无法调整保证金模式的错误
+
+<div class="text--center">
+    <img src={UnifiedAssets} alt="API Dropdown" style={{ width: 400 }} />
+</div>
+
+- 目前，Tealstreet仅支持单资产模式（如USDT），而不是新的混合保证金模式（USDT+BUSD）。请参见[更多信息](https://www.binance.com/en/support/faq/how-to-switch-between-single-asset-and-multi-assets-modes-de2681ac63714c7d84a685967f7c1a53)
+
+### 关于订单位置方向不匹配的错误
+
+<div class="text--center">
+    <img src={PositionSide} alt="Position Side" style={{ width: 400 }} />
+</div>
+
+- 请仔细检查您的合约模式是单向持仓还是双向持仓。
+
+### 关于 "Trading key - invalid api key, ip, or permissions for action "的错误信息
+
+<div class="text--center">
+    <img src={AccountTypeError} alt="wrong account / permission type" style={{ width: 400 }} />
+</div>
+
+- 请确保您使用的是期货交易账户。Tealstreet目前不支持现货交易。
+    - 另外，请确保您为API密钥选择了正确的权限。

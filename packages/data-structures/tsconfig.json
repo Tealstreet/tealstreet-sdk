@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "ESNext",
+    "jsx": "react-jsx",
+    "incremental": true,
+    "types": ["vitest/globals"]
+  },
+  "exclude": ["**/node_modules", "**/.*/*", "dist"],
+  "include": [
+    ".eslintrc.*",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts",
+    "**/*.cjs",
+    "**/*.mjs",
+    "**/*.jsx",
+    "**/*.json"
+  ]
+}

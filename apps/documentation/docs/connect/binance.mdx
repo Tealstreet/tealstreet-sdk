@@ -1,0 +1,253 @@
+---
+title: Binance
+description: Connecting Binance to Tealstreet
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiMore from '/img/connect/binance/apimore.png';
+import ApiRest from '/img/connect/binance/apirest.png';
+import ApiDropdown from '/img/connect/binance/apidropdown.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+import TradeApi from '/img/connect/binance/v3/trade-api.png';
+import SysGen from '/img/connect/binance/sys-gen.png';
+import UnifiedAssets from '/img/connect/binance/multiassetmode.png';
+import PositionSide from '/img/connect/binance/position-side.png';
+import AccountTypeError from '/img/connect/binance/account-type-error.png';
+
+---
+
+<ThemedImage
+    alt="binance-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/binance-light.png'),
+        dark: useBaseUrl('/img/exchange/binance-dark.png'),
+    }}
+/>
+
+<div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+    <iframe
+        src="https://www.youtube.com/embed/xHI6YYHCxPQ"
+        frameBorder="0"
+        allow="autoplay; encrypted-media"
+        allowFullScreen
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+    />
+</div>
+
+## Connecting [Binance](https://teal.link/Binance1) to Tealstreet
+
+:::note
+Binance users are required to complete KYC before creating new trading API Keys.
+:::
+
+<!-- :::caution
+To Trade using your Binance account on Tealstreet, users must setup a Dual API key. Please review the [Dual API](/docs/connect/dual-api) section for more informaiton.
+::: -->
+
+- First, make sure you are logged into your [Binance](https://teal.link/Binance1) account.
+
+<IntroTealstreet exchangeName="Binance" />
+
+---
+
+- Now you are ready to generate the API Keys within your Binance Account. Head on over to the Binance tab and:
+    - Click on the User Icon.
+    - Select **API Management** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 500 }} />
+</div>
+
+- Choose System Generated and then click Next.
+
+<div class="text--center">
+    <img src={SysGen} alt="System Generated Key" style={{ width: 600 }} />
+</div>
+
+- Now you are ready to create the APs you will need to Trade using Tealstreet.
+
+<!-- :::note
+Please review the [Dual API](/docs/connect/dual-api) section for more informaiton as to why a Read-Only API is required for Binance users using Tealstreet.
+::: -->
+
+---
+
+### Create the API
+
+On the Create API page:
+
+- Choose a name for your API Key. It can be helpful to choose a name like Trading-Tealstreet to distinguish between the Trade and Read APIs. You will only see this label on the Binance website.
+    - When done click on the **Next** button to start the key creation process.
+
+<div class="text--center">
+
+![API-Create](/img/connect/binance/apicreate.png)
+
+</div>
+
+:::tip
+You can get to this page directly by navigating to this [link](https://www.binance.com/en/my/settings/api-management)
+:::
+
+1. Once you have created the API Key on Binance, you need to click the yellow button titled ‘**Edit Restrictions**'.
+
+<div class="text--center">
+    <img src={ApiRest} alt="API Restrictions" style={{ width: 550 }} />
+</div>
+
+- Now you are ready to choose the settings of your API Key.
+
+<div class="text--center">
+    <img src={ApiMore} alt="API Details" style={{ width: 650 }} />
+</div>
+
+1. ‘**API Key**’ - This is the key that will be pasted it into the Key field on Tealstreet.
+2. ‘**Secret Key**’ - This is the secret that will be pasted it into the Secret field on Tealstreet.
+3. Select the ‘**Enable Futures**’ option. Do not enable any other permissions.
+4. Copy the list of IP Addresses from Tealstreet and then paste them into the ‘Restrict access to trusted IPs only’ field on the edit permissions window of Binance.
+    - You need to hit the confirm button after you paste in the IPs in order for them to save properly.
+5. Click ‘Save’
+
+:::caution
+Users **MUST** use the **Whitelisted IP Addresses** when creating this API. Please Ensure all IP addresses are correct as shown in the **Tealstreet terminal** window (images below/above are for reference only)
+:::
+
+<div class="text--center">
+
+![API-Whitelist](/img/connect/binance/v3/apiwhitelist.png)
+
+</div>
+
+:::note
+After editing Key permissions, the dropdown arrow at the top right will minimize the editable fields. Once you minimize this area, you will no longer be able to see your **API secret**. Make sure you have it saved!
+:::
+
+:::caution
+Never share your API Keys with anyone.
+:::
+
+Once you have created the API Key on Binance’s website, you are ready to fill out the information on Tealstreet’s API keys page.
+
+- Ensure you have selected ‘**Binance**’ in the Exchange dropdown menu.
+    - Consider using the Tealstreet [referral link](https://teal.link/binance1) to help support Tealstreet development.
+
+<div class="text--center">
+    <img src={TradeApi} alt="Trade Api" style={{ width: 650 }} />
+</div>
+
+- This guide assumes you will use the Tealstreet network for trading and have whitelisted the IP's in the previous section.
+    - If you want to use a custom setup or service such as TraderWagon you won't enable this option and will enter custom IP whitelisting.
+
+- Choose a name for this API connection. You will see this name on an API on the trading page of the Tealstreet terminal. This is helpful for traders who utilize multiple accounts and/or sub accounts per exchange and want to distinguish between them.
+
+- Paste the API Key provided by Binance here.
+
+- Paste the API Secret provided by Binance here.
+
+- Once you have all the information filled out including both API keys click the '**Done**' button.
+
+<OutroTealstreet exchangeName="Binance" />
+
+<!-- 
+:::caution
+Do NOT press confirm yet, we need to create a **[Read-only API key](#read-only-api)**.
+:::
+
+Now that we are ready to create the **Read-Only** API key lets return to the Binance tab  we opened earlier.
+
+* Click on the User Icon.
+* Select **API Management** from the dropdown menu.
+
+<div class="text--center">
+  <img src={ApiDropdown} alt="API Dropdown" style={{width: 550}} />
+</div> -->
+
+---
+
+<!-- 
+### Read-Only API
+
+:::note
+Please review the [Dual API](/docs/connect/dual-api) section for more informaiton as to why a Read-Only API is required
+:::
+
+On the Create API page:
+
+* Choose a name for your API Key. It can be helpful to choose a name like Read-Only-Tealstreet to distinguish between the Trade and Read APIs. You will only see this name on the Binance website.
+* Click on the **Create API** Button to start the key creation process.
+
+<div class="text--center">
+
+![API-Create](/img/connect/binance/apicreate.png)
+</div>
+
+:::tip
+You can get to this page directly by navigating to _[this link](https://www.binance.com/en/my/settings/api-management)_
+:::
+
+* Once you have created the API Key on Binance, you need to click the yellow button titled ‘Edit Restrictions.
+
+<div class="text--center">
+  <img src={ApiRest} alt="API Rest" style={{width: 1000}} />
+</div>
+
+* Now you are ready to choose the settings of your Read-Only API Key pair.
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/binance/api-read.png)
+</div>
+
+* Ensure that only "Reading" and "Unrestricted" are selected
+* ‘API Key’ - This is the key that will be pasted it into the Key field on Tealstreet.
+* ‘Secret Key’ - This is the secret that will be pasted it into the Secret field on Tealstreet.
+* Click ‘Save’
+* Once you have created the API Key on Binance’s website, you are ready to fill out the information on Tealstreet’s API KEYS page.
+
+<div class="text--center">
+
+![Trade-Tealstreet](/img/connect/binance/dualapi-nowhite.png)
+</div>
+-->
+
+## Frequently Asked Questions
+
+- Can I use USDC on Binance with Tealstreet?
+    - Yes USDC pairs are supported
+
+---
+
+## Troubleshooting
+
+In this section we will go over some of the Binance specific issues that may arise.
+
+### Error about unable to adjust margin mode
+
+<div class="text--center">
+    <img src={UnifiedAssets} alt="API Dropdown" style={{ width: 400 }} />
+</div>
+
+- For now Tealstreet only supports single-asset-mode not the new multi-asset-mode. See [more here](https://www.binance.com/en/support/faq/how-to-switch-between-single-asset-and-multi-assets-modes-de2681ac63714c7d84a685967f7c1a53)
+
+### Error about order position side not matching
+
+<div class="text--center">
+    <img src={PositionSide} alt="Position Side" style={{ width: 400 }} />
+</div>
+
+- Please double check your hedge mode vs one-way settings.
+
+### Error about "Trading key - invalid api key, ip, or permissions for action"
+
+<div class="text--center">
+    <img src={AccountTypeError} alt="wrong account / permission type" style={{ width: 400 }} />
+</div>
+
+- Please ensure you are using a futures trading account. Tealstreet does not currently support spot trading.
+    - Also please ensure you selected the correct permissions for the API key.

@@ -1,0 +1,132 @@
+---
+title: News Feed Modules
+description: Tealstreet offers multiple news feed modules to keep you informed about crypto and macro news from various sources.
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import NewsFeedSettings from '/img/trading/modules/news-feed/module-news-feed.png';
+import NewsFeed from '/img/trading/modules/news-feed/news-feed.png';
+import NewsFeedTrading from '/img/trading/modules/news-feed/news-feed-trading.png';
+import NewsTradingSettings from '/img/trading/modules/twitter/news-trading-settings.png';
+
+Tealstreet provides multiple **News Feed Modules** to help you stay informed about crypto and macro news from various curated sources. These modules offer real-time updates and can be configured for automated trading based on keywords.
+
+<div class="text--center">
+    <img src={NewsFeed} alt="News Feed" style={{ width: 600 }} />
+</div>
+
+## Available News Feed Modules
+
+### PhoenixNews Feed
+
+The **PhoenixNews Feed** displays news from Phoenix News, a curated source of crypto and macro news. This module provides high-quality, filtered news content.
+
+### TreeNews Feed
+
+The **TreeNews Feed** shows news from Tree of Alpha, offering curated crypto and macro news content. This is one of the most popular news sources in the crypto community.
+
+### Combined News Feed
+
+The **Combined News Feed** aggregates news from all available sources into a single, unified feed. This includes:
+
+- Phoenix News
+- Tree of Alpha
+- Onchain data (Risitas)
+- Twitter feeds
+- Telegram channels
+- Arkham Intelligence
+- BWE Alerts
+
+The combined feed automatically deduplicates content and sorts items by timestamp, showing the most recent news first.
+
+### Onchain Feed (Risitas)
+
+The **Onchain Feed** displays onchain data and insights from Risitas, providing real-time blockchain activity and transaction information.
+
+### BWE Alerts Feed
+
+The **BWE Alerts Feed** shows alerts and notifications from BWE (Blockchain Web Events), keeping you informed about significant blockchain events.
+
+### Telegram Feed
+
+The **Telegram Feed** displays messages from configured Telegram channels, allowing you to monitor community discussions and announcements.
+
+### Arkham Feed
+
+The **Arkham Feed** shows intelligence data from Arkham, providing insights into blockchain analytics and onchain activities.
+
+## Activating News Feed Modules
+
+You can activate any of these news feed modules by going to the **Modules** section of your Terminal Settings:
+
+<div class="text--center">
+    <img src={NewsFeedSettings} alt="News Feed Module" style={{ width: 400 }} />
+</div>
+
+Each module can be added independently to your terminal layout, allowing you to customize your news monitoring setup based on your preferences and trading strategy.
+
+## Module Features
+
+All news feed modules include the following features:
+
+- **Real-time Updates**: News items are updated in real-time as they become available
+- **Auto-scroll**: New items automatically scroll to the top when you're not interacting with the feed
+- **Freeze on Hover**: The feed can be configured to freeze scrolling when you hover over it
+- **Virtual Scrolling**: Efficient rendering of large numbers of news items
+- **Source Filtering**: Ability to filter content based on your preferences
+- **Trading Integration**: Quick trading actions based on news content
+
+---
+
+## Trading the News
+
+In a recent update to Tealstreet, we added the ability to place orders based on keywords inside the news feed modules. This allows you to quickly place a long or short order without needing to pull up the chart first, potentially getting a much quicker entry on a trade.
+
+### Activating News Trading
+
+You can activate News Trading by going to the **Modules** panel in the terminal settings page:
+
+<div class="text--center">
+    <img src={NewsTradingSettings} alt="News Trading Settings" style={{ width: 500 }} />
+</div>
+
+### Using News Trading
+
+Once activated and customized as you like, you will be able to quickly act on trades from within the news feed modules:
+
+<div class="text--center">
+    <img src={NewsFeedTrading} alt="News Trading" style={{ width: 600 }} />
+</div>
+
+:::caution
+Please be careful when using this feature as it can lead to unintended trades if you are not careful. Sometimes news items will come across that have no relation to crypto at all and can still trigger the detection system to generate trade buttons. We are working on ways to improve this feature in the future.
+:::
+
+:::note
+You can also access the News Feed from the button located at the top of the [Twitter module](/docs/trade/modules/twitter) in addition to the Modules panel inside the terminal settings.
+:::
+
+## Configuration Options
+
+Each news feed module can be configured with various settings:
+
+- **API Keys**: Some feeds require API keys for access (e.g., Tree of Alpha, Phoenix News)
+- **Content Filtering**: Set up filters to exclude certain types of content
+- **Display Preferences**: Configure how news items are displayed
+- **Trading Keywords**: Set up keyword-based trading triggers
+- **Update Frequency**: Control how often the feeds refresh
+
+## Best Practices
+
+- **Diversify Sources**: Use multiple news feed modules to get a comprehensive view of the market
+- **Monitor Combined Feed**: The combined feed is excellent for getting an overview of all news sources
+- **Set Up Alerts**: Configure trading keywords for news that matters to your strategy
+- **Regular Review**: Periodically review and adjust your news feed configuration
+- **API Key Management**: Keep your API keys secure and rotate them regularly

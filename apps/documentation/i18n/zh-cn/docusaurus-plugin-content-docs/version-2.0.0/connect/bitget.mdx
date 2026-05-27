@@ -1,0 +1,254 @@
+---
+title: Bitget
+description: Connecting Bitget to Tealstreet
+sidebar_position: 6
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiWhitelist from '/img/connect/bitget/apiwhitelist.png';
+import ApiTeal from '/img/connect/bitget/apiteal.png';
+import ApiMore from '/img/connect/bitget/apimore.png';
+import ApiMore3 from '/img/connect/bitget/apimore3.png';
+import ApiMore4 from '/img/connect/bitget/apimore4.png';
+import ApiMore5 from '/img/connect/bitget/apimore5.png';
+import ApiMore6 from '/img/connect/bitget/apimore6.png';
+import ApiCreate2 from '/img/connect/bitget/apicreate2.png';
+import BitgetLeverageError from '/img/connect/bitget/bitget-leverage-error.png';
+import CommonSettings from '/img/connect/common/common-settings.png';
+import BitgetStops from '/img/connect/bitget/bitgetstops1.png';
+import RegionRestricted from '/img/connect/bitget/bitget-tradingregionrestricted.png';
+import BitgetStopError from '/img/connect/bitget/bitget-stoperror.png';
+
+---
+
+<ThemedImage
+    alt="bitget-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bitget-light.png'),
+        dark: useBaseUrl('/img/exchange/bitget-dark.png'),
+    }}
+/>
+
+## 将 [Bitget](https://teal.link/Bitget) 连接到 Tealstreet
+
+- 首先，请确保您已登录您的 [Bitget](https://teal.link/Bitget) 账户。
+
+:::note
+考虑通过使用推荐链接 _[link](https://teal.link/Bitget)_ 支持 Tealstreet。交易者将获得10％的费用折扣（更低的费用有助于交易者的盈利能力！）。
+:::
+
+- 接下来，登录您的Tealstreet帐户。
+
+:::tip
+最好同时保持Tealstreet和[Bitget](https://teal.link/Bitget)标签打开。
+:::
+
+1. 成功登录Tealstreet后，导航到标题为 **“API密钥”** 的标头
+
+2. 单击名为 **“New API Key”** 的蓝色按钮
+
+![addingapi](/img/connect/common/addingapi.jpg)
+
+- 从下拉菜单中选择[Bitget](https://teal.link/Bitget)。
+
+<div class="text--center">
+
+![dropdown](/img/connect/bitget/dropdown.png)
+
+</div>
+
+- 现在，您已准备好在您的Bitget帐户中生成API密钥。前往[Bitget](https://teal.link/Bitget)标签并执行以下操作：
+    - 单击用户图标。
+    - 从下拉菜单中选择**API管理**。
+
+<div class="text--center">
+
+![API-Dropdown](/img/connect/bitget/apidropdown.png)
+
+</div>
+
+- 在 API 密钥页面上，单击 **“创建新密钥”** 按钮以开始密钥创建过程。
+
+![API-Create](/img/connect/bitget/apicreate.png)
+
+- 选择系统生成的 API 密钥
+
+<div class="text--center">
+    <img src={ApiCreate2} alt="Api Creation 2" style={{ width: 400 }} />
+</div>
+
+:::tip
+您可以通过导航到 **[此链接](https://www.bitget.com/en/account/newapi)** 直接访问此页面。
+:::
+
+---
+
+### 创建新的API
+
+- 现在您已经准备好选择您的[Bitget](https://teal.link/Bitget) API密钥对的设置。
+
+<div class="text--center">
+    <img src={ApiMore} alt="Api Detailed" style={{ width: 400 }} />
+</div>
+
+1. 在Bitget上为API密钥对选择一个昵称。这只会显示在Bitget的网站上，即API管理页面上。它不需要与您在Tealstreet终端上使用的昵称匹配，可以是任何您想要的名称。
+
+2. 创建一个 **“API密码短语”。** 密码短语必须至少为8个字符。只使用字母或数字。不要使用符号或特殊字符。
+    - 将 **“API密码短语”** 存储在安全的地方！您需要在Tealstreet交易终端中输入此密码短语。
+
+3. 选择 **“读写”** 权限
+
+4. 向下滚动
+
+<div class="text--center">
+    <img src={ApiMore3} alt="API More 3" style={{ width: 500 }} />
+</div>
+
+5. 在 **“期货”** 类别下选择 **“订单和持仓”** 权限。
+
+6. 继续向下滚动。
+
+<div class="text--center">
+    <img src={ApiMore4} alt="API More 4" style={{ width: 500 }} />
+</div>
+
+7. 在税务类别下选择 **“搜索”** 权限。
+
+:::note
+这个权限对于职位历史和日志功能是必要的，但是如果您不关心这些功能，可以跳过此权限。
+:::
+
+8. 从下拉菜单中选择Bitget后，复制并粘贴Tealstreet交易终端中列出的IP地址。
+    - 点击终端内的 "剪贴板 "按钮，如下图所示。
+
+<div class="text--center">
+    <img src={ApiWhitelist} alt="API Whitelist" style={{ width: 500 }} />
+</div>
+
+9. 点击 **“下一步”** 以完成API创建过程。
+
+<div class="text--center">
+    <img src={ApiMore5} alt="API More 5" style={{ width: 500 }} />
+</div>
+
+10. 点击“发送”按钮，获取电子邮件中的代码，然后将此代码放入电子邮件验证框中。
+
+11. 输入您的2FA身份验证代码。
+
+12. 在填写完所有必要字段并确认无误后，单击 **“确认”** 按钮，Bitget将生成您的API密钥。
+
+<div class="text--center">
+    <img src={ApiMore6} alt="API More 6" style={{ width: 500 }} />
+</div>
+
+- 请妥善保管您的 **“API密钥”** 和 **“SecretKey”**，我们将使用它们来完成将API与Tealstreet连接的过程。
+
+:::caution
+请勿与任何人分享您的API密钥。
+:::
+
+---
+
+### 连接到Tealstreet
+
+在 [Bitget](https://teal.link/Bitget) 网站上创建API密钥后，您可以填写Tealstreet的 **“API KEYS”** 页面上的信息。
+
+<div class="text--center">
+    <img src={ApiTeal} alt="API Tealstreet" style={{ width: 650 }} />
+</div>
+
+1. 确保您已选择Bitget作为交易所。
+
+2. 为您的Bitget帐户API密钥选择一个昵称。昵称仅在Tealstreet内可见。它不需要与您在Bitget网站上选择的昵称匹配。
+
+3. 选择您的加密密码。记得将其保存在某个地方！当您返回交易终端的交易页面时，您需要输入此密码。
+
+4. 在此处粘贴您的Bitget Passphase。
+
+5. 在此处粘贴Bitget提供的API密钥。
+
+6. 在此处粘贴Bitget提供的API密钥。
+
+7. 点击“创建”。
+
+:::tip
+阅读更多关于Tealstreet的加密密码系统的信息 **[在这里](/docs/connect/api-encryption)**。
+:::
+
+:::note
+请确保您不要混淆 **“API密钥”** 和 **“API密钥”**。如果这些字段输入不正确，则无法将您的 **[Bitget](https://teal.link/Bitget)** 交易所账户连接到Tealstreet。
+:::
+
+如果所有详细信息都正确，您将成功将您的[Bitget](https://teal.link/Bitget)账户链接到Tealstreet。导航到Tealstreet的“交易”页面，并从下拉菜单中选择[Bitget](https://teal.link/Bitget)账户。如果链接正确，您将在Tealstreet的保证金窗口中看到您的余额/抵押品。祝您交易愉快！！！
+
+---
+
+### Bitget 特定设置
+
+在 Tealstreet 上使用 Bitget 时，您可以通过几种方式调整止损的行为。
+
+<div class="text--center">
+
+![bitget-stops](/img/connect/bitget/bitgetstops2.png)
+
+</div>
+
+- 您可以通过进入终端的交易选项来调整 Bitget 的止损功能。
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Common Settings" style={{ width: 350 }} />
+</div>
+
+<div class="text--center">
+    <img src={BitgetStops} alt="Bitget Stops" style={{ width: 600 }} />
+</div>
+
+- 默认情况下，Bitget 将执行无限制的止损，这意味着它将完全关闭您的整个持仓。
+    - 如果您希望有部分止损，可以启用 **支持部分 TP/SL 订单** 选项。
+- 在最近的更新中，Bitget 更改了其止损功能的行为，并且不允许用户在没有活动持仓的情况下放置止损单。
+    - 如果您启用 **自动创建 TP/SL 订单的最小持仓量**，则 Tealstreet 将开启一个最小规模的订单，然后您就可以放置止损单了。
+
+---
+
+## Bitget 故障排除
+
+以下是**Bitget**报告的常见问题列表。
+
+### 尝试链接API密钥时的错误信息
+
+当我尝试创建/链接一个API密钥时，有时会弹出一个中文的错误信息。为什么会这样？
+
+![Bitget-RegionRestricted](/img/connect/bitget/bitget-tradingregionrestricted.png)
+
+- 交易所本身发送了这条消息，翻译为：**由于监管限制，您被限制下单**
+    - 如果交易所检测到您正在受限制的地区交易，就会出现这种情况。这不是Tealstreet的问题，而是交易所的问题。
+
+---
+
+### 尝试设置止损时的错误信息
+
+当尝试在没有持仓的情况下放置止损单，或在开仓后尝试放置第二个止损单时，我会收到有关持仓大小不足的错误。为什么？
+
+![Bitget-StoplossError](/img/connect/bitget/bitget-stoperror.png)
+
+- 这是交易所的已知问题。交易所不允许您在没有持仓的情况下放置止损单，或在开仓后放置第二个止损单。这不是Tealstreet的问题，而是交易所的设计选择。
+
+---
+
+### 尝试更改杠杆时出错
+
+尝试更改杠杆时，您可能会收到需要未来 pos 写入权限的错误信息
+
+<div class="text--center">
+    <img src={BitgetLeverageError} alt="Bitget leverage error message" style={{ width: 500 }} />
+</div>
+
+- 请确认您运行的是最新版本的终端，并在 API 创建过程中启用了正确的权限。
+
+### 为什么我不能使用限价设置止损？
+
+目前Bitget还不支持使用限价订单止损。

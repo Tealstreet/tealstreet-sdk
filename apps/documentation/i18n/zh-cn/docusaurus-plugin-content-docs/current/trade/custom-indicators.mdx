@@ -1,0 +1,83 @@
+---
+title: 自定义指标
+description: Tealstreet supports some community made custom indicators created in PineJS.
+sidebar_position: 19
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import ThemedImage from '@theme/ThemedImage';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import CustomIndicators from '/static/img/trading/custom-indicators/custom-indicators.png';
+import CustomIndicatorsPVSRA from '/static/img/trading/custom-indicators/custom-indicators-pvsra.png';
+import CustomIndicatorsUpload from '/static/img/trading/custom-indicators/custom-indicators-upload.png';
+
+## 自定义指标
+
+在 2.0 更新中，Tealstreet 现在支持使用 PineJS 创建的社区自定义指标。本节将介绍一些已经制作好的示例，以及如何制作自己的指标并将其添加到 Tealstreet 中，如果您希望这样做。
+
+<div class="text--center">
+    <img src={CustomIndicatorsPVSRA} alt="Custom Indicators Example" style={{ width: 700 }} />
+</div>
+
+- 这是 PVSRA Combined 和 PVSRA Candles 自定义指标
+
+---
+
+### Tealstreet 中的自定义指标
+
+<div class="text--center">
+    <img src={CustomIndicators} alt="Custom Indicators Example 2" style={{ width: 300 }} />
+</div>
+
+- 在此截图中，您可以看到社区成员 [Zande](https://github.com/lmvdz) 已经提交了 3 个指标
+
+:::tip
+请注意，这些指标不如原生 TradingView 指标强大。PineJS 是第三方开发人员使用的功能较少且简化版本。
+:::
+
+---
+
+### 将您的自定义指标添加到 Tealstreet
+
+<div class="text--center">
+    <img src={CustomIndicatorsUpload} alt="Custom Indicators Github" style={{ width: 700 }} />
+</div>
+
+- 您可以通过我们的 **[Github](https://github.com/Tealstreet/tealstreet-tv-studies)** 提交您的自定义指标PR。但请确保在您的代码顶部包含MIT许可证头文件。如果您没有包含此文件，我们将无法接受您的PR。
+
+<details>
+    <summary>
+        MIT 许可证
+    </summary>
+    <br />
+
+    Copyright (c) (year) (copyright holders)
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+  <br />
+</details>
+
+:::note
+有关上传自定义指标的问题或疑虑？请在我们的 **[Discord](/docs/support/contact-us)** 上联系我们。
+:::

@@ -1,0 +1,61 @@
+---
+title: 筛选器
+description: Screener 模块是一个帮助您跟踪交易所上表现最好和最差的代币的模块。
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Screener1 from '/img/trading/modules/screener/modules-screener2.png';
+import Screener2 from '/img/trading/modules/screener/modules-screener1.png';
+import ScreenerSettings from '/img/trading/modules/screener/modules-screener-settings.png';
+import ScreenerModRel from '/img/trading/modules/screener/screener-modrel.gif';
+
+**Screener 模块** 是一个工具，可以按照某些标准（价格变化、资金费率）过滤和排序交易对。
+
+<div class="text--center">
+    <img src={Screener1} alt="Screener" style={{ width: 500 }} />
+</div>
+
+- 默认情况下，它按照过去 24 小时内最大的价格增长排序交易对。
+
+---
+
+### 启用筛选器模块
+
+<div class="text--center">
+    <img src={ScreenerSettings} alt="Screener Settings" style={{ width: 600 }} />
+</div>
+
+- 您可以在 **交易设置** 配置窗口的 **模块** 选项卡下启用 **筛选器** 模块。
+
+:::tip
+记得解锁您的布局以便能够移动模块。
+:::
+
+---
+
+### 使用筛选器模块
+
+<div class="text--center">
+    <img src={Screener2} alt="Screener 2" style={{ width: 800 }} />
+</div>
+
+- 您可以将您个人喜欢的交易对添加到收藏夹中，它们将显示在固定选项卡下。
+
+<div class="text--center">
+    <img src={ScreenerModRel} alt="Screener Mod Rel" style={{ width: 800 }} />
+</div>
+
+:::note
+**mod** 切换按钮将显示表现最好和最差的交易对。切换到 Rel 后，它将按降序显示表现最好的交易对。
+:::
+
+:::tip
+在 **终端设置** 页面的 **Beta** 选项卡中，您可以启用 **启用 K 线弹出图表**，这样当您在筛选器中鼠标悬停在某个交易对上时，将弹出一个图表，让您预览该交易对的价格走势。
+:::

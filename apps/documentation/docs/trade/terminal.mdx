@@ -1,0 +1,240 @@
+---
+title: Terminal
+description: The main trading window of Tealstreet which houses the core functionality of the terminal.
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import CommonSettings from '/img/trading/common/common-settings.png';
+import Terminal from '/img/trading/terminal/v3/terminal.gif';
+import TerminalSettings from '/img/trading/terminal/v3/terminal-settings.gif';
+import Market from '/img/trading/terminal/v3/market-pair.gif';
+import API from '/img/trading/terminal/v3/api-key-selection.gif';
+import Sound from '/img/trading/terminal/v3/sound.gif';
+import Lock from '/img/trading/terminal/v3/lock-unlock.gif';
+import SettingsCommon from '/img/trading/terminal/v3/terminal.gif';
+import SettingsButtons from '/img/trading/terminal/v3/terminal.gif';
+import SettingsButton from '/img/trading/terminal/v3/settings-button.png';
+import SettingsQuick from '/img/trading/settings-quick.gif';
+import QuickOffsets from '/img/trading/quick-offsets.png';
+import Hotkeys from '/img/trading/terminal/v3/hotkeys.gif';
+import Modules from '/img/trading/terminal/v3/settings-modules.gif';
+import Profiles from '/img/trading/terminal/v3/profiles.png';
+import BellIcon from '/img/trading/bellicon.png';
+
+This is the main Tealstreet trading window. You will find a number of different features to help you interact and trade. Go ahead and click on the **TOUR** button to get a brief overview of the different features of Tealstreet.
+
+<div class="text--center">
+    <img src={Terminal} alt="Main Window" style={{ width: 700 }} />
+</div>
+
+## Primary Trade Settings
+
+In the top right corner of the main trading window you will find the Primary Trade Settings for Tealstreet.
+
+<div class="text--center">
+    <img src={SettingsButton} alt="Settings" style={{ width: 500 }} />
+</div>
+
+Here you can change various settings for the terminal. Such as draggable orders, Risk management tools, Hotkeys, and more.
+
+<div class="text--center">
+    <img src={TerminalSettings} alt="Settings" style={{ width: 700 }} />
+</div>
+
+---
+
+### Market/Trading Pair
+
+To change the 'Market' / 'Trading Pair' click the drop down at the top of the terminal with an active API selected. The primary market your API key is connected to will appear in the center. You can select your favorite pair from this drop down.
+
+:::tip
+Click on the star next to the pair to favorite it. Any favorites will appear in the favorites column.
+:::
+
+<div class="text--center">
+    <img src={Market} alt="Market" style={{ width: 500 }} />
+</div>
+
+You can view other markets if you have other API's connected. The dropdown contains a filter which will let you add or remove other exchanges from the list.
+
+:::note
+You will not be able to trade the pair unless you have the API key for that exchanges added to Tealstreet.
+:::
+
+---
+
+### API Key Selection
+
+At the top of the terminal you can see the currently active API's and can switch between them. If you have not added an API key this menu may be blank. If you have only one API key connected you will only see one option.
+
+<div class="text--center">
+    <img src={API} alt="API" style={{ width: 800 }} />
+</div>
+
+:::tip
+Click on the star next to the API key to favorite it. Any favorites will appear on the favorites bar for easy switching between API keys.
+:::
+
+---
+
+### Sound Settings
+
+Tealstreet offers sound effects for different actions across the main trading window. To change the volume level, click the speaker icon and use the slider to find your preferred audio level. Click on the icon to mute all sounds.
+
+<div class="text--center">
+    <img src={Sound} alt="Sound" style={{ width: 600 }} />
+</div>
+
+---
+
+### Lock/Unlock Button
+
+You can adjust all the modules and windows within the layout of Tealstreet. You can adjust their size and position. To prevent accidentally moving or changing a window, simply click the 'Lock' button. When the lock icon appears closed, your window settings are locked in place. When the lock icon appears open, your windows settings can be adjusted.
+
+<div class="text--center">
+    <img src={Lock} alt="Lock" style={{ width: 650 }} />
+</div>
+
+---
+
+<!-- ## Terminal Settings
+
+You can change the various settings for how you interact and trade using Tealstreet by clicking on the gear icon named "Trade Settings".
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Settings Common" style={{width: 300}} />
+</div>
+
+Once you click it a new window will pop up with multiple sections each of which are defined below:
+
+<div class="text--center">
+    <img src={SettingsCommon} alt="Settings General" style={{width: 700}} />
+</div> -->
+
+<!-- Disabled until reworked for V3 -->
+
+<!-- ### General
+
+-   -   -   -
+
+- **Notifications placement**: This allows you to change where you receive notifications on Tealstreet. Notifications include filled orders, canceled orders, and errors.
+
+- **Show Order Notifications**: This allows you to turn on/off notifications for orders.
+
+- **Show Confirmation Warnings**: This will pop up a confirmation box when you try to close certain positions such as from the open positions module.
+
+- **Hotkeys/Chart use Currently Active order-tab**: This allows you to use hotkeys to place orders in the currently active tab (such as place order or quick)
+
+- **Click Price Auto Populates Limit Order**: Detirmines whether clicking price in the OrderBook populates the currently active order-form, or the limit order form in the place order module.
+
+- **Show Empty Orderbook Levels**: If enabled you will see prices in the orderbook which have no resting orders.
+
+- **Show Favorite Markets for All Exchanges**: If disabled you will only see your favorite markets for the exchange you are currently connected to.
+
+- **Show Testnet Exchanges / Markets**: If enabled you will see the various testnet exchanges and markets. This can be a useful way to test out Tealstreet or paper trade.
+
+-   -   -   - -->
+
+### Place Order
+
+- Button Sizes: This setting allows the user to adjust the amount/size of their orders. The 'Place Order' window of Teal Street gives the user 6 buttons for order sizes. Input numbers that reflect your needs, wallet balance, or average trade size. Once you click 'OK', these changes will show in the 'Place Order' window.
+
+<div class="text--center">
+    <img src={SettingsButtons} alt="Settings Buttons" style={{ width: 700 }} />
+</div>
+
+:::note
+Ask yourself what pair you are trading before setting these figures. Choosing appropriate increments depend on your balance, average trading size, and the crypto itself!
+:::
+
+<!-- 
+- Quick Offsets: This allow the user to change tick sizes for a Quick Order type.
+
+<div class="text--center">
+    <img src={SettingsQuick} alt="Settings Quick" style={{width: 700}} />
+</div>
+
+Changes made to 'Quick Offsets' will show on the Quick Order type in the 'Place Order' window.
+
+<div class="text--center">
+    <img src={QuickOffsets} alt="Quick Offsets" style={{width: 700}} />
+</div> -->
+
+:::tip
+For those new to Tealstreet, we recommend changing the Place Order button sizes immediately to fit the size of trades you expect to take.
+:::
+
+---
+
+### Shortcuts
+
+Here you can define various keyboard shortcuts to interact with the main trading window.
+
+<div class="text--center">
+    <img src={Hotkeys} alt="Settings Shortcuts" style={{ width: 600 }} />
+</div>
+
+:::note
+For a more thorough explanation on hotkeys & shortcuts people **[see here](/docs/trade/shortcuts/)**.
+:::
+
+---
+
+### Modules
+
+Here you can set the list of modules that are available in the Terminal.
+
+<div class="text--center">
+    <img src={Modules} alt="Settings Modules" style={{ width: 600 }} />
+</div>
+
+:::note
+Removing a module from your trading profile / layout will disable its rendering which can reduce graphics card load and improve performance.
+:::
+
+---
+
+### Profiles (Formerly Workspaces)
+
+Inside your settings is the profiles category. A profile is a collection of settings and windows that you can save and load at any time. This allows you to have different profiles for different trading strategies, environments, or exchanges.
+
+<div class="text--center">
+    <img src={Profiles} alt="Profiles" style={{ width: 800 }} />
+</div>
+
+- Here you can modify existing profiles in this window
+    - You can import an external profile (such as from discord or a friend)
+    - You can duplicate the specified profile
+    - You can delete the specified profile
+    - You can export the specified profile to save it to disk or share it with others
+
+:::note
+new profiles may occasionally be randomly generated by Tealstreet. (Such as when introducing a new feature or module)
+:::
+
+---
+
+## Useful Tips
+
+<!-- 
+<div class="text--center">
+    <img src={BellIcon} alt="Bell Icon" style={{width: 450}} />
+</div>
+
+:::tip
+- The bell icon shows the notification window of the terminal.
+::: -->
+
+![Tealstreet-Zoom](/img/client/ClientZoom.png)
+
+:::tip
+In the Desktop app you can **Zoom** the Tealstreet window in and out by clicking the zoom buttons.
+
+You can also use the **Ctrl +** keyboard shortcut to zoom in and out.
+:::

@@ -1,0 +1,107 @@
+﻿{
+    "generatedAt":  "2026-04-13T00:35:16.1764637Z",
+    "scope":  [
+                  "trade/modules",
+                  "desktopclient",
+                  "FAQ"
+              ],
+    "count":  24,
+    "entries":  [
+                    {
+                        "docPath":  "apps/documentation/docs/desktopclient/linux.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/desktopclient/linux.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/desktopclient/mac.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/desktopclient/mac.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/desktopclient/windows.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/desktopclient/windows.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/FAQ.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/FAQ.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/aggr.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/aggr.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/basic-chart.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/basic-chart.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/browser-view.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/browser-view.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/chaser-orders.mdx",
+                        "v2Path":  null
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/cli.mdx",
+                        "v2Path":  null
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/cross-trades.mdx",
+                        "v2Path":  null
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/custom-module.mdx",
+                        "v2Path":  null
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/dom.mdx",
+                        "v2Path":  null
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/econ-events.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/econ-events.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/fee-calculator.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/fee-calculator.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/forex-calendar.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/forex-calendar.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/news-feed.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/news-feed.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/open-interest-chart.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/open-interest-chart.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/position-history.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/position-history.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/screener.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/screener.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/ticker-data.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/ticker-data.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/ticks-chart.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/ticks-chart.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/twitch.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/twitch.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/twitter.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/twitter.mdx"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/wsot-leaderboard.mdx",
+                        "v2Path":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/wsot-leaderboard.mdx"
+                    }
+                ]
+}

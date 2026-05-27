@@ -1,0 +1,129 @@
+---
+title: Kraken Futures
+description: Connect your Kraken Futures account to Tealstreet.
+sidebar_position: 17
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiTeal from '/img/connect/kraken-futures/api-teal.png';
+import ApiTeal2 from '/img/connect/kraken-futures/api-teal2.png';
+import ApiWhitelist from '/img/connect/kraken-futures/apiwhitelist.png';
+import KrakenProCreateApiKey from '/img/connect/kraken-futures/kraken-create-api-key.png';
+import KrakenProCreateKey from '/img/connect/kraken-futures/kraken-pro-create-key.png';
+import KrakenProApiKey from '/img/connect/kraken-futures/kraken-pro-api-key.png';
+import KrakenProLandingPage from '/img/connect/kraken-futures/kraken-pro-landing-page.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<ThemedImage
+    alt="kraken-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/kraken-dark.png'),
+        dark: useBaseUrl('/img/exchange/kraken-dark.png'),
+    }}
+    style={{ width: 500, height: 75 }}
+/>
+
+## Connecting [Kraken Futures](https://pro.kraken.com) to Tealstreet
+
+:::::danger
+US customers are not eligible to trade on Kraken Derivatives (perpetual futures) and cannot use Tealstreet with Kraken Futures. Tealstreet’s integration supports only the Perpetual Futures API.
+:::::
+
+<IntroTealstreet exchangeName="Kraken Futures" />
+
+---
+
+### Creating the API Key
+
+- Now we are ready to generate the API key for Kraken. Head over to [Kraken Futures](https://pro.kraken.com)
+
+<div class="text--center">
+    <img src={KrakenProLandingPage} alt="Kraken Settings" style={{ width: 600 }} />
+</div>
+
+- Log in (or create an account if you haven't already).
+- Navigate to your settings page here: [Kraken Futures -> Connections & API Settings](https://pro.kraken.com/app/settings/api)
+
+<div class="text--center">
+    <img src={KrakenProCreateApiKey} alt="Create API Key" style={{ width: 700 }} />
+</div>
+
+::::note
+You may need to accept derivatives/futures-specific terms or disclosures before trading is enabled as well as verifying your identity.
+::::
+
+- Navigate to the API management section here: [Kraken Futures -> Connections & API Settings](https://pro.kraken.com/app/settings/api)
+
+:::warning
+Tealstreet does not support Kraken Spot trading.
+:::
+
+<div class="text--center">
+    <img src={KrakenProCreateKey} alt="Kraken Futures Create Key" style={{ width: 800 }} />
+</div>
+
+- Click **Create API Key**.
+
+<div class="text--center">
+    <img src={KrakenProApiKey} alt="Kraken Futures API Key" style={{ width: 500 }} />
+</div>
+
+<!-- * Choose a name for your key. It can be anything you want. LUL they dont let us name our keys -->
+
+- Set permissions:
+    - General API: Full Access
+    - Withdrawal API: No Access
+
+- Click **Generate key**.
+
+<!-- ::::tip
+Kraken Futures supports IP whitelisting on your account if you want to, copy the IPs from the Tealstreet API form using the clipboard button and paste them into the whitelist field on Kraken.
+:::: -->
+
+<!-- <div class="text--center">
+  <img src={ApiWhitelist} alt="Tealstreet Whitelist IPs (placeholder)" style={{width: 500}} />
+</div> -->
+
+- Securely store your **API Key** and **API Secret**. You will need these to link Kraken Futures to Tealstreet.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal2} alt="Tealstreet API Form" style={{ width: 550 }} />
+</div>
+
+- Fill out the form with the information you created on the Kraken Futures API page.
+  - Give the key a name; this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **API Key** you created on Kraken Futures.
+  - Provide the **API Secret** you created on Kraken Futures.
+  - Click **Done**.
+
+::
+
+<OutroTealstreet exchangeName="Kraken Futures" />
+
+---
+
+## Frequently Asked Questions
+
+- Are US customers supported for Kraken Derivatives (Perpetual Futures)? \* No. Tealstreet’s Kraken integration uses the Perpetual Futures API only; US customers are not eligible to trade Kraken Derivatives and are not supported. See Kraken’s official article: [Kraken Derivatives eligibility](https://support.kraken.com/articles/360023786632-kraken-derivatives-eligibility).
+
+- Do I need to enable anything special to trade futures on Kraken? \* Some users need to accept derivatives terms or disclosures in the Futures interface before trading is enabled.
+
+- I'm seeing an insufficient margin error when placing an order. \* Ensure you have sufficient available margin in your Kraken Futures account.
+
+- Does Kraken Futures require IP whitelisting? \* IP whitelisting is available to use if you want to, copy the IPs from the Tealstreet API form using the clipboard button and paste them into the whitelist field on Kraken.
+
+- Who is eligible to trade Kraken derivatives? \* Refer to Kraken’s official source of truth: [Kraken Derivatives eligibility](https://support.kraken.com/articles/360023786632-kraken-derivatives-eligibility).

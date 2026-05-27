@@ -1,0 +1,23 @@
+import { type SchemaPairMap } from './types'
+import { SPOT_BALANCE_MAP } from './api_spot_balance'
+import { VAULT_INVESTMENT_MAP } from './vault_investment'
+
+// Schema map for the 'FUNDING_ACCOUNT_SUMMARY' struct.
+export const FUNDING_ACCOUNT_SUMMARY_MAP: SchemaPairMap = Object.freeze({
+  FULL_TO_LITE: {
+    main_account_id: 'ma',
+    total_equity: 'te',
+    spot_balances: ['sb', [SPOT_BALANCE_MAP.FULL_TO_LITE]],
+    vault_investments: ['vi', [VAULT_INVESTMENT_MAP.FULL_TO_LITE]],
+    total_cash_balance: 'tc',
+    total_spot_asset_balance: 'ts'
+  },
+  LITE_TO_FULL: {
+    ma: 'main_account_id',
+    te: 'total_equity',
+    sb: ['spot_balances', [SPOT_BALANCE_MAP.LITE_TO_FULL]],
+    vi: ['vault_investments', [VAULT_INVESTMENT_MAP.LITE_TO_FULL]],
+    tc: 'total_cash_balance',
+    ts: 'total_spot_asset_balance'
+  }
+})

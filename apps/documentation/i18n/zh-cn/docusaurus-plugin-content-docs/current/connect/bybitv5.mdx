@@ -1,0 +1,43 @@
+---
+title: Bybit V5（API 升级）
+description: 详细介绍 Bybit V5 API 的升级情况
+sidebar_position: 7
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+<ThemedImage
+    alt="bybit-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bybit-light.png'),
+        dark: useBaseUrl('/img/exchange/bybit-dark.png'),
+    }}
+/>
+
+## Bybit V5 API 升级
+
+10 月 16 日，Bybit 将升级其 API 到 V5。他们还将关闭 Tealstreet 一直在使用的经典（非 UM）账户的 Legacy V2 API。
+
+- 这将影响所有在 Tealstreet 上使用 Bybit Classic（非统一）账户的用户。
+
+在过渡期间，我们将把所有 Bybit Classic 账户迁移到新的 v5 系统。这将使我们能够继续支持 Tealstreet 上的 Bybit 账户。
+
+您可以从 Bybit 的官方文档[这里](https://announcements.bybit.com/en-US/article/bybit-openapi-services-transition-from-legacy-version-to-new-v5-api-blt25b43a5738c00765/?category=product_updates)了解更多信息。
+
+:::note
+现有的统一账户不会受到此迁移和升级的影响。
+:::
+
+---
+
+### 故障排除
+
+- 如果您连接到Bybit时遇到问题，可能需要在升级后重新生成API密钥。[/docs/connect/bybit](/docs/connect/bybit)
+
+- 如果您在升级后无法访问 Bybit，请联系我们获取[支持](/docs/support/contact-us)。

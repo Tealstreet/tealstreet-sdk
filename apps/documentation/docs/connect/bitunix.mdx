@@ -1,0 +1,188 @@
+---
+title: Bitunix
+description: Connect your Bitunix account to Tealstreet.
+sidebar_position: 15
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiDropdown from '/img/connect/bitunix/apidropdown.png';
+import ApiTeal from '/img/connect/bitunix/v3/api-teal.png';
+import ApiCreate from '/img/connect/bitunix/apicreate.png';
+import ApiCreate2 from '/img/connect/bitunix/apicreate2.png';
+import ApiCreated from '/img/connect/bitunix/apicreated.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+<ThemedImage
+    alt="bitunix-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/bitunix-light.png'),
+        dark: useBaseUrl('/img/exchange/bitunix-dark.png'),
+    }}
+    style={{ width: 400, height: 90 }}
+/>
+
+<!-- <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+  <iframe
+    src="https://www.youtube.com/embed/TBlybqFeHBs"
+    frameBorder="0"
+    allow="autoplay; encrypted-media"
+    allowFullScreen
+    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+  />
+</div> -->
+
+## Connecting [Bitunix](https://teal.link/bitunix) to Tealstreet
+
+- First, make sure you are logged into your [Bitunix](https://teal.link/bitunix) account.
+
+:::note
+Consider supporting Tealstreet by using the _[referral link](https://teal.link/bitunix)._
+:::
+
+<IntroTealstreet exchangeName="Bitunix" />
+
+---
+
+### Creating the key
+
+- Now you are ready to generate the API Keys within your Bitunix Account. Head on over to the [Bitunix](https://teal.link/bitunix) tab and:
+    - Click on the User Icon.
+    - Select **API** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="Api Dropdown" style={{ width: 300 }} />
+</div>
+
+- On the API Key page click on the **Create API** Button to start the key creation process.
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+:::note
+You can access this page directly by [navigating here](https://www.bitunix.com/account/api-management).
+:::
+
+- Now you are ready to setup your [Bitunix](https://teal.link/bitunix) API Key.
+
+<!-- :::warning
+There is currently a bug on Bitunix' side which doesn't permit IP whitelisting. We hope this will be fixed soon. Until it is fixed do not whitelist IP's for your API Key.
+::: -->
+
+- Choose a name for your API Key, this can be anything you want.
+    - Ensure **Trading API** is selected.
+        <!-- * Ensure **IP Binding** is filled with the IP's provided in the Tealstreet API creation window. -->
+    - Ensure **Permission** is set to **Trade**.
+    - When ready click the **Get Code** button to receive a verification code via email. Then put the code in the box near the bottom.
+    - Click the **Submit** button at the bottom of the page.
+
+- Now you're key shouldve be created. Make sure you keep this information secure and handy as we will use it inside the Tealstreet terminal.
+
+<div class="text--center">
+    <img src={ApiCreated} alt="API Created" style={{ width: 500 }} />
+</div>
+
+:::caution
+Tealstreet team members will never ask you what your API key is. Never share your API Keys with anyone.
+:::
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Teal" style={{ width: 700 }} />
+</div>
+
+:::warning
+There is currently a bug on Bitunix' side which doesn't permit IP whitelisting. We hope this will be fixed soon. Until it is fixed do not whitelist IP's for your API Key.
+:::
+
+- Proceed to fill out the form with the information you got when you created the API on the Bitunix API page.
+  - Enter your **Bitunix Access Code**.
+    - This is a code you will receive via email when you ask us for it. [Details here](https://www.tealstreet.io/post/bitunix-api-keys-now-requires-use-of-tealstreets-bitunix-referral-link).
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **API Key** Bitunix showed you when you created the API.
+  - Provide the **API Secret** Bitunix showed you when you created the API.
+  - Click Done.
+
+<OutroTealstreet exchangeName="Bitunix" />
+
+---
+
+## Bitunix Access Code
+
+- **Bitunix Access Codes are now required** to add Bitunix API Keys in Tealstreet v3 due to updates in Bitunix’s system and policies.
+- **How to get your Access Code:**  
+  Email [support@tealstreet.io](mailto:support@tealstreet.io) with your Bitunix UID and your Tealstreet account email.  
+  _Access Codes are unique and can only be used once._
+- **Eligibility:**  
+  You must use the [Tealstreet referral link](https://teal.link/bitunix) to register your Bitunix account. If you already have a Bitunix account, you’ll need to create a new one with the referral link for the Access Code.
+- **Benefits:**  
+  Registering via the Tealstreet referral link gives you a **35% rebate on Futures** and **25% rebate on Spot** trading.
+- The Tealstreet team hopes this Access Code requirement will be removed in the future when Bitunix updates their system.
+- **Alternative exchanges:**  
+  If you do not wish to use the referral link or Access Code, consider using BloFin, Bybit, OKX, or Phemex instead.
+
+<!-- -   -   -   -
+
+## Troubleshooting -->
+
+<!-- * During May 2022 **BingX** deprecated their old API. If you are receiving an error about inability to decrypt the password and the API stopped working please switch to the upcoming V3 release of Tealstreet. Read more about it [here](/docs/about/version-3).
+
+* I am seeing a message about insufficient margin when trying to place an order?
+
+  * This is likely to have occurred if you have not transferred any funds to your __Perpetual Futures__ account.
+    * By default funds transfer into the **Standard Futures** account.
+
+* I am seeing a message about "risk forbidden" in my order window?
+
+  * Please double check your API key permissions you used when making the API.
+    * Some users have reported they fixed it by remaking their API with the correct permissions. -->
+
+<!-- -   -   -   -
+
+## Frequently Asked Questions -->
+
+<!-- * I am getting an error trying to link my API key on BingX it keeps saying refresh browser?
+      * Around July 2024 BingX upgraded their API which broke support for V2 of Tealstreet. Please switch to [V3](https://preview.tealstreet.io/trade)
+
+* Can users trade BingX's Standard Futures like Stocks, Forex, and Indices through Tealstreet?
+
+  * No. At the time of this writing **BingX** does not offer a open API for their Standard Futures. Tealstreet users can only trade BingX's Perpetuals.
+
+* Am I limited in the amount of leverage I can use in perp futures?
+
+  * Yes. BingX has certain restrictions for users who do not KYC when trading on certain pairs. (BTC and ETH are generally exempt from this restriction)
+
+  :::note
+  For more info please check out the [BingX Documentation](https://bingx.com/en-us/support/articles/360045899754-PerpetualFuturesPasanganPerdaganganLeveragedanLimit/)
+  :::
+
+* Can I change my margin from Isolated to Cross?
+
+  * Yes. BingX defaults users to isolated but you can change it to cross. In the top right corner of the perp trading page you will see a button called Margin next to the Leverage indicator. Click it.
+
+<div class="text--center">
+  <img src={CrossMargin} alt="Margin Selector" style={{width: 400}} />
+</div>
+
+* Here you can easily switch your margin mode.
+
+<div class="text--center">
+  <img src={CrossMargin2} alt="Margin Selection" style={{width: 400}} />
+</div> -->
+
+<!-- * Can I use One-Way mode for trading instead of hedged?
+
+  * Yes you can use One-Way mode. -->

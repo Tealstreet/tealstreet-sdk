@@ -1,0 +1,193 @@
+import type { ServerWebSocket, WebSocketHandler } from 'bun';
+import type { StandalonePlatformAdapter } from '../platform-adapter';
+import { logger } from '../logger';
+import { isOriginAllowed, getUserEmail } from './auth';
+import { isTrusted, addTrustedClient } from './state';
+import { promptApproval } from './prompt';
+import { handleCmdExec, type ProcessCommandFn } from './handlers/cmd';
+import { handleMutateAccount } from './handlers/account';
+import { handleMutateHook, HOOK_OUTPUT_TOPIC } from './handlers/hook';
+import { sendAccountsSnapshot, ACCOUNTS_TOPIC } from './account-broadcast';
+import { sendTasksSnapshot, TASKS_TOPIC } from './tasks-broadcast';
+import { sendHooksSnapshot, HOOKS_TOPIC } from './hooks-broadcast';
+import { isAccountSyncEnabled } from './config';
+
+export interface WsSessionData {
+  origin: string;
+  clientId?: string;
+  label?: string;
+  trusted: boolean;
+  helloSeen: boolean;
+}
+
+interface HelloFrame {
+  t: 'hello';
+  clientId: string;
+  label?: string;
+}
+
+function isHello(msg: unknown): msg is HelloFrame {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    (msg as { t?: unknown }).t === 'hello' &&
+    typeof (msg as { clientId?: unknown }).clientId === 'string' &&
+    (msg as { clientId: string }).clientId.length > 0
+  );
+}
+
+function sendWelcome(ws: ServerWebSocket<WsSessionData>, listenerId: string): void {
+  const email = getUserEmail();
+  ws.send(JSON.stringify({ t: 'welcome', listenerId, user: { email } }));
+}
+
+function sendRejected(ws: ServerWebSocket<WsSessionData>): void {
+  ws.send(JSON.stringify({ t: 'rejected' }));
+}
+
+export function buildWebSocketHandler({
+  adapter,
+  listenerId,
+  processCommand,
+  notifyOwnAccountWrite,
+  notifyOwnHookWrite,
+  onClientConnect,
+}: {
+  adapter: StandalonePlatformAdapter;
+  listenerId: string;
+  processCommand: ProcessCommandFn;
+  notifyOwnAccountWrite: () => void;
+  notifyOwnHookWrite: () => void;
+  onClientConnect?: () => void;
+}): WebSocketHandler<WsSessionData> {
+  const onTrusted = (ws: ServerWebSocket<WsSessionData>) => {
+    if (isAccountSyncEnabled()) {
+      ws.subscribe(ACCOUNTS_TOPIC);
+      sendAccountsSnapshot(ws);
+    }
+    ws.subscribe(TASKS_TOPIC);
+    sendTasksSnapshot(ws);
+    ws.subscribe(HOOKS_TOPIC);
+    ws.subscribe(HOOK_OUTPUT_TOPIC);
+    sendHooksSnapshot(ws);
+  };
+  return {
+    open(ws) {
+      if (!isOriginAllowed(ws.data.origin)) {
+        logger.warn(`listener: origin-blocked ${ws.data.origin || '(no Origin header)'}`);
+        ws.close(4002, 'origin-blocked');
+        return;
+      }
+      logger.info(`listener: client opened from ${ws.data.origin}`);
+      onClientConnect?.();
+    },
+
+    async message(ws, raw) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
+      } catch {
+        logger.warn('listener: invalid JSON frame');
+        return;
+      }
+
+      if (!ws.data.helloSeen) {
+        if (!isHello(parsed)) {
+          logger.warn('listener: first frame was not a valid hello — closing');
+          ws.close(4001, 'expected-hello');
+          return;
+        }
+        ws.data.helloSeen = true;
+        ws.data.clientId = parsed.clientId;
+        ws.data.label = parsed.label ?? '';
+
+        const known = isTrusted(parsed.clientId);
+        if (known) {
+          ws.data.trusted = true;
+          sendWelcome(ws, listenerId);
+          onTrusted(ws);
+          logger.info(`listener: welcomed known client ${parsed.clientId.slice(0, 8)}`);
+          return;
+        }
+
+        const approved = await promptApproval({
+          adapter,
+          clientId: parsed.clientId,
+          label: ws.data.label,
+          origin: ws.data.origin,
+        });
+
+        if (approved) {
+          try {
+            addTrustedClient({
+              clientId: parsed.clientId,
+              label: ws.data.label,
+              origin: ws.data.origin,
+            });
+          } catch (err) {
+            logger.error(`listener: failed to persist trusted client: ${(err as Error).message}`);
+            sendRejected(ws);
+            ws.close(4001, 'persist-failed');
+            return;
+          }
+          ws.data.trusted = true;
+          sendWelcome(ws, listenerId);
+          onTrusted(ws);
+          adapter.printSuccess(`Approved client ${parsed.clientId.slice(0, 8)}…`);
+          return;
+        }
+
+        sendRejected(ws);
+        ws.close(4001, 'rejected');
+        return;
+      }
+
+      // Post-hello dispatch.
+      if (!ws.data.trusted) {
+        logger.warn('listener: post-hello frame from untrusted ws — closing');
+        ws.close(4001, 'untrusted');
+        return;
+      }
+      const t = (parsed as { t?: unknown }).t;
+      if (t === 'cmd:exec') {
+        const id = (parsed as { id?: unknown }).id;
+        const command = (parsed as { command?: unknown }).command;
+        const account = (parsed as { account?: unknown }).account;
+        const symbol = (parsed as { symbol?: unknown }).symbol;
+        if (typeof id !== 'string' || id.length === 0) {
+          logger.warn('listener: cmd:exec missing id');
+          return;
+        }
+        if (typeof command !== 'string') {
+          ws.send(JSON.stringify({ t: 'cmd:done', id, success: false, error: 'cmd:exec missing command' }));
+          return;
+        }
+        void handleCmdExec(
+          ws,
+          id,
+          command,
+          processCommand,
+          typeof account === 'string' && account.length > 0 ? account : undefined,
+          typeof symbol === 'string' && symbol.length > 0 ? symbol : undefined,
+        );
+        return;
+      }
+      if (t === 'mutate:account') {
+        const result = handleMutateAccount(ws, parsed);
+        if (result.wrote) notifyOwnAccountWrite();
+        return;
+      }
+      if (t === 'mutate:hook') {
+        const result = handleMutateHook(ws, parsed);
+        if (result.wrote) notifyOwnHookWrite();
+        return;
+      }
+      logger.info(`listener: unhandled post-hello frame t=${String(t)}`);
+    },
+
+    close(ws, code, reason) {
+      const id = ws.data.clientId ? ws.data.clientId.slice(0, 8) : '(no hello)';
+      logger.info(`listener: client closed ${id} code=${code} reason=${reason || ''}`);
+    },
+  };
+}

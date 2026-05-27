@@ -1,0 +1,60 @@
+---
+title: Responsible Disclosure
+description: Responsible Disclosure of Security Vulnerabilities
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: true
+---
+
+---
+
+## Introduction
+
+At Tealstreet, we prioritize the security and privacy of our users. We recognize the valuable role that the security research community plays in maintaining a safe and secure online environment.
+This Vulnerability Disclosure Policy provides guildelines for working with us to disclose potential vulnerabilities.
+
+## Guidelines
+
+If you have discovered a potential security vulnerability, we ask that you report it to us under the following guidelines:
+
+- **Secure Reporting:** Please email your findings to us at [security@tealstreet.io].
+- **Responsible Investigation:** Avoid any testing that would result in:
+    - Denial of service to our users or infrastructure.
+    - Social Engineering or phishing attempts against our users or employees.
+    - Degradation of user experience, disruption to production systems, and destruction of data.
+- **Confidentiality:** Please keep the issue confidential until we have resolved it. We respect the importance of privacy and confidentiality and we expect the same in return.
+- **Proof of Concept:** Please provide detailed steps to reproduce the vulnerability. This should include scripts, screenshots, or exploits.
+- **Safe Harbor:** If you follow these guidelines when reporting an issue to us, we commit to:
+    - Not Pursuing or supporting any legal action related to your research.
+    - Working with you to understand and resolve the issue quickly, including an initial confirmation of your report within 72 hours.
+    - Recognizing your contribution to improving our security if you are the first to report the issue and we make a code or configuration change based on the issue.
+
+## Out of Scope
+
+To keep our review process focused on issues that meaningfully affect our users, the following are considered out of scope and are not eligible for recognition or reward:
+
+- Reports targeting third-party services we use (Auth0, Sentry, Vercel, exchange APIs, etc.). Please report those to the respective vendors directly.
+- Theoretical issues without a working proof of concept demonstrating concrete impact on Tealstreet users or data.
+- Missing security headers (X-Frame-Options, CSP, HSTS, etc.) on pages without authenticated functionality, sensitive data, or state-changing actions.
+- Denial-of-service issues, including resource exhaustion via large request payloads, request flooding, or rate-limit testing. Per our guidelines, DoS testing of any kind is prohibited.
+- Clickjacking on pages without authenticated, state-changing actions.
+- CORS misconfigurations on endpoints that do not return sensitive, authenticated, victim-supplied data.
+- Self-XSS, or issues that require the victim to perform unrealistic actions against themselves.
+- Reports generated primarily by automated scanners without manual validation of impact.
+- Social engineering of Tealstreet staff or users.
+- Issues affecting outdated browsers, jailbroken devices, or unsupported platforms.
+
+## Recognition and Rewards
+
+While we do not currently have a bug bounty program, we do recognize the effort of security researchers. We are open to discussing recognition or rewards for significant contributions in line with the impact of the reported issue.
+
+## Communication
+
+Once you've submitted a vulnerability report, we will respond within 72 hour to:
+
+- Acknowledge receipt of your report.
+- Provide an estimated time frame for a fix.
+- Ask for additional information if needed.
+
+For more information or questions about this policy, contact us at [security@tealstreet.io].

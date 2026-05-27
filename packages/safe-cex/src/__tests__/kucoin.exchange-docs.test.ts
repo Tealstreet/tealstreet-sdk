@@ -1,0 +1,1026 @@
+import type { ExchangeOptions } from '../types';
+
+import createHmac from 'create-hmac';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createAPI } from '../exchanges/kucoin/kucoin.api';
+import { KucoinExchange } from '../exchanges/kucoin/kucoin.exchange';
+import { ENDPOINTS } from '../exchanges/kucoin/kucoin.types';
+import { DefaultStore } from '../store/store.base';
+import {
+  MarginType,
+  OrderSide,
+  OrderStatus,
+  OrderStopTriggerType,
+  OrderTimeInForce,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../types';
+
+const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
+
+const createMockWs = () =>
+  ({
+    readyState: OPEN_STATE,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    close: vi.fn(),
+    send: vi.fn(),
+  }) as any;
+
+const makeExchange = () => {
+  const store = new DefaultStore();
+  const exchange = new KucoinExchange(
+    'kucoin' as any,
+    {
+      key: 'k',
+      secret: 's',
+      passphrase: 'p',
+    } as ExchangeOptions,
+    store,
+  );
+  return { exchange, store };
+};
+
+describe('KucoinExchange current futures docs compatibility', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not attach KuCoin API credentials to public-data-only futures REST requests', async () => {
+    const { exchange } = makeExchange();
+    const adapter = vi.fn().mockResolvedValue({
+      data: { code: '200000', data: [] },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    });
+    const api = createAPI({ publicDataOnly: true } as ExchangeOptions, exchange);
+    api.defaults.adapter = adapter;
+
+    await api.get(ENDPOINTS.MARKETS, { params: { symbol: 'XBTUSDTM' } });
+
+    const headers = adapter.mock.calls[0][0].headers;
+    expect(headers?.['KC-API-KEY']).toBeUndefined();
+    expect(headers?.['KC-API-SIGN']).toBeUndefined();
+    expect(headers?.['KC-API-TIMESTAMP']).toBeUndefined();
+    expect(headers?.['KC-API-PASSPHRASE']).toBeUndefined();
+    expect(headers?.['KC-API-KEY-VERSION']).toBeUndefined();
+  });
+
+  it('signs private futures REST requests with the unencoded query string', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+
+    const { exchange } = makeExchange();
+    const adapter = vi.fn().mockResolvedValue({
+      data: { code: '200000', data: {} },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    });
+    const api = createAPI({ key: 'k', secret: 's', passphrase: 'p' } as ExchangeOptions, exchange);
+    api.defaults.adapter = adapter;
+
+    await api.delete('/api/v1/sub/api-key', {
+      params: { apiKey: '67b3', subName: 'test', passphrase: 'abc!@#11' },
+    });
+
+    const timestamp = Date.parse('2026-05-02T12:00:00Z');
+    const expectedSignature = createHmac('sha256', 's')
+      .update(`${timestamp}DELETE/api/v1/sub/api-key?apiKey=67b3&subName=test&passphrase=abc!@#11`)
+      .digest('base64');
+
+    expect(adapter.mock.calls[0][0].headers?.['KC-API-SIGN']).toBe(expectedSignature);
+  });
+
+  it('maps active perpetual USDT contracts from current /contracts/active fields', async () => {
+    const { exchange } = makeExchange();
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          code: '200000',
+          data: [
+            {
+              symbol: 'XBTUSDTM',
+              baseCurrency: 'XBT',
+              quoteCurrency: 'USDT',
+              settleCurrency: 'USDT',
+              status: 'Open',
+              expireDate: null,
+              lotSize: 1,
+              tickSize: 0.1,
+              maxOrderQty: 1000000,
+              maxLeverage: 125,
+              multiplier: 0.001,
+              isInverse: false,
+            },
+            {
+              symbol: 'ETHUSDTM',
+              baseCurrency: 'ETH',
+              quoteCurrency: 'USDT',
+              settleCurrency: 'USDT',
+              status: 'Open',
+              expireDate: 1798761600000,
+              lotSize: 1,
+              tickSize: 0.01,
+              maxOrderQty: 1000000,
+              maxLeverage: 100,
+              multiplier: 0.01,
+              isInverse: false,
+            },
+          ],
+        },
+      }),
+    } as any;
+
+    const markets = await exchange.fetchMarkets();
+
+    expect(markets).toHaveLength(1);
+    expect(markets[0]).toMatchObject({
+      id: 'XBTUSDTM',
+      symbol: 'BTCUSDT',
+      base: 'BTC',
+      quote: 'USDT',
+      active: true,
+      precision: { amount: 1, price: 0.1 },
+      limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+      contractSize: 0.001,
+      isExpiring: false,
+      isInverse: false,
+    });
+  });
+
+  it('maps /allTickers array rows through marketsById', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          code: '200000',
+          data: [
+            {
+              symbol: 'XBTUSDTM',
+              price: '67153',
+              bestBidPrice: '67152.9',
+              bestAskPrice: '67153.1',
+              size: 21,
+            },
+          ],
+        },
+      }),
+    } as any;
+
+    const tickers = await exchange.fetchTickers();
+
+    expect(tickers).toEqual([
+      expect.objectContaining({
+        id: 'XBTUSDTM',
+        symbol: 'BTCUSDT',
+        bid: 67152.9,
+        ask: 67153.1,
+        last: 67153,
+        mark: 67153,
+        index: 67153,
+        volume: 21,
+      }),
+    ]);
+  });
+
+  it('uses millisecond kline query bounds and parses millisecond candle timestamps', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        data: [[1757659080000, 115328.4, 115328.4, 115284.2, 115284.2, 602, 69424.9528]],
+      },
+    });
+    exchange.xhr = { get } as any;
+
+    const candles = await exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '1h', limit: 2 });
+
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.KLINE, {
+      params: {
+        symbol: 'XBTUSDTM',
+        granularity: '60',
+        from: Date.parse('2026-05-02T10:00:00Z'),
+        to: Date.parse('2026-05-02T12:00:00Z'),
+      },
+    });
+    expect(candles[0]).toMatchObject({
+      timestamp: 1757659080,
+      open: 115328.4,
+      close: 115284.2,
+      volume: 602,
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('maps current position rows with uppercase margin mode and explicit position side', async () => {
+    const { exchange } = makeExchange();
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          code: '200000',
+          data: [
+            {
+              symbol: 'XBTUSDTM',
+              currentQty: 1,
+              markPrice: 120009.57,
+              avgEntryPrice: 120016.4,
+              leverage: 6,
+              unrealisedPnl: -0.00683,
+              liquidationPrice: 100475.86,
+              marginMode: 'ISOLATED',
+              positionSide: 'SHORT',
+            },
+          ],
+        },
+      }),
+    } as any;
+
+    const positions = await exchange.fetchOpenPositions();
+
+    expect(positions).toEqual([
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        side: PositionSide.Short,
+        positionMode: PositionMode.Hedged,
+        marginType: MarginType.Isolated,
+      }),
+    ]);
+  });
+
+  it('fetches missing-position metadata from current margin, position, and leverage endpoints', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const get = vi.fn((endpoint: string) => {
+      if (endpoint === ENDPOINTS.GET_MARGIN_MODE) {
+        return Promise.resolve({ data: { code: '200000', data: { marginMode: 'CROSS' } } });
+      }
+      if (endpoint === ENDPOINTS.GET_POSITION_MODE) {
+        return Promise.resolve({ data: { code: '200000', data: { positionMode: 1 } } });
+      }
+      if (endpoint === ENDPOINTS.POSITION_LEVERAGE) {
+        return Promise.resolve({ data: { code: '200000', data: { leverage: '3' } } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    exchange.xhr = { get } as any;
+
+    const metadata = await exchange.fetchPositionMetadata(['BTCUSDT']);
+
+    expect(metadata).toEqual([
+      {
+        symbol: 'BTCUSDT',
+        side: PositionSide.Long,
+        leverage: 3,
+        positionMode: PositionMode.Hedged,
+        marginType: MarginType.Cross,
+      },
+      {
+        symbol: 'BTCUSDT',
+        side: PositionSide.Short,
+        leverage: 3,
+        positionMode: PositionMode.Hedged,
+        marginType: MarginType.Cross,
+      },
+    ]);
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.GET_MARGIN_MODE, { params: { symbol: 'XBTUSDTM' } });
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.GET_POSITION_MODE);
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.POSITION_LEVERAGE, { params: { symbol: 'XBTUSDTM' } });
+  });
+
+  it('uses current REST endpoints and payloads for cross leverage, margin mode, and position mode', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 125 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const post = vi.fn().mockResolvedValue({ data: { code: '200000', data: true } });
+    exchange.xhr = { post } as any;
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
+
+    await exchange.setLeverage('BTCUSDT', 7);
+    await exchange.changeMarginType(true, 'BTCUSDT');
+    await exchange.changePositionMode(true);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.SET_LEVERAGE, { symbol: 'XBTUSDTM', leverage: '7' });
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.SET_MARGIN_MODE, { symbol: 'XBTUSDTM', marginMode: 'ISOLATED' });
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.SET_POSITION_MODE, { positionMode: '1' });
+  });
+
+  it('does not call the cross leverage endpoint for isolated margin', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 125 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Isolated);
+
+    await expect(exchange.setLeverage('BTCUSDT', 7)).rejects.toThrow(/cross-margin leverage/);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('cancels normal and stop orders from current cancel-all endpoints', async () => {
+    const { exchange } = makeExchange();
+    const deleteRequest = vi.fn().mockResolvedValue({ data: { code: '200000', data: {} } });
+    exchange.unlimitedXHR = { delete: deleteRequest } as any;
+
+    await exchange.cancelAllOrders();
+
+    expect(deleteRequest).toHaveBeenCalledWith(ENDPOINTS.CANCEL_ALL_ORDERS);
+    expect(deleteRequest).toHaveBeenCalledWith(ENDPOINTS.CANCEL_ALL_STOP_ORDERS);
+  });
+
+  it('uses native KuCoin contract ids for order create and cancel requests', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const deleteRequest = vi.fn().mockResolvedValue({ data: { code: '200000', data: {} } });
+    exchange.unlimitedXHR = { delete: deleteRequest } as any;
+
+    const [payload] = await exchange.formatCreateOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Limit,
+      price: 67000,
+      amount: 3,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    await exchange.cancelNormalOrders([
+      {
+        id: 'order-id',
+        symbol: 'BTCUSDT',
+      } as any,
+    ]);
+    await exchange.cancelSymbolOrders('BTCUSDT');
+
+    expect(payload.symbol).toBe('XBTUSDTM');
+    expect(deleteRequest).toHaveBeenCalledWith(`${ENDPOINTS.CANCEL_ORDERS}/order-id`, {
+      params: { symbol: 'XBTUSDTM' },
+    });
+    expect(deleteRequest).toHaveBeenCalledWith(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
+      params: { symbol: 'XBTUSDTM' },
+    });
+  });
+
+  it('routes attached take-profit and stop-loss orders through current st-orders fields', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+      positions: [
+        {
+          id: 'BTCUSDT:long',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 65000,
+          notional: 65000,
+          leverage: 5,
+          marginType: MarginType.Isolated,
+          positionMode: PositionMode.Hedged,
+          unrealizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 0,
+        },
+      ],
+    });
+    const post = vi.fn().mockResolvedValue({ data: { code: '200000', data: { orderId: 'order-id' } } });
+    exchange.unlimitedXHR = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Limit,
+      price: 67000,
+      amount: 1,
+      takeProfit: 70000,
+      stopLoss: 64000,
+      tpTriggerType: OrderStopTriggerType.MarkPrice,
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.PLACE_ALGO_ORDER,
+      expect.objectContaining({
+        symbol: 'XBTUSDTM',
+        side: 'buy',
+        type: 'limit',
+        leverage: 5,
+        marginMode: 'ISOLATED',
+        positionSide: 'LONG',
+        triggerStopUpPrice: '70000',
+        triggerStopDownPrice: '64000',
+        stopPriceType: 'MP',
+      }),
+    );
+  });
+
+  it('places standalone futures stop orders through the normal order endpoint stop fields', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+      positions: [
+        {
+          id: 'BTCUSDT:long',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 65000,
+          notional: 65000,
+          leverage: 5,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.Hedged,
+          unrealizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 0,
+        },
+      ],
+    });
+    const post = vi.fn().mockResolvedValue({ data: { code: '200000', data: { orderId: 'stop-id' } } });
+    exchange.unlimitedXHR = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      price: 64000,
+      amount: 1,
+      slTriggerType: OrderStopTriggerType.IndexPrice,
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.PLACE_ORDER,
+      expect.objectContaining({
+        symbol: 'XBTUSDTM',
+        side: 'sell',
+        type: 'market',
+        stop: 'down',
+        stopPrice: '64000',
+        stopPriceType: 'IP',
+        reduceOnly: true,
+        marginMode: 'CROSS',
+        positionSide: 'LONG',
+      }),
+    );
+  });
+
+  it('rejects trailing stop placement because it is absent from current futures REST docs', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Sell,
+        type: OrderType.TrailingStopLoss,
+        price: 64000,
+        amount: 1,
+      }),
+    ).rejects.toThrow(/trailing stop placement/);
+  });
+
+  it('maps native KuCoin order symbols and canceled statuses into internal orders', () => {
+    const { exchange } = makeExchange();
+
+    const [order] = exchange.mapOrder({
+      id: 'order-id',
+      symbol: 'XBTUSDTM',
+      status: 'cancelled',
+      side: 'buy',
+      type: 'limit',
+      price: '67000',
+      size: '1',
+      filledSize: '0',
+    });
+
+    expect(order).toMatchObject({
+      id: 'order-id',
+      symbol: 'BTCUSDT',
+      status: OrderStatus.Canceled,
+    });
+  });
+
+  it('uses current futures websocket topics with native symbols', () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const ws = exchange.publicWebsocket;
+    const mockSocket = createMockWs();
+    ws.ws = mockSocket;
+    ws.topics.ticker = { XBTUSDTM: 1 };
+
+    ws.subscribe();
+    const unsubscribe = ws.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
+    unsubscribe();
+
+    const payloads = mockSocket.send.mock.calls.map((call: any[]) => JSON.parse(String(call[0] || '{}')));
+    expect(payloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/tickerV2:XBTUSDTM' }),
+        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/limitCandle:XBTUSDTM_1min' }),
+        expect.objectContaining({ type: 'unsubscribe', topic: '/contractMarket/limitCandle:XBTUSDTM_1min' }),
+      ]),
+    );
+  });
+
+  it('parses current futures websocket ticker and candle payloads into internal symbols', () => {
+    const { exchange, store } = makeExchange();
+    const ticker = {
+      id: 'XBTUSDTM',
+      symbol: 'BTCUSDT',
+      bid: 0,
+      ask: 0,
+      last: 0,
+      mark: 0,
+      index: 0,
+      percentage: 0,
+      openInterest: 0,
+      fundingRate: 0,
+      fundingTime: 0,
+      volume: 0,
+      quoteVolume: 0,
+    };
+    store.update({ tickers: [ticker] });
+    const ws = exchange.publicWebsocket;
+    ws.ws = createMockWs();
+    const updateTicker = vi.spyOn(store, 'updateTicker');
+    const candleCallback = vi.fn();
+
+    ws.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, candleCallback);
+    ws.handleTickerSnapshot({
+      data: {
+        symbol: 'XBTUSDTM',
+        bestBidPrice: '86454.5',
+        bestAskPrice: '86454.6',
+      },
+    });
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contractMarket/limitCandle:XBTUSDTM_1min',
+        type: 'message',
+        data: {
+          symbol: 'XBTUSDTM',
+          candles: ['1731898200', '90638.6', '90638.7', '90639.1', '90638.2', '21.0', '21'],
+        },
+      }),
+    } as MessageEvent);
+
+    expect(updateTicker).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'BTCUSDT' }),
+      expect.objectContaining({ bid: 86454.5, ask: 86454.6 }),
+    );
+    expect(candleCallback).toHaveBeenCalledWith({
+      timestamp: 1731898200,
+      open: 90638.6,
+      close: 90638.7,
+      high: 90639.1,
+      low: 90638.2,
+      volume: 21,
+    });
+  });
+
+  it('seeds futures websocket orderbook from REST snapshot and applies incremental changes', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        code: '200000',
+        data: {
+          sequence: 16,
+          bids: [['100', '1']],
+          asks: [['101', '2']],
+        },
+      },
+    });
+    exchange.xhr = { get } as any;
+    const ws = exchange.publicWebsocket;
+    const mockSocket = createMockWs();
+    ws.ws = mockSocket;
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contractMarket/level2:XBTUSDTM',
+        type: 'message',
+        subject: 'level2',
+        sn: 17,
+        data: {
+          sequence: 17,
+          change: '100,buy,3',
+        },
+      }),
+    } as MessageEvent);
+
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.ORDERBOOK, { params: { symbol: 'XBTUSDTM' } });
+    expect(JSON.parse(String(mockSocket.send.mock.calls[0][0]))).toMatchObject({
+      type: 'subscribe',
+      topic: '/contractMarket/level2:XBTUSDTM',
+    });
+    expect(callback).toHaveBeenCalledTimes(2);
+    expect(callback.mock.calls.at(-1)?.[0]).toMatchObject({
+      bids: [expect.objectContaining({ price: 100, amount: 3 })],
+      asks: [expect.objectContaining({ price: 101, amount: 2 })],
+    });
+  });
+
+  it('refetches futures websocket orderbook snapshots instead of applying sequence gaps', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          code: '200000',
+          data: {
+            sequence: 16,
+            bids: [['100', '1']],
+            asks: [['101', '2']],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          code: '200000',
+          data: {
+            sequence: 18,
+            bids: [['100', '4']],
+            asks: [['101', '2']],
+          },
+        },
+      });
+    exchange.xhr = { get } as any;
+    const ws = exchange.publicWebsocket;
+    ws.ws = createMockWs();
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contractMarket/level2:XBTUSDTM',
+        type: 'message',
+        subject: 'level2',
+        sn: 18,
+        data: {
+          sequence: 18,
+          change: '100,buy,3',
+        },
+      }),
+    } as MessageEvent);
+
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(2));
+    expect(callback.mock.calls.at(-1)?.[0]).toMatchObject({
+      bids: [expect.objectContaining({ price: 100, amount: 4 })],
+    });
+  });
+
+  it('keeps refetching futures websocket orderbooks when a replacement snapshot is still behind a buffered gap', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          code: '200000',
+          data: {
+            sequence: 16,
+            bids: [['100', '1']],
+            asks: [['101', '2']],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          code: '200000',
+          data: {
+            sequence: 16,
+            bids: [['100', '2']],
+            asks: [['101', '2']],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          code: '200000',
+          data: {
+            sequence: 18,
+            bids: [['100', '4']],
+            asks: [['101', '2']],
+          },
+        },
+      });
+    exchange.xhr = { get } as any;
+    const ws = exchange.publicWebsocket;
+    ws.ws = createMockWs();
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contractMarket/level2:XBTUSDTM',
+        type: 'message',
+        subject: 'level2',
+        sn: 18,
+        data: {
+          sequence: 18,
+          change: '100,buy,3',
+        },
+      }),
+    } as MessageEvent);
+
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(2));
+    expect(callback.mock.calls.at(-1)?.[0]).toMatchObject({
+      bids: [expect.objectContaining({ price: 100, amount: 4 })],
+    });
+  });
+
+  it('subscribes current futures private websocket channels without an extra login frame', () => {
+    const { exchange } = makeExchange();
+    const ws = exchange.privateWebsocket;
+    const mockSocket = createMockWs();
+    ws.ws = mockSocket;
+    vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot').mockResolvedValue(undefined);
+
+    ws.onOpen();
+
+    const payloads = mockSocket.send.mock.calls.map((call: any[]) => JSON.parse(String(call[0] || '{}')));
+    expect(payloads.map((payload: Record<string, any>) => payload.topic)).toEqual(
+      expect.arrayContaining([
+        '/contractMarket/tradeOrders',
+        '/contractMarket/advancedOrders',
+        '/contract/positionAll',
+        '/contractAccount/wallet',
+        '/contract/marginMode',
+        '/contract/crossLeverage',
+      ]),
+    );
+    expect(payloads).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'login' })]));
+  });
+
+  it('refreshes private snapshots for current account websocket topics', () => {
+    const { exchange } = makeExchange();
+    const ws = exchange.privateWebsocket;
+    const refresh = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot').mockResolvedValue(undefined);
+
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contract/positionAll',
+        type: 'message',
+        data: { symbol: 'XBTUSDTM' },
+      }),
+    } as MessageEvent);
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contractAccount/wallet',
+        type: 'message',
+        data: { currency: 'USDT' },
+      }),
+    } as MessageEvent);
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contract/marginMode',
+        type: 'message',
+        data: { XBTUSDTM: 'CROSS' },
+      }),
+    } as MessageEvent);
+    ws.onMessage({
+      data: JSON.stringify({
+        topic: '/contract/crossLeverage',
+        type: 'message',
+        data: { XBTUSDTM: { leverage: '51' } },
+      }),
+    } as MessageEvent);
+
+    expect(refresh).toHaveBeenCalledTimes(4);
+  });
+
+  it('handles current futures private order event types', () => {
+    const { exchange, store } = makeExchange();
+    const ws = exchange.privateWebsocket;
+    const updateStatus = vi.spyOn(store, 'updateOrderStatus');
+    const addOrUpdateOrder = vi.spyOn(store, 'addOrUpdateOrder');
+    const emit = vi.spyOn(exchange.emitter, 'emit');
+
+    ws.handleOrderTopic({
+      data: {
+        symbol: 'XBTUSDTM',
+        orderId: 'cancel-id',
+        type: 'canceled',
+        status: 'done',
+        side: 'buy',
+        orderType: 'limit',
+        price: '90000',
+        size: '1',
+        filledSize: '0',
+        remainSize: '0',
+      },
+    });
+    ws.handleOrderTopic({
+      data: {
+        symbol: 'XBTUSDTM',
+        orderId: 'match-id',
+        type: 'match',
+        status: 'match',
+        side: 'buy',
+        orderType: 'limit',
+        price: '91670',
+        matchPrice: '91670',
+        size: '1',
+        filledSize: '1',
+        matchSize: '1',
+        remainSize: '0',
+      },
+    });
+
+    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'cancel-id' }), OrderStatus.Canceled);
+    expect(emit).toHaveBeenCalledWith(
+      'fill',
+      expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT', price: 91670, amount: 1 }),
+    );
+    expect(addOrUpdateOrder).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT' }));
+  });
+
+  it('maps current futures stop order websocket payloads', () => {
+    const { exchange } = makeExchange();
+
+    const [order] = exchange.mapOrder({
+      symbol: 'XBTUSDTM',
+      orderId: 'stop-id',
+      type: 'open',
+      orderType: 'stop',
+      stop: 'down',
+      stopPrice: '1000',
+      orderPrice: '900',
+      status: 'open',
+      side: 'buy',
+      size: '1',
+      filledSize: '0',
+    });
+
+    expect(order).toMatchObject({
+      id: 'stop-id',
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      price: 1000,
+    });
+  });
+});

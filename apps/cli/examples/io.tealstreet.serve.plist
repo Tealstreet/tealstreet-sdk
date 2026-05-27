@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Tealstreet CLI Serve - macOS launchd service file
+
+  Installation:
+    1. Copy this file to ~/Library/LaunchAgents/io.tealstreet.serve.plist
+    2. Load the service: launchctl load ~/Library/LaunchAgents/io.tealstreet.serve.plist
+    3. Start the service: launchctl start io.tealstreet.serve
+
+  Commands:
+    launchctl list | grep tealstreet          # Check if loaded
+    launchctl start io.tealstreet.serve       # Start
+    launchctl stop io.tealstreet.serve        # Stop
+    launchctl unload ~/Library/LaunchAgents/io.tealstreet.serve.plist  # Disable
+    tail -f ~/.tealstreet/serve.log           # View logs
+
+  Note: Update ProgramArguments path if tealstreet is installed elsewhere.
+        Use 'which tealstreet' to find the correct path.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.tealstreet.serve</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/tealstreet</string>
+        <string>serve</string>
+        <string>--local-only</string>
+    </array>
+
+    <!-- Start automatically on login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart on crash -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Throttle restarts (wait 5 seconds between restart attempts) -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- Logging -->
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.tealstreet/serve.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.tealstreet/serve.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME</string>
+
+    <!-- Environment variables (uncomment and modify if needed) -->
+    <!--
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TEALSTREET_EXCHANGE_RELAY_URL</key>
+        <string>https://exchange.tealstreet.io</string>
+        <key>TEALSTREET_EXCHANGE_RELAY_WS</key>
+        <string>wss://exchange.tealstreet.io/account</string>
+        <key>TEALSTREET_WEB_URL</key>
+        <string>https://trade.tealstreet.io</string>
+    </dict>
+    -->
+</dict>
+</plist>

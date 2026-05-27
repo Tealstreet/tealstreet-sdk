@@ -1,0 +1,99 @@
+---
+title: 括号订单
+description: Bracket Orders (Long / Short tool) are a tool to help traders determine their position size and manage their risk more effectively.
+sidebar_position: 15
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import PlaceOrder from '/img/trading/bracket-orders/placeorder.png';
+import EnableSettings from '/img/trading/bracket-orders/enablesettings.png';
+import Example from '/img/trading/bracket-orders/example.png';
+import PreviewDrag from '/img/trading/bracket-orders/preview-drag.gif';
+import AddDrawing from '/img/trading/bracket-orders/add-drawing.gif';
+
+## 括号订单（做多/做空工具）
+
+什么是Bracket Orders？
+
+<div class="text--center">
+    <img src={Example} alt="Bracket Orders Example Order" style={{ width: 750 }} />
+</div>
+
+RR 工具（Bracket Orders）根据预定义的参数（如风险金额、止损和止盈水平）计算交易的潜在风险和回报。它可用于帮助交易者确定其头寸大小并更有效地管理风险。
+
+:::tip
+你可以从Tradingview的**[多头/空头工具页面](https://www.tradingview.com/support/solutions/43000475660-how-to-use-long-and-short-position-drawing-tools/)**了解更多信息。
+:::
+
+---
+
+### 启用 RR 工具
+
+<div class="text--center">
+    <img src={EnableSettings} alt="Bracket Orders Enable Settings" style={{ width: 450 }} />
+</div>
+
+要启用 RR 工具，请进入“交易设置”下的“beta”类别，并启用“Bracket Orders”选项。
+
+:::note
+默认情况下，TP将使用市价单。如果您希望使用限价单，请勾选第二个框“当成交价格达到时，用限价单替换TP”。
+:::
+
+---
+
+### 激活 RR 工具
+
+<div class="text--center">
+    <img src={PlaceOrder} alt="Bracket Orders Placing Order" style={{ width: 450 }} />
+</div>
+
+在上一节中启用了 RR 工具之后，您现在可以通过在下单模块中勾选 TP/SL 按钮来激活 RR 工具，如下图所示。
+
+:::note
+锁定大小将使用固定的交易大小而不是您的风险百分比来计算订单
+:::
+
+---
+
+### 使用 RR 工具
+
+<div class="text--center">
+    <img src={AddDrawing} alt="Bracket Orders Add Drawing" style={{ width: 450 }} />
+</div>
+
+将Bracket Orders添加到您的图表中的一种方法是使用侧面板TradingView绘制多头或空头头寸，如此gif所示。
+
+<div class="text--center">
+    <img src={PreviewDrag} alt="Bracket Orders Preview Drag" style={{ width: 450 }} />
+</div>
+
+一旦您从下单模块中激活了**预览**，或者在图表上应用了**多头/空头绘图**，您就可以轻松地将入场、止损和止盈价格拖动到您想要的位置。
+
+:::note
+如果您想取消括号订单，您可以在“下单模块”中点击“取消”或在图表上左键单击并删除绘图。
+:::
+
+---
+
+### RR工具相关问题
+
+- 当我按下取消或预览按钮时，为什么RR工具会从图表中消失？
+    - 当取消或预览订单时，RR 工具从图表中消失是正常行为。这样可以让您在不用杂乱无用的信息干扰的情况下查看和修改订单。
+
+- 如果 RR 工具从图表中消失了该怎么办？
+    - 如果 RR 工具从图表中消失了，您可以通过在下单表单中按预览按钮（假设您已启用它。有关启用详细信息，请参见上面的部分）或按住热键（默认键 **r**）并单击图表来重新启用它。
+
+- 我可以自定义 RR 工具中的风险计算吗？
+    - 是的，RR 工具通常根据预定义的设置计算风险。但是，如果您锁定了头寸大小，则 RR 工具将基于固定交易大小而不是定义的风险金额进行计算。这样可以更灵活地管理风险。
+
+- 如何调整 RR 工具中的风险和回报参数？
+    - 要调整 RR 工具中的风险和回报参数，请在启用时调整限价单 -> 下单模块中的 TP 和 SL 部分。有关更多详细信息，请参见上面的示例图像。
+
+- 为什么我不能在 Bitget 上使用括号订单？
+    - Bitget 最近更改了他们的 API，要求用户在设置止损之前必须有一个持仓。由于这个特定的要求更改，括号订单在 Bitget 上有时会表现出意外的行为。
+    - 有一个[Bitget 特定设置](/docs/connect/bitget)，可以帮助缓解这个问题。

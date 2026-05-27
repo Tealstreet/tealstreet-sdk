@@ -1,0 +1,178 @@
+---
+title: WOOFi
+description: 了解如何将 WOOFi API 连接到 Tealstreet。
+sidebar_position: 11
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import Dropdown from '/img/connect/woofi/dropdown.png';
+import WooFiConnect from '/img/connect/woofi/woofi-connect.png';
+import WooFiConnect2 from '/img/connect/woofi/woofi-connect2.png';
+import WooFiAccount from '/img/connect/woofi/woofi-account.png';
+import WooFiAcceptPermissions from '/img/connect/woofi/woofi-accept-permissions.png';
+import WooFiAcceptPermissions2 from '/img/connect/woofi/woofi-accept-permissions2.png';
+import WooFiApiSetup from '/img/connect/woofi/woofi-api-setup.png';
+import ApiCreate4 from '/img/connect/woofi/apicreate4.png';
+import ApiCreation2 from '/img/connect/woox/apicreation2.png';
+
+<ThemedImage
+    alt="WOOFi-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/WooFi-light.png'),
+        dark: useBaseUrl('/img/exchange/WooFi-dark.png'),
+    }}
+/>
+
+## 连接 [WOOFi](https://dex.woo.org/)到 Tealstreet
+
+- 首先，加载 [WOOFi](https://dex.woo.org/)页面，因为我们稍后会用到它。
+
+<!-- :::note
+Consider supporting Tealstreet by using the referral _[link](https://dex.woo.org/)._
+::: -->
+
+- 接下来，登录你的 [Tealstreet](http://app.tealstreet.io) 账户。
+
+:::tip
+最好同时打开 Tealstreet 和 [WOOFi](https://dex.woo.org/)两个标签。
+:::
+
+1. 成功登录Tealstreet后，浏览标题为**"API密钥 "的页面**
+
+2. 点击标题为**'新API密钥'**的蓝色按钮
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding Api" style={{ width: 750 }} />
+</div>
+
+- 从下拉菜单中选择 [WOOFi](https://dex.woo.org/)。
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 500 }} />
+</div>
+
+保持此窗口打开，稍后我们在 WOOFi 网站上创建 API 密钥时会用到它。
+
+---
+
+### 获取 API 密钥
+
+- 现在，您已准备好在 WOOFi 账户中获取 API 密钥。前往 [WOOFi](https://dex.woo.org/)页面：
+    - 点击页面右上方的**连接**。
+
+<div class="text--center">
+    <img src={WooFiConnect} alt="WOOFi Wallet Connect" style={{ width: 400 }} />
+</div>
+
+- 选择您想用来连接 WOOFi 的任何钱包。
+    - 在本指南中，我们将使用 **Rabby Wallet** 和 **Arbitrum** 网络。
+
+:::note
+WOOFi 还支持 Optimism 和 Polygon 网络。
+:::
+
+:::warning
+激活一个钱包将禁用另一个钱包。例如，如果您通常使用 Metamask，而您激活了 Rabby，它将停用您的 Metamask 钱包。一次只能激活一个钱包。
+:::
+
+<div class="text--center">
+    <img src={WooFiConnect2} alt="WOOFi Wallet Selection" style={{ width: 500 }} />
+</div>
+
+- 您需要签署两份请求，以验证钱包所有权，从而完成 WOOFi 账户设置。
+
+<div class="text--center">
+    <img src={WooFiAcceptPermissions} alt="WOOFi Accept Permissions" style={{ width: 400 }} />
+</div>
+
+<div class="text--center">
+    <img src={WooFiAcceptPermissions2} alt="WOOFi Accept Permissions 2" style={{ width: 300 }} />
+</div>
+
+<!-- :::tip
+You can get to this page directly by navigating to **[this link](https://x.woo.org/en/account/sub-account/)**
+::: -->
+
+- 现在，我们准备获取API密钥和秘密，以便将其链接到Tealstreet。
+    - 从你的主账户窗口/仪表板找到顶部面板附近的API按钮，点击它。
+
+<div class="text--center">
+    <img src={WooFiAccount} alt="WOOFi main account window" style={{ width: 600 }} />
+</div>
+
+在这个窗口中，找到你的Orderly API Key、Orderly API Secret和账户ID。您需要用这些信息将您的账户与Tealstreet连接起来。
+
+<div class="text--center">
+    <img src={WooFiApiSetup} alt="WOOFi main account window" style={{ width: 700 }} />
+</div>
+
+- 现在我们有了这 3 条信息，让我们回到 Tealstreet 终端。
+
+:::warning
+目前，请勿在您的 api 交易账户上激活 IP 限制。交易所服务似乎存在问题，如果激活，您的账户将无法使用。这是一个已知错误，目前正在解决中。
+:::
+
+<!-- * Provide the IP Addresses that are to be whitelisted that you can get from inside the Terminals **API Keys** window we opened earlier.
+      * In the screenshot below I have highlighted the **'clipboard'** function you can click to copy the IP addresses to your clipboard. You can then paste them into the WOOFi API keys box in step 4.
+
+<div class="text--center">
+  <img src={ApiCreate4} alt="API Created" style={{width: 500}} />
+</div> -->
+
+---
+
+###将API密钥连接到Tealstreet
+
+现在，让我们回到离开Tealstreet API页面的地方：
+
+<div class="text--center">
+    <img src={ApiCreation2} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- 使用在 **WOOFi API** 页面找到 API 密钥时获得的信息填写表格。
+    1. 给密钥起一个名字，可以是任何你想要的名字。
+    2. 提供**加密密码**。这是由您自己创建的额外安全层。
+
+    :::tip
+    有关加密工作原理的更多信息，请参阅 **[API加密](/docs/connect/api-encryption)**。
+    ::: 3. 提供您访问 API 管理页面时 WOOFi 显示的 **API 帐户 ID**。\* 应用程序 ID = API 帐户 ID。4. 提供您访问 API 管理页面时 WOOFi 向您显示的 **API 密钥**。5. 提供您访问 API 管理页面时 WOOFi 向您显示的 **API 密钥**。6. 点击创建。
+
+:::caution
+绝不与任何人分享你的API密钥。Tealstreet团队成员绝不会询问你的API密钥是什么。
+:::
+
+:::note
+请务必仔细检查，不要混淆**API Key**和**API Secret。**如果这些字段输入不正确，将无法将您的**[WOOFi](https://dex.woo.org/)**交换账户连接到Tealstreet。
+:::
+
+如果所有细节都正确无误，您就成功地将您的[WOOFi](https://dex.woo.org/)账户与Tealstreet连接起来了。
+
+- 您还需要将钱包中的资金存入 [WOOFi](https://dex.woo.org/) 账户，才能开始交易。
+    - 确保你有足够的煤气能够通过网络发送资金。
+    - 如果您以前未使用过 WOOFi，您可能需要在最后验证步骤中覆盖警告，才能最终完成存款。
+
+- 导航至 Tealstreet 终端的**交易**页面，从顶部下拉菜单中选择 [WOOFi](https://dex.woo.org/) 账户。
+    - 如果链接正确，你会看到你的余额出现在Tealstreet的保证金窗口。交易愉快
+
+---
+
+<!-- ## Troubleshooting
+
+### Leverage slider capped inside the terminal
+
+Woo restricts the amount of leverage that can be used via the API. This is a restriction that is not shared on the website.
+
+### Error about enabling futures
+
+<div class="text--center">
+  <img src={WooEnableFutures} alt="Enable Futures Error" style={{width: 500}} />
+</div>
+
+This error is caused by the API key not having futures enabled. To fix this, go to your WOOFi account page and enable futures trading. This also needs to be done for individual sub accounts. -->

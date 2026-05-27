@@ -1,0 +1,105 @@
+---
+title: Beta 功能和设置
+description: 本节将介绍各种被视为测试版（正在进行中）的系统和功能。
+sidebar_position: 20
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import CommonSettings from '/img/trading/common/common-settings.png';
+import BetaSettings from '/img/trading/beta-features/beta-settings.png';
+import TWAP from '/img/trading/beta-features/twap.png';
+import TwapStop from '/img/trading/beta-features/twap-stop.png';
+
+---
+
+本节将介绍各种设置或功能，这些设置或功能被视为Beta（正在进行的工作，有时会出现意外或有错误的行为）。这些功能不建议不熟悉测试和有时会遇到错误的用户使用。
+
+### 访问Beta设置面板
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Common Settings" style={{ width: 350 }} />
+</div>
+
+- 您可以通过单击终端右上角的齿轮图标来访问Beta设置页面。
+
+<div class="text--center">
+    <img src={BetaSettings} alt="Common Settings" style={{ width: 500 }} />
+</div>
+
+<details>
+    <summary>单击以获取有关Beta设置的更多信息</summary>
+    <p>
+        <b>启用K线弹出图表</b>：在<b>筛选器模块</b>中将鼠标悬停在符号上时启用<b>K线图表</b>弹出。 <br />
+        <b>启用多帐户流</b>：允许您在不需要切换交换API密钥的情况下监视和跟踪多个交易所的头寸。 <br />
+        <b>在图表上显示多个帐户</b>：显示当前正在使用的图表上的其他交换帐户头寸。 <br />
+        <b>在Tradingview中启用对象树（刷新）</b>
+        ：这将取消隐藏对象树，使您可以在图表上隐藏或显示特定的指标或绘图。启用后需要刷新图表。 <br />
+        <b>启用Chaser快速订单</b>：在<b>下单模块</b>内启用限价追踪系统。 <br />
+        <b>Chaser订单轮询速率（毫秒）</b>：追踪订单追踪价格的速度（较低的数字速度更快）。 <br />
+        <b>括号订单（TP / SL绘图/限制）</b>：将<b>下单模块</b>的限价订单部分扩展到支持使用图表上的Long /
+        Short工具来管理您的订单放置。 <br />
+        <b>当入场成交时，使用限价单替换止盈单</b>：默认情况下，使用Bracket Orders的止盈单使用Maker /
+        Taker订单。这将更改为使用限价/ Maker订单。这发生在客户端端。
+        <br />
+        <b>高数据重新采样率（~20 / s）</b>：增加Tealstreet在屏幕上更新和刷新数据的速率。您可以将其视为游戏中的FPS。{' '}
+        <br />
+        <b>最高数据重新采样率（~60 / s）</b>
+        ：进一步增加Tealstreet在屏幕上更新和刷新数据的速率。此设置将对系统资源使用产生明显影响。 <br />
+    </p>
+</details>
+
+---
+
+## 其他Beta功能
+
+这些是我们拥有的一些Beta系统，它们不是特定位于设置面板的Beta选项卡中。
+
+### TWAP订单
+
+在下单模块中，如果您选中右上角的复选框，则可以推出一些其他功能之一是TWAP。
+
+TWAP是一种强大的工具，可用于帮助您平均持仓或减仓。在此窗口中，您可以调整要购买的大小，可以像通常放置订单一样指定大小，例如使用预设大小按钮，手动输入大小或使用保证金滑块。
+
+<div class="text--center">
+    <img src={TWAP} alt="TWAP Orders" style={{ width: 400 }} />
+</div>
+
+将此更改为正常订单系统的更改为：
+
+- **订单计数**：
+    - 这是您要TWAP执行的总订单数。如果设置为10，则会在激活后放置10个订单。
+- **分钟**：
+    - 每个订单之间的分钟数。如果设置了10个订单并将分钟设置为1，则会在10分钟内执行10个订单。
+- **Rand. %**：
+    - 在您的订单中引入随机性。这将通过您指定的随机量来变化您的订单计数，大小和订单之间的时间，这可以帮助您避免对监视订单簿的任何人太可预测。
+        - 小心设置随机性太高，100％的值理论上可能不会放置任何订单，因为这在100％随机性的范围内。
+
+:::note
+即使刷新浏览器，TWAP会话也会被保留。
+:::
+
+---
+
+### 停止TWAP订单
+
+启动TWAP订单后，您可以转到“打开头寸和订单”面板来监视它并控制它。
+
+<div class="text--center">
+    <img src={TwapStop} alt="Stop TWAP Orders" style={{ width: 800 }} />
+</div>
+
+:::note
+目前，TWAP仅支持**市场** / **Taker**订单。我们正在努力添加对**限价** / **Maker**追踪订单的支持。
+:::
+
+:::caution
+TWAP是一项实验性功能，可能无法按预期工作。虽然我们会尽力使其稳定，但可能会出现问题。如果您遇到任何您认为是错误的问题，请联系我们的**[Discord](/docs/support/contact-us)**。
+:::
+
+:::danger
+并非每个交易所的行为都相同。它们在API数据，延迟甚至速率限制等方面都有轻微差异。这使得很难将此功能的行为统一在每个交易所上。在使用它进行实时和全尺寸交易之前，请通过测试订单数量或twap执行的持续时间来小心使用。
+:::

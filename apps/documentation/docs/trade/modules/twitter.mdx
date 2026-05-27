@@ -1,0 +1,172 @@
+---
+title: Twitter
+description: The Twitter module is a way to keep an eye on some of our favorite traders and other related news events
+sidebar_position: 14
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Twitter from '/img/trading/modules/twitter/modules-twitter.png';
+import SettingsTwitter from '/img/trading/modules/twitter/news-trading-settings.png';
+import TwitterEye from '/img/trading/modules/twitter/twittereye.png';
+import NewsTradingSettings from '/img/trading/modules/twitter/news-trading-settings.png';
+import NewsTrading from '/img/trading/modules/twitter/news-trading.gif';
+
+---
+
+This section will go over the **Twitter module** which will display a live feed which can be customized from the Twitter panel inside the settings window.
+
+### Activating the Twitter Module
+
+- To activate it proceed to the Modules tab in your settings panel.
+
+<div class="text--center">
+    <img src={Twitter} alt="Twitter Module Activation" style={{ width: 450 }} />
+</div>
+
+<div class="text--center">
+    <img src={SettingsTwitter} alt="Twitter Module" style={{ width: 700 }} />
+</div>
+
+:::tip
+Don't see your favorite trader? _[Let us know](/docs/support/contact-us)!_
+:::
+
+### Twitter Feed Categories
+
+The Twitter feed is organized into different categories to help you filter and focus on specific types of content:
+
+- **Traders** - Posts from cryptocurrency traders and analysts
+- **Crypto News** - News and updates from crypto news sources
+- **Bots** - Automated feeds and relay accounts
+- **All** - Combined view of all categories
+
+You can switch between these categories using the tabs at the top of the Twitter feed module.
+
+### Account Filtering
+
+<div class="text--center">
+    <img src={TwitterEye} alt="Twitter Eye" style={{ width: 600 }} />
+</div>
+
+:::note
+
+- You can click the eye symbol next to any tweet to hide that specific account from your feed. You can reset your filter by clicking **Clear Filter** button in the settings.
+- Filtered accounts are managed in the News Trading settings panel.
+  :::
+
+### Freeze on Hover Feature
+
+The Twitter feed includes a "Freeze on Hover" feature that allows you to pause the real-time updates when you're actively reading tweets. This prevents content from disappearing or shifting unexpectedly while you're focused on specific posts.
+
+To enable this feature:
+
+1. Go to **Settings** → **News Trading**
+2. Check the "Freeze news feed on hover" option
+
+When enabled, the feed will automatically freeze when you hover over it, and a "Scroll frozen" indicator will appear to let you know the feed is paused.
+
+### Text Highlighting System
+
+The Twitter feed includes a comprehensive text highlighting system that automatically emphasizes important keywords and allows you to create custom highlight rules.
+
+#### Built-in Highlights
+
+The system automatically highlights certain words with predefined colors:
+
+- **Green Highlights** - Bullish/positive terms like "buy", "bullish", "profit", "pump", "long", "ATH"
+- **Red Highlights** - Bearish/negative terms like "sell", "bearish", "loss", "dump", "short", "ATL"
+- **Yellow Highlights** - Important entities and events like "Binance", "SEC", "ETF", "Fed", "CPI", "FOMC"
+
+#### Custom Highlight Rules
+
+You can create your own highlight rules to emphasize specific keywords that are important to your trading strategy:
+
+1. Go to **Settings** → **News Trading**
+2. Scroll down to the "Highlights" section
+3. Enter keywords separated by commas (e.g., "bitcoin, ethereum, solana")
+4. Choose a color from the dropdown (orange, green, blue, red, yellow, purple, pink, teal, gray)
+5. Click "Add" to create the rule
+
+**Example Custom Rules:**
+
+- `bitcoin,btc` with orange color
+- `ethereum,eth` with blue color
+- `solana,sol` with purple color
+- `binance,coinbase` with green color
+
+The custom highlights take priority over built-in highlights and will make your specified keywords stand out in the feed.
+
+### Critical Alerts
+
+Critical alerts allow you to set up filters that will make specific tweets more prominent when they contain certain keywords or phrases.
+
+#### Setting Up Critical Alerts
+
+1. Go to **Settings** → **News Trading**
+2. Find the "Critical Alerts" section
+3. Enter your filter criteria and press Enter
+
+#### Filter Syntax
+
+- **Single Keywords**: Enter a single word to highlight tweets containing that term
+- **Multiple Keywords with AND Logic**: Use `+` to require all keywords to be present
+    - Example: `binance+trade` - matches tweets containing both "binance" AND "trade"
+    - Example: `bitcoin+crash+alert` - matches tweets containing all three words
+
+#### Use Cases
+
+Critical alerts are useful for:
+
+- **Breaking News**: Set up alerts for major events like "SEC+approval" or "ETF+launch"
+- **Exchange Issues**: Monitor for problems with "binance+down" or "coinbase+outage"
+- **Market Moves**: Track significant movements with "bitcoin+breakout" or "crash+alert"
+- **Regulatory News**: Stay informed with "SEC+enforcement" or "CFTC+investigation"
+
+When a tweet matches your critical alert criteria, it will be visually emphasized in the feed to ensure you don't miss important information.
+
+### Trading the News in Twitter
+
+In a recent update to Tealstreet we added the ability to place orders based on keywords inside the **twitter** & **news feed** modules. This allows you to quickly place a long or short order without needing to pull up the chart first. A way to potentially get a much quicker entry on a trade.
+
+- You can activate News Trading by going to the **Modules** panel in the terminal settings page.
+
+<div class="text--center">
+    <img src={NewsTradingSettings} alt="News Trading Settings" style={{ width: 500 }} />
+</div>
+
+- Once activated and customized as you like you will now be able to quickly act on trades from within the twitter feed module:
+
+<div class="text--center">
+    <img src={NewsTrading} alt="News Trading" style={{ width: 600 }} />
+</div>
+
+:::note
+Please be careful when using this feature as it can lead to unintended trades if you are not careful. Sometimes a tweet will come across that has no relation to crypto at all and can still trigger the detection system to generate trade buttons. We are working on ways to improve this feature in the future.
+:::
+
+### Advanced Features
+
+The Twitter feed module includes several advanced features:
+
+- **Retweet and Quote Support** - Full display of retweeted and quoted content with proper attribution
+- **Media Support** - Images and videos are displayed inline within the feed
+- **Text Highlighting** - Custom highlight rules can be applied to emphasize specific keywords
+- **Collapsible Content** - Long tweets can be collapsed to save space
+- **Auto-scroll** - New tweets automatically scroll to the top when you're not actively viewing the feed
+- **Virtual Scrolling** - Efficient rendering of large numbers of tweets for smooth performance
+
+### Settings Configuration
+
+You can customize the Twitter feed behavior through the News Trading settings:
+
+- **Freeze on Hover** - Pause feed updates when hovering
+- **Filtered Accounts** - Manage which accounts to hide from your feed
+- **Text Collapsing** - Enable/disable collapsing of long tweet text
+- **Word Breaking** - Control how long words are handled in the display
+- **Highlight Rules** - Set up custom keyword highlighting with colors
+- **Critical Alerts** - Configure filters for important tweets
+- **Custom Symbol/Keyword Pairs** - Map specific keywords to trading symbols for quick order placement

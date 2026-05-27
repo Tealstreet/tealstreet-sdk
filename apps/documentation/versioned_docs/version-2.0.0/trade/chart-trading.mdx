@@ -1,0 +1,243 @@
+---
+title: Chart Trading
+description: Chart Trading is a system that allows you to place orders directly on the chart.
+sidebar_position: 4
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import CommonSettings from '/img/trading/common/common-settings.png';
+import DraggableTPSL from '/img/trading/draggable-tp-sl/draggable-tp-sl.png';
+import ActivateDraggables from '/img/trading/draggable-tp-sl/activate-draggables.png';
+import Draggables from '/img/trading/draggable-tp-sl/draggables.gif';
+import DraggablePartial from '/img/trading/draggable-tp-sl/draggable-partial.png';
+import DraggablePartial2 from '/img/trading/draggable-tp-sl/draggable-partial2.gif';
+
+The chart in Tealstreet is provided by TradingView and displays data from the exchange API that is currently selected.
+
+<div class="text--center">
+
+![Chart-Main](/img/trading/chart-main.gif)
+
+</div>
+
+The chart supports all the features found in a regular TradingView Chart such as:
+
+- Drawing Tools
+
+<div class="text--center">
+
+![Drawing-Tools](/img/trading/drawing-tools.gif)
+
+</div>
+
+- Indicators
+
+<div class="text--center">
+
+![Indicators](/img/trading/indicators.gif)
+
+</div>
+
+- Different time frame candles
+- Different type of candle views
+- Trading view chart settings
+- Many more
+
+The most valuable aspect of the chart in Tealstreet is **Chart Trading**
+
+---
+
+### Trading on the Chart
+
+You can use the Tealstreet chart to:
+
+- View Positions
+- Place Orders
+- Drag Orders
+- Remove Orders
+- Place Stop Orders
+- Place Scaled Orders
+- View your liquidation
+- Veiw your break-even price
+- View your fills
+
+<div class="text--center">
+
+![Chart-Trading](/img/trading/chart-trading.gif)
+
+</div>
+
+:::note
+The Tealstreet Chart will remember the settings in your **Place Order** window to interact with the chart. This includes settings like post, reduce, trigger price, and close on trigger.
+
+<div class="text--center">
+
+![Chart-Settings](/img/trading/chartsettings.png)
+
+</div>
+:::
+
+---
+
+## Multiple Tab Chart Trading
+
+:::note
+This feature is new and may still have some linkering bugs. Please report any issues you find to the [Tealstreet Discord](/docs/support/contact-us)
+:::
+
+You can use the Tealstreet terminal to have multiple Trading View windows to view and manage your positions over multiple trading pairs.
+
+<div class="text--center">
+
+![Add-Chart](/img/trading/add-chart.gif)
+
+</div>
+
+- CLick on the "+" button at the top right of the chart window.
+- Use the Duplicate Button to add Multiple Chart windows.
+- Use the Remove Button to remove the additional windows.
+
+<div class="text--center">
+
+![Add-Chart-2](/img/trading/add-chart-2.gif)
+
+</div>
+
+:::note
+The Place Order Window will remember your settings set for your selected Trading pair.
+:::
+
+---
+
+## Draggable TakeProfit & Stoploss
+
+A very powerful feature while using Chart Trading in the Tealstreet Terminal is the ability to drag your TP & SL lines on the chart from your open positions.
+
+<div class="text--center">
+    <img src={DraggableTPSL} alt="Stub" style={{ width: 450 }} />
+</div>
+
+- Some users may find this to be much faster then manipulating the order panel
+- By default these stops and tp's are set to be market orders. See below for more info.
+
+:::note
+The behavior of this feature is not identical on every exchange, it is important to explore the nuances if you
+will be trading on multiple exchanges.
+:::
+
+<div class="text--center">
+    <img src={Draggables} alt="Stub" style={{ width: 600 }} />
+</div>
+
+---
+
+### Activating Draggable TP & SL
+
+- To activate the draggables functionality proceed into your settings
+
+<div class="text--center">
+    <img src={CommonSettings} alt="Stub" style={{ width: 300 }} />
+</div>
+
+- Under the TradingView (chart) settings category you will see the three options relating to draggables
+
+<div class="text--center">
+    <img src={ActivateDraggables} alt="Stub" style={{ width: 550 }} />
+</div>
+
+<details>
+    <summary>Click here for more information on Draggables</summary>
+    <p>
+        <b>Support Brackets from Orders</b>: This will allow you to use draggable functionality on resting orders.
+        <br />
+        <b>Support Brackets from Positions</b>: This will allow you to use draggable functionality on active positions.
+        <br />
+        <b>Bracket TP from Position Uses Limits</b>: This will force take-profit orders created from active positions to
+        use limit(maker) orders rather then the default market(taker) orders.
+        <br />
+        <b>Show Reverse Position Button</b>: This will show a button next to the draggable TP/SL buttons that will allow
+        you to quickly reverse your position with a market order.
+        <br />
+        <b>Enable Partial TP/SL on Chart</b>: This setting when enabled will allow you to drag your orders horizontally
+        to do partial amounts such as 10%, 25%, 50%, 75%, 100%, or cancel order.
+        <br />
+    </p>
+</details>
+
+---
+
+### Partial TP/SL Draggables
+
+- You can activate the partial draggable functionality by enabling the **Enable Partial TP/SL on Chart** setting in the **TradingView** settings category.
+
+<div class="text--center">
+    <img src={DraggablePartial} alt="Draggable Partial SL/TP" style={{ width: 350 }} />
+</div>
+
+- Once activated you can adjsust the size of the TP/SL based on where you drag it horizontally on the chart. The following gif shows an example of using this feature.
+
+<div class="text--center">
+    <img src={DraggablePartial2} alt="Draggable Partial SL/TP 2" style={{ width: 750 }} />
+</div>
+
+:::tip
+You can also adjust how large your TP or SL will be by dragging the TP/SL order horizontally on the chart.
+:::
+
+:::caution
+Not every exchange functions the same, for example [Bitget](/docs/connect/bitget) does not allow you to have more then one stoploss active at a time. This means that if you have a position open and you drag the stoploss to a new price it will cancel and fail if you have an existing stoploss.
+:::
+
+:::note
+This feature is new and still considered a beta feature. Please report any issues you find in the [Tealstreet Discord](/docs/support/contact-us)
+:::
+
+---
+
+## One Click Trading
+
+:::tip
+Ensure _[hotkeys](/docs/trade/shortcuts)_ are enabled.
+:::
+
+Use hotkeys to activate 1-click trading enabling users to submit limit orders instantly by clicking the **chart**, orderbook, or depth chart.
+‘Limit at clicked price’ means the terminal will submit a limit buy if the clicked price is below last trade price and a limit sell if above last trade price.
+
+<div class="text--center">
+
+![One-Clicked](/img/trading/one-click.png)
+
+</div>
+
+---
+
+## Auto populate order form price from chart
+
+Click on the chart while holding hotkey to auto populate order form price (hold “z” by default). Much faster than typing!
+
+<div class="text--center">
+
+![Auto-Chart](/img/trading/auto-chart.gif)
+
+</div>
+
+---
+
+## Additional information
+
+:::caution
+
+- Stoplosses do not function identically across all exchanges
+    - As an example on **[bitget](/docs/connect/bitget)** you will not be able to activate more then a single stoploss for an active position due to how the exchange handles stoplosses
+    - Some exchanges and/or settings will allow stops to show as infinity, this functionality can be emulated with the **[Close-On-Trigger](/docs/trade/placing-orders#stop-orders)** setting for exchanges that do not do infinity stops
+- It is usually a good idea to set the setting **Stops Placed on Chart Close on Trigger** as this will guarentee you do not accidentally end up an an opposite direct position when trying to close out of a position.
+  :::
+
+:::note
+The **Protect Position** button is currently non-functional.
+:::

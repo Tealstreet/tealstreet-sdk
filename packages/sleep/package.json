@@ -1,0 +1,21 @@
+{
+  "name": "@tealstreet/sleep",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'build-force' to test a build.\"",
+    "build-force": "tsup",
+    "clean": "rimraf ./dist ./coverage ./tsconfig.tsbuildinfo",
+    "dev": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'dev-force' to watch a dev version.\"",
+    "dev-force": "tsup --watch",
+    "fix-all-files": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --fix",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/sleep.eslintcache",
+    "test": "vitest run",
+    "typecheck": "tsc --project ./tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@tealstreet/prettierrc": "*",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

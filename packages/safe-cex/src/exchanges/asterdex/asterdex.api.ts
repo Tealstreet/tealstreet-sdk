@@ -1,0 +1,431 @@
+import type { AsterDEXExchange } from './asterdex.exchange';
+
+import * as crypto from 'crypto';
+
+import axios, { AxiosInstance } from 'axios';
+import axiosRateLimit from 'axios-rate-limit';
+import axiosRetry from 'axios-retry';
+import { ethers } from 'ethers';
+
+import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { LogSeverity } from '../../types';
+import type { AsterDEXAPIVersion } from './asterdex.types';
+import {
+  ASTERDEX_ENDPOINTS,
+  isAsterDEXV3PrivateKey,
+  resolveAsterDEXApiVersion,
+  resolveAsterDEXV3AuthContext,
+} from './asterdex.types';
+import { asterDEXVirtualClock } from './asterdex.virtualClock';
+
+interface AsterDEXAPIOptions {
+  apiKey?: string;
+  apiSecret?: string;
+  apiVersion?: AsterDEXAPIVersion;
+  v3UserAddress?: string;
+  v3SignerAddress?: string;
+  v3SignerPrivateKey?: string;
+  testnet?: boolean;
+}
+
+const PUBLIC_FAPI_PREFIXES = [
+  '/fapi/v1/ticker',
+  '/fapi/v1/klines',
+  '/fapi/v1/depth',
+  '/fapi/v1/trades',
+  '/fapi/v1/aggTrades',
+  '/fapi/v1/exchangeInfo',
+  '/fapi/v1/ping',
+  '/fapi/v1/time',
+  '/fapi/v3/ticker',
+  '/fapi/v3/klines',
+  '/fapi/v3/depth',
+  '/fapi/v3/trades',
+  '/fapi/v3/aggTrades',
+  '/fapi/v3/exchangeInfo',
+  '/fapi/v3/ping',
+  '/fapi/v3/time',
+] as const;
+
+const lastV3NonceBySigner = new Map<string, bigint>();
+
+const buildV3Nonce = (nonceScopeKey: string): string => {
+  const microsecondsNow = BigInt(asterDEXVirtualClock.getCurrentTimeMs()) * 1000n;
+  const prevNonce = lastV3NonceBySigner.get(nonceScopeKey) ?? 0n;
+  const nextNonce = microsecondsNow > prevNonce ? microsecondsNow : prevNonce + 1n;
+  lastV3NonceBySigner.set(nonceScopeKey, nextNonce);
+  return nextNonce.toString();
+};
+
+const generateV1Signature = (queryString: string, secret: string): string => {
+  // AsterDEX uses HMAC SHA256 signature (similar to Binance)
+  return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+};
+
+const buildQueryString = (params: Record<string, any>): string => {
+  // Build query string without sorting (order matters for signature)
+  // Filter out undefined, null, and empty string values
+  const filteredParams = Object.entries(params)
+    .filter(([_, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${String(value)}`); // No URL encoding for signature
+
+  return filteredParams.join('&');
+};
+
+const buildV3SigningPayload = (params: Record<string, any>): Record<string, string> => {
+  const result: Record<string, string> = {};
+  const sortedKeys = Object.keys(params).sort();
+
+  for (const key of sortedKeys) {
+    const value = params[key];
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    result[key] = String(value);
+  }
+
+  return result;
+};
+
+const generateV3Signature = (
+  params: Record<string, any>,
+  userAddress: string,
+  signerAddress: string,
+  signerPrivateKey: string,
+  nonce: string,
+): string => {
+  const payload = buildV3SigningPayload(params);
+  const serializedPayload = JSON.stringify(payload);
+  const encodedPayload = ethers.AbiCoder.defaultAbiCoder().encode(
+    ['string', 'address', 'address', 'uint256'],
+    [serializedPayload, userAddress, signerAddress, BigInt(nonce)],
+  );
+  const payloadHash = ethers.keccak256(encodedPayload);
+  const ethSignedHash = ethers.hashMessage(ethers.getBytes(payloadHash));
+  const normalizedPrivateKey = signerPrivateKey.startsWith('0x') ? signerPrivateKey : `0x${signerPrivateKey}`;
+  const signerKey = new ethers.SigningKey(normalizedPrivateKey);
+  const signature = signerKey.sign(ethSignedHash);
+  return ethers.Signature.from(signature).serialized;
+};
+
+const isPublicEndpoint = (url?: string): boolean => {
+  if (!url) return false;
+  return PUBLIC_FAPI_PREFIXES.some((prefix) => url.startsWith(prefix) || url.includes(prefix));
+};
+
+export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
+  const baseURL = exchange?.options?.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
+
+  const api = exchange
+    ? safeCexAxiosCreate(
+        {
+          baseURL,
+          timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+        exchange.options,
+        exchange,
+      )
+    : axios.create({
+        baseURL,
+        timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+  // Set up HTTP over WebSocket adapter if tunnel is enabled
+  if (exchange?.options?.tealstreetTunnel) {
+    api.defaults.adapter = axiosHttpOverWebsocketAdapter;
+  }
+
+  // Add retry logic for network errors
+  axiosRetry(api, {
+    retries: 3,
+    retryDelay: (retryCount) => retryCount * 1000,
+    retryCondition: (error) => {
+      return (
+        axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+        error.response?.status === 503 ||
+        error.response?.status === 504
+      );
+    },
+  });
+
+  // Add rate limiting
+  const rateLimitedAPI = axiosRateLimit(api, {
+    maxRequests: 10,
+    perMilliseconds: 1000,
+  });
+
+  return rateLimitedAPI;
+};
+
+export const createAPI = (exchange: AsterDEXExchange, options: AsterDEXAPIOptions = {}): AxiosInstance => {
+  const baseURL = options.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
+
+  const api = safeCexAxiosCreate(
+    {
+      baseURL,
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+    exchange.options,
+    exchange,
+  );
+
+  // Set up HTTP over WebSocket adapter if tunnel is enabled
+  if (exchange.options.tealstreetTunnel) {
+    setInnerAdapterForRemoteSigning(api, axiosHttpOverWebsocketAdapter);
+  }
+
+  // Add authentication interceptor
+  api.interceptors.request.use(
+    async (config) => {
+      const isPublic = isPublicEndpoint(config.url);
+
+      if (exchange.options.remoteSigner && !isPublic) {
+        return config;
+      }
+
+      if (!isPublic && options.apiKey) {
+        // Check if time sync is needed
+        if (asterDEXVirtualClock.needsSync()) {
+          if (exchange) {
+            exchange.log('Time sync needed, syncing with server...', LogSeverity.Info);
+          }
+          await asterDEXVirtualClock.syncClientServerTime(options.testnet, options.apiVersion);
+        }
+
+        // Add API key to headers
+        config.headers = config.headers || {};
+        config.headers['X-MBX-APIKEY'] = options.apiKey;
+
+        // Add timestamp and recvWindow
+        // Use AsterDEX-specific virtualClock for time synchronization
+        const timestamp = asterDEXVirtualClock.getCurrentTimeMs();
+        const recvWindow = 20000; // 20 seconds
+
+        // Prepare parameters for signature
+        // Binance-style APIs send all parameters as query params, even for POST/PUT
+        const data = config.data || config.params || {};
+
+        // Add timestamp and recvWindow at the end (order matters)
+        const params: Record<string, any> = {
+          ...data,
+          recvWindow,
+          timestamp,
+        };
+
+        const isV3Request = config.url?.includes('/fapi/v3/') ?? false;
+        let signature = '';
+
+        if (isV3Request) {
+          const { v3UserAddress, v3SignerAddress, v3SignerPrivateKey } = options;
+          if (!v3UserAddress || !v3SignerAddress || !v3SignerPrivateKey) {
+            throw new Error(
+              'AsterDEX v3 signing requires auth.userAddress, auth.signerAddress, and signer private key (auth.privateKey or secret)',
+            );
+          }
+          if (!isAsterDEXV3PrivateKey(v3SignerPrivateKey)) {
+            throw new Error('AsterDEX v3 signing requires a 64-byte hex private key');
+          }
+
+          const userAddress = ethers.getAddress(v3UserAddress);
+          const signerAddress = ethers.getAddress(v3SignerAddress);
+          const nonceScopeKey = `${userAddress}:${signerAddress}`;
+          const nonce = buildV3Nonce(nonceScopeKey);
+
+          signature = generateV3Signature(params, userAddress, signerAddress, v3SignerPrivateKey, nonce);
+          params.user = userAddress;
+          params.signer = signerAddress;
+          params.nonce = nonce;
+        } else {
+          if (!options.apiSecret) {
+            throw new Error('AsterDEX v1 signing requires API secret');
+          }
+          const queryString = buildQueryString(params);
+          signature = generateV1Signature(queryString, options.apiSecret);
+        }
+
+        // Add signature to parameters
+        params.signature = signature;
+
+        // For Binance-style API, all parameters go as query params
+        config.params = params;
+
+        // Remove data from POST/PUT/DELETE requests
+        // as parameters are sent via query string
+        if (config.data) {
+          delete config.data;
+        }
+      }
+
+      return config;
+    },
+    (error) => {
+      return Promise.reject(error);
+    },
+  );
+
+  // Add response interceptor for error handling
+  api.interceptors.response.use(
+    async (response) => {
+      // Check if response contains an error (Binance-style API returns errors with 200 status)
+      if (response.data?.code && response.data.code < 0) {
+        const errorMessage = `AsterDEX API Error: ${response.data.msg || 'Unknown error'} (code: ${response.data.code})`;
+
+        if (exchange) {
+          exchange.emitAndLogError(errorMessage);
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      return response;
+    },
+    async (error) => {
+      if (error.response) {
+        const { status, data } = error.response;
+
+        // Check for timestamp error
+        if (data?.code === -1021 && data?.msg?.includes('Timestamp')) {
+          // Timestamp error detected, resync time and retry once
+          if (exchange) {
+            exchange.log('Timestamp error detected, resyncing with server time...', LogSeverity.Warning);
+          }
+
+          // Resync time with AsterDEX server
+          await asterDEXVirtualClock.syncClientServerTime(options.testnet, options.apiVersion);
+
+          // Mark this request as already retried to avoid infinite loop
+          if (!error.config.__isRetryRequest) {
+            error.config.__isRetryRequest = true;
+
+            // Retry the original request with new timestamp
+            // Remove old signature parameters
+            if (error.config.params) {
+              delete error.config.params.timestamp;
+              delete error.config.params.signature;
+              delete error.config.params.recvWindow;
+              delete error.config.params.user;
+              delete error.config.params.signer;
+              delete error.config.params.nonce;
+            }
+
+            if (exchange) {
+              exchange.log('Retrying request with synced timestamp...', LogSeverity.Info);
+            }
+
+            // The request will go through the request interceptor again
+            // which will add fresh timestamp and signature
+            return api.request(error.config);
+          }
+        }
+
+        // Format error message for proper display
+        let errorMessage = `AsterDEX API Error: ${status}`;
+
+        // Add error details from response
+        if (data?.msg) {
+          errorMessage += ` - ${data.msg}`;
+        } else if (data?.error) {
+          errorMessage += ` - ${data.error}`;
+        }
+
+        // Include error code if available
+        if (data?.code) {
+          errorMessage += ` (code: ${data.code})`;
+        }
+
+        // Log and emit error (similar to Hyperliquid pattern)
+        if (exchange) {
+          exchange.emitAndLogError(errorMessage);
+
+          // Handle specific error codes
+          switch (status) {
+            case 401:
+              exchange.log('Authentication failed. Check API credentials.', LogSeverity.Error);
+              break;
+            case 429:
+              exchange.log('Rate limit exceeded. Reducing request frequency.', LogSeverity.Warning);
+              break;
+            case 503:
+            case 504:
+              exchange.log('Service temporarily unavailable. Will retry.', LogSeverity.Warning);
+              break;
+          }
+        }
+
+        // Throw error with formatted message
+        throw new Error(errorMessage);
+      }
+
+      return Promise.reject(error);
+    },
+  );
+
+  // Add retry logic
+  axiosRetry(api, {
+    retries: 3,
+    retryDelay: (retryCount) => retryCount * 1000,
+    retryCondition: (error) => {
+      return (
+        axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+        error.response?.status === 503 ||
+        error.response?.status === 504
+      );
+    },
+  });
+
+  // Add rate limiting based on endpoint weight
+  const rateLimitedAPI = axiosRateLimit(api, {
+    maxRequests: 20, // Adjust based on AsterDEX limits
+    perMilliseconds: 1000,
+  });
+
+  return rateLimitedAPI;
+};
+
+// Helper function to create multiple API instances with different rate limits
+export const createAPIInstances = (exchange: AsterDEXExchange) => {
+  const apiVersion = resolveAsterDEXApiVersion(exchange.options);
+  const v3Auth = resolveAsterDEXV3AuthContext(exchange.options);
+
+  const options: AsterDEXAPIOptions = {
+    apiKey: exchange.options.key,
+    apiSecret: exchange.options.secret,
+    apiVersion,
+    v3UserAddress: v3Auth.userAddress,
+    v3SignerAddress: v3Auth.signerAddress,
+    v3SignerPrivateKey: v3Auth.signerPrivateKey,
+    testnet: exchange.options.testnet,
+  };
+
+  // Primary API with standard rate limit
+  const primary = createAPI(exchange, options);
+
+  // Secondary API with reduced rate limit for heavy endpoints
+  const secondary = axiosRateLimit(createAPI(exchange, options), {
+    maxRequests: 5,
+    perMilliseconds: 1000,
+  });
+
+  // Unlimited API for time-sensitive operations (use with caution)
+  const unlimited = createAPI(exchange, options);
+
+  // Public API for market data
+  const publicAPI = createPublicAPI(exchange);
+
+  return {
+    primary,
+    secondary,
+    unlimited,
+    public: publicAPI,
+  };
+};

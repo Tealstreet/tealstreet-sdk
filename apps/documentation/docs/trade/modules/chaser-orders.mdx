@@ -1,0 +1,64 @@
+---
+title: Chaser Orders
+description: Auto-repricing post-only limit orders that “chase” the best bid/ask until filled or stopped.
+sidebar_position: 30
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+Chaser Orders place and continuously reprice post-only limit orders near the top of book until the target size is filled or the chaser stops (cancelled, fully filled, or no position left when reduce-only).
+
+::::caution
+Chasers rapidly place/cancel orders. Use on exchanges that support fast post-only updates, and monitor fees/limits.
+::::
+
+---
+
+### Starting & Stopping
+
+- Chasers run inside the trading worker; they watch the orderbook and reprice on every store update.
+- Start a chaser via trading actions (e.g., chase commands) and stop it by:
+    - Cancelling the chaser (`chasers cancel <id>` or `chasers cancel all` in CLI).
+    - Closing relevant positions when running reduce-only.
+    - Hitting full fill of the requested size.
+
+---
+
+### CLI Management
+
+- **List chasers:** `chasers`
+- **Cancel one:** `chasers cancel <id|prefix>`
+- **Cancel all:** `chasers cancel all`
+- **Live view:** `watch chase` for a streaming view of active chasers.
+
+Each entry shows symbol, side, filled/total size, attempts, status, and stop reason when done.
+
+---
+
+### How It Works
+
+- Places post-only limit orders at the predicted best bid/ask minus/plus a tick distance.
+- If orders are rejected or filled/cancelled, the chaser:
+    - Increments tick distance on repeated post-only rejects.
+    - Recomputes price from current best bid/ask and reposts.
+    - Tracks fills; marks complete when size is fully filled.
+- For reduce-only chasers, if the opposing position vanishes, the chaser stops.
+- Hyperliquid-specific: uses fill-based tracking and REST fill checks to handle delayed order status updates.
+
+---
+
+### Cancellation & Cleanup
+
+- Chasers unsubscribe from updates when stopped and attempt to cancel any live orders.
+- Manual cancellation removes the instance and attempts to cancel outstanding orders.
+
+---
+
+### Tips
+
+- Use sensible sizes; exchanges may throttle frequent cancels.
+- If you see “failed to place after retries,” widen tick distance or check exchange status.
+- For reduce-only chasers, ensure the position still exists or the chaser will stop immediately.

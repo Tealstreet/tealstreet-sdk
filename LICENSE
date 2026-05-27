@@ -1,0 +1,40 @@
+Tealstreet SDK — Proprietary and Confidential
+
+Copyright (c) 2026 Tealstreet Ltd. All rights reserved.
+
+"Tealstreet" means Tealstreet Ltd, a Cayman Islands company.
+
+This is NOT open-source software. No open-source license is granted.
+
+The contents of this repository — including, without limitation, `safe-cex`,
+the Tealstreet CLI, and every package, application, and supporting file herein
+(collectively, the "Licensed Software") — are the proprietary and confidential
+property of Tealstreet.
+
+GOVERNED BY YOUR SIGNED AGREEMENT
+
+Your access to and use of the Licensed Software are governed solely by the
+written agreement you have signed with Tealstreet — typically one or more of:
+
+  - a Contributor Agreement (confidentiality + IP assignment + a personal,
+    non-commercial use license);
+  - a Non-Disclosure Agreement (for pre-access evaluation); and/or
+  - a Commercial License (required for ANY use beyond the non-commercial
+    personal use granted by the Contributor Agreement).
+
+That signed agreement controls. In the event of any conflict between it and
+this notice, the signed agreement supersedes this notice.
+
+NO AGREEMENT, NO RIGHTS
+
+If you have not signed such an agreement with Tealstreet, you have NO right to
+access, use, copy, modify, distribute, or create derivative works from the
+Licensed Software, and you must delete all copies in your possession.
+
+BROKER / REFERRAL CODES
+
+Regardless of any rights granted by a signed agreement, you may not remove,
+disable, or alter any broker, referral, or affiliate codes embedded in the
+exchange integrations.
+
+For licensing inquiries, contact Tealstreet.

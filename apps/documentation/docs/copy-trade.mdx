@@ -1,0 +1,86 @@
+---
+title: Copy Trading (BETA) - DEPRECATED
+description: Tealstreet Cross Exchange Copy Trading
+sidebar_position: 99
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import CopyTradeTopButton from '/img/trading/copy-trade/copy-trade-setup.png';
+import CopyTradeTraders from '/img/trading/copy-trade/copy-trade-traders.png';
+import CopyTradeCopiers from '/img/trading/copy-trade/copy-trade-copying.png';
+import RequestAccess from '/img/trading/copy-trade/copy-trade-principal.png';
+
+---
+
+<div class="text--center">
+    <img src={CopyTradeTopButton} alt="Copy Trading Setup (Top Button)" style={{ width: 600 }} />
+</div>
+
+Tealstreet **Copy Trading** is a feature that allows you to copy the trades of specific traders.
+
+    * For now this means TraderSamwise & Pocky only.
+    * This is also currently limited to users in the **Beta** test group using a Tealstreet reflink.
+      * You can request access to the beta on our discord. [Contact us](/docs/support/contact-us) for more information.
+
+## Copy Trading - Traders
+
+<div class="text--center">
+    <img src={CopyTradeTraders} alt="Copy Trading - Traders" style={{ width: 800 }} />
+</div>
+
+- The principal traders are a curated group of traders that you can copy trades from if you want to do so.
+    - Only certain traders will be permitted to be principal traders for the time being.
+    - For now this means only TraderSamwise.
+    - The principal trader has to accept your request to copytrade.
+
+:::note
+Using copytrading will be limited to accounts that have used a **[Tealstreet Ref-Link](/docs/ref-links)**.
+:::
+
+---
+
+### Copy Trading - Copiers
+
+<div class="text--center">
+    <img src={CopyTradeCopiers} alt="Copy Trade - Copiers" style={{ width: 800 }} />
+</div>
+
+- The **Copying** section will show which traders have signed up under a principal.
+
+---
+
+## Requesting Access to a Principal Trader
+
+<div class="text--center">
+    <img src={RequestAccess} alt="Requesting access to a Principal Copytrader" style={{ width: 800 }} />
+</div>
+
+1. Select an API key you wish to enable copy-trading on.
+2. Re-Enter your existing API Keys Encryption Password.
+3. Enter the size multiplier you wish to use.
+4. Click Submit.
+
+- For now cross-exchange copying is experimental and not really recommended. Best results will likely be achieved by copying a trader on the same exchange as you.
+- **Size Multiplier**: This is the multiplier that will be applied to the principal traders position size. If the principal trader opens a 1 BTC position and you have a size multiplier of 2, then you will open a 2 BTC position.
+    - If the principal withdraws / deposits margin then the system will update the multiplier proportionally.
+        - An email is expected to go out to all copiers when this happens.
+
+:::caution
+This feature is still in **BETA**. Please use it with caution.
+:::
+
+:::note
+Your encryption password is never shared. What happens is that a copy of your api key gets re-encrypted with the principals encryption password. To read more about this please see our **[API Encryption page.](/docs/connect/api-encryption)**
+:::
+
+---
+
+## FAQ / Troubleshooting
+
+- Can I adjust my size multiplier after I created the request?
+    - Currently no, this functionality is expected in a future update.
+        - For now just cancel current copy and request a new one with the modified multiplier

@@ -1,0 +1,137 @@
+---
+title: Lighter
+description: Connect your Lighter account to Tealstreet.
+sidebar_position: 21
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import ApiTeal from '/img/connect/lighter/api-teal.png';
+import WalletConnect from '/img/connect/lighter/walletconnect.png';
+import WalletConnect2 from '/img/connect/lighter/walletconnect2.png';
+import WalletConnect3 from '/img/connect/lighter/walletconnect3.png';
+import ApiDropdown from '/img/connect/lighter/apidropdown.png';
+import AuthorizeWallet from '/img/connect/lighter/authorizewallet.png';
+import AuthorizeWallet2 from '/img/connect/lighter/authorizewallet2.png';
+import AccountTier from '/img/connect/lighter/account-tier.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<ThemedImage
+    alt="lighter-logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/lighter-light.png'),
+        dark: useBaseUrl('/img/exchange/lighter-dark.png'),
+    }}
+/>
+
+## Connecting [Lighter](https://teal.link/lighter) to Tealstreet
+
+<IntroTealstreet exchangeName="Lighter" />
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [Lighter](https://teal.link/lighter) and:
+    - Login or connect your wallet when the window pops up
+        - If a window did not automatically pop up click the connect button at the top right of the page
+
+:::note
+Lighter's main website may be unavailable in restricted jurisdictions. If you cannot access it, review Lighter's Terms and regional availability requirements before continuing.
+:::
+
+<div class="text--center">
+    <img src={WalletConnect} alt="Wallet Connect" style={{ width: 500 }} />
+</div>
+
+<div class="text--center">
+    <img src={WalletConnect2} alt="Wallet Connect 2" style={{ width: 400 }} />
+</div>
+
+- For this guide we will be using the **[Rabby](https://rabby.io/)** wallet.
+
+<div class="text--center">
+    <img src={WalletConnect3} alt="Wallet Connect 3" style={{ width: 400 }} />
+</div>
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **Tools** button at the top and choosing **API Keys** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 400 }} />
+</div>
+
+- Click the **Generate API Key** button to begin the process.
+
+<div class="text--center">
+    <img src={AuthorizeWallet2} alt="Authorize Wallet 2" style={{ width: 500 }} />
+</div>
+
+- At the time of this writing there is no IP Whitelist option.
+- Input an API Key Index and click the **Generate** button.
+    - Keys 0 through 3 are usually used by Lighter. So you should start with index 4 and up.
+
+<div class="text--center">
+    <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 600 }} />
+</div>
+
+<!-- :::::caution
+You may need to deposit funds before you can finalize **API Key** creation. If Lighter prompts for a deposit, complete that step and then continue.
+::::: -->
+
+- Securely store the API Key information.
+- When done close the window and return to Tealstreet.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information from your Lighter API key setup:
+  - **Name**: Enter any label you want (for example, `lighter-01`).
+  - **Color**: Choose the color you want this account to use in the terminal.
+  - **Use Tealstreet WebSocket Route**: Keep this enabled for Tealstreet's optimized WebSocket routing unless you have excellent internet and are not in a restricted jurisdiction.
+  - **Account Index**: Enter your Lighter account index (the L1 wallet address you made the API Keys with).
+  - **API Key Index**: Enter the numeric index of the API key you created.
+  - **Public Key**: Paste the public key exactly as shown in Lighter.
+  - **Private Key**: Paste the private key exactly as shown in Lighter.
+  - **Approve Builder Fee**: Tick the box to approve Tealstreet as a builder if you permit it to charge fees on your behalf. This is required for attributed orders to be placed through Tealstreet.
+  - Click **Done**.
+
+:::note
+Lighter usually reserves API Key Indices 0 through 3 for their own use and they recommend you use 4 and up.
+:::
+
+---
+
+## Frequently Asked Questions
+
+- **What is a builder fee, and does Lighter charge one?**
+  - A builder fee is an integrator fee configured through Lighter's [Partner Attribution Program](https://docs.lighter.xyz/integrations/partner-attribution). It allows a partner frontend, such as Tealstreet, to charge trading fees on orders routed through that frontend after the user approves the fee configuration.
+  - Lighter currently charges no maker or taker fees for Standard Accounts, as described in Lighter's [Trading Fees](https://docs.lighter.xyz/trading/trading-fees) docs.
+  - Tealstreet's Lighter API form does not charge a fee just for linking your key. During the link flow, you approve Tealstreet as a builder partner to charge **0.03% (3 bps)** maker/taker fees on trades routed through Tealstreet.
+
+- **What are Lighter account tiers?**
+  - Lighter has Standard, Premium, and Plus account tiers. These can affect fees, latency, rate limits, and official competition eligibility.
+  - You can switch tiers in Tealstreet from **Settings → Profile → Lighter → Lighter Account Tier**.
+  - Switching tiers has a 24h cooldown and can only be done when there are no open orders or positions.. Read more in Lighter's [official account type docs](https://apidocs.lighter.xyz/docs/account-types).
+
+:::note
+Lighter at the time of this writing does not support changing to Plus tier over their exchange UI. You can of course change to this tier in the Tealstreet Lighter Settings. Different tiers have different fees, latency, and rate limits.
+:::
+
+<div class="text--center">
+    <img src={AccountTier} alt="Account Tier" style={{ width: 600 }} />
+</div>
+
+<OutroTealstreet exchangeName="Lighter" />

@@ -1,0 +1,48 @@
+# Tealstreet CLI Serve - systemd service file
+#
+# Installation:
+#   1. Copy this file to ~/.config/systemd/user/tealstreet-serve.service
+#   2. Reload systemd: systemctl --user daemon-reload
+#   3. Enable on boot: systemctl --user enable tealstreet-serve
+#   4. Start service: systemctl --user start tealstreet-serve
+#
+# Commands:
+#   systemctl --user status tealstreet-serve   # Check status
+#   systemctl --user restart tealstreet-serve  # Restart
+#   systemctl --user stop tealstreet-serve     # Stop
+#   journalctl --user -u tealstreet-serve -f   # View logs
+#
+# Note: For system-wide service (runs as root), place in /etc/systemd/system/
+# and remove --user flags from commands.
+
+[Unit]
+Description=Tealstreet CLI Serve Mode
+Documentation=https://github.com/AmphibianLabs/Tealstreet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tealstreet serve --local-only
+Restart=on-failure
+RestartSec=5
+# Exponential backoff: 5s, 10s, 20s, 40s, max 5 minutes
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+# Environment (uncomment and modify if needed)
+# Environment=TEALSTREET_EXCHANGE_RELAY_URL=https://exchange.tealstreet.io
+# Environment=TEALSTREET_EXCHANGE_RELAY_WS=wss://exchange.tealstreet.io/account
+# Environment=TEALSTREET_WEB_URL=https://trade.tealstreet.io
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tealstreet
+
+# Security hardening (optional)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,35 @@
+export enum ETransferType {
+  // Standard transfer that has nothing to do with bridging
+  STANDARD = 'STANDARD',
+  // Fast Arb Deposit Metadata type
+  FAST_ARB_DEPOSIT = 'FAST_ARB_DEPOSIT',
+  // Fast Arb Withdrawal Metadata type
+  FAST_ARB_WITHDRAWAL = 'FAST_ARB_WITHDRAWAL',
+  // Transfer type for non native bridging deposit
+  NON_NATIVE_BRIDGE_DEPOSIT = 'NON_NATIVE_BRIDGE_DEPOSIT',
+  // Transfer type for non native bridging withdrawal
+  NON_NATIVE_BRIDGE_WITHDRAWAL = 'NON_NATIVE_BRIDGE_WITHDRAWAL',
+  // Transfer type for adhoc incentive
+  ADHOC_INCENTIVE = 'ADHOC_INCENTIVE',
+  // Transfer type for referral incentive
+  REFERRAL_INCENTIVE = 'REFERRAL_INCENTIVE',
+  // Transfer type for trading deposit yield incentive
+  TRADING_DEPOSIT_YIELD_INCENTIVE = 'TRADING_DEPOSIT_YIELD_INCENTIVE',
+  // Transfer type for TGE vesting distribution
+  TGE_VESTING = 'TGE_VESTING',
+  // Transfer type for TGE airdrop distribution
+  TGE_AIRDROP = 'TGE_AIRDROP',
+}
+
+export const ETransferTypeInt: Record<ETransferType, number> = Object.freeze({
+  [ETransferType.STANDARD]: 1,
+  [ETransferType.FAST_ARB_DEPOSIT]: 2,
+  [ETransferType.FAST_ARB_WITHDRAWAL]: 3,
+  [ETransferType.NON_NATIVE_BRIDGE_DEPOSIT]: 4,
+  [ETransferType.NON_NATIVE_BRIDGE_WITHDRAWAL]: 5,
+  [ETransferType.ADHOC_INCENTIVE]: 6,
+  [ETransferType.REFERRAL_INCENTIVE]: 7,
+  [ETransferType.TRADING_DEPOSIT_YIELD_INCENTIVE]: 8,
+  [ETransferType.TGE_VESTING]: 9,
+  [ETransferType.TGE_AIRDROP]: 10
+})

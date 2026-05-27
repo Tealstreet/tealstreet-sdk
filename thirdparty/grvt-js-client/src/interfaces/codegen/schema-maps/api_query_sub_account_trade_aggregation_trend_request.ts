@@ -1,0 +1,21 @@
+import { type SchemaPairMap } from './types'
+
+// Schema map for the 'API_QUERY_SUB_ACCOUNT_TRADE_AGGREGATION_TREND_REQUEST' struct.
+export const API_QUERY_SUB_ACCOUNT_TRADE_AGGREGATION_TREND_REQUEST_MAP: SchemaPairMap = Object.freeze({
+  FULL_TO_LITE: {
+    sub_account_id: 'sa',
+    time_interval: 'ti',
+    start_time: 'st',
+    end_time: 'et',
+    kind: 'k',
+    main_account_id: 'ma'
+  },
+  LITE_TO_FULL: {
+    sa: 'sub_account_id',
+    ti: 'time_interval',
+    st: 'start_time',
+    et: 'end_time',
+    k: 'kind',
+    ma: 'main_account_id'
+  }
+})

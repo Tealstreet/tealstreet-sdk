@@ -1,0 +1,171 @@
+---
+title: 持仓和订单
+description: The Open Positions & Orders window of Tealstreet is where you manage all your open positions and orders.
+sidebar_position: 8
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import Twap from '/img/trading/openpositions/twap.png';
+import ClosedNonPersist from '/img/trading/openpositions/closed-positions-non-persist.png';
+
+## 持仓
+
+Tealstreet 的 **持仓** 窗口是您管理所有持仓的地方。它将显示您所选交易所的所有当前持仓。您可以通过单击窗口右上角的按钮更改信息显示方式。
+
+单击 **BTC** 按钮，以比特币报价所有持仓的保证金、未实现盈亏、5分钟盈亏差和实现盈亏。"=" 将以本地货币显示所有持仓，这对于交易线性和反向的用户非常有帮助。
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/open-positions-version.png)
+
+</div>
+
+:::caution
+单击红色的“关闭”按钮将使用市价单关闭您的持仓。
+:::
+
+---
+
+### ROE/ROI 切换
+
+**ROI (投资回报率)** 表示 PnL 作为您总保证金余额的百分比。
+
+**ROE (股东权益回报率)** 表示 PnL 作为头寸初始保证金的百分比。如果您使用更高的杠杆，这将更高，因为相同头寸大小所需的保证金将更低。这是大多数交易所使用的方法。
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/open-positions-percent-roe.png)
+
+</div>
+
+---
+
+### 百分比 (%) 切换
+
+百分比 (%%) 切换将根据当前持仓的账户盈亏百分比或账户盈亏金额表示您的 PnL。
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/open-positions-percent-roi.png)
+
+</div>
+
+---
+
+### SL 和 SL All 按钮
+
+**SL** 按钮将在您的入场价格处设置止损。**SL All** 按钮对所有开放的头寸做同样的操作。
+
+<div class="text--center">
+
+![Open-Positions](/img/trading/openpositions/SL-SLAll.png)
+
+</div>
+
+---
+
+### 实现盈亏
+
+实现盈亏数（UTC 每日）来自交易所，而不是 Tealstreet 计算的。未实现盈亏是按最后交易价格定价的，不是所有交易所都有每日实现盈亏报告，因此某些交易所可能不会显示此数字。
+
+---
+
+## 订单
+
+Tealstreet 的 **订单** 窗口允许您管理当前的所有订单。有四个选项卡可组织您的订单。与持仓窗口类似，您可以通过单击窗口右上角的按钮更改信息显示方式。
+
+<div class="text--center">
+
+![Open-Orders](/img/trading/open-orders.gif)
+
+</div>
+
+1. 第一列显示当前选定对的订单（例如，在此情况下为 BTC | USD）。它将根据您选择的市场或加密货币而更改。
+2. 第二列显示您放置订单的所有对的订单。
+3. 第三列显示当前选定对的停止订单。
+4. 第四列显示您为所有交易对设置停止订单的停止订单。
+
+---
+
+### 取消订单
+
+在 **订单** 窗口中有三种取消订单的方法。
+
+1. 带有 **取消** 的框将关闭已打开的单个订单。
+
+<div class="text--center">
+
+![Close-Orders](/img/trading/close-orders-2.gif)
+
+</div>
+
+2. **(X)** 在取消上方将关闭当前显示的选项卡上的所有订单。
+
+<div class="text--center">
+
+![Close-Orders](/img/trading/close-orders.gif)
+
+</div>
+
+3. 右上角的 **(X) 订单** 按钮将帮助您取消订单。
+
+<div class="text--center">
+
+![Close-All](/img/trading/close-all.gif)
+
+</div>
+
+<!---
+TODO: Should probably update this screenshot/gif
+-->
+
+:::note
+(X) **全部** 不会取消您的停止订单。<br />
+上面的 (X) **所有订单** 将取消所有订单，包括停止订单。
+:::
+
+---
+
+### 修改订单
+
+您可以通过单击其关联数字来编辑开放订单的数量和价格。
+
+<div class="text--center">
+
+![Modify-Orders](/img/trading/modify-orders.gif)
+
+</div>
+
+:::note
+如果您下了一个仅限限价订单并将价格编辑到上一个价格（在 Tealstreet 的订单簿顶部显示的价格），则您的订单将自动取消。
+:::
+
+---
+
+### TWAP 订单
+
+<div class="text--center">
+    <img src={Twap} alt="Stop TWAP Orders" style={{ width: 800 }} />
+</div>
+
+最近，Tealstreet 实现了执行 TWAP 订单的功能。如果启用了 TWAP 订单，您将在开放订单窗口中看到一个选项卡。您可以在此处阅读有关 TWAP 订单的更多信息 [here](/docs/trade/beta-features)。
+
+---
+
+## 已平仓头寸
+
+Tealstreet 的 **已平仓头寸** 窗口是您可以查看以前已平仓头寸的地方。
+
+<div class="text--center">
+    <img src={ClosedNonPersist} alt="Closed Positions (Non persisting)" style={{ width: 800 }} />
+</div>
+
+:::note
+已平仓头寸将跟踪您最近的交易，但不应与 [头寸历史记录模块](/docs/trade/modules/position-history) 混淆。已平仓头寸窗口不会像头寸历史记录模块一样无限期地保持跟踪您的已平仓头寸。
+:::

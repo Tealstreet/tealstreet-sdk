@@ -1,0 +1,160 @@
+---
+title: Woo X
+description: Learn how to connect your Woo X API to Tealstreet.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import AddingApi from '/img/connect/common/addingapi.jpg';
+import Dropdown from '/img/connect/woox/dropdown.png';
+import ApiDropdown from '/img/connect/woox/apidropdown.png';
+import ApiCreate from '/img/connect/woox/apicreate.png';
+import ApiCreation2 from '/img/connect/woox/apicreation2.png';
+import SecVerify from '/img/connect/woox/secverify.png';
+import ApiCreate2 from '/img/connect/woox/apicreate2.png';
+import ApiCreate4 from '/img/connect/woox/apicreate4.png';
+import WooEnableFutures from '/img/connect/woox/woo-enable-futures.png';
+
+<!--TODO: Still missing a paired light & dark set. I hacked together two different images to get
+these two close but this isnt ideal solution
+-->
+
+<ThemedImage
+    alt="WooX-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/WooX-light.png'),
+        dark: useBaseUrl('/img/exchange/WooX-dark.svg'),
+    }}
+/>
+
+## 创建 [Woo X](https://teal.link/woo) API 密钥
+
+- 首先，请确保您已登录您的 [Woo X](https://teal.link/woo) 帐户。
+
+:::note
+考虑通过使用推荐链接 _[link](https://teal.link/woo)_ 支持 Tealstreet。
+:::
+
+- 接下来，登录您的[Tealstreet](http://app.tealstreet.io)帐户。
+
+:::tip
+最好同时打开Tealstreet和[Woo X](https://teal.link/woo)选项卡。
+:::
+
+1. 成功登录 Tealstreet 后，导航到标题为“API 密钥”的标头
+
+2. 单击标题为“新 API 密钥”的蓝色按钮
+
+<div class="text--center">
+    <img src={AddingApi} alt="Adding Api" style={{ width: 750 }} />
+</div>
+
+- 从下拉菜单中选择 [Woo X](https://teal.link/woo)。
+
+<div class="text--center">
+    <img src={Dropdown} alt="Dropdown" style={{ width: 500 }} />
+</div>
+
+---
+
+### 创建 API 密钥
+
+- 现在您已经准备好在 WooX 帐户中生成 API 密钥。前往 [Woo X](https://teal.link/woo) 选项卡并：
+    - 单击用户图标。
+    - 从下拉菜单中选择“子帐户和 API”。
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="Api Dropdown" style={{ width: 300 }} />
+</div>
+
+- 在 API 密钥页面上，单击“创建 API”按钮开始密钥创建过程。
+
+<div class="text--center">
+    <img src={ApiCreate} alt="Api Create" style={{ width: 700 }} />
+</div>
+
+:::tip
+您可以通过导航到 **[此链接](https://x.woo.org/en/account/sub-account/)** 直接访问此页面。
+:::
+
+- 现在您已经准备好选择您的 [Woo X](https://teal.link/bingx) API 密钥的设置。
+
+- 如果弹出窗口，请通过安全验证。
+
+<div class="text--center">
+    <img src={SecVerify} alt="Security Verify" style={{ width: 400 }} />
+</div>
+
+- 创建 API 密钥：
+
+<div class="text--center">
+    <img src={ApiCreate2} alt="API Created" style={{ width: 500 }} />
+</div>
+
+- 填写表格，使用所请求的信息
+    1. 选择 Tealstreet X Woo 选项。
+    2. 激活 **读取** 和 **启用交易** 权限。
+
+    :::warning
+    不要激活 **启用提款** 权限。
+    ::: 3. 提供描述。任何您想要的都可以。4. 提供要列入白名单的 IP 地址，这些地址可以从我们之前打开的终端 **API 密钥**窗口中获取。将 IP 地址粘贴到框中后，请务必点击**添加**按钮进行保存。- 在下面的截图中，我突出显示了 **'剪贴板'**功能，你可以点击该功能将 IP 地址复制到剪贴板中。然后，您就可以将它们粘贴到步骤 4 中的 WooX API 密钥框中。
+
+<div class="text--center">
+    <img src={ApiCreate4} alt="API Created" style={{ width: 500 }} />
+</div>
+
+5. 提供身份验证器代码。
+6. 点击创建API。
+
+---
+
+### 将API密钥连接到Tealstreet
+
+现在让我们回到我们离开的Tealstreet API页面：
+
+<div class="text--center">
+    <img src={ApiCreation2} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- 填写表格，使用您在 WooX API 页面创建 API 时获得的信息。
+    1. 给密钥命名，可以是任何您想要的名称。
+    2. 提供加密密钥。这是您为自己创建的额外安全层。
+
+    :::tip
+    有关加密方式的更多信息，请参见[API加密](/docs/connect/api-encryption)
+    ::: 3. 在此处提供应用程序ID。您可以在Woo账户页面的子账户和API页面的帐户管理部分中找到它。4. 提供WooX在创建API时向您显示的API密钥。5. 提供WooX在创建API时向您显示的API密钥密码。6. 点击创建。
+
+    :::caution
+    永远不要与任何人分享您的API密钥。Tealstreet团队成员永远不会询问您的API密钥。
+    :::
+
+:::note
+请务必仔细检查您不要混淆**API密钥**和**API密钥密码**。如果这些字段输入不正确，则无法将您的[ Woo X ](https://teal.link/woo)交易所账户连接到 Tealstreet。
+:::
+
+如果所有细节都正确，您将成功将您的[ Woo X ](https://teal.link/woo)账户链接到 Tealstreet。
+
+- 导航到 Tealstreet 终端的 **交易** 页面，并从顶部下拉菜单中选择 [ Woo X ](https://teal.link/woo) 账户。
+    - 如果链接正确，您将在 Tealstreet 的保证金窗口中看到您的余额。祝您交易愉快！
+
+---
+
+## 故障排除
+
+### 杠杆滑块在终端内受限
+
+Woo通过API限制可以使用的杠杆数量。这是一个在网站上没有共享的限制。
+
+### 关于启用期货的错误
+
+<div class="text--center">
+    <img src={WooEnableFutures} alt="Enable Futures Error" style={{ width: 500 }} />
+</div>
+
+此错误是由于API密钥未启用期货交易所致。要解决此问题，请前往您的Woo X帐户页面并启用期货交易。这也需要为每个子帐户执行。

@@ -1,0 +1,73 @@
+{
+  "name": "@tealstreet/grvt-ts-sdk",
+  "version": "0.0.4",
+  "description": "TypeScript SDK for GRVT (Tealstreet fork)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "_start": "echo 'Script disabled for thirdparty package'",
+    "_prebuild": "echo 'Script disabled for thirdparty package'",
+    "_build": "echo 'Script disabled for thirdparty package'",
+    "_postbuild": "echo 'Script disabled for thirdparty package'",
+    "_prerelease": "echo 'Script disabled for thirdparty package'",
+    "_release": "echo 'Script disabled for thirdparty package'",
+    "_link-local": "echo 'Script disabled for thirdparty package'",
+    "_lint": "echo 'Script disabled for thirdparty package'",
+    "_format": "echo 'Script disabled for thirdparty package'",
+    "_test": "echo 'Script disabled for thirdparty package'",
+    "_test:watch": "echo 'Script disabled for thirdparty package'",
+    "_test:coverage": "echo 'Script disabled for thirdparty package'",
+    "_playground": "echo 'Script disabled for thirdparty package'",
+    "_playground:ws": "echo 'Script disabled for thirdparty package'"
+  },
+  "keywords": [
+    "grvt",
+    "sdk",
+    "typescript",
+    "trading",
+    "crypto"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/set-cookie-parser": "^2.4.10",
+    "@typescript-eslint/eslint-plugin": "^8.60.0",
+    "@typescript-eslint/parser": "^8.60.0",
+    "dotenv": "^17.4.2",
+    "eslint": "^9.28.0",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-prettier": "^5.5.5",
+    "jest": "^30.4.2",
+    "prettier": "^3.8.3",
+    "rimraf": "^6.1.3",
+    "ts-jest": "^29.4.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@tealstreet/grvt-client": "*",
+    "@metamask/eth-sig-util": "^8.2.0",
+    "@types/ws": "^8.18.1",
+    "ethers": "^6.16.0",
+    "set-cookie-parser": "^3.0.1",
+    "ws": "^8.21.0"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gravity-technologies/grvt-ts-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gravity-technologies/grvt-ts-sdk/issues"
+  },
+  "homepage": "https://github.com/gravity-technologies/grvt-ts-sdk#readme"
+}

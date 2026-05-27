@@ -1,0 +1,55 @@
+---
+title: Depth Chart
+description: Visualize bid/ask depth, overlays, and orders for your active market.
+sidebar_position: 6
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+This is the Depth Chart window of Tealstreet. It shows bids/asks as a depth curve around the best bid/ask for your active symbol and account.
+
+![DepthChart](/img/trading/modules/depthchart/depthchart.gif)
+
+:::tip
+Use the mouse wheel (or pinch) to zoom the visible spread. Forward = zoom in; backward = zoom out.
+:::
+
+---
+
+### Modes (View)
+
+Switch how size is visualized:
+
+- **Individual**: Per-level size bars.
+- **Cumulative**: Running totals up to each price.
+- **Combined**: Overlay of both.
+
+![DepthChart Combined](/img/trading/modules/depthchart/depthchart-combined.gif)
+![DepthChart Cumulative](/img/trading/modules/depthchart/depthchart-cumulative.gif)
+
+---
+
+### Overlays & Interactions
+
+- **Multiple exchanges**: Overlay secondary markets to compare depth; overlays are color-coded.
+- **Price click**: Click a price to stage it in Place Order (respects one-click trading settings).
+- **Zoom**: Mouse wheel/pinch to zoom; auto-centers unless you’ve manually zoomed.
+- **Orders**: Open orders inside the visible range show as small yellow dots on the curve.
+
+---
+
+### Settings
+
+Use the Depth Chart settings panel (module header):
+
+- **Mode**: Individual / Cumulative / Combined.
+- **Center Overlay**: Align overlays to the active exchange midpoint.
+- **Scale Overlay**: Normalize overlay depth to the active exchange or keep native scale.
+- **Monochrome**: Single-color rendering for simpler overlays.
+- **Smooth Steps**: Stepped vs smoothed cumulative curves.
+- **Show Grid**: Toggle background grid lines.
+
+![DepthChart Settings](/img/trading/modules/depthchart/depthchart-settings.gif)

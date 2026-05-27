@@ -1,0 +1,89 @@
+import type { ExchangeOptions } from '../../types';
+
+import retry, { isNetworkError } from 'axios-retry';
+import qs from 'qs';
+
+import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { BaseExchange } from '../base';
+import { BASE_URLS } from './hyperliquidspot.types';
+
+export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
+  const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
+
+  const xhr = safeCexAxiosCreate(
+    {
+      baseURL,
+      timeout: options?.extra?.recvWindow,
+      paramsSerializer: {
+        serialize: (params) => qs.stringify(params, { arrayFormat: 'repeat' }),
+      },
+      headers: {
+        'Content-Type': 'application/json, charset=utf-8',
+      },
+    },
+    options,
+    exchange,
+  );
+
+  // retry requests on network errors instead of throwing
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+
+  if (!options.publicDataOnly) {
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+  }
+
+  xhr.interceptors.request.use((config) => {
+    const nextConfig = { ...config };
+    // const timestamp = virtualClock.getCurrentTimeMs();
+
+    // const data = config.data || config.params || {};
+    // data.timestamp = timestamp;
+    // data.recvWindow = options?.extra?.recvWindow;
+    //
+    // const asString = qs.stringify(data, { arrayFormat: 'repeat' });
+    // data.signature = createHmac('sha256', options.secret).update(asString).digest('hex');
+    //nextConfig.params = data;
+
+    // remove data from POST/PUT/DELETE requests
+    // Binance API takes data as query params
+    //return omit(nextConfig, 'data');
+    return nextConfig;
+  });
+
+  xhr.interceptors.response.use(async (response) => {
+    if (response.data?.status === 'err') {
+      const msg = `${response.data?.response}`;
+      exchange.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+    if (response.data?.response?.data?.status === 'err') {
+      const msg = `${response.data?.response?.data?.response}`;
+      exchange.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+    if (response.data?.statuses && response.data?.statuses.some((status: any) => Boolean(status.error))) {
+      const errors = response.data?.statuses
+        .filter((status: any) => Boolean(status.error))
+        .map((status: any) => status.error)
+        .join(', ');
+      exchange.emitAndLogError(errors);
+      throw new Error(errors);
+    }
+    if (
+      response.data?.response?.data?.statuses &&
+      response.data?.response?.data?.statuses.some((status: any) => Boolean(status.error))
+    ) {
+      const errors = response.data?.response?.data?.statuses
+        .filter((status: any) => Boolean(status.error))
+        .map((status: any) => status.error)
+        .join(', ');
+      exchange.emitAndLogError(errors);
+      throw new Error(errors);
+    }
+
+    return response;
+  });
+
+  return xhr;
+};

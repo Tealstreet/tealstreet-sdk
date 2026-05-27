@@ -1,0 +1,1317 @@
+import type { Axios } from 'axios';
+import type { ManipulateType } from 'dayjs';
+import type { Store } from '../../store/store.interface';
+
+import rateLimit from 'axios-rate-limit';
+import dayjs from 'dayjs';
+import chunk from 'lodash/chunk';
+import { forEachSeries } from 'p-iteration';
+
+import {
+  Balance,
+  Candle,
+  ExchangeName,
+  ExchangeOptions,
+  HistoricalTradeOptions,
+  MarginType,
+  Market,
+  OHLCVOptions,
+  Order,
+  OrderBook,
+  OrderSide,
+  OrderStatus,
+  OrderTimeInForce,
+  OrderType,
+  PlaceOrderOpts,
+  Position,
+  PositionMode,
+  PositionSide,
+  Ticker,
+  Timeframe,
+  UpdateOrderOpts,
+} from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
+import { loop } from '../../utils/loop';
+import { adjust, multiply, round } from '../../utils/safe-math';
+import { uuid } from '../../utils/uuid';
+import { BaseExchange } from '../base';
+import { createAPI } from './coinbase.api';
+import {
+  BALANCE_RESPONSE,
+  BALANCE_RESPONSE_CFM,
+  CANDLES_RESPONSE,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTX_INSTRUMENTS_RESPONSE,
+  LIST_PORTFOLIOS_RESPONSE,
+  LIST_POSITIONS_CFM_RESPONSE,
+  LIST_POSITIONS_INTX_RESPONSE,
+  MARKET_RESPONSE,
+  PLACE_ORDER_REQUEST,
+  PLACE_ORDER_RESPONSE,
+  PORTFOLIO_BREAKDOWN_RESPONSE,
+} from './coinbase.types';
+import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
+import { CoinbasePublicWebsocket } from './coinbase.ws-public';
+
+export class CoinbaseExchange extends BaseExchange {
+  xhr: Axios;
+  unlimitedXHR: Axios;
+
+  publicWebsocket: CoinbasePublicWebsocket;
+  privateWebsocket: CoinbasePrivateWebsocket;
+
+  grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
+  grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
+
+  selectedPortfolio: LIST_PORTFOLIOS_RESPONSE['portfolios'][0] | null = null;
+
+  supportSpot = true;
+
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+    super(exchangeName, opts, store);
+
+    this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 3 });
+    this.unlimitedXHR = createAPI(opts, this);
+
+    this.publicWebsocket = new CoinbasePublicWebsocket(this);
+    this.privateWebsocket = new CoinbasePrivateWebsocket(this);
+  }
+
+  dispose = () => {
+    super.dispose();
+    this.publicWebsocket.dispose();
+    this.privateWebsocket.dispose();
+  };
+
+  getAccount = async () => {
+    const {
+      data: [{ accountAlias }],
+    } = await this.xhr.get(ENDPOINTS.BALANCE);
+
+    return { userId: accountAlias };
+  };
+
+  validateAccount = async () => {
+    try {
+      await this.xhr.get(ENDPOINTS.MARKETS);
+      // return '';
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+    }
+  };
+
+  start = async () => {
+    const useExternalPublicData = await this.initExternalPublicData();
+
+    // need this first to know what types of data to fetch (skip in public-only mode)
+    if (!this.isPublicDataOnly) {
+      this.selectedPortfolio = await this.findSelectedPortfolio();
+    }
+
+    if (!useExternalPublicData) {
+      // load initial market data
+      // then we can poll for live data
+      const markets = await this.fetchMarkets();
+      if (this.isDisposed) return;
+
+      await this.store.update({
+        markets,
+        loaded: { ...this.store.loaded, markets: true },
+      });
+
+      this.publicWebsocket.connectAndSubscribe();
+    }
+
+    if (!this.isPublicDataOnly) {
+      this._startPrivate();
+    } else {
+      await this._startPublicDataOnly();
+    }
+  };
+
+  _startPrivate = async () => {
+    this.privateWebsocket.connectAndSubscribe();
+
+    // // fetch current position mode (Hedge/One-way)
+    // this.store.setSetting('isHedged', await this.fetchPositionMode());
+    //
+    // start ticking live data
+    // balance, tickers, positions
+    this.selectedPortfolio = await this.findSelectedPortfolio();
+    if (this.isDisposed) return;
+
+    await this.tick();
+    if (this.isDisposed) return;
+
+    //
+    // this.log(`Ready to trade on coinbase`);
+
+    //
+    // // fetch unfilled orders
+    // const orders = await this.fetchOrders();
+    // if (this.isDisposed) return;
+    //
+    // this.log(`Loaded Binance orders`);
+    //
+    // this.store.update({
+    //   orders,
+    //   loaded: { ...this.store.loaded, orders: true },
+    // });
+  };
+
+  _startPublicDataOnly = async () => {
+    // start ticking live data
+    // balance, tickers, positions
+    if (this.isDisposed) return;
+
+    this.log(`Ready to watch public data on Coinbase`);
+
+    // Fetch tickers from public INTX endpoint
+    const tickers = await this.fetchTickersIntx();
+    this.store.update({
+      tickers,
+      orders: [],
+      balance: {
+        used: 0,
+        free: 0,
+        total: 0,
+        upnl: 0,
+      },
+      positions: [],
+      loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
+    });
+  };
+
+  tick = async () => {
+    if (!this.isDisposed) {
+      try {
+        const tickers = await this.fetchTickers();
+        if (this.isDisposed) return;
+        this.store.update({
+          tickers,
+          loaded: {
+            ...this.store.loaded,
+            tickers: true,
+          },
+        });
+
+        // iterate over tickers and update OB and kline callbacks
+        const messageHandlers = this.publicWebsocket.messageHandlers;
+        tickers.forEach((ticker) => {
+          if (messageHandlers[`poll_book.${ticker.symbol}`]) {
+            messageHandlers[`poll_book.${ticker.symbol}`].forEach((cb) => cb(ticker));
+          }
+          if (messageHandlers[`poll_kline.${ticker.symbol}`]) {
+            messageHandlers[`poll_kline.${ticker.symbol}`].forEach((cb) => cb(ticker));
+          }
+        });
+
+        const balance = await this.fetchBalance();
+        if (this.isDisposed) return;
+        this.store.update({
+          balance,
+          loaded: { ...this.store.loaded, balance: true },
+        });
+
+        const positions = await this.fetchPositions();
+        if (this.isDisposed) return;
+        this.store.update({
+          positions,
+          loaded: { ...this.store.loaded, positions: true },
+        });
+      } catch (err: any) {
+        this.emitAndLogError(err, err?.message);
+      }
+
+      if (!this.isDisposed) {
+        loop(() => this.tick(), this.getTickInterval());
+      }
+    }
+  };
+
+  getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
+    // In public-only mode, only INTX is available (public endpoint, no auth needed)
+    // The /api/v3/brokerage/products endpoint requires JWT and returns ALL products
+    // (spot + futures + options = 175k+), so we must not call it in public mode
+    if (this.isPublicDataOnly) {
+      return ['intx'];
+    }
+
+    const supportedTypes: ('spot' | 'cfm' | 'intx')[] = [];
+    if (!this.selectedPortfolio) {
+      this.selectedPortfolio = await this.findSelectedPortfolio();
+    }
+
+    if (this.selectedPortfolio.type === 'INTX') {
+      supportedTypes.push('intx');
+    } else if (this.selectedPortfolio.type === 'CFM') {
+      supportedTypes.push('cfm');
+    }
+    if (this.supportSpot && this.selectedPortfolio.type !== 'INTX') {
+      supportedTypes.push('spot');
+    }
+
+    if (!supportedTypes.length) {
+      this.emitAndLogError('No supported portfolios found');
+    }
+
+    return supportedTypes;
+  };
+
+  fetchBalance = async () => {
+    if (!this.selectedPortfolio) {
+      this.selectedPortfolio = await this.findSelectedPortfolio();
+    }
+
+    const supportedTypes = await this.getSupportedTypes();
+    if (supportedTypes.includes('intx') && supportedTypes.includes('cfm')) {
+      this.emitAndLogError('Cannot have both INTX and CFM portfolios');
+      return this.store.balance;
+    }
+
+    let baseBalance: Balance = {
+      used: 0,
+      free: 0,
+      total: 0,
+      upnl: 0,
+    };
+
+    if (supportedTypes.includes('intx')) {
+      baseBalance = await this.fetchBalanceIntx();
+    }
+
+    if (supportedTypes.includes('cfm')) {
+      baseBalance = await this.fetchBalanceCfm();
+    }
+
+    if (supportedTypes.includes('spot')) {
+      const currencies = await this.fetchSpotCurrencies();
+      baseBalance = {
+        ...baseBalance,
+        currencies,
+      };
+    }
+
+    return baseBalance;
+  };
+
+  fetchSpotCurrencies = async (): Promise<Balance['currencies']> => {
+    if (!this.selectedPortfolio || this.selectedPortfolio.type === 'INTX') {
+      this.emitAndLogError('No spot portfolio found');
+      return this.store.balance.currencies;
+    }
+    try {
+      const { data } = await this.xhr.get<PORTFOLIO_BREAKDOWN_RESPONSE>(ENDPOINTS.PORTFOLIO_BREAKDOWN, {
+        params: {
+          portfolio_uuid: this.selectedPortfolio.uuid,
+        },
+      });
+      // export type PORTFOLIO_BREAKDOWN_RESPONSE = {
+      //   breakdown: {
+      //     portfolio: {
+      //       name: string;
+      //       uuid: string;
+      //       type: string;
+      //       deleted: boolean;
+      //     };
+      //     portfolio_balances: {
+      //       total_balance: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //       total_futures_balance: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //       total_cash_equivalent_balance: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //       total_crypto_balance: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //       futures_unrealized_pnl: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //       perp_unrealized_pnl: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //     };
+      //     spot_positions: {
+      //       asset: string;
+      //       account_uuid: string;
+      //       total_balance_fiat: number;
+      //       total_balance_crypto: number;
+      //       available_to_trade_fiat: number;
+      //       allocation: number;
+      //       cost_basis: {
+      //         value: string;
+      //         currency: string;
+      //       };
+      //       asset_img_url: string;
+      //       is_cash: boolean;
+      //       average_entry_price: string;
+      //       asset_uuid: string;
+      //       available_to_trade_crypto: number;
+      //       unrealized_pnl: number;
+      //       available_to_transfer_fiat: number;
+      //       available_to_transfer_crypto: number;
+      //       asset_color: string;
+      //     }[];
+      //     perp_positions: {
+      //       product_id: string;
+      //       contract_size: string;
+      //       side: 'FUTURES_POSITION_SIDE_LONG' | 'FUTURES_POSITION_SIDE_SHORT';
+      //       amount: string;
+      //       avg_entry_price: string;
+      //       current_price: string;
+      //       unrealized_pnl: string;
+      //       expiry: string;
+      //       underlying_asset: string;
+      //       asset_img_url: string;
+      //       product_name: string;
+      //       venue: string;
+      //       notional_value: string;
+      //       asset_color: string;
+      //     }[];
+      //     futures_positions: {
+      //       product_id: string;
+      //       contract_size: string;
+      //       side: 'FUTURES_POSITION_SIDE_LONG' | 'FUTURES_POSITION_SIDE_SHORT';
+      //       amount: string;
+      //       avg_entry_price: string;
+      //       current_price: string;
+      //       unrealized_pnl: string;
+      //       expiry: string;
+      //       underlying_asset: string;
+      //       asset_img_url: string;
+      //       product_name: string;
+      //       venue: string;
+      //       notional_value: string;
+      //       asset_color: string;
+      //     }[];
+      //   };
+      // };
+
+      const currencies: Balance['currencies'] = data.breakdown.spot_positions.reduce(
+        (acc, position) => {
+          acc![position.asset] = {
+            total: position.available_to_trade_crypto,
+            free: position.available_to_trade_crypto,
+            used: position.total_balance_crypto - position.available_to_trade_crypto,
+            upnl: 0,
+          };
+          return acc;
+        },
+        {} as Balance['currencies'],
+      );
+      return currencies;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.balance.currencies;
+    }
+  };
+
+  fetchBalanceCfm = async () => {
+    try {
+      const { data } = await this.xhr.get<BALANCE_RESPONSE_CFM>(ENDPOINTS.BALANCE_CFM);
+      // export type BALANCE_RESPONSE_CFM = {
+      //   balance_summary: {
+      //     futures_buying_power: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     total_usd_balance: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     cbi_usd_balance: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     cfm_usd_balance: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     total_open_orders_hold_amount: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     unrealized_pnl: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     daily_realized_pnl: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     initial_margin: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     available_margin: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     liquidation_threshold: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     liquidation_buffer_amount: {
+      //       value: string;
+      //       currency: string;
+      //     };
+      //     liquidation_buffer_percentage: string;
+      //     intraday_margin_window_measure: {
+      //       margin_window_type: string;
+      //       margin_level: string;
+      //       initial_margin: string;
+      //       maintenance_margin: string;
+      //       liquidation_buffer: string;
+      //       total_hold: string;
+      //       futures_buying_power: string;
+      //     };
+      //     overnight_margin_window_measure: {
+      //       margin_window_type: string;
+      //       margin_level: string;
+      //       initial_margin: string;
+      //       maintenance_margin: string;
+      //       liquidation_buffer: string;
+      //       total_hold: string;
+      //       futures_buying_power: string;
+      //     };
+      //   };
+      // };
+
+      const total = parseFloat(data.balance_summary.total_usd_balance.value);
+      const free = parseFloat(data.balance_summary.available_margin.value);
+      const used = total - free;
+      return { total, free, used, upnl: 0 };
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.balance;
+    }
+  };
+
+  fetchBalanceIntx = async () => {
+    if (!this.selectedPortfolio || this.selectedPortfolio.type !== 'INTX') {
+      this.emitAndLogError('No INTX portfolio found');
+      return this.store.balance;
+    }
+    try {
+      const { data } = await this.xhr.get<BALANCE_RESPONSE>(ENDPOINTS.BALANCE, {
+        params: {
+          portfolio_uuid: this.selectedPortfolio!.uuid,
+        },
+      });
+
+      const summary = data.summary;
+      const total = parseFloat(summary.total_balance.value);
+      const free = parseFloat(summary.buying_power.value);
+      const used = total - free;
+
+      // need to get upnl from positions because the balance version is rebalanced every few seconds and wrong
+      const positions = this.store.positions;
+      const upnl = positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
+
+      return { total, free, used, upnl };
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.balance;
+    }
+  };
+
+  fetchMarkets = async () => {
+    try {
+      // In public-only mode, use the public INTX instruments endpoint
+      // since /api/v3/brokerage/products requires JWT authentication
+      if (this.isPublicDataOnly) {
+        return this.fetchMarketsFromIntxInstruments();
+      }
+
+      const supportedTypes = await this.getSupportedTypes();
+
+      const responses = await Promise.all(
+        supportedTypes.map((type) => {
+          return this.xhr.get<MARKET_RESPONSE>(ENDPOINTS.MARKETS, {
+            params:
+              type === 'spot'
+                ? {}
+                : {
+                    product_type: 'FUTURE',
+                    ...(type === 'intx' ? { contract_expiry_type: 'PERPETUAL' } : {}),
+                  },
+          });
+        }),
+      );
+
+      const markets: Market[] = responses
+        .flatMap((response) => response.data.products)
+        .map((m) => {
+          const p = m.price_increment;
+          const amt = m.base_increment;
+          const isSpot = m.future_product_details === undefined;
+          const isExpiring = m.future_product_details?.contract_expiry_type === 'EXPIRING';
+          const contractSize = parseFloat(m.future_product_details?.contract_size || '1');
+          const base = m.future_product_details?.contract_root_unit || m.base_currency_id || m.product_id.split('-')[0];
+
+          const market: Market = {
+            id: m.product_id,
+            symbol: m.product_id,
+            base,
+            quote: m.quote_currency_id,
+            active: m.status === 'TRADING',
+            isExpiring,
+            isSpot,
+            precision: {
+              amount: parseFloat(amt),
+              price: parseFloat(p),
+            },
+            limits: {
+              amount: {
+                min: parseFloat(m.base_min_size),
+                max: parseFloat(m.base_max_size),
+              },
+              leverage: {
+                min: 1,
+                max: isSpot ? 1 : 10,
+              },
+            },
+            contractSize,
+            info: m,
+          };
+          return market;
+        });
+      return markets;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.markets;
+    }
+  };
+
+  /**
+   * Fetch markets from the public INTX instruments endpoint (no auth needed).
+   * Used in public-only mode since /api/v3/brokerage/products requires JWT.
+   */
+  private fetchMarketsFromIntxInstruments = async (): Promise<Market[]> => {
+    try {
+      let data: INTX_INSTRUMENTS_RESPONSE = [];
+      try {
+        const { data: _data } = await this.xhr.get<INTX_INSTRUMENTS_RESPONSE>(ENDPOINTS.INTX_INSTRUMENTS);
+        data = _data;
+      } catch (err: any) {
+        if (err.response?.data?.length) {
+          data = err.response.data;
+        } else {
+          throw err;
+        }
+      }
+
+      return data
+        .filter((m) => m.trading_state === 'TRADING' && m.type === 'PERP')
+        .map((m) => ({
+          id: `${m.symbol}-INTX`,
+          symbol: `${m.symbol}-INTX`,
+          base: m.base_asset_name,
+          quote: m.quote_asset_name,
+          active: true,
+          precision: {
+            amount: parseFloat(m.base_increment),
+            price: parseFloat(m.quote_increment),
+          },
+          limits: {
+            amount: {
+              min: parseFloat((m as any).min_quantity || m.min_notional_value || '0.001'),
+              max: 1e9,
+            },
+            leverage: { min: 1, max: 10 },
+          },
+          contractSize: 1,
+          info: m,
+        }));
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.markets;
+    }
+  };
+
+  fetchTickers = async () => {
+    const supportedTypes = await this.getSupportedTypes();
+    return (
+      await Promise.all(
+        supportedTypes.map((type) => {
+          return type === 'spot'
+            ? this.fetchTickersSpot()
+            : type === 'cfm'
+              ? this.fetchTickersCfm()
+              : this.fetchTickersIntx();
+        }),
+      )
+    ).flat();
+  };
+
+  fetchTickersSpot = async (): Promise<Ticker[]> => {
+    try {
+      const { data } = await this.xhr.get<MARKET_RESPONSE>(ENDPOINTS.MARKETS);
+      return this.formatSpotCfmTicker(data);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.tickers;
+    }
+  };
+
+  fetchTickersCfm = async (): Promise<Ticker[]> => {
+    try {
+      const { data } = await this.xhr.get<MARKET_RESPONSE>(ENDPOINTS.MARKETS, {
+        params: {
+          product_type: 'FUTURE',
+        },
+      });
+      return this.formatSpotCfmTicker(data);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.tickers;
+    }
+  };
+
+  formatSpotCfmTicker = (data: MARKET_RESPONSE) => {
+    const fakeTickers: Ticker[] = data.products.map((m) => {
+      const price = m.price === '' ? 0 : parseFloat(m.price);
+
+      const contractSize = parseFloat(m.future_product_details?.contract_size || '1');
+
+      const rawPricePercentageChange24h = m.price_percentage_change_24h;
+      const percentage = rawPricePercentageChange24h === '' ? 0 : parseFloat(rawPricePercentageChange24h);
+
+      const rawVolume = m.volume_24h;
+      const volume = rawVolume === '' ? 0 : parseFloat(rawVolume);
+      const quoteVolume = round(price * volume * contractSize);
+
+      const rawOpenInterest = m.future_product_details?.perpetual_details?.open_interest;
+      const openInterest = rawOpenInterest === '' ? 0 : parseFloat(rawOpenInterest) * contractSize;
+
+      return {
+        id: m.product_id,
+        symbol: m.product_id,
+        bid: price,
+        ask: price,
+        last: price,
+        mark: price,
+        index: price,
+        percentage,
+        fundingRate: 0,
+        fundingTime: 0,
+        volume,
+        quoteVolume,
+        openInterest,
+      };
+    });
+
+    return fakeTickers;
+  };
+
+  fetchTickersIntx = async (): Promise<Ticker[]> => {
+    try {
+      let data: INTX_INSTRUMENTS_RESPONSE = [];
+
+      // dont ask... coinbase api errors but still returns data
+      try {
+        const { data: _data } = await this.xhr.get<INTX_INSTRUMENTS_RESPONSE>(ENDPOINTS.INTX_INSTRUMENTS);
+        data = _data;
+      } catch (err: any) {
+        if (err.response?.data?.length) {
+          data = err.response.data;
+        } else {
+          throw err;
+        }
+      }
+
+      const marketMap = this.store.markets.reduce(
+        (acc, m) => {
+          acc[m.symbol] = m;
+          return acc;
+        },
+        {} as Record<string, Market>,
+      );
+      const tickers: Ticker[] = data
+        .filter((marketIntx) => marketIntx.trading_state === 'TRADING' && marketIntx.type === 'PERP')
+        .map((marketIntx) => {
+          const quote: INTX_INSTRUMENTS_RESPONSE[0]['quote'] = marketIntx.quote;
+          const symbolV3 = `${marketIntx.symbol}-INTX`;
+          const rawMarketV3: MARKET_RESPONSE['products'][0] = marketMap[symbolV3]?.info;
+          const fundingInterval = parseFloat(marketIntx.funding_interval || '0') / 1000 / 1000;
+          return {
+            id: symbolV3,
+            symbol: symbolV3,
+            bid: parseFloat(quote.best_bid_price),
+            ask: parseFloat(quote.best_ask_price),
+            last: parseFloat(quote.trade_price),
+            mark: parseFloat(quote.mark_price),
+            index: parseFloat(quote.index_price),
+            percentage: parseFloat(rawMarketV3?.price_percentage_change_24h || '0'),
+            fundingRate: parseFloat(quote.predicted_funding),
+            fundingTime:
+              new Date(rawMarketV3?.future_product_details?.perpetual_details?.funding_time).getTime() +
+              fundingInterval,
+            volume: parseFloat(marketIntx.qty_24hr),
+            quoteVolume: parseFloat(marketIntx.notional_24hr),
+            openInterest: parseFloat(marketIntx.open_interest),
+            info: marketIntx,
+          };
+        });
+
+      return tickers;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.tickers;
+    }
+  };
+
+  _fetchTickersV3 = async () => {
+    try {
+      const tickers: Ticker[] = this.store.markets.map((m) => {
+        const info: MARKET_RESPONSE['products'][0] = m.info;
+        return {
+          id: m.id,
+          symbol: m.symbol,
+          bid: parseFloat(info.price),
+          ask: parseFloat(info.price),
+          last: parseFloat(info.price),
+          mark: parseFloat(info.price),
+          index: parseFloat(info.price),
+          percentage: parseFloat(info.price_percentage_change_24h),
+          fundingRate: parseFloat(info.future_product_details?.perpetual_details?.funding_rate || '0'),
+          fundingTime: parseFloat(info.future_product_details?.perpetual_details?.funding_time || '0'),
+          volume: parseFloat(info.volume_24h),
+          quoteVolume: 0,
+          openInterest: parseFloat(info.future_product_details?.perpetual_details?.open_interest || '0'),
+        };
+      });
+      return tickers;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return this.store.tickers;
+    }
+  };
+
+  fetchPortfolios = async () => {
+    try {
+      const { data } = await this.xhr.get<LIST_PORTFOLIOS_RESPONSE>(ENDPOINTS.LIST_PORTFOLIOS);
+      return data.portfolios;
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  findSelectedPortfolio = async () => {
+    const portfolios = await this.fetchPortfolios();
+    const breakdownResponses = await Promise.all(
+      portfolios.map(async (portfolio) => {
+        try {
+          return await this.xhr.get<PORTFOLIO_BREAKDOWN_RESPONSE>(ENDPOINTS.PORTFOLIO_BREAKDOWN, {
+            params: {
+              portfolio_uuid: portfolio.uuid,
+            },
+          });
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    const selectedPortfolioIndex = breakdownResponses.findIndex((response) => response !== null);
+    if (selectedPortfolioIndex === -1) {
+      this.emitAndLogError('No portfolio with permissions found');
+      throw new Error('No portfolio with permissions found');
+    }
+    const foundPortfolio = portfolios[selectedPortfolioIndex];
+
+    // hack convert portfolio to CFM if supported
+    if (foundPortfolio.type !== 'INTX') {
+      try {
+        const { data } = await this.xhr.get<BALANCE_RESPONSE_CFM>(ENDPOINTS.BALANCE_CFM);
+        if (data.balance_summary) {
+          foundPortfolio.type = 'CFM';
+        }
+      } catch {
+        // do nothing
+      }
+    }
+    return foundPortfolio;
+  };
+
+  fetchPositions = async () => {
+    const openPositions = await this.fetchOpenPositions();
+    const markets = this.store.markets;
+    const missingPositionMarkets = markets.filter((m) => !openPositions.find((p) => p.symbol === m.symbol));
+    const fakePositions = missingPositionMarkets.map((m) => ({
+      id: createPositionId(m.symbol),
+      symbol: m.symbol,
+      side: PositionSide.Long,
+      entryPrice: 0,
+      notional: 0,
+      leverage: 10,
+      positionMode: PositionMode.OneWay,
+      marginType: MarginType.Cross,
+      unrealizedPnl: 0,
+      contracts: 0,
+      liquidationPrice: 0,
+      info: {},
+    }));
+    return [...openPositions, ...fakePositions];
+  };
+
+  fetchOpenPositions = async () => {
+    const supportedTypes = await this.getSupportedTypes();
+    return (
+      await Promise.all(
+        supportedTypes.map((type) => {
+          return type === 'spot' ? [] : type === 'cfm' ? this.fetchOpenPositionsCfm() : this.fetchOpenPositionsIntx();
+        }),
+      )
+    ).flat();
+  };
+
+  fetchOpenPositionsCfm = async (): Promise<Position[]> => {
+    try {
+      const { data } = await this.xhr.get<LIST_POSITIONS_CFM_RESPONSE>(ENDPOINTS.LIST_POSITIONS_CFM);
+
+      const formattedPositions: Position[] = data.positions.map(
+        (position: LIST_POSITIONS_CFM_RESPONSE['positions'][0]) => {
+          // export type Position = {
+          //   readonly id: string;
+          //   readonly symbol: string;
+          //   readonly side: PositionSide;
+          //   readonly entryPrice: number;
+          //   readonly notional: number;
+          //   readonly leverage: number;
+          //   readonly marginType?: MarginType;
+          //   readonly positionMode?: PositionMode;
+          //   readonly unrealizedPnl: number;
+          //   readonly realizedPnl?: number;
+          //   readonly contracts: number;
+          //   readonly liquidationPrice: number;
+          //   readonly info?: any;
+          //   readonly extra?: {
+          //     readonly unrealizedPnlNative?: number;
+          //     readonly nativeCurrency?: string;
+          //   };
+          //   readonly lastUpdate?: number;
+          // };
+
+          // export type LIST_POSITIONS_CFM_RESPONSE = {
+          //   product_id: string;
+          //   expiration_time: string;
+          //   side: 'LONG' | 'SHORT';
+          //   number_of_contracts: string;
+          //   current_price: string;
+          //   avg_entry_price: string;
+          //   unrealized_pnl: string;
+          //   daily_realized_pnl: string;
+          // }[];
+
+          const market = this.store.marketsBySymbol[position.product_id];
+          const contractSize = market?.contractSize || 1;
+
+          const side = position.side === 'LONG' ? PositionSide.Long : PositionSide.Short;
+          const entryPrice = parseFloat(position.avg_entry_price);
+          const markPrice = parseFloat(position.current_price);
+          const size = Math.abs(parseFloat(position.number_of_contracts));
+          const unrealisedPnl = parseFloat(position.unrealized_pnl);
+          const sizeNotional = size * markPrice * contractSize;
+          const sizeInBase = multiply(size, contractSize);
+          return {
+            id: createPositionId(position.product_id),
+            symbol: position.product_id,
+            side,
+            entryPrice: entryPrice,
+            notional: sizeNotional,
+            positionMode: PositionMode.OneWay,
+            marginType: MarginType.Cross,
+            leverage: 10,
+            unrealizedPnl: unrealisedPnl,
+            contracts: sizeInBase,
+            liquidationPrice: 0,
+            extra: {
+              contractsNative: size,
+            },
+            info: position,
+          };
+        },
+      );
+
+      return formattedPositions;
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      return this.store.positions;
+    }
+  };
+
+  fetchOpenPositionsIntx = async () => {
+    if (!this.selectedPortfolio || this.selectedPortfolio.type !== 'INTX') {
+      this.emitAndLogError('No INTX portfolio found');
+      return this.store.positions;
+    }
+    try {
+      const { data } = await this.xhr.get<LIST_POSITIONS_INTX_RESPONSE>(ENDPOINTS.LIST_POSITIONS_INTX, {
+        params: {
+          portfolio_uuid: this.selectedPortfolio.uuid,
+        },
+      });
+      const formattedPositions: Position[] = data.positions.map(
+        (position: LIST_POSITIONS_INTX_RESPONSE['positions'][0]) => {
+          const side = position.position_side === 'POSITION_SIDE_LONG' ? PositionSide.Long : PositionSide.Short;
+          const entryPrice = parseFloat(position.entry_vwap.value);
+          const markPrice = parseFloat(position.mark_price.value);
+          const size = Math.abs(parseFloat(position.net_size));
+          const unrealisedPnl = (side === PositionSide.Long ? 1 : -1) * size * (markPrice - entryPrice);
+          const sizeNotional = size * markPrice;
+          return {
+            id: createPositionId(position.symbol),
+            symbol: position.symbol,
+            side,
+            entryPrice: entryPrice,
+            notional: sizeNotional,
+            positionMode: PositionMode.OneWay,
+            marginType: MarginType.Cross,
+            leverage: parseFloat(position.leverage || '10'),
+            unrealizedPnl: unrealisedPnl,
+            contracts: size,
+            liquidationPrice: parseFloat(position.liquidation_price.value),
+            info: position,
+          };
+        },
+      );
+
+      return formattedPositions;
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      return this.store.positions;
+    }
+  };
+
+  // TODO: implement
+  fetchHistoricalTrades = async (_opts: HistoricalTradeOptions) => {
+    return [];
+  };
+
+  dailyCandles: { [key: string]: Candle } = {};
+
+  fetchOHLCV = async (opts: OHLCVOptions) => {
+    const interval = opts.interval;
+    // ONE_MINUTE, FIVE_MINUTES, FIFTEEN_MINUTES, THIRTY_MINUTES, ONE_HOUR, TWO_HOURS, SIX_HOURS, ONE_DAY
+    const intervalMap: Partial<Record<Timeframe, string>> = {
+      '1m': 'ONE_MINUTE',
+      '5m': 'FIVE_MINUTE',
+      '15m': 'FIFTEEN_MINUTE',
+      '30m': 'THIRTY_MINUTE',
+      '1h': 'ONE_HOUR',
+      '2h': 'TWO_HOUR',
+      '6h': 'SIX_HOUR',
+      '1d': 'ONE_DAY',
+    };
+    const granularity = intervalMap[interval];
+    if (!granularity) {
+      throw new Error(`Invalid interval ${interval}`);
+    }
+    const limit = Math.min(opts.limit || 300, 300);
+    const [, amount, unit] = opts.interval.split(/(\d+)/);
+
+    const end = opts.to ? dayjs(opts.to) : dayjs();
+    const start =
+      !limit && opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
+
+    const { data } = await this.xhr.get<CANDLES_RESPONSE>(ENDPOINTS.KLINE, {
+      params: {
+        product_id: opts.symbol,
+        granularity,
+        start: Math.round(start.valueOf() / 1000),
+        end: Math.round(end.valueOf() / 1000),
+      },
+    });
+
+    const candles: Candle[] = data.candles
+      .map(({ start, low, high, open, close, volume }) => {
+        const formattedCandle = {
+          timestamp: +start,
+          open: parseFloat(open),
+          high: parseFloat(high),
+          low: parseFloat(low),
+          close: parseFloat(close),
+          volume: parseFloat(volume),
+        };
+        if (interval === '1d') {
+          if (!this.dailyCandles[opts.symbol] || this.dailyCandles[opts.symbol].timestamp < formattedCandle.timestamp) {
+            this.dailyCandles[opts.symbol] = formattedCandle;
+          }
+        }
+        return formattedCandle;
+      })
+      .reverse();
+
+    return candles;
+  };
+
+  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    return this.publicWebsocket.listenOHLCV(opts, callback);
+  };
+
+  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+    return this.publicWebsocket.listenOrderBook(symbol, callback);
+  };
+
+  cancelOrders = async (orders: Order[]) => {
+    try {
+      const lots = chunk(
+        orders.map((o) => o.id),
+        100,
+      );
+      await forEachSeries(lots, async (lot) => {
+        await this.xhr.post(ENDPOINTS.CANCEL_ORDER_BATCH, {
+          order_ids: lot,
+        });
+
+        this.store.updateOrdersStatus(
+          lot.map((id) => ({ id })),
+          OrderStatus.Canceled,
+        );
+      });
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+    }
+  };
+
+  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const newOrder = {
+      symbol: order.symbol,
+      type: order.type,
+      side: order.side,
+      price: order.price,
+      amount: order.amount,
+      reduceOnly: order.reduceOnly || false,
+    };
+
+    if ('price' in update) newOrder.price = update.price;
+    if ('amount' in update) newOrder.amount = update.amount;
+
+    await this.cancelOrders([order]);
+    return await this.placeOrder(newOrder);
+  };
+
+  placeOrder = async (opts: PlaceOrderOpts) => {
+    const payload = this.formatCreateOrder(opts);
+    try {
+      const { data } = await this.xhr.post<PLACE_ORDER_RESPONSE>(ENDPOINTS.ORDER, payload);
+
+      if (!data.success) {
+        if (data.error_response?.preview_failure_reason) {
+          throw new Error(data.error_response.preview_failure_reason);
+        } else {
+          throw new Error(data.failure_reason || 'Unknown error');
+        }
+      }
+      return [data.order_id];
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      throw new Error(err?.response?.data?.message || err?.message);
+    }
+  };
+
+  private formatCreateOrder = (opts: PlaceOrderOpts): PLACE_ORDER_REQUEST => {
+    // if (opts.type === OrderType.TrailingStopLoss) {
+    //   return this.formatCreateTrailingStopLossOrder(opts);
+    // }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+
+    if (!market) {
+      throw new Error(`Market ${opts.symbol} not found`);
+    }
+
+    // const pSide = this.getOrderPositionSide(opts);
+    //
+    const pPrice = market.precision.price;
+    const pAmount = market.precision.amount;
+
+    const amount = adjust(opts.amount, pAmount);
+    //
+    // // We use price only for limit orders
+    // // Market order should not define price
+    const price = opts.price && opts.type !== OrderType.Market ? adjust(opts.price, pPrice) : undefined;
+    //
+    // // Binance stopPrice only for SL or TP orders
+    // const priceField = isStopOrTP ? 'stopPrice' : 'price';
+    //
+    // const reduceOnly = opts.reduceOnly;
+    // const timeInForce = opts.timeInForce
+    //   ? inverseObj(TIME_IN_FORCE)[opts.timeInForce]
+    //   : inverseObj(TIME_IN_FORCE)[OrderTimeInForce.GoodTillCancel];
+
+    // type ORDER_REQUEST_CONFIG = {
+    //   market_market_ioc?: {
+    //     quote_size: string;
+    //     base_size: string;
+    //   };
+    //   sor_limit_ioc?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //   };
+    //   limit_limit_gtc?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //     post_only?: boolean;
+    //   };
+    //   limit_limit_gtd?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //     end_time: string; // RFC3339 Timestamp
+    //     post_only?: boolean;
+    //   };
+    //   stop_limit_stop_limit_gtc?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //     stop_price: string;
+    //     stop_direction: STOP_DIRECTION;
+    //   };
+    //   stop_limit_stop_limit_gtd?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //     stop_price: string;
+    //     end_time: string; // RFC3339 Timestamp
+    //     stop_direction: STOP_DIRECTION;
+    //   };
+    //   trigger_bracket_gtc?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //     stop_trigger_price: string;
+    //   };
+    //   trigger_bracket_gtd?: {
+    //     base_size: string;
+    //     limit_price: string;
+    //     stop_trigger_price: string;
+    //     end_time: string; // RFC3339 Timestamp
+    //   };
+    // };
+    //
+    // export type PLACE_ORDER_REQUEST = {
+    //   client_order_id: string;
+    //   product_id: string;
+    //   side: 'BUY' | 'SELL';
+    //   order_configuration: ORDER_REQUEST_CONFIG;
+    //   self_trade_prevention_id?: string;
+    //   leverage?: string;
+    //   margin_type?: MARGIN_TYPE;
+    //   retail_portfolio_id?: string;
+    // };
+
+    let order_configuration: PLACE_ORDER_REQUEST['order_configuration'];
+    if (opts.type === OrderType.Market) {
+      order_configuration = {
+        market_market_ioc: {
+          base_size: `${amount}`,
+        },
+      };
+    } else if (
+      opts.type === OrderType.StopLoss
+      // || opts.type === OrderType.TakeProfit
+    ) {
+      const stopIsAbove = opts.side === OrderSide.Buy && opts.type === OrderType.StopLoss;
+      // || (opts.side === OrderSide.Sell && opts.type === OrderType.TakeProfit);
+      const stopPrice = price || 0;
+      const limitPrice = adjust(stopPrice * (stopIsAbove ? 1.01 : 0.99), pPrice);
+      order_configuration = {
+        stop_limit_stop_limit_gtc: {
+          base_size: `${amount}`,
+          limit_price: `${limitPrice}`,
+          stop_price: `${stopPrice}`,
+          stop_direction: stopIsAbove ? 'STOP_DIRECTION_STOP_UP' : 'STOP_DIRECTION_STOP_DOWN',
+        },
+      };
+    } else {
+      order_configuration = {
+        limit_limit_gtc: {
+          base_size: `${amount}`,
+          limit_price: `${price}`,
+          post_only: opts.timeInForce === OrderTimeInForce.PostOnly,
+        },
+      };
+    }
+
+    const req: PLACE_ORDER_REQUEST = {
+      client_order_id: 'tealstreet-' + uuid(),
+      product_id: opts.symbol,
+      side: opts.side === OrderSide.Buy ? 'BUY' : 'SELL',
+      // TODO. leverage setting?
+      leverage: '10',
+      order_configuration,
+    };
+
+    return req;
+
+    // const req = omitUndefined({
+    //   symbol: opts.symbol,
+    //   positionSide: pSide,
+    //   side: inverseObj(ORDER_SIDE)[opts.side],
+    //   type: inverseObj(ORDER_TYPE)[opts.type],
+    //   quantity: amount ? `${amount}` : undefined,
+    //   [priceField]: price ? `${price}` : undefined,
+    //   timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
+    //   closePosition: isStopOrTP ? 'true' : undefined,
+    //   reduceOnly: reduceOnly && !isStopOrTP ? 'true' : undefined,
+    // });
+    //
+    // const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
+    // const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
+    //
+    // const lotSize = adjust((amount - rest) / lots, pAmount);
+    //
+    // const payloads: Array<Record<string, any>> = times(lots, () => ({
+    //   ...req,
+    //   quantity: `${lotSize}`,
+    // }));
+    //
+    // if (rest) {
+    //   payloads.push({ ...req, quantity: `${rest}` });
+    // }
+    //
+    // if (opts.stopLoss) {
+    //   payloads.push({
+    //     ...omit(req, 'price'),
+    //     side: inverseObj(ORDER_SIDE)[opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy],
+    //     type: inverseObj(ORDER_TYPE)[OrderType.StopLoss],
+    //     stopPrice: `${opts.stopLoss}`,
+    //     timeInForce: 'GTC',
+    //     closePosition: 'true',
+    //   });
+    // }
+    //
+    // if (opts.takeProfit) {
+    //   payloads.push({
+    //     ...omit(req, 'price'),
+    //     side: inverseObj(ORDER_SIDE)[opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy],
+    //     type: inverseObj(ORDER_TYPE)[OrderType.TakeProfit],
+    //     stopPrice: `${opts.takeProfit}`,
+    //     timeInForce: 'GTC',
+    //     closePosition: 'true',
+    //   });
+    // }
+    //
+    // // We need to set orderId for each order
+    // // otherwise Binance will duplicate the IDs
+    // // when its sent in batches
+    // for (const payload of payloads) {
+    //   payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+    // }
+    //
+    // return payloads;
+  };
+
+  fetchAndSetPrivateSnapshot = async () => {};
+}

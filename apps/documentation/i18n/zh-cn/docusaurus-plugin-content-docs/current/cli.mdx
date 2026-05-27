@@ -1,0 +1,266 @@
+---
+title: CLI 交易（贝塔）
+description: Tealstreet 的命令行界面（CLI）交易
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+---
+
+## 导言
+
+该命令行界面（CLI）提供了一套与交易系统交互的命令。这些命令涵盖各种操作，如下达市价订单和限价订单、取消订单以及管理自定义命令的别名。
+
+## 目录
+
+1. [订单行动](#order-actions)
+2. [订单类型](#order-types)
+3. [订购参数](#order-parameters)
+4. [命令](#commands)
+    - [市场订单](#market-order)
+    - [限价订单](#limit-order)
+    - [停止令](#stop-order)
+    - [取消所有订单](#cancel-all-orders)
+    - [取消所有符号订单](#cancel-all-orders-for-symbol)
+    - [压平所有位置](#flatten-all-positions)
+    - [扁平化符号位置](#flatten-position-for-symbol)
+    - [确保位置](#ensure-position)
+    - [睡眠](#sleep)
+    - [列出命令别名](#list-command-aliases)
+    - [显示命令别名](#show-command-alias)
+    - [创建命令别名](#create-command-alias)
+    - [删除命令别名](#delete-command-alias)
+    - [解析命令别名](#parse-command-alias)
+
+## 订单行动 {#order-actions}
+
+- **买入**： 启动买入指令。
+- **卖出**： 发出卖出指令。
+- **长**： 相当于 "买入"。
+- **短**： 相当于 "卖出"。
+
+## 订单类型 {#order-types}
+
+- **市场**： 下达市价订单。
+- **限制**： 下达限价订单。
+- **stop**： 下达止损订单。
+
+## 订购参数 {#order-parameters}
+
+- **数字**： 代表数值（浮点数或整数）。
+- **symbol**： 代表一种交易工具（至少 5 个字符）。
+- **post**： 指定 "仅限过账 "订单。
+- **reduce**： 指定 "仅限减仓 "订单。
+- **word**： 代表一个单词。
+- **usd_currency**： 代表美元货币符号（如"$"、"d dollars"、"usd"）。
+
+## 命令 {#commands}
+
+### 市场订单 {#market-order}
+
+**Grammar:**
+
+```plaintext
+[order_type 'market'] <action: buy | sell | long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+market buy 10 BTC with post
+```
+
+### 限价订单 {#limit-order}
+
+**Grammar:**
+
+```plaintext
+[order_type 'limit'] <action: buy | sell | long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> at [$] <price: number> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+limit sell 5 ETH at $200 with reduce
+```
+
+### 停止令 {#stop-order}
+
+**Grammar:**
+
+```plaintext
+[order_type 'stop'] <action: buy | sell | long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> at [$] <price: number> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+stop sell 2 BTC at $35000 with post, reduce, mark
+```
+
+### 取消所有订单 {#cancel-all-orders}
+
+**Grammar:**
+
+```plaintext
+cancel [all] orders
+```
+
+**Example:**
+
+```plaintext
+cancel all orders
+```
+
+### 取消所有符号订单 {#cancel-all-orders-for-symbol}
+
+**Grammar:**
+
+```plaintext
+cancel [all] <symbol: symbol> orders
+```
+
+**Example:**
+
+```plaintext
+cancel all BTC orders
+```
+
+### 压平所有位置 {#flatten-all-positions}
+
+**Grammar:**
+
+```plaintext
+flatten [all] [positions]
+```
+
+**Example:**
+
+```plaintext
+flatten all
+```
+
+### 扁平化符号位置 {#flatten-position-for-symbol}
+
+**Grammar:**
+
+```plaintext
+flatten [all] <symbol: symbol> [positions] [position]
+```
+
+**Example:**
+
+```plaintext
+flatten BTC positions
+```
+
+### 确保位置 {#ensure-position}
+
+**Grammar:**
+
+```plaintext
+ensure <action: long | short> [usd_currency] <amount: number> [usd_currency] [usd_currency] [of] <symbol: symbol> [with [exec_params: post | reduce | <trigger type> | <margin mode> | <position mode> | bind stops]]
+```
+
+**Example:**
+
+```plaintext
+ensure long $500 btcusdt
+```
+
+### 睡眠 {#sleep}
+
+**Grammar:**
+
+```plaintext
+sleep <seconds: SleepTime>
+```
+
+**Example:**
+
+```plaintext
+sleep 5
+```
+
+### 列出命令别名 {#list-command-aliases}
+
+**Grammar:**
+
+```plaintext
+alias list
+```
+
+**Example:**
+
+```plaintext
+alias list
+```
+
+### 显示命令别名 {#show-command-alias}
+
+**Grammar:**
+
+```plaintext
+alias show <name: word>
+```
+
+**Example:**
+
+```plaintext
+alias show my_alias
+```
+
+### 创建命令别名 {#create-command-alias}
+
+**Grammar:**
+
+```plaintext
+alias [create] <name: word> [(args: word, ...)] = <command: restline>
+```
+
+**Example:**
+
+```plaintext
+alias create my_alias (arg1, arg2) = limit buy {arg1} at $500 with post
+```
+
+### 删除命令别名 {#delete-command-alias}
+
+**Grammar:**
+
+```plaintext
+alias [delete | remove | rm] <name: word>
+```
+
+**Example:**
+
+```plaintext
+alias delete my_alias
+```
+
+### 解析命令别名 {#parse-command-alias}
+
+**Grammar:**
+
+```plaintext
+<alias: word> [(args: word, ...)]
+```
+
+**Example:**
+
+```plaintext
+my_alias (value1, value2)
+```
+
+```plaintext
+本文档概述了可用命令及其语法。用户可根据自己的交易需求定制并执行这些命令。
+```
+
+## 考虑因素和局限性
+
+- CLI 支持使用附加或额外的 "执行 "参数。例如，某些交换需要 **bindStop**、**marginMode**、**positionMode** 等。这些参数可添加到命令行中，并将传递给交易所。

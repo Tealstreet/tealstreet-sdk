@@ -1,0 +1,43 @@
+---
+title: API 迁移
+description: Migration of API keys (Tealstreet Update 2.0)
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+---
+
+## API 密钥迁移（更新 2.0）
+
+随着 [Tealstreet 2.0](https://app.tealstreet.io/) 的推出，某些交易所的 API 密钥需要进行编辑或重新创建。
+
+- **Binance**: 密钥需要重新创建。请参阅 [Binance](/docs/connect/binance)
+- **Bitget**: 密钥需要重新创建。请参阅 [Bitget](/docs/connect/bitget)
+- **Bitmex**: 密钥需要重新创建。请参阅 [Bitmex](/docs/connect/bitmex)
+- **Bybit**: 此迁移不应影响密钥。
+- **Okex**: 此迁移不应影响密钥。
+- **Phemex**: 密钥需要重新创建。请参阅 [Phemex](/docs/connect/phemex)
+
+:::caution
+建议用户创建 **新的** API 密钥，而不是仅编辑现有密钥。
+:::
+
+:::danger
+用户在 Tealstreet 旧版本向新版本的迁移完成后有 3 天的宽限期，在此期间可继续使用原有交易密钥，然后旧版本将被淘汰
+:::
+
+---
+
+### 故障排除
+
+在本节中，我们将介绍用户在迁移和更新到 Tealstreet 2.0 过程中可能遇到的一些常见问题。
+
+**我的 API 密钥无法使用/未显示？**
+
+由于数据迁移的处理方式，创建 API 密钥的用户可能会在数据快照（4 月 30 日）之后失去其激活的密钥，并需要创建新的密钥。
+
+- 如果您在迁移 API 密钥时遇到问题，请联系我们获取 [支持](/docs/support/contact-us)。

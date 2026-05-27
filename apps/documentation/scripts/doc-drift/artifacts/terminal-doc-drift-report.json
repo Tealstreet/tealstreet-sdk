@@ -1,0 +1,820 @@
+﻿{
+    "generatedAt":  "2026-04-13T00:35:17.7983379Z",
+    "scope":  [
+                  "trade/modules",
+                  "desktopclient",
+                  "FAQ"
+              ],
+    "method":  "split-script rerank (v2 similarity + stale phrasing + route/asset checks; draft ignored by default)",
+    "entries":  [
+                    {
+                        "docPath":  "apps/documentation/docs/desktopclient/windows.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/desktopclient/windows.mdx",
+                        "title":  "windows",
+                        "featureKeywords":  [
+                                                "window"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  2,
+                                      "userImpact":  3,
+                                      "confidence":  1,
+                                      "ageSignal":  0,
+                                      "total":  6,
+                                      "priority":  "P1"
+                                  },
+                        "issues":  [
+                                       {
+                                           "type":  "version_drift",
+                                           "description":  "Page has high V2 overlap and likely needs modernization polish.",
+                                           "evidence":  {
+                                                            "docSnippet":  "v2_similarity=0.816",
+                                                            "codePaths":  [
+
+                                                                          ]
+                                                        }
+                                       }
+                                   ],
+                        "recommendedAction":  "surgical_edit",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.816; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/FAQ.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/FAQ.mdx",
+                        "title":  "FAQ",
+                        "featureKeywords":  [
+                                                "FAQ"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  2,
+                                      "userImpact":  3,
+                                      "confidence":  1,
+                                      "ageSignal":  0,
+                                      "total":  6,
+                                      "priority":  "P1"
+                                  },
+                        "issues":  [
+                                       {
+                                           "type":  "link_drift",
+                                           "description":  "Contains links to legacy connect routes.",
+                                           "evidence":  {
+                                                            "docSnippet":  "/docs/connect/kucoin",
+                                                            "codePaths":  [
+
+                                                                          ]
+                                                        }
+                                       }
+                                   ],
+                        "recommendedAction":  "surgical_edit",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.63; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/desktopclient/linux.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/desktopclient/linux.mdx",
+                        "title":  "linux",
+                        "featureKeywords":  [
+                                                "linux"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  3,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  4,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.601; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/desktopclient/mac.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/desktopclient/mac.mdx",
+                        "title":  "mac",
+                        "featureKeywords":  [
+                                                "mac"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  3,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.46; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/aggr.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/aggr.mdx",
+                        "title":  "aggr",
+                        "featureKeywords":  [
+                                                "aggr"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.506; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/econ-events.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/econ-events.mdx",
+                        "title":  "econ-events",
+                        "featureKeywords":  [
+                                                "econ",
+                                                "event"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.547; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/fee-calculator.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/fee-calculator.mdx",
+                        "title":  "fee-calculator",
+                        "featureKeywords":  [
+                                                "fee",
+                                                "calculator"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.519; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/forex-calendar.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/forex-calendar.mdx",
+                        "title":  "forex-calendar",
+                        "featureKeywords":  [
+                                                "forex",
+                                                "calendar"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.539; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/open-interest-chart.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/open-interest-chart.mdx",
+                        "title":  "open-interest-chart",
+                        "featureKeywords":  [
+                                                "open",
+                                                "intere",
+                                                "t",
+                                                "chart"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.557; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/wsot-leaderboard.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/wsot-leaderboard.mdx",
+                        "title":  "wsot-leaderboard",
+                        "featureKeywords":  [
+                                                "w",
+                                                "ot",
+                                                "leaderboard"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  1,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  3,
+                                      "priority":  "P2"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "cleanup_review",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.586; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/basic-chart.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/basic-chart.mdx",
+                        "title":  "basic-chart",
+                        "featureKeywords":  [
+                                                "ba",
+                                                "ic",
+                                                "chart"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.496; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/browser-view.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/browser-view.mdx",
+                        "title":  "browser-view",
+                        "featureKeywords":  [
+                                                "brow",
+                                                "er",
+                                                "view"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.476; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/chaser-orders.mdx",
+                        "v2ComparisonPath":  "",
+                        "title":  "chaser-orders",
+                        "featureKeywords":  [
+                                                "cha",
+                                                "er",
+                                                "order"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=n/a; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/cli.mdx",
+                        "v2ComparisonPath":  "",
+                        "title":  "cli",
+                        "featureKeywords":  [
+                                                "cli"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=n/a; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/cross-trades.mdx",
+                        "v2ComparisonPath":  "",
+                        "title":  "cross-trades",
+                        "featureKeywords":  [
+                                                "cro",
+                                                "trade"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=n/a; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/custom-module.mdx",
+                        "v2ComparisonPath":  "",
+                        "title":  "custom-module",
+                        "featureKeywords":  [
+                                                "cu",
+                                                "tom",
+                                                "module"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=n/a; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/dom.mdx",
+                        "v2ComparisonPath":  "",
+                        "title":  "dom",
+                        "featureKeywords":  [
+                                                "dom"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=n/a; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/news-feed.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/news-feed.mdx",
+                        "title":  "news-feed",
+                        "featureKeywords":  [
+                                                "new",
+                                                "feed"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.431; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/position-history.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/position-history.mdx",
+                        "title":  "position-history",
+                        "featureKeywords":  [
+                                                "po",
+                                                "ition",
+                                                "hi",
+                                                "tory"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.435; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/screener.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/screener.mdx",
+                        "title":  "screener",
+                        "featureKeywords":  [
+                                                "creener"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.485; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/ticker-data.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/ticker-data.mdx",
+                        "title":  "ticker-data",
+                        "featureKeywords":  [
+                                                "ticker",
+                                                "data"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.3; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/ticks-chart.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/ticks-chart.mdx",
+                        "title":  "ticks-chart",
+                        "featureKeywords":  [
+                                                "tick",
+                                                "chart"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.248; draft=false"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/twitch.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/twitch.mdx",
+                        "title":  "twitch",
+                        "featureKeywords":  [
+                                                "twitch"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.315; draft=true"
+                    },
+                    {
+                        "docPath":  "apps/documentation/docs/trade/modules/twitter.mdx",
+                        "v2ComparisonPath":  "apps/documentation/versioned_docs/version-2.0.0/trade/modules/twitter.mdx",
+                        "title":  "twitter",
+                        "featureKeywords":  [
+                                                "twitter"
+                                            ],
+                        "codePathsChecked":  [
+                                                 "apps/web/src",
+                                                 "packages/worker-*",
+                                                 "packages/safe-cex"
+                                             ],
+                        "codeSignal":  {
+                                           "keywordHitCount":  0,
+                                           "topMatchingPaths":  [
+
+                                                                ]
+                                       },
+                        "score":  {
+                                      "mismatchEvidence":  0,
+                                      "userImpact":  2,
+                                      "confidence":  0,
+                                      "ageSignal":  0,
+                                      "total":  2,
+                                      "priority":  "Monitor"
+                                  },
+                        "issues":  [
+
+                                   ],
+                        "recommendedAction":  "keep",
+                        "notes":  "lastUpdatedDays=0; v2Similarity=0.37; draft=false"
+                    }
+                ]
+}

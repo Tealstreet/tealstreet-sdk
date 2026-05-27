@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "ESNext",
+    "jsx": "preserve",
+    "incremental": true,
+    "types": ["vitest/globals", "node"],
+    "paths": {
+      "@tealstreet/poseidon-crypto/src": ["../poseidon-crypto/src"]
+    }
+  },
+  "exclude": ["**/node_modules", "**/.*/*", "dist"],
+  "include": [".eslintrc.*", "**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cjs", "**/*.mjs", "**/*.jsx", "**/*.json"]
+}

@@ -1,0 +1,254 @@
+---
+title: Phemex
+description: Learn how to connect your Phemex API to Tealstreet.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WhitelistTroubleshooting from '/img/connect/phemex/whitelist-troubleshooting.png';
+import ApiWhitelist from '/img/connect/bitget/v3/apiwhitelist.png';
+import ApiTeal from '/img/connect/bitget/v3/api-teal.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+<ThemedImage
+    alt="Phemex-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/phemex-light.png'),
+        dark: useBaseUrl('/img/exchange/phemex-dark.png'),
+    }}
+/>
+
+<div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+    <iframe
+        src="https://www.youtube.com/embed/O6nnMDf2AIg"
+        frameBorder="0"
+        allow="autoplay; encrypted-media"
+        allowFullScreen
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+    />
+</div>
+
+## Connecting [Phemex](https://teal.link/Phemex) to Tealstreet
+
+---
+
+## API Creation Process
+
+- First, make sure you are logged into your [Phemex](https://teal.link/Phemex) account.
+
+:::note
+Consider supporting Tealstreet by using the [referral link](https://teal.link/Phemex).
+:::
+
+<IntroTealstreet exchangeName="Phemex" />
+
+---
+
+### Phemex API Creation
+
+- Now you are ready to generate the API Keys within your Phemex Account. Head on over to the Phemex tab and:
+    1. Click on the User Icon.
+    2. Select **'API Management'** from the dropdown menu.
+
+<div class="text--center">
+
+![API-Dropdown](/img/connect/phemex/apidropdown.png)
+
+</div>
+
+:::tip
+You can get to this page directly by navigating **[here](https://www.phemex.com/account/api-management)**
+:::
+
+- On the API Management page click on the **Create new API Key** Button to start the key creation process.
+
+<div class="text--center">
+
+![API-Create](/img/connect/phemex/apicreate.png)
+
+</div>
+
+- On the **Create API** pop-up window
+    1. Select "High Rate Limit API"
+    2. Select next
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/phemex/apimore.png)
+
+</div>
+
+- Now you are ready to choose the settings of your Phemex API Key.
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/phemex/v3/apidetails2.png)
+
+</div>
+
+- **Name**: You can choose any name you like for this section. It can be helpful to use a name related to Tealstreet in case you have many API keys for different services.
+- Copy the Whitelist IP Addresses supplied by Tealstreet (on the new API key page) and paste them into this field.
+- Choose ‘**Read & Trade Permission**’.
+- **Confirm**: Once you have completed the required fields, press Confirm.
+
+:::caution
+Never share your API Keys with anyone.
+:::
+
+---
+
+### Linking the API to Tealstreet
+
+- Once you have created the API Key on Phemex’s website, you are ready to link them inside Tealstreet
+
+- Now lets return to the **'API Keys'** page inside the terminal we left open earlier.
+
+<div class="text--center">
+
+![API-Tealstreet](/img/connect/phemex/v3/api-teal.png)
+
+</div>
+
+- Click the exchange drop down and select Phemex.
+  - '**Name**': Here you can choose a name for your API Key. This is helpful for traders who utilize multiple exchanges and/or sub accounts and want to easily distinguish between them on the trading terminal page.
+  - Choose the Color you want your key to look like inside the terminal.
+  - Paste the **API Key** provided by Phemex here.
+  - Paste the **API Secret** provided by Phemex here.
+  - Click **'Done'**.
+
+<OutroTealstreet exchangeName="Phemex" />
+
+:::caution
+**Phemex** requires that an account have performed a **single manual trade** before their API activates for remote-trading through a terminal.
+:::
+
+---
+
+## Supported Markets
+
+Phemex supports 3 margin types for their perpetual markets:
+
+1. **COIN-M**: Coin margined (Inverse).
+    - BTC margined & ETH margined contracts.
+
+2. **USD-M**: Phemex’s USD markets.
+    - You must hold USD (**not USDT**) in your Contract Trading Account to trade USD-M markets on Phemex.
+
+3. **USDT**: Phemex' USDT markets.
+    - You must hold USDT (**not USD**) in your Contract Trading Account to trade USDT markets on Phemex.
+
+<!-- :::note
+**USDT** pairs support was added as of the [Tealstreet 2.0](https://app.tealstreet.io/) upgrade.
+::: -->
+
+:::note
+
+- Linear Perpetuals use USD or USDT as margin.
+- Inverse Perpetuals use Coin margin (BTC or ETH).
+- For example the BTC Linear Perps are called **‘BTCUSD’** & **‘BTCUSDT’**, while the BTC Inverse Perp is called **‘BTCUSD Perp’** See image below:
+  :::
+
+<div class="text--center">
+
+![LinPerp](/img/connect/phemex/linperp.png)
+
+</div>
+
+---
+
+## Getting Phemex USD
+
+Watch this Youtube video from Phemex to learn how to use their crypto convert tool:
+
+<div class="text--center">
+
+_[![Phemex-Connect](https://img.youtube.com/vi/33MOUAwraOo/hqdefault.jpg)](https://www.youtube.com/watch?v=33MOUAwraOo)_
+
+</div>
+
+:::note
+If you hold USDC or USDT and want to trade Phemex ‘USD-M’ you need to convert the margin to Phemex USD first!
+:::
+
+---
+
+### Transferring to Contract account
+
+Once you have either USD, USDT, BTC, or ETH, transfer your preferred balance to the **'Contract Trading Accounts'**. Follow the instructions below to transfer margin from the Spot wallet to the Contract Trading Wallet.
+
+The steps to do this are:
+
+- bring up the **Assets** menu
+- Click **'Transfer'**
+
+<div class="text--center">
+
+![Transfer](/img/connect/phemex/transfer.png)
+
+</div>
+
+- Select the margin type you wish to transfer. (e.g., USD)
+- Ensure the locations for the transfer (e.g., Spot to Contract Trading)
+- Input the desired amount of margin to transfer (e.g., $100, All)
+- Click **'Confirm'**
+
+<div class="text--center">
+
+![Transfer](/img/connect/phemex/transfer2.png)
+
+</div>
+
+---
+
+## Troubleshooting
+
+### API Stuck loading
+
+:::danger
+Having trouble loading your Phemex API in Tealstreet? such as a **spinning wheel** when trying to place an order?
+:::
+
+1. Make sure the Phemex account has **completed** at least **one trade** to generate history & unlock the API
+2. Ensure you are using a supported market. (Spot for example isn't supported)
+3. If you have issues, please **[contact us](/docs/support/contact-us/)**.
+
+---
+
+### Zero Balance
+
+Tealstreet **'Margin Wallet'** not showing any balance?
+
+1. Confirm you hold the appropriate margin in your **'Contract Trading Account'** on Phemex.
+2. Confirm you have the appropriate market open in Tealstreet.
+    - If you hold Phemex USD and want to trade BTC go to 'BTCUSD' Linear.
+    - If you hold BTC and want to trade BTC margined contracts, go to 'BTCUSD' Inverse.
+    - if you hold ETH and want to trade ETH margined contracts, go to 'cETHUSD' Inverse.
+
+---
+
+### Can't place stoploss orders
+
+- Phemex requires you to have an active position to be able to place stoplosses. This is a limitation of the exchange engine.
+
+---
+
+### Getting a message about API Validated but IP is unrestricted?
+
+- Please ensure you have followed the documentation, in particular did you create a "High rate limit" API Key? or a default?
+    - Are you trying to connect to the testnet? or the mainnet? At this time testnet support is provided on a best-effort basis and may not be working correctly.
+
+### Other API Issues
+
+1. Double check that you did not confuse the API Key and the API Secret.
+2. Ensure you correctly whitelisted all IP Addresses listed in the terminal, shown in the **'New API Key - Phemex'** window.
+
+<!-- <div class="text--center">
+  <img src={WhitelistTroubleshooting} alt="Troubleshooting IP Whitelist" style={{width: 450}} />
+</div> -->

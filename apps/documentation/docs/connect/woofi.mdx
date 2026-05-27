@@ -1,0 +1,162 @@
+---
+title: WOOFi
+description: Learn how to connect your WOOFi API to Tealstreet.
+sidebar_position: 11
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WooFiConnect from '/img/connect/woofi/woofi-connect.png';
+import WooFiConnect2 from '/img/connect/woofi/woofi-connect2.png';
+import WooFiAccount from '/img/connect/woofi/woofi-account.png';
+import WooFiAcceptPermissions from '/img/connect/woofi/woofi-accept-permissions.png';
+import WooFiAcceptPermissions2 from '/img/connect/woofi/woofi-accept-permissions2.png';
+import WooFiApiSetup from '/img/connect/woofi/woofi-api-setup.png';
+import ApiCreate4 from '/img/connect/woofi/apicreate4.png';
+import ApiTeal from '/img/connect/woofi/v3/api-teal.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+<ThemedImage
+    alt="WOOFi-Logo"
+    sources={{
+        light: useBaseUrl('/img/exchange/WooFi-light.png'),
+        dark: useBaseUrl('/img/exchange/WooFi-dark.png'),
+    }}
+/>
+
+<!-- <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden' }}>
+  <iframe
+    src="https://www.youtube.com/embed/VY6G0JWedrQ"
+    frameBorder="0"
+    allow="autoplay; encrypted-media"
+    allowFullScreen
+    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+  />
+</div> -->
+
+## Connecting [WOOFi](https://teal.link/WOOFi) to Tealstreet
+
+- First, make sure you are logged into your [WOOFi](https://teal.link/WOOFi) account.
+
+:::note
+Consider supporting Tealstreet by using the [referral link](https://teal.link/WOOFi).
+:::
+
+<IntroTealstreet exchangeName="WOOFi" />
+
+---
+
+### Acquire the API Key
+
+- Now you are ready to acquire the API Key within your WOOFi Account. Head on over to the **[WOOFi](https://teal.link/WOOFi)** page and:
+    - Click **Connect** from the top right of the page.
+
+<div class="text--center">
+    <img src={WooFiConnect} alt="WOOFi Wallet Connect" style={{ width: 400 }} />
+</div>
+
+- Select any wallet you would like to use to connect to WOOFi.
+    - For the purposes of this guide, we will be using **Rabby Wallet** and the **Arbitrum** network.
+
+:::note
+Optimism and Polygon networks are also supported by WOOFi.
+:::
+
+:::warning
+Activating one wallet will disable another wallet. For example if you normally use Metamask and you activate Rabby it will deactivate your Metamask wallet. You can only have one wallet active at a time.
+:::
+
+<div class="text--center">
+    <img src={WooFiConnect2} alt="WOOFi Wallet Selection" style={{ width: 500 }} />
+</div>
+
+- You will need to sign two requests to verify ownership of the wallet to finish setting up your account with WOOFi.
+
+<div class="text--center">
+    <img src={WooFiAcceptPermissions} alt="WOOFi Accept Permissions" style={{ width: 400 }} />
+</div>
+
+<div class="text--center">
+    <img src={WooFiAcceptPermissions2} alt="WOOFi Accept Permissions 2" style={{ width: 300 }} />
+</div>
+
+:::tip
+You can get to this page directly by navigating to **[this link](https://dex.woo.org/en/account/api-management)**
+:::
+
+- Now we are ready to get the API key & secret so we can link it to Tealstreet.
+    - From your main account window / dashboard locate the API button near the top panel and click it.
+
+<div class="text--center">
+    <img src={WooFiAccount} alt="WOOFi main account window" style={{ width: 600 }} />
+</div>
+
+In this window locate your Orderly API Key, Orderly API Secret, and Account ID. You will need these to link your account to Tealstreet.
+
+<div class="text--center">
+    <img src={WooFiApiSetup} alt="WOOFi main account window" style={{ width: 700 }} />
+</div>
+
+- Now that we have these 3 pieces of information lets return back to the Tealstreet terminal.
+
+:::warning
+Do NOT activate ip restrictions on your api trading account. There seems to be an issue with the exchange service at the time of writing which will make your account inoperable if you do. This is a known bug and it is being worked on.
+:::
+
+<!-- * Provide the IP Addresses that are to be whitelisted that you can get from inside the Terminals **API Keys** window we opened earlier.
+      * In the screenshot below I have highlighted the **'clipboard'** function you can click to copy the IP addresses to your clipboard. You can then paste them into the WOOFi API keys box in step 4.
+
+<div class="text--center">
+  <img src={ApiCreate4} alt="API Created" style={{width: 500}} />
+</div> -->
+
+---
+
+### Connecting the API Key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Teal" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you located the API Key on the **WOOFi API** page.
+  - Give the key a name, this can be anything you want.
+  - Choose a color for this API Key.
+  - Provide the **API Account ID** WOOFi showed you when you visited the API Management page. \* Application ID = API Account ID.
+  - Provide the **API Key** WOOFi showed you when you visited the API Management page.
+  - Provide the **API Secret** WOOFi showed you when you visited the API Management page.
+  - Click Done.
+
+<OutroTealstreet exchangeName="WOOFi" />
+
+- You will still need to deposit funds from your wallet into your **[WOOFi](https://teal.link/WOOFi)** account to start trading.
+    - Make sure you have sufficient gas to be able to send the funds across network.
+    - You might need to override a warning during the final verification step if you have not used WOOFi before to be able to finalize the deposit.
+
+Close the **‘Settings’** window and you will be on the main Trade page with the API key being activated automatically.
+
+    * If properly linked, you will see your balance appear in the Margin window of Tealstreet.
+    * for more information check out our [Quick Start Guide](https://www.youtube.com/watch?v=k0x1LpzwbfQ).
+
+---
+
+<!-- ## Troubleshooting
+
+### Leverage slider capped inside the terminal
+
+Woo restricts the amount of leverage that can be used via the API. This is a restriction that is not shared on the website.
+
+### Error about enabling futures
+
+<div class="text--center">
+  <img src={WooEnableFutures} alt="Enable Futures Error" style={{width: 500}} />
+</div>
+
+This error is caused by the API key not having futures enabled. To fix this, go to your WOOFi account page and enable futures trading. This also needs to be done for individual sub accounts. -->

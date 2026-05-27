@@ -1,0 +1,132 @@
+---
+title: Dual API
+description: Tealstreet's Dual API Key System for certain exchanges.
+sidebar_position: 3
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+## What is Dual API?
+
+In an effort to provide upgraded stability, the Tealstreet team is introducing a new Dual (2) API Key system.
+
+By combining a ‘Read-Only’ API Key and a ‘Trading / Read-Write’ API Key, users can expect improved responsiveness and performance for the data intensive features of Tealstreet without the interference of [Rate Limiting](/docs/2.0.0/connect/dual-api) by exchanges.
+
+When connecting their exchange account to Tealstreet, users will need to submit details for two (2) keys:
+
+- One ‘Trading / Read-Write’ API key (with the whitelisted IP Addresses supplied by Tealstreet)
+- One ‘Read-Only’ API key (without IP whitelisting)
+
+<div class="text--center">
+
+![API-Main](/img/connect/dual/dualapi-main.png)
+
+</div>
+
+:::danger
+The 2nd API Key **must** be ‘Read-Only'. Do **NOT** add a read/write API Key here!
+
+- By using Tealstreet, you agree / confirm that the 2nd API key is Read-Only
+  :::
+
+## API Creation Review
+
+Before proceeding wtih this section it is important to review the Exchange documentation on API and API Trading.
+
+- [Binance](https://www.binance.com/en/support/faq/360002502072)
+- [Bitget](https://www.bitget.com/en/support/articles/360038968251-API%20Creation%20Guide)
+- [BitMEX](https://www.bitmex.com/app/apiKeysUsage)
+- [BingX](https://bingx-api.github.io/docs/#/swapV2/introduce)
+- [Bybit](https://www.bybithelp.com/HelpCenterKnowledge/bybitHC_SubCategories?id=a005g000031G2OTAA0&language=en_US)
+- [Gate.io](https://support.gate.io/hc/en-us/articles/900000114363-What-are-APIKey-and-APIV4keys-for-) (Planned)
+- [Kucoin](https://www.kucoin.com/support/360015102174) (Planned)
+- [OKEx](https://www.okx.com/docs-v5/en/#overview)
+- [Phemex](https://phemex.com/user-guides/how-do-i-create-an-api-key)
+- [Woo](https://docs.woo.org/#general-information)
+
+## Trading API
+
+The Trading API is the first API you need to add to your account. Make sure that this is the Read/Write API.
+
+:::caution
+Users **MUST** use the Whitelisted IP Addresses when creating this API. Please Ensure all IP addresses are correct as shown in the **Tealstreet terminal** window (images below/above are for reference only)
+:::
+
+<div class="text--center">
+
+![API-Trade](/img/connect/dual/dualapi-white.png)
+
+</div>
+
+## Read-Only API
+
+The Read-Only API is the second API you need to add to your account. Make sure that this API is a "Read Only" API.
+
+:::caution
+Users **MUST NOT** use IP Whitelisting for the Read-Only API Key
+:::
+
+Choose the following settings of your Read-Only API Key pair on Binance.
+
+<div class="text--center">
+
+![API-Detailed](/img/connect/binance/api-read.png)
+
+</div>
+
+<div class="text--center">
+
+![API-Read](/img/connect/dual/dualapi-nowhite.png)
+
+</div>
+
+For existing users:
+
+<div class="text--center">
+
+![API-Read-Ex](/img/connect/dual/dualapi-existing.png)
+
+</div>
+
+## Is the Dual-API Key system mandatory?
+
+**Yes**, the ‘Dual-API’ Key system is mandatory for **[Binance](https://teal.link/Binance1)** users
+
+:::note
+It is important to note that adding a Dual-Api Key is mandatory for both new and **existing** active [Binance](https://teal.link/Binance1) x Tealstreet users. For existing users, all they need to do to continue using Tealstreet to trade on [Binance](https://teal.link/Binance1) is to add their Read-Only API Key.
+:::
+
+## Is the Dual-API Key system mandatory for all exchanges?
+
+**No**, the Dual-API is only mandatory for Binance at this time. However, in the future we may require certain exchanges to use Dual API Keys.
+
+## How Do I Setup a Dual API?
+
+Since Dual API is mandatory [Binance](https://teal.link/Binance1) users, please refer to the section in the Binance connection [guide](/docs/connect/binance)
+
+## Rate Limiting
+
+Rate limiting by definition is used to control the rate of requests sent or received by a network interface controller. In the context of the Tealstreet Terminal, the **Rate Limit** is the limit on the number of requests Tealstreet can send to the exchange.
+
+:::note
+It is important to note that the **Rate Limit** is set by the exchange themselves and it differs from exchange to exchange.
+:::
+
+You can read more about the Rate Limits set by the different exchanges below:
+
+- [Binance](https://www.binance.com/en-GB/support/faq/281596e222414cdd9051664ea621cdc3)
+- [Bybit](https://bybit-exchange.github.io/docs/v5/rate-limit)
+- [Okex](https://www.okx.com/docs-v5/en/#overview-rate-limits)
+- [Phemex](https://phemex.com/user-guides/order-spamming-limitations)
+- [Woo](https://support.woo.org/hc/en-001/articles/4410291173145--What-is-the-rate-limit-for-orders-on-a-pair-when-trading-over-API-Can-I-increase-my-limits-)
+
+### What Causes 'Rate Limiting'?
+
+If the amount of total requests going from the Tealstreet terminal to the exchange exceeds the limit set by the exchange, the user gets the 'Rate Limit' Error.
+
+### How do I fix the Rate Limit Error?
+
+With the implementation of the Dual API system, instances of 'Rate Limiting' should be very rare. If you are experiencing Rate Limiting even with the Dual API in place, please [contact us](/docs/support/contact-us).

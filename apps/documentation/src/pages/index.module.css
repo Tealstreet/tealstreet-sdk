@@ -1,0 +1,82 @@
+/**
+ * CSS files with the .module.css suffix will be treated as CSS modules
+ * and scoped locally.
+ */
+
+.heroBanner {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  background: url(/static/img/splashbg.png);
+  background-size: contain;
+  height: 300px;
+  background-color: #23232e;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+@media screen and (max-width: 966px) {
+  .heroBanner {
+    padding: 2rem;
+  }
+}
+
+.card {
+  box-shadow: 0 8px 28px 4px rgb(86 91 115 / 15%);
+  transition-duration: 0.2s;
+  transition-property: all;
+  border-radius: 1.5rem;
+  height: 100%;
+  color: var(--ifm-heading-color);
+}
+
+.card:hover {
+  transform: translateY(-1rem);
+  color: #25c2a0;
+  cursor: pointer;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.features {
+  /*/outside box*/
+  display: flex;
+  width: 100%;
+  margin-top: 2.5%;
+  margin-bottom: 2.5%;
+  padding: 2rem 0;
+  align-items: center;
+  -webkit-animation: 0.4s 0.15s backwards a;
+  animation: 0.4s 0.15s backwards a;
+  transition-duration: 0.2s;
+  transition-property: all;
+}
+
+.features a:link {
+  color: var(--ifm-heading-color);
+  text-decoration: none;
+}
+
+.terminal:hover {
+  box-shadow: rgba(0, 1, 0, 0.2) 0 2px 8px;
+  opacity: 0.85;
+}
+
+.terminal:active {
+  outline: 0;
+}
+
+.terminal:focus {
+  box-shadow: rgba(0, 0, 0, 0.5) 0 0 0 3px;
+}
+
+@media (max-width: 420px) {
+  .terminal {
+    height: 48px;
+  }
+}

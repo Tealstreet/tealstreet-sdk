@@ -1,0 +1,135 @@
+---
+title: Webhooks
+description: Webhooks are a way for Tealstreet to receive alerts from external services like TradingView and Arkham Intelligence, which are then displayed as notifications in the terminal.
+sidebar_position: 6
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WebHooks1 from '/img/trading/webhooks/v3/webhooks1.png';
+import WebHooks2 from '/img/trading/webhooks/v3/webhooks2.png';
+import WebHooks3 from '/img/trading/webhooks/v3/tradingview-webhook.png';
+import WebHooks4 from '/img/trading/webhooks/v3/arkham-webhook.png';
+import WebHooks5 from '/img/trading/webhooks/v3/arkham-webhook2.png';
+
+Webhooks allow Tealstreet to receive real-time alerts from external services like TradingView and Arkham Intelligence. When these services send alerts to Tealstreet's webhook endpoints, they are automatically displayed as notifications in your terminal.
+
+## How Webhooks Work
+
+When you set up a webhook, Tealstreet creates a unique endpoint URL that external services can send HTTP POST requests to. These requests contain alert data that gets stored in Tealstreet's database and displayed as notifications in your terminal interface.
+
+## Creating a webhook
+
+- To begin click the settings cogwheel at the top right of the terminal
+
+<div class="text--center">
+    <img src={WebHooks1} alt="Web Hooks 1" style={{ width: 750 }} />
+</div>
+
+- Then click the Webhook category in the settings window
+
+<div class="text--center">
+    <img src={WebHooks2} alt="Web Hooks 2" style={{ width: 750 }} />
+</div>
+
+In here you will be able to get the information necessary to link Tealstreet to other services. Such as TradingView or Arkham Intelligence.
+
+<!-- :::note
+Note that in the case of **[Runbot](/docs/webhooks/runbot)** you will need to select an appropriate key as they do not support all exchanges. For example, if you are using a **Binance** Runbot strategy you will need to select a **Binance** API key.
+::: -->
+
+---
+
+### TradingView Webhooks
+
+Tealstreet automatically generates a unique webhook URL for each user to receive TradingView alerts.
+
+#### Setup Process
+
+- **Get Your Webhook URL**: In the webhook settings, Tealstreet displays your unique webhook URL in the format:
+
+    ```
+    https://preview.tealstreet.io/api/webhooks/tv/{your-unique-hash}
+    ```
+
+- **Regenerate if Needed**: You can click the "Regenerate" button to create a new unique hash if needed for security purposes.
+
+- **Configure TradingView Alert**: - Select and copy the entire webhook URL from Tealstreet - Switch to TradingView and place an alert on your chart - Go to the alert notification settings - Tick the "Webhook URL" box and paste the copied URL into the webhook field
+
+:::note
+TradingView requires you to enable 2FA authentication to use webhooks. You may get a popup asking you to enable 2FA when you try to save the webhook if you haven't enabled it yet.
+:::
+
+<div class="text--center">
+    <img src={WebHooks3} alt="TradingView Webhook" style={{ width: 500 }} />
+</div>
+
+- **Save the Alert**: Click Save when done.
+
+#### How It Works
+
+- **Authentication**: Tealstreet uses a unique 256-character hexadecimal hash as the webhook identifier
+- **Data Storage**: When TradingView sends an alert, it's stored in the `tradingview_log` table in Tealstreet's database
+- **Real-time Display**: The alert content is immediately displayed as a notification in your terminal
+- **Security**: Each user has their own unique hash, ensuring alerts are only received by the intended user
+
+---
+
+### Arkham Intelligence Webhooks
+
+Tealstreet supports receiving alerts from Arkham Intelligence through their webhook system.
+
+#### Setup Process
+
+- **Get Your Webhook URL**: In the webhook settings, Tealstreet provides the receiving URL:
+
+```
+https://preview.tealstreet.io/api/webhooks/arkham
+```
+
+- **Configure Arkham Intelligence**: - Login to your Arkham Intelligence account and navigate to the [Alerts Page](https://intel.arkm.com/alerts/all) - Edit or create an existing Alert - At the bottom, choose how you wish to be alerted and select "Webhook"
+
+<div class="text--center">
+    <img src={WebHooks4} alt="Arkham Intel Webhook" style={{ width: 800 }} />
+</div>
+
+- **Configure the Webhook**: - A window will popup with configuration options - **Header Code**: Save the header code (found after the semicolon in `Arkham-Webhook-Token: your-key-here`) - **Webhook URL**: Paste the Tealstreet receiving URL into Arkham's text input box
+
+<div class="text--center">
+    <img src={WebHooks5} alt="Arkham Intel Webhook 2" style={{ width: 800 }} />
+</div>
+
+- **Save Your Header Key in Tealstreet**: - Copy the header code from Arkham - Paste it into the "Webhook Key" field in Tealstreet's webhook settings - If you have multiple alerts, separate the keys with commas - Example: `OU00c0s0hn056V,pFUpi00tcu0lcT,cd1D000Xvllfbz` - Click "Save Arkham Webhook Key"
+
+- **Complete Setup**: Click "Connect" in Arkham and save the alert
+
+#### How It Works
+
+- **Authentication**: Arkham sends alerts with a header `arkham-webhook-token` containing your unique key
+- **Multiple Alerts**: You can configure multiple Arkham alerts by separating their keys with commas
+- **Data Storage**: Alerts are stored in the `arkham_log` table in Tealstreet's database
+- **Real-time Display**: Arkham alerts appear as notifications in your terminal interface
+- **Security**: Only alerts with valid header tokens are processed and displayed
+
+## Notification Display
+
+When webhook alerts are received, they are automatically displayed as notifications in your Tealstreet terminal. The system uses real-time database subscriptions to ensure alerts appear immediately when received.
+
+## Security Features
+
+- **Unique Identifiers**: Each user has their own unique webhook URLs and authentication keys
+- **Token Validation**: All incoming webhook requests are validated against stored user credentials
+- **Regeneration**: Webhook URLs can be regenerated for enhanced security
+- **Isolation**: Users can only receive alerts intended for their account
+
+## Troubleshooting
+
+- **TradingView 2FA**: Ensure 2FA is enabled on your TradingView account
+- **Invalid Requests**: Check that you're using the correct webhook URL and authentication tokens
+- **No Notifications**: Verify that your webhook settings are properly configured and saved
+- **Multiple Alerts**: For Arkham, ensure multiple keys are separated by commas without spaces

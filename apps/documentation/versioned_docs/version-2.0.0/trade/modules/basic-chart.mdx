@@ -1,0 +1,81 @@
+---
+title: Basic Charts
+description: This section will go over the Basic Chart functionality of Tealstreet
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import BasicChart from '/img/trading/basicchart.png';
+import BasicChart2 from '/img/trading/basicchart2.png';
+import BasicCharts from '/img/blog/basiccharts.png';
+import BasicChartExample from '/img/trading/basic-charts/basiccharts-example1.png';
+import BasicChartExample2 from '/img/trading/basic-charts/basiccharts-example2.png';
+
+This section will go over the **Basic Charts module** of Tealstreet
+
+<div class="text--center">
+    <img src={BasicChart} alt="Basic Chart" style={{ width: 650 }} />
+</div>
+
+With this tool you can put any chart supported by tradingview on your terminal.
+
+---
+
+### Functionality
+
+- Can duplicate/remove windows with the + button at top of frame
+- Top bar settings persist through refreshes
+- Position & Size saved in TS workspace layout
+
+<details open>
+    <summary>More info</summary>
+    <p>
+        <div class="text--center">
+            <img src={BasicChart2} alt="Basic Chart (Detailed)" style={{ width: 500 }} />
+        </div>
+        1. The Plus button can be used to duplicate or remove a Basic Chart window <br />
+        2. The top header (Ticker & Timeframe) is the only section that preserves its settings across refreshes. Changes
+        made inside the chart will not be preserved <br />
+        3. When the workspace is unlocked you can drag bottom corner to expand/shrink the window. These settings will be
+        saved as part of the workspace profile that is currently active <br />
+    </p>
+</details>
+
+---
+
+### Additional Information
+
+Some additional information can be read about here from the _[blog post by Sam](https://www.tealstreet.io/tealstreet-1-5-2-release-notes/)_
+
+:::note
+The Basic Chart window is a standalone window that can be used to display a chart of any instrument on TradingView. A common use of it is to display a chart of some other instrument you are interested in such as an index or the dollar.
+:::
+
+:::caution
+You will not be able to trade positions on the main chart through the basic chart.
+:::
+
+---
+
+### Examples
+
+<details>
+    <summary>Example Layouts</summary>
+    <br />
+    <div class="text--center">
+        <img src={BasicCharts} alt="Basic Chart (Detailed)" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <div class="text--center">
+        <img src={BasicChartExample} alt="Basic Chart (Detailed)" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <div class="text--center">
+        <img src={BasicChartExample2} alt="Basic Chart (Detailed)" style={{ width: 1000 }} />
+    </div>
+</details>

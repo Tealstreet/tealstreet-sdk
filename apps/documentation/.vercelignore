@@ -1,0 +1,6 @@
+# Local build output — Vercel runs `docusaurus build` remotely
+build
+.docusaurus
+.cache-loader
+.turbo
+node_modules

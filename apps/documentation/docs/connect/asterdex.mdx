@@ -1,0 +1,131 @@
+---
+title: AsterDex
+description: Connect your AsterDex account to Tealstreet.
+sidebar_position: 18
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+import WalletConnect from '/img/connect/asterdex/walletconnect.png';
+import WalletConnect2 from '/img/connect/asterdex/walletconnect2.png';
+import ApiDropdown from '/img/connect/asterdex/apidropdown.png';
+import AuthorizeWallet from '/img/connect/asterdex/authorizewallet.png';
+import AuthorizeWallet2 from '/img/connect/asterdex/authorizewallet2.png';
+import ApiTeal from '/img/connect/asterdex/api-teal.png';
+import EnableTrading from '/img/connect/asterdex/enable-trading.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+<div style={{ maxWidth: 400 }}>
+    <ThemedImage
+        alt="asterdex-logo"
+        sources={{
+            light: useBaseUrl('/img/exchange/asterdex-dark.png'),
+            dark: useBaseUrl('/img/exchange/asterdex-light.png'),
+        }}
+    />
+</div>
+
+## Connecting [AsterDex](https://teal.link/aster5) to Tealstreet
+
+<IntroTealstreet exchangeName="AsterDex" />
+
+---
+
+### Creating the key
+
+- Now we are ready to generate the API Key. Head on over to [AsterDex](https://teal.link/aster5) and:
+    - Login or connect your wallet when the window pops up
+        - If a window did not automatically pop up click the connect button at the top right of the page
+
+::::note
+You will not be able to connect to AsterDex if you are connecting from a geo-restricted region.
+::::
+
+<div class="text--center">
+    <img src={WalletConnect} alt="Wallet Connect" style={{ width: 400 }} />
+</div>
+
+- Select the wallet you want to use. We will use Rabby for this example.
+
+<div class="text--center">
+    <img src={WalletConnect2} alt="Wallet Connect 2" style={{ width: 300 }} />
+</div>
+
+- Sign the transaction to verify your wallet when the window pops up.
+
+<div class="text--center">
+    <img src={EnableTrading} alt="Enable Trading" style={{ width: 300 }} />
+</div>
+
+- Make sure to enable trading in the order panel on the right side of the page.
+
+- Once you are connected to your wallet, navigate to the API Key page by clicking the **More** button at the top and choosing **API Management** from the dropdown menu.
+
+<div class="text--center">
+    <img src={ApiDropdown} alt="API Dropdown" style={{ width: 500 }} />
+</div>
+
+::::tip
+You can get to this page directly by navigating to **[this link](https://www.asterdex.com/en/api-management)**
+::::
+
+- Click on the **Create API Key** button to begin the process.
+
+<div class="text--center">
+    <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 700 }} />
+</div>
+
+- Choose a label for the key, this can be anything you want.
+- Generate an API Wallet address by clicking the **Generate** button.
+- Enable **Perps trading** permission.
+- Enter how many days you want it to be valid for. Max is 1 year. (Or click the Max button to set 365).
+    - If you want to use whitelisting, go back to Tealstreet and click the clipboard icon next to the IP Whitelist field.
+    - Paste the IP addresses you copied into the IP Whitelist box on the AsterDex API page.
+- Click the **Authorize** button to continue and sign the transaction with your wallet.
+
+- Securely store your API & API Secret.
+
+<div class="text--center">
+    <img src={AuthorizeWallet2} alt="Authorize Wallet 2" style={{ width: 400 }} />
+</div>
+
+- Now lets return to Tealstreet to resume the API Linking process now that we have the information we need.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+<div class="text--center">
+    <img src={ApiTeal} alt="Api Creation2" style={{ width: 600 }} />
+</div>
+
+- Proceed to fill out the form with the information you got when you created the API on the AsterDex API page.
+  - Give the key a name, this can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - If you are using whitelisting, tick the box for Use Tealstreet IP's.
+  - Provide the **Main Wallet Address** of the wallet you used to sign the transactions when making the API Key.
+  - Provide the **API Wallet Adress** AsterDex you generated in AsterDex when making the API Key.
+  - Provide the **API Secret** AsterDex showed you when you authorized the API Key.
+  - Click done.
+
+<OutroTealstreet exchangeName="AsterDex" />
+
+---
+
+## Frequently Asked Questions
+
+- AsterDex says I'm from a restricted jurisdiction? \* AsterDex has restrictions on users from certain jurisdictions such as the United States. Please see their [Terms of Service](https://docs.asterdex.com/about-us/aster-terms-and-conditions) for more info.
+
+- How do I enable trading on AsterDex? \* AsterDex requires you to enable trading on your account before you can use it. To enable trading, go to the [AsterDex](https://teal.link/aster5) website and click the **Enable Trading** button after you have signed in with your wallet.
+
+- AsterDex is not letting me create a new V1 API key. What should I do?
+  AsterDex updated their API model and no longer allows creation of new V1 API keys as of March 25, 2026. Existing V1 keys can still work, but new users should create V3 (Pro) API keys and use those for Tealstreet.
+  For full details, see Aster's official API overview: [Aster API V1 vs V3](https://github.com/asterdex/api-docs/blob/master/Aster%20API%20Overview.md).
