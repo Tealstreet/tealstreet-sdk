@@ -5,6 +5,7 @@ Vendored JavaScript SDK for Paradex (StarkNet-based perpetuals DEX).
 - **Tracked version**: 0.6.0
 - **Dependencies**: `starknet`, `@starkware-industries/starkware-crypto-utils`, `bignumber.js`
 - **Build**: `yarn build-original` runs the upstream `tsc`; the standard `build` is a no-op so the monorepo can use tsconfig-paths against `src/`
+- **Package metadata**: `package.json` points `types` at the committed `dist/index.d.ts` so clean mirror installs can resolve the package during transitive TypeScript checks.
 - **Used by**: `packages/safe-cex` Paradex adapter
 - **Why vendored**: SDK is still pre-1.0; we hold it in-tree to apply our own fixes without rebasing on every upstream release
 - **Patches**: see `git log -- thirdparty/paradex.js` for the diffs we carry

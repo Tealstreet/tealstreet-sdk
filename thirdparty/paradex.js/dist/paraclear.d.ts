@@ -1,0 +1,137 @@
+import * as Starknet from 'starknet';
+import type { Account } from './account.js';
+import type { ParadexConfig } from './config.js';
+import type { ParaclearProvider } from './paraclear-provider.js';
+import type { Hex } from './types.js';
+interface GetBalanceParams {
+    readonly config: ParadexConfig;
+    readonly provider: Pick<ParaclearProvider, 'callContract'>;
+    /**
+     * Account to get the balance for.
+     */
+    readonly account: Pick<Account, 'address'>;
+    /**
+     * Token symbol.
+     * @example 'USDC'
+     */
+    readonly token: string;
+}
+interface GetBalanceResult {
+    /**
+     * Token balance as a decimal string.
+     * @example '100.45'
+     * @example '45.2'
+     */
+    readonly size: string;
+}
+/**
+ * Get the Paraclear balance of the given token for the given account.
+ */
+export declare function getTokenBalance(params: GetBalanceParams): Promise<GetBalanceResult>;
+interface GetSocializedLossFactorParams {
+    readonly config: ParadexConfig;
+    readonly provider: Pick<ParaclearProvider, 'callContract'>;
+}
+interface GetSocializedLossFactorResult {
+    readonly socializedLossFactor: string;
+}
+/**
+ * Socialized losses happen when Paradex Insurance Fund is bankrupt
+ * due to large amounts of unprofitable liquidations. When socialized
+ * losses are active, (socialized loss factor > 0), the amount that
+ * the user will receive when withdrawing will be smaller than the
+ * requested amount.
+ */
+export declare function getSocializedLossFactor(params: GetSocializedLossFactorParams): Promise<GetSocializedLossFactorResult>;
+interface GetReceivableAmountParams {
+    readonly config: ParadexConfig;
+    readonly provider: Pick<ParaclearProvider, 'callContract'>;
+    /**
+     * Token symbol.
+     * @example 'USDC'
+     */
+    readonly token: string;
+    /**
+     * Amount of to withdraw from Paradex, as a decimal string.
+     * The receivable amount will be calculated based on this amount and
+     * can be less than the requested amount if socialized loss is active.
+     */
+    readonly amount: string;
+}
+interface GetReceivableAmountResult {
+    /**
+     * Amount that will be received from Paradex, after socialized loss,
+     * if applicable, after a withdrawal of the given amount parameter.
+     * Decimal string.
+     * @example '99.45'
+     */
+    readonly receivableAmount: string;
+    /**
+     * The receivable amount, converted to be used in chain calls,
+     * using the Paraclear decimals.
+     * @example '9945000000'
+     */
+    readonly receivableAmountChain: string;
+    /**
+     * Socialized loss factor used to calculate the receivable amount.
+     * Decimal string.
+     * @example '0.05'
+     */
+    readonly socializedLossFactor: string;
+}
+/**
+ * The receivable amount is calculated based on the current
+ * socialized loss factor: amount * (1 - socializedLossFactor)
+ *
+ * If the socialized loss factor is 0, the receivable amount
+ * will be equal to the requested amount.
+ */
+export declare function getReceivableAmount(params: GetReceivableAmountParams): Promise<GetReceivableAmountResult>;
+interface WithdrawParams {
+    readonly config: ParadexConfig;
+    /**
+     * Account to withdraw from.
+     */
+    readonly account: Account;
+    /**
+     * Token symbol.
+     * @example 'USDC'
+     */
+    readonly token: string;
+    /**
+     * Amount to withdraw from Paradex.
+     * Note that this amount can be less than the amount that will be
+     * received if socialized loss is active. Use {@link getReceivableAmount}
+     * to calculate the amount that will be received.
+     * Decimal string.
+     * @example '100.45'
+     * @example '45.2'
+     */
+    readonly amount: string;
+    /**
+     * Call to transfer funds to the bridge. This transaction will be called
+     * as the second transaction of the withdrawal transactions batch.
+     *
+     * The bridge call must be made with the receivable amount calculated
+     * using {@link getReceivableAmount}.
+     */
+    readonly bridgeCall: Starknet.Call | readonly Starknet.Call[];
+}
+interface TransactionResult {
+    readonly hash: Hex;
+}
+/**
+ * Withdraw funds from Paraclear for the given account.
+ *
+ * Automatically make a batch transaction with `initiate_withdrawal`
+ * call to the Paraclear contract along with the transaction passed
+ * as `params.bridgeCall` The batch call is atomic. If either of
+ * the transactions fail, the entire batch gets reverted.
+ *
+ * If socialized loss is active, the bridge call must be constructed
+ * with an amount that accounts for the loss. To calculate that amount,
+ * use {@link getReceivableAmount}. Failing to do so can result in a
+ * failed withdrawal.
+ */
+export declare function withdraw(params: WithdrawParams): Promise<TransactionResult>;
+export {};
