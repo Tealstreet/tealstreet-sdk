@@ -505,15 +505,15 @@ Source: `AccountCommand.ts`.
 
 ### `accounts` &nbsp; _(alias `config`)_
 
-| Form                                                    | Result                                  |
-| ------------------------------------------------------- | --------------------------------------- |
-| `accounts` / `accounts list`                            | List all configured accounts            |
-| `accounts add -n <name> -e <ex> -k <key> -s <secret>`   | Add — full flag list in `accounts help` |
-| `accounts import <json>`                                | Import from web export JSON             |
-| `accounts remove <name>` / `--all`                      | Remove (tombstoned for 30 days)         |
-| `accounts enable <name…>` / `disable <name…>` / `--all` | Bulk streaming control                  |
-| `accounts enabled` / `streaming` / `active`             | List only streaming accounts            |
-| `accounts help`                                         | Full reference                          |
+| Form                                                    | Result                                                                                     |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `accounts` / `accounts list`                            | List all configured accounts                                                               |
+| `accounts add -n <name> -e <ex> -k <key> -s <secret>`   | Add — use `--tealstreet-proxy [--proxy-region <region>]` to match web "Use Tealstreet IPs" |
+| `accounts import <json>`                                | Import from web export JSON                                                                |
+| `accounts remove <name>` / `--all`                      | Remove (tombstoned for 30 days)                                                            |
+| `accounts enable <name…>` / `disable <name…>` / `--all` | Bulk streaming control                                                                     |
+| `accounts enabled` / `streaming` / `active`             | List only streaming accounts                                                               |
+| `accounts help`                                         | Full reference                                                                             |
 
 Source: `AccountsCommand.ts`.
 

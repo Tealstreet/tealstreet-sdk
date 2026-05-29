@@ -1,3 +1,5 @@
+import { normalizeExchangeAccountConfig } from '@tealstreet/safe-cex/src/accounts/normalizeExchangeAccountConfig';
+
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { getExchangeInfo } from '../../exchanges';
@@ -39,6 +41,7 @@ export class AccountsCommand extends BaseCommand {
     'accounts',
     'accounts enabled',
     'accounts add -n mybybit -e bybit -k KEY -s SECRET',
+    'accounts add -n mybybit -e bybit -k KEY -s SECRET --tealstreet-proxy',
     'accounts import {"exchange":"bybit","name":"my-acc",...}',
     'accounts remove mybybit',
     'accounts remove --all',
@@ -178,7 +181,9 @@ export class AccountsCommand extends BaseCommand {
     const passphrase = this.getOption(ctx, 'p', 'passphrase');
     const privateKey = this.getOption(ctx, 'private-key');
     const _walletAddress = this.getOption(ctx, 'wallet-address');
+    const proxyRegion = this.getOption(ctx, 'proxy-region');
     const testnet = this.hasFlag(ctx, 't', 'testnet');
+    const tealstreetProxy = this.hasFlag(ctx, 'tealstreet-proxy', 'use-tealstreet-ips');
 
     // Validate required fields
     if (!name || !exchange) {
@@ -202,15 +207,17 @@ export class AccountsCommand extends BaseCommand {
       return this.success();
     }
 
-    const newAccount: AccountConfig = {
+    const newAccount: AccountConfig = normalizeExchangeAccountConfig({
       name,
       exchange: exchange.toLowerCase() as ExchangeName,
       apiKey: privateKey || apiKey || '',
       apiSecret: apiSecret || '',
       passphrase,
       testnet,
+      tealstreetProxy,
+      proxyRegion,
       active: true, // Always set active on add so it will be enabled
-    };
+    });
 
     ctx.adapter.addAccount(newAccount);
     this.printSuccess(ctx, `Account "${newAccount.name}" added successfully`);
@@ -285,7 +292,7 @@ export class AccountsCommand extends BaseCommand {
     }
 
     // Build account config from parsed JSON
-    const newAccount: AccountConfig = {
+    const newAccount: AccountConfig = normalizeExchangeAccountConfig({
       name: parsed.name,
       exchange: parsed.exchange.toLowerCase() as ExchangeName,
       apiKey: parsed.privateKey || parsed.apiKey || '',
@@ -297,7 +304,7 @@ export class AccountsCommand extends BaseCommand {
       tealstreetTunnel: parsed.tealstreetTunnel,
       proxyRegion: parsed.proxyRegion,
       active: true, // Always set active on import so it will be enabled
-    };
+    });
 
     ctx.adapter.addAccount(newAccount);
     this.printSuccess(ctx, `Account "${newAccount.name}" imported successfully`);
@@ -558,6 +565,7 @@ export class AccountsCommand extends BaseCommand {
       'Adding accounts manually:',
       '  accounts add -n <name> -e <exchange> -k <api-key> -s <api-secret> [-p <passphrase>] [-t]',
       '  accounts add -n <name> -e <exchange> --private-key <key> --wallet-address <addr> [-t]',
+      '  Add --tealstreet-proxy [--proxy-region <region>] to match web "Use Tealstreet IPs".',
       '',
       'Options:',
       '  -n, --name           Account name (your choice)',
@@ -568,6 +576,8 @@ export class AccountsCommand extends BaseCommand {
       '  --private-key        Private key (Hyperliquid, dYdX, Paradex)',
       '  --wallet-address     Wallet address (for DEX exchanges)',
       '  -t, --testnet        Use testnet',
+      '  --tealstreet-proxy   Route like web "Use Tealstreet IPs"',
+      '  --proxy-region       Proxy region to use when proxy routing is enabled',
       '',
     ]);
 

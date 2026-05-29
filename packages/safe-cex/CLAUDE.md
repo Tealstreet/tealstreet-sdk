@@ -40,6 +40,13 @@ yarn test          # Watch mode
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.
 
+Canonical saved account shaping lives in
+`src/accounts/normalizeExchangeAccountConfig.ts`. Web, CLI, key-audit, and
+other "add API key" flows should produce an `ExchangeAccountConfig`, normalize
+that account, then persist/test/pass it to `createExchangeFromAccount()`.
+Do not reimplement `tealstreetProxy` / `proxyRegion` account defaults in app
+code.
+
 Before changing proxy/tunnel routing, read `docs/proxy-routing-flow.html`.
 Code remains the source of truth; the HTML is a manually audited snapshot of
 the current web → safe-cex → HOW flow for humans and agents. If routing behavior
@@ -117,6 +124,7 @@ headers }` under Bun.
 ## Key Files
 
 - `src/exchangeMetadata.ts` — All exchange configuration metadata
+- `src/accounts/normalizeExchangeAccountConfig.ts` — Canonical saved-account proxy/region shaping
 - `src/createExchangeFromAccount.ts` — Translates account config → exchange options (proxy/tunnel logic here)
 - `src/index.ts` — `buildPublicExchangeOptions()` is the shared public-only
   routing helper used by `createPublicExchange()` and exchange-server shared

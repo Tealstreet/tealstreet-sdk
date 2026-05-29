@@ -1,17 +1,8 @@
-// Helper to get CORS proxy URL for browser runtimes.
-// Includes both main thread (window) and WebWorker (self) contexts.
-// Pure server-side Node.js should return empty string.
+// Helper to get private exchange proxy URL whenever the account/runtime has
+// requested Tealstreet IP routing. Browser runtimes need this for CORS; headless
+// clients need it for exchange API-key IP allowlists.
 
 export const getPrivateProxy = (url: string | undefined, requiresCors = false, forceJa = false): string => {
-  const isWebWorker = typeof self !== 'undefined' && typeof window === 'undefined';
-  const isBrowserMainThread = typeof window !== 'undefined';
-  const isBrowserRuntime = isBrowserMainThread || isWebWorker;
-
-  // Server-side: no CORS needed.
-  if (!isBrowserRuntime) {
-    return '';
-  }
-
   if (!requiresCors) {
     return '';
   }

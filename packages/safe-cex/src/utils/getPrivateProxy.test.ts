@@ -20,11 +20,20 @@ describe('getPrivateProxy', () => {
     restoreGlobal('self', originalSelf);
   });
 
-  it('returns empty string for server-side runtime', () => {
+  it('returns proxy url for server-side runtime when requested', () => {
     delete (globalThis as any).window;
     delete (globalThis as any).self;
 
-    expect(getPrivateProxy('https://openapi.blofin.com', true)).toBe('');
+    expect(getPrivateProxy('https://openapi.blofin.com', true)).toBe(
+      'https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy',
+    );
+  });
+
+  it('still respects requiresCors=false in server-side runtime', () => {
+    delete (globalThis as any).window;
+    delete (globalThis as any).self;
+
+    expect(getPrivateProxy('https://openapi.blofin.com', false)).toBe('');
   });
 
   it('returns worker proxy url when running in webworker runtime', () => {

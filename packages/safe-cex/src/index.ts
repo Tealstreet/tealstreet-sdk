@@ -178,6 +178,7 @@ export const createPublicExchange = async (
 /**
  * Account-based exchange creation
  */
+export { normalizeExchangeAccountConfig } from './accounts/normalizeExchangeAccountConfig';
 export { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
 export type { ExchangeAccountConfig, PublicExchangeOptions } from './types';
 

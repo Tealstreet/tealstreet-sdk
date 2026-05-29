@@ -334,7 +334,12 @@ WS MESSAGE
         this.sumFinite(
           okxPositions.map((p) => {
             const market = this.store.marketsById[p.instId];
-            return this.parent.convertMarginValueToUsd(this.parseFinite(p.mmr), p.ccy, market, this.parseFinite(p.markPx));
+            return this.parent.convertMarginValueToUsd(
+              this.parseFinite(p.mmr),
+              p.ccy,
+              market,
+              this.parseFinite(p.markPx),
+            );
           }),
         ),
       );
@@ -366,7 +371,9 @@ WS MESSAGE
     }
   };
 
-  handleAccountTopic = ({ data }: { data: Array<Record<string, any>> }) => {
+  handleAccountTopic = ({ data }: { data?: Array<Record<string, any>> }) => {
+    if (!Array.isArray(data)) return;
+
     const totalEqValues = data
       .map((b) => parseFloat(String(b.totalEq ?? '')))
       .filter((value) => Number.isFinite(value));
