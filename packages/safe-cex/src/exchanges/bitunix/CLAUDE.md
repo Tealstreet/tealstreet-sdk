@@ -9,7 +9,7 @@
 
 ## API Documentation
 
-- **Official API Documentation**: https://openapidoc.bitunix.com/
+- **Official API Documentation**: <https://openapidoc.bitunix.com/>
 
 ## File Structure
 
@@ -38,7 +38,7 @@ Bitunix uses a **double-SHA256** signature scheme (NOT HMAC). Implemented in `bi
 
 2. **Signature computation** (`bitunix.api.ts:49-60`):
 
-   ```
+   ```text
    paramsStripped = URLparams with '=' and '&' characters removed
    toSign = nonce + timestamp + apiKey + paramsStripped [+ JSON body if POST]
    digest = SHA256(toSign)
@@ -113,7 +113,7 @@ Defined in `bitunix.exchange.ts:177-206`:
 | Constant               | Path                                               | Description                                                                                                                                                                                                                                    |
 | ---------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MARKETS`              | `/api/v1/futures/market/trading_pairs`             | All trading pairs (public)                                                                                                                                                                                                                     |
-| `ACCOUNT`              | `/api/v1/futures/account`                          | Account info, balance, position mode                                                                                                                                                                                                           |
+| `ACCOUNT`              | `/api/v1/futures/account`                          | Account info, balance, position mode. Current docs show `data` as an array of account rows for the requested `marginCoin`; older/live variants may return a single object.                                                                     |
 | `TICKERS`              | `/api/v1/futures/market/tickers`                   | All tickers (public)                                                                                                                                                                                                                           |
 | `LEVERAGE_MARGIN_MODE` | `/api/v1/futures/account/get_leverage_margin_mode` | Per-symbol leverage and margin mode                                                                                                                                                                                                            |
 | `HEDGE_MODE`           | `/api/v1/futures/account/change_position_mode`     | Change hedge/one-way mode                                                                                                                                                                                                                      |
@@ -376,12 +376,16 @@ Complex logic handling four order categories:
 
 `bitunix.exchange.ts:399-402`:
 
-```
+`fetchBalance()` selects the `USDT` account row from either an object response or the documented account-array response:
+
+```text
 free = available
 upnl = crossUnrealizedPNL + isolationUnrealizedPNL
 used = margin
 total = free + used + frozen
 ```
+
+Malformed or missing numeric fields are treated as `0` so a payload drift cannot poison the balance store with `NaN`.
 
 ### Ticker Data
 
@@ -412,11 +416,12 @@ total = free + used + frozen
 
 `positionIdCache: Map<string, string>` (key format: `"SYMBOL:side"`)
 
-- **Populated from**: REST `fetchPositions()` (`bitunix.exchange.ts:336-337`), WS `position` events on `OPEN`/`UPDATE` (`bitunix.ws-private.ts:262-269`)
+- **Populated from**: WS `position` events on `OPEN`/`UPDATE` (`bitunix.ws-private.ts:262-269`)
 - **Cleared on**: WS `position` `CLOSE` event (deletes entry)
 - **Purpose**: Survives store serialization where `position.info` may be lost
 - **Lookup priority** (`getPositionId`, `bitunix.exchange.ts:1022-1029`): `position.info.positionId` first, then cache fallback
 - **TP/SL priority** (`formatTPSLOrder`, `bitunix.exchange.ts:1155`): Cache first (more recent from WS), then `position.info` fallback
+- **REST behavior**: `fetchPositions()` keeps REST `positionId` in `position.info` but intentionally does not populate `positionIdCache`; REST can lag behind WS after close/reopen.
 
 ### Order TIF Cache
 
@@ -442,10 +447,13 @@ total = free + used + frozen
 
 ### Positions Response Format
 
-The API may return positions in two formats (`bitunix.exchange.ts:316-319`):
+The API may return positions in several formats (`bitunix.exchange.ts:316-319`):
 
 - Direct array: `data: [...]`
 - Wrapped: `data: { positionList: [...] }`
+- Extra nested wrappers: `data: { data: { positionList: [...] } }`
+
+`fetchPositions()` also accepts common alias fields observed across endpoint revisions (`instId`/`contract` for symbol, `size`/`positionAmt` for quantity, `avgPrice`/`entryPrice` for entry, `unRealizedProfit`/`upl` for uPNL, and `marginType` for margin mode). It still preserves the raw row in `position.info`.
 
 Similarly, TP/SL orders may be direct array or wrapped in `orderList` (`bitunix.exchange.ts:567-571`).
 
@@ -453,7 +461,7 @@ Similarly, TP/SL orders may be direct array or wrapped in `orderList` (`bitunix.
 
 - `exchangeName`: `'bitunix'`
 - `enableFakeFullTpSl`: `false`
-- `accountPositionMode`: Defaults to `PositionMode.Hedged`, updated from `fetchBalance()` response (`data.positionMode`)
+- `accountPositionMode`: Defaults to `PositionMode.Hedged`, updated from the selected `fetchBalance()` account row (`positionMode`)
 - `symbolSettings`: `Map<string, { marginType, leverage }>` -- cached per-symbol from `updateSymbolMetadata()`
 - `grafanaEndpointsEvery`: `ORDER`, `BATCH_ORDERS`, `SET_LEVERAGE`, `CANCEL_SYMBOL_ORDERS`, `HEDGE_MODE`
 - `grafanaEndpointsPeriodic`: `ACCOUNT`, `OPEN_ORDERS`, `POSITIONS`
@@ -496,6 +504,8 @@ Similarly, TP/SL orders may be direct array or wrapped in `orderList` (`bitunix.
 14. **Order clientId prefix**: All orders get client IDs prefixed with `ts_` (`bitunix.exchange.ts:1100`).
 
 15. **Margin mode values**: `ISOLATION` (not `ISOLATED`) for isolated margin, `CROSS` for cross margin.
+
+16. **Multi-assets / joint-margin visibility**: Bitunix help docs describe multi-assets/joint-margin as eligible collateral assets backing USDT-M margin through discount-rate conversion, not as a separate positions endpoint. Keep using `/api/v1/futures/account?marginCoin=USDT` and `/api/v1/futures/position/get_pending_positions`, but parse account `data` as object-or-array and positions through the flexible wrapper/alias extractor. Do not expand this exchange to USDC-M/Coin-M support without separately auditing market discovery, margin coin selection, order sizing, and settlement semantics.
 
 ## Error Handling
 

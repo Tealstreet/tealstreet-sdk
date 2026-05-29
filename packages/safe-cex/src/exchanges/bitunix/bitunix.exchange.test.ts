@@ -205,6 +205,44 @@ describe('BitunixExchange', () => {
       expect(real!.info.positionId).toBe('6674071536328511558');
     });
 
+    it('should parse positions from nested wrappers and alias fields', async () => {
+      const { exchange } = createExchange(makeMockStore());
+      const aliasedPosition = {
+        positionId: 'nested-id',
+        instId: 'ARBUSDT',
+        size: '12',
+        notional: '25',
+        side: 'SHORT',
+        marginType: 'ISOLATED',
+        posMode: 'ONE_WAY',
+        lever: '15',
+        unRealizedProfit: '1.2',
+        realizedPnl: '0.3',
+        liquidationPrice: '0.05',
+        avgPrice: '0.12',
+      };
+
+      exchange.xhr = {
+        get: vi.fn().mockResolvedValue({ data: { data: { data: { positionList: [aliasedPosition] } } } }),
+      } as any;
+
+      const positions = await exchange.fetchPositions();
+      const real = positions.find((p) => p.symbol === 'ARBUSDT' && p.contracts > 0);
+
+      expect(real).toBeDefined();
+      expect(real!.side).toBe(PositionSide.Short);
+      expect(real!.positionMode).toBe(PositionMode.OneWay);
+      expect(real!.marginType).toBe(MarginType.Isolated);
+      expect(real!.contracts).toBe(12);
+      expect(real!.notional).toBe(25);
+      expect(real!.leverage).toBe(15);
+      expect(real!.unrealizedPnl).toBe(1.2);
+      expect(real!.realizedPnl).toBe(0.3);
+      expect(real!.liquidationPrice).toBe(0.05);
+      expect(real!.entryPrice).toBe(0.12);
+      expect(real!.info).toBe(aliasedPosition);
+    });
+
     it('should return empty formatted positions when data is null', async () => {
       const { exchange } = createExchange(makeMockStore([], [], [ARBUSDT_MARKET]));
 
@@ -270,6 +308,95 @@ describe('BitunixExchange', () => {
       const positions = await exchange.fetchPositions();
 
       expect(positions).toBe(existingPositions);
+    });
+  });
+
+  // =========================================================================
+  // fetchBalance / fetchPositionMode - account array handling
+  // =========================================================================
+  describe('fetchBalance', () => {
+    it('should parse the documented account array response and prefer USDT', async () => {
+      const { exchange } = createExchange();
+
+      exchange.xhr = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            data: [
+              {
+                marginCoin: 'USDC',
+                available: '9999',
+                frozen: '9999',
+                margin: '9999',
+                positionMode: 'HEDGE',
+                crossUnrealizedPNL: '9999',
+                isolationUnrealizedPNL: '9999',
+              },
+              {
+                marginCoin: 'USDT',
+                available: '1000',
+                frozen: '2',
+                margin: '10',
+                positionMode: 'ONE_WAY',
+                crossUnrealizedPNL: '3',
+                isolationUnrealizedPNL: '4',
+              },
+            ],
+          },
+        }),
+      } as any;
+
+      const { balance } = await exchange.fetchBalance();
+
+      expect(balance).toEqual({ total: 1012, free: 1000, used: 10, upnl: 7 });
+      expect(exchange.accountPositionMode).toBe(PositionMode.OneWay);
+    });
+
+    it('should default malformed numeric account fields to zero', async () => {
+      const { exchange } = createExchange();
+
+      exchange.xhr = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            data: [
+              {
+                marginCoin: 'USDT',
+                available: 'not-a-number',
+                frozen: null,
+                margin: '',
+                positionMode: 'HEDGE',
+                crossUnrealizedPNL: 'bad',
+              },
+            ],
+          },
+        }),
+      } as any;
+
+      const { balance } = await exchange.fetchBalance();
+
+      expect(balance).toEqual({ total: 0, free: 0, used: 0, upnl: 0 });
+      expect(Object.values(balance).every(Number.isFinite)).toBe(true);
+      expect(exchange.accountPositionMode).toBe(PositionMode.Hedged);
+    });
+  });
+
+  describe('fetchPositionMode', () => {
+    it('should parse the documented account array response', async () => {
+      const { exchange } = createExchange();
+
+      exchange.xhr = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            data: [
+              {
+                marginCoin: 'USDT',
+                positionMode: 'ONE_WAY',
+              },
+            ],
+          },
+        }),
+      } as any;
+
+      await expect(exchange.fetchPositionMode()).resolves.toBe(false);
     });
   });
 
@@ -382,7 +509,7 @@ describe('BitunixExchange', () => {
       const { exchange } = createExchange(makeMockStore([position], [], [ARBUSDT_MARKET]));
 
       // First call: cache empty, will throw "Missing positionId"
-      // fetchPositions in retry will populate cache
+      // fetchPositions in retry refreshes position.info.positionId
       const RAW = {
         positionId: 'refreshed-id',
         symbol: 'ARBUSDT',

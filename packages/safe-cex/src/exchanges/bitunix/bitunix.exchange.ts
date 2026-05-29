@@ -50,7 +50,6 @@ import { BaseExchange } from '../base';
 import { createAPI } from './bitunix.api';
 import {
   ENDPOINTS,
-  GET_PENDING_POSITIONS_RESPONSE,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   ORDER_SIDE,
@@ -101,6 +100,119 @@ export class BitunixExchange extends BaseExchange {
     this.futuresWebsocket = new BitunixFuturesWebsocket(this);
   }
 
+  private isRecord = (value: unknown): value is Record<string, any> => {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  };
+
+  private getResponseCandidates = (payload: unknown) => {
+    const candidates: unknown[] = [];
+    const seen = new Set<object>();
+
+    const visit = (value: unknown, depth = 0) => {
+      if (value === undefined || value === null || depth > 4) {
+        return;
+      }
+
+      if (typeof value === 'object') {
+        if (seen.has(value)) {
+          return;
+        }
+        seen.add(value);
+      }
+
+      candidates.push(value);
+
+      if (!this.isRecord(value)) {
+        return;
+      }
+
+      visit(value.data, depth + 1);
+      visit(value.result, depth + 1);
+      visit(value.payload, depth + 1);
+      visit(value.positionList, depth + 1);
+      visit(value.positions, depth + 1);
+      visit(value.list, depth + 1);
+      visit(value.rows, depth + 1);
+    };
+
+    visit(payload);
+
+    return candidates;
+  };
+
+  private getFirstValue = (record: Record<string, any>, fields: string[]) => {
+    for (const field of fields) {
+      const value = record[field];
+      if (value !== undefined && value !== null && value !== '') {
+        return value;
+      }
+    }
+    return undefined;
+  };
+
+  private parseFiniteNumber = (value: unknown, fallback = 0) => {
+    if (value === undefined || value === null || value === '') {
+      return fallback;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  private extractAccountRow = (payload: unknown, marginCoin = 'USDT') => {
+    const accountFields = [
+      'marginCoin',
+      'available',
+      'availableBalance',
+      'frozen',
+      'margin',
+      'positionMode',
+      'crossUnrealizedPNL',
+      'isolationUnrealizedPNL',
+    ];
+
+    const isAccountRow = (value: unknown): value is Record<string, any> => {
+      return this.isRecord(value) && accountFields.some((field) => value[field] !== undefined);
+    };
+
+    for (const candidate of this.getResponseCandidates(payload)) {
+      if (Array.isArray(candidate)) {
+        const rows = candidate.filter(isAccountRow);
+        const preferred = rows.find(
+          (row) => String(row.marginCoin || '').toUpperCase() === marginCoin.toUpperCase(),
+        );
+        if (preferred || rows[0]) {
+          return preferred || rows[0];
+        }
+      }
+
+      if (isAccountRow(candidate)) {
+        return candidate;
+      }
+    }
+
+    return {};
+  };
+
+  private extractPositionRows = (payload: unknown) => {
+    const isPositionRow = (value: unknown): value is Record<string, any> => {
+      return this.isRecord(value) && !!this.getFirstValue(value, ['symbol', 'instId', 'contract', 'instrument']);
+    };
+
+    for (const candidate of this.getResponseCandidates(payload)) {
+      if (!Array.isArray(candidate)) {
+        continue;
+      }
+
+      const rows = candidate.filter(isPositionRow);
+      if (rows.length > 0) {
+        return rows;
+      }
+    }
+
+    return [];
+  };
+
   dispose = () => {
     super.dispose();
     this.publicWebsocket.dispose();
@@ -111,11 +223,12 @@ export class BitunixExchange extends BaseExchange {
 
   validateAccount = async () => {
     try {
-      await this.xhr.get(ENDPOINTS.ACCOUNT, {
+      const response = await this.xhr.get(ENDPOINTS.ACCOUNT, {
         params: {
           marginCoin: 'USDT',
         },
       });
+      this.extractAccountRow(response?.data);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
@@ -328,26 +441,34 @@ export class BitunixExchange extends BaseExchange {
 
   fetchPositions = async () => {
     try {
-      const {
-        data: { data },
-      } = await this.xhr.get<{ data: Record<string, any> }>(ENDPOINTS.POSITIONS);
+      const response = await this.xhr.get<{ data: Record<string, any> }>(ENDPOINTS.POSITIONS);
 
-      // Bitunix API may return positions as a direct array or wrapped in positionList
-      const positionList: GET_PENDING_POSITIONS_RESPONSE = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.positionList)
-          ? data.positionList
-          : [];
+      // Bitunix has returned positions as direct arrays, positionList wrappers,
+      // and extra nested data wrappers across endpoint revisions.
+      const positionList = this.extractPositionRows(response?.data);
 
-      const formattedPositions = positionList.map((p) => {
-        const contracts = parseFloat(p.qty || p.maxQty || '0');
-        const positionModeStr = (p.positionMode || '').toUpperCase();
+      const formattedPositions = positionList.reduce<Position[]>((acc, p) => {
+        const symbol = String(this.getFirstValue(p, ['symbol', 'instId', 'contract', 'instrument']) || '');
+        if (!symbol) {
+          return acc;
+        }
+
+        const contractsRaw = this.getFirstValue(p, ['qty', 'maxQty', 'size', 'positionAmt', 'amount', 'contracts']);
+        const contracts = this.parseFiniteNumber(contractsRaw);
+        const positionModeStr = String(this.getFirstValue(p, ['positionMode', 'posMode']) || '').toUpperCase();
         const positionMode = positionModeStr === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
-        const marginType = (p.marginMode || '').toUpperCase() === 'CROSS' ? MarginType.Cross : MarginType.Isolated;
+        const marginModeStr = String(this.getFirstValue(p, ['marginMode', 'marginType']) || '').toUpperCase();
+        const symbolSettings = this.symbolSettings.get(symbol);
+        const marginType =
+          marginModeStr === 'CROSS'
+            ? MarginType.Cross
+            : marginModeStr === 'ISOLATION' || marginModeStr === 'ISOLATED'
+              ? MarginType.Isolated
+              : symbolSettings?.marginType || MarginType.Cross;
 
         // Bitunix API may return side as BUY/SELL or LONG/SHORT depending on endpoint version
-        const sideStr = (p.side || '').toUpperCase();
-        const isLong = sideStr === 'BUY' || sideStr === 'LONG';
+        const sideStr = String(this.getFirstValue(p, ['side', 'positionSide']) || '').toUpperCase();
+        const isLong = sideStr === 'BUY' || sideStr === 'LONG' || (sideStr === 'BOTH' && contracts >= 0);
 
         const side = isLong ? PositionSide.Long : PositionSide.Short;
 
@@ -358,22 +479,25 @@ export class BitunixExchange extends BaseExchange {
         // REST positionId is still available via position.info.positionId as fallback.
 
         const res: Position = {
-          id: createPositionId(p.symbol, side, positionMode),
-          symbol: p.symbol,
+          id: createPositionId(symbol, side, positionMode),
+          symbol,
           side,
-          entryPrice: parseFloat(p.avgOpenPrice || p.entryPrice || '0'),
-          notional: parseFloat(p.entryValue || '0'),
-          leverage: p.leverage,
-          unrealizedPnl: parseFloat(p.unrealizedPNL || '0'),
-          realizedPnl: parseFloat(p.realizedPNL || '0'),
+          entryPrice: this.parseFiniteNumber(this.getFirstValue(p, ['avgOpenPrice', 'entryPrice', 'openPrice', 'avgPrice'])),
+          notional: this.parseFiniteNumber(this.getFirstValue(p, ['entryValue', 'notional', 'positionValue'])),
+          leverage: this.parseFiniteNumber(this.getFirstValue(p, ['leverage', 'lever']), symbolSettings?.leverage || 10),
+          unrealizedPnl: this.parseFiniteNumber(
+            this.getFirstValue(p, ['unrealizedPNL', 'unrealizedPnl', 'unRealizedProfit', 'upl']),
+          ),
+          realizedPnl: this.parseFiniteNumber(this.getFirstValue(p, ['realizedPNL', 'realizedPnl'])),
           contracts: Math.abs(contracts),
-          liquidationPrice: parseFloat(p.liqPrice || '0'),
+          liquidationPrice: this.parseFiniteNumber(this.getFirstValue(p, ['liqPrice', 'liquidationPrice', 'liqPx'])),
           marginType,
           positionMode,
           info: p,
         };
-        return res;
-      });
+        acc.push(res);
+        return acc;
+      }, []);
 
       const createFakePosition = (m: Market, side: PositionSide, positionMode: PositionMode) => {
         const symbolSettings = this.symbolSettings.get(m.symbol);
@@ -407,20 +531,28 @@ export class BitunixExchange extends BaseExchange {
 
   fetchBalance = async () => {
     try {
-      const {
-        data: { data },
-      } = await this.xhr.get<{ data: Record<string, any> }>(ENDPOINTS.ACCOUNT, {
+      const response = await this.xhr.get<{ data: Record<string, any> }>(ENDPOINTS.ACCOUNT, {
         params: {
           marginCoin: 'USDT',
         },
       });
 
-      this.accountPositionMode = data?.positionMode === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
+      const account = this.extractAccountRow(response?.data);
+      const positionModeStr = String(this.getFirstValue(account, ['positionMode', 'posMode']) || '').toUpperCase();
+      this.accountPositionMode = positionModeStr === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
 
-      const free = parseFloat(data?.available);
-      const upnl = parseFloat(data?.crossUnrealizedPNL) + parseFloat(data?.isolationUnrealizedPNL);
-      const used = parseFloat(data?.margin);
-      const total = free + used + parseFloat(data?.frozen);
+      const free = this.parseFiniteNumber(this.getFirstValue(account, ['available', 'availableBalance', 'availableMargin']));
+      const crossUnrealizedPnl = this.getFirstValue(account, ['crossUnrealizedPNL', 'crossUnrealizedPnl']);
+      const isolationUnrealizedPnl = this.getFirstValue(account, [
+        'isolationUnrealizedPNL',
+        'isolationUnrealizedPnl',
+      ]);
+      const upnl =
+        crossUnrealizedPnl !== undefined || isolationUnrealizedPnl !== undefined
+          ? this.parseFiniteNumber(crossUnrealizedPnl) + this.parseFiniteNumber(isolationUnrealizedPnl)
+          : this.parseFiniteNumber(this.getFirstValue(account, ['unrealizedPNL', 'unrealizedPnl', 'upnl']));
+      const used = this.parseFiniteNumber(this.getFirstValue(account, ['margin', 'used', 'usedMargin']));
+      const total = free + used + this.parseFiniteNumber(this.getFirstValue(account, ['frozen', 'locked']));
 
       const balance = { total, free, used, upnl };
 
@@ -936,13 +1068,14 @@ export class BitunixExchange extends BaseExchange {
     // /account endpoint already returns positionMode ("HEDGE" | "ONE_WAY"),
     // and fetchBalance reads it from the same response, so reuse it here
     // to avoid the broken endpoint entirely.
-    const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT, {
+    const response = await this.xhr.get(ENDPOINTS.ACCOUNT, {
       params: { marginCoin: 'USDT' },
     });
+    const account = this.extractAccountRow(response?.data);
     // Mirror fetchBalance's classification — treat any non-ONE_WAY value
     // (including missing/unexpected casing) as Hedged so the two helpers
     // stay in sync.
-    return data?.data?.positionMode !== 'ONE_WAY';
+    return String(this.getFirstValue(account, ['positionMode', 'posMode']) || '').toUpperCase() !== 'ONE_WAY';
   };
 
   changePositionMode = async (hedged: boolean) => {
