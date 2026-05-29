@@ -4,7 +4,7 @@ import Emitter from 'tiny-emitter';
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
-import { getUniqueLatencyDomains, syncServerTime } from './config';
+import { getTunnelUrlTicket, getUniqueLatencyDomains, syncServerTime } from './config';
 import { HOWWebSocketAuthState, LatencyEntry } from './types';
 
 // Import ws package for Node.js/Bun - needed because Bun's native WebSocket
@@ -83,6 +83,7 @@ export class HOWWebSocket {
   };
 
   private url: string | undefined;
+  private currentTunnelUrlTicket = '';
 
   constructor(url: string) {
     if (!url) {
@@ -109,7 +110,7 @@ export class HOWWebSocket {
       };
     }
 
-    ws = new ReconnectingWebSocket(`${url}?v=2&t=${+new Date()}`, protocols, options);
+    ws = new ReconnectingWebSocket(() => this.buildWebsocketUrl(url), protocols, options);
 
     // Add error handler immediately to prevent uncaught errors
     ws.addEventListener('error', this.handleWebSocketError as any);
@@ -179,7 +180,25 @@ export class HOWWebSocket {
     }
   };
 
-  connectAndSubscribe = () => {
+  buildWebsocketUrl = async (url: string): Promise<string> => {
+    try {
+      this.currentTunnelUrlTicket = await getTunnelUrlTicket();
+    } catch (err) {
+      console.error('[HOWWebSocket] Failed to get tunnel URL ticket:', err);
+      this.currentTunnelUrlTicket = '';
+    }
+
+    const params = new URLSearchParams({
+      v: '2',
+      t: String(+new Date()),
+    });
+    if (this.currentTunnelUrlTicket) {
+      params.set('tt', this.currentTunnelUrlTicket);
+    }
+    return `${url}?${params.toString()}`;
+  };
+
+  connectAndSubscribe = async () => {
     this.isInitialized = true;
     if (!this.isDisposed) {
       this.ws = this.createWebsocket(this.url || '');
@@ -428,7 +447,6 @@ export class HOWWebSocket {
     };
 
     this.latencyByDomain.set(domain, entry);
-
   };
 
   /**

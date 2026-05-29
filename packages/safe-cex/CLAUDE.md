@@ -87,6 +87,12 @@ Is requiresCors true?
 - **`requiresCors: true` needs `privateProxyIps`**: The proxy IPs are shown to users for IP whitelisting. Without them, users can't configure their API keys.
 - **Runtime checks for proxy resolution**: treat browser main thread and WebWorker as browser runtimes. Do not use `typeof window === 'undefined'` alone to infer "server"; that breaks worker-local proxy routing.
 - **Package-boundary discipline**: do not import proxy helpers from `apps/web` into `packages/safe-cex`. Shared routing logic must live in `packages/safe-cex/src/utils/getPrivateProxy.ts`.
+- **Multi-tenant token contexts**: `accessToken.ts` supports a per-async-context
+  proxy token provider used by exchange-server. Contextual tokens are checked
+  before the browser shared-worker or CLI/global refresh path, but invalid,
+  expired, empty, or throwing contextual providers must fall back to the normal
+  module token path. Do not replace this with module-global `setProxyToken` in
+  multi-user hosts.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
 - **Tradetunnel access requires an allowlisted egress IP, not a
   User-Agent.** CloudFront's WAF in front of

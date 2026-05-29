@@ -49,6 +49,10 @@ yarn test           # Vitest
 - Latency checking uses 1-second tick with 10-second stale threshold
 - `configureHOW()` must be called before any functionality is used
 - Browser uses native WebSocket; Node.js/Bun dynamically imports `ws`
+- `getTunnelUrlTicket` is called from the reconnecting-websocket async URL
+  provider, so each connection attempt/reconnect gets a fresh `tt` URL ticket.
+  Do not move this back to `connectAndSubscribe()`; that would reuse an expired
+  ticket on long-lived reconnecting HOW sessions.
 - **Inspecting tunneled requests/responses.** REST appears as WS
   frames, not XHRs. Low-level fallback:
   `NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG=1` (gated in

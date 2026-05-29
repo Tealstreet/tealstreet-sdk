@@ -20,6 +20,8 @@ export enum HOWWebSocketAuthState {
 export interface HOWConfig {
   /** Function to get the proxy token for authentication */
   getProxyToken: () => Promise<string>;
+  /** Optional function to get a short-lived URL ticket for WebSocket upgrade admission */
+  getTunnelUrlTicket?: () => Promise<string>;
   /** Function to check if a token is expired */
   isTokenExpired: (token: string) => boolean;
   /** Whether to simulate HTTP over WebSocket (bypass tunnel, use direct HTTP) */

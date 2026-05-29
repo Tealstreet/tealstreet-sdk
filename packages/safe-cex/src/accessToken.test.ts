@@ -1,7 +1,14 @@
 import jwt from 'jsonwebtoken';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { currentProxyToken, isTokenExpired, setProxyToken, setTokenRefreshFunction } from './accessToken';
+import {
+  currentProxyToken,
+  getProxyToken,
+  isTokenExpired,
+  setContextualProxyTokenProvider,
+  setProxyToken,
+  setTokenRefreshFunction,
+} from './accessToken';
 
 vi.mock('./utils/virtualClock', () => ({
   virtualClock: {
@@ -18,6 +25,9 @@ vi.mock('./proxyTokenClient', () => ({
 }));
 
 describe('accessToken', () => {
+  const createFutureToken = (label: string, now = Date.now()) =>
+    jwt.sign({ exp: Math.floor(now / 1000) + 3600, label }, 'test-secret');
+
   describe('isTokenExpired', () => {
     it('should return true for empty token', () => {
       expect(isTokenExpired('')).toBe(true);
@@ -99,6 +109,84 @@ describe('accessToken', () => {
       const mockFn = vi.fn().mockResolvedValue('new-token');
       setTokenRefreshFunction(mockFn);
       expect(() => setTokenRefreshFunction(null)).not.toThrow();
+    });
+  });
+
+  describe('setContextualProxyTokenProvider', () => {
+    beforeEach(() => {
+      setProxyToken('');
+    });
+
+    afterEach(() => {
+      setContextualProxyTokenProvider(null);
+      setTokenRefreshFunction(null);
+      setProxyToken('');
+    });
+
+    it('uses the active contextual provider before the module-global refresh function', async () => {
+      const contextToken = createFutureToken('context-token');
+      const globalRefresh = vi.fn().mockResolvedValue(createFutureToken('global-token'));
+      const contextProvider = vi.fn().mockResolvedValue(contextToken);
+
+      setTokenRefreshFunction(globalRefresh);
+      setContextualProxyTokenProvider(() => contextProvider);
+
+      await expect(getProxyToken()).resolves.toBe(contextToken);
+      expect(contextProvider).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).not.toHaveBeenCalled();
+    });
+
+    it('falls back to global refresh when the contextual provider returns an empty token', async () => {
+      const globalToken = createFutureToken('global-token');
+      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+      const contextProvider = vi.fn().mockResolvedValue('');
+
+      setTokenRefreshFunction(globalRefresh);
+      setContextualProxyTokenProvider(() => contextProvider);
+
+      await expect(getProxyToken()).resolves.toBe(globalToken);
+      expect(contextProvider).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to global refresh when the contextual provider returns an expired token', async () => {
+      const globalToken = createFutureToken('global-token');
+      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+      const contextProvider = vi.fn().mockResolvedValue(jwt.sign({ exp: 1 }, 'test-secret'));
+
+      setTokenRefreshFunction(globalRefresh);
+      setContextualProxyTokenProvider(() => contextProvider);
+
+      await expect(getProxyToken()).resolves.toBe(globalToken);
+      expect(contextProvider).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to global refresh when the contextual provider throws', async () => {
+      const globalToken = createFutureToken('global-token');
+      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+      const contextProvider = vi.fn().mockRejectedValue(new Error('provider failed'));
+
+      setTokenRefreshFunction(globalRefresh);
+      setContextualProxyTokenProvider(() => contextProvider);
+
+      await expect(getProxyToken()).resolves.toBe(globalToken);
+      expect(contextProvider).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses global refresh after clearing the contextual provider', async () => {
+      const globalToken = createFutureToken('global-token');
+      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+      const contextProvider = vi.fn().mockResolvedValue(createFutureToken('context-token'));
+
+      setTokenRefreshFunction(globalRefresh);
+      setContextualProxyTokenProvider(() => contextProvider);
+      setContextualProxyTokenProvider(null);
+
+      await expect(getProxyToken()).resolves.toBe(globalToken);
+      expect(contextProvider).not.toHaveBeenCalled();
+      expect(globalRefresh).toHaveBeenCalledTimes(1);
     });
   });
 });
