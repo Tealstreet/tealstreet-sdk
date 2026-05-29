@@ -102,7 +102,7 @@ Now let us proceed back to where we left the Tealstreet API page:
   - **Color**: Choose the color you want this account to use in the terminal.
   - **Use Tealstreet WebSocket Route**: Keep this enabled for Tealstreet's optimized WebSocket routing unless you have excellent internet and are not in a restricted jurisdiction.
   - **Account Index**: Enter your Lighter account index (the L1 wallet address you made the API Keys with).
-  - **API Key Index**: Enter the numeric index of the API key you created.
+  - **API Key Index**: Enter the numeric index of the API key you created. Lighter recommends using an indice of 4 or higher.
   - **Public Key**: Paste the public key exactly as shown in Lighter.
   - **Private Key**: Paste the private key exactly as shown in Lighter.
   - **Approve Builder Fee**: Tick the box to approve Tealstreet as a builder if you permit it to charge fees on your behalf. This is required for attributed orders to be placed through Tealstreet.
@@ -126,9 +126,12 @@ Lighter usually reserves API Key Indices 0 through 3 for their own use and they 
   - You can switch tiers in Tealstreet from **Settings → Profile → Lighter → Lighter Account Tier**.
   - Switching tiers has a 24h cooldown and can only be done when there are no open orders or positions.. Read more in Lighter's [official account type docs](https://apidocs.lighter.xyz/docs/account-types).
 
-:::note
+  :::note
 Lighter at the time of this writing does not support changing to Plus tier over their exchange UI. You can of course change to this tier in the Tealstreet Lighter Settings. Different tiers have different fees, latency, and rate limits.
 :::
+
+- **Why did my API Expire suddenly?**
+  - Lighter utilizes the first 4 indices for their own use. If you re-auth using their fornt-end for example it can reset the 0-4 indices. This is why Lighter recommends using an indice of 4 or higher to avoid this issue.
 
 <div class="text--center">
     <img src={AccountTier} alt="Account Tier" style={{ width: 600 }} />
