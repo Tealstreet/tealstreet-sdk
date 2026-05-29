@@ -54,10 +54,6 @@ yarn test           # Vitest
 - Latency checking uses 1-second tick with 10-second stale threshold
 - `configureHOW()` must be called before any functionality is used
 - Browser uses native WebSocket; Node.js/Bun dynamically imports `ws`
-- `getTunnelUrlTicket` is called from the reconnecting-websocket async URL
-  provider, so each connection attempt/reconnect gets a fresh `tt` URL ticket.
-  Do not move this back to `connectAndSubscribe()`; that would reuse an expired
-  ticket on long-lived reconnecting HOW sessions.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.

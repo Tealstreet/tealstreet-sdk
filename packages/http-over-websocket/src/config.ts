@@ -38,13 +38,6 @@ export async function getProxyToken(): Promise<string> {
 }
 
 /**
- * Get an optional tunnel URL ticket for WebSocket upgrade admission.
- */
-export async function getTunnelUrlTicket(): Promise<string> {
-  return config.getTunnelUrlTicket?.() ?? '';
-}
-
-/**
  * Check if token is expired (calls the configured function)
  */
 export function isTokenExpired(token: string): boolean {
