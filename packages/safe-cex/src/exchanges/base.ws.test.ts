@@ -2,6 +2,7 @@ import type { BaseExchange } from './base';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { BaseWebSocket, getCloseCodeDescription, WS_PING_THRESHOLD_MS, WS_RECONNECT_THRESHOLD_MS } from './base.ws';
 
 // Mock dependencies
@@ -18,7 +19,13 @@ vi.mock('@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket', () => ({
 
 vi.mock('../config/config', () => ({
   ENABLE_RECONNECTING_WEBSOCKET: false,
+  ENABLE_WS_LIFECYCLE_DEBUG_LOGS: false,
   RECONNECTING_WEBSOCKET_TUNING: {},
+  WS_BACKOFF_BASE_DELAY: 2000,
+  WS_BACKOFF_FACTOR: 2,
+  WS_BACKOFF_MAX_DELAY: 30000,
+  WS_FAILURE_STREAK_PAUSE_MS: 120000,
+  WS_FAILURE_STREAK_PAUSE_THRESHOLD: 8,
   WS_MIN_RECONNECTION_DELAY: 1000,
 }));
 
@@ -318,6 +325,45 @@ describe('BaseWebSocket', () => {
       // Should have error handler set
       expect(ws.addEventListener).toBeDefined();
     });
+
+    it('should use header-capable reconnecting websocket for Tealstreet proxy URLs', () => {
+      vi.mocked(ReconnectingWebSocket).mockClear();
+
+      baseWs.createWebsocket('wss://fsjnpy143pbz.asia.tealstreet.io/bitmex/private', undefined, {
+        headers: {
+          Origin: 'https://bad-origin.invalid',
+          'User-Agent': 'bad-agent',
+        },
+      } as any);
+
+      expect(ReconnectingWebSocket).toHaveBeenCalledWith(
+        'wss://fsjnpy143pbz.asia.tealstreet.io/bitmex/private',
+        undefined,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Origin: 'https://preview.tealstreet.io',
+            'User-Agent': expect.stringContaining('Mozilla/5.0'),
+          }),
+        }),
+      );
+    });
+
+    it('should treat apex Tealstreet websocket URLs as proxy URLs', () => {
+      vi.mocked(ReconnectingWebSocket).mockClear();
+
+      baseWs.createWebsocket('wss://tealstreet.io/tunnel');
+
+      expect(ReconnectingWebSocket).toHaveBeenCalledWith(
+        'wss://tealstreet.io/tunnel',
+        undefined,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Origin: 'https://preview.tealstreet.io',
+            'User-Agent': expect.stringContaining('Mozilla/5.0'),
+          }),
+        }),
+      );
+    });
   });
 
   describe('handleWebSocketError', () => {
@@ -362,10 +408,12 @@ describe('BaseWebSocket', () => {
   });
 
   describe('send', () => {
-    it('should throw error when WebSocket is not OPEN', () => {
-      baseWs.ws = { readyState: WebSocket.CONNECTING } as any;
+    it('should trigger reconnect when WebSocket is not OPEN', () => {
+      baseWs.ws = { readyState: WebSocket.CONNECTING, close: vi.fn() } as any;
+      baseWs.reconnect = vi.fn();
 
-      expect(() => baseWs.send('test')).toThrow('WebSocket not ready for send');
+      expect(() => baseWs.send('test')).not.toThrow();
+      expect(baseWs.reconnect).toHaveBeenCalled();
     });
 
     it('should send message when WebSocket is OPEN', () => {
@@ -387,7 +435,7 @@ describe('BaseWebSocket', () => {
       expect(() => baseWs.send('ping')).not.toThrow();
 
       // Should log skip message
-      expect(mockParent.log).toHaveBeenCalledWith(expect.stringContaining('Skipping ping/pong'), expect.any(Number));
+      expect(mockParent.log).toHaveBeenCalledWith(expect.stringContaining('Skipping ping/pong'), expect.any(String));
     });
 
     it('should trigger reconnect when WebSocket is not ready', () => {
@@ -532,7 +580,7 @@ describe('BaseWebSocket', () => {
 
       await baseWs.reconnect();
 
-      expect(mockParent.log).toHaveBeenCalledWith(expect.stringContaining('Reconnect count > 100'), expect.any(Number));
+      expect(mockParent.log).toHaveBeenCalledWith(expect.stringContaining('Reconnect count > 100'), expect.any(String));
     });
 
     it('should call onClose when no WebSocket exists', async () => {

@@ -41,6 +41,22 @@ See [`apps/documentation/cli/CLAUDE.md`](../documentation/cli/CLAUDE.md) if one 
 
 **Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64.
 
+## Tradetunnel / HoW WebSocket Runtime
+
+CLI accounts that normalize to HoW/tradetunnel use the shared
+`@tealstreet/http-over-websocket` package through safe-cex. That path is
+load-bearing: in Node/Bun it uses a header-capable WebSocket constructor,
+attaches `Origin: https://preview.tealstreet.io` plus a browser-like
+`User-Agent`, and forces HTTP/1.1 via vendored `ReconnectingWebSocket` ALPN
+options. Direct safe-cex exchange WebSockets to `*.tealstreet.io` use the same
+header/ALPN branch in `packages/safe-cex/src/exchanges/base.ws.ts`. Do not add a
+CLI-local tradetunnel socket or route tradetunnel through bare Bun native
+`WebSocket`.
+
+`src/ws-shim.ts` is separate: it protects other `*.tealstreet.io` WebSocket
+clients from Bun's HTTP/2 upgrade behavior by using `tcp-websocket`. It is not
+the HoW/tradetunnel auth path and should not replace `HOWWebSocket`.
+
 ## Architecture
 
 ```

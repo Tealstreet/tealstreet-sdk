@@ -19,7 +19,8 @@
     "@tealstreet/sleep": "*",
     "axios": "^1.14.0",
     "nanoid": "~5.1.11",
-    "tiny-emitter": "^2.1.0"
+    "tiny-emitter": "^2.1.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@tealstreet/prettierrc": "*",

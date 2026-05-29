@@ -6,16 +6,24 @@
  * WebSocket proxies that negotiate HTTP/2. Bun also replaces the `ws` npm
  * package with its own native implementation, so we can't use `ws` directly.
  *
- * This shim overrides globalThis.WebSocket so that connections to
+ * This shim overrides globalThis.WebSocket so that non-HOW connections to
  * tealstreet.io domains use `tcp-websocket` (undici's WebSocket, which
- * bypasses Bun's native shim), while all other connections use Bun's
- * native WebSocket for performance.
+ * bypasses Bun's native shim) with browser-like headers, while all other
+ * connections use Bun's native WebSocket for performance. HTTP-over-WebSocket
+ * / tradetunnel does not depend on this shim; HOWWebSocket passes its own
+ * header-capable constructor plus Origin/User-Agent headers directly into
+ * ReconnectingWebSocket.
  */
 
 const isBun = typeof process !== 'undefined' && !!(process as any).isBun;
 
 if (isBun) {
   const NativeWebSocket = globalThis.WebSocket;
+  const TEALSTREET_WS_HEADERS = {
+    Origin: 'https://preview.tealstreet.io',
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+  };
 
   // Lazy-load tcp-websocket only when needed
   let TcpWebSocket: any = null;
@@ -44,7 +52,10 @@ if (isBun) {
 
     if (isTealstreetProxy(urlStr)) {
       const Ws = getTcpWebSocket();
-      return new Ws(urlStr, protocols || []);
+      return new Ws(urlStr, {
+        headers: TEALSTREET_WS_HEADERS,
+        ...(protocols ? { protocols } : {}),
+      });
     }
 
     // Native Bun WebSocket for everything else

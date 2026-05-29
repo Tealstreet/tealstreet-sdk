@@ -106,20 +106,17 @@ Is requiresCors true?
   module token path. Do not replace this with module-global `setProxyToken` in
   multi-user hosts.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
-- **Tradetunnel access requires an allowlisted egress IP, not a
-  User-Agent.** CloudFront's WAF in front of
-  `fsjnpy143pbz.{jp,asia}.tealstreet.io` returns 403 to WS upgrade
-  requests with no `User-Agent`, and Bun's built-in `WebSocket`
-  constructor sends no UA with no public API to add one — `new
-WebSocket(url, protocols, { headers })` silently drops the
-  options. So the bun exchange-server can only reach tradetunnel
-  hostnames from an IP allowlisted at the CDN (production hosted
-  server on the DO droplet works; local `bun --hot run` does not).
-  Local exchange-server development against
-  tradetunnel-gated exchanges has to either deploy to the allowlisted
-  droplet (`docker --context tealstreet-exchange-services ...`) or
-  swap the WS client for the `ws` npm package, which honours `{
-headers }` under Bun.
+- **Non-browser tradetunnel callers must use the shared header-capable
+  transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
+  `fsjnpy143pbz.{jp,asia}.tealstreet.io` can reject WebSocket upgrades before
+  the Rust tradetunnel sees them. Browser clients send their own UA. Node/Bun
+  clients (CLI, `yarn keys`, exchange-server) must use either
+  `@tealstreet/http-over-websocket` for HoW REST or `base.ws.ts`'s Tealstreet
+  URL branch for exchange WebSockets. Both attach `Origin:
+https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
+  vendored `ReconnectingWebSocket` to force HTTP/1.1 via `ALPNProtocols`. Do not
+  use Bun native `WebSocket`, undici/tcp-websocket, or a hand-rolled socket for
+  tradetunnel/HOW.
 
 ## Key Files
 

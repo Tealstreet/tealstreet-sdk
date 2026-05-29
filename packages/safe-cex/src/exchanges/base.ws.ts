@@ -28,6 +28,31 @@ const lifecycleLog = (...args: unknown[]): void => {
   }
 };
 
+const TEALSTREET_WS_HEADERS = {
+  Origin: 'https://preview.tealstreet.io',
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+};
+
+const isTealstreetWebSocketUrl = (url: string): boolean => {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname === 'tealstreet.io' || hostname.endsWith('.tealstreet.io');
+  } catch {
+    return false;
+  }
+};
+
+const getNodeWebSocket = (): typeof WebSocket | undefined => {
+  if (typeof process === 'undefined' || !(process.versions?.node || (process as any).isBun)) return undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('ws');
+  } catch {
+    return undefined;
+  }
+};
+
 // WebSocket health check breakpoints
 export const WS_PING_THRESHOLD_MS = 6_000; // Time after which to send a ping
 export const WS_RECONNECT_THRESHOLD_MS = 20_000; // Time after which to reconnect/close
@@ -264,7 +289,17 @@ export class BaseWebSocket<T extends BaseExchange> {
 
   createWebsocket(url: string, protocols?: string | string[], options: Options = RECONNECTING_WEBSOCKET_TUNING) {
     let ws: ReconnectingWebSocket | WebSocket;
-    if (ENABLE_RECONNECTING_WEBSOCKET) {
+    if (isTealstreetWebSocketUrl(url)) {
+      const NodeWebSocket = getNodeWebSocket();
+      ws = new ReconnectingWebSocket(url, protocols, {
+        ...options,
+        ...(NodeWebSocket ? { WebSocket: NodeWebSocket } : {}),
+        headers: {
+          ...(options as any).headers,
+          ...TEALSTREET_WS_HEADERS,
+        },
+      });
+    } else if (ENABLE_RECONNECTING_WEBSOCKET) {
       ws = new ReconnectingWebSocket(url, protocols, options);
     } else {
       ws = new WebSocket(url, protocols);

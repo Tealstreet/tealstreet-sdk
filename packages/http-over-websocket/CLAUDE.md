@@ -50,10 +50,18 @@ yarn test           # Vitest
 ## Gotchas
 
 - **Build disabled by default** — uses tsconfig path aliases in development. Use `build-force` for actual build.
-- Forces HTTP/1.1 via `ALPNProtocols` (HTTP/2 incompatible with WebSocket upgrade)
+- Non-browser tradetunnel callers must use this package's `HOWWebSocket`, not a
+  direct `new WebSocket(...)`. In Node/Bun, `HOWWebSocket.ts` loads a header-capable WebSocket constructor, sends `Origin: https://preview.tealstreet.io` plus a browser-like
+  `User-Agent`, and passes that constructor into vendored
+  `ReconnectingWebSocket`.
+- Vendored `ReconnectingWebSocket` forces HTTP/1.1 via `ALPNProtocols:
+['http/1.1']` for Node/Bun constructors (HTTP/2 is incompatible with WS
+  upgrade). Keep the UA/Origin headers and ALPN behavior aligned; they are what
+  let CLI, `yarn keys`, and exchange-server use HoW outside a browser.
 - Latency checking uses 1-second tick with 10-second stale threshold
 - `configureHOW()` must be called before any functionality is used
-- Browser uses native WebSocket; Node.js/Bun dynamically imports `ws`
+- Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
+  constructor path that accepts headers.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.
