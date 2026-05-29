@@ -58,6 +58,9 @@ yarn test           # Vitest
   provider, so each connection attempt/reconnect gets a fresh `tt` URL ticket.
   Do not move this back to `connectAndSubscribe()`; that would reuse an expired
   ticket on long-lived reconnecting HOW sessions.
+- Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
+  before exit. The SG/JA HOW clients are module-singletons, so exchange-level
+  disposal alone does not close their sockets/timers.
 - **Inspecting tunneled requests/responses.** REST appears as WS
   frames, not XHRs. Low-level fallback:
   `NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG=1` (gated in

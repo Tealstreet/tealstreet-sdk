@@ -469,4 +469,25 @@ export class HOWWebSocket {
   simulateClose = () => {
     this.ws?.close();
   };
+
+  dispose = () => {
+    this.isDisposed = true;
+    this.isOpen = false;
+    this.isInitialized = false;
+    this.isTimeSynced = false;
+    this.isTokenSent = false;
+    this.authState = HOWWebSocketAuthState.Unknown;
+
+    if (this.pingTimeoutId) {
+      clearTimeout(this.pingTimeoutId);
+      this.pingTimeoutId = undefined;
+    }
+    clearTimeout(this.lastMessageTimeout);
+    this.lastMessageTimeout = undefined;
+    this.stopLatencyChecks();
+
+    this.ws?.terminate?.();
+    this.ws = undefined;
+    this._activeEventHandlers.clear();
+  };
 }

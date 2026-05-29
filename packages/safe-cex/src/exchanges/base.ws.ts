@@ -704,7 +704,9 @@ export class BaseWebSocket<T extends BaseExchange> {
       clearTimeout(this.lastReceivedTimer);
       this.lastReceivedTimer = undefined;
     }
-    // Close the WebSocket connection
+    // Close the WebSocket connection. Node's `ws` can keep a connecting
+    // socket alive after close(); terminate when the wrapper exposes it.
+    (this.ws as any)?.terminate?.();
     this.ws?.close?.();
     this.ws = undefined; // Clear the reference to prevent any accidental reuse
   }

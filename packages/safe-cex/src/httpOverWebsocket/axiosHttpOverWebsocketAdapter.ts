@@ -19,6 +19,7 @@ export {
   getAllServerLatencies,
   getTunnelLatencyForExchange,
   getAllTunnelLatencies,
+  disposeHOWWebSockets,
 } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 
 export type { HOWRegion, CreateAxiosHttpOverWebsocketAdapterOptions } from '@tealstreet/http-over-websocket/src/types';

@@ -462,3 +462,8 @@ export const getAllTunnelLatencies = (): {
     tokyo: howWebSocketJA.tunnelLatency,
   };
 };
+
+export const disposeHOWWebSockets = (): void => {
+  howWebSocketSG.dispose();
+  howWebSocketJA.dispose();
+};

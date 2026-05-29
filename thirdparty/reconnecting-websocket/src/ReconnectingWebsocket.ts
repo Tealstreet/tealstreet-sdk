@@ -230,6 +230,21 @@ export class ReconnectingWebSocket {
     this._ws.close(code, reason);
   }
 
+  public terminate(code = 1000, reason?: string) {
+    this._closeCalled = true;
+    this._shouldReconnect = false;
+    this._clearTimeouts();
+    if (!this._ws) return;
+    this._removeListeners();
+    const ws = this._ws as any;
+    if (typeof ws.terminate === 'function') {
+      ws.terminate();
+    } else if (this._ws.readyState !== this.CLOSED) {
+      this._ws.close(code, reason);
+    }
+    this._ws = undefined;
+  }
+
   /**
    * Closes the WebSocket connection or connection attempt and connects again.
    * Resets retry counter;
