@@ -11,7 +11,7 @@ import {
   getActiveAccounts as getActiveAccountsFromConfig,
   loadConfig,
 } from './config';
-import { isLoggedIn, checkAndRefreshToken, getProxyTokenFromConfig } from './auth';
+import { isLoggedIn, checkAndRefreshToken, getProxyTokenFromConfig, getTealstreetApiBaseUrl } from './auth';
 // Import original console functions to bypass rate limiting for CLI command output
 import { originalConsoleLog, originalConsoleError, originalConsoleWarn, writeAbovePrompt } from './logger';
 import { classifyLog } from './log-classify';
@@ -21,7 +21,13 @@ import { getAdapterContext } from './listener/adapter-context';
 // Static import for token management - must match what safe-cex uses internally
 import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import {
+  createTunnelUrlTicketProvider,
+  getProxyTicketsUrl,
+} from '@tealstreet/safe-cex/src/httpOverWebsocket/tunnelUrlTicket';
+import { initializeHOW } from '@tealstreet/safe-cex/src/httpOverWebsocket/configureHOW';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
+import { configureHOW } from '@tealstreet/http-over-websocket/src/config';
 
 // Default timeout for exchange operations (30 seconds)
 const EXCHANGE_OPERATION_TIMEOUT = 30000;
@@ -70,7 +76,14 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   // HOW adapter polls getProxyToken() globally. Setting this once here means
   // HOW always sees the freshest token from config; login() also primes the
   // in-memory cache so any in-flight retries pick up the new token immediately.
+  initializeHOW();
   setTokenRefreshFunction(async () => getProxyTokenFromConfig() || '');
+  configureHOW({
+    getTunnelUrlTicket: createTunnelUrlTicketProvider({
+      endpoint: getProxyTicketsUrl(getTealstreetApiBaseUrl()),
+      getAuthToken: getProxyTokenFromConfig,
+    }),
+  });
   const initialToken = getProxyTokenFromConfig();
   if (initialToken) {
     setProxyToken(initialToken);

@@ -12,6 +12,10 @@ const TEALSTREET_API = process.env.TEALSTREET_API || 'http://localhost:3000';
 const CALLBACK_PORT = 9876;
 const CALLBACK_URL = `http://localhost:${CALLBACK_PORT}/callback`;
 
+export function getTealstreetApiBaseUrl(): string {
+  return TEALSTREET_API;
+}
+
 interface CallbackResult {
   token: string;
   state: string;
@@ -31,6 +35,15 @@ function generateState(): string {
  */
 function startCallbackServer(expectedState: string): Promise<CallbackResult> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      fn();
+    };
+
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url || '', `http://localhost:${CALLBACK_PORT}`);
 
@@ -53,7 +66,7 @@ function startCallbackServer(expectedState: string): Promise<CallbackResult> {
             </html>
           `);
           server.close();
-          reject(new Error(error));
+          settle(() => reject(new Error(error)));
           return;
         }
 
@@ -69,7 +82,7 @@ function startCallbackServer(expectedState: string): Promise<CallbackResult> {
             </html>
           `);
           server.close();
-          reject(new Error('Invalid state parameter'));
+          settle(() => reject(new Error('Invalid state parameter')));
           return;
         }
 
@@ -85,7 +98,7 @@ function startCallbackServer(expectedState: string): Promise<CallbackResult> {
             </html>
           `);
           server.close();
-          reject(new Error('No token received'));
+          settle(() => reject(new Error('No token received')));
           return;
         }
 
@@ -100,15 +113,19 @@ function startCallbackServer(expectedState: string): Promise<CallbackResult> {
         `);
 
         server.close();
-        resolve({ token, state, email, userId });
+        settle(() => resolve({ token, state, email, userId }));
       }
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
-        reject(new Error(`Port ${CALLBACK_PORT} is already in use. Please close other applications using this port.`));
+        settle(() =>
+          reject(
+            new Error(`Port ${CALLBACK_PORT} is already in use. Please close other applications using this port.`),
+          ),
+        );
       } else {
-        reject(err);
+        settle(() => reject(err));
       }
     });
 
@@ -117,10 +134,13 @@ function startCallbackServer(expectedState: string): Promise<CallbackResult> {
     });
 
     // Timeout after 5 minutes
-    setTimeout(() => {
-      server.close();
-      reject(new Error('Authentication timed out'));
-    }, 5 * 60 * 1000);
+    timeoutHandle = setTimeout(
+      () => {
+        server.close();
+        settle(() => reject(new Error('Authentication timed out')));
+      },
+      5 * 60 * 1000,
+    );
   });
 }
 
@@ -333,8 +353,8 @@ export function showAuthStatus(): void {
     : null;
 
   // Detect mismatch between stored expiresAt and actual JWT exp
-  const hasMismatch = jwtExpiresAt && config.auth.expiresAt &&
-    Math.abs(jwtExpiresAt - config.auth.expiresAt) > 60000; // More than 1 minute difference
+  const hasMismatch =
+    jwtExpiresAt && config.auth.expiresAt && Math.abs(jwtExpiresAt - config.auth.expiresAt) > 60000; // More than 1 minute difference
 
   console.log(chalk.green('Logged in'));
   console.log(chalk.gray(`  User ID: ${config.auth.userId || tokenPayload?.sub || 'Unknown'}`));
