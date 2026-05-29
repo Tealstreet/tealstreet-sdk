@@ -16,16 +16,17 @@ vi.mock('./exchangeMetadata', () => ({
   getExchangeMetadata: vi.fn((exchangeName: string) => ({
     exchangeName,
     requiresCors: exchangeName === 'coinbase',
-    enforceWsTunnel: false,
+    enforceWsTunnel: exchangeName === 'bitmex',
   })),
 }));
 
 vi.mock('./exchanges/registry', () => ({
   exchangeRegistry: {
     bybit: () => Promise.resolve(testState.MockExchange),
+    bitmex: () => Promise.resolve(testState.MockExchange),
     coinbase: () => Promise.resolve(testState.MockExchange),
   },
-  getRegisteredExchangeNames: vi.fn(() => ['bybit', 'coinbase']),
+  getRegisteredExchangeNames: vi.fn(() => ['bybit', 'bitmex', 'coinbase']),
 }));
 
 vi.mock('./utils/virtualClock', () => ({
@@ -34,7 +35,7 @@ vi.mock('./utils/virtualClock', () => ({
   },
 }));
 
-import { createPublicExchange } from './index';
+import { buildPublicExchangeOptions, createPublicExchange } from './index';
 
 describe('createPublicExchange', () => {
   beforeEach(() => {
@@ -45,6 +46,15 @@ describe('createPublicExchange', () => {
     await createPublicExchange('coinbase');
 
     expect(testState.constructorCalls[0]?.options).toMatchObject({
+      key: '',
+      secret: '',
+      publicDataOnly: true,
+      overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+    });
+  });
+
+  it('uses the same proxy override for public exchanges that enforce HoW', () => {
+    expect(buildPublicExchangeOptions('bitmex')).toMatchObject({
       key: '',
       secret: '',
       publicDataOnly: true,

@@ -69,6 +69,40 @@ export const createExchange = async (
   return new Exchange(exchangeName, options, store || new DefaultStore());
 };
 
+export const buildPublicExchangeOptions = (
+  exchangeName: ExchangeName,
+  options?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly'>>,
+): ExchangeOptions => {
+  const metadata = getExchangeMetadata(exchangeName);
+  const { forceAllProxiesOff, ...exchangeOptions } = options || {};
+
+  // Exchanges with requiresCors/enforceWsTunnel have IP-whitelisted APIs.
+  // On server-side, route REST calls through the exchange proxy (whose IPs
+  // are whitelisted on the exchange side). The proxy itself must accept the
+  // caller's IP without JWT (e.g. K8s NAT gateway whitelisted in Lambda@Edge).
+  const needsProxy = !forceAllProxiesOff && (metadata.requiresCors || metadata.enforceWsTunnel);
+  const proxyOpts: Partial<ExchangeOptions> = needsProxy
+    ? { overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy' }
+    : {};
+  const disabledProxyOpts: Partial<ExchangeOptions> = forceAllProxiesOff
+    ? {
+        overrideProxyUrl: undefined,
+        tealstreetProxy: false,
+        tealstreetTunnel: false,
+        tealstreetWsRoute: false,
+      }
+    : {};
+
+  return {
+    key: '',
+    secret: '',
+    ...proxyOpts,
+    ...exchangeOptions,
+    ...disabledProxyOpts,
+    publicDataOnly: true,
+  };
+};
+
 /**
  * Preload an exchange module before it's needed
  *
@@ -138,38 +172,7 @@ export const createPublicExchange = async (
   options?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly'>>,
   store?: Store,
 ): Promise<BaseExchange> => {
-  const metadata = getExchangeMetadata(exchangeName);
-  const { forceAllProxiesOff, ...exchangeOptions } = options || {};
-
-  // Exchanges with requiresCors/enforceWsTunnel have IP-whitelisted APIs.
-  // On server-side, route REST calls through the exchange proxy (whose IPs
-  // are whitelisted on the exchange side). The proxy itself must accept the
-  // caller's IP without JWT (e.g. K8s NAT gateway whitelisted in Lambda@Edge).
-  const needsProxy = !forceAllProxiesOff && (metadata.requiresCors || metadata.enforceWsTunnel);
-  const proxyOpts: Partial<ExchangeOptions> = needsProxy
-    ? { overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy' }
-    : {};
-  const disabledProxyOpts: Partial<ExchangeOptions> = forceAllProxiesOff
-    ? {
-        overrideProxyUrl: undefined,
-        tealstreetProxy: false,
-        tealstreetTunnel: false,
-        tealstreetWsRoute: false,
-      }
-    : {};
-
-  return createExchange(
-    exchangeName,
-    {
-      key: '',
-      secret: '',
-      ...proxyOpts,
-      ...exchangeOptions,
-      ...disabledProxyOpts,
-      publicDataOnly: true,
-    },
-    store,
-  );
+  return createExchange(exchangeName, buildPublicExchangeOptions(exchangeName, options), store);
 };
 
 /**

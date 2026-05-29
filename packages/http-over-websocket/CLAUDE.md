@@ -15,6 +15,11 @@ src/
 
 **Protocol**: Client connects via WebSocket to a proxy. HTTP requests are serialized, sent through the WS tunnel, and responses are deserialized back. The Axios adapter makes this transparent to calling code.
 
+Before changing tunnel URL or region selection behavior, read
+`docs/proxy-routing-flow.html`. Code remains the source of truth; the HTML is a
+manually audited snapshot of the current web → safe-cex → HOW flow. If routing
+behavior changes, update or delete that snapshot in the same PR.
+
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)

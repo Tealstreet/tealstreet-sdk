@@ -40,6 +40,11 @@ yarn test          # Watch mode
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.
 
+Before changing proxy/tunnel routing, read `docs/proxy-routing-flow.html`.
+Code remains the source of truth; the HTML is a manually audited snapshot of
+the current web → safe-cex → HOW flow for humans and agents. If routing behavior
+changes, update or delete that snapshot in the same PR.
+
 ### Metadata Flags
 
 | Flag              | Default | Purpose                                             |
@@ -113,6 +118,9 @@ headers }` under Bun.
 
 - `src/exchangeMetadata.ts` — All exchange configuration metadata
 - `src/createExchangeFromAccount.ts` — Translates account config → exchange options (proxy/tunnel logic here)
+- `src/index.ts` — `buildPublicExchangeOptions()` is the shared public-only
+  routing helper used by `createPublicExchange()` and exchange-server shared
+  public exchanges. Keep those paths aligned through this helper.
 - `src/safeCexAxiosCreate.ts` — Axios instance creation, HOW adapter setup
 - `src/utils/getPrivateProxy.ts` — CORS proxy URL resolver used by safe-cex REST clients
 - `src/types.ts` — Shared types (`ExchangeOptions`, `ExchangeAccountConfig`, etc.)
