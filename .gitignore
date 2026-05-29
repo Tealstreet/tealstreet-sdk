@@ -1,7 +1,9 @@
 node_modules/
 dist/
 coverage/
+.cache/
 .turbo/
 *.tsbuildinfo
+*.bun-build
 .DS_Store
 *.log
