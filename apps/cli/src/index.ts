@@ -16,9 +16,16 @@ import {
 } from './config';
 import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
+import { fireCheckin } from './checkin';
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+// Announce this process to the web app so the web's CliListenerWorker
+// gate knows there's a CLI on this platform. Fire-and-forget — no
+// network awaited, all errors swallowed; safe to run unconditionally.
+// See apps/cli/src/checkin.ts for the gating + dedupe contract.
+fireCheckin();
 
 // Global error handlers to prevent crashes and verbose stack traces
 process.on('uncaughtException', (error: Error) => {

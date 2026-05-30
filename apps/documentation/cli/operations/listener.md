@@ -154,6 +154,31 @@ See [Config files](./config-files.md) for the full per-file map.
 - **Topics**: `accounts`, `tasks`, `hooks`, `hook-output`. A client opts in
   per-topic after `welcome`.
 
+## Web auto-connect gate
+
+The web app only probes `ws://127.0.0.1:53219` if it has reason to
+believe the CLI is running on this machine. Without that gate, every
+web user (the vast majority of whom never run the CLI) would see
+`WebSocket connection failed:` errors in their browser console on
+every page load.
+
+The CLI fires a single `POST /api/cli/checkin` on every startup with
+its `process.platform`. The web mounts its loopback worker if
+**either**:
+
+1. It already has a `trustedListenerId` for this device (from a prior
+   successful pairing).
+2. The current web platform (`darwin`/`win32`/`linux`) has a fresh
+   checkin (< 14 days) in `users_app_settings.settings.cli.checkins`.
+
+Mobile browsers and the iPad desktop-mode UA are hard-skipped — they
+can't reach loopback anyway.
+
+**First-run experience**: launch the CLI once. On the next web page
+load, the gate flips on and the pairing flow runs as documented in
+[Pairing](./pairing.md). After that the trustedListenerId fast-path
+takes over and the worker stays live across reloads.
+
 For the end-to-end web ↔ standalone setup, see [Pairing](./pairing.md). For
 the webhook HTTP variant of `cmd:exec`, see
 [Hooks & webhooks](./hooks-and-webhooks.md).

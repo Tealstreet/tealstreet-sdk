@@ -137,6 +137,36 @@ All in `~/.tealstreet/`:
 3. Browser redirects back with JWT
 4. CLI stores token in config
 
+## Startup checkin (web mount gate)
+
+Every CLI process fires a single best-effort `POST /api/cli/checkin`
+right after `interceptConsole()` in `src/index.ts`. The web side reads
+`settings.cli.checkins[<webPlatform>]` to decide whether to mount its
+`CliListenerWorker` — without that gate, every user's web app was
+hitting `ws://127.0.0.1:53219/ws` on every page load and logging 3+
+connection errors regardless of whether they actually run the CLI.
+
+Contract:
+
+- `src/checkin.ts:fireCheckin()` — module-level latch (at most one
+  POST per CLI process), no-op when not logged in, no-op on
+  unsupported platforms (BSD etc.), swallows network failures.
+- Sends the stored proxy token as `Authorization: Bearer <token>`;
+  the web route verifies it with the `privateProxyKey` public
+  counterpart via `apps/web/src/app/api/utils/verifyProxyToken.ts`
+  (NOT Auth0 `/userinfo` — the CLI's token is RS256-signed by us,
+  not an Auth0 access token).
+- Backend write is a narrow `fn_upsert_cli_checkin` JSONB merge
+  (`supabase/users_app_settings_cli_checkin.sql`) — NOT the
+  destructive full-blob upsert that `POST /api/settings` uses, which
+  would wipe the rest of the user's settings.
+
+If you rename either side: update both `apps/cli/src/checkin.ts` and
+`apps/web/src/app/api/cli/checkin/route.ts` in the same commit and
+update the `/api/cli/checkin` reference in this paragraph. The
+co-located web doc is `apps/web/src/components/cliListener/CLAUDE.md`
+→ "Mount gate — don't remove it".
+
 ## Remote Signing
 
 Remote signing lives in `services/exchange-server/`. The CLI no longer
