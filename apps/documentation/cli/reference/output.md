@@ -41,6 +41,15 @@ Where each stream goes:
 - `print()` / `originalConsoleLog()` → terminal only, no rate limit — what
   command handlers use for primary output.
 
+Verbose HoW/tradetunnel request diagnostics also use the existing console
+pipeline: start the CLI with `DEBUG=1` or `DEBUG=true` to add sanitized
+`[TradeTunnel]` request/response summaries to the same
+`~/.tealstreet/cli.log`. The `[TradeTunnel]` prefix is classified as
+operational, so these lines stay off the terminal. This is off by default, does
+not create a second network log file, omits headers, redacts sensitive keys,
+preserves URL query-key names without query values, and truncates large
+payloads.
+
 The `operational` / `info` / `warn` / `error` / `critical` taxonomy lives in
 `apps/cli/src/log-classify.ts`; routing in `apps/cli/src/logger.ts`. View the
 full log with the `logs` / `log` command, or tail `~/.tealstreet/cli.log`

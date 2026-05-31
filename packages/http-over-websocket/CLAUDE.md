@@ -66,12 +66,14 @@ yarn test           # Vitest
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.
 - **Inspecting tunneled requests/responses.** REST appears as WS
-  frames, not XHRs. Low-level fallback:
-  `NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG=1` (gated in
-  `axiosHttpOverWebsocketAdapter.ts:12-13`) — requires dev server
-  restart since `NEXT_PUBLIC_*` is inlined at build time. Consumer
-  apps typically expose a runtime capture; check their CLAUDE.md
-  first.
+  frames, not XHRs. The adapter can emit sanitized `[TradeTunnel]`
+  request/response summaries: Node/Bun callers can use `DEBUG=1` /
+  `DEBUG=true`, while browser builds still have the low-level
+  `NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG=1` fallback (requires dev
+  server restart because `NEXT_PUBLIC_*` is inlined at build time). The
+  summaries omit headers, redact sensitive keys, keep URL query-key names
+  without query values, and truncate large payloads. Consumer apps typically
+  expose a runtime capture; check their CLAUDE.md first.
 - **Tunnel responses must carry the caller's request `config`.** The adapter
   resolves with `{ ...data, config }` (and attaches `config` to thrown
   `TradeTunnelError`s) so the caller's custom request-config keys and

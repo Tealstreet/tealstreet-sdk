@@ -8,9 +8,14 @@ import { getProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from '
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
 
-// Check if trade tunnel logging is enabled via environment variable
-const LOG_TRADETUNNEL =
-  typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG === '1';
+const MAX_LOG_STRING_LENGTH = 500;
+const MAX_LOG_ARRAY_LENGTH = 20;
+const MAX_LOG_OBJECT_KEYS = 50;
+const MAX_LOG_DEPTH = 4;
+const REDACTED = '[REDACTED]';
+const TRUNCATED = '[TRUNCATED]';
+const SENSITIVE_LOG_KEY_PATTERN =
+  /authorization|cookie|password|passphrase|secret|token|signature|api[-_]?key|apikey|access[-_]?key|x-mbx-apikey|x-bitmex/i;
 
 type TradeTunnelRouteContext = {
   selectedRegion: 'JA' | 'SG';
@@ -20,13 +25,92 @@ type TradeTunnelRouteContext = {
   simulated?: boolean;
 };
 
-/**
- * Strip proxy URL from the full URL to show just the exchange endpoint
- */
-function stripProxyUrl(url: string): string {
-  // Remove common proxy patterns like wss://xxx.tealstreet.io/tunnel or similar
-  // The actual exchange URL is typically after the proxy forwards it
-  return url;
+function isTradeTunnelVerboseLoggingEnabled(): boolean {
+  if (typeof process === 'undefined') return false;
+  return (
+    process.env?.DEBUG === '1' ||
+    process.env?.DEBUG === 'true' ||
+    process.env?.NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG === '1'
+  );
+}
+
+function logTradeTunnelVerbose(message: string, data: unknown): void {
+  console.log(message, data);
+}
+
+function sanitizeForTradeTunnelLog(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string') {
+    if (value.length <= MAX_LOG_STRING_LENGTH) return value;
+    return `${value.slice(0, MAX_LOG_STRING_LENGTH)}...${TRUNCATED}`;
+  }
+  if (typeof value !== 'object') return String(value);
+  if (seen.has(value)) return '[CIRCULAR]';
+  if (depth >= MAX_LOG_DEPTH) return TRUNCATED;
+
+  seen.add(value);
+
+  if (value instanceof URLSearchParams) {
+    return sanitizeForTradeTunnelLog(Object.fromEntries(value.entries()), depth + 1, seen);
+  }
+
+  if (typeof FormData !== 'undefined' && value instanceof FormData) {
+    const formObject: Record<string, unknown> = {};
+    for (const [key, formValue] of value.entries()) {
+      const maybeFile = formValue as any;
+      formObject[key] =
+        typeof File !== 'undefined' && maybeFile instanceof File
+          ? { fileName: maybeFile.name, size: maybeFile.size }
+          : formValue;
+    }
+    return sanitizeForTradeTunnelLog(formObject, depth + 1, seen);
+  }
+
+  if (Array.isArray(value)) {
+    const values = value.slice(0, MAX_LOG_ARRAY_LENGTH).map((item) => sanitizeForTradeTunnelLog(item, depth + 1, seen));
+    if (value.length > MAX_LOG_ARRAY_LENGTH) {
+      values.push(`${TRUNCATED} ${value.length - MAX_LOG_ARRAY_LENGTH} items`);
+    }
+    return values;
+  }
+
+  const output: Record<string, unknown> = {};
+  const entries = Object.entries(value as Record<string, unknown>);
+  for (const [key, entryValue] of entries.slice(0, MAX_LOG_OBJECT_KEYS)) {
+    output[key] = SENSITIVE_LOG_KEY_PATTERN.test(key) ? REDACTED : sanitizeForTradeTunnelLog(entryValue, depth + 1, seen);
+  }
+  if (entries.length > MAX_LOG_OBJECT_KEYS) {
+    output.__truncatedKeys = entries.length - MAX_LOG_OBJECT_KEYS;
+  }
+  return output;
+}
+
+function summarizeTradeTunnelUrl(url: string): Record<string, unknown> {
+  try {
+    const parsed = new URL(url);
+    return {
+      origin: parsed.origin,
+      pathname: parsed.pathname,
+      queryKeys: Array.from(new Set(parsed.searchParams.keys())),
+    };
+  } catch {
+    const [path] = url.split('?');
+    return {
+      value: path.length <= MAX_LOG_STRING_LENGTH ? path : `${path.slice(0, MAX_LOG_STRING_LENGTH)}...${TRUNCATED}`,
+      hasQuery: url.includes('?'),
+    };
+  }
+}
+
+function hasLoggableContent(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.length > 0;
+  if (value instanceof URLSearchParams) return Array.from(value.keys()).length > 0;
+  if (typeof FormData !== 'undefined' && value instanceof FormData) return Array.from(value.keys()).length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
 }
 
 /**
@@ -36,23 +120,23 @@ function logTradeTunnelRequest(
   request: { url: string; method: string; params?: any; data?: any },
   route?: TradeTunnelRouteContext,
 ) {
-  if (!LOG_TRADETUNNEL) return;
+  if (!isTradeTunnelVerboseLoggingEnabled()) return;
 
   const logData: any = {
-    url: stripProxyUrl(request.url),
+    url: summarizeTradeTunnelUrl(request.url),
     method: request.method,
     route,
   };
 
-  if (request.params && Object.keys(request.params).length > 0) {
-    logData.params = request.params;
+  if (hasLoggableContent(request.params)) {
+    logData.params = sanitizeForTradeTunnelLog(request.params);
   }
 
-  if (request.data && Object.keys(request.data).length > 0) {
-    logData.data = request.data;
+  if (hasLoggableContent(request.data)) {
+    logData.data = sanitizeForTradeTunnelLog(request.data);
   }
 
-  console.log('[TradeTunnel] REQUEST:', logData);
+  logTradeTunnelVerbose('[TradeTunnel] REQUEST:', logData);
 }
 
 /**
@@ -63,21 +147,21 @@ function logTradeTunnelResponse(
   response: any,
   route?: TradeTunnelRouteContext,
 ) {
-  if (!LOG_TRADETUNNEL) return;
+  if (!isTradeTunnelVerboseLoggingEnabled()) return;
 
   const logData: any = {
-    url: stripProxyUrl(request.url),
+    url: summarizeTradeTunnelUrl(request.url),
     method: request.method,
     route,
   };
 
   if (response?.data !== undefined) {
-    logData.data = response.data;
+    logData.data = sanitizeForTradeTunnelLog(response.data);
   } else if (response !== undefined) {
-    logData.response = response;
+    logData.response = sanitizeForTradeTunnelLog(response);
   }
 
-  console.log('[TradeTunnel] RESPONSE:', logData);
+  logTradeTunnelVerbose('[TradeTunnel] RESPONSE:', logData);
 }
 
 const TUNNEL_PATH =

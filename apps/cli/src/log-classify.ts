@@ -34,6 +34,7 @@ export const OPERATIONAL_PATTERNS: readonly RegExp[] = [
   /^onClose handler called/,
   /^setting reconnecting/,
   /^\[HOW\] Latency/, // HTTP-over-WebSocket latency logs (noisy)
+  /^\[TradeTunnel\]/, // verbose HoW request/response summaries
   /sending ping/i,
   /\bkeepalive\b/i,
   // safe-cex bitunix dumps the full balance WS message via console.info before

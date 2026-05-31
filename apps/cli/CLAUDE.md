@@ -230,6 +230,15 @@ delegated to the client over WebSocket.
 
 ³ `console.debug` routes to `logger.debug`, which is gated by `MIN_LOG_LEVEL` (`logger.ts`) — default `info`, so debug lines are **dropped entirely** unless `DEBUG=1`/`DEBUG=true` is set. Don't rely on debug output being in `cli.log` by default.
 
+HoW/tradetunnel request diagnostics use this same existing console/logging
+path in the CLI: with `DEBUG=1`/`DEBUG=true`, the shared
+`@tealstreet/http-over-websocket` adapter writes sanitized `[TradeTunnel]`
+request/response summaries through `console.log`, and `log-classify.ts` marks
+that prefix operational so it lands in `~/.tealstreet/cli.log` without printing
+above the prompt. There is no separate network-debug file. Headers are omitted,
+sensitive keys are redacted, URLs keep query-key names but not query values,
+and large payloads are truncated.
+
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
 
 ## Commands

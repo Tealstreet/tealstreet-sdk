@@ -17,6 +17,7 @@ describe('classifyLog', () => {
       expect(classifyLog('[BaseReconnectingWebSocket] reconnect attempt 3', 'log')).toBe('operational');
       expect(classifyLog('setting reconnecting = true', 'log')).toBe('operational');
       expect(classifyLog('[HOW] Latency 42ms', 'log')).toBe('operational');
+      expect(classifyLog('[TradeTunnel] REQUEST:', 'log')).toBe('operational');
       expect(classifyLog('sending keepalive frame', 'log')).toBe('operational');
     });
 

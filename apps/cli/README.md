@@ -200,6 +200,12 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
 - **`print()` / `originalConsoleLog()` bypass all of the above** — use them for
   primary command output, prompts, progress, and anything the user explicitly
   asked for.
+- **Verbose transport diagnostics share `cli.log`.** When the CLI runs with
+  `DEBUG=1` or `DEBUG=true`, tunneled HoW/tradetunnel REST requests emit
+  sanitized `[TradeTunnel]` request/response summaries through the existing
+  `console.log` interception. The `[TradeTunnel]` prefix is classified as
+  operational, so those lines land in `~/.tealstreet/cli.log` and stay off the
+  terminal. This is off by default; it is not a separate network log file.
 
 ```typescript
 import { originalConsoleLog } from '../logger';
