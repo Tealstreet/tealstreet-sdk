@@ -1,7 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { ExchangeAccountConfig } from '@tealstreet/cli-core';
 import type { WsSessionData } from '../ws';
-import { summarizeAccountForLog } from '../../account-log';
 import { logger } from '../../logger';
 import { isAccountSyncEnabled } from '../config';
 import { loadConfig, upsertAccountRaw, tombstoneAccount } from '../../config';
@@ -58,7 +57,6 @@ export function handleMutateAccount(ws: ServerWebSocket<WsSessionData>, frame: u
   }
 
   if (!isAccountSyncEnabled()) {
-    logger.info('mutate:account ignored accountSync disabled');
     err(ws, id, 'accountSync disabled');
     return { acked: true, wrote: false };
   }
@@ -75,22 +73,10 @@ export function handleMutateAccount(ws: ServerWebSocket<WsSessionData>, frame: u
     const existingUpdatedAt = effectiveUpdatedAt(existing);
     if (existingUpdatedAt >= incomingUpdatedAt && incomingUpdatedAt > 0) {
       // Stale; ack but don't write.
-      logger.info('mutate:account upsert ignored stale', {
-        incoming: summarizeAccountForLog(incoming),
-        existing: existing ? summarizeAccountForLog(existing) : undefined,
-        incomingUpdatedAt,
-        existingUpdatedAt,
-      });
       ack(ws, id);
       return { acked: true, wrote: false };
     }
     upsertAccountRaw(mergeAccount(incoming, existing));
-    logger.info('mutate:account upsert wrote', {
-      incoming: summarizeAccountForLog(incoming),
-      existing: existing ? summarizeAccountForLog(existing) : undefined,
-      incomingUpdatedAt,
-      existingUpdatedAt,
-    });
     ack(ws, id);
     return { acked: true, wrote: true };
   }
@@ -105,22 +91,10 @@ export function handleMutateAccount(ws: ServerWebSocket<WsSessionData>, frame: u
     const existing = loadConfig().accounts.find((a) => a.name === name);
     if (existing && effectiveUpdatedAt(existing) >= incomingUpdatedAt) {
       // Stale; ack but don't write.
-      logger.info('mutate:account delete ignored stale', {
-        name,
-        existing: summarizeAccountForLog(existing),
-        incomingUpdatedAt,
-        existingUpdatedAt: effectiveUpdatedAt(existing),
-      });
       ack(ws, id);
       return { acked: true, wrote: false };
     }
     tombstoneAccount(name, incomingUpdatedAt);
-    logger.info('mutate:account delete wrote', {
-      name,
-      existing: existing ? summarizeAccountForLog(existing) : undefined,
-      incomingUpdatedAt,
-      existingUpdatedAt: effectiveUpdatedAt(existing),
-    });
     ack(ws, id);
     return { acked: true, wrote: true };
   }

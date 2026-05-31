@@ -251,7 +251,7 @@ This will:
 4. Let GitHub Actions build binaries, publish public `Tealstreet/cli`
    release `vX.Y.Z`, and update `Tealstreet/homebrew-tap`
 
-The workflow uses repository secret `TEALSTREET_CLI_RELEASE_TOKEN` to write
+The workflow uses repository secret `TEALSTREET_RELEASE_TOKEN` to write
 to the public release repo and Homebrew tap.
 
 ## License

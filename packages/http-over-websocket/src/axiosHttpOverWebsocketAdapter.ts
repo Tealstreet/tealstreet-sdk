@@ -12,14 +12,6 @@ import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, Late
 const LOG_TRADETUNNEL =
   typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG === '1';
 
-type TradeTunnelRouteContext = {
-  selectedRegion: 'JA' | 'SG';
-  tunnelHost: 'tokyo' | 'singapore';
-  forcedRegion?: 'JA' | 'SG';
-  bypassProxy?: boolean;
-  simulated?: boolean;
-};
-
 /**
  * Strip proxy URL from the full URL to show just the exchange endpoint
  */
@@ -32,16 +24,12 @@ function stripProxyUrl(url: string): string {
 /**
  * Log trade tunnel request
  */
-function logTradeTunnelRequest(
-  request: { url: string; method: string; params?: any; data?: any },
-  route?: TradeTunnelRouteContext,
-) {
+function logTradeTunnelRequest(request: { url: string; method: string; params?: any; data?: any }) {
   if (!LOG_TRADETUNNEL) return;
 
   const logData: any = {
     url: stripProxyUrl(request.url),
     method: request.method,
-    route,
   };
 
   if (request.params && Object.keys(request.params).length > 0) {
@@ -58,17 +46,12 @@ function logTradeTunnelRequest(
 /**
  * Log trade tunnel response
  */
-function logTradeTunnelResponse(
-  request: { url: string; method: string },
-  response: any,
-  route?: TradeTunnelRouteContext,
-) {
+function logTradeTunnelResponse(request: { url: string; method: string }, response: any) {
   if (!LOG_TRADETUNNEL) return;
 
   const logData: any = {
     url: stripProxyUrl(request.url),
     method: request.method,
-    route,
   };
 
   if (response?.data !== undefined) {
@@ -138,12 +121,6 @@ const createAxiosHttpOverWebsocketAdapter = (
     } else {
       howWebSocket = config.baseURL && TOKYO_EGRESS_PATTERN.test(config.baseURL) ? howWebSocketJA : howWebSocketSG;
     }
-    const selectedRegion = howWebSocket === howWebSocketJA ? 'JA' : 'SG';
-    const baseRouteContext: TradeTunnelRouteContext = {
-      selectedRegion,
-      tunnelHost: selectedRegion === 'JA' ? 'tokyo' : 'singapore',
-      ...(region ? { forcedRegion: region } : {}),
-    };
     return new Promise(async (resolve, reject) => {
       const newHeaders: { [key: string]: string } = {};
 
@@ -192,15 +169,12 @@ const createAxiosHttpOverWebsocketAdapter = (
 
       if (shouldSimulateHttpOverWebsocket()) {
         // Log request before sending (simulated mode)
-        logTradeTunnelRequest(
-          {
-            url: websocketRequest.url,
-            method: websocketRequest.method,
-            params: websocketRequest.params,
-            data: websocketRequest.data,
-          },
-          { ...baseRouteContext, simulated: true },
-        );
+        logTradeTunnelRequest({
+          url: websocketRequest.url,
+          method: websocketRequest.method,
+          params: websocketRequest.params,
+          data: websocketRequest.data,
+        });
 
         const response = await axios({
           headers: websocketRequest.headers,
@@ -211,7 +185,7 @@ const createAxiosHttpOverWebsocketAdapter = (
         });
 
         // Log response (simulated mode)
-        logTradeTunnelResponse(websocketRequest, response, { ...baseRouteContext, simulated: true });
+        logTradeTunnelResponse(websocketRequest, response);
 
         // Attach the original adapter config so response interceptors see the
         // caller's custom keys/headers (e.g. __suppressExchangeError). The
@@ -322,11 +296,6 @@ const createAxiosHttpOverWebsocketAdapter = (
         }
 
         const nonce = nanoid();
-        const shouldBypassProxy = config.baseURL && BYPASS_PROXY_PATTERN.test(config.baseURL);
-        const routeContext: TradeTunnelRouteContext = {
-          ...baseRouteContext,
-          bypassProxy: Boolean(shouldBypassProxy),
-        };
 
         let timeoutTimer = setTimeout(() => {
           howWebSocket.off('sub:' + nonce);
@@ -334,7 +303,6 @@ const createAxiosHttpOverWebsocketAdapter = (
           timeoutError.name = 'TradeTunnelTimeoutError';
           (timeoutError as any).url = websocketRequest.url;
           (timeoutError as any).method = websocketRequest.method;
-          (timeoutError as any).tradeTunnelRoute = routeContext;
           reject(timeoutError);
         }, 20_000);
 
@@ -342,7 +310,7 @@ const createAxiosHttpOverWebsocketAdapter = (
           clearTimeout(timeoutTimer);
 
           // Log response before processing
-          logTradeTunnelResponse(websocketRequest, data, routeContext);
+          logTradeTunnelResponse(websocketRequest, data);
 
           if (data && typeof data === 'object' && data.error) {
             // Create a proper Error object with URL context for better Sentry tracking
@@ -351,7 +319,6 @@ const createAxiosHttpOverWebsocketAdapter = (
             (tunnelError as any).url = websocketRequest.url;
             (tunnelError as any).method = websocketRequest.method;
             (tunnelError as any).originalError = data.error;
-            (tunnelError as any).tradeTunnelRoute = routeContext;
             // Attach the caller's config so error-path interceptors (e.g.
             // `error?.config?.__suppressExchangeError` in Lighter) can see
             // request-time suppression flags through the tunnel.
@@ -375,16 +342,16 @@ const createAxiosHttpOverWebsocketAdapter = (
 
         data = parseWebsocketData(customParser || JSON.parse, websocketRequest);
 
+        // Check if this exchange should bypass the proxy
+        const shouldBypassProxy = config.baseURL && BYPASS_PROXY_PATTERN.test(config.baseURL);
+
         // Log request before sending
-        logTradeTunnelRequest(
-          {
-            url: websocketRequest.url,
-            method: websocketRequest.method,
-            params: websocketRequest.params,
-            data: data,
-          },
-          routeContext,
-        );
+        logTradeTunnelRequest({
+          url: websocketRequest.url,
+          method: websocketRequest.method,
+          params: websocketRequest.params,
+          data: data,
+        });
 
         howWebSocket.send({
           type: 'rpc.http',
