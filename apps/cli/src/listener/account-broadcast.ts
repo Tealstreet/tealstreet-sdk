@@ -14,6 +14,7 @@
 
 import type { ServerWebSocket } from 'bun';
 import { watch, type FSWatcher } from 'fs';
+import { summarizeAccountsForLog } from '../account-log';
 import { getConfigFilePath, listAllAccounts } from '../config';
 import { logger } from '../logger';
 import type { WsSessionData } from './ws';
@@ -23,8 +24,8 @@ type ServerLike = { publish(topic: string, data: string): number };
 const ACCOUNTS_TOPIC = 'accounts';
 const DEBOUNCE_MS = 250;
 
-function snapshotFrame(): string {
-  return JSON.stringify({ t: 'state:accounts', accounts: listAllAccounts() });
+function snapshotFrame(accounts = listAllAccounts()): string {
+  return JSON.stringify({ t: 'state:accounts', accounts });
 }
 
 function accountsHash(): string {
@@ -34,7 +35,9 @@ function accountsHash(): string {
 
 export function sendAccountsSnapshot(ws: ServerWebSocket<WsSessionData>): void {
   try {
-    ws.send(snapshotFrame());
+    const accounts = listAllAccounts();
+    ws.send(snapshotFrame(accounts));
+    logger.info('state:accounts send', { snapshot: summarizeAccountsForLog(accounts) });
   } catch (err) {
     logger.warn(`state:accounts send failed: ${(err as Error).message}`);
   }
@@ -54,9 +57,10 @@ export function startAccountsBroadcast(server: ServerLike): AccountsBroadcastHan
     const hash = accountsHash();
     if (hash === lastHash) return;
     lastHash = hash;
-    const frame = snapshotFrame();
+    const accounts = listAllAccounts();
+    const frame = snapshotFrame(accounts);
     const n = server.publish(ACCOUNTS_TOPIC, frame);
-    logger.info(`state:accounts broadcast (${n} bytes published)`);
+    logger.info(`state:accounts broadcast (${n} bytes published)`, { snapshot: summarizeAccountsForLog(accounts) });
   };
 
   const onChange = () => {

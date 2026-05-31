@@ -18,6 +18,7 @@ import { classifyLog } from './log-classify';
 import { setStatus } from './status-line';
 import type { ExchangeManager } from './exchange-manager';
 import { getAdapterContext } from './listener/adapter-context';
+import { logAccountRoute } from './account-log';
 // Static import for token management - must match what safe-cex uses internally
 import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
@@ -198,6 +199,19 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       const metadata = getExchangeMetadata(account.exchange as ExchangeName);
       const requiresAuth =
         account.tealstreetTunnel || account.tealstreetProxy || metadata.requiresCors || metadata.enforceWsTunnel;
+      const resolvedProxyRegion = account.proxyRegion || Object.keys(metadata.privateProxyRegions || {})[0] || 'SG';
+
+      logAccountRoute('account-route createExchange', account, {
+        runtime: 'cli',
+        requiresAuth: Boolean(requiresAuth),
+        requiresCors: metadata.requiresCors,
+        enforceWsTunnel: metadata.enforceWsTunnel,
+        supportsTunnel: metadata.supportsTunnel,
+        privateProxyRegions: Object.keys(metadata.privateProxyRegions || {}),
+        resolvedProxyRegion,
+        effectiveTealstreetProxy: account.tealstreetProxy || metadata.requiresCors,
+        effectiveTealstreetTunnel: account.tealstreetTunnel || metadata.enforceWsTunnel,
+      });
 
       if (requiresAuth) {
         if (!isLoggedIn()) {
