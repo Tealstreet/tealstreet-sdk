@@ -221,8 +221,6 @@ user-customizable segments). Both no-op on non-TTY.
 ### Prerequisites
 
 - [Bun](https://bun.sh/) - `curl -fsSL https://bun.sh/install | bash`
-- [GitHub CLI](https://cli.github.com/) - `brew install gh`
-- GitHub CLI authenticated - `gh auth login`
 
 ### Build (local only)
 
@@ -237,27 +235,24 @@ Binaries are output to `dist/`.
 
 ```bash
 # Release with version bump
-bun run release:patch     # 0.1.0 -> 0.1.1
-bun run release:minor     # 0.1.0 -> 0.2.0
-bun run release:major     # 0.1.0 -> 1.0.0
+yarn release:patch     # 0.1.0 -> 0.1.1
+yarn release:minor     # 0.1.0 -> 0.2.0
+yarn release:major     # 0.1.0 -> 1.0.0
 
-# Release with specific version
-bun run release 0.2.0
-
-# Release current version (re-release)
-bun run release
+# Release current package.json version
+yarn release
 ```
 
 This will:
 
 1. Bump version in package.json (if specified)
-2. Build binaries for all platforms
-3. Create a GitHub release with tag `cli-vX.Y.Z`
-4. Upload binaries to the release
+2. Commit the version bump
+3. Push a private monorepo tag named `cli-vX.Y.Z`
+4. Let GitHub Actions build binaries, publish public `Tealstreet/cli`
+   release `vX.Y.Z`, and update `Tealstreet/homebrew-tap`
 
-Distribution (Homebrew tap formula in `homebrew/tealstreet.rb`, public
-`Tealstreet/cli` releases) is covered in
-[`operations/releases.md`](../documentation/cli/operations/releases.md).
+The workflow uses repository secret `TEALSTREET_CLI_RELEASE_TOKEN` to write
+to the public release repo and Homebrew tap.
 
 ## License
 
