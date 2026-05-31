@@ -2,18 +2,26 @@
   "name": "@tealstreet/cli",
   "version": "0.9.3",
   "description": "Tealstreet CLI - Trade crypto from your terminal",
-  "main": "src/index.ts",
+  "main": "bin/tealstreet.cjs",
   "type": "module",
   "bin": {
-    "tealstreet": "src/index.ts"
+    "tealstreet": "bin/tealstreet.cjs"
   },
+  "files": [
+    "bin",
+    "scripts/install-binary.cjs",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Tealstreet/tealstreet-next.git",
     "directory": "apps/cli"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "cli": "bun src/index.ts",
@@ -30,7 +38,8 @@
     "typecheck": "tsc --noEmit --skipLibCheck",
     "logs": "tail -f ~/.tealstreet/cli.log",
     "test": "vitest",
-    "test-ci": "vitest run"
+    "test-ci": "vitest run",
+    "postinstall": "node scripts/install-binary.cjs --optional"
   },
   "dependencies": {
     "@tealstreet/cli-core": "*",

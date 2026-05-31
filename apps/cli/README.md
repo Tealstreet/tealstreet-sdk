@@ -47,6 +47,12 @@ yarn build
 ./dist/tealstreet-darwin-arm64        # or -darwin-x64 / -linux-x64 / -linux-arm64
 ```
 
+### npm package
+
+The public `@tealstreet/cli` package is a thin installer/launcher. It does not
+ship CLI source; it downloads the matching binary from
+`https://github.com/Tealstreet/cli/releases` on install or first run.
+
 Config and runtime state live under `~/.tealstreet/` — see
 [`operations/config-files.md`](../documentation/cli/operations/config-files.md).
 

@@ -54,6 +54,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   $BUN build src/index.ts \
     --compile \
     --minify \
+    --sourcemap=none \
     --target=$TARGET \
     --outfile=$OUTPUT \
     --define "process.env.TEALSTREET_CLI_VERSION='${VERSION}'" \
@@ -65,6 +66,8 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   # Make executable
   chmod +x $OUTPUT
 done
+
+bash ./scripts/check-release-artifacts.sh
 
 echo ""
 echo "Build complete!"
