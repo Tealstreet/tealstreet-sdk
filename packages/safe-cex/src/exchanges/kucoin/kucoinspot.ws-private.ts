@@ -1,7 +1,6 @@
 import type { KucoinSpotExchange } from './kucoinspot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { OrderStatus } from '../../types';
 import { BaseWebSocket } from '../base.ws';
@@ -109,12 +108,18 @@ export class KucoinSpotPrivateWebsocket extends BaseWebSocket<KucoinSpotExchange
       return;
     }
 
-    const status = rawOrder.status || rawOrder.type;
+    // KuCoin Spot tradeOrdersV2 carries the EVENT in `type`
+    // (received | open | match | filled | canceled | update) and the order's
+    // lifecycle state in `status` (new | open | match | done). Branch on the
+    // event `type` — collapsing to `status || type` mislabels a cancel
+    // (`type:canceled, status:done`) as Closed instead of Canceled (the REST
+    // heal can't fix it; see fetchOrders symbol requirement).
+    const eventType = rawOrder.type;
     const order = this.parent.mapOrder({
       ...rawOrder,
       id: rawOrder.orderId,
       orderId: rawOrder.orderId,
-      status,
+      status: rawOrder.status,
       type: rawOrder.orderType || rawOrder.orderTypeV2,
       price: rawOrder.price || rawOrder.orderPrice || rawOrder.matchPrice,
       size: rawOrder.size || rawOrder.orderSize,
@@ -122,7 +127,7 @@ export class KucoinSpotPrivateWebsocket extends BaseWebSocket<KucoinSpotExchange
       lastUpdatedAt: normalizeMillis(rawOrder.ts || rawOrder.orderTime || rawOrder.createdAt),
     });
 
-    if (status === 'match') {
+    if (eventType === 'match') {
       this.emitter.emit('fill', {
         id: order.id,
         side: order.side,
@@ -132,9 +137,9 @@ export class KucoinSpotPrivateWebsocket extends BaseWebSocket<KucoinSpotExchange
       });
     }
 
-    if (status === 'canceled' || status === 'cancelled') {
+    if (eventType === 'canceled' || eventType === 'cancelled') {
       this.store.updateOrderStatus(order, OrderStatus.Canceled);
-    } else if (status === 'filled') {
+    } else if (eventType === 'filled') {
       this.store.updateOrderStatus(order, OrderStatus.Closed);
     } else {
       this.store.addOrUpdateOrder(order);

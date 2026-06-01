@@ -239,6 +239,150 @@ async function main() {
     log('open BTC-USDT orders now:', open.length, j(open.map((o) => ({ id: o.id, price: o.price, amount: o.amount }))));
   }
 
+  if (PHASE === 'trade-ws') {
+    hr('TRADE + WS PINGBACKS (spot)');
+    const { btc, ticker } = await bootstrap();
+    const last = ticker?.last || 0;
+    const bal0 = await exchange.fetchBalance();
+    const freeUsdt = bal0.currencies?.USDT?.free ?? 0;
+    log(`last≈${last}, free USDT=${freeUsdt}`);
+    const amount = 0.0001; // ~$7 at $71k — fits the ~10 USDT budget
+
+    await exchange.publicWebsocket.connectAndSubscribe();
+    await exchange.privateWebsocket.connectAndSubscribe();
+    await pollUntil(
+      async () => (exchange.privateWebsocket as any).ws?.readyState,
+      (rs) => rs === 1,
+      6000,
+      250,
+    );
+
+    const frames: { t: number; step: string; topic: string; data: any }[] = [];
+    const emitterEvents: { step: string; kind: string; e: any }[] = [];
+    let step = 'idle';
+    (exchange.privateWebsocket as any).ws?.addEventListener('message', (e: any) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (['welcome', 'pong', 'ack'].includes(m.type)) return;
+        frames.push({ t: Date.now(), step, topic: m.topic || m.subject, data: m.data });
+      } catch {
+        /* noop */
+      }
+    });
+    for (const k of ['fill', 'error', 'warning'] as const) {
+      exchange.emitter.on(k, (e: any) => emitterEvents.push({ step, kind: k, e }));
+    }
+    const storeOrder = (id: string) => exchange.store.orders.find((o) => String(o.id) === id);
+
+    const runStep = async (name: string, fn: () => Promise<void>, waitMs = 4000) => {
+      step = name;
+      hr(`STEP ${name}`);
+      try {
+        await fn();
+      } catch (e: any) {
+        log(`  ⚠️ step threw: ${e?.response?.data?.msg || e?.message}`);
+      }
+      await sleep(waitMs);
+      const fr = frames.filter((x) => x.step === name);
+      log(`  private-WS frames (${fr.length}):`);
+      fr.forEach((x) =>
+        log(`   → ${x.topic} type=${x.data?.type} status=${x.data?.status} ${j(x.data || {}).slice(0, 240)}`),
+      );
+      const ev = emitterEvents.filter((x) => x.step === name);
+      if (ev.length) log('  emitter events:', j(ev));
+      step = 'idle';
+    };
+
+    // S-1: limit place + cancel (S1: is the cancel transiently mislabeled Closed?)
+    let s1Id = '';
+    const farPrice = Math.max(1, Math.min(Math.round(last * 0.5), Math.floor((freeUsdt * 0.9) / amount)));
+    await runStep('S1-place-limit', async () => {
+      const ids = await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount,
+        price: farPrice,
+        timeInForce: OrderTimeInForce.PostOnly,
+      } as any);
+      s1Id = String((ids as any)?.[0] ?? '');
+      log(
+        `  placed id=${s1Id} @ ${farPrice}; store:`,
+        j(
+          storeOrder(s1Id) && {
+            type: storeOrder(s1Id)!.type,
+            price: storeOrder(s1Id)!.price,
+            amount: storeOrder(s1Id)!.amount,
+            status: storeOrder(s1Id)!.status,
+          },
+        ),
+      );
+    });
+    await runStep(
+      'S1-cancel-limit',
+      async () => {
+        await exchange.cancelOrders([storeOrder(s1Id) || ({ id: s1Id, symbol: btc.symbol } as any)]);
+        // sample store status rapidly to catch the WS-handler value BEFORE the 250ms REST refetch heals it
+        for (let i = 0; i < 8; i++) {
+          await sleep(40);
+          log(`   t+${(i + 1) * 40}ms store status: ${storeOrder(s1Id)?.status ?? 'GONE'}`);
+        }
+      },
+      3000,
+    );
+
+    // S-2: tiny market fill round-trip (S2: does a fill event fire, in base units?)
+    await runStep('S2-market-buy', async () => {
+      const b = await exchange.fetchBalance();
+      if ((b.currencies?.USDT?.free ?? 0) < amount * last * 1.1) {
+        log('  SKIP: insufficient USDT for a market buy');
+        return;
+      }
+      await exchange.placeOrder({ symbol: btc.symbol, type: OrderType.Market, side: OrderSide.Buy, amount } as any);
+    });
+    await runStep('S2-market-sell', async () => {
+      const b = await exchange.fetchBalance();
+      const btcFree = b.currencies?.BTC?.free ?? 0;
+      if (btcFree >= amount * 0.8) {
+        await exchange.placeOrder({
+          symbol: btc.symbol,
+          type: OrderType.Market,
+          side: OrderSide.Sell,
+          amount: btcFree,
+        } as any);
+      } else {
+        log(`  nothing to flatten (BTC free=${btcFree})`);
+      }
+    });
+
+    // S-3: TP/SL rejection (S3: does it emit before throwing, or silently throw?)
+    await runStep('S3-tpsl-reject', async () => {
+      const before = emitterEvents.length;
+      try {
+        await exchange.placeOrder({
+          symbol: btc.symbol,
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount,
+          price: farPrice,
+          stopLoss: Math.round(last * 0.4),
+        } as any);
+        log('  ⚠️ unexpectedly did NOT throw');
+      } catch (e: any) {
+        log(`  threw: "${e?.message}"`);
+        log(
+          `  >>> emitter events fired by the throw: ${emitterEvents.length - before} (S3 bug → 0 = silent, no toast)`,
+        );
+      }
+    });
+
+    hr('FINAL STATE (spot)');
+    const finalOrders = await exchange.fetchOrders([btc.symbol]);
+    log('open orders:', finalOrders.length, j(finalOrders.map((o) => ({ id: o.id, status: o.status }))));
+    const finalBal = await exchange.fetchBalance();
+    log('USDT total:', finalBal.currencies?.USDT?.total, '| BTC total:', finalBal.currencies?.BTC?.total);
+  }
+
   log('\nDONE.');
   process.exit(0);
 }

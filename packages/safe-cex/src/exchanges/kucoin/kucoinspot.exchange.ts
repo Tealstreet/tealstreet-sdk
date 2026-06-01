@@ -351,15 +351,26 @@ export class KucoinSpotExchange extends BaseExchange {
         return orders;
       };
 
-      if (symbols?.length) {
-        const ordersBySymbol = await Promise.all(symbols.map((symbol) => fetchSymbolOrders(symbol)));
-        return ordersBySymbol.flat();
-      }
-
-      return await fetchSymbolOrders();
+      const targetSymbols = symbols?.length ? symbols : await this.fetchActiveOrderSymbols();
+      if (!targetSymbols.length) return [];
+      const ordersBySymbol = await Promise.all(targetSymbols.map((symbol) => fetchSymbolOrders(symbol)));
+      return ordersBySymbol.flat();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return this.store.orders;
+    }
+  };
+
+  // The HF open-orders endpoint REQUIRES a symbol ("Symbol can't be empty"), so
+  // an all-symbols fetch (the tick loop + WS refresh-heal both call fetchOrders()
+  // with no args) must first discover which symbols currently have active orders.
+  private fetchActiveOrderSymbols = async (): Promise<string[]> => {
+    try {
+      const { data } = await this.xhr.get(KUCOIN_SPOT_ENDPOINTS.ACTIVE_ORDER_SYMBOLS);
+      if (data.code !== '200000') return [];
+      return Array.isArray(data.data?.symbols) ? data.data.symbols : [];
+    } catch {
+      return [];
     }
   };
 
@@ -391,11 +402,15 @@ export class KucoinSpotExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) {
-      throw new Error(`KuCoin Spot does not support ${opts.type} orders`);
+      const msg = `KuCoin Spot does not support ${opts.type} orders`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
     }
 
     if (opts.stopLoss || opts.takeProfit) {
-      throw new Error('KuCoin Spot attached TP/SL orders are not supported');
+      const msg = 'KuCoin Spot attached TP/SL orders are not supported';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
     }
 
     const market = this.store.marketsBySymbol[opts.symbol];

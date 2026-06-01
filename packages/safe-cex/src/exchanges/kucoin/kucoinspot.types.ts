@@ -14,6 +14,7 @@ export const KUCOIN_SPOT_ENDPOINTS = {
   TICKERS: '/api/v1/market/allTickers',
   KLINE: '/api/v1/market/candles',
   OPEN_ORDERS: '/api/v1/hf/orders/active/page',
+  ACTIVE_ORDER_SYMBOLS: '/api/v1/hf/orders/active/symbols',
   PLACE_ORDER: '/api/v1/hf/orders',
   CANCEL_ORDER: '/api/v1/hf/orders',
   CANCEL_SYMBOL_ORDERS: '/api/v1/hf/orders',

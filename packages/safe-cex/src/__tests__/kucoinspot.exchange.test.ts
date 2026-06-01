@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { KucoinSpotExchange } from '../exchanges/kucoin/kucoinspot.exchange';
+import { KUCOIN_SPOT_ENDPOINTS } from '../exchanges/kucoin/kucoinspot.types';
 import { DefaultStore } from '../store/store.base';
 import {
   ExchangeOptions,
@@ -336,13 +337,13 @@ describe('KucoinSpotExchange', () => {
               items: [
                 {
                   id: 'order-2',
-                  symbol: 'ETH-USDT',
-                  type: 'market',
+                  symbol: 'BTC-USDT',
+                  type: 'limit',
                   side: 'sell',
-                  price: '0',
-                  size: '1.5',
-                  dealSize: '0.5',
-                  remainSize: '1',
+                  price: '60000',
+                  size: '0.1',
+                  dealSize: '0',
+                  remainSize: '0.1',
                   active: true,
                 },
               ],
@@ -351,13 +352,15 @@ describe('KucoinSpotExchange', () => {
         }),
     } as any;
 
-    const orders = await exchange.fetchOrders();
+    // Explicit symbol — the HF open-orders endpoint always needs one; the
+    // no-symbol active-symbols discovery is covered by its own test.
+    const orders = await exchange.fetchOrders(['BTC-USDT']);
 
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, '/api/v1/hf/orders/active/page', {
-      params: { pageNum: 1, pageSize: 50 },
+      params: { symbol: 'BTC-USDT', pageNum: 1, pageSize: 50 },
     });
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, '/api/v1/hf/orders/active/page', {
-      params: { pageNum: 2, pageSize: 50 },
+      params: { symbol: 'BTC-USDT', pageNum: 2, pageSize: 50 },
     });
     expect(orders.map((order) => order.id)).toEqual(['order-1', 'order-2']);
   });
@@ -399,6 +402,76 @@ describe('KucoinSpotExchange', () => {
       postOnly: true,
     });
     expect(payload.clientOid).toEqual(expect.any(String));
+  });
+
+  it('branches spot order WS events on the event type, not the collapsed status', () => {
+    store.update({ markets: [btcMarket] });
+    // any background refetch is a harmless mock
+    exchange.xhr = { get: vi.fn().mockResolvedValue({ data: { code: '200000', data: { symbols: [] } } }) } as any;
+    const ws = exchange.privateWebsocket;
+    const updateStatus = vi.spyOn(store, 'updateOrderStatus');
+    const addOrUpdate = vi.spyOn(store, 'addOrUpdateOrder');
+    const fills: any[] = [];
+    exchange.emitter.on('fill', (f: any) => fills.push(f));
+
+    const base = {
+      orderId: 'o1',
+      symbol: 'BTC-USDT',
+      side: 'buy',
+      orderType: 'limit',
+      price: '50000',
+      size: '0.1',
+      filledSize: '0',
+    };
+
+    ws.handleOrderTopic({ data: { ...base, type: 'open', status: 'open' } });
+    expect(addOrUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1', status: OrderStatus.Open }));
+
+    // Cancel arrives as type:canceled, status:done — MUST be Canceled, not Closed.
+    ws.handleOrderTopic({ data: { ...base, type: 'canceled', status: 'done' } });
+    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }), OrderStatus.Canceled);
+
+    // Match → one fill in base units.
+    ws.handleOrderTopic({ data: { ...base, type: 'match', status: 'match', matchSize: '0.04', matchPrice: '50001' } });
+    expect(fills).toContainEqual(expect.objectContaining({ id: 'o1', amount: 0.04, price: 50001 }));
+
+    // Terminal filled arrives as type:filled, status:done → Closed.
+    ws.handleOrderTopic({ data: { ...base, type: 'filled', status: 'done', filledSize: '0.1' } });
+    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }), OrderStatus.Closed);
+  });
+
+  it('emits before throwing on unsupported spot orders (TP/SL)', async () => {
+    store.update({ markets: [btcMarket] });
+    const emitSpy = vi.spyOn(exchange, 'emitAndLogError');
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.1,
+        price: 50_000,
+        stopLoss: 40_000,
+      } as any),
+    ).rejects.toThrow(/TP\/SL/);
+    expect(emitSpy).toHaveBeenCalled();
+  });
+
+  it('fetches all open orders by first discovering active-order symbols (HF requires a symbol)', async () => {
+    const get = vi.fn(async (path: string) => {
+      if (path === KUCOIN_SPOT_ENDPOINTS.ACTIVE_ORDER_SYMBOLS) {
+        return { data: { code: '200000', data: { symbols: ['BTC-USDT'] } } };
+      }
+      return { data: { code: '200000', data: { items: [], totalPage: 1 } } };
+    });
+    exchange.xhr = { get } as any;
+
+    await exchange.fetchOrders();
+
+    expect(get).toHaveBeenCalledWith(KUCOIN_SPOT_ENDPOINTS.ACTIVE_ORDER_SYMBOLS);
+    expect(get).toHaveBeenCalledWith(
+      KUCOIN_SPOT_ENDPOINTS.OPEN_ORDERS,
+      expect.objectContaining({ params: expect.objectContaining({ symbol: 'BTC-USDT' }) }),
+    );
   });
 
   it('maps KuCoin HF fills into execution history', async () => {

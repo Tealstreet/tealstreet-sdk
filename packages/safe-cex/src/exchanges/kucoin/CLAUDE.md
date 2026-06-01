@@ -63,6 +63,26 @@ Unlike the futures socket, KuCoin Spot private WS does not send a follow-up
 topic subscriptions. Order and balance messages should be treated as triggers
 for throttled REST refreshes because websocket payloads can be partial.
 
+**`tradeOrdersV2` frames carry the EVENT in `type`, the order state in `status`.**
+A frame has both `type` (`received | open | match | filled | canceled | update`)
+and `status` (`new | open | match | done`). `handleOrderTopic` MUST branch on
+`type` — collapsing to `status || type` made a cancel (`type:canceled,
+status:done`) map to **Closed instead of Canceled** (confirmed live). Fill emits
+on `type:match` (incremental `matchSize`, base units); terminal `type:filled`
+arrives as `status:done`.
+
+**`fetchOrders()` with no symbol needs an active-symbols discovery first.** The HF
+open-orders endpoint (`/api/v1/hf/orders/active/page`) rejects a missing symbol
+("Symbol can't be empty"), which broke the WS refresh-heal AND `tick()` (both
+call `fetchOrders()` with no args). `fetchActiveOrderSymbols`
+(`/api/v1/hf/orders/active/symbols`) discovers which symbols have open orders,
+then it fetches each. Combined with the cancel mislabel above, a cancelled spot
+order otherwise stuck forever as the wrong status.
+
+**Spot pre-flight throws emit first.** `placeOrder`'s unsupported-type and
+attached-TP/SL rejections call `emitAndLogError` before throwing (per the
+`exchanges/CLAUDE.md` rule) — a bare throw produced no toast.
+
 `kucoinspot` is intentionally dev-only for the web app via exchange metadata:
 `enabled: false`, `enabledInDev: true`, and `enableInPreview: false`.
 `apps/web` consumes these flags in the new API flow and account availability
