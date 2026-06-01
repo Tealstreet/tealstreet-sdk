@@ -638,6 +638,19 @@ When testnet would be enabled:
 19. **Duplicate trailing stop fetch**: `fetchTrailingStopOrders` fetches from the same `ALGO_ORDERS` endpoint as `fetchAlgoOrders`, filtering by `stopType === 'trailing' || orderType === 'trailing'` -- may result in duplicate orders if not filtered out (`kucoin.exchange.ts:643-673`).
 20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book.
 21. **Broker ID**: `X-CHANNEL-API-CODE: '3zexp'` sent as a default REST header.
+22. **`isQuanto` is a false friend — `fetchMarkets` forces it to `false`.** KuCoin
+    marks multiplier-based LINEAR contracts (XBTUSDTM + ~11 others) as
+    `isQuanto: true`, but that is NOT the BitMEX-style quanto the web app means
+    (a contract needing a separate BTC index price). KuCoin's multiplier is
+    already captured by `contractSize`, so `fetchMarkets` overrides
+    `info.isQuanto = false`. **Do not pass KuCoin's raw `isQuanto` through.** The
+    app keys quanto sizing off raw `market.info?.isQuanto` (sizingStateful,
+    QuickOrder, MarginSlider, validateOrderSize, ChartTradingController); with it
+    true, `getBtcPriceForQuanto` finds no `.BXBT`/`XBTUSDT` ticker for the KuCoin
+    account and sizes everything against a bogus 100000 fallback — which broke
+    order/TP-SL sizing and made dragged chart TP/SL lines not render. (The
+    app's reliance on the raw exchange `isQuanto` field is fragile cross-exchange;
+    a normalized `Market.isQuanto` would be the broader fix.)
 
 ## Error Handling
 

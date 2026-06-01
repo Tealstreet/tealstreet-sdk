@@ -118,6 +118,7 @@ describe('KucoinExchange current futures docs compatibility', () => {
               maxLeverage: 125,
               multiplier: 0.001,
               isInverse: false,
+              isQuanto: true,
             },
             {
               symbol: 'ETHUSDTM',
@@ -153,6 +154,9 @@ describe('KucoinExchange current futures docs compatibility', () => {
       isExpiring: false,
       isInverse: false,
     });
+    // KuCoin's misleading `isQuanto: true` on multiplier-linear contracts must be
+    // forced off so the app doesn't run BitMEX-style quanto sizing for it.
+    expect((markets[0].info as any).isQuanto).toBe(false);
   });
 
   it('maps /allTickers array rows through marketsById', async () => {

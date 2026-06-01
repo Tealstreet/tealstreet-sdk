@@ -518,7 +518,15 @@ export class KucoinExchange extends BaseExchange {
         isExpiring: Boolean(m.expireDate),
         isInverse: Boolean(m.isInverse),
         contractSize: parseFloat(m.multiplier || '1'),
-        info: m,
+        // KuCoin marks multiplier-based LINEAR contracts (XBTUSDTM and ~11
+        // others) as `isQuanto: true`, but that is NOT the BitMEX-style quanto
+        // the app means (one needing a separate BTC index price). KuCoin's
+        // multiplier is already captured by `contractSize`, so force the flag
+        // off — otherwise the app's `info.isQuanto` sizing path runs
+        // `getBtcPriceForQuanto`, fails to find a `.BXBT`/`XBTUSDT` ticker, and
+        // sizes everything against a bogus 100000 fallback price (which broke
+        // order/TP-SL sizing + chart lines).
+        info: { ...m, isQuanto: false },
       };
     });
 
