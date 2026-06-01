@@ -98,7 +98,7 @@ Subscribes to channels only after receiving `{ "event": "auth", "success": true 
 
 The `start()` method (`orderly.exchange.ts:124-171`) executes the following sequence:
 
-1. **Validate account** - `validateAccount()` calls `GET /v1/client/info`. On failure, emits `'deactivate'` and returns immediately.
+1. **Validate account** - `start()` calls `GET /v1/client/info` inline. On a **definitive auth rejection** (4xx — expired/revoked/wrong key) it emits `'deactivate'` and returns. On a **transient failure** (no HTTP response, 408, 429, or 5xx) it **throws instead** — see "Transient validation must not deactivate" under Known Quirks.
 2. **Fetch markets** - `fetchMarkets()` calls `GET /v1/public/info`, filters to `PERP_` symbols, stores in store.
 3. **Dispose check** - Returns if `isDisposed` (checked after each async call).
 4. **Fetch tickers** - `fetchTickers()` calls `GET /v1/public/futures`, maps to internal ticker format.
@@ -329,10 +329,11 @@ Testnet selection is via `options.testnet` boolean.
 13. **Params serialization**: Query params are sorted alphabetically via `qs.stringify` with `sort: (a, b) => a.localeCompare(b)` (`orderly.api.ts:56`).
 14. **cancelSymbolOrders**: The variable is named `wooSymbol` (legacy naming from WooX origin, `orderly.exchange.ts:900`), but correctly calls `reverseSymbol()`.
 15. **Kline timestamp**: Kline timestamps from the API are in milliseconds, divided by 1000 for internal use (`orderly.exchange.ts:477`). Results are reversed to ascending order.
+16. **Transient validation must not deactivate** (`start()` + `isTransientOrderlyValidationError`): `start()` runs on **every (re)connect**, and Orderly is the **only** exchange that emits `'deactivate'`. The web app turns `'deactivate'` into `account.active = false` (`exchangeAccountController` `deactivate-status` handler), and `CleanupComponentWorker` then **force-switches the user off their selected account**. So the account-validation `GET /v1/client/info` at the top of `start()` must only `emit('deactivate')` on a **definitive 4xx auth rejection**; a transient failure (no HTTP response — network/CORS/proxy/tunnel drop — or 408 / 429 / 5xx) must **`throw`** instead, so the worker treats it like any other exchange's transient `start()` failure (logs it, leaves the account ACTIVE, recovers on the next reconnect). Do **not** route this back through `validateAccount()` (which collapses the error to a string and loses the HTTP status needed to classify it). Past bug: a reconnect-time blip on this one request silently disabled a valid account and yanked the user's active-account selection.
 
 ## Error Handling
 
-- **Validation failure on start**: Emits error message and `'deactivate'` event, then returns without starting WebSockets or tick loop (`orderly.exchange.ts:128-131`).
+- **Validation failure on start**: Auth rejections (4xx) emit the error and `'deactivate'`, then return without starting WebSockets or the tick loop. Transient failures (no response / 408 / 429 / 5xx) throw instead — see Known Quirks → "Transient validation must not deactivate".
 - **Tick errors**: Caught at tick level, logged via `emitAndLogError`, tick loop continues (`orderly.exchange.ts:230-233`).
 - **Network retries**: 3 retries on network errors via `axios-retry` (`orderly.api.ts:68`).
 - **Algo cancel "already canceled"**: If error message includes "already canceled", order is marked as Canceled locally instead of throwing (`orderly.exchange.ts:695-698`).

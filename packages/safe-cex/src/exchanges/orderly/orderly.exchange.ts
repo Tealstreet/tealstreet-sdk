@@ -50,6 +50,28 @@ import { normalizeSymbol, reverseSymbol } from './orderly.utils';
 import { OrderlyPrivateWebSocket } from './orderly.ws-private';
 import { OrderlyPublicWebsocket } from './orderly.ws-public';
 
+/**
+ * Classify an Orderly account-validation failure as transient vs. a definitive
+ * auth rejection.
+ *
+ * `start()` runs on every (re)connect, so a reconnect-time network blip,
+ * timeout, rate-limit, or 5xx on the single `GET /v1/client/info` validation
+ * call must NOT be treated as "API key expired". Doing so emits `deactivate`,
+ * which the web app turns into `account.active = false` (exchangeAccountController
+ * `deactivate-status`) and then `CleanupComponentWorker` force-switches the user
+ * off their selected account — for an account that was merely reconnecting.
+ *
+ * Only a real 4xx auth rejection should deactivate. No HTTP response at all
+ * (network error / CORS / proxy / tunnel drop) is transient by definition.
+ */
+const isTransientOrderlyValidationError = (err: any): boolean => {
+  const status: number | undefined = err?.response?.status;
+  if (status == null) return true; // network error / timeout / CORS / proxy / tunnel drop
+  if (status === 408 || status === 429) return true; // request timeout / rate limited
+  if (status >= 500) return true; // exchange-side error
+  return false; // 4xx (401/403/…) — credentials or request rejected
+};
+
 export class OrderlyExchange extends BaseExchange {
   xhr: Axios;
 
@@ -123,11 +145,35 @@ export class OrderlyExchange extends BaseExchange {
   start = async () => {
     const publicDataOnly = this.isPublicDataOnly;
 
-    // Validate account at the start (skip for public-only mode)
+    // Validate account at the start (skip for public-only mode).
+    // NOTE: validated inline (not via validateAccount(), which collapses the
+    // error to a string) so we can classify transient vs. auth failures and
+    // only deactivate on the latter.
     if (!publicDataOnly) {
-      const validationError = await this.validateAccount();
-      if (validationError) {
-        // Account validation failed - emit error and deactivate
+      try {
+        await this.xhr.get(ENDPOINTS.ACCOUNT);
+      } catch (err: any) {
+        // Surface the underlying error either way (honors the app-side
+        // showErrorsWhileReconnecting gate).
+        this.emitAndLogError(err?.response?.data?.message || err?.message);
+
+        if (isTransientOrderlyValidationError(err)) {
+          // Network / timeout / rate-limit / 5xx during a (re)connect: the key
+          // is almost certainly fine and the account is just reconnecting.
+          // Throw so the worker handles this like any other exchange's
+          // transient start() failure (logs it, leaves the account ACTIVE).
+          // Do NOT emit `deactivate` — that disables the account and
+          // force-switches the user off their selected account on a transient
+          // reconnect.
+          throw new Error(
+            `Orderly account validation failed transiently, will retry on next reconnect: ${
+              err?.response?.data?.msg || err?.message || 'unknown error'
+            }`,
+          );
+        }
+
+        // Definitive auth rejection (expired / revoked / wrong key) — disable
+        // the account so we stop hammering the API and tell the user.
         this.emitAndLogError('API key expired');
         this.emitter.emit('deactivate');
         return;
