@@ -1969,19 +1969,14 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
 }
 
 /**
- * Process a command string. Runs the cli-core preprocess pipeline
- * (repeat expansion, chain split on `;` / `&`, alias + var + $constant
- * substitution) and dispatches each step.
+ * Execute a CLI command string through preprocessing and dispatch the resulting step chain.
  *
- * Chain semantics: `;` is sequential — the runner drains all in-flight
- * fire-and-forget steps before dispatching a `;`-separated step (its
- * `awaitPrior` flag), so `close all; buy $1000` waits for the close.
- * `&` is parallel — no barrier. `sleep`/`wait` (block:true), retry, and
- * capture steps are awaited inline regardless.
+ * The preprocessor expands repeats, resolves aliases/variables/constants, and splits the input into ordered steps.
+ * Steps separated by `;` are executed with a barrier (the runner waits for prior fire-and-forget steps to settle before continuing).
+ * Steps separated by `&` run without that barrier (parallel/background). Steps marked `block`, `retry`, or `capture` are awaited inline.
  *
- * The legacy `@cmd` parallel prefix is recognised by the preprocessor
- * (stripped + one warning per invocation) for backwards compatibility;
- * users should migrate to `&`.
+ * @param options - Execution options
+ * @param options.drainFinalInFlight - If true, wait for any remaining background (fire-and-forget) steps to settle before this function returns
  */
 export async function processCommand(
   commandString: string,
@@ -2626,6 +2621,19 @@ export function getSessionInfo(): {
   };
 }
 
+/**
+ * Executes a single CLI command against a configured account and symbol, connecting the account if necessary.
+ *
+ * Connects to the target account, sets the session symbol, runs the provided command (draining any final in-flight steps),
+ * waits for any TWAP tasks started by the command to appear, and then stops the exchange connection.
+ *
+ * This function may print warnings/errors and call `process.exit` on fatal failures (for example: no accounts configured,
+ * account not found, or connection/auth errors).
+ *
+ * @param commandString - The raw command string to execute
+ * @param accountName - Optional account name to use; if omitted the default account is used
+ * @param symbol - Optional market symbol to set for the session before executing the command
+ */
 export async function runSingleCommand(commandString: string, accountName?: string, symbol?: string): Promise<void> {
   const config = loadConfig();
 
@@ -2679,6 +2687,12 @@ export async function runSingleCommand(commandString: string, accountName?: stri
   await adapter.stopExchange(session.currentExchange);
 }
 
+/**
+ * Waits until TWAPs that were started after a command are no longer present in the TWAP manager.
+ *
+ * @param twapsBeforeCommand - Set of TWAP IDs that existed before the command was executed; the function monitors TWAP IDs that are present now but not in this set.
+ * @returns Resolves when none of the TWAP IDs that started after the command are present in `twapManager`
+ */
 async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Promise<void> {
   const startedTwapIds = Array.from(twapManager.runningTwaps.keys()).filter((id) => !twapsBeforeCommand.has(id));
   if (startedTwapIds.length === 0) return;
