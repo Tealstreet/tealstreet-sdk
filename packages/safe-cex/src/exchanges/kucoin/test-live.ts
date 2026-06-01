@@ -355,6 +355,222 @@ async function main() {
     }
   }
 
+  if (PHASE === 'trade-ws') {
+    hr('TRADE + WS PINGBACKS (perps) — pure-WS store (no tick loop)');
+    const { btc, ticker } = await bootstrap();
+    const cs = btc.contractSize ?? 1;
+    const mark = ticker?.mark || ticker?.last || 0;
+    log(`mark≈${mark}`);
+
+    const pre = await btcPositionContracts(btc.symbol);
+    log(`pre position: ${pre.contracts} BTC (${pre.side ?? 'flat'})`);
+    const preOrders = (await exchange.fetchOrders()).filter((o) => o.symbol === btc.symbol);
+    const preStopIds = new Set(preOrders.map((o) => String(o.id)));
+    log(
+      'pre existing orders:',
+      j(preOrders.map((o) => ({ id: o.id, type: o.type, price: o.price, amount: o.amount }))),
+    );
+
+    // hook RAW private-WS frames + fill emitter, tagged by step
+    await exchange.privateWebsocket.connectAndSubscribe();
+    await pollUntil(
+      async () => (exchange.privateWebsocket as any).ws?.readyState,
+      (rs) => rs === 1,
+      6000,
+      250,
+    );
+    const frames: { t: number; step: string; topic: string; data: any }[] = [];
+    let step = 'idle';
+    (exchange.privateWebsocket as any).ws?.addEventListener('message', (e: any) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (['welcome', 'pong', 'ack'].includes(m.type)) return;
+        frames.push({ t: Date.now(), step, topic: m.topic || m.subject || m.type, data: m.data });
+      } catch {
+        /* noop */
+      }
+    });
+    const fills: { step: string; e: any }[] = [];
+    exchange.emitter.on('fill', (e: any) => fills.push({ step, e }));
+    const storeOrder = (id: string) => exchange.store.orders.find((o) => String(o.id) === id);
+
+    const runStep = async (name: string, fn: () => Promise<void>, waitMs = 5000) => {
+      step = name;
+      hr(`STEP ${name}`);
+      try {
+        await fn();
+      } catch (e: any) {
+        log(`  ⚠️ step "${name}" threw: ${e?.response?.status ?? ''} ${e?.response?.data?.msg || e?.message}`);
+      }
+      await sleep(waitMs);
+      const fr = frames.filter((x) => x.step === name);
+      log(`  private-WS frames (${fr.length}):`);
+      fr.forEach((x) =>
+        log(`   → ${x.topic} | type=${x.data?.type} status=${x.data?.status} ${j(x.data || {}).slice(0, 240)}`),
+      );
+      const sf = fills.filter((x) => x.step === name);
+      log(`  fill events (${sf.length}):`, j(sf.map((x) => x.e)));
+      step = 'idle';
+    };
+
+    // --- P-1: resting limit place + cancel (cancel pingback / store removal) ---
+    let p1Id = '';
+    await runStep('P1-place-limit', async () => {
+      const ids = await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: Math.round(mark * 0.5),
+        timeInForce: OrderTimeInForce.PostOnly,
+      } as any);
+      p1Id = String((ids as any)?.[0] ?? '');
+      log(
+        `  placed limit id=${p1Id}; store order:`,
+        j(
+          storeOrder(p1Id) && {
+            type: storeOrder(p1Id)!.type,
+            price: storeOrder(p1Id)!.price,
+            amount: storeOrder(p1Id)!.amount,
+            status: storeOrder(p1Id)!.status,
+          },
+        ),
+      );
+    });
+    await runStep('P1-cancel-limit', async () => {
+      const o = storeOrder(p1Id) || ({ id: p1Id, symbol: btc.symbol } as any);
+      await exchange.cancelOrders([o]);
+      await sleep(1500);
+      log(`  store order after cancel frame (pre-refetch): ${j(storeOrder(p1Id)?.status ?? 'GONE')}`);
+    });
+
+    // --- P-2: market fill + reduce-only close (fill double-fire / units) ---
+    let abortTrades = false;
+    await runStep('P2-market-fill', async () => {
+      // Safety: the user's SL@71177 sits near mark. If natural market movement
+      // triggered it mid-test the position will have changed — never add
+      // exposure or "restore" on a position we didn't change.
+      const cur = await btcPositionContracts(btc.symbol);
+      if (Math.abs(cur.contracts - pre.contracts) > 1e-9) {
+        abortTrades = true;
+        log(
+          `  ⚠️ ABORT fill: position changed ${cur.contracts} vs pre ${pre.contracts} (external SL trigger?) — skipping all further trade steps`,
+        );
+        return;
+      }
+      if (pre.contracts + cs > MAX_BASE_BTC) {
+        log('  SKIP fill: would exceed max');
+        return;
+      }
+      // On a flat symbol getPositionForOrder finds no position → leverage 1 →
+      // a 0.001 BTC market order needs full notional as margin (more than this
+      // small account has). Set 5x (the account's prior setting) and refetch so
+      // formatCreateOrder reads it.
+      try {
+        await exchange.setLeverage(btc.symbol, 5);
+        store.update({ positions: await exchange.fetchPositions([btc.symbol]) });
+      } catch (e: any) {
+        log('  setLeverage note:', e?.message);
+      }
+      await exchange.placeOrder({ symbol: btc.symbol, type: OrderType.Market, side: OrderSide.Buy, amount: 1 } as any);
+    });
+    await runStep('P2-close', async () => {
+      const now = await btcPositionContracts(btc.symbol);
+      if (now.contracts > pre.contracts + 1e-9) {
+        await exchange.placeOrder({
+          symbol: btc.symbol,
+          type: OrderType.Market,
+          side: OrderSide.Sell,
+          amount: 1,
+          reduceOnly: true,
+        } as any);
+      }
+    });
+    const p2fills = fills.filter((x) => x.step === 'P2-market-fill');
+    log(
+      `>>> P2 fill assertion: ${p2fills.length} fill event(s), summed amount=${p2fills.reduce((s, x) => s + (x.e?.amount || 0), 0)} (expect 1 × 0.001)`,
+    );
+
+    // --- P-3: standalone SL place + cancel (does NOT disturb existing stops) ---
+    let p3Id = '';
+    await runStep('P3-place-SL', async () => {
+      if (abortTrades) {
+        log('  SKIP P3: trades aborted (position changed)');
+        return;
+      }
+      const ids = await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 1,
+        price: Math.round(mark * 0.6),
+      } as any);
+      p3Id = String((ids as any)?.[0] ?? '');
+      log(
+        `  placed SL id=${p3Id}; store order:`,
+        j(
+          storeOrder(p3Id) && {
+            type: storeOrder(p3Id)!.type,
+            price: storeOrder(p3Id)!.price,
+            reduceOnly: storeOrder(p3Id)!.reduceOnly,
+          },
+        ),
+      );
+      const after = (await exchange.fetchOrders()).filter((o) => o.symbol === btc.symbol);
+      const stillThere = preOrders.every((po) => after.some((a) => String(a.id) === String(po.id)));
+      log(`  CLOBBER CHECK — all ${preOrders.length} pre-existing stops still present: ${stillThere}`);
+      if (!stillThere)
+        log(
+          '  ⚠️⚠️ EXISTING STOP MISSING — aborting before cancel',
+          j(after.map((a) => ({ id: a.id, type: a.type, price: a.price }))),
+        );
+    });
+    await runStep('P3-cancel-SL', async () => {
+      if (!p3Id) return;
+      const o = storeOrder(p3Id) || ({ id: p3Id, symbol: btc.symbol, type: OrderType.StopLoss } as any);
+      await exchange.cancelOrders([o]);
+    });
+
+    hr('FINAL STATE');
+    const finalPos = await btcPositionContracts(btc.symbol);
+    const finalOrders = (await exchange.fetchOrders()).filter((o) => o.symbol === btc.symbol);
+    log(`position: ${finalPos.contracts} BTC (expect ${pre.contracts})`);
+    log('orders:', j(finalOrders.map((o) => ({ id: o.id, type: o.type, price: o.price }))));
+    const myLeftovers = finalOrders.filter((o) => !preStopIds.has(String(o.id)));
+    log(`leftover test orders (expect 0): ${myLeftovers.length}`, j(myLeftovers.map((o) => o.id)));
+    const originalsIntact = preOrders.every((po) => finalOrders.some((a) => String(a.id) === String(po.id)));
+    log(`originals intact: ${originalsIntact}`);
+  }
+
+  if (PHASE === 'cleanup-stop') {
+    const id = process.argv[3];
+    hr(`CLEANUP orphaned stop ${id}`);
+    await bootstrap();
+    const before = await exchange.fetchOrders();
+    log(
+      'present before:',
+      before.some((o) => String(o.id) === id),
+      '| total:',
+      before.length,
+      j(before.map((o) => ({ id: o.id, type: o.type, price: o.price }))),
+    );
+    // Stop-flagged orders are POSTed to /api/v1/orders, so cancel there (NOT /api/v1/stopOrders).
+    try {
+      const { data } = await (exchange as any).unlimitedXHR.delete(`/api/v1/orders/${id}`);
+      log('DELETE /api/v1/orders/{id} →', data.code, data.msg);
+    } catch (e: any) {
+      log('DELETE /api/v1/orders failed:', e?.response?.status, e?.response?.data?.msg || e?.message);
+    }
+    await sleep(1500);
+    const after = await exchange.fetchOrders();
+    log(
+      'present after:',
+      after.some((o) => String(o.id) === id),
+      '| total:',
+      after.length,
+    );
+  }
+
   log('\nDONE.');
   process.exit(0);
 }

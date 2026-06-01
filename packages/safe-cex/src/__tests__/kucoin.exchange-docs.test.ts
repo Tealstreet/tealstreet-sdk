@@ -442,6 +442,35 @@ describe('KucoinExchange current futures docs compatibility', () => {
     });
   });
 
+  it('cancels a standalone TP/SL via /api/v1/orders (where it is placed), not /api/v1/stopOrders', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+    const deleteRequest = vi.fn().mockResolvedValue({ data: { code: '200000', data: {} } });
+    exchange.unlimitedXHR = { delete: deleteRequest } as any;
+
+    // placeAlgoOrders posts stop-flagged TP/SL to /api/v1/orders, so the cancel
+    // must hit /api/v1/orders/{id}. Routing to /api/v1/stopOrders/{id} 404s and
+    // orphans the order (confirmed live).
+    await exchange.cancelOrders([{ id: 'sl-1', symbol: 'BTCUSDT', type: OrderType.StopLoss } as any]);
+
+    expect(deleteRequest).toHaveBeenCalledWith(`${ENDPOINTS.CANCEL_ORDERS}/sl-1`, {
+      params: { symbol: 'XBTUSDTM' },
+    });
+    expect(deleteRequest).not.toHaveBeenCalledWith(ENDPOINTS.CANCEL_ALGO_ORDER.replace('{orderId}', 'sl-1'));
+  });
+
   it('sends post-only via the postOnly boolean, not an invalid timeInForce', async () => {
     const { exchange, store } = makeExchange();
     store.update({

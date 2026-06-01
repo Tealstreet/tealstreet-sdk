@@ -422,13 +422,23 @@ overwrote its `price` with `stopPrice` (0) — limit orders showed price 0.
 
 ### Cancellation
 
-Both normal and algo orders are cancelled **individually** (no batch cancellation):
+All single-order cancels go through `cancelNormalOrders` → `DELETE /api/v1/orders/{orderId}`, including **standalone TP/SL**.
 
-- Normal orders: `DELETE /api/v1/orders/{orderId}` (`kucoin.exchange.ts:737-762`)
-- Algo orders: `DELETE /api/v1/stopOrders/{orderId}` (`kucoin.exchange.ts:764-780`)
-- Virtual TP/SL orders are resolved to their parent ID before cancellation
-- `cancelSymbolOrders`: Uses `DELETE /api/v1/orders` with symbol param (`kucoin.exchange.ts:782-797`)
-- All cancellations use `unlimitedXHR` (no rate limit)
+**TP/SL place and cancel must use the SAME book.** `placeAlgoOrders` posts every
+stop-flagged TP/SL to **`/api/v1/orders`** (`payload.stop ? PLACE_ORDER`; trailing
+throws), and they stream on `/contractMarket/advancedOrders`. They are therefore
+cancelled via `DELETE /api/v1/orders/{id}` — **NOT** `/api/v1/stopOrders/{id}`,
+which returns **404 and orphans the order** (confirmed live). `cancelOrders` no
+longer routes TP/SL to a separate algo-cancel; `cancelNormalOrders` keeps a
+defensive 404→`/api/v1/stopOrders/{id}` fallback for anything KuCoin ever files
+on the stop-order book. (The dedicated `cancelAlgoOrders` method was removed.)
+
+- Virtual TP/SL legs are resolved to their parent id before cancellation.
+- `cancelSymbolOrders`: `DELETE /api/v1/orders` with symbol param.
+- `cancelAllOrders`: `DELETE /api/v1/orders` (CANCEL_ALL_ORDERS) **and** `DELETE
+/api/v1/stopOrders` (CANCEL_ALL_STOP_ORDERS) — **wipes the user's pos-level
+  TP/SL too**; never call it as a test-cleanup shortcut.
+- All cancellations use `unlimitedXHR` (no rate limit).
 
 ### Algo Order Side Logic
 
@@ -631,7 +641,7 @@ All KuCoin API responses follow this structure:
 ### Order Error Propagation
 
 - `placeOrderBatch`: Emits error event and throws on failure (`kucoin.exchange.ts:963-968`)
-- `cancelNormalOrders` / `cancelAlgoOrders`: Emit error and re-throw (`kucoin.exchange.ts:755-760`, `kucoin.exchange.ts:775-779`)
+- `cancelNormalOrders`: Emit error and re-throw (also handles TP/SL; 404→stopOrders fallback)
 - `updateOrder` / `updateAlgoOrder`: Emit error and re-throw (`kucoin.exchange.ts:1087-1090`, `kucoin.exchange.ts:1114-1116`)
 
 ## Kline Interval Mapping

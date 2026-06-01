@@ -792,12 +792,14 @@ export class KucoinExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
+    // App-placed orders — INCLUDING standalone TP/SL — are POSTed to
+    // `/api/v1/orders` (placeAlgoOrders routes every stop-flagged payload to
+    // PLACE_ORDER, and trailing stops throw), so they ALL cancel via
+    // DELETE `/api/v1/orders/{id}`. Routing TP/SL to `/api/v1/stopOrders/{id}`
+    // returns 404 and orphans the order (confirmed live). Virtual TP/SL legs
+    // resolve to their parent id inside cancelNormalOrders.
     const [virtualTPSLOrders, otherOrders] = partition<Order>(orders, this.isVirtualTPSLOrder);
-    const [algoOrders, normalOrders] = partition<Order>(otherOrders, this.isAlgoOrder);
-    const normalAndVirtualTPSL = [...normalOrders, ...virtualTPSLOrders];
-
-    if (normalAndVirtualTPSL.length) await this.cancelNormalOrders(normalAndVirtualTPSL);
-    if (algoOrders.length) await this.cancelAlgoOrders(algoOrders);
+    await this.cancelNormalOrders([...otherOrders, ...virtualTPSLOrders]);
   };
 
   cancelNormalOrders = async (orders: Order[]) => {
@@ -821,24 +823,16 @@ export class KucoinExchange extends BaseExchange {
           this.emitAndLogError(data.msg || `Failed to cancel order ${order.id}`);
         }
       } catch (err: any) {
-        this.emitAndLogError(err?.response?.data?.msg || err?.message);
-        throw err;
-      }
-    }
-  };
-
-  cancelAlgoOrders = async (orders: Order[]) => {
-    for (const order of orders) {
-      try {
-        // For KuCoin, we need to replace {orderId} in the URL
-        const url = ENDPOINTS.CANCEL_ALGO_ORDER.replace('{orderId}', order.id);
-
-        const { data } = await this.unlimitedXHR.delete(url);
-
-        if (data.code !== '200000') {
-          this.emitAndLogError(data.msg || `Failed to cancel algo order ${order.id}`);
+        // Defensive: if KuCoin ever filed this id on the stop-order book rather
+        // than the regular order book, retry there before surfacing the error.
+        if (err?.response?.status === 404) {
+          try {
+            const { data } = await this.unlimitedXHR.delete(ENDPOINTS.CANCEL_ALGO_ORDER.replace('{orderId}', order.id));
+            if (data.code === '200000') continue;
+          } catch {
+            /* fall through to surface the original error */
+          }
         }
-      } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
         throw err;
       }
