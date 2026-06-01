@@ -301,12 +301,18 @@ Additional API-to-internal mappings: `tp` -> TakeProfit, `sl` -> StopLoss, `psl`
 
 ### Time In Force
 
-| Internal TIF        | KuCoin Value |
-| ------------------- | ------------ |
-| `GoodTillCancel`    | `GTC`        |
-| `ImmediateOrCancel` | `IOC`        |
-| `FillOrKill`        | `FOK`        |
-| `PostOnly`          | `POST_ONLY`  |
+| Internal TIF        | KuCoin Value                             |
+| ------------------- | ---------------------------------------- |
+| `GoodTillCancel`    | `GTC`                                    |
+| `ImmediateOrCancel` | `IOC`                                    |
+| `FillOrKill`        | `FOK`                                    |
+| `PostOnly`          | `GTC` **+ `postOnly: true` (NOT a TIF)** |
+
+**`POST_ONLY` is NOT a valid `timeInForce`** on KuCoin Futures — sending it
+returns `"Time in Force type invalid"` and the order is rejected. Post-only is
+conveyed via the separate `postOnly` boolean while `timeInForce` stays `GTC`
+(`formatCreateOrder`). (KuCoin Futures `timeInForce` accepts only `GTC`/`IOC`;
+`FOK` is also unverified on futures — treat it as untested.)
 
 Also maps from KuCoin response: `normal` -> GTC, `post_only` -> PostOnly
 
@@ -387,6 +393,12 @@ The virtual orders have the **inverse side** of the parent order (if parent is B
 - If `o.stop === true` and `o.stopType === 'up'`: maps to `OrderType.TakeProfit`
 - If `o.stop === true` and `o.stopPriceType === 'TP'`: maps to `OrderType.TrailingStopLoss`
 - Price is taken from `stopPrice` for stop orders
+
+**`stop: ""` is NOT a stop order.** KuCoin returns `stop: ""` (empty string) on
+**normal** orders. The stop-detection guard requires a NON-empty `stop`
+(`o.stop === true || (typeof o.stop === 'string' && o.stop !== '')`); a bare
+`typeof o.stop === 'string'` check misclassified every limit order as a stop and
+overwrote its `price` with `stopPrice` (0) — limit orders showed price 0.
 
 ### Plan Type Selection
 

@@ -932,7 +932,10 @@ export class KucoinExchange extends BaseExchange {
     } else if (opts.timeInForce === OrderTimeInForce.FillOrKill) {
       timeInForce = 'FOK';
     } else if (opts.timeInForce === OrderTimeInForce.PostOnly) {
-      timeInForce = 'POST_ONLY';
+      // KuCoin Futures rejects timeInForce='POST_ONLY' ("Time in Force type
+      // invalid"). Post-only is conveyed via the separate `postOnly` boolean
+      // (set below); timeInForce stays GTC.
+      timeInForce = 'GTC';
     } else {
       timeInForce = 'GTC'; // Default
     }
@@ -1327,8 +1330,11 @@ export class KucoinExchange extends BaseExchange {
       info: o,
     };
 
-    // Handle stop orders differently
-    if (o.stop === true || typeof o.stop === 'string' || rawOrderType === 'stop') {
+    // Handle stop orders differently. NB: KuCoin returns `stop: ""` (empty
+    // string) for NON-stop orders, so a bare `typeof o.stop === 'string'` check
+    // misclassifies normal limit orders as stops and overwrites their price with
+    // stopPrice (0) — require a non-empty stop value.
+    if (o.stop === true || (typeof o.stop === 'string' && o.stop !== '') || rawOrderType === 'stop') {
       const stopType = String(o.stopType || o.stop || '').toLowerCase();
       if (stopType === 'down' || stopType === 'loss' || stopType === 'sl') {
         order.type = OrderType.StopLoss;

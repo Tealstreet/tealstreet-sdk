@@ -442,6 +442,74 @@ describe('KucoinExchange current futures docs compatibility', () => {
     });
   });
 
+  it('sends post-only via the postOnly boolean, not an invalid timeInForce', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+
+    const [payload] = await exchange.formatCreateOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Limit,
+      price: 67000,
+      amount: 1,
+      timeInForce: OrderTimeInForce.PostOnly,
+    });
+
+    // KuCoin Futures rejects timeInForce='POST_ONLY' ("Time in Force type
+    // invalid"); post-only must ride the separate boolean with TIF left GTC.
+    expect(payload.timeInForce).toBe('GTC');
+    expect(payload.postOnly).toBe(true);
+  });
+
+  it('does not misclassify a normal limit order (stop: "") as a stop, preserving its price', () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          contractSize: 0.001,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+
+    // KuCoin returns stop: "" for non-stop orders — must stay a Limit with its
+    // real price, not get rewritten to stopPrice (0).
+    const [order] = exchange.mapOrder({
+      id: 'lim-1',
+      symbol: 'XBTUSDTM',
+      type: 'limit',
+      side: 'buy',
+      price: '67000',
+      size: 1,
+      filledSize: '0',
+      stop: '',
+      stopPrice: '0',
+      status: 'open',
+    });
+
+    expect(order.type).toBe(OrderType.Limit);
+    expect(order.price).toBe(67000);
+    expect(order.amount).toBe(0.001); // 1 contract × 0.001 contractSize (base units)
+  });
+
   it('routes attached take-profit and stop-loss orders through current st-orders fields', async () => {
     const { exchange, store } = makeExchange();
     store.update({

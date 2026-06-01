@@ -82,6 +82,11 @@ async function main() {
       markets.find((m) => m.base === 'BTC' && m.quote === 'USDT' && !m.isExpiring) ||
       markets.find((m) => m.id === 'XBTUSDTM');
     if (!btc) throw new Error('BTC futures market not found');
+    // Load positions so getPositionForOrder resolves the right leverage when
+    // formatting orders (the app keeps these live via the tick loop; without it
+    // leverage defaults to 1 and margin checks over-charge).
+    const positions = await exchange.fetchPositions([btc.symbol]);
+    store.update({ positions });
     const ticker = store.tickersBySymbol[btc.symbol];
     return { markets, tickers, btc, ticker };
   };
@@ -266,6 +271,8 @@ async function main() {
         amount: mine.amount,
         status: mine.status,
         reduceOnly: mine.reduceOnly,
+        raw_stop: JSON.stringify((mine.info as any)?.stop),
+        raw_price: (mine.info as any)?.price,
       },
     );
 
