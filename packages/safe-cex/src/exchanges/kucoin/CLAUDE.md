@@ -397,6 +397,30 @@ KuCoin uses descriptive side names that encode position direction:
 - With `rangeRate`: `PLACE_TRAILING_STOP_ORDER` (`/api/v1/stop-order`)
 - Without: `PLACE_ALGO_ORDER` (`/api/v1/st-orders`)
 
+### Order Fetch — two books, partial-failure preservation
+
+`fetchOrders` reads **two separate books** and concatenates them:
+
+- `fetchNormalOrders` → `GET /api/v1/orders?status=active` (limit / market / conditional)
+- `fetchAlgoOrders` → `GET /api/v1/stopOrders?status=active` (untriggered TP/SL **and** trailing — `mapOrder` classifies each, so one call covers both)
+
+**The tick loop FULL-REPLACES `store.orders` with this combined result every poll.**
+That made a silent single-book failure catastrophic: each sub-fetch used to return
+`[]` on error, so if the **stop book** failed (rate limit / tunnel hiccup) while the
+normal book succeeded, the full-replace **wiped every TP/SL line off the chart while
+limits kept rendering** — the "limit orders show but dragged TP/SL don't, no error"
+report. The WS (`advancedOrders`) delivers a stop only **once** on placement, so once
+the tick wiped it nothing re-added it → permanent disappearance.
+
+**Fix / invariant:** the sub-fetchers now return **`null` on failure** (vs `[]` for a
+genuinely empty book), and `fetchOrders` **preserves the existing `store.orders` of the
+failed category** instead of dropping it (`normalOrders ?? store non-stop`,
+`stopOrders ?? store stop-type`). If you add another order book or change the tick to
+keep full-replacing, keep this preserve-on-failure split — **never let one book's
+failure blank another book's orders.** (The old `fetchTrailingStopOrders`, which
+re-hit `/api/v1/stopOrders` a second time and double-counted trailing rows, was removed;
+`fetchAlgoOrders` already returns them.)
+
 ### Update Order (Cancel-Replace)
 
 KuCoin has **no PUT endpoint for orders**. `updateOrder` (`kucoin.exchange.ts:1055-1091`) implements cancel-and-replace:
@@ -661,7 +685,7 @@ When testnet would be enabled:
 16. **Fetch missing-position metadata**: Position metadata for zero-size/fake positions is fetched from `/api/v2/position/getMarginMode`, `/api/v2/position/getPositionMode`, and cross leverage from `/api/v2/getCrossUserLeverage`.
 17. **Ticker percentage from WS**: WS ticker `priceChangePercent` is multiplied by 100 to convert from decimal to percentage (`kucoin.ws-public.ts:174`).
 18. **Commented-out leverage fetch**: The `fetchCurrentLeverage` and `fetchLeverageBrackets` methods are fully commented out (`kucoin.exchange.ts:466-540`), suggesting a previous implementation that was replaced.
-19. **Duplicate trailing stop fetch**: `fetchTrailingStopOrders` fetches from the same `ALGO_ORDERS` endpoint as `fetchAlgoOrders`, filtering by `stopType === 'trailing' || orderType === 'trailing'` -- may result in duplicate orders if not filtered out (`kucoin.exchange.ts:643-673`).
+19. **Order fetch is two books with preserve-on-failure**: `fetchOrders` = `/api/v1/orders` (normal) + `/api/v1/stopOrders` (TP/SL + trailing). A failed book preserves the existing store orders of that category so the tick's full-replace can't wipe TP/SL lines — see "Order Fetch — two books, partial-failure preservation". (The old duplicate `fetchTrailingStopOrders`, which re-hit `/api/v1/stopOrders`, was removed.)
 20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book.
 21. **Broker ID**: `X-CHANNEL-API-CODE: '3zexp'` sent as a default REST header.
 22. **`isQuanto` is a false friend — `fetchMarkets` forces it to `false`.** KuCoin

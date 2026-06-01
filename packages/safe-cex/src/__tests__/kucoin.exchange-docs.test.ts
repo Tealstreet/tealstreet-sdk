@@ -580,6 +580,139 @@ describe('KucoinExchange current futures docs compatibility', () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
+  const kucoinMarket = {
+    id: 'XBTUSDTM',
+    symbol: 'BTCUSDT',
+    base: 'BTC',
+    quote: 'USDT',
+    active: true,
+    contractSize: 0.001,
+    precision: { amount: 1, price: 0.1 },
+    limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+  };
+
+  it('preserves existing TP/SL orders when the stop-order book fetch fails (does not wipe the chart)', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [kucoinMarket],
+      // The chart full-replaces store.orders with fetchOrders(); seed it with a
+      // WS-delivered SL alongside a limit, as it would be on a live chart.
+      orders: [
+        {
+          id: 'limit-1',
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 60000,
+          amount: 0.001,
+          remaining: 0.001,
+          status: OrderStatus.Open,
+        } as any,
+        {
+          id: 'sl-1',
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 50000,
+          amount: 0.001,
+          remaining: 0.001,
+          status: OrderStatus.Open,
+        } as any,
+      ],
+    });
+
+    // Normal book (/api/v1/orders) succeeds; stop book (/api/v1/stopOrders) FAILS.
+    const get = vi.fn((endpoint: string) => {
+      if (endpoint === ENDPOINTS.ORDERS) {
+        return Promise.resolve({
+          data: {
+            code: '200000',
+            data: {
+              items: [
+                {
+                  id: 'limit-1',
+                  symbol: 'XBTUSDTM',
+                  type: 'limit',
+                  side: 'buy',
+                  price: '60000',
+                  size: 1,
+                  filledSize: '0',
+                  stop: '',
+                  status: 'open',
+                },
+              ],
+            },
+          },
+        });
+      }
+      if (endpoint === ENDPOINTS.ALGO_ORDERS) {
+        return Promise.resolve({ data: { code: '400100', msg: 'rate limited' } });
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    });
+    exchange.xhr = { get } as any;
+
+    const ids = (await exchange.fetchOrders()).map((o) => o.id);
+    // Limit refreshed from the working book; the SL is PRESERVED despite the
+    // stop-book failure (previously it was wiped → vanished from the chart).
+    expect(ids).toContain('limit-1');
+    expect(ids).toContain('sl-1');
+  });
+
+  it('preserves existing limit orders when the normal-order book fetch fails', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [kucoinMarket],
+      orders: [
+        {
+          id: 'limit-1',
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 60000,
+          amount: 0.001,
+          remaining: 0.001,
+          status: OrderStatus.Open,
+        } as any,
+      ],
+    });
+
+    // Normal book FAILS; stop book succeeds (returns a fresh SL).
+    const get = vi.fn((endpoint: string) => {
+      if (endpoint === ENDPOINTS.ORDERS) {
+        return Promise.resolve({ data: { code: '400100', msg: 'rate limited' } });
+      }
+      if (endpoint === ENDPOINTS.ALGO_ORDERS) {
+        return Promise.resolve({
+          data: {
+            code: '200000',
+            data: {
+              items: [
+                {
+                  id: 'sl-1',
+                  symbol: 'XBTUSDTM',
+                  type: 'stop',
+                  side: 'sell',
+                  stop: 'down',
+                  stopPrice: '50000',
+                  size: 1,
+                  filledSize: '0',
+                  status: 'open',
+                },
+              ],
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    });
+    exchange.xhr = { get } as any;
+
+    const ids = (await exchange.fetchOrders()).map((o) => o.id);
+    expect(ids).toContain('limit-1'); // preserved despite normal-book failure
+    expect(ids).toContain('sl-1'); // refreshed from the working stop book
+  });
+
   it('sends post-only via the postOnly boolean, not an invalid timeInForce', async () => {
     const { exchange, store } = makeExchange();
     store.update({

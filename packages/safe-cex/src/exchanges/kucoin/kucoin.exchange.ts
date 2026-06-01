@@ -653,15 +653,37 @@ export class KucoinExchange extends BaseExchange {
     return tickers;
   };
 
-  fetchOrders = async () => {
+  fetchOrders = async (): Promise<Order[]> => {
+    // KuCoin serves orders from TWO books: /api/v1/orders (limit/market/
+    // conditional) and /api/v1/stopOrders (untriggered TP/SL). The tick loop
+    // FULL-REPLACES store.orders with this combined result every poll, and each
+    // book is fetched independently and can fail on its own (rate limit / tunnel
+    // hiccup). The sub-fetchers now signal failure with `null` (vs `[]` for a
+    // genuinely empty book).
+    //
+    // CRITICAL: on a book's failure we PRESERVE the existing store orders of
+    // that category instead of dropping them. Previously a failed stop-book
+    // fetch returned `[]`, so the full-replace wiped EVERY TP/SL line off the
+    // chart while limits (from the working normal book) kept rendering — the
+    // reported "limit orders show but dragged TP/SL don't", with no error toast.
+    // The WS stream (advancedOrders) only delivers a stop once, so once the tick
+    // wiped it there was nothing to re-add it. Preserving the category keeps the
+    // WS-delivered stop alive; the next successful poll refreshes it.
     const normalOrders = await this.fetchNormalOrders();
-    const algoOrders = await this.fetchAlgoOrders();
-    const tslOrders = await this.fetchTrailingStopOrders();
+    const stopOrders = await this.fetchAlgoOrders();
 
-    return [...normalOrders, ...algoOrders, ...tslOrders];
+    const isStopType = (o: Order) =>
+      o.type === OrderType.StopLoss || o.type === OrderType.TakeProfit || o.type === OrderType.TrailingStopLoss;
+
+    const normalPart = normalOrders ?? this.store.orders.filter((o) => !isStopType(o));
+    const stopPart = stopOrders ?? this.store.orders.filter(isStopType);
+
+    return [...normalPart, ...stopPart];
   };
 
-  fetchNormalOrders = async () => {
+  // Returns `null` on FAILURE so fetchOrders can preserve the category; `[]`
+  // only for a genuinely empty book.
+  fetchNormalOrders = async (): Promise<Order[] | null> => {
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ORDERS, {
         params: {
@@ -671,7 +693,7 @@ export class KucoinExchange extends BaseExchange {
 
       if (data.code !== '200000') {
         this.emitAndLogError(data.msg || 'Failed to fetch orders');
-        return [];
+        return null;
       }
 
       if (!Array.isArray(data.data.items)) {
@@ -681,11 +703,17 @@ export class KucoinExchange extends BaseExchange {
       return data.data.items.flatMap(this.mapOrder);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return [];
+      return null;
     }
   };
 
-  fetchAlgoOrders = async () => {
+  // /api/v1/stopOrders returns every untriggered stop — TP/SL AND trailing — and
+  // mapOrder classifies each by type, so this single call covers what a separate
+  // trailing fetch used to re-request from the same endpoint (and double-count).
+  // Returns `null` on failure (see fetchOrders preservation). KuCoin trailing-stop
+  // PLACEMENT throws as unsupported, so trailing rows are effectively never
+  // present, but mapping them here is free and correct.
+  fetchAlgoOrders = async (): Promise<Order[] | null> => {
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ALGO_ORDERS, {
         params: {
@@ -695,7 +723,7 @@ export class KucoinExchange extends BaseExchange {
 
       if (data.code !== '200000') {
         this.emitAndLogError(data.msg || 'Failed to fetch algo orders');
-        return [];
+        return null;
       }
 
       if (!Array.isArray(data.data.items)) {
@@ -705,39 +733,7 @@ export class KucoinExchange extends BaseExchange {
       return data.data.items.flatMap(this.mapOrder);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return [];
-    }
-  };
-
-  fetchTrailingStopOrders = async () => {
-    try {
-      // KuCoin may not have a specific filter for trailing stops
-      // Fetch all active stop orders and filter by order type
-      const { data } = await this.xhr.get(ENDPOINTS.ALGO_ORDERS, {
-        params: {
-          status: 'active',
-        },
-      });
-
-      if (data.code !== '200000') {
-        this.emitAndLogError(data.msg || 'Failed to fetch trailing stop orders');
-        return [];
-      }
-
-      if (!Array.isArray(data.data.items)) {
-        return [];
-      }
-
-      // Filter for trailing stop orders based on order properties
-      const trailingStops = data.data.items.filter((order: any) => {
-        // Check if it's a trailing stop based on order properties
-        return order.stopType === 'trailing' || order.orderType === 'trailing';
-      });
-
-      return trailingStops.flatMap(this.mapOrder);
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return [];
+      return null;
     }
   };
 
