@@ -67,6 +67,10 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   chmod +x $OUTPUT
 done
 
+# Bun compile can leave intermediate JS output next to the compiled binaries.
+# Those files are not release artifacts and should never be uploaded.
+rm -f "$DIST_DIR"/index.js "$DIST_DIR"/index.js.map
+
 bash ./scripts/check-release-artifacts.sh
 
 echo ""
