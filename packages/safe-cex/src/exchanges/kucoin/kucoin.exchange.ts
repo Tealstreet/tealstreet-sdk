@@ -50,13 +50,17 @@ import {
   TIME_IN_FORCE,
 } from './kucoin.types';
 import { KucoinPrivateWebsocket } from './kucoin.ws-private';
-import { KucoinPublicWebsocket } from './kucoin.ws-public';
+import { createKucoinSnapshotWebsockets, KucoinPublicWebsocket } from './kucoin.ws-public';
 
 export class KucoinExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
 
+  // 'detail' socket: orderbook + candles + the viewed symbol's bid/ask + mark.
   publicWebsocket: KucoinPublicWebsocket;
+  // 'snapshot' sockets: bulk last/24h%/funding/volume sharded across the ~600
+  // markets, since KuCoin caps each connection at 400 topic subscriptions.
+  snapshotWebsockets: KucoinPublicWebsocket[] = [];
   privateWebsocket: KucoinPrivateWebsocket;
 
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
@@ -70,7 +74,7 @@ export class KucoinExchange extends BaseExchange {
     this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 3 });
     this.unlimitedXHR = createAPI(opts, this);
 
-    this.publicWebsocket = new KucoinPublicWebsocket(this);
+    this.publicWebsocket = new KucoinPublicWebsocket(this, { role: 'detail' });
     this.privateWebsocket = new KucoinPrivateWebsocket(this);
   }
 
@@ -168,6 +172,8 @@ export class KucoinExchange extends BaseExchange {
   dispose = () => {
     super.dispose();
     this.publicWebsocket.dispose();
+    this.snapshotWebsockets.forEach((ws) => ws.dispose());
+    this.snapshotWebsockets = [];
     this.privateWebsocket.dispose();
   };
 
@@ -198,8 +204,13 @@ export class KucoinExchange extends BaseExchange {
 
         this.log(`Loaded ${tickers.length} KuCoin Futures tickers`);
 
-        // Connect to WebSocket streams for real-time data
+        // Connect to WebSocket streams for real-time data. The detail socket
+        // handles orderbook/candles/active-ticker; the snapshot pool bulk-feeds
+        // last/24h%/funding/volume for every market, sharded under the 400-topic
+        // per-connection cap.
         this.publicWebsocket.connectAndSubscribe();
+        this.snapshotWebsockets = createKucoinSnapshotWebsockets(this, this.store.markets.length);
+        this.snapshotWebsockets.forEach((ws) => ws.connectAndSubscribe());
       }
 
       const publicDataOnly = this.isPublicDataOnly;

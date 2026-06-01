@@ -13,27 +13,42 @@ type MessageHandlers = {
   [topic: string]: Array<(json: Data) => void>;
 };
 
-type SubscribedTopics = {
-  [id: string]: { [instId: string]: number };
-};
+// KuCoin closes the socket if a SESSION exceeds 400 topic subscriptions
+// ("exceed max subscription count limitation of 400 per session"). With ~600
+// USDT markets, even one ticker channel for every symbol overflows one
+// connection — so the public feed is a small POOL of sockets (like
+// bitget/bitunix), each staying under the cap and differing only by ROLE:
+//   • 'detail'   — orderbook + candles + the actively-viewed symbol's bid/ask +
+//     mark/index, all on-demand (a user only views a handful at once).
+//   • 'snapshot' — bulk-subscribes /contractMarket/snapshot (last / 24h% /
+//     funding / volume) for an interleaved shard of all symbols, giving the
+//     screener live data for every market.
+// All sockets share one store through the handlers; see CLAUDE.md "400-topic
+// per-connection limit".
+const MAX_SNAPSHOT_SYMBOLS_PER_CONNECTION = 380; // < 400, leaves room for ack/control frames
+const SNAPSHOT_CHANNEL = '/contractMarket/snapshot';
+// Per-viewed-symbol channels carried by the detail socket alongside the orderbook.
+const ACTIVE_DETAIL_TICKER_CHANNELS = ['/contractMarket/tickerV2', '/contract/instrument'];
+
+export type KucoinPublicRole = 'detail' | 'snapshot';
 
 export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
-  topics: SubscribedTopics = {};
   messageHandlers: MessageHandlers = {};
   token: string | null = null;
   socketEndpoint: string | null = null;
+  private role: KucoinPublicRole;
+  private shardIndex: number;
+  private shardCount: number;
+
+  constructor(parent: KucoinExchange, opts?: { role?: KucoinPublicRole; shardIndex?: number; shardCount?: number }) {
+    super(parent);
+    this.role = opts?.role ?? 'detail';
+    this.shardIndex = opts?.shardIndex ?? 0;
+    this.shardCount = opts?.shardCount ?? 1;
+  }
 
   connectAndSubscribe = async () => {
     if (!this.isDisposed) {
-      // Set up ticker topics for all available markets
-      this.topics.ticker = this.parent.store.markets.reduce(
-        (acc, m) => ({
-          ...acc,
-          [m.id || this.parent.toApiSymbol(m.symbol)]: 1,
-        }),
-        {},
-      );
-
       try {
         // Get WebSocket token
         const { data } = await this.parent.xhr.post(ENDPOINTS.GET_PUBLIC_WS_TOKEN);
@@ -83,18 +98,16 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
   };
 
   private onMarketsChanged = ({ added }: { added: Array<{ id?: string; symbol: string }> }) => {
-    if (added.length === 0 || !this.ws || this.isDisposed) return;
-    if (!this.isConnected) return;
-
-    // Add new symbols to tracked topics
-    for (const m of added) {
-      if (!this.topics.ticker) this.topics.ticker = {};
-      this.topics.ticker[m.id || this.parent.toApiSymbol(m.symbol)] = 1;
-    }
-
-    // Subscribe to just the new symbols
-    const newSymbols = added.map((m) => m.id || this.parent.toApiSymbol(m.symbol));
-    this.subscribeTopics('tickerV2', newSymbols);
+    if (added.length === 0 || !this.ws || this.isDisposed || !this.isConnected) return;
+    // Only snapshot sockets carry the bulk feed; subscribe the newly-added
+    // symbols that fall in THIS socket's interleaved shard. The detail socket
+    // adds nothing here (it is purely on-demand).
+    if (this.role !== 'snapshot') return;
+    const owned = new Set(this.snapshotShardSymbols());
+    const newSymbols = added
+      .map((m) => m.id || this.parent.toApiSymbol(m.symbol))
+      .filter((s): s is string => Boolean(s) && owned.has(s));
+    if (newSymbols.length) this.sendChannelOp('subscribe', [SNAPSHOT_CHANNEL], newSymbols);
   };
 
   ping = () => {
@@ -106,21 +119,52 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
   };
 
   subscribe = () => {
-    const tickerSymbols = Object.keys(this.topics.ticker || {});
-    this.subscribeTopics('tickerV2', tickerSymbols);
+    if (this.role === 'snapshot') {
+      // Bulk snapshot (last / 24h% / funding / volume) for this socket's shard
+      // of all markets — gives the screener live data for every symbol.
+      this.sendChannelOp('subscribe', [SNAPSHOT_CHANNEL], this.snapshotShardSymbols());
+    }
+    // The 'detail' socket subscribes nothing up front: orderbook, candles and
+    // the viewed symbol's bid/ask + mark/index are added on demand (listen*).
   };
 
-  private subscribeTopics = (channel: 'tickerV2', symbols: string[]) => {
-    for (const symbol of symbols) {
-      this.send(
-        JSON.stringify({
-          id: Date.now(),
-          type: 'subscribe',
-          topic: `/contractMarket/${channel}:${symbol}`,
-          privateChannel: false,
-          response: true,
-        }),
-      );
+  // Interleaved (index % shardCount) shard of all market api-symbols owned by
+  // this snapshot socket — balances load across sockets regardless of order.
+  private snapshotShardSymbols = (): string[] => {
+    const ids = this.parent.store.markets
+      .map((m) => m.id || this.parent.toApiSymbol(m.symbol))
+      .filter((s): s is string => Boolean(s));
+    return ids.filter((_, i) => i % this.shardCount === this.shardIndex);
+  };
+
+  // Subscribe/unsubscribe the viewed symbol's detail ticker channels (bid/ask +
+  // mark/index). Called from listenOrderBook on the 'detail' socket. snapshot
+  // (last/24h%/funding/volume) for the symbol already arrives on a snapshot
+  // socket, so it is not duplicated here.
+  subscribeActiveTicker = (apiSymbol: string) => {
+    if (apiSymbol && !this.isDisposed) this.sendChannelOp('subscribe', ACTIVE_DETAIL_TICKER_CHANNELS, [apiSymbol]);
+  };
+
+  unsubscribeActiveTicker = (apiSymbol: string) => {
+    if (apiSymbol && !this.isDisposed) this.sendChannelOp('unsubscribe', ACTIVE_DETAIL_TICKER_CHANNELS, [apiSymbol]);
+  };
+
+  // Batched (≤100 symbols/frame, KuCoin's per-frame cap) sub/unsub across channels.
+  private sendChannelOp = (type: 'subscribe' | 'unsubscribe', channels: string[], symbols: string[]) => {
+    for (let i = 0; i < symbols.length; i += 100) {
+      const chunk = symbols.slice(i, i + 100).join(',');
+      if (!chunk) continue;
+      for (const channel of channels) {
+        this.send(
+          JSON.stringify({
+            id: Date.now(),
+            type,
+            topic: `${channel}:${chunk}`,
+            privateChannel: false,
+            response: false,
+          }),
+        );
+      }
     }
   };
 
@@ -136,10 +180,23 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
         return;
       }
 
-      // Handle ticker updates
-      if (json.topic && json.topic.startsWith('/contractMarket/ticker')) {
+      // Ticker family: tickerV2 (best bid/ask), snapshot.24h (last / 24h% /
+      // funding / volume), instrument (mark / index). Disjoint fields → route
+      // each to its own partial-update handler. tickerV2 must be matched before
+      // any '/contractMarket/ticker' prefix check.
+      if (json.topic && json.topic.startsWith('/contractMarket/tickerV2')) {
         this.recordMessageHandlerStats('ticker');
-        this.handleTickerSnapshot(json);
+        this.handleTickerV2(json);
+        return;
+      }
+      if (json.topic && json.topic.startsWith('/contractMarket/snapshot')) {
+        this.recordMessageHandlerStats('snapshot');
+        this.handleSnapshot(json);
+        return;
+      }
+      if (json.topic && json.topic.startsWith('/contract/instrument')) {
+        this.recordMessageHandlerStats('instrument');
+        this.handleInstrument(json);
         return;
       }
 
@@ -177,29 +234,51 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     }
   };
 
-  handleTickerSnapshot = (json: Record<string, any>) => {
+  // KuCoin splits ticker data across THREE channels with disjoint fields, so
+  // each handler must update ONLY the fields its channel actually carries —
+  // mapping absent fields (the old single handler did) zeroes good data.
+  private tickerForApiSymbol = (apiSymbol?: string): Writable<Ticker> | undefined => {
+    if (!apiSymbol) return undefined;
+    return this.parent.store.tickersBySymbol[this.parent.toInternalSymbol(apiSymbol)];
+  };
+
+  // /contractMarket/tickerV2 — best bid/ask only.
+  handleTickerV2 = (json: Record<string, any>) => {
     const data = json.data;
-    if (!data || !data.symbol) return;
+    const ticker = this.tickerForApiSymbol(data?.symbol);
+    if (!ticker) return;
+    this.parent.store.updateTicker(ticker, {
+      bid: parseFloat(data.bestBidPrice || ticker.bid || '0'),
+      ask: parseFloat(data.bestAskPrice || ticker.ask || '0'),
+    });
+  };
 
-    const symbol = this.parent.toInternalSymbol(data.symbol);
-    // Use O(1) hashmap lookup instead of O(n) find
-    const ticker = this.parent.store.tickersBySymbol[symbol];
+  // /contractMarket/snapshot (subject snapshot.24h) — last price, 24h change,
+  // funding rate, base + quote volume.
+  handleSnapshot = (json: Record<string, any>) => {
+    const data = json.data;
+    const ticker = this.tickerForApiSymbol(data?.symbol);
+    if (!ticker) return;
+    const update: Partial<Writable<Ticker>> = {};
+    if (data.lastPrice != null) update.last = parseFloat(data.lastPrice);
+    if (data.priceChgPct != null) update.percentage = parseFloat(data.priceChgPct) * 100;
+    if (data.fundingRate != null) update.fundingRate = parseFloat(data.fundingRate);
+    if (data.volume != null) update.volume = parseFloat(data.volume);
+    if (data.turnover != null) update.quoteVolume = parseFloat(data.turnover);
+    if (Object.keys(update).length) this.parent.store.updateTicker(ticker, update);
+  };
 
-    if (ticker) {
-      const update: Partial<Writable<Ticker>> = {
-        bid: parseFloat(data.bestBidPrice || '0'),
-        ask: parseFloat(data.bestAskPrice || '0'),
-        last: parseFloat(data.lastPrice || '0'),
-        index: parseFloat(data.indexPrice || '0'),
-        percentage: parseFloat(data.priceChangePercent || '0') * 100,
-        fundingRate: parseFloat(data.fundingRate || '0'),
-        fundingTime: parseFloat(data.nextFundingTime || '0'),
-        volume: parseFloat(data.volume24h || '0'),
-        quoteVolume: parseFloat(data.turnover24h || '0'),
-      };
-
-      this.parent.store.updateTicker(ticker, update);
-    }
+  // /contract/instrument (subject mark.index.price) — mark + index price. The
+  // payload has no symbol field, so resolve it from the topic suffix.
+  handleInstrument = (json: Record<string, any>) => {
+    const data = json.data;
+    if (!data) return;
+    const ticker = this.tickerForApiSymbol((json.topic || '').split(':')[1]);
+    if (!ticker) return;
+    const update: Partial<Writable<Ticker>> = {};
+    if (data.markPrice != null) update.mark = parseFloat(data.markPrice);
+    if (data.indexPrice != null) update.index = parseFloat(data.indexPrice);
+    if (Object.keys(update).length) this.parent.store.updateTicker(ticker, update);
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
@@ -409,6 +488,10 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
           };
 
           this.send(JSON.stringify(payload));
+          // The viewed symbol may sit outside any snapshot shard's bid/ask scope
+          // (snapshot has no bid/ask) and has no mark/index feed otherwise, so
+          // pull its live bid/ask + mark/index here on the detail socket.
+          this.subscribeActiveTicker(apiSymbol);
           void fetchSnapshot();
         }
       } else {
@@ -441,7 +524,22 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
         };
 
         this.send(JSON.stringify(payload));
+        this.unsubscribeActiveTicker(apiSymbol);
       }
     };
   };
 }
+
+// Build the snapshot-socket pool, sharded so each connection stays under
+// KuCoin's 400-topic-per-session cap. One socket for ≤380 markets, two for
+// ≤760, etc. The 'detail' socket is created separately by the exchange.
+export const createKucoinSnapshotWebsockets = (
+  parent: KucoinExchange,
+  symbolCount: number,
+): KucoinPublicWebsocket[] => {
+  const shardCount = Math.max(1, Math.ceil(symbolCount / MAX_SNAPSHOT_SYMBOLS_PER_CONNECTION));
+  return Array.from(
+    { length: shardCount },
+    (_, shardIndex) => new KucoinPublicWebsocket(parent, { role: 'snapshot', shardIndex, shardCount }),
+  );
+};

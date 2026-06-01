@@ -216,29 +216,47 @@ Reconnection is handled by `BaseWebSocket`:
 - On reconnect, public WS calls `emitWsReconnected()`
 - On reconnect, private WS calls `parent.fetchAndSetPrivateSnapshot()` to resync state (`kucoin.ws-private.ts:57-58`)
 
-### Public Channels
+### Public Channels — multi-socket pool + per-channel ticker mapping
 
-**Subscription format**:
+**KuCoin caps subscriptions at 400 topics PER CONNECTION** (the socket is closed
+with `"exceed max subscription count limitation of 400 per session"`). There are
+~600 USDT markets, so a single connection cannot carry every symbol's ticker AND
+the on-demand orderbook/candle subscriptions. The public feed is therefore a
+small **pool of sockets** (the bitget/bitunix pattern), each a
+`KucoinPublicWebsocket` differing only by `role`:
 
-```json
-{
-  "id": "<timestamp>",
-  "type": "subscribe",
-  "topic": "/contractMarket/ticker:<symbol1>,<symbol2>,...",
-  "privateChannel": false,
-  "response": true
-}
-```
+| Role       | Count                                                                                      | Subscribes                                                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `detail`   | 1 (`publicWebsocket`)                                                                      | on-demand only: `level2` (orderbook), `limitCandle` (candles), and the viewed symbol's `tickerV2` + `instrument` (bid/ask + mark/index)                         |
+| `snapshot` | `ceil(numSymbols / 380)` (`snapshotWebsockets`, built by `createKucoinSnapshotWebsockets`) | bulk `/contractMarket/snapshot` for an **interleaved shard** (`i % shardCount === shardIndex`) of all markets — last / 24h% / funding / volume for the screener |
 
-| Topic Pattern                            | Description                               | Subscription   |
-| ---------------------------------------- | ----------------------------------------- | -------------- |
-| `/contractMarket/ticker:<symbols>`       | Ticker data (price, bid/ask, funding)     | All markets    |
-| `/contractMarket/candle<interval>:<sym>` | Kline updates (on demand)                 | Per instrument |
-| `/contractMarket/level2:<symbol>`        | Order book depth (snapshot + incremental) | Per instrument |
+All sockets share one store via the ticker handlers; only what each SUBSCRIBES
+differs. `listenOrderBook`/`listenOHLCV` always run on the detail socket.
 
-Tickers are subscribed on connect as a comma-separated list of all market symbols. Candle and orderbook channels are subscribed on demand.
+**Ticker is split across THREE channels with DISJOINT fields** — each must be
+routed to its own partial-update handler, or one channel zeroes another's
+fields (past bug: subscribing only `tickerV2` but mapping `lastPrice`/`fundingRate`
+etc. zeroed `last`/funding/%/volume → price showed 0):
 
-**Message routing** (`kucoin.ws-public.ts:109-157`): All messages are JSON-parsed. Routing is based on the `topic` field prefix (`startsWith` checks), with `type` field used for pong detection.
+| Topic Pattern                             | Subject            | Fields it carries                                                                 | Handler            |
+| ----------------------------------------- | ------------------ | --------------------------------------------------------------------------------- | ------------------ |
+| `/contractMarket/tickerV2:<symbols>`      | `tickerV2`         | `bestBidPrice` / `bestAskPrice` (bid/ask ONLY)                                    | `handleTickerV2`   |
+| `/contractMarket/snapshot:<symbols>`      | `snapshot.24h`     | `lastPrice`, `priceChgPct` (×100→percentage), `fundingRate`, `volume`, `turnover` | `handleSnapshot`   |
+| `/contract/instrument:<symbols>`          | `mark.index.price` | `markPrice`, `indexPrice` (NO symbol in payload — read it from the topic)         | `handleInstrument` |
+| `/contractMarket/limitCandle:<sym>_<int>` | —                  | candle (on demand)                                                                | `listenOHLCV`      |
+| `/contractMarket/level2:<symbol>`         | `level2`           | orderbook delta (on demand)                                                       | `listenOrderBook`  |
+
+Subscribe frames batch ≤100 comma-separated symbols (KuCoin's per-frame cap),
+which also avoids the per-symbol burst that closed the socket (1006). REST
+`fetchTickers` (`/api/v1/allTickers`) only returns price/bid/ask (no
+funding/24h%/volume/mark) — those come only from the snapshot/instrument WS.
+
+**Known follow-up:** the screener gets live bid/ask only for _viewed_ symbols
+(snapshot has no bid/ask). Adding a second sharded channel (tickerV2) for all
+symbols would need more pool connections.
+
+**Message routing** (`onMessage`): JSON-parsed; routed by `topic` prefix
+(`tickerV2` matched before any `ticker` prefix), `type` for pong.
 
 ### Private Channels
 

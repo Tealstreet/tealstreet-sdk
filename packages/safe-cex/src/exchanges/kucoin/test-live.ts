@@ -16,6 +16,7 @@ import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { KucoinExchange } from './kucoin.exchange';
+import { createKucoinSnapshotWebsockets } from './kucoin.ws-public';
 
 const PHASE = process.argv[2] || 'rest';
 const TRANSPORT = (process.env.KC_TRANSPORT || 'direct') as 'direct' | 'tunnel';
@@ -154,6 +155,39 @@ async function main() {
     let candleUpdates = 0;
     let lastOb: any = null;
     let lastCandle: any = null;
+
+    await exchange.publicWebsocket.connectAndSubscribe();
+    // Spin up the snapshot-socket pool exactly like start() does (bulk
+    // last/24h%/funding/volume, sharded under the 400-topic cap).
+    exchange.snapshotWebsockets = createKucoinSnapshotWebsockets(exchange, store.markets.length);
+    exchange.snapshotWebsockets.forEach((ws) => ws.connectAndSubscribe());
+    log(`snapshot pool size: ${exchange.snapshotWebsockets.length} connection(s)`);
+    await exchange.privateWebsocket.connectAndSubscribe();
+    // Wait for the public socket to actually be OPEN before per-symbol subs,
+    // else listenOrderBook/listenOHLCV send their subscribe frame to a closed
+    // socket (mirrors the app, where these are called after start()).
+    await pollUntil(
+      async () => (exchange.publicWebsocket as any).ws?.readyState,
+      (rs) => rs === 1,
+      4000,
+      250,
+    );
+    // Raw frame counters straight off the socket — distinguishes "subscribe
+    // never took effect" (raw=0) from "frames arrive but handler drops them".
+    let rawL2 = 0;
+    let rawCandle = 0;
+    (exchange.publicWebsocket as any).ws?.addEventListener('message', (e: any) => {
+      const t = (() => {
+        try {
+          return JSON.parse(e.data)?.topic || '';
+        } catch {
+          return '';
+        }
+      })();
+      if (t.includes('level2')) rawL2++;
+      if (t.includes('limitCandle')) rawCandle++;
+    });
+
     exchange.listenOrderBook(btc.symbol, (ob) => {
       obUpdates++;
       lastOb = ob;
@@ -163,18 +197,31 @@ async function main() {
       lastCandle = c;
     });
 
-    await exchange.publicWebsocket.connectAndSubscribe();
-    await exchange.privateWebsocket.connectAndSubscribe();
-
     // sample tickers over time to confirm live updates
     const tick = () => store.tickersBySymbol[btc.symbol];
     const t0 = tick();
     log('t0 ticker bid/ask/last:', t0 && [t0.bid, t0.ask, t0.last]);
-    await sleep(8000);
+    await sleep(10000);
     const t1 = tick();
-    log('t1 ticker bid/ask/last:', t1 && [t1.bid, t1.ask, t1.last]);
-    log('orderbook updates:', obUpdates, '| top bid/ask:', lastOb && [lastOb.bids?.[0], lastOb.asks?.[0]]);
-    log('candle updates:', candleUpdates, '| last candle:', lastCandle);
+    log(
+      't1 ticker FULL:',
+      t1 && {
+        bid: t1.bid,
+        ask: t1.ask,
+        last: t1.last,
+        mark: t1.mark,
+        index: t1.index,
+        percentage: t1.percentage,
+        fundingRate: t1.fundingRate,
+        volume: t1.volume,
+        quoteVolume: t1.quoteVolume,
+      },
+    );
+    log(
+      `orderbook: raw level2 frames=${rawL2} | forwarded callbacks=${obUpdates} | top:`,
+      lastOb && [lastOb.bids?.[0], lastOb.asks?.[0]],
+    );
+    log(`candle: raw limitCandle frames=${rawCandle} | forwarded callbacks=${candleUpdates} | last:`, lastCandle);
     log('private WS readyState:', (exchange.privateWebsocket as any).ws?.readyState);
     log('public WS readyState:', (exchange.publicWebsocket as any).ws?.readyState);
 

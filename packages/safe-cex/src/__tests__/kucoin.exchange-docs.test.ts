@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAPI } from '../exchanges/kucoin/kucoin.api';
 import { KucoinExchange } from '../exchanges/kucoin/kucoin.exchange';
 import { ENDPOINTS } from '../exchanges/kucoin/kucoin.types';
+import { KucoinPublicWebsocket } from '../exchanges/kucoin/kucoin.ws-public';
 import { DefaultStore } from '../store/store.base';
 import {
   MarginType,
@@ -607,7 +608,7 @@ describe('KucoinExchange current futures docs compatibility', () => {
     });
   });
 
-  it('uses current futures websocket topics with native symbols', () => {
+  it('snapshot socket bulk-subscribes its shard; detail socket is on-demand only', () => {
     const { exchange, store } = makeExchange();
     store.update({
       markets: [
@@ -622,23 +623,40 @@ describe('KucoinExchange current futures docs compatibility', () => {
         },
       ],
     });
-    const ws = exchange.publicWebsocket;
-    const mockSocket = createMockWs();
-    ws.ws = mockSocket;
-    ws.topics.ticker = { XBTUSDTM: 1 };
 
-    ws.subscribe();
-    const unsubscribe = ws.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
-    unsubscribe();
-
-    const payloads = mockSocket.send.mock.calls.map((call: any[]) => JSON.parse(String(call[0] || '{}')));
-    expect(payloads).toEqual(
+    // Snapshot socket: bulk last/24h%/funding/volume for its interleaved shard.
+    const snapshot = new KucoinPublicWebsocket(exchange, { role: 'snapshot', shardIndex: 0, shardCount: 1 });
+    const snapSocket = createMockWs();
+    snapshot.ws = snapSocket;
+    snapshot.subscribe();
+    const snapPayloads = snapSocket.send.mock.calls.map((c: any[]) => JSON.parse(String(c[0] || '{}')));
+    expect(snapPayloads).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/tickerV2:XBTUSDTM' }),
-        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/limitCandle:XBTUSDTM_1min' }),
-        expect.objectContaining({ type: 'unsubscribe', topic: '/contractMarket/limitCandle:XBTUSDTM_1min' }),
+        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/snapshot:XBTUSDTM' }),
       ]),
     );
+
+    // Detail socket: subscribes NOTHING in bulk (no snapshot fan-out), only
+    // candles + the viewed symbol's bid/ask + mark/index on demand.
+    const detail = exchange.publicWebsocket;
+    const detailSocket = createMockWs();
+    detail.ws = detailSocket;
+    detail.subscribe();
+    const unsubCandle = detail.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
+    unsubCandle();
+    detail.subscribeActiveTicker('XBTUSDTM'); // what listenOrderBook does for the viewed symbol
+
+    const detailPayloads = detailSocket.send.mock.calls.map((c: any[]) => JSON.parse(String(c[0] || '{}')));
+    expect(detailPayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/limitCandle:XBTUSDTM_1min' }),
+        expect.objectContaining({ type: 'unsubscribe', topic: '/contractMarket/limitCandle:XBTUSDTM_1min' }),
+        expect.objectContaining({ type: 'subscribe', topic: '/contractMarket/tickerV2:XBTUSDTM' }),
+        expect.objectContaining({ type: 'subscribe', topic: '/contract/instrument:XBTUSDTM' }),
+      ]),
+    );
+    // The detail socket must NOT bulk-subscribe snapshot for the whole market list.
+    expect(detailPayloads.some((p: any) => String(p.topic).startsWith('/contractMarket/snapshot'))).toBe(false);
   });
 
   it('parses current futures websocket ticker and candle payloads into internal symbols', () => {
@@ -665,7 +683,7 @@ describe('KucoinExchange current futures docs compatibility', () => {
     const candleCallback = vi.fn();
 
     ws.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, candleCallback);
-    ws.handleTickerSnapshot({
+    ws.handleTickerV2({
       data: {
         symbol: 'XBTUSDTM',
         bestBidPrice: '86454.5',
@@ -694,6 +712,86 @@ describe('KucoinExchange current futures docs compatibility', () => {
       high: 90639.1,
       low: 90638.2,
       volume: 21,
+    });
+  });
+
+  it('updates last/24h%/funding/volume from the snapshot channel WITHOUT zeroing bid/ask', () => {
+    const { exchange, store } = makeExchange();
+    const ticker = {
+      id: 'XBTUSDTM',
+      symbol: 'BTCUSDT',
+      bid: 86454.5,
+      ask: 86454.6,
+      last: 0,
+      mark: 0,
+      index: 0,
+      percentage: 0,
+      openInterest: 0,
+      fundingRate: 0,
+      fundingTime: 0,
+      volume: 0,
+      quoteVolume: 0,
+    };
+    store.update({ tickers: [ticker] });
+    const ws = exchange.publicWebsocket;
+    ws.ws = createMockWs();
+    const updateTicker = vi.spyOn(store, 'updateTicker');
+
+    // snapshot.24h carries last/funding/24h%/volume but NOT bid/ask — the
+    // update must omit bid/ask so the tickerV2 values survive.
+    ws.handleSnapshot({
+      data: {
+        symbol: 'XBTUSDTM',
+        lastPrice: 72175.4,
+        fundingRate: 0.000107,
+        priceChgPct: -0.0238,
+        volume: 2581.453,
+        turnover: 188909573.1256,
+      },
+    });
+
+    const update = updateTicker.mock.calls[0][1];
+    expect(update.last).toBe(72175.4);
+    expect(update.fundingRate).toBe(0.000107);
+    expect(update.percentage).toBeCloseTo(-2.38, 6); // priceChgPct(-0.0238) * 100
+    expect(update.volume).toBe(2581.453);
+    expect(update.quoteVolume).toBe(188909573.1256);
+    expect(update).not.toHaveProperty('bid');
+    expect(update).not.toHaveProperty('ask');
+  });
+
+  it('updates mark/index from the instrument channel, resolving symbol from the topic', () => {
+    const { exchange, store } = makeExchange();
+    const ticker = {
+      id: 'XBTUSDTM',
+      symbol: 'BTCUSDT',
+      bid: 0,
+      ask: 0,
+      last: 0,
+      mark: 0,
+      index: 0,
+      percentage: 0,
+      openInterest: 0,
+      fundingRate: 0,
+      fundingTime: 0,
+      volume: 0,
+      quoteVolume: 0,
+    };
+    store.update({ tickers: [ticker] });
+    const ws = exchange.publicWebsocket;
+    ws.ws = createMockWs();
+    const updateTicker = vi.spyOn(store, 'updateTicker');
+
+    // /contract/instrument data has no symbol field — it comes from the topic.
+    ws.handleInstrument({
+      topic: '/contract/instrument:XBTUSDTM',
+      subject: 'mark.index.price',
+      data: { markPrice: 72176.3, indexPrice: 72172.81, granularity: 1000 },
+    });
+
+    expect(updateTicker).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'BTCUSDT' }), {
+      mark: 72176.3,
+      index: 72172.81,
     });
   });
 
