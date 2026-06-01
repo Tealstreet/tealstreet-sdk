@@ -97,6 +97,15 @@ export class KucoinExchange extends BaseExchange {
     return this.store.marketsBySymbol[symbol]?.id || this.toKucoinSymbol(symbol);
   };
 
+  // KuCoin Futures reports sizes as integer CONTRACT counts; 1 contract =
+  // market.contractSize base units (e.g. XBTUSDTM = 0.001 BTC). The rest of the
+  // app expects position/order sizes in BASE units and `notional` in quote
+  // (USD), matching OKX/BitMEX/BloFin. Convert native↔base at the store
+  // boundary with this helper. Note: order PLACEMENT still takes native
+  // contracts (opts.amount, same as OKX) — only store OUTPUTS are base.
+  private contractSizeFor = (internalSymbol?: string) =>
+    (internalSymbol && this.store.marketsBySymbol[internalSymbol]?.contractSize) || 1;
+
   private parseMarginType = (marginMode?: unknown, crossMode?: unknown) => {
     const mode = String(marginMode || '').toUpperCase();
     if (mode === 'ISOLATED' || mode === 'FIXED') return MarginType.Isolated;
@@ -420,6 +429,9 @@ export class KucoinExchange extends BaseExchange {
 
         const symbol = this.toInternalSymbol(p.symbol);
         const price = parseFloat(p.markPrice || '0');
+        const contractSize = this.contractSizeFor(symbol);
+        const contractsNative = Math.abs(contracts);
+        const contractsBase = multiply(contractsNative, contractSize);
 
         // Determine position side
         let side: PositionSide;
@@ -442,13 +454,14 @@ export class KucoinExchange extends BaseExchange {
           symbol,
           side,
           entryPrice: parseFloat(p.avgEntryPrice || '0'),
-          notional: Math.abs(multiply(contracts, price)),
+          notional: Math.abs(multiply(contractsBase, price)),
           leverage: parseInt(p.leverage || '1'),
           unrealizedPnl: parseFloat(p.unrealisedPnl || '0'),
-          contracts: Math.abs(contracts),
+          contracts: contractsBase,
           liquidationPrice: parseFloat(p.liquidationPrice || '0'),
           positionMode,
           marginType,
+          extra: { contractsNative },
           info: p,
         };
 
@@ -869,7 +882,10 @@ export class KucoinExchange extends BaseExchange {
     }
 
     const payloads = await this.formatCreateOrder(opts);
-    return await this.placeOrderBatch(payloads, opts.stopLoss || opts.takeProfit ? ENDPOINTS.PLACE_ALGO_ORDER : ENDPOINTS.PLACE_ORDER);
+    return await this.placeOrderBatch(
+      payloads,
+      opts.stopLoss || opts.takeProfit ? ENDPOINTS.PLACE_ALGO_ORDER : ENDPOINTS.PLACE_ORDER,
+    );
   };
 
   formatCreateOrder = async (opts: PlaceOrderOpts) => {
@@ -1274,20 +1290,29 @@ export class KucoinExchange extends BaseExchange {
     const lastUpdate = rawTimestamp ? parseInt(`${rawTimestamp}`.slice(0, 13), 10) : virtualClock.getCurrentTimeMs();
     const rawOrderType = o.orderType || o.type;
 
-    // Basic order mapping
+    const symbol = this.toInternalSymbol(o.symbol) || o.symbol;
+    const contractSize = this.contractSizeFor(symbol);
+    const sizeNative = parseFloat(o.size || '0');
+    const filledNative = parseFloat(o.filledSize || '0');
+    const remainingNative = subtract(sizeNative, filledNative);
+
+    // Basic order mapping. KuCoin reports sizes as native contract counts;
+    // expose amount/filled/remaining in BASE units (see contractSizeFor), with
+    // the raw native remainder kept on `extra.remainingNative` (OKX pattern).
     const order: Writable<Order> = {
       id: o.id || o.orderId,
       status: ORDER_STATUS[o.status] || ORDER_STATUS.new,
-      symbol: this.toInternalSymbol(o.symbol) || o.symbol,
+      symbol,
       type: ORDER_TYPE[rawOrderType] || (rawOrderType === 'market' ? OrderType.Market : OrderType.Limit),
       side: o.side === 'buy' ? OrderSide.Buy : OrderSide.Sell,
       price: parseFloat(o.price || o.orderPrice || '0'),
-      amount: parseFloat(o.size || '0'),
-      filled: parseFloat(o.filledSize || '0'),
+      amount: multiply(sizeNative, contractSize),
+      filled: multiply(filledNative, contractSize),
       lastUpdate,
       reduceOnly: o.reduceOnly === true,
-      remaining: subtract(parseFloat(o.size || '0'), parseFloat(o.filledSize || '0')),
+      remaining: multiply(remainingNative, contractSize),
       timeInForce: TIME_IN_FORCE[o.timeInForce] || OrderTimeInForce.GoodTillCancel,
+      extra: { remainingNative },
       info: o,
     };
 
@@ -1449,11 +1474,14 @@ export class KucoinExchange extends BaseExchange {
 
     let infiniteStop = true;
     if (opts.amount !== 0) {
+      // opts.amount is native contracts; position.contracts is base units
+      // (see contractSizeFor) — compare in the same (base) unit.
+      const optsAmountBase = multiply(opts.amount, this.contractSizeFor(opts.symbol));
       const foundPosition = this.store.positions.find(
         (p) =>
           p.symbol === opts.symbol &&
           p.side === (opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-          p.contracts >= opts.amount,
+          p.contracts >= optsAmountBase,
       );
       if (foundPosition) {
         infiniteStop = false;

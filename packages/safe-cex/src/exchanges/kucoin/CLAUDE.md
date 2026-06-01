@@ -160,29 +160,29 @@ Key difference from other exchanges: Markets and tickers are fetched **sequentia
 
 Defined in `ENDPOINTS` object in `kucoin.types.ts`:
 
-| Constant                     | Path                                          | Method | Description                 |
-| ---------------------------- | --------------------------------------------- | ------ | --------------------------- |
-| `ACCOUNT` / `BALANCE`        | `/api/v1/account-overview`                    | GET    | Account info and balance    |
-| `MARKETS`                    | `/api/v1/contracts/active`                    | GET    | Active markets/contracts    |
-| `TICKERS`                    | `/api/v1/allTickers`                          | GET    | All ticker data             |
-| `POSITIONS` / `POSITIONS_V2` | `/api/v1/positions`                           | GET    | Open positions              |
-| `FETCH_SINGLE_ACCOUNT`       | `/api/v2/position`                            | GET    | Single position info        |
-| `SYMBOL_LEVERAGE`            | `/api/v1/position/risk/limit`                 | GET    | Leverage risk limits        |
-| `ORDERS`                     | `/api/v1/orders`                              | GET    | Open orders (status=active) |
-| `PLACE_ORDER`                | `/api/v1/orders`                              | POST   | Place order                 |
-| `CANCEL_ORDERS`              | `/api/v1/orders`                              | DELETE | Cancel single order (/{id}) |
-| `CANCEL_ALL_ORDERS`          | `/api/v3/orders`                              | DELETE | Cancel all orders           |
-| `BATCH_ORDERS`               | `/api/v1/orders/multi`                        | POST   | Batch order placement       |
-| `ALGO_ORDERS`                | `/api/v1/stopOrders`                          | GET    | Fetch algo/stop orders      |
-| `CANCEL_ALGO_ORDER`          | `/api/v1/stopOrders/{orderId}`                | DELETE | Cancel algo order           |
-| `PLACE_ALGO_ORDER`           | `/api/v1/st-orders`                           | POST   | Place algo order            |
-| `PLACE_TRAILING_STOP_ORDER`  | `/api/v1/stop-order`                          | POST   | Place trailing stop order   |
-| `KLINE`                      | `/api/v1/kline/query`                         | GET    | Kline/candlestick data      |
-| `SET_LEVERAGE`               | `/api/v2/changeCrossUserLeverage`             | POST   | Set cross leverage          |
-| `SET_POSITION_MODE`          | `/api/v2/position/switchPositionMode`         | POST   | Change position mode        |
-| `SET_MARGIN_MODE`            | `/api/v2/position/changeMarginMode`           | POST   | Change margin mode (v2)     |
-| `GET_PUBLIC_WS_TOKEN`        | `/api/v1/bullet-public`                       | POST   | Get public WS token         |
-| `GET_PRIVATE_WS_TOKEN`       | `/api/v1/bullet-private`                      | POST   | Get private WS token        |
+| Constant                     | Path                                  | Method | Description                 |
+| ---------------------------- | ------------------------------------- | ------ | --------------------------- |
+| `ACCOUNT` / `BALANCE`        | `/api/v1/account-overview`            | GET    | Account info and balance    |
+| `MARKETS`                    | `/api/v1/contracts/active`            | GET    | Active markets/contracts    |
+| `TICKERS`                    | `/api/v1/allTickers`                  | GET    | All ticker data             |
+| `POSITIONS` / `POSITIONS_V2` | `/api/v1/positions`                   | GET    | Open positions              |
+| `FETCH_SINGLE_ACCOUNT`       | `/api/v2/position`                    | GET    | Single position info        |
+| `SYMBOL_LEVERAGE`            | `/api/v1/position/risk/limit`         | GET    | Leverage risk limits        |
+| `ORDERS`                     | `/api/v1/orders`                      | GET    | Open orders (status=active) |
+| `PLACE_ORDER`                | `/api/v1/orders`                      | POST   | Place order                 |
+| `CANCEL_ORDERS`              | `/api/v1/orders`                      | DELETE | Cancel single order (/{id}) |
+| `CANCEL_ALL_ORDERS`          | `/api/v3/orders`                      | DELETE | Cancel all orders           |
+| `BATCH_ORDERS`               | `/api/v1/orders/multi`                | POST   | Batch order placement       |
+| `ALGO_ORDERS`                | `/api/v1/stopOrders`                  | GET    | Fetch algo/stop orders      |
+| `CANCEL_ALGO_ORDER`          | `/api/v1/stopOrders/{orderId}`        | DELETE | Cancel algo order           |
+| `PLACE_ALGO_ORDER`           | `/api/v1/st-orders`                   | POST   | Place algo order            |
+| `PLACE_TRAILING_STOP_ORDER`  | `/api/v1/stop-order`                  | POST   | Place trailing stop order   |
+| `KLINE`                      | `/api/v1/kline/query`                 | GET    | Kline/candlestick data      |
+| `SET_LEVERAGE`               | `/api/v2/changeCrossUserLeverage`     | POST   | Set cross leverage          |
+| `SET_POSITION_MODE`          | `/api/v2/position/switchPositionMode` | POST   | Change position mode        |
+| `SET_MARGIN_MODE`            | `/api/v2/position/changeMarginMode`   | POST   | Change margin mode (v2)     |
+| `GET_PUBLIC_WS_TOKEN`        | `/api/v1/bullet-public`               | POST   | Get public WS token         |
+| `GET_PRIVATE_WS_TOKEN`       | `/api/v1/bullet-private`              | POST   | Get private WS token        |
 
 ## WebSocket Implementation
 
@@ -249,14 +249,14 @@ Token obtained via `POST /api/v1/bullet-private`. Subscribe flow (`kucoin.ws-pri
 
 **Subscribed channels**:
 
-| Topic                               | Description             |
-| ----------------------------------- | ----------------------- |
-| `/contractMarket/tradeOrders`       | Order events            |
-| `/contractMarket/advancedOrders`    | Algo order events       |
-| `/contract/positionAll`             | Position updates        |
-| `/contractAccount/wallet`           | Account/balance updates |
-| `/contract/marginMode`              | Margin mode updates     |
-| `/contract/crossLeverage`           | Cross leverage updates  |
+| Topic                            | Description             |
+| -------------------------------- | ----------------------- |
+| `/contractMarket/tradeOrders`    | Order events            |
+| `/contractMarket/advancedOrders` | Algo order events       |
+| `/contract/positionAll`          | Position updates        |
+| `/contractAccount/wallet`        | Account/balance updates |
+| `/contract/marginMode`           | Margin mode updates     |
+| `/contract/crossLeverage`        | Cross leverage updates  |
 
 Each channel is subscribed individually with `privateChannel: true`.
 
@@ -435,12 +435,39 @@ All prices and amounts are rounded using `adjust()` from `safe-math.ts`:
 - `price = adjust(opts.price, pPrice)` where `pPrice` is `market.precision.price`
 - `amount = adjust(opts.amount, pAmount)` where `pAmount` is `market.precision.amount`
 
-### Position Contracts
+### Contract-size units: store outputs are BASE, order input is NATIVE
 
-Positions use raw contract quantities (not divided by contract value):
+**KuCoin Futures sizes are integer CONTRACT counts** (`currentQty` /
+`size` / `filledSize` / `matchSize`), where `1 contract = market.contractSize`
+base units (e.g. XBTUSDTM `multiplier = 0.001` → 1 contract = 0.001 BTC). The
+rest of the app (web `getPositionNativeSize` = `contracts / contractSize`,
+direct-USD `notional`, base-size columns) expects **position/order sizes in
+BASE units and `notional` in quote (USD)** — the OKX/BitMEX/BloFin convention.
 
-- `contracts = Math.abs(parseFloat(p.currentQty))` -- sign determines side
-- `notional = Math.abs(contracts * markPrice)`
+So everything that **reads** a size from KuCoin and writes it into the store
+must convert native→base via `contractSizeFor(internalSymbol)`:
+
+- `mapPosition`: `contracts = |currentQty| * contractSize` (base),
+  `notional = |currentQty| * contractSize * markPrice` (≈ exchange `markValue`),
+  `extra.contractsNative = |currentQty|`.
+- `mapOrder`: `amount/filled/remaining = nativeSize * contractSize`,
+  `extra.remainingNative = nativeRemaining`.
+- private-WS `fill`: `amount = matchSize * contractSize`.
+
+Order **placement is the opposite direction**: `opts.amount` is NATIVE
+contracts (the web size input is contract-primary when `contractSize !== 1`),
+so `formatCreateOrder` sends `size = adjust(opts.amount, lotSize)` **unchanged**
+— do NOT multiply order placement by `contractSize`. Any comparison that mixes
+`opts.amount` (native) with `position.contracts` (base) must convert one side
+(see `getOrderPlanTypeAndAmount` → `multiply(opts.amount, contractSizeFor(...))`).
+
+**Regression guard:** omitting `contractSize` here is a silent 1000× bug on
+XBTUSDTM — it inflates every USD/leverage/drawdown readout and makes the web
+close path (`contracts / contractSize`) over-close by 1/contractSize. Only
+masked in prod because KuCoin is dev-only (`enabled: false`). All `kucoin`
+markets are linear (metadata filters to `quote === apiMarginCoin` USDT), so the
+conversion is the simple linear `native * contractSize`; there is no inverse
+path here.
 
 ## Rate Limiting
 

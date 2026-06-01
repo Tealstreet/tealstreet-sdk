@@ -124,15 +124,18 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
 
     const eventType = rawOrder.type;
     const status = rawOrder.status;
-    const fillAmount = parseFloat(rawOrder.matchSize || rawOrder.filledSize || '0');
+    // KuCoin reports fill size in native contracts; emit in BASE units to match
+    // position.contracts / order.amount (see kucoin.exchange.ts contractSizeFor).
+    const fillAmountNative = parseFloat(rawOrder.matchSize || rawOrder.filledSize || '0');
+    const contractSize = this.parent.store.marketsBySymbol[parentOrder.symbol]?.contractSize || 1;
 
-    if ((eventType === 'match' || eventType === 'filled' || status === 'match') && fillAmount > 0) {
+    if ((eventType === 'match' || eventType === 'filled' || status === 'match') && fillAmountNative > 0) {
       this.emitter.emit('fill', {
         id: parentOrder.id,
         side: parentOrder.side,
         symbol: parentOrder.symbol,
         price: parseFloat(rawOrder.matchPrice || rawOrder.price || '0'),
-        amount: fillAmount,
+        amount: fillAmountNative * contractSize,
       });
     }
 
