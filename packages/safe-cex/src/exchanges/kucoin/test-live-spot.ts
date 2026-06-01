@@ -383,6 +383,145 @@ async function main() {
     log('USDT total:', finalBal.currencies?.USDT?.total, '| BTC total:', finalBal.currencies?.BTC?.total);
   }
 
+  if (PHASE === 'limit-tests') {
+    hr('LIMIT ORDER TESTS (spot) — resting place/cancel + immediately-filled limits');
+    const { btc } = await bootstrap();
+    const amount = 0.0001;
+
+    await exchange.publicWebsocket.connectAndSubscribe();
+    await exchange.privateWebsocket.connectAndSubscribe();
+    await pollUntil(
+      async () => (exchange.privateWebsocket as any).ws?.readyState,
+      (rs) => rs === 1,
+      6000,
+      250,
+    );
+
+    const frames: { step: string; topic: string; data: any }[] = [];
+    const fills: { step: string; e: any }[] = [];
+    let step = 'idle';
+    (exchange.privateWebsocket as any).ws?.addEventListener('message', (e: any) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (['welcome', 'pong', 'ack'].includes(m.type)) return;
+        frames.push({ step, topic: m.topic || m.subject, data: m.data });
+      } catch {
+        /* noop */
+      }
+    });
+    exchange.emitter.on('fill', (e: any) => fills.push({ step, e }));
+    const storeOrder = (id: string) => exchange.store.orders.find((o) => String(o.id) === id);
+    const liveTicker = () => store.tickersBySymbol[btc.symbol];
+
+    const runStep = async (name: string, fn: () => Promise<void>, waitMs = 4000) => {
+      step = name;
+      hr(`STEP ${name}`);
+      try {
+        await fn();
+      } catch (e: any) {
+        log(`  ⚠️ threw: ${e?.response?.data?.msg || e?.message}`);
+      }
+      await sleep(waitMs);
+      const fr = frames.filter((x) => x.step === name && `${x.topic}`.includes('tradeOrdersV2'));
+      log(`  order WS frames (${fr.length}):`);
+      fr.forEach((x) =>
+        log(
+          `   → type=${x.data?.type} status=${x.data?.status} filled=${x.data?.filledSize} match=${x.data?.matchSize}`,
+        ),
+      );
+      const sf = fills.filter((x) => x.step === name);
+      if (sf.length) log('  fill events:', j(sf.map((x) => x.e)));
+      step = 'idle';
+    };
+
+    // --- A: place TWO resting limits, then cancel both (multi-cancel) ---
+    let idA = '';
+    let idB = '';
+    await runStep('A-place-2-resting', async () => {
+      const t = liveTicker();
+      const pA = Math.round((t?.last || 0) * 0.5);
+      const pB = Math.round((t?.last || 0) * 0.4);
+      [idA] = (await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount,
+        price: pA,
+        timeInForce: OrderTimeInForce.PostOnly,
+      } as any)) as any;
+      [idB] = (await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount,
+        price: pB,
+        timeInForce: OrderTimeInForce.PostOnly,
+      } as any)) as any;
+      log(`  placed A=${idA} @ ${pA}, B=${idB} @ ${pB}`);
+      log(`  store: A=${storeOrder(String(idA))?.status} B=${storeOrder(String(idB))?.status}`);
+    });
+    await runStep('A-cancel-both', async () => {
+      const os = [storeOrder(String(idA)), storeOrder(String(idB))].filter(Boolean) as any[];
+      await exchange.cancelOrders(
+        os.length
+          ? os
+          : ([
+              { id: idA, symbol: btc.symbol },
+              { id: idB, symbol: btc.symbol },
+            ] as any),
+      );
+      await sleep(1200);
+      log(
+        `  store after cancel: A=${storeOrder(String(idA))?.status ?? 'GONE'} B=${storeOrder(String(idB))?.status ?? 'GONE'}`,
+      );
+    });
+
+    // --- B: immediately-filled limit BUY (price crosses the ask → fills as taker) ---
+    let idFill = '';
+    await runStep('B-immediate-fill-buy', async () => {
+      const t = liveTicker();
+      const cross = Math.round((t?.ask || t?.last || 0) * 1.003); // above ask → marketable limit
+      log(`  ask≈${t?.ask} → GTC limit BUY ${amount} @ ${cross} (crosses; fills immediately)`);
+      [idFill] = (await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount,
+        price: cross,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      } as any)) as any;
+      log(`  placed id=${idFill}`);
+    });
+    log(`>>> B store order status: ${storeOrder(String(idFill))?.status ?? '(not in store)'} (expect closed/filled)`);
+
+    // --- C: sell it back via an immediately-filled limit SELL ---
+    await runStep('C-immediate-fill-sell', async () => {
+      const b = await exchange.fetchBalance();
+      const btcFree = b.currencies?.BTC?.free ?? 0;
+      if (btcFree < amount * 0.8) {
+        log(`  nothing to sell (BTC free=${btcFree})`);
+        return;
+      }
+      const t = liveTicker();
+      const cross = Math.round((t?.bid || t?.last || 0) * 0.997); // below bid → marketable limit
+      log(`  bid≈${t?.bid} → GTC limit SELL ${btcFree} @ ${cross} (crosses; fills immediately)`);
+      await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Sell,
+        amount: btcFree,
+        price: cross,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      } as any);
+    });
+
+    hr('FINAL STATE (spot)');
+    const finalOrders = await exchange.fetchOrders([btc.symbol]);
+    log('open orders:', finalOrders.length, j(finalOrders.map((o) => ({ id: o.id, status: o.status }))));
+    const fb = await exchange.fetchBalance();
+    log('USDT total:', fb.currencies?.USDT?.total, '| BTC total:', fb.currencies?.BTC?.total);
+  }
+
   log('\nDONE.');
   process.exit(0);
 }

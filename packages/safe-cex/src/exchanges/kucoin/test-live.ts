@@ -571,6 +571,108 @@ async function main() {
     );
   }
 
+  if (PHASE === 'limit-tests') {
+    hr('LIMIT ORDER TESTS (perps) — resting place/cancel + immediate-fill attempt');
+    const { btc, ticker } = await bootstrap();
+    const mark = ticker?.mark || ticker?.last || 0;
+    const bal = await exchange.fetchBalance();
+    log(`mark≈${mark} | equity≈${bal.total} free≈${bal.free}`);
+
+    await exchange.privateWebsocket.connectAndSubscribe();
+    await pollUntil(
+      async () => (exchange.privateWebsocket as any).ws?.readyState,
+      (rs) => rs === 1,
+      6000,
+      250,
+    );
+    const frames: { step: string; topic: string; data: any }[] = [];
+    let step = 'idle';
+    (exchange.privateWebsocket as any).ws?.addEventListener('message', (e: any) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (['welcome', 'pong', 'ack'].includes(m.type)) return;
+        frames.push({ step, topic: m.topic || m.type, data: m.data });
+      } catch {
+        /* noop */
+      }
+    });
+    const storeOrder = (id: string) => exchange.store.orders.find((o) => String(o.id) === id);
+    const runStep = async (name: string, fn: () => Promise<void>, waitMs = 4500) => {
+      step = name;
+      hr(`STEP ${name}`);
+      try {
+        await fn();
+      } catch (e: any) {
+        log(`  ⚠️ threw: ${e?.response?.data?.msg || e?.message}`);
+      }
+      await sleep(waitMs);
+      const fr = frames.filter((x) => x.step === name && `${x.topic}`.includes('tradeOrders'));
+      log(`  order WS frames (${fr.length}):`);
+      fr.forEach((x) => log(`   → type=${x.data?.type} status=${x.data?.status} filled=${x.data?.filledSize}`));
+      step = 'idle';
+    };
+
+    // Resting limit place + cancel. At isolated leverage 1, a 1-contract order
+    // reserves ~0.001*price; keep price low enough to fit equity.
+    let id = '';
+    await runStep('place-resting-limit', async () => {
+      const p = Math.round(mark * 0.5);
+      [id] = (await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: p,
+        timeInForce: OrderTimeInForce.PostOnly,
+      } as any)) as any;
+      log(
+        `  placed id=${id} @ ${p}; store status=${storeOrder(String(id))?.status} amount=${storeOrder(String(id))?.amount}`,
+      );
+    });
+    await runStep('cancel-resting-limit', async () => {
+      if (!id) return;
+      await exchange.cancelOrders([storeOrder(String(id)) || ({ id, symbol: btc.symbol } as any)]);
+      await sleep(1000);
+      log(`  store after cancel: ${storeOrder(String(id))?.status ?? 'GONE'}`);
+    });
+
+    // Immediately-filled limit (crossing) — expected to need ~full notional at
+    // leverage 1; on this small isolated account it should report insufficient
+    // balance (the constraint), not actually fill.
+    await runStep('immediate-fill-attempt', async () => {
+      const cross = Math.round((ticker?.ask || mark) * 1.001);
+      log(
+        `  attempting GTC limit BUY 1 contract @ ${cross} (crosses); needs ~${(0.001 * cross).toFixed(0)} USDT margin at 1x`,
+      );
+      const ids = (await exchange.placeOrder({
+        symbol: btc.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: cross,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      } as any)) as any;
+      const fid = String(ids?.[0] ?? '');
+      if (fid) {
+        log(`  ⚠️ it filled/placed (id=${fid}) — closing reduce-only`);
+        await exchange.placeOrder({
+          symbol: btc.symbol,
+          type: OrderType.Market,
+          side: OrderSide.Sell,
+          amount: 1,
+          reduceOnly: true,
+        } as any);
+      } else {
+        log('  no order id (insufficient balance / rejected — see emitter error above)');
+      }
+    });
+
+    hr('FINAL STATE (perps)');
+    const fp = await btcPositionContracts(btc.symbol);
+    const fo = (await exchange.fetchOrders()).filter((o) => o.symbol === btc.symbol);
+    log(`position: ${fp.contracts} BTC | open orders: ${fo.length}`, j(fo.map((o) => o.id)));
+  }
+
   log('\nDONE.');
   process.exit(0);
 }
