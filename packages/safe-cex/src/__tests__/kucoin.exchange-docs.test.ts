@@ -475,6 +475,111 @@ describe('KucoinExchange current futures docs compatibility', () => {
     expect(deleteRequest).not.toHaveBeenCalledWith(ENDPOINTS.CANCEL_ALGO_ORDER.replace('{orderId}', 'sl-1'));
   });
 
+  it('places a full-position (infinity) TP/SL via closeOrder:true with no size, never size:"0"', () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          contractSize: 0.001,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+
+    // amount:0 is the app's "Full Position / infinity TP/SL" (the chart bracket
+    // sends 0 when supportsInfinityStops is on). KuCoin's /api/v1/orders rejects
+    // size:"0", so a full-position stop must ride the closeOrder flag with no size.
+    const payload = exchange.formatAlgoOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      amount: 0,
+      price: 42000,
+      reduceOnly: true,
+    } as any);
+
+    expect(payload.closeOrder).toBe(true);
+    expect(payload.size).toBeUndefined();
+    expect(payload.stop).toBe('down'); // sell stop-loss triggers on the way down
+  });
+
+  it('places a partial TP/SL with size in native contracts and no closeOrder flag', () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          contractSize: 0.001,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+
+    const payload = exchange.formatAlgoOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.TakeProfit,
+      amount: 3,
+      price: 90000,
+      reduceOnly: true,
+    } as any);
+
+    expect(payload.size).toBe('3'); // integer native contracts
+    expect(payload.closeOrder).toBeUndefined();
+    expect(payload.stop).toBe('up'); // sell take-profit triggers on the way up
+  });
+
+  it('surfaces a non-200000 KuCoin rejection code instead of swallowing it (silent place failure)', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      markets: [
+        {
+          id: 'XBTUSDTM',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          contractSize: 0.001,
+          precision: { amount: 1, price: 0.1 },
+          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+        },
+      ],
+    });
+
+    // KuCoin returns HTTP 200 with a rejection code in the body. The old code only
+    // read body.data.orderId, so a rejection produced no id, no throw, no toast —
+    // exactly how full-position stops used to vanish.
+    const post = vi.fn().mockResolvedValue({
+      data: { code: '400100', msg: 'The order size cannot be 0', data: null },
+    });
+    exchange.unlimitedXHR = { post } as any;
+    const errors: any[] = [];
+    exchange.emitter.on('error', (e: any) => errors.push(e));
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Sell,
+        type: OrderType.StopLoss,
+        amount: 1,
+        price: 42000,
+        reduceOnly: true,
+      } as any),
+    ).rejects.toThrow(/order size cannot be 0|400100/);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
   it('sends post-only via the postOnly boolean, not an invalid timeInForce', async () => {
     const { exchange, store } = makeExchange();
     store.update({

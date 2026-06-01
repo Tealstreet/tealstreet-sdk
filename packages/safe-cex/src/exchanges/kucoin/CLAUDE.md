@@ -329,6 +329,11 @@ Each channel is subscribed individually with `privateChannel: true`.
 | `OrderType.StopLoss`         | `loss_plan`      | Partial SL (specific amount)   |
 | `OrderType.TrailingStopLoss` | `track_plan`     | Trailing stop with `rangeRate` |
 
+> **These `planType` values are NOT what the wired path sends.** They belong to
+> the unused `st-orders` design (`getOrderPlanTypeAndAmount`). The live stop path
+> posts to `/api/v1/orders` and expresses full-position via `closeOrder: true`
+> (no size) — see "Full-position vs partial TP/SL — `closeOrder`, NOT `planType`".
+
 Additional API-to-internal mappings: `tp` -> TakeProfit, `sl` -> StopLoss, `psl` -> StopLoss, `ptp` -> TakeProfit, `track` -> TrailingStopLoss.
 
 ### Time In Force
@@ -432,13 +437,34 @@ The virtual orders have the **inverse side** of the parent order (if parent is B
 `typeof o.stop === 'string'` check misclassified every limit order as a stop and
 overwrote its `price` with `stopPrice` (0) — limit orders showed price 0.
 
-### Plan Type Selection
+### Full-position vs partial TP/SL — `closeOrder`, NOT `planType`
 
-`getOrderPlanTypeAndAmount` (`kucoin.exchange.ts:1372-1398`) determines whether TP/SL targets the full position or a partial amount:
+The wired path is `formatAlgoOrder` → `placeAlgoOrders` → **`/api/v1/orders`**
+(stop-flagged), which has **no `planType` field**. Full-position vs partial is
+expressed on that endpoint as:
 
-- If `amount === 0`: always uses position-level plan (`pos_loss`/`pos_profit`)
-- If `amount > 0` but smaller than the opposite position's contracts: uses partial plan (`loss_plan`/`profit_plan`)
-- Otherwise: uses position-level plan (infinite stop)
+- **`amount === 0` → full position** (the app's "Full Position / infinity TP/SL",
+  `supportsInfinityStops` + the bracket sending `amount:0`): payload sets
+  **`closeOrder: true` and OMITS `size`**. KuCoin **rejects `size:"0"`**, so the
+  old code (which always sent `size: \`${adjust(amount)}\``) made every
+full-position stop silently fail — no order, no toast (see the error-surfacing
+note below), so dragged Full-Position TP/SL never appeared on the chart. The
+resulting order comes back `size 0`→ maps to`amount/remaining 0` → the chart
+renders it as a **`100%`** line (`isFullStop`). Confirmed live.
+- **`amount > 0` → partial**: payload sends `size` = integer **native contracts**.
+
+`getOrderPlanTypeAndAmount` (the `pos_loss`/`pos_profit`/`loss_plan`/`profit_plan`
+helper) is **dead code** — it targets KuCoin's separate `st-orders` `planType`
+API, which this integration does not use. Don't wire it back in without moving the
+whole stop path to `st-orders`; the `/api/v1/orders` + `closeOrder` shape is what's
+proven against prod. Incoming stops are classified by `stop` direction
+(`up`/`down`) + side in `mapOrder`, not by any planType.
+
+**Rejections are surfaced, not swallowed.** `placeAlgoOrders` now checks
+`body.code !== '200000'` and throws (the catch emits + the order builder rejects).
+KuCoin returns rejections as **HTTP 200 with a non-`200000` code**; reading only
+`body.data.orderId` (the old shape) dropped them silently — that swallow is what
+hid the `size:"0"` failure above.
 
 ### Cancellation
 
@@ -620,7 +646,7 @@ When testnet would be enabled:
 1. **Dynamic WebSocket URLs**: WS endpoints are not hardcoded. Obtained via POST to `bullet-public` / `bullet-private` which returns `instanceServers` with dynamic endpoints and tokens.
 2. **No batch order support used**: Despite `BATCH_ORDERS` endpoint existing (`/api/v1/orders/multi`), orders are placed individually in a loop (`kucoin.exchange.ts:949-972`).
 3. **Update order not supported**: KuCoin has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one (cancel-and-replace pattern).
-4. **Algo order plan types**: TP/SL orders use different `planType` values depending on whether they target the full position (`pos_profit`/`pos_loss`) or partial amount (`profit_plan`/`loss_plan`).
+4. **Full-position TP/SL uses `closeOrder`, not `planType`**: stops post to `/api/v1/orders` (no `planType`). `amount === 0` → `closeOrder: true` with no `size` (KuCoin rejects `size:"0"`); `amount > 0` → `size` in native contracts. See "Full-position vs partial TP/SL" above. The `planType` helper is dead code.
 5. **Virtual TP/SL orders**: Limit orders with attached `stopLoss`/`takeProfit` create compound order IDs: `<orderId>__stop_loss` and `<orderId>__take_profit`.
 6. **Success code**: API success is indicated by `data.code === '200000'` (string, not number).
 7. **Encrypted passphrase for REST only**: Passphrase must be HMAC-SHA256 encrypted for REST API headers. Private WS uses the `bullet-private` token and does not send the passphrase.

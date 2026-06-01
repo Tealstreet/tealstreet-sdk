@@ -968,13 +968,20 @@ export class KucoinExchange extends BaseExchange {
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) throw new Error(`Market ${opts.symbol} not found`);
 
+    // A 0 amount means "close the whole position" — the Full Position / infinity
+    // TP/SL mode (PositionLineManager sends amount:0 when supportsInfinityStops is
+    // on). KuCoin's /api/v1/orders rejects size:"0" (and the rejection used to be
+    // swallowed in placeAlgoOrders, so the stop silently never placed). The
+    // documented way to close the full position is the `closeOrder` flag with NO
+    // size; with a real amount we send integer native contracts as usual.
+    const isFullPositionStop = !opts.amount;
     const payload: Record<string, any> = {
       symbol: market.id,
       clientOid: uuid(),
       side: opts.side === OrderSide.Buy ? 'buy' : 'sell',
       type: 'market',
-      size: `${adjust(opts.amount, market.precision.amount)}`,
       reduceOnly: opts.reduceOnly ?? true,
+      ...(isFullPositionStop ? { closeOrder: true } : { size: `${adjust(opts.amount, market.precision.amount)}` }),
     };
 
     if (opts.type === OrderType.TakeProfit && opts.price) {
@@ -1044,12 +1051,19 @@ export class KucoinExchange extends BaseExchange {
       try {
         const endpoint = payload.stop ? ENDPOINTS.PLACE_ORDER : ENDPOINTS.PLACE_ALGO_ORDER;
 
-        const {
-          data: { data },
-        } = await this.unlimitedXHR.post(endpoint, payload);
+        const { data: body } = await this.unlimitedXHR.post(endpoint, payload);
 
-        if (data?.orderId) {
-          newOrderIds.push(data.orderId);
+        // KuCoin returns HTTP 200 with a non-200000 `code` on rejection (e.g. a
+        // bad/`0` size). Previously we only read `body.data.orderId`, so a
+        // rejection produced no id, no throw and no toast — the exact silent
+        // failure that made full-position stops "disappear". Surface it so the
+        // catch below emits and the order builder rejects.
+        if (body?.code && body.code !== '200000') {
+          throw new Error(body.msg || `KuCoin order rejected (code ${body.code})`);
+        }
+
+        if (body?.data?.orderId) {
+          newOrderIds.push(body.data.orderId);
         }
       } catch (err: any) {
         this.emitter.emit('error', err?.response?.data?.msg || err?.message);
