@@ -135,11 +135,9 @@ export class TwapInstance {
     }
   };
 
-  /** Compute slice interval in ms (duration is minutes per safe-cex's
-   *  TwapOptions; ordersPace is per the existing convention). */
+  /** Compute slice interval in ms. TwapOptions.duration is already milliseconds. */
   private sliceIntervalMs(): number {
-    const ordersPace = this.options.duration / this.options.ordersCount;
-    return ordersPace * 60 * 1000;
+    return this.options.duration / this.options.ordersCount;
   }
 
   /** Place a market order for the slice's unfilled remainder. */
@@ -193,9 +191,8 @@ export class TwapInstance {
     }
 
     const orderSize = this.state.ordersSizes.shift();
-    const ordersPace = this.options.duration / this.options.ordersCount;
     const rand = multiply(random(-this.options.randomnessPercentage, this.options.randomnessPercentage), 0.01);
-    const wait = ordersPace * 60 * 1000;
+    const wait = this.sliceIntervalMs();
     const waitWithRandom = wait + wait * rand;
     const nextOrderAt = Date.now() + waitWithRandom;
 

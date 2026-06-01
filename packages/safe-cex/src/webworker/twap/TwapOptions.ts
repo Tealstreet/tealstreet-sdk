@@ -12,6 +12,7 @@ export interface TwapOptions {
   accountName: string;
   activeMarket: Market;
   size: number;
+  /** Total TWAP duration in milliseconds. */
   duration: number;
   ordersCount: number;
   side: OrderSide;

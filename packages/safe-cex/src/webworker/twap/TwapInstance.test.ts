@@ -6,6 +6,8 @@ import { TwapStatus } from './TwapStatus';
 import { OrderSide, Market } from '../../types';
 import { Exchange } from '../../exchanges/base';
 
+const tenMinutesMs = 10 * 60_000;
+
 // Mock exchange
 const createMockExchange = () =>
   ({
@@ -53,7 +55,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -74,7 +76,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -98,7 +100,7 @@ describe('TwapInstance', () => {
           accountName: 'test-account',
           activeMarket: mockMarket,
           size: 1.0,
-          duration: 10,
+          duration: tenMinutesMs,
           ordersCount: 5,
           side: OrderSide.Buy,
           chaserDelay: 1000,
@@ -124,7 +126,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -148,7 +150,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -168,7 +170,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -189,7 +191,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -210,7 +212,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: totalSize,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -248,7 +250,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -293,7 +295,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 1.0,
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 5,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -325,7 +327,7 @@ describe('TwapInstance', () => {
         accountName: 'test-account',
         activeMarket: mockMarket,
         size: 0.001, // Small size for test
-        duration: 10,
+        duration: tenMinutesMs,
         ordersCount: 2,
         side: OrderSide.Buy,
         chaserDelay: 1000,
@@ -346,6 +348,39 @@ describe('TwapInstance', () => {
       expect(instance.state.startedAt).toBeGreaterThanOrEqual(beforeStart);
       expect(instance.state.startedAt).toBeLessThanOrEqual(afterStart);
       expect(instance.state.status).toBe(TwapStatus.Running);
+    });
+
+    it('should schedule slices from millisecond duration without minute conversion', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-06-01T00:00:00.000Z'));
+
+      try {
+        const options: TwapOptions = {
+          accountName: 'test-account',
+          activeMarket: mockMarket,
+          size: 0.02,
+          duration: 5 * 60_000,
+          ordersCount: 20,
+          side: OrderSide.Buy,
+          chaserDelay: 1000,
+          reduceOnly: false,
+          randomnessPercentage: 0,
+          useLimitOrders: false,
+          useChaserOrders: false,
+        };
+
+        const instance = new TwapInstance(mockExchange, mockWorkerContext, options, vi.fn());
+
+        await instance.start();
+
+        expect(instance.state.startedAt).toBeDefined();
+        expect(instance.state.nextOrderAt - instance.state.startedAt!).toBe(15_000);
+        expect(mockExchange.placeOrder).toHaveBeenCalledTimes(1);
+
+        await instance.terminate();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

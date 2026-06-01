@@ -49,7 +49,7 @@ function baseOptions(overrides: Partial<TwapOptions> = {}): TwapOptions {
     accountName: 'a',
     activeMarket: market,
     size: 1.0,
-    duration: 10, // 10 minutes
+    duration: 10 * 60_000, // 10 minutes in milliseconds
     ordersCount: 5, // → slice = 2 minutes = 120,000ms
     side: OrderSide.Buy,
     chaserDelay: 1000,
