@@ -178,6 +178,25 @@ describe('KucoinSpotExchange', () => {
     });
   });
 
+  it('applies /market/ticker:all updates by resolving the symbol from json.subject', () => {
+    // Clone: updateTicker mutates the ticker in place, so don't taint the shared fixture.
+    store.update({ tickers: [{ ...btcTicker }] });
+    const updateTicker = vi.spyOn(store, 'updateTicker');
+
+    // The all-symbols feed puts the symbol in `subject`; `data` has none and the
+    // topic is literally ":all". Without subject the update is dropped.
+    exchange.publicWebsocket.handleTickerSnapshot({
+      topic: '/market/ticker:all',
+      subject: 'BTC-USDT',
+      data: { bestBid: '51000', bestAsk: '51001', price: '51000.5' },
+    });
+
+    expect(updateTicker).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'BTC-USDT' }),
+      expect.objectContaining({ bid: 51_000, ask: 51_001, last: 51_000.5 }),
+    );
+  });
+
   it('aggregates trade account balances with ticker-derived USD values', async () => {
     store.update({
       markets: [btcMarket],
@@ -233,7 +252,7 @@ describe('KucoinSpotExchange', () => {
           code: '200000',
           data: {
             currentPage: 1,
-            pageSize: 100,
+            pageSize: 50,
             totalNum: 1,
             totalPage: 1,
             items: [
@@ -259,7 +278,7 @@ describe('KucoinSpotExchange', () => {
     const orders = await exchange.fetchOrders(['BTC-USDT']);
 
     expect(exchange.xhr.get).toHaveBeenCalledWith('/api/v1/hf/orders/active/page', {
-      params: { symbol: 'BTC-USDT', pageNum: 1, pageSize: 100 },
+      params: { symbol: 'BTC-USDT', pageNum: 1, pageSize: 50 },
     });
     expect(orders).toHaveLength(1);
     expect(orders[0]).toMatchObject({
@@ -287,7 +306,7 @@ describe('KucoinSpotExchange', () => {
             code: '200000',
             data: {
               currentPage: 1,
-              pageSize: 100,
+              pageSize: 50,
               totalNum: 2,
               totalPage: 2,
               items: [
@@ -311,7 +330,7 @@ describe('KucoinSpotExchange', () => {
             code: '200000',
             data: {
               currentPage: 2,
-              pageSize: 100,
+              pageSize: 50,
               totalNum: 2,
               totalPage: 2,
               items: [
@@ -335,10 +354,10 @@ describe('KucoinSpotExchange', () => {
     const orders = await exchange.fetchOrders();
 
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, '/api/v1/hf/orders/active/page', {
-      params: { pageNum: 1, pageSize: 100 },
+      params: { pageNum: 1, pageSize: 50 },
     });
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, '/api/v1/hf/orders/active/page', {
-      params: { pageNum: 2, pageSize: 100 },
+      params: { pageNum: 2, pageSize: 50 },
     });
     expect(orders.map((order) => order.id)).toEqual(['order-1', 'order-2']);
   });

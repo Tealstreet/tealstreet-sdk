@@ -2,7 +2,6 @@ import type { Candle, OHLCVOptions, OrderBook, Ticker, Writable } from '../../ty
 import type { KucoinSpotExchange } from './kucoinspot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
 import { BaseWebSocket } from '../base.ws';
@@ -154,7 +153,10 @@ export class KucoinSpotPublicWebsocket extends BaseWebSocket<KucoinSpotExchange>
 
   handleTickerSnapshot = (json: Data) => {
     const data = json.data;
-    const symbol = data?.symbol || `${json.topic || ''}`.split(':')[1];
+    // On the all-symbols feed (`/market/ticker:all`) the symbol is in
+    // `json.subject` (e.g. "BTC-USDT"); `data` has no symbol and the topic is
+    // literally ":all". Without reading subject, every ticker update is dropped.
+    const symbol = data?.symbol || json.subject || `${json.topic || ''}`.split(':')[1];
     if (!data || !symbol || symbol === 'all') return;
 
     const ticker = this.parent.store.tickersBySymbol[symbol];
@@ -233,8 +235,7 @@ export class KucoinSpotPublicWebsocket extends BaseWebSocket<KucoinSpotExchange>
             total: 0,
           }))
           .filter(
-            ({ price, amount }: { price: number; amount: number }) =>
-              Number.isFinite(price) && Number.isFinite(amount),
+            ({ price, amount }: { price: number; amount: number }) => Number.isFinite(price) && Number.isFinite(amount),
           ),
         asks: (data.asks || [])
           .map(([price, amount]: [string, string]) => ({
@@ -243,8 +244,7 @@ export class KucoinSpotPublicWebsocket extends BaseWebSocket<KucoinSpotExchange>
             total: 0,
           }))
           .filter(
-            ({ price, amount }: { price: number; amount: number }) =>
-              Number.isFinite(price) && Number.isFinite(amount),
+            ({ price, amount }: { price: number; amount: number }) => Number.isFinite(price) && Number.isFinite(amount),
           ),
       };
 

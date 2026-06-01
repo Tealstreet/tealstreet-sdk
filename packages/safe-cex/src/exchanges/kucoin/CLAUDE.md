@@ -21,6 +21,10 @@ Official docs used for `kucoinspot`:
 - Spot HF orders: https://www.kucoin.com/docs-new/rest/spot-trading/orders/add-order
 - Spot HF open orders by page: https://www.kucoin.com/docs-new/rest/spot-trading/orders/get-open-orders-by-page
 
+**`get-open-orders-by-page` caps `pageSize` at 50** (`"pageSize must be less or
+equals than 50"`). `KUCOIN_SPOT_OPEN_ORDERS_PAGE_SIZE` was 100, so `fetchOrders`
+errored on every call and open orders never loaded — keep it ≤ 50.
+
 Spot REST auth is the same API-key-v2 HMAC scheme as futures:
 
 1. `KC-API-PASSPHRASE = base64(HMAC-SHA256(passphrase, secret))`.
@@ -40,6 +44,14 @@ Spot public topics:
 - Ticker: `/market/ticker:all`
 - Order book: `/spotMarket/level2Depth50:{symbol}`
 - Klines: `/market/candles:{symbol}_{interval}`
+
+**`/market/ticker:all` puts the symbol in `json.subject`** (e.g. `"BTC-USDT"`),
+not `data.symbol` (absent) or the topic (literally `:all`). `handleTickerSnapshot`
+must resolve `data.symbol || json.subject` — otherwise the symbol is `"all"`, the
+`symbol === 'all'` guard fires, and **every ticker update is dropped** (live price
+frozen at the REST snapshot). The `ticker:all` `data` only carries
+`bestBid`/`bestAsk`/`price` — 24h `changeRate`/`volume`/`turnover` come from the
+REST `fetchTickers` (allTickers) snapshot, not this feed.
 
 Spot private topics:
 

@@ -8,11 +8,11 @@ import dayjs from 'dayjs';
 import {
   Balance,
   Candle,
-  Execution,
-  ExecutionsOptions,
   ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
+  Execution,
+  ExecutionsOptions,
   MarginType,
   Market,
   OHLCVOptions,
@@ -21,10 +21,10 @@ import {
   OrderSide,
   OrderTimeInForce,
   OrderType,
+  PlaceOrderOpts,
   Position,
   PositionMode,
   PositionSide,
-  PlaceOrderOpts,
   Ticker,
   UpdateOrderOpts,
 } from '../../types';
@@ -35,9 +35,9 @@ import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
 import { createKucoinSpotAPI } from './kucoinspot.api';
 import {
+  KUCOIN_SPOT_ENDPOINTS,
   KUCOIN_SPOT_GRAFANA_ENDPOINTS_EVERY,
   KUCOIN_SPOT_GRAFANA_ENDPOINTS_PERIODIC,
-  KUCOIN_SPOT_ENDPOINTS,
   KUCOIN_SPOT_INTERVAL,
   KUCOIN_SPOT_ORDER_STATUS,
   KUCOIN_SPOT_ORDER_TYPE,
@@ -46,7 +46,10 @@ import {
 import { KucoinSpotPrivateWebsocket } from './kucoinspot.ws-private';
 import { KucoinSpotPublicWebsocket } from './kucoinspot.ws-public';
 
-const KUCOIN_SPOT_OPEN_ORDERS_PAGE_SIZE = 100;
+// KuCoin Spot's open-orders-by-page endpoint rejects pageSize > 50
+// ("pageSize must be less or equals than 50"), which made fetchOrders error out
+// entirely — open orders never loaded. Keep this at the 50 max.
+const KUCOIN_SPOT_OPEN_ORDERS_PAGE_SIZE = 50;
 const KUCOIN_SPOT_OPEN_ORDERS_MAX_PAGES = 100;
 
 export class KucoinSpotExchange extends BaseExchange {
