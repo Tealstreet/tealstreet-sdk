@@ -1186,12 +1186,32 @@ describe('KucoinExchange current futures docs compatibility', () => {
       },
     });
 
+    // Terminal `filled` frame: cumulative filledSize, NO matchSize → must NOT
+    // emit a second fill (the match frame already did), and closes the order.
+    ws.handleOrderTopic({
+      data: {
+        symbol: 'XBTUSDTM',
+        orderId: 'match-id',
+        type: 'filled',
+        status: 'done',
+        side: 'buy',
+        orderType: 'limit',
+        price: '91670',
+        size: '1',
+        filledSize: '1',
+        remainSize: '0',
+      },
+    });
+
     expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'cancel-id' }), OrderStatus.Canceled);
     expect(emit).toHaveBeenCalledWith(
       'fill',
       expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT', price: 91670, amount: 1 }),
     );
     expect(addOrUpdateOrder).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT' }));
+    // exactly one fill across the match + filled pair (no double-fire)
+    expect((emit as any).mock.calls.filter((c: any[]) => c[0] === 'fill')).toHaveLength(1);
+    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id' }), OrderStatus.Closed);
   });
 
   it('maps current futures stop order websocket payloads', () => {

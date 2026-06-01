@@ -571,10 +571,18 @@ The tick interval is configurable via `options.extra.tickInterval` (default from
 
 ### WebSocket vs REST
 
-- **Order events** (private WS): Processed immediately via `mapOrder`, then state is updated:
-  - `filled`: Emits `fill` event, updates order status to Closed
-  - `cancelled`: Updates order status to Canceled
-  - `open`/`partially_filled`: Adds or updates order
+- **Order events** (private WS, `/contractMarket/tradeOrders`): Processed immediately via `mapOrder`:
+  - `match`: emits a `fill` (status Open) — see fill rule below.
+  - `filled` / `status:done`+`remainSize:0`: updates order status to Closed.
+  - `canceled`: updates order status to Canceled.
+  - `open`/`update`/`match`: adds or updates the order.
+- **`fill` emits ONLY on the incremental `matchSize`** (`fillAmountNative =
+parseFloat(matchSize)`, base = `× contractSize`). A fill arrives as a `match`
+  frame (carries `matchSize`) THEN a terminal `filled` frame (cumulative
+  `filledSize`, **no** `matchSize`). The old `matchSize || filledSize` + the
+  `eventType === 'filled'` emit branch fired **twice** and over-counted the lot;
+  gating on `matchSize > 0` (the per-frame increment, present only on fill
+  frames) emits exactly once. Mirrors the spot handler.
 - **Algo order events**: `cancel` -> Canceled, `triggered`/`active` -> add/update
 - **No debounced re-fetch**: Unlike BloFin, KuCoin does NOT trigger a throttled full order re-fetch after WS events. State relies on WS events + periodic tick fetches.
 - **Reconnection**: On private WS reconnect, `fetchAndSetPrivateSnapshot()` is called
