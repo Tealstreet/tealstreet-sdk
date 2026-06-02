@@ -1,6 +1,8 @@
-import { CrossTradeCopier } from '../../crossTrade/types';
-import { Market, OrderSide, OrderType, type PlaceOrderOpts } from '../../types';
+import type { PlaceOrderOpts } from '../../types';
+
 import { DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
+import { CrossTradeCopier } from '../../crossTrade/types';
+import { Market, OrderSide, OrderType } from '../../types';
 import { adjust } from '../../utils/safe-math';
 import { exchangeWorkers } from '../store.webworker';
 
@@ -78,7 +80,10 @@ export const crossTradePlaceOrder = async (
     try {
       return await exchange.placeOrder(order);
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       console.error('CrossTradeManager', 'Failed to place order', e);
+      exchange.emitter.emit('warning', `Cross Trade: failed to place limit order on ${symbol}: ${message}`);
+      throw e;
     }
   } else if (copier.execution === 'Market') {
     if (!amount) {
@@ -96,7 +101,10 @@ export const crossTradePlaceOrder = async (
     try {
       return await exchange.placeOrder(order);
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       console.error('CrossTradeManager', 'Failed to place order', e);
+      exchange.emitter.emit('warning', `Cross Trade: failed to place market order on ${symbol}: ${message}`);
+      throw e;
     }
   } else {
     debug('Unknown execution type', copier.execution);

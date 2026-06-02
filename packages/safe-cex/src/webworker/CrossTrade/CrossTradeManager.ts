@@ -4,7 +4,7 @@ import { getCopierSymbolFromMaster } from '../../crossTrade/getCopierSymbolFromM
 import { getCopierWeightRatio } from '../../crossTrade/getCopierWeightRatio';
 import { getMasterSymbolFromCopier } from '../../crossTrade/getMasterSymbolFromCopier';
 import { Exchange } from '../../exchanges/base';
-import { OrderSide, PositionSide } from '../../types';
+import { Market, OrderSide, PositionSide } from '../../types';
 import { loop } from '../../utils/loop';
 import { convertFromBaseSizeToNative } from '../../utils/sizing';
 import { convertSymbol } from '../../utils/symbolConverter';
@@ -13,12 +13,75 @@ import { crossTradePlaceOrder } from './crossTradePlaceOrder';
 
 const debug = (...args: any[]) => console.log('[CrossTradeManager]', ...args);
 
+const FAILURE_THRESHOLD = 2;
+const FAILURE_MUTE_MS = 30_000;
+
 export class CrossTradeManager {
   private _loop: {
     (): Promise<void>;
     isDisposed?: boolean;
   } | null = null;
   private _loopInterval = 3000;
+  private _failures = new Map<string, { failures: number; mutedUntil: number }>();
+
+  private _failureKey(account: string, symbol: string) {
+    return `${account}:${symbol}`;
+  }
+
+  private _isMuted(account: string, symbol: string): boolean {
+    const entry = this._failures.get(this._failureKey(account, symbol));
+    return !!entry && entry.mutedUntil > Date.now();
+  }
+
+  private _recordFailure(account: string, symbol: string) {
+    const key = this._failureKey(account, symbol);
+    const entry = this._failures.get(key) ?? { failures: 0, mutedUntil: 0 };
+    entry.failures += 1;
+    if (entry.failures >= FAILURE_THRESHOLD) {
+      entry.mutedUntil = Date.now() + FAILURE_MUTE_MS;
+      debug('Muting', key, 'until', new Date(entry.mutedUntil).toISOString());
+    }
+    this._failures.set(key, entry);
+  }
+
+  private _recordSuccess(account: string, symbol: string) {
+    this._failures.delete(this._failureKey(account, symbol));
+  }
+
+  private _meetsMinAmount(market: Market, amount: number): boolean {
+    const minAmount = market.limits?.amount?.min ?? 0;
+    if (minAmount <= 0) return true;
+    return Math.abs(amount) >= minAmount;
+  }
+
+  private async _safePlaceOrder(
+    copier: CrossTradeCopier,
+    market: Market,
+    referencePrice: number | undefined,
+    account: string,
+    side: OrderSide,
+    amount: number,
+    reduceOnly: boolean,
+  ) {
+    const symbol = market.symbol;
+    if (this._isMuted(account, symbol)) {
+      debug('Skipping muted', account, symbol);
+      return;
+    }
+    // Allow reduceOnly closes through the min-amount gate so a residual position
+    // below the exchange minimum still has a chance to be flattened.
+    if (!reduceOnly && !this._meetsMinAmount(market, amount)) {
+      debug('Skipping below-min-amount order', account, symbol, amount, 'min', market.limits?.amount?.min);
+      return;
+    }
+    try {
+      const result = await crossTradePlaceOrder(copier, market, referencePrice, account, side, amount, reduceOnly);
+      this._recordSuccess(account, symbol);
+      return result;
+    } catch (_e) {
+      this._recordFailure(account, symbol);
+    }
+  }
 
   /**
    * Check that all copier positions are correct in the master. Reverse of _auditMasterPositions
@@ -106,7 +169,7 @@ export class CrossTradeManager {
       // close the copier position if not open in master
       if (!foundMasterPosition) {
         // no master position, close copier position
-        return crossTradePlaceOrder(
+        return this._safePlaceOrder(
           copier,
           copierMarket,
           // dont use reference price, we dont want to slip to position entry...
@@ -155,7 +218,7 @@ export class CrossTradeManager {
           //   greater than 5% diff
           Math.abs(sizeDiff / copierPosition.contracts) > 0.05
         ) {
-          crossTradePlaceOrder(
+          return this._safePlaceOrder(
             copier,
             copierMarket,
             // dont use reference price, we dont want to slip to position entry...
@@ -290,7 +353,7 @@ export class CrossTradeManager {
             : OrderSide.Buy
           : nonHedgeModeSide;
 
-        return crossTradePlaceOrder(
+        return this._safePlaceOrder(
           copier,
           copierMarket,
           orderPrice,
@@ -377,6 +440,7 @@ export class CrossTradeManager {
       debug('Stopping cross trade manager');
       this._loop.isDisposed = true;
     }
+    this._failures.clear();
   }
 }
 
