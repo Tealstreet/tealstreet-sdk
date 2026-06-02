@@ -17,12 +17,22 @@ fi
 VERSION=${1:-$(node -p "require('./package.json').version")}
 DIST_DIR="dist"
 
+cleanup_bun_build_artifacts() {
+  local artifacts=(./.*.bun-build)
+  if [ -e "${artifacts[0]}" ]; then
+    rm -f "${artifacts[@]}"
+  fi
+}
+
+trap cleanup_bun_build_artifacts EXIT
+
 echo "Building Tealstreet CLI v${VERSION}..."
 echo "Using bun at: $BUN"
 
 # Clean
-rm -rf $DIST_DIR
-mkdir -p $DIST_DIR
+rm -rf "$DIST_DIR"
+cleanup_bun_build_artifacts
+mkdir -p "$DIST_DIR"
 
 # Build for each platform
 PLATFORMS=(
@@ -51,12 +61,12 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   PROD_RELAY_URL="https://exchange.tealstreet.io"
   PROD_RELAY_WS="wss://exchange.tealstreet.io/account"
 
-  $BUN build src/index.ts \
+  "$BUN" build src/index.ts \
     --compile \
     --minify \
     --sourcemap=none \
-    --target=$TARGET \
-    --outfile=$OUTPUT \
+    --target="$TARGET" \
+    --outfile="$OUTPUT" \
     --define "process.env.TEALSTREET_CLI_VERSION='${VERSION}'" \
     --define "process.env.TEALSTREET_API='${PROD_WEB_URL}'" \
     --define "process.env.TEALSTREET_WEB_URL='${PROD_WEB_URL}'" \
@@ -64,7 +74,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     --define "process.env.TEALSTREET_EXCHANGE_RELAY_WS='${PROD_RELAY_WS}'"
 
   # Make executable
-  chmod +x $OUTPUT
+  chmod +x "$OUTPUT"
 done
 
 # Bun compile can leave intermediate JS output next to the compiled binaries.
@@ -75,4 +85,4 @@ bash ./scripts/check-release-artifacts.sh
 
 echo ""
 echo "Build complete!"
-ls -lh $DIST_DIR/
+ls -lh "$DIST_DIR"/

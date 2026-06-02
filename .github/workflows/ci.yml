@@ -21,10 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # No committed lockfile yet, so no yarn cache and no --frozen-lockfile.
-      # Once a known-good yarn.lock is committed, add `cache: yarn` above and
-      # switch to `yarn install --frozen-lockfile`.
-      - run: yarn install --network-timeout 600000
+          cache: yarn
+      - run: yarn install --frozen-lockfile --network-timeout 600000
       - run: yarn typecheck
       - run: yarn lint
       - run: yarn test
