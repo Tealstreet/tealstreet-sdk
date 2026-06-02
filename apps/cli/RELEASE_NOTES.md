@@ -5,6 +5,132 @@ script extracts the section matching the current `package.json` version
 and uses it as the GitHub release body — so put the version heading
 above the new bullet points before running `yarn release`.
 
+## v0.10.0 — 2026-06-02
+
+Headless cross-trade engine + dual-runtime safety wiring.
+
+### Headless cross-trade engine
+
+- **New `tealstreet cross-trade` command surface.** `list` / `add` /
+  `enable` / `disable` / `remove` operate on configs in
+  `~/.tealstreet/cross-trade.json`; `run` boots the matching accounts
+  and runs the engine as a foreground daemon (Ctrl+C to stop);
+  `status` reads the daemon's heartbeat and prints running state,
+  uptime, and active config count.
+- **Same engine as the browser leader tab.** The audit loop, >5% drift
+  detection, 2-failures-→-30s mute per `(account, symbol)`, min-amount
+  gate, and reduce-only bypass on residual closes are all shared. The
+  CLI swaps in its own placeOrder adapter that talks directly to
+  `exchange.placeOrder` for Market and LimitSlippage orders.
+- **Chase execution mode is web-only in v1.** Configs with Chase
+  copiers are accepted at `add` but skipped at `run` with a per-config
+  warning; switch them to Market or LimitSlippage to run on the CLI,
+  or keep using the web leader tab for Chase.
+- **Cross-device sync via the listener bridge.** `cross-trade.json`
+  shares its shape with the web side (`StoredCrossTradeConfig` extends
+  safe-cex's `CrossTradeConfig` with `id`, `updatedAt`, and optional
+  `deletedAt`). Edits flow both directions with last-write-wins
+  semantics — newer `updatedAt` wins, tombstones propagate.
+
+### Dual-runtime safety warning
+
+- **Warn-only, no auto-disable.** When the CLI daemon is running AND a
+  connected web tab is the cross-trade leader with enabled configs,
+  both engines will place orders. The CLI prints a throttled (≤1/min)
+  warning line; the web shows a yellow banner above the existing
+  leader-status alert. Close one to silence — the system never
+  disables either side for you.
+- **File-based heartbeat.** The daemon writes
+  `~/.tealstreet/cross-trade-running.json` every 5s and clears it on
+  graceful shutdown. The listener broadcasts a `state:cross-trade`
+  frame to every connected web client driven by that file + the
+  config registry; stale heartbeats (>15s) report `running:false` so
+  a hard-killed daemon doesn't leave a phantom warning.
+
+### Audit log
+
+- **`recordCrossTradeEvent`** appends `[cross-trade] start` and
+  `[cross-trade] stop` lines to `~/.tealstreet/audit.log` when audit is
+  on. Filter via `audit tail | grep '\[cross-trade\]'`.
+
+## v0.9.5 — 2026-05-30
+
+Release pipeline hardening.
+
+- **Build no longer ships intermediate sourcemaps.** Removed sourcemap
+  output from the inner build step so the published binaries don't
+  leak internal file paths.
+
+## v0.9.4 — 2026-05-29
+
+Release pipeline hardening (the broader release-artifact audit).
+
+- **`yarn release` refuses to ship if the built binary or the npm
+  launcher tarball contains leaked release artifacts.** Defense-in-depth
+  for the source-map / app-leak chain that landed across the v0.9.3-0.9.5
+  series.
+- **Source maps explicitly forbidden in published binaries.**
+- **Hardened the npm launcher downloader** against unexpected response
+  shapes from GitHub Releases.
+
+## v0.9.3 — 2026-05-28
+
+Tag-driven CI release, the web mount-gate check-in, and a batch of
+correctness fixes.
+
+### Release pipeline
+
+- **`yarn release[:patch|:minor|:major]`** is now a thin wrapper that
+  bumps `apps/cli/package.json`, commits, and pushes a `cli-vX.Y.Z`
+  tag. The new `.github/workflows/cli-release.yml` job picks the tag
+  up, builds cross-platform binaries, publishes the public
+  `Tealstreet/cli` GitHub release using the matching
+  `RELEASE_NOTES.md` section as the body, and updates
+  `Tealstreet/homebrew-tap`. No more manual release machinery.
+- **Public npm launcher package.** Installing `@tealstreet/cli` from
+  npm now drops a launcher that resolves the right platform binary
+  from the GitHub release.
+
+### CLI ↔ web mount gate
+
+- **CLI startup checkin.** Every CLI process fires a single
+  best-effort `POST /api/cli/checkin` right after startup. The web
+  side records `settings.cli.checkins.<webPlatform>` and only mounts
+  its loopback listener worker when the matching platform has a
+  fresh (< 14d) checkin. Without this, ~99% of users (who don't run
+  the CLI) were getting three `WebSocket connection to
+ws://127.0.0.1:53219/ws failed:` errors on every page load.
+
+### Tradetunnel / HOW WebSocket runtime
+
+- **Verbose tradetunnel logging via `DEBUG=1`.** Sanitized
+  `[TradeTunnel]` request/response summaries route through
+  `console.log` and the operational-noise classifier sends them to
+  `~/.tealstreet/cli.log` without printing above the prompt.
+  Headers omitted, sensitive keys redacted, URL query values
+  redacted (query keys preserved), large payloads truncated.
+- **Account-route diagnostics.** A scrubbed snapshot of how
+  `createExchangeFromAccount` resolved each account's proxy / tunnel
+  path is emitted on startup, so it's clear from logs whether the CLI
+  hit the right transport.
+- **CLI tradetunnel clients issue admission tickets locally.** The
+  exchange-server tunnel-admission flow now matches the CLI flow, so
+  the same URL-ticket path is exercised end-to-end.
+
+### Correctness
+
+- **Tightened script execution edge cases.** Async script failures
+  and adapter-context propagation in fire-and-forget steps no longer
+  swallow errors.
+- **Script-types-bundle drift gate is skipped in the OSS mirror.**
+  The monorepo-only generator script isn't available in the sliced
+  mirror, so the drift check became a false positive there. The
+  monorepo gate still fires on every sync-back.
+
+### Dependencies
+
+- **commander → 15.0.0**, **ws → 8.21.0** (dependabot).
+
 ## v0.9.2 — 2026-05-25
 
 Adds a customizable bottom status footer.

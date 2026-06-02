@@ -19,10 +19,6 @@ The **Cross Trades** module allows you to copy trades onto alternate API keys. T
 
 It can be used to copy trades from one account to another, or to copy trades from one exchange to another. It even supports a form of basket trading where you can go long on one ticker and short on another, or vice versa.
 
-:::caution
-Cross Trades is currently in beta and may not work as expected. Please report any issues you encounter to the team on [Discord](https://teal.link/discord)
-:::
-
 <div class="text--center">
     <img src={CrossTrades} alt="Cross Trades Main" style={{ width: 500 }} />
 </div>
@@ -45,11 +41,13 @@ In the top right of your terminal when logged in you can access the module selec
 
 This will place the module on your layout and you can proceed to set it up and use it.
 
-- You will need to enable the 'Shared Worker' option in the settings of the Cross Trades module. \* Do not enable the worker on more then a single instance.
-
 - In the top left of the module choose the account you wish to make as a master. You need to be logged in and have the account linked in order to use this option. \* Make sure to toggle the On switch so that the module will be fully enabled.
 
 - After you have enabled a master account you can then click the button to add Copier's. \* In these copier accounts you can select the account(s) you wish to copy trades to.
+
+:::info Cross-tab leader
+The cross-trade engine runs in one browser tab at a time per device — coordinated via a localStorage leader lock with a 1.5s heartbeat. Open multiple Tealstreet tabs and only the leader places orders; close the leader and another tab takes over within a few seconds. No "Shared Worker" toggle is required anymore.
+:::
 
 ---
 
@@ -120,9 +118,30 @@ The module includes comprehensive validation to prevent configuration errors:
 
 ---
 
+### Run the engine in the CLI instead of a browser tab
+
+Power users can run the cross-trade engine inside the Tealstreet CLI as a long-lived daemon instead of relying on a browser leader tab. Configs live at `~/.tealstreet/cross-trade.json` and the CLI command surface is `tealstreet cross-trade {list,add,enable,disable,remove,run,status}`.
+
+Quick start:
+
+```bash
+tealstreet cross-trade add --master my-master --copier my-copier --symbol BTCUSDT --mode Market --enabled
+tealstreet cross-trade run     # foreground; Ctrl+C to stop
+tealstreet cross-trade status  # from another shell
+```
+
+When both the web leader tab and the CLI daemon are active for the same configs, **both engines will place orders**. The web shows a yellow warning banner above the leader-status alert, and the CLI prints a throttled warning line — neither side auto-disables the other, so close one before running both.
+
+Chase execution mode is **web-only in CLI v1**. Configs with Chase copiers are accepted by `tealstreet cross-trade add` but skipped at `run` time; use Market or LimitSlippage on the CLI.
+
+Full CLI documentation at [docs.tealstreet.io/cli/operations/cross-trade](https://docs.tealstreet.io/cli/operations/cross-trade).
+
+---
+
 ### Troubleshooting
 
-- **Shared Worker Required**: The module requires the shared worker to be enabled. This will trigger a page reload when enabled.
 - **Account Connectivity**: Ensure all accounts are properly connected and active before setting up cross-trades.
 - **Symbol Availability**: Verify that the symbols you want to trade are available on both master and copier exchanges.
 - **Execution Issues**: If trades aren't executing, check the execution type settings and ensure the exchange supports your chosen method.
+- **"Cross Trade is running in another tab"**: Another browser tab on this device owns the leader lock. Close it (or its window) to take over here; takeover happens within a few seconds.
+- **"Cross Trade is ALSO running on the CLI"**: The local `tealstreet cross-trade run` daemon is up and this tab is the leader. Both will place orders — disable one.
