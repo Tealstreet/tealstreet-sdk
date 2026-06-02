@@ -11,6 +11,7 @@ export function buildServeOptions({
   processCommand,
   notifyOwnAccountWrite,
   notifyOwnHookWrite,
+  notifyOwnCrossTradeWrite,
   onClientConnect,
 }: {
   port: number;
@@ -19,6 +20,7 @@ export function buildServeOptions({
   processCommand: ProcessCommandFn;
   notifyOwnAccountWrite: () => void;
   notifyOwnHookWrite: () => void;
+  notifyOwnCrossTradeWrite: () => void;
   onClientConnect?: () => void;
 }) {
   return {
@@ -41,6 +43,7 @@ export function buildServeOptions({
           origin,
           trusted: false,
           helloSeen: false,
+          webCrossTradeActive: false,
         };
         const upgraded = server.upgrade(req, { data });
         if (upgraded) return undefined;
@@ -54,6 +57,7 @@ export function buildServeOptions({
       processCommand,
       notifyOwnAccountWrite,
       notifyOwnHookWrite,
+      notifyOwnCrossTradeWrite,
       onClientConnect,
     }),
   };

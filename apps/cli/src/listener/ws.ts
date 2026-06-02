@@ -6,10 +6,12 @@ import { isTrusted, addTrustedClient } from './state';
 import { promptApproval } from './prompt';
 import { handleCmdExec, type ProcessCommandFn } from './handlers/cmd';
 import { handleMutateAccount } from './handlers/account';
+import { handleMutateCrossTrade } from './handlers/cross-trade';
 import { handleMutateHook, HOOK_OUTPUT_TOPIC } from './handlers/hook';
 import { sendAccountsSnapshot, ACCOUNTS_TOPIC } from './account-broadcast';
 import { sendTasksSnapshot, TASKS_TOPIC } from './tasks-broadcast';
 import { sendHooksSnapshot, HOOKS_TOPIC } from './hooks-broadcast';
+import { sendCrossTradeSnapshot, CROSS_TRADE_TOPIC } from './cross-trade-broadcast';
 import { isAccountSyncEnabled } from './config';
 
 export interface WsSessionData {
@@ -18,12 +20,19 @@ export interface WsSessionData {
   label?: string;
   trusted: boolean;
   helloSeen: boolean;
+  /**
+   * Latest signal from this web client that its in-tab cross-trade leader is
+   * running. Drives the CLI-side "both engines active" warning. Defaults
+   * false so old clients (no field in hello) don't trigger warnings.
+   */
+  webCrossTradeActive: boolean;
 }
 
 interface HelloFrame {
   t: 'hello';
   clientId: string;
   label?: string;
+  webCrossTradeActive?: boolean;
 }
 
 function isHello(msg: unknown): msg is HelloFrame {
@@ -45,12 +54,39 @@ function sendRejected(ws: ServerWebSocket<WsSessionData>): void {
   ws.send(JSON.stringify({ t: 'rejected' }));
 }
 
+const CROSS_TRADE_WARN_THROTTLE_MS = 60_000;
+let lastCrossTradeWarnAt = 0;
+
+/**
+ * Print a one-time-per-minute warning when this CLI process is running the
+ * cross-trade daemon AND any connected web client reports it is also
+ * running cross-trade locally. Warn-only — no auto-disable, no locking.
+ */
+function maybeWarnCrossTradeBoth(adapter: StandalonePlatformAdapter, ws: ServerWebSocket<WsSessionData>): void {
+  if (!ws.data.webCrossTradeActive) return;
+  const { isCrossTradeDaemonRunning } = require('../cross-trade-daemon') as typeof import('../cross-trade-daemon');
+  const { readFreshHeartbeat } = require('../cross-trade-heartbeat') as typeof import('../cross-trade-heartbeat');
+  // Daemon may be in another process (REPL listener + standalone daemon).
+  // Treat either in-process running OR a fresh heartbeat as "CLI engine on".
+  const cliRunning = isCrossTradeDaemonRunning() || readFreshHeartbeat() !== null;
+  if (!cliRunning) return;
+  const now = Date.now();
+  if (now - lastCrossTradeWarnAt < CROSS_TRADE_WARN_THROTTLE_MS) return;
+  lastCrossTradeWarnAt = now;
+  const label = ws.data.label || ws.data.clientId?.slice(0, 8) || '(unknown)';
+  adapter.printWarning(
+    `cross-trade warning: web client ${label} is also running cross-trade — both engines will place orders. ` +
+      `Disable one (web's leader-tab or "tealstreet cross-trade run") to avoid double-trading.`,
+  );
+}
+
 export function buildWebSocketHandler({
   adapter,
   listenerId,
   processCommand,
   notifyOwnAccountWrite,
   notifyOwnHookWrite,
+  notifyOwnCrossTradeWrite,
   onClientConnect,
 }: {
   adapter: StandalonePlatformAdapter;
@@ -58,6 +94,7 @@ export function buildWebSocketHandler({
   processCommand: ProcessCommandFn;
   notifyOwnAccountWrite: () => void;
   notifyOwnHookWrite: () => void;
+  notifyOwnCrossTradeWrite: () => void;
   onClientConnect?: () => void;
 }): WebSocketHandler<WsSessionData> {
   const onTrusted = (ws: ServerWebSocket<WsSessionData>) => {
@@ -70,6 +107,8 @@ export function buildWebSocketHandler({
     ws.subscribe(HOOKS_TOPIC);
     ws.subscribe(HOOK_OUTPUT_TOPIC);
     sendHooksSnapshot(ws);
+    ws.subscribe(CROSS_TRADE_TOPIC);
+    sendCrossTradeSnapshot(ws);
   };
   return {
     open(ws) {
@@ -100,6 +139,8 @@ export function buildWebSocketHandler({
         ws.data.helloSeen = true;
         ws.data.clientId = parsed.clientId;
         ws.data.label = parsed.label ?? '';
+        ws.data.webCrossTradeActive = parsed.webCrossTradeActive === true;
+        maybeWarnCrossTradeBoth(adapter, ws);
 
         const known = isTrusted(parsed.clientId);
         if (known) {
@@ -180,6 +221,22 @@ export function buildWebSocketHandler({
       if (t === 'mutate:hook') {
         const result = handleMutateHook(ws, parsed);
         if (result.wrote) notifyOwnHookWrite();
+        return;
+      }
+      if (t === 'mutate:cross-trade-config') {
+        const result = handleMutateCrossTrade(ws, parsed);
+        if (result.wrote) notifyOwnCrossTradeWrite();
+        return;
+      }
+      if (t === 'client:state') {
+        // Live update to the per-session feature signals carried in hello.
+        // Only `webCrossTradeActive` is used today; other fields ignored
+        // forward-compat.
+        const next = (parsed as { webCrossTradeActive?: unknown }).webCrossTradeActive;
+        if (typeof next === 'boolean' && next !== ws.data.webCrossTradeActive) {
+          ws.data.webCrossTradeActive = next;
+          maybeWarnCrossTradeBoth(adapter, ws);
+        }
         return;
       }
       logger.info(`listener: unhandled post-hello frame t=${String(t)}`);

@@ -608,6 +608,21 @@ Detailed in [Operations → Listener](../operations/listener.md) and
 
 ---
 
+## Cross-trade &nbsp; _(standalone-only)_ {#cross-trade}
+
+Detailed in [Operations → Cross-trade](../operations/cross-trade.md). Top-level
+binary surface:
+
+| Form                                                                                   | Result                                                                                          |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `tealstreet cross-trade list`                                                          | List configs in `~/.tealstreet/cross-trade.json`.                                               |
+| `tealstreet cross-trade add --master <a> --copier <b> [--symbol] [--mode] [--enabled]` | Add a single-copier config. `--mode ∈ LimitSlippage \| Market \| Chase` (Chase skipped on CLI). |
+| `tealstreet cross-trade enable <id>` / `disable <id>` / `remove <id>`                  | Mutate by id prefix (8 chars matches one row).                                                  |
+| `tealstreet cross-trade run`                                                           | Foreground daemon. Boots accounts, runs the engine, blocks until SIGINT.                        |
+| `tealstreet cross-trade status`                                                        | Read the heartbeat and print running/not + uptime + active configs.                             |
+
+---
+
 ## Recording &nbsp; _(standalone-only)_ {#recording}
 
 Detailed in [Operations → Recording](../operations/recording.md). REPL surface:

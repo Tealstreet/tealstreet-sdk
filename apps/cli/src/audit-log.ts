@@ -324,6 +324,29 @@ export const AUDIT_WRITE_HEADS = new Set([
 ]);
 
 /**
+ * Record a cross-trade engine lifecycle / safety event. Tagged
+ * `[cross-trade]` in the command field so `audit tail` can filter on
+ * the prefix. No-op when audit is off.
+ *
+ * Used by the daemon for: start, stop, drift events, per-account mute
+ * (via failure threshold), and the "both engines running" warning.
+ */
+export function recordCrossTradeEvent(
+  event: string,
+  detail: { account?: string; ok?: boolean; error?: string; orderIds?: string[] } = {},
+): void {
+  if (!isAuditEnabled()) return;
+  appendAuditEntry({
+    ts: new Date().toISOString(),
+    account: detail.account || 'cross-trade',
+    command: `[cross-trade] ${event}`,
+    ok: detail.ok !== false,
+    ...(detail.orderIds?.length ? { orderIds: detail.orderIds } : {}),
+    ...(detail.error ? { error: detail.error } : {}),
+  });
+}
+
+/**
  * Record a dispatched command as a write-op audit entry — the single
  * entry point the CLI runner calls after each command. No-ops unless
  * (a) auditing is on, (b) the command was handled, and (c) its head is

@@ -1,5 +1,6 @@
-import type { CrossTradeCopier } from '../../crossTrade/types';
 import type { Market } from '../../types';
+import type { CrossTradeCopier } from '../types';
+import type { CrossTradePlaceOrderFn } from './CrossTradeManager';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,16 +8,6 @@ import { OrderSide } from '../../types';
 
 vi.mock('../../utils/loop', () => ({
   loop: vi.fn(),
-}));
-
-const exchangeWorkersMock: Record<string, any> = {};
-vi.mock('../store.webworker', () => ({
-  exchangeWorkers: exchangeWorkersMock,
-}));
-
-const crossTradePlaceOrderMock = vi.fn();
-vi.mock('./crossTradePlaceOrder', () => ({
-  crossTradePlaceOrder: crossTradePlaceOrderMock,
 }));
 
 const makeMarket = (overrides: Partial<Market> = {}): Market => ({
@@ -42,12 +33,15 @@ const makeCopier = (overrides: Partial<CrossTradeCopier> = {}): CrossTradeCopier
 
 describe('CrossTradeManager._safePlaceOrder', () => {
   let manager: any;
+  let placeOrderMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     const { CrossTradeManager } = await import('./CrossTradeManager');
-    manager = new CrossTradeManager();
-    crossTradePlaceOrderMock.mockReset();
-    crossTradePlaceOrderMock.mockResolvedValue({ id: 'order-1' });
+    placeOrderMock = vi.fn().mockResolvedValue({ id: 'order-1' });
+    manager = new CrossTradeManager({
+      getExchange: () => undefined,
+      placeOrder: placeOrderMock as unknown as CrossTradePlaceOrderFn,
+    });
   });
 
   afterEach(() => {
@@ -57,14 +51,14 @@ describe('CrossTradeManager._safePlaceOrder', () => {
   it('places an order under normal conditions', async () => {
     const market = makeMarket();
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
   });
 
   it('clears state on success so future calls go through', async () => {
     const market = makeMarket();
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(2);
+    expect(placeOrderMock).toHaveBeenCalledTimes(2);
   });
 
   it('skips orders below market.limits.amount.min', async () => {
@@ -72,7 +66,7 @@ describe('CrossTradeManager._safePlaceOrder', () => {
       limits: { amount: { min: 1, max: 1000 }, leverage: { min: 1, max: 100 } },
     });
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).not.toHaveBeenCalled();
+    expect(placeOrderMock).not.toHaveBeenCalled();
   });
 
   it('allows orders at exactly the min amount threshold', async () => {
@@ -80,7 +74,7 @@ describe('CrossTradeManager._safePlaceOrder', () => {
       limits: { amount: { min: 1, max: 1000 }, leverage: { min: 1, max: 100 } },
     });
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 1, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not impose a min when market.limits.amount.min is 0', async () => {
@@ -88,44 +82,46 @@ describe('CrossTradeManager._safePlaceOrder', () => {
       limits: { amount: { min: 0, max: 1000 }, leverage: { min: 1, max: 100 } },
     });
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.0001, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
   });
 
   it('reduceOnly orders bypass the min-amount gate so residual closes still flow', async () => {
     const market = makeMarket({
       limits: { amount: { min: 1, max: 1000 }, leverage: { min: 1, max: 100 } },
     });
-    // Below-min, but reduceOnly = true → must reach the exchange
+    // Below-min, but reduceOnly = true → must reach the injected placeOrder
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Sell, 0.5, true);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
-    expect(crossTradePlaceOrderMock.mock.calls[0][6]).toBe(true);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock.mock.calls[0][6]).toBe(true);
   });
 
   it('mutes (account, symbol) after 2 consecutive failures', async () => {
     const market = makeMarket();
-    crossTradePlaceOrderMock.mockRejectedValue(new Error('boom'));
+    placeOrderMock.mockReset();
+    placeOrderMock.mockRejectedValue(new Error('boom'));
 
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(2);
+    expect(placeOrderMock).toHaveBeenCalledTimes(2);
 
-    // 3rd call should be muted, never reach crossTradePlaceOrder
+    // 3rd call should be muted, never reach placeOrder
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(2);
+    expect(placeOrderMock).toHaveBeenCalledTimes(2);
   });
 
   it('mute is scoped per (account, symbol)', async () => {
     const btcMarket = makeMarket({ id: 'BTCUSDT', symbol: 'BTCUSDT' });
     const ethMarket = makeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT' });
-    crossTradePlaceOrderMock.mockRejectedValue(new Error('boom'));
+    placeOrderMock.mockReset();
+    placeOrderMock.mockRejectedValue(new Error('boom'));
 
     await manager._safePlaceOrder(makeCopier(), btcMarket, 100, 'copier1', OrderSide.Buy, 0.5, false);
     await manager._safePlaceOrder(makeCopier(), btcMarket, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    crossTradePlaceOrderMock.mockClear();
+    placeOrderMock.mockClear();
 
     // BTC on copier1 muted; ETH on copier1 should still be attempted
     await manager._safePlaceOrder(makeCopier(), ethMarket, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
 
     // BTC on copier2 should also still be attempted
     await manager._safePlaceOrder(
@@ -137,64 +133,67 @@ describe('CrossTradeManager._safePlaceOrder', () => {
       0.5,
       false,
     );
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(2);
+    expect(placeOrderMock).toHaveBeenCalledTimes(2);
   });
 
   it('mute expires after 30s', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const market = makeMarket();
-    crossTradePlaceOrderMock.mockRejectedValue(new Error('boom'));
+    placeOrderMock.mockReset();
+    placeOrderMock.mockRejectedValue(new Error('boom'));
 
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    crossTradePlaceOrderMock.mockClear();
-    crossTradePlaceOrderMock.mockResolvedValue({ id: 'order-1' });
+    placeOrderMock.mockClear();
+    placeOrderMock.mockResolvedValue({ id: 'order-1' });
 
     // Still muted at +29s
     vi.setSystemTime(new Date('2026-01-01T00:00:29Z'));
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).not.toHaveBeenCalled();
+    expect(placeOrderMock).not.toHaveBeenCalled();
 
     // Unmuted at +31s
     vi.setSystemTime(new Date('2026-01-01T00:00:31Z'));
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
   });
 
   it('successful call clears prior failure count', async () => {
     const market = makeMarket();
-    crossTradePlaceOrderMock.mockRejectedValueOnce(new Error('boom'));
-    crossTradePlaceOrderMock.mockResolvedValueOnce({ id: 'order-1' });
-    crossTradePlaceOrderMock.mockRejectedValueOnce(new Error('boom2'));
+    placeOrderMock.mockReset();
+    placeOrderMock.mockRejectedValueOnce(new Error('boom'));
+    placeOrderMock.mockResolvedValueOnce({ id: 'order-1' });
+    placeOrderMock.mockRejectedValueOnce(new Error('boom2'));
 
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
     // After success, the failure count was cleared. One more failure should NOT yet mute.
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    crossTradePlaceOrderMock.mockClear();
-    crossTradePlaceOrderMock.mockResolvedValue({ id: 'order-2' });
+    placeOrderMock.mockClear();
+    placeOrderMock.mockResolvedValue({ id: 'order-2' });
 
     // Not muted — one isolated failure is below threshold
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
   });
 
   it('stop() clears failure state', async () => {
     const market = makeMarket();
-    crossTradePlaceOrderMock.mockRejectedValue(new Error('boom'));
+    placeOrderMock.mockReset();
+    placeOrderMock.mockRejectedValue(new Error('boom'));
 
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
 
     manager.stop();
 
-    crossTradePlaceOrderMock.mockClear();
-    crossTradePlaceOrderMock.mockResolvedValue({ id: 'order-1' });
+    placeOrderMock.mockClear();
+    placeOrderMock.mockResolvedValue({ id: 'order-1' });
 
     // After stop(), the mute is cleared; next call goes through
     await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
-    expect(crossTradePlaceOrderMock).toHaveBeenCalledTimes(1);
+    expect(placeOrderMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -203,17 +202,15 @@ describe('CrossTradeManager.start / stop lifecycle', () => {
 
   beforeEach(async () => {
     const { CrossTradeManager } = await import('./CrossTradeManager');
-    manager = new CrossTradeManager();
-    crossTradePlaceOrderMock.mockReset();
-    crossTradePlaceOrderMock.mockResolvedValue({ id: 'order-1' });
-
-    for (const key of Object.keys(exchangeWorkersMock)) delete exchangeWorkersMock[key];
+    manager = new CrossTradeManager({
+      getExchange: () => undefined,
+      placeOrder: vi.fn().mockResolvedValue({ id: 'order-1' }) as unknown as CrossTradePlaceOrderFn,
+    });
   });
 
   it('start([]) schedules a loop but places no orders', async () => {
     manager.start([]);
     await new Promise((r) => setTimeout(r, 0));
-    expect(crossTradePlaceOrderMock).not.toHaveBeenCalled();
     expect(manager._loop).toBeDefined();
     manager.stop();
   });

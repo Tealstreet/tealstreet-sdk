@@ -79,6 +79,7 @@ function getExchangeInfo(name: string): ExchangeInfo | undefined {
   return SUPPORTED_EXCHANGES[name.toLowerCase()];
 }
 import { checkForUpdatesBackground, performUpdate, forceCheckForUpdates, getCurrentVersion } from './updater';
+import { registerCrossTradeCommand } from './commands/cross-trade';
 
 // Dynamic import for repl to avoid circular dependency issues with safe-cex
 const getRepl = async () => import('./repl');
@@ -338,6 +339,9 @@ accountCmd
 
 // Note: 'serve' command has been moved to services/exchange-server.
 // Use the standalone exchange-server binary instead of `tealstreet serve`.
+
+// ============ Cross-Trade Commands ============
+registerCrossTradeCommand(program);
 
 // ============ Tasks Commands ============
 const tasksCmd = program.command('tasks').description('Manage running tasks');

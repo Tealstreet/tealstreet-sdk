@@ -46,6 +46,7 @@ const sidebars = {
         'operations/trusted-clients',
         'operations/pairing',
         'operations/recording',
+        'operations/cross-trade',
         'operations/troubleshooting',
         'operations/config-files',
         'operations/releases',
