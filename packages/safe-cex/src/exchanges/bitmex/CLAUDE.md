@@ -493,12 +493,15 @@ existing account's region silently breaks it**. The current setup:
 The user's BitMEX API key has a per-key IP allowlist that contains
 the **Singapore** HAProxy egress IPs from
 `@tealstreet/proxy-ips-lists` → `privateProxyIpsSingapore`. The
-Tokyo pool (`privateProxyIpsTokyo`) is a disjoint set of 5 EIPs.
-Switching `proxyRegion` on an existing account to `'JA'` without
-the user re-whitelisting the Tokyo IPs on BitMEX produces signed
-requests that BitMEX rejects with HTTP 401 — and the resulting auth
-errors don't surface a clear "wrong IP" message; they look like a
-broken API key.
+Tokyo private proxy pool (`privateProxyIpsTokyo`) is a disjoint set
+of 5 EIPs, and JA WS tunnel outbound connections also use the
+separate Tokyo K8s NAT gateway
+`tokyoK8sNatGatewayIp = 18.176.98.246`. Switching `proxyRegion` on
+an existing account to `'JA'` without the user re-whitelisting both
+the Tokyo private proxy pool and the Tokyo WS/K8s NAT IP on BitMEX
+produces signed requests or private WS auth flows that BitMEX can
+reject — and the resulting auth errors don't always surface a clear
+"wrong IP" message; they can look like a broken API key.
 
 When editing an existing BitMEX account in the UI, the region
 selector pre-populates from the stored value. **Do not** auto-flip
@@ -512,9 +515,29 @@ BitMEX's own network firewall in front. Singapore HAProxy IPs are
 enrolled. Tokyo HAProxy IPs (`privateProxyIpsTokyo`) were enrolled
 2026-05-11 via BitMEX support — without that enrollment, TCP SYNs
 from Tokyo egress to `api.direct.bitmex.com` are silently dropped
-(15 s timeout, 0 bytes). If we ever rotate or add a Tokyo EIP, the
-new IP must be sent to BitMEX support before traffic from it will
-work.
+(15 s timeout, 0 bytes). The Tokyo K8s NAT gateway
+(`tokyoK8sNatGatewayIp`) is a distinct WS tunnel egress IP that users
+must whitelist on their BitMEX API keys for JA private WS stability.
+If we ever rotate or add a Tokyo EIP or NAT gateway, the new IP must
+be sent to BitMEX support and added to the web account setup allowlist
+before traffic from it will work reliably.
+
+### Why a missing JA tunnel IP can look partially connected
+
+BitMEX startup does not currently gate "ready to trade" on a proven
+private WS auth success. `_startPrivate()` connects/subscribes the
+private WS, starts `tick()`, and then logs readiness while public
+market data and some authenticated REST paths may still be independently
+working. The private WS auth path also sends auth and subscriptions
+without waiting for an auth success frame first. If a BitMEX API key is
+missing the JA tunnel egress IP, the account can therefore look partly
+alive while private WS tables fail to arrive or reconnects churn.
+
+HoW tunnel errors are another source of lost signal: tunnel replies can
+carry structured exchange errors, so callers must preserve the exchange
+message instead of coercing the object to `[object Object]`. That is
+load-bearing for surfacing BitMEX IP allowlist failures to web/CLI
+health and validation paths.
 
 ## Known Quirks / Implementation Notes
 

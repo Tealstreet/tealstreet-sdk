@@ -113,6 +113,27 @@ function hasLoggableContent(value: unknown): boolean {
   return true;
 }
 
+function formatTradeTunnelErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+
+  if (error && typeof error === 'object') {
+    const errorObject = error as Record<string, unknown>;
+    for (const key of ['message', 'error', 'msg']) {
+      const value = errorObject[key];
+      if (typeof value === 'string' && value.length > 0) return value;
+    }
+
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+
+  return String(error);
+}
+
 /**
  * Log trade tunnel request
  */
@@ -430,7 +451,7 @@ const createAxiosHttpOverWebsocketAdapter = (
 
           if (data && typeof data === 'object' && data.error) {
             // Create a proper Error object with URL context for better Sentry tracking
-            const tunnelError = new Error(`${data.error} (URL: ${websocketRequest.url})`);
+            const tunnelError = new Error(`${formatTradeTunnelErrorMessage(data.error)} (URL: ${websocketRequest.url})`);
             tunnelError.name = 'TradeTunnelError';
             (tunnelError as any).url = websocketRequest.url;
             (tunnelError as any).method = websocketRequest.method;

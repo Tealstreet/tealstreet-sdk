@@ -131,6 +131,28 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     });
   });
 
+  it('preserves object-shaped tunnel error messages', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const callerConfig: any = {
+      url: '/api/path',
+      method: 'POST',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    mockWs.replyTo = (sent) => {
+      mockWs.emitter.emit('sub:' + sent.nonce, {
+        error: { message: 'This request has expired - `expires` is in the past.' },
+      });
+    };
+
+    await expect(adapter(callerConfig)).rejects.toMatchObject({
+      name: 'TradeTunnelError',
+      message: 'This request has expired - `expires` is in the past. (URL: https://example.com/api/path)',
+      originalError: { message: 'This request has expired - `expires` is in the past.' },
+    });
+  });
+
   it('emits sanitized request and response summaries only in DEBUG mode', async () => {
     vi.stubEnv('DEBUG', '1');
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
