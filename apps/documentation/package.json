@@ -40,7 +40,7 @@
     "docusaurus-plugin-image-zoom": "^3.0.1",
     "prism-react-renderer": "^2.4.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.6",
+    "react-dom": "^19.2.7",
     "react-grid-layout": "^2.2.2",
     "typescript": "^6.0.3"
   },
