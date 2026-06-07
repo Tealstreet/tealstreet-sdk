@@ -250,7 +250,10 @@ and large payloads are truncated.
 ```bash
 yarn dev           # Run with bun
 yarn build         # Build cross-platform binaries (scripts/build.sh)
-yarn release       # Build + GitHub release (scripts/release.sh)
+yarn release       # Bump + tag + push; tag fires .github/workflows/cli-release.yml (binaries, npm, homebrew).
+                   # Variants: yarn release:patch | :minor | :major. No-arg = patch.
+                   # Recovery if package.json was bumped without tagging:
+                   #   git tag cli-v$(node -p "require('./package.json').version") master && git push origin --tags
 yarn test          # Vitest
 yarn logs          # Tail ~/.tealstreet/cli.log
 ```
