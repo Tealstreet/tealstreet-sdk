@@ -40,7 +40,7 @@
     "@tealstreet/grvt-ts-sdk": "*",
     "@tealstreet/paradex-sdk": "*",
     "dequal": "^2.0.3",
-    "axios": "^1.14.0",
+    "axios": "^1.17.0",
     "axios-rate-limit": "^1.9.0",
     "axios-retry": "^4.5.0",
     "big.js": "^7.0.1",
