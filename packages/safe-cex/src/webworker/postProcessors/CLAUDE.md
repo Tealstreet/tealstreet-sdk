@@ -7,6 +7,57 @@ update (4 Hz default). Each one mutates the snapshot before
 For the broader hot-path rule set, see `../../exchanges/CLAUDE.md`
 → "Public WebSocket Hot-Path Patterns".
 
+## Layer boundary contract — what belongs here vs. core vs. UI
+
+This package sits between two other layers. Use this to decide where a
+new computation lives. More specific rules elsewhere win.
+
+- **safe-cex core** (`../../exchanges/*`, the store in `store.base.ts`)
+  — exchange-specific normalization, signing, and anything that needs
+  exchange API/WS semantics or per-exchange tier data. Owns the **raw**
+  `StoreData` fields: `balance`, `positions`, `orders`, `tickers`,
+  `markets`, `fetchedLeverage`, and exchange-reported values like
+  `liquidationPrice` / `unrealizedPnl`.
+- **post-processor** (this dir) — pure, exchange-agnostic derivations
+  over the canonical store + account context, plus stateful
+  time-windowed bookkeeping (rolling PnL). Writes the **derived**
+  `StoreData` fields: `displayedPositions`, `ordersRisk`,
+  `activeChasers`, `activeTWAPs`, `messageHandlerStats`. Output **must
+  be identical for every consumer** — no dependence on user display
+  settings.
+- **UI render** (`apps/web/src/components`, atoms, hooks) —
+  view-dependent presentation only: USD-vs-% toggles, formatting,
+  privacy masking, sorting, per-user-setting thresholds, and anything
+  sourced outside the store.
+
+**The hoist test** — move work into a post-processor only if **all
+three** hold:
+
+1. Output is identical for every consumer (independent of user view
+   settings).
+2. It does non-trivial or shared work — not a single
+   division/subtraction the UI can do per visible row.
+3. It needs only the store + account context (no live `Exchange`
+   instance → it can be an _independent_ processor and run client-side
+   in hosted mode; otherwise it's an exchange-dependent one).
+
+Worked examples, applied to the Open Positions derivations:
+
+| Derivation                                     | #1 same for all?              | #2 non-trivial?      | Verdict                                                          |
+| ---------------------------------------------- | ----------------------------- | -------------------- | ---------------------------------------------------------------- |
+| SL/TP coverage (`hasFullStop`/`hasFullTP`)     | yes                           | yes (order scan)     | **hoisted** here                                                 |
+| `accountLeverage` (`notional / balance.total`) | yes                           | no (one division)    | stays in UI                                                      |
+| 1m/5m PnL delta (`uPnL − baseline`)            | yes                           | no (one subtraction) | stays in UI                                                      |
+| max-drawdown tag                               | no (`maxAccountDrawdownAtom`) | —                    | stays in UI                                                      |
+| realized PnL / breakeven                       | —                             | —                    | stays in UI (sourced from the history controller, not the store) |
+
+> **Known boundary blur (not yet fixed):**
+> `apps/web/src/components/riskProfiler/riskProfiler.calculations.ts`
+> recomputes order-risk scenarios on the main thread that
+> `OrdersRiskProfilePostprocessor` already wrote to `store.ordersRisk`.
+> That one is substantial (a full risk recompute), so it's a candidate
+> for consuming the derived field instead — left as a follow-up.
+
 ## Pipeline cadence
 
 `ExchangeWorker._throttledStoreUpdate` is throttled to 250 ms
@@ -86,10 +137,27 @@ per matched order. Now: single pass over chasers builds an
 The displayed-position pass always enriches real positions, but
 chaser/TWAP side maps are only useful while those algos are active.
 When `activeChasers` and `activeTWAPs` are empty, don't build
-`activeKey`, `activeChaserKeys`, `activeTwapKeys`, or the real-position
-key map. Fake positions are only a chaser feature, so
-`realPositionKeys` is intentionally allocated only when chasers exist
-(not merely when TWAPs exist).
+`activeChaserKeys`, `activeTwapKeys`, or the real-position key map.
+Fake positions are only a chaser feature, so `realPositionKeys` is
+intentionally allocated only when chasers exist (not merely when TWAPs
+exist). The per-position `activeKey` string is built when
+`needsPositionKey` **or** there is stop/TP coverage to look up
+(`hasStopTpCoverage`) — it's reused for the chaser/TWAP flags and the
+`hasFullStop` / `hasFullTP` lookup, so it stays a single allocation per
+position even though it now serves two features.
+
+### `hasFullStop` / `hasFullTP` are derived here, not in the UI
+
+`buildStopTpCoverage(store.orders)` maps each `symbol:closingSide` to
+its open stop/take-profit coverage (a Sell order closes a Long, a Buy
+closes a Short; `amount === 0` is the close-entire-position marker →
+full coverage). Each displayed position then carries `hasFullStop` /
+`hasFullTP` = full marker **or** summed amounts `≥ contracts`. This is
+order-derived, consumer-agnostic state, so it belongs on the data
+object — the Open Positions status column reads the booleans off the
+row with no order scan. The **max-drawdown** tag stays in the UI
+instead: it depends on the per-user `maxAccountDrawdownAtom` and needs
+the raw stop orders for worst-case-loss math.
 
 Keep this work in the worker unless a later profile proves otherwise.
 The UI consumes `displayedPositions` with ticker/market/balance fields

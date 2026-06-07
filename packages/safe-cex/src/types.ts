@@ -480,6 +480,8 @@ export type DisplayedPosition = Position & {
   readonly hasActiveTWAP?: boolean;
   readonly isFakePosition?: boolean;
   readonly chaserSize?: number;
+  readonly hasFullStop?: boolean;
+  readonly hasFullTP?: boolean;
 };
 
 export type HistoricalTrade = {

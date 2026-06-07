@@ -5,7 +5,10 @@ import {
   ActiveTWAP,
   DisplayedPosition,
   Market,
+  Order,
   OrderSide,
+  OrderStatus,
+  OrderType,
   PositionSide,
   StoreData,
   Ticker,
@@ -15,6 +18,8 @@ import { TwapStatus } from '../twap/TwapStatus';
 import { BasePostprocessor } from './BasePostprocessor';
 
 const positionKey = (symbol: string, side: PositionSide) => `${symbol}:${side}`;
+
+type StopTpCoverage = { hasFullStop: boolean; hasFullTP: boolean; stopAmount: number; tpAmount: number };
 
 /**
  * Adds ticker, market, balance, exchange information to positions to save some UI cycles.
@@ -69,6 +74,48 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
       keys[positionKey(activeMarket.symbol, this.getTwapPositionSide(twap))] = true;
     }
     return keys;
+  }
+
+  // Maps each `symbol:closingSide` to its open stop/take-profit coverage so the
+  // displayed position can carry `hasFullStop` / `hasFullTP` precomputed instead
+  // of the UI re-scanning every account's orders per render. A Sell order closes
+  // a Long, a Buy order closes a Short; `amount === 0` is the exchange's
+  // close-entire-position marker (full coverage regardless of size).
+  private buildStopTpCoverage(orders: Order[]): Record<string, StopTpCoverage> {
+    const coverage: Record<string, StopTpCoverage> = {};
+    for (let i = 0; i < orders.length; i++) {
+      const order = orders[i];
+      if (order.status !== OrderStatus.Open) continue;
+
+      const closingSide =
+        order.side === OrderSide.Sell
+          ? PositionSide.Long
+          : order.side === OrderSide.Buy
+            ? PositionSide.Short
+            : undefined;
+      if (!closingSide) continue;
+
+      const isStop = order.type === OrderType.StopLoss || order.type === OrderType.TrailingStopLoss;
+      const isTakeProfit = order.type === OrderType.TakeProfit || order.type === OrderType.Limit;
+      if (!isStop && !isTakeProfit) continue;
+
+      const key = positionKey(order.symbol, closingSide);
+      let entry = coverage[key];
+      if (!entry) {
+        entry = { hasFullStop: false, hasFullTP: false, stopAmount: 0, tpAmount: 0 };
+        coverage[key] = entry;
+      }
+
+      if (isStop) {
+        if (order.amount === 0) entry.hasFullStop = true;
+        else entry.stopAmount += order.amount || 0;
+      }
+      if (isTakeProfit) {
+        if (order.amount === 0) entry.hasFullTP = true;
+        else entry.tpAmount += order.amount || 0;
+      }
+    }
+    return coverage;
   }
 
   private _lastMinutePnl = new Map<string, TimeLimitedQueue<{ upnl: number }>>();
@@ -151,12 +198,18 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
     const activeTwapKeys = hasActiveTWAPs ? this.buildActiveTwapKeys(store.activeTWAPs) : undefined;
     const realPositionKeys: Record<string, true> | undefined = hasActiveChasers ? {} : undefined;
     const needsPositionKey = hasActiveChasers || hasActiveTWAPs;
+    const stopTpCoverage = this.buildStopTpCoverage(store.orders || []);
+    let hasStopTpCoverage = false;
+    for (const _key in stopTpCoverage) {
+      hasStopTpCoverage = true;
+      break;
+    }
     const displayedPositions: Writable<DisplayedPosition[]> = [];
     const positions = store.positions || [];
 
     for (let i = 0; i < positions.length; i++) {
       const position = positions[i];
-      const activeKey = needsPositionKey ? positionKey(position.symbol, position.side) : undefined;
+      const activeKey = needsPositionKey || hasStopTpCoverage ? positionKey(position.symbol, position.side) : undefined;
       if (realPositionKeys && activeKey) {
         realPositionKeys[activeKey] = true;
       }
@@ -165,6 +218,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
       if (contracts <= 0) continue;
 
       const ticker = tickerMap[position.symbol];
+      const coverage = activeKey ? stopTpCoverage[activeKey] : undefined;
       const displayedPosition = {
         ...position,
         contracts,
@@ -177,6 +231,8 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
         exchangeName: this._exchangeName!,
         hasActiveChaser: activeKey !== undefined && activeChaserKeys?.[activeKey] === true,
         hasActiveTWAP: activeKey !== undefined && activeTwapKeys?.[activeKey] === true,
+        hasFullStop: coverage ? coverage.hasFullStop || coverage.stopAmount >= contracts : false,
+        hasFullTP: coverage ? coverage.hasFullTP || coverage.tpAmount >= contracts : false,
       } as Writable<DisplayedPosition> & { key: string };
       this.trackPositionPnl(displayedPosition);
       displayedPositions.push(displayedPosition);
@@ -238,6 +294,8 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
             hasActiveTWAP: false,
             isFakePosition: true, // Mark as fake
             chaserSize: chaser.size, // Store intended size
+            hasFullStop: false,
+            hasFullTP: false,
           };
 
           this.trackPositionPnl(fakePosition);

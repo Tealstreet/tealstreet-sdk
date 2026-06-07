@@ -5,6 +5,7 @@ import type {
   ExchangeName,
   ExchangeOptions,
   Market,
+  Order,
   Position,
   StoreData,
   Ticker,
@@ -13,7 +14,7 @@ import type {
 
 import { describe, expect, it } from 'vitest';
 
-import { OrderSide, PositionSide } from '../../types';
+import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 import { TwapStatus } from '../twap/TwapStatus';
 import { DisplayedPositionsPostprocessor } from './DisplayedPositionsPostprocessor';
 
@@ -80,6 +81,18 @@ const createActiveTwap = (overrides?: Partial<ActiveTWAP>): ActiveTWAP =>
     status: TwapStatus.Running,
     ...overrides,
   }) as ActiveTWAP;
+
+const createOrder = (overrides?: Partial<Order>): Order =>
+  ({
+    id: 'order-1',
+    symbol: 'BTCUSDT',
+    side: OrderSide.Sell,
+    type: OrderType.StopLoss,
+    status: OrderStatus.Open,
+    amount: 2,
+    price: 90,
+    ...overrides,
+  }) as Order;
 
 const createStore = (overrides?: Partial<StoreData>): Writable<StoreData> =>
   ({
@@ -170,6 +183,86 @@ describe('DisplayedPositionsPostprocessor', () => {
       isFakePosition: true,
       chaserSize: 2,
       hasActiveChaser: true,
+      hasFullStop: false,
+      hasFullTP: false,
     });
+  });
+
+  it('marks full stop coverage when a close-entire-position stop exists (amount === 0)', () => {
+    const store = createStore({
+      positions: [createPosition({ contracts: 2 })],
+      orders: [createOrder({ side: OrderSide.Sell, type: OrderType.StopLoss, amount: 0 })],
+    });
+
+    createProcessor().process(store);
+
+    expect(store.displayedPositions[0].hasFullStop).toBe(true);
+    expect(store.displayedPositions[0].hasFullTP).toBe(false);
+  });
+
+  it('marks full stop coverage when partial stop amounts sum to at least the position size', () => {
+    const store = createStore({
+      positions: [createPosition({ contracts: 2 })],
+      orders: [
+        createOrder({ id: 'sl-a', side: OrderSide.Sell, type: OrderType.StopLoss, amount: 1 }),
+        createOrder({ id: 'sl-b', side: OrderSide.Sell, type: OrderType.StopLoss, amount: 1 }),
+      ],
+    });
+
+    createProcessor().process(store);
+
+    expect(store.displayedPositions[0].hasFullStop).toBe(true);
+  });
+
+  it('leaves stop coverage incomplete when partial stop amounts are below the position size', () => {
+    const store = createStore({
+      positions: [createPosition({ contracts: 2 })],
+      orders: [createOrder({ side: OrderSide.Sell, type: OrderType.StopLoss, amount: 1 })],
+    });
+
+    createProcessor().process(store);
+
+    expect(store.displayedPositions[0].hasFullStop).toBe(false);
+  });
+
+  it('treats limit orders as take-profit coverage', () => {
+    const store = createStore({
+      positions: [createPosition({ contracts: 2 })],
+      orders: [createOrder({ side: OrderSide.Sell, type: OrderType.Limit, amount: 2 })],
+    });
+
+    createProcessor().process(store);
+
+    expect(store.displayedPositions[0].hasFullTP).toBe(true);
+    expect(store.displayedPositions[0].hasFullStop).toBe(false);
+  });
+
+  it('keeps long and short coverage independent for a hedged symbol', () => {
+    const store = createStore({
+      positions: [
+        createPosition({ id: 'long', side: PositionSide.Long, contracts: 2 }),
+        createPosition({ id: 'short', side: PositionSide.Short, contracts: 2 }),
+      ],
+      // Sell stop closes the long; no order closes the short.
+      orders: [createOrder({ side: OrderSide.Sell, type: OrderType.StopLoss, amount: 0 })],
+    });
+
+    createProcessor().process(store);
+
+    const long = store.displayedPositions.find((p) => p.id === 'long');
+    const short = store.displayedPositions.find((p) => p.id === 'short');
+    expect(long?.hasFullStop).toBe(true);
+    expect(short?.hasFullStop).toBe(false);
+  });
+
+  it('ignores non-open orders for coverage', () => {
+    const store = createStore({
+      positions: [createPosition({ contracts: 2 })],
+      orders: [createOrder({ side: OrderSide.Sell, type: OrderType.StopLoss, amount: 0, status: OrderStatus.Closed })],
+    });
+
+    createProcessor().process(store);
+
+    expect(store.displayedPositions[0].hasFullStop).toBe(false);
   });
 });
