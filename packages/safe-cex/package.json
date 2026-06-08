@@ -86,7 +86,7 @@
     "vite": "^8.0.16",
     "vite-tsconfig-paths": "^5.0.1",
     "@vitejs/plugin-react": "^6.0.2",
-    "vitest": "^4.1.7",
+    "vitest": "^4.1.8",
     "@types/create-hash": "^1.2.2",
     "@types/create-hmac": "^1.1.0",
     "@types/lodash": "^4.17.23",
