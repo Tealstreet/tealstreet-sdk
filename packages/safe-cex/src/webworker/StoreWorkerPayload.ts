@@ -32,8 +32,6 @@ export type StoreWorkerIncomingOp =
   | 'updatePositions'
   | 'callMethod'
   | 'exec'
-  | 'crosstrade:start'
-  | 'crosstrade:stop'
   // Dev
   | 'dev:simulateWebSocketsReconnect'
   | 'dev:simulateHOWClose'

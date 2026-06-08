@@ -15,7 +15,6 @@ import { BaseHandler } from './handlers/BaseHandler';
 import { CallMethodHandler } from './handlers/CallMethodHandler';
 import { ChaserOrderHandler } from './handlers/ChaserOrderHandler';
 import { CommandHandler } from './handlers/CommandHandler';
-import { CrossTradeHandler } from './handlers/CrossTradeHandler';
 import { DevHandler } from './handlers/DevHandler';
 import { OHLCVSubscriptionsHandler } from './handlers/OHLCVSubscriptionsHandler';
 import { OrderBookSubscriptionsHandler } from './handlers/OrderBookSubscriptionsHandler';
@@ -54,7 +53,6 @@ export class ExchangeWorker {
     CommandHandler,
     UpdatePositionsHandler,
     CallMethodHandler,
-    CrossTradeHandler,
     UiStateHandler,
   ];
 
