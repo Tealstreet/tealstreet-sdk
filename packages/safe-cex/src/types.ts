@@ -697,6 +697,12 @@ export type StoreUpdateIds = {
   orders: number;
 };
 
+export type DisplayedMargin = {
+  readonly longExposure: number;
+  readonly shortExposure: number;
+  readonly totalNotional: number;
+};
+
 export type StoreData = {
   readonly latency: number;
   readonly balance: Balance;
@@ -722,6 +728,7 @@ export type StoreData = {
   readonly userData?: any;
   readonly positions: Position[];
   readonly displayedPositions: DisplayedPosition[];
+  readonly displayedMargin?: DisplayedMargin;
   readonly ordersRisk: { [orderId: string]: OrderRiskProfile[] };
   readonly activeChasers: ActiveChaser[];
   readonly activeTWAPs: ActiveTWAP[];

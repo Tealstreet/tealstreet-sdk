@@ -28,6 +28,7 @@ export const defaultStore: StoreData = {
   tickers: [],
   positions: [],
   displayedPositions: [],
+  displayedMargin: { longExposure: 0, shortExposure: 0, totalNotional: 0 },
   ordersRisk: {},
   activeChasers: [],
   activeTWAPs: [],
@@ -193,6 +194,10 @@ export class DefaultStore implements Store {
 
   get displayedPositions() {
     return this.state.displayedPositions;
+  }
+
+  get displayedMargin() {
+    return this.state.displayedMargin;
   }
 
   get activeChasers() {

@@ -142,6 +142,7 @@ export const stubStore: StoreData = {
   tickers: [stubTicker],
   positions: [stubPosition],
   displayedPositions: [stubDisplayedPosition],
+  displayedMargin: { longExposure: 0, shortExposure: 0, totalNotional: 0 },
   ordersRisk: { stub: [stubOrderRiskProfile] },
   activeChasers: [stubActiveChaser],
   activeTWAPs: [stubActiveTWAP],

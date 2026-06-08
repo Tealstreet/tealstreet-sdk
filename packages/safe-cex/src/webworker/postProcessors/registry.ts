@@ -15,13 +15,17 @@ import { ChaserOrderEnrichmentPostprocessor } from './ChaserOrderEnrichmentPostp
 import { ChaserOrderPostprocessor } from './ChaserOrderPostprocessor';
 import { DisplayedPositionsPostprocessor } from './DisplayedPositionsPostprocessor';
 import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor';
+import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 import { MessageHandlerStatsPostprocessor } from './MessageHandlerStatsPostprocessor';
 import { OrdersRiskProfilePostprocessor } from './OrdersRiskProfilePostprocessor';
 import { SnapshotPostprocessor } from './tasks/SnapshotPostprocessor';
 import { TwapPostprocessor } from './TwapPostprocessor';
 
 export const independentPostprocessors: (typeof BasePostprocessor)[] = [
+  // DisplayedMarginPostprocessor reads displayedPositions, so it must run after
+  // DisplayedPositionsPostprocessor.
   DisplayedPositionsPostprocessor,
+  DisplayedMarginPostprocessor,
   ChaserOrderEnrichmentPostprocessor,
   OrdersRiskProfilePostprocessor,
   SnapshotPostprocessor,

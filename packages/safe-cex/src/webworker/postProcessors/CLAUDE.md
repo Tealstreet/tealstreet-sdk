@@ -21,7 +21,7 @@ new computation lives. More specific rules elsewhere win.
 - **post-processor** (this dir) — pure, exchange-agnostic derivations
   over the canonical store + account context, plus stateful
   time-windowed bookkeeping (rolling PnL). Writes the **derived**
-  `StoreData` fields: `displayedPositions`, `ordersRisk`,
+  `StoreData` fields: `displayedPositions`, `displayedMargin`, `ordersRisk`,
   `activeChasers`, `activeTWAPs`, `messageHandlerStats`. Output **must
   be identical for every consumer** — no dependence on user display
   settings.
@@ -145,6 +145,31 @@ exist). The per-position `activeKey` string is built when
 (`hasStopTpCoverage`) — it's reused for the chaser/TWAP flags and the
 `hasFullStop` / `hasFullTP` lookup, so it stays a single allocation per
 position even though it now serves two features.
+
+### `DisplayedMarginPostprocessor` derives `store.displayedMargin`
+
+`DisplayedMarginPostprocessor` (independent, registered **after**
+`DisplayedPositionsPostprocessor` because it reads
+`store.displayedPositions`) aggregates per-account exposure into
+`store.displayedMargin` = `{ longExposure, shortExposure, totalNotional }`.
+This is the margin analog of `displayedPositions`: a worker-derived
+internal layer the margin UI reads instead of looping positions on the
+render path. It's a single order-preserving pass using the exact formula
+the UI used inline (`Math.abs(notional || 0)` summed in array order, per
+side and overall), so the sums are floating-point identical to the old
+filter+reduce — locked by an oracle-parity test in
+`DisplayedMarginPostprocessor.test.ts`.
+
+It mirrors `displayedPositions` at every bridge point: defaulted in
+`defaultStore` / `store.stub`, exposed via the `Store` interface getter,
+in `EXCLUDED_FIELDS` (server delta) so hosted mode recomputes it
+client-side, normalized in `ExchangeServerWorker`, and stripped with
+`displayedPositions` during the cache-hydration fence. It is **not**
+gated by an optimistic `_lastSent*` id, so it does **not** need the VWC
+pre-gate exemption that orders/positions require. Only the pure exposure
+aggregation lives here; the margin UI keeps view-dependent work
+(effective-leverage `isolated ? 0` rule, uPnL%, currency slicing,
+cross-account combination, ticker/funding for the active symbol).
 
 ### `hasFullStop` / `hasFullTP` are derived here, not in the UI
 

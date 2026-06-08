@@ -57,6 +57,8 @@ export interface Store {
 
   get displayedPositions(): StoreData['displayedPositions'];
 
+  get displayedMargin(): StoreData['displayedMargin'];
+
   get activeChasers(): StoreData['activeChasers'];
 
   get activeTWAPs(): StoreData['activeTWAPs'];
