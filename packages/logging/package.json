@@ -24,7 +24,7 @@
     "create-hmac": "^1.1.7",
     "dayjs": "^1.11.21",
     "dequal": "^2.0.3",
-    "jotai": "^2.20.0",
+    "jotai": "^2.20.1",
     "lodash": "^4.18.1",
     "nanoid": "~5.1.11",
     "p-iteration": "^1.1.8",
