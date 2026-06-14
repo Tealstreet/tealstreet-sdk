@@ -226,6 +226,13 @@ export interface ExchangeAccountConfig {
   tealstreetWsRoute?: boolean;
   proxyRegion?: string;
 
+  /** When set, and the Tealstreet browser extension is present, this account
+   *  connects directly to the exchange (no proxy/tunnel) — the extension's
+   *  declarativeNetRequest rules handle CORS/header injection. Resolved
+   *  web-side only; ignored when the extension is absent (proxy stays the
+   *  fallback). */
+  useExtensionDirect?: boolean;
+
   // UI/metadata fields (optional, not used for trading)
   user?: string;
   color?: string;

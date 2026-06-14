@@ -52,6 +52,16 @@ Code remains the source of truth; the HTML is a manually audited snapshot of
 the current web → safe-cex → HOW flow for humans and agents. If routing behavior
 changes, update or delete that snapshot in the same PR.
 
+**Extension direct-connect (web-side override).** The web app can force an
+account fully-direct (`tealstreetProxy=false`, `tealstreetTunnel=false`) when
+the user opts in (`ExchangeAccountConfig.useExtensionDirect`) and the Tealstreet
+browser extension is present (`window.__tealstreetExtension`). The decision is
+web-only (`apps/web/src/utils/exchange/extensionTransport.ts`), passed as a
+last-wins `ExchangeOptions` override — safe-cex stays app-agnostic and does not
+read `window`. The extension's declarativeNetRequest rules supply CORS/headers
+for the direct calls. Bybit only for now; no-op (proxy stays the fallback) when
+the extension is absent.
+
 ### Metadata Flags
 
 | Flag              | Default | Purpose                                             |
