@@ -202,7 +202,7 @@ export class BybitExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 5 });
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
     this.unlimitedXHR = createAPI(opts, this);
 
     this.publicWebsocket = new BybitPublicWebsocket(this, 'linear');

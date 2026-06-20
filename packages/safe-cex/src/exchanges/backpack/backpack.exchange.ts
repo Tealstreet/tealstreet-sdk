@@ -67,7 +67,7 @@ export class BackpackExchange extends BaseExchange {
     super(exchangeName, opts, store);
 
     // Rate limit to a conservative 10 RPS
-    this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 10 });
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 10 }) });
 
     this.publicWebsocket = new BackpackPublicWebSocket(this);
     this.privateWebsocket = new BackpackPrivateWebSocket(this);

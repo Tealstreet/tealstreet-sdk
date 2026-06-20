@@ -62,6 +62,62 @@ read `window`. The extension's declarativeNetRequest rules supply CORS/headers
 for the direct calls. Bybit only for now; no-op (proxy stays the fallback) when
 the extension is absent.
 
+**Secondary (read-only) key — split read/write transport.** When an account has
+a `secondary_apiKey`, `createApiWithSecondaryKey.ts` routes all REST **GET (read)**
+requests to a second axios client built from the `secondary_*` credentials, while
+writes stay on the primary. That secondary client's transport is set by
+`ExchangeOptions.secondaryProxyUrl` (resolved by `src/utils/getReadFleetProxy.ts`
+from exchange/region), so reads can later egress through a separate cheap proxy
+fleet while writes keep the primary/whitelisted transport. The feature is
+**default-off**: with **no** `secondary_apiKey`, `createApiWithSecondaryKey` returns
+three references to the _same_ primary client (the read Proxy is never built), so
+routing is **byte-identical** to before. Precedence for the secondary read transport:
+`options.secondaryProxyUrl || otherOptions.proxyUrl || <jp default>`, applied as the
+secondary client's `overrideProxyUrl`. `getReadFleetProxyUrl` returns `undefined`
+today (no fleet wired), so an **opted-in** account's reads currently egress through
+that `<jp default>` = `exchange-proxy.jp.tealstreet.io` — the public CORS/forwarding
+proxy (used tokenless elsewhere, e.g. `virtualClock`/bitmex OHLCV), **not** the
+IP-whitelist private proxy, so no proxy Bearer token is required. Swapping that
+default for the dedicated read fleet (and any auth that fleet needs) is the Epic-3
+activation step; Epic 1 is the plumbing.
+
+**Wiring is per-exchange, gated by `exchangeSupportsSecondaryKey()`.** Every HMAC
+exchange builds its authed `this.xhr` via the base helper
+`BaseExchange.createXhrWithSecondaryKey(opts, createApi, otherOptions)`
+(`src/exchanges/base.ts`), which calls `createApiWithSecondaryKey` and stashes the
+raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The set
+that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
+`exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
+exclusion list is the wallet / single-keypair venues (hyperliquid, dydx, paradex,
+grvt, apexomni, lighter, polymarket, asterdex, and the orderly ed25519 family
+incl. `tealstreet-dex`) **plus** the session-login venues `breakoutprop` (DXtrade
+session token) and `btcc` (MD5 login) — there a shared per-session token is injected
+on every request so a second client can't authenticate as a distinct key (and btcc
+issues REST via `this.xhr.request()`, which the `.get`-only read Proxy doesn't even
+intercept). A read-only "second API key" is not a coherent concept for any of these.
+When adding an exchange, wire the helper **and** reconcile that list.
+`binancepm` is the one bespoke case: it has no single `this.xhr` (uses
+`papiXhr`/`fapiXhr`), so it calls `createApiWithSecondaryKey` directly for each and
+keeps papi's primary/secondary for validation.
+
+**Only the helper-wired client splits reads.** A few exchanges also build an
+`unlimitedXHR` (rate-limiter-bypass client for urgent order placement) that is **not**
+routed through the helper, so any GET issued on it stays on the primary transport.
+Today the only authed read on that path is bitrue's `fetchOrdersForSymbol`
+(`unlimitedXHR.get`); everywhere else `unlimitedXHR` is writes-only and the bulk of
+read volume (tick-loop `fetchPositions`/`fetchBalance`/`fetchOrders`) flows through
+`this.xhr`, which does split. Wiring `unlimitedXHR` for 100% read coverage is a
+deliberate follow-up, not in this pass.
+
+**`validateAccount` caveat (opt-in path only).** Because `this.xhr.get()` routes to
+the secondary key once one is set, an exchange's `validateAccount` (which is a GET)
+validates the **read** key, not the primary write key, when a secondary key is
+present. binance and binancepm validate **both** explicitly via
+`_primaryXhr`/`_secondaryXhr`; the other HMAC exchanges validate only the read key
+on the opt-in path (write key is exercised on first order). The default-off path
+(no secondary key) is unchanged. Validating both keys everywhere is a deliberate
+follow-up, not an oversight.
+
 ### Metadata Flags
 
 | Flag              | Default | Purpose                                             |

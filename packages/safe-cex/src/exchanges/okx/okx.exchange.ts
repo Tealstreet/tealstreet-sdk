@@ -87,7 +87,7 @@ export class OKXExchange extends BaseExchange {
 
     this.region = exchangeName === 'okxeu' ? 'okxeu' : 'okx';
 
-    this.xhr = createAPI(opts, this);
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
     this.publicWebsocket = new OKXPublicWebsocket(this);
     this.privateWebsocket = new OKXPrivateWebsocket(this);
     this.businessWebsocket = new OKXBusinessWebsocket(this);

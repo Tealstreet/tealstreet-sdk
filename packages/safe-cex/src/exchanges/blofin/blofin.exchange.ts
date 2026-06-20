@@ -105,7 +105,7 @@ export class BlofinExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.xhr = createAPI(opts, this);
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
     this.publicWebsocket = new BlofinPublicWebsocket(this);
     this.privateWebsocket = new BlofinPrivateWebsocket(this);
   }

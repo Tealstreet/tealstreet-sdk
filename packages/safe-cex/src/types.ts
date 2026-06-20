@@ -65,6 +65,11 @@ export type ExchangeOptions = {
   readonly secondary_secret?: string;
   readonly secondary_passphrase?: string;
 
+  // Proxy URL for the secondary (read-only) key's transport. Lets reads route
+  // through a separate cheap fleet while writes stay on the primary transport.
+  // Undefined = secondary client keeps the primary/default transport.
+  readonly secondaryProxyUrl?: string;
+
   // AsterDEX Web3 authentication
   readonly auth?: {
     userAddress?: string;

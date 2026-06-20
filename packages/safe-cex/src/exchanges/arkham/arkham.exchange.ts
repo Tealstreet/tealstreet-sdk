@@ -65,7 +65,7 @@ export class ArkhamExchange extends BaseExchange {
 
     // Rate limit based on tier (default to lowest tier)
     const rps = 20; // Default to lowest tier
-    this.xhr = rateLimit(createAPI(opts, this), { maxRPS: rps });
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: rps }) });
 
     this.publicWebsocket = new ArkhamPublicWebSocket(this);
     this.privateWebsocket = new ArkhamPrivateWebSocket(this);

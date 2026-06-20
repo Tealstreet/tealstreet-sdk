@@ -110,7 +110,7 @@ export class BingxExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 3 });
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 3 }) });
     this.unlimitedXHR = createAPI(opts, this);
 
     this.publicWebsocket = new BingxPublicWebsocket(this);

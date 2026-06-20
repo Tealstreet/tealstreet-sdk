@@ -9,6 +9,7 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
+import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
 import {
   Candle,
   ExchangeName,
@@ -71,7 +72,16 @@ export class BinancePMExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.papiXhr = createPAPI(opts, this);
+    // Route reads on the authed papi/fapi clients to the secondary (read-only)
+    // key when one is set; writes stay on the primary. Keep papi's raw primary/
+    // secondary clients for explicit per-key validation. Default-off: with no
+    // secondary key all three clients are identical (see createApiWithSecondaryKey).
+    const [papiXhr, papiPrimaryXhr, papiSecondaryXhr] = createApiWithSecondaryKey(opts, this, createPAPI);
+    this.papiXhr = papiXhr;
+    this._primaryXhr = papiPrimaryXhr;
+    this._secondaryXhr = papiSecondaryXhr;
+    // fapiXhr is currently unused by binancepm; leave it on the primary key
+    // (no read-split wrapper) until a private FAPI read path exists.
     this.fapiXhr = createFAPI(opts, this);
     this.unlimitedXHR = createPAPI(opts, this);
     this.publicXhr = createPublicAPI(opts, this);
@@ -96,7 +106,7 @@ export class BinancePMExchange extends BaseExchange {
 
   validateAccount = async () => {
     try {
-      await this.papiXhr.get(ENDPOINTS.ACCOUNT);
+      await this._primaryXhr!.get(ENDPOINTS.ACCOUNT);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
@@ -104,7 +114,7 @@ export class BinancePMExchange extends BaseExchange {
 
     if (this.options.secondary_key) {
       try {
-        await this.papiXhr.get(ENDPOINTS.ACCOUNT);
+        await this._secondaryXhr!.get(ENDPOINTS.ACCOUNT);
       } catch (err: any) {
         return `Secondary Key: ${err?.response?.data?.msg || err?.message}`;
       }

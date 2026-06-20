@@ -127,6 +127,20 @@ describe('createApiWithSecondaryKey', () => {
       expect(secondCallOptions.overrideProxyUrl).toBe(customProxyUrl);
     });
 
+    it('should prefer options.secondaryProxyUrl over otherOptions.proxyUrl for the read transport', () => {
+      const readFleetUrl = 'https://read-fleet.tealstreet.io/api/exchange_proxy';
+
+      createApiWithSecondaryKey(
+        { ...optionsWithSecondary, secondaryProxyUrl: readFleetUrl },
+        mockExchange,
+        mockCreateApi,
+        { proxyUrl: 'https://custom-proxy.example.com' },
+      );
+
+      const secondCallOptions = mockCreateApi.mock.calls[1][0];
+      expect(secondCallOptions.overrideProxyUrl).toBe(readFleetUrl);
+    });
+
     it('should apply secondary rate limiter to secondary instance', () => {
       const secondaryRateLimiter = vi.fn().mockImplementation((instance) => instance);
 

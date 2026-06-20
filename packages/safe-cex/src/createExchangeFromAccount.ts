@@ -2,6 +2,7 @@ import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
 import { getExchangeMetadata } from './exchangeMetadata';
 import { createExchange } from './index';
+import { getReadFleetProxyUrl } from './utils/getReadFleetProxy';
 
 /**
  * Convert an ExchangeAccountConfig to ExchangeOptions.
@@ -37,6 +38,10 @@ export function accountToExchangeOptions(
 
   const tealstreetProxy = account.tealstreetProxy || metadata.requiresCors || metadata.enforceWsTunnel;
 
+  // When a secondary (read-only) key is configured, route its reads through the
+  // cheap read fleet. Undefined until the fleet is wired, so this is a no-op today.
+  const secondaryProxyUrl = account.secondary_apiKey ? getReadFleetProxyUrl(account.exchange, proxyRegion) : undefined;
+
   const options: ExchangeOptions = {
     key: account.apiKey,
     secret: account.apiSecret,
@@ -48,6 +53,7 @@ export function accountToExchangeOptions(
     ...(account.secondary_apiKey ? { secondary_key: account.secondary_apiKey } : {}),
     ...(account.secondary_apiSecret ? { secondary_secret: account.secondary_apiSecret } : {}),
     ...(account.secondary_passphrase ? { secondary_passphrase: account.secondary_passphrase } : {}),
+    ...(secondaryProxyUrl ? { secondaryProxyUrl } : {}),
 
     // Proxy settings
     tealstreetProxy: tealstreetProxy,

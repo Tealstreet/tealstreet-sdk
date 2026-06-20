@@ -116,7 +116,7 @@ export class WeexExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.xhr = createAPI(opts, this);
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
     this.publicWebsocket = new WeexPublicWebsocket(this);
     this.privateWebsocket = new WeexPrivateWebsocket(this);
   }

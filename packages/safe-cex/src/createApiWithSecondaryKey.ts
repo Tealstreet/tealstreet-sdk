@@ -1,5 +1,7 @@
+import type { BaseExchange } from './exchanges/base';
+
 import { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { BaseExchange } from './exchanges/base';
+
 import { ExchangeOptions, Writable } from './types';
 
 export const createApiWithSecondaryKey = (
@@ -12,7 +14,8 @@ export const createApiWithSecondaryKey = (
     secondaryRateLimit?: (axiosInstance: AxiosInstance) => AxiosInstance;
   } = {},
 ) => {
-  const proxyUrl = otherOptions.proxyUrl || 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
+  const proxyUrl =
+    options.secondaryProxyUrl || otherOptions.proxyUrl || 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
 
   let defaultXhr = createApi(options, exchange);
   if (otherOptions.rateLimit) {

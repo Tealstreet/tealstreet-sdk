@@ -60,7 +60,7 @@ export class CryptocomExchange extends BaseExchange {
     super(exchangeName, opts, store);
 
     // Rate limit conservatively (100 RPS according to docs, but we'll use 50)
-    this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 50 });
+    this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 50 }) });
 
     this.publicWebsocket = new CryptocomPublicWebSocket(this);
     this.privateWebsocket = new CryptocomPrivateWebSocket(this);

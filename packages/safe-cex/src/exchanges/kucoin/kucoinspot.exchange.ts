@@ -67,7 +67,9 @@ export class KucoinSpotExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.xhr = rateLimit(createKucoinSpotAPI(opts, this), { maxRPS: 5 });
+    this.xhr = this.createXhrWithSecondaryKey(opts, createKucoinSpotAPI, {
+      rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }),
+    });
     this.unlimitedXHR = createKucoinSpotAPI(opts, this);
 
     this.publicWebsocket = new KucoinSpotPublicWebsocket(this);

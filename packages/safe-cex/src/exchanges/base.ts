@@ -1,3 +1,4 @@
+import type { Axios, AxiosInstance } from 'axios';
 import type { Store } from '../store/store.interface';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 
@@ -8,6 +9,7 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 import { TinyEmitter } from 'tiny-emitter';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import {
   Candle,
@@ -249,6 +251,33 @@ export class BaseExchange implements Exchange {
 
   grafanaEndpointsEvery: string[] = [];
   grafanaEndpointsPeriodic: string[] = [];
+
+  // Raw primary/secondary REST clients, populated by createXhrWithSecondaryKey.
+  // Useful for explicitly hitting one key (e.g. validating both on startup).
+  _primaryXhr?: Axios;
+  _secondaryXhr?: Axios;
+
+  /**
+   * Build the authenticated REST client, routing GET (read) requests to the
+   * secondary (read-only) key's client when one is configured. Writes stay on
+   * the primary key. Stores the raw primary/secondary clients on the instance.
+   * When no secondary key is set, all three are the same client — behaviour is
+   * identical to a plain createApi() call, so wiring this in is safe/default-off.
+   */
+  protected createXhrWithSecondaryKey(
+    opts: ExchangeOptions,
+    createApi: (options: ExchangeOptions, exchange: BaseExchange) => AxiosInstance,
+    otherOptions?: {
+      proxyUrl?: string;
+      rateLimit?: (axiosInstance: AxiosInstance) => AxiosInstance;
+      secondaryRateLimit?: (axiosInstance: AxiosInstance) => AxiosInstance;
+    },
+  ): AxiosInstance {
+    const [xhr, primaryXhr, secondaryXhr] = createApiWithSecondaryKey(opts, this, createApi, otherOptions);
+    this._primaryXhr = primaryXhr;
+    this._secondaryXhr = secondaryXhr;
+    return xhr;
+  }
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     this._exchangeName = exchangeName;

@@ -1,0 +1,32 @@
+import { describe, expect, it } from 'vitest';
+
+import { exchangeSupportsSecondaryKey, exchangesWithoutSecondaryKey } from './exchangeSupportsSecondaryKey';
+
+describe('exchangeSupportsSecondaryKey', () => {
+  it('is true for HMAC key+secret CEXes', () => {
+    expect(exchangeSupportsSecondaryKey('bybit')).toBe(true);
+    expect(exchangeSupportsSecondaryKey('binance')).toBe(true);
+    expect(exchangeSupportsSecondaryKey('okx')).toBe(true);
+    expect(exchangeSupportsSecondaryKey('arkham')).toBe(true);
+  });
+
+  it('is false for wallet/private-key and Orderly-ed25519 venues', () => {
+    expect(exchangeSupportsSecondaryKey('hyperliquid')).toBe(false);
+    expect(exchangeSupportsSecondaryKey('dydx')).toBe(false);
+    expect(exchangeSupportsSecondaryKey('woofi')).toBe(false);
+    expect(exchangeSupportsSecondaryKey('what')).toBe(false);
+  });
+
+  it('is false for tealstreet-dex (Orderly ed25519 family)', () => {
+    expect(exchangeSupportsSecondaryKey('tealstreet-dex')).toBe(false);
+  });
+
+  it('is false for session-login venues where a distinct read key cannot authenticate', () => {
+    expect(exchangeSupportsSecondaryKey('breakoutprop')).toBe(false);
+    expect(exchangeSupportsSecondaryKey('btcc')).toBe(false);
+  });
+
+  it('every excluded entry is unique', () => {
+    expect(new Set(exchangesWithoutSecondaryKey).size).toBe(exchangesWithoutSecondaryKey.length);
+  });
+});
