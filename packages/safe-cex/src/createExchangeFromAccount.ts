@@ -3,6 +3,7 @@ import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 import { getExchangeMetadata } from './exchangeMetadata';
 import { createExchange } from './index';
 import { getReadFleetProxyUrl } from './utils/getReadFleetProxy';
+import { resolveAccountTransport } from './utils/transportResolution';
 
 /**
  * Convert an ExchangeAccountConfig to ExchangeOptions.
@@ -30,13 +31,9 @@ export function accountToExchangeOptions(
     );
   }
 
-  // Determine proxy region - if exchange requires CORS and no region set, use first available
-  let proxyRegion = account.proxyRegion;
-  if (metadata.requiresCors && !proxyRegion) {
-    proxyRegion = Object.keys(metadata?.privateProxyRegions || {})[0] || 'SG';
-  }
-
-  const tealstreetProxy = account.tealstreetProxy || metadata.requiresCors || metadata.enforceWsTunnel;
+  // Resolve proxy / tunnel / region from preferences + metadata (single source
+  // of truth — see utils/transportResolution.ts).
+  const { tealstreetProxy, tealstreetTunnel, proxyRegion } = resolveAccountTransport(account, metadata);
 
   // When a secondary (read-only) key is configured, route its reads through the
   // cheap read fleet. Undefined until the fleet is wired, so this is a no-op today.
@@ -55,12 +52,9 @@ export function accountToExchangeOptions(
     ...(account.secondary_passphrase ? { secondary_passphrase: account.secondary_passphrase } : {}),
     ...(secondaryProxyUrl ? { secondaryProxyUrl } : {}),
 
-    // Proxy settings
+    // Proxy settings (resolved above via resolveAccountTransport)
     tealstreetProxy: tealstreetProxy,
-    tealstreetTunnel:
-      tealstreetProxy && (metadata.supportsTunnel !== false || metadata.enforceWsTunnel)
-        ? true
-        : account.tealstreetTunnel,
+    tealstreetTunnel: tealstreetTunnel,
     tealstreetWsRoute: account.tealstreetWsRoute,
     ...(proxyRegion ? { proxyRegion } : {}),
 

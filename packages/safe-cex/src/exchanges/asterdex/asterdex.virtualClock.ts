@@ -1,9 +1,11 @@
-import axios from 'axios';
 import type { Dayjs } from 'dayjs';
+import type { AsterDEXAPIVersion } from './asterdex.types';
+
+import axios from 'axios';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import type { AsterDEXAPIVersion } from './asterdex.types';
+import { PUBLIC_CORS_PROXY } from '../../utils/transportResolution';
 
 dayjs.extend(utc);
 
@@ -28,10 +30,7 @@ class AsterDEXVirtualClock {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
-    this.syncInterval = setInterval(
-      () => this.syncClientServerTime(testnet, preferredApiVersion),
-      5 * 60 * 1000,
-    );
+    this.syncInterval = setInterval(() => this.syncClientServerTime(testnet, preferredApiVersion), 5 * 60 * 1000);
   };
 
   /**
@@ -116,10 +115,7 @@ class AsterDEXVirtualClock {
     // Try through proxy
     for (const timePath of timePathCandidates) {
       try {
-        const { data } = await axios.get(
-          `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/${baseUrl}${timePath}`,
-          { timeout: 5000 },
-        );
+        const { data } = await axios.get(`${PUBLIC_CORS_PROXY}/${baseUrl}${timePath}`, { timeout: 5000 });
         if (data.serverTime) {
           return dayjs(data.serverTime);
         }

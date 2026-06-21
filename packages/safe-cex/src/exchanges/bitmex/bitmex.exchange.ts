@@ -44,6 +44,7 @@ import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { parsePrecision } from '../../utils/parsePrecision';
 import { add, adjust, handleRoundingError, multiply, round, subtract } from '../../utils/safe-math';
+import { PUBLIC_CORS_PROXY } from '../../utils/transportResolution';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bitmex.api';
@@ -1276,8 +1277,8 @@ export class BitmexExchange extends BaseExchange {
 
     // Use proxy endpoint for UDF data
     const baseUrl = this.options.testnet
-      ? 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet.bitmex.com/api/udf'
-      : 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://www.bitmex.com/api/udf';
+      ? `${PUBLIC_CORS_PROXY}/https://testnet.bitmex.com/api/udf`
+      : `${PUBLIC_CORS_PROXY}/https://www.bitmex.com/api/udf`;
 
     const params = new URLSearchParams({
       symbol: opts.symbol,

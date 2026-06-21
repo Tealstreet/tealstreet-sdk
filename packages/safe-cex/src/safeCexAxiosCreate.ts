@@ -8,6 +8,7 @@ import { createRemoteSigningAdapter } from './remoteSigningAdapter';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { getPrivateProxy } from './utils/getPrivateProxy';
 import { isDevelopment } from './utils/isDevelopment';
+import { PUBLIC_CORS_PROXY } from './utils/transportResolution';
 
 /**
  * Tracks the "real" inner adapter for remote signing instances.
@@ -143,7 +144,7 @@ export const httpStats = new HttpRequestStatsTracker();
 export const getProxyForAxios = (config: CreateAxiosDefaults, options: ExchangeOptions): string =>
   config.baseURL?.includes('binance') &&
   (options.publicDataOnly || !Boolean((config?.headers as any)?.['X-MBX-APIKEY']))
-    ? 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy'
+    ? PUBLIC_CORS_PROXY
     : options.tealstreetProxy
       ? getPrivateProxy(config?.baseURL, true, options.proxyRegion === 'JA' ? true : false)
       : '';

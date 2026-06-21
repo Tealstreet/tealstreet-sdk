@@ -1,10 +1,11 @@
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, Timeframe } from '../../types';
+import { PUBLIC_CORS_PROXY } from '../../utils/transportResolution';
 
 export const RECV_WINDOW = 20_000;
 
 export const BASE_URL = {
-  livenet: 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai',
-  testnet: 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet-api.lighter.xyz',
+  livenet: `${PUBLIC_CORS_PROXY}/https://mainnet.zklighter.elliot.ai`,
+  testnet: `${PUBLIC_CORS_PROXY}/https://testnet-api.lighter.xyz`,
 };
 
 export const BASE_WS_URL = {
