@@ -1,7 +1,8 @@
 import type { ExchangeName } from '../types';
-import type { RoutingTable, WsStrategy } from './types';
+import type { RoutingTable } from './types';
 
 import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion';
+import { exchangeMetadata } from '../exchangeMetadata';
 
 // THE declarative routing table. Every value here was previously hardcoded and
 // scattered (getPrivateProxy's regex, the HOW TOKYO_EGRESS list, ~18 per-exchange
@@ -10,7 +11,7 @@ import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion'
 //
 // How to read an entry:
 //   restPool  - which whitelisted CORS pool REST uses when tealstreetProxy is on.
-//   howEgress - HOW (REST-over-WS) tradetunnel egress region (TOKYO_EGRESS list -> jp).
+//   howEgress - HOW (REST-over-WS) tradetunnel egress region (isTokyoEgress -> jp).
 //   ws        - per-channel WS host strategy; omitted channels are 'direct'.
 
 // --- WS host literals (exact, matching the current per-exchange ws classes) ---
@@ -33,8 +34,6 @@ const WS = {
   lighterPublic: `${JP}/lighter/stream?readonly=true`,
   lighterPrivate: `${JP}/lighter/stream`,
 } as const;
-
-const direct: WsStrategy = { kind: 'direct' };
 
 // Exchanges whose REST CORS pool is the Tokyo (jp) box — getPrivateProxy's
 // /binance|okx|okex|bitget/ regex. grvt -> 'tiny'; everything else -> 'asia'.
@@ -63,6 +62,9 @@ const bitgetWs: WsGroup = {
   private: { kind: 'fallbackOnly', fallback: WS.bitgetPrivate },
 };
 const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };
+const bitmexWs: WsGroup = {
+  private: { kind: 'regionConditional', ja: WS.bitmexJa, other: WS.bitmexOther },
+};
 
 // Per-exchange WS overrides (everything not listed defaults to all-direct).
 const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
@@ -74,7 +76,8 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
   coinbase: coinbaseWs,
   coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
   apexomni: { private: { kind: 'proxyConditional', host: WS.apex } },
-  bitmex: { private: { kind: 'regionConditional', ja: WS.bitmexJa, other: WS.bitmexOther } },
+  bitmex: bitmexWs,
+  bitmextestnet: bitmexWs, // BitmexTestnetExchange extends BitmexExchange
   bitget: bitgetWs,
   bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
   bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange
@@ -99,58 +102,13 @@ const HOW_REGION_CONDITIONAL: ExchangeName[] = [
   'bybitspot',
 ];
 
-const ALL_EXCHANGES = [
-  'apexomni',
-  'arkham',
-  'asterdex',
-  'backpack',
-  'binance',
-  'binancespot',
-  'binancepm',
-  'bingx',
-  'bitget',
-  'bitgetinverse',
-  'bitgetusdc',
-  'bitmex',
-  'bitmextestnet',
-  'bitrue',
-  'bitunix',
-  'blofin',
-  'breakoutprop',
-  'btcc',
-  'bybit',
-  'bybitdemo',
-  'bybitinverse',
-  'bybitspot',
-  'coinbase',
-  'coinbasespot',
-  'cryptocom',
-  'dydx',
-  'grvt',
-  'hyperliquid',
-  'hyperliquidspot',
-  'lighter',
-  'okx',
-  'okxeu',
-  'paradex',
-  'phemex',
-  'polymarket',
-  'kodiakfi',
-  'mode',
-  'salsadex',
-  'tealstreet-dex',
-  'what',
-  'weex',
-  'woo',
-  'woofi',
-  'kucoin',
-  'kucoinspot',
-  'kraken',
-  'krakenspot',
-] as const satisfies readonly ExchangeName[];
-
+// The set of exchanges is enumerated exactly once, at the type level (ExchangeName)
+// and at runtime by exchangeMetadata's keys — which TypeScript pins to ExchangeName
+// via its `{ [key in ExchangeName]: ... }` mapped type. We derive the table from
+// those keys so a new exchange automatically gets a row (and can't be forgotten):
+// adding it to ExchangeName forces a metadata entry, which forces a routing entry.
 export const routingTable: RoutingTable = Object.fromEntries(
-  ALL_EXCHANGES.map((name) => [
+  (Object.keys(exchangeMetadata) as ExchangeName[]).map((name) => [
     name,
     {
       restPool: name === 'grvt' ? 'tiny' : REST_JP.includes(name) ? 'jp' : 'asia',
@@ -159,14 +117,3 @@ export const routingTable: RoutingTable = Object.fromEntries(
     },
   ]),
 ) as RoutingTable;
-
-// bitmextestnet mirrors bitmex (testnet is out of scope but the key must exist).
-routingTable.bitmextestnet.ws = routingTable.bitmex.ws;
-
-// Compile-time exhaustiveness: a new ExchangeName cannot be added without listing
-// it in ALL_EXCHANGES above — this line errors and names the missing exchange.
-type _MissingExchange = Exclude<ExchangeName, (typeof ALL_EXCHANGES)[number]>;
-const _assertAllExchangesCovered: _MissingExchange extends never ? true : _MissingExchange = true;
-void _assertAllExchangesCovered;
-
-export { direct };

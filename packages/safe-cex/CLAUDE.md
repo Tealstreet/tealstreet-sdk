@@ -51,10 +51,13 @@ that account, then persist/test/pass it to `createExchangeFromAccount()`.
 Do not reimplement `tealstreetProxy` / `proxyRegion` account defaults in app
 code.
 
-Before changing proxy/tunnel routing, read `docs/proxy-routing-flow.html`.
-Code remains the source of truth; the HTML is a manually audited snapshot of
-the current web → safe-cex → HOW flow for humans and agents. If routing behavior
-changes, update or delete that snapshot in the same PR.
+Before changing proxy/tunnel routing, the typed source of truth is the
+`routing/` table + resolver, locked by `routing/__tests__/routing.equivalence.test.ts`
+and its golden-master snapshot (the always-current, machine-checked per-exchange
+routing map). `docs/proxy-routing-flow.html` is a manually rendered human-facing
+**mirror** of the same web → safe-cex → HOW flow (it re-implements resolution in
+vanilla JS for an interactive table) — useful for browsing, but trust the snapshot
+over it. If routing behavior changes, update or delete that page in the same PR.
 
 **Extension direct-connect (web-side override).** The web app can force an
 account fully-direct (`tealstreetProxy=false`, `tealstreetTunnel=false`) when
