@@ -18,10 +18,13 @@ export const PRIVATE_PROXY_JP = 'https://fsjnpy143pbz.jp.tealstreet.io/api/excha
 export const PRIVATE_PROXY_ASIA = 'https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy';
 
 // Public CORS proxy: unwhitelisted, tokenless, used to CORS-unblock public and
-// unwhitelisted requests in the browser. This is the AWS endpoint that the Vultr
-// read-fleet migration repoints; it is the ONLY transport safe to move to Vultr
-// (no IP allowlist depends on it).
-export const PUBLIC_CORS_PROXY = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
+// unwhitelisted requests in the browser. Migrated AWS (exchange-proxy.jp) -> Vultr
+// read-fleet: the same HAProxy CORS proxy on cheap commodity VPS behind Cloudflare,
+// safe to move because no IP allowlist depends on it. The read fleet is region-split
+// (jp/sg), but these public/unwhitelisted requests carry no per-user region, so they
+// use the Tokyo pool — matching the old exchange-proxy.jp default. (The secondary-key
+// read transport picks jp/sg per region separately via getReadFleetProxy.ts.)
+export const PUBLIC_CORS_PROXY = 'https://read-fleet-jp.tealstreet.io/api/exchange_proxy';
 
 // --- Preference resolution -------------------------------------------------
 

@@ -71,7 +71,7 @@ Export these variables before running:
 ```bash
 LIGHTER_ACCOUNT_INDEX=123456
 LIGHTER_API_KEY_INDEX=0
-LIGHTER_API_URL=https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai
+LIGHTER_API_URL=https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai
 
 # Optional, defaults shown
 LIGHTER_INTEGRATOR_ACCOUNT_INDEX=0

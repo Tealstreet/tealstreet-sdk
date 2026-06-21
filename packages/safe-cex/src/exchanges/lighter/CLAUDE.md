@@ -542,8 +542,8 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 
 **REST API** (proxied through Tealstreet exchange proxy):
 
-- **Livenet**: `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai`
-- **Testnet**: `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet-api.lighter.xyz`
+- **Livenet**: `https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai`
+- **Testnet**: `https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://testnet-api.lighter.xyz`
 
 **WebSocket** (direct + optional proxy route):
 

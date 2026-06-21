@@ -164,8 +164,8 @@ it inflates the e2e load-gate's diagnostic counters.
   (no CORS, no geo-block, always reachable), then the JP proxy, then
   worldtimeapi.
 - `fetchBybitTime` (bybit-specific, wants Bybit's real clock) leads with the
-  **JP proxy** (`exchange-proxy.jp.tealstreet.io/...` — Bybit's real time via
-  non-blocked egress), then `/api/time`.
+  **public CORS proxy** (`read-fleet-jp.tealstreet.io/...` — the Vultr read fleet,
+  Bybit's real time via non-blocked egress), then `/api/time`.
 
 If you "simplify" either chain back to a direct Bybit lead, you reintroduce
 the 403 noise for every geo-blocked user. The offset only needs ~1s

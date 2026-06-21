@@ -81,10 +81,12 @@ Vultr VPS running the same HAProxy CORS forwarding proxy as the AWS exchange-pro
 boxes, fronted by Cloudflare (orange-cloud, zone SSL "Full" so CF accepts the boxes'
 self-signed certs) — so an **opted-in** account's reads egress from the fleet's many
 IPs (rate-limit spreading) while writes stay on the primary/whitelisted transport.
-The fleet is public/tokenless (same posture as `exchange-proxy.jp.tealstreet.io`), so
-no proxy Bearer token is required. Terraform for the fleet lives in
-`terraform/vultr-read-fleet/` (isolated local state, not the prod AWS workspace).
-Still **default-off**: with no `secondary_apiKey`, none of this is reached.
+The fleet is public/tokenless, so no proxy Bearer token is required. The shared
+public CORS proxy for unwhitelisted/public requests (`PUBLIC_CORS_PROXY` in
+`utils/transportResolution.ts`) was migrated off AWS `exchange-proxy.jp` to the same
+`read-fleet-jp` endpoint, so that hostname is no longer used in code. Terraform for the
+fleet lives in `terraform/vultr-read-fleet/` (isolated local state, not the prod AWS
+workspace). Still **default-off**: with no `secondary_apiKey`, none of this is reached.
 
 **Wiring is per-exchange, gated by `exchangeSupportsSecondaryKey()`.** Every HMAC
 exchange builds its authed `this.xhr` via the base helper
