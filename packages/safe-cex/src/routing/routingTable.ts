@@ -1,6 +1,8 @@
 import type { ExchangeName } from '../types';
 import type { RoutingTable, WsStrategy } from './types';
 
+import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion';
+
 // THE declarative routing table. Every value here was previously hardcoded and
 // scattered (getPrivateProxy's regex, the HOW TOKYO_EGRESS list, ~18 per-exchange
 // ws files). It is transcribed faithfully from that code as of the consolidation;
@@ -45,30 +47,6 @@ const REST_JP: ExchangeName[] = [
   'bitget',
   'bitgetinverse',
   'bitgetusdc',
-];
-
-// Exchanges whose baseURL matches the HOW TOKYO_EGRESS_PATTERN -> jp egress.
-const HOW_JP: ExchangeName[] = [
-  'arkham',
-  'hyperliquid',
-  'hyperliquidspot',
-  'bitunix',
-  'bitrue',
-  'bitget',
-  'bitgetinverse',
-  'bitgetusdc',
-  'binance',
-  'binancepm',
-  'binancespot',
-  'kucoin',
-  'kucoinspot',
-  'kraken',
-  'krakenspot',
-  'breakoutprop',
-  'asterdex',
-  'paradex',
-  'grvt',
-  'backpack',
 ];
 
 // Shared WS groups for exchange families whose variants extend the same class and
@@ -176,7 +154,7 @@ export const routingTable: RoutingTable = Object.fromEntries(
     name,
     {
       restPool: name === 'grvt' ? 'tiny' : REST_JP.includes(name) ? 'jp' : 'asia',
-      howEgress: HOW_REGION_CONDITIONAL.includes(name) ? 'regionConditional' : HOW_JP.includes(name) ? 'jp' : 'sg',
+      howEgress: HOW_REGION_CONDITIONAL.includes(name) ? 'regionConditional' : isTokyoEgress(name) ? 'jp' : 'sg',
       ...(WS_OVERRIDES[name] ? { ws: WS_OVERRIDES[name] } : {}),
     },
   ]),

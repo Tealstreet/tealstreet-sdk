@@ -2,9 +2,81 @@ import type { ExchangeName } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
+import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { PRIVATE_PROXY_ASIA, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from '../../utils/transportResolution';
 import { resolveExchangeRouting } from '../resolveExchangeRouting';
+
+// Frozen oracle: each exchange's current REST API baseURL — the exact string the
+// HOW adapter inspects at request time (via isTokyoEgress(config.baseURL)) to pick
+// jp vs sg egress. Kept here independently of the api modules so the single-source
+// lock test below can prove the table's NAME-based egress agrees with the adapter's
+// runtime BASEURL-based egress. If an exchange's baseURL changes such that its
+// Tokyo match flips, this map (and the reconciliation it forces) is the tripwire.
+const REST_BASE_URLS: Record<ExchangeName, string> = {
+  apexomni: 'https://omni.apex.exchange/api',
+  arkham: 'https://arkm.com/api',
+  asterdex: 'https://fapi.asterdex.com',
+  backpack: 'https://api.backpack.exchange',
+  binance: 'https://fapi.binance.com',
+  binancepm: 'https://papi.binance.com',
+  binancespot: 'https://api.binance.com',
+  bingx: 'https://open-api.bingx.com',
+  bitget: 'https://api.bitget.com',
+  bitgetinverse: 'https://api.bitget.com',
+  bitgetusdc: 'https://api.bitget.com',
+  bitmex: 'https://api.direct.bitmex.com/api/v1',
+  bitmextestnet: 'https://api.direct.testnet.bitmex.com/api/v1',
+  bitrue: 'https://fapi.bitrue.com',
+  bitunix: 'https://fapi.bitunix.com',
+  blofin: 'https://openapi.blofin.com',
+  breakoutprop: 'https://breakout.prosp.devexperts.com/dxsca-web',
+  btcc: 'https://api1.btloginc.com:9081',
+  bybit: 'https://api.bybit.com',
+  bybitdemo: 'https://api-demo.bybit.com',
+  bybitinverse: 'https://api.bybit.com',
+  bybitspot: 'https://api.bybit.com',
+  coinbase: 'https://api.coinbase.com',
+  coinbasespot: 'https://api.coinbase.com',
+  cryptocom: 'https://api.crypto.com',
+  dydx: 'https://indexer.dydx.trade',
+  // grvt issues REST across three hosts (market-data/trades/edge .grvt.io); all
+  // match /grvt/i, so any one represents the egress decision faithfully.
+  grvt: 'https://trades.grvt.io',
+  hyperliquid: 'https://api.hyperliquid.xyz',
+  hyperliquidspot: 'https://api.hyperliquid.xyz',
+  kodiakfi: 'https://api-evm.orderly.org',
+  kraken: 'https://futures.kraken.com/derivatives/api',
+  krakenspot: 'https://api.kraken.com',
+  kucoin: 'https://api-futures.kucoin.com',
+  kucoinspot: 'https://api.kucoin.com',
+  lighter: 'https://mainnet.zklighter.elliot.ai',
+  mode: 'https://api-evm.orderly.org',
+  okx: 'https://www.okx.com',
+  okxeu: 'https://eea.okx.com',
+  paradex: 'https://api.prod.paradex.trade/v1',
+  phemex: 'https://api.phemex.com',
+  polymarket: 'https://clob.polymarket.com',
+  salsadex: 'https://api-evm.orderly.org',
+  'tealstreet-dex': 'https://api-evm.orderly.org',
+  weex: 'https://api-contract.weex.com',
+  what: 'https://api-evm.orderly.org',
+  woo: 'https://api.woox.io',
+  woofi: 'https://api-evm.orderly.org',
+};
+
+// Exchanges whose HOW adapter is region-PINNED from the account's proxyRegion
+// (bitmex always; bybit family when tunnelling) rather than auto-detected from the
+// baseURL. Their egress is covered by the region-conditional test above, so they're
+// excluded from the baseURL-vs-name agreement assertion.
+const REGION_PINNED_HOW: ExchangeName[] = [
+  'bitmex',
+  'bitmextestnet',
+  'bybit',
+  'bybitdemo',
+  'bybitinverse',
+  'bybitspot',
+];
 
 // Frozen copy of the original getPrivateProxy (deleted when REST consumers were cut
 // over to resolveExchangeRouting), including its requiresCors=false -> '' guard. Kept
@@ -142,6 +214,27 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('phemex', { proxyRegion: 'JA' }).howEgress).toBe('sg');
     // a TOKYO-list exchange stays jp regardless of region.
     expect(resolveExchangeRouting('binance', { proxyRegion: 'SG' }).howEgress).toBe('jp');
+  });
+
+  it('howEgress single-source: table name-match == adapter baseURL-match for every exchange', () => {
+    // The declarative table computes howEgress from isTokyoEgress(NAME); the HOW
+    // adapter computes the runtime egress from isTokyoEgress(baseURL). For the table
+    // to be a faithful description of the actual packet path, the two must agree for
+    // every (non-region-pinned) exchange. This locks the single source: the egress
+    // list now lives only in http-over-websocket/egressRegion, and any future drift
+    // between an exchange's name and its baseURL match trips here.
+    for (const exchange of Object.keys(exchangeMetadata) as ExchangeName[]) {
+      const baseURL = REST_BASE_URLS[exchange];
+      // No silent gaps: a new exchange added to metadata must declare its baseURL here.
+      expect(baseURL, `missing frozen REST baseURL for ${exchange}`).toBeDefined();
+
+      if (REGION_PINNED_HOW.includes(exchange)) continue;
+
+      const byName = isTokyoEgress(exchange);
+      const byBaseURL = isTokyoEgress(baseURL);
+      expect(byName, `name vs baseURL egress disagree for ${exchange}`).toBe(byBaseURL);
+      expect(resolveExchangeRouting(exchange, {}).howEgress).toBe(byBaseURL ? 'jp' : 'sg');
+    }
   });
 
   it('resolved packet-path matrix (golden master)', () => {

@@ -8,6 +8,7 @@ Tunnels HTTP requests over WebSocket connections, enabling HTTP communication th
 src/
 ├── HOWWebSocket.ts                       # Core WebSocket protocol (reconnecting, auth, message routing)
 ├── axiosHttpOverWebsocketAdapter.ts      # Axios adapter for transparently tunneling HTTP via WS
+├── egressRegion.ts                       # Single source: Tokyo-vs-Singapore egress list + isTokyoEgress()
 ├── types.ts                              # HOWConfig, HOWWebSocketAuthState, LatencyEntry
 ├── config.ts                             # Configuration (getProxyToken, isTokenExpired, etc.)
 └── index.ts                              # Main exports
@@ -20,6 +21,17 @@ Before changing tunnel URL or region selection behavior, read
 manually audited snapshot of the current web → safe-cex → HOW flow. If routing
 behavior changes, update or delete that snapshot in the same PR.
 
+- **Egress region is single-sourced in `egressRegion.ts`** — a pure, side-effect-free
+  module (no `HOWWebSocket` construction, no `configureHOW`) exporting
+  `TOKYO_EGRESS_EXCHANGES`, `TOKYO_EGRESS_PATTERN`, and `isTokyoEgress(key)`. The
+  adapter derives both its request-time egress (`isTokyoEgress(config.baseURL)`) and
+  `getHOWWebSocketForExchange` (`isTokyoEgress(name)`) from it, and **safe-cex's
+  routing table** (`packages/safe-cex/src/routing/routingTable.ts`) imports
+  `isTokyoEgress` from here to compute each exchange's declared `howEgress`. To change
+  where an exchange egresses, edit this list in this one place. Keep it pure — pulling
+  it back into the adapter would drag websocket construction / `configureHOW` into
+  every pure consumer (safe-cex's routing table) and break their test mocks.
+  `routing.equivalence.test.ts` locks name-based and baseURL-based agreement per exchange.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)

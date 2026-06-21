@@ -5,6 +5,7 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
 import { getProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
+import { isTokyoEgress } from './egressRegion';
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
 
@@ -79,7 +80,9 @@ function sanitizeForTradeTunnelLog(value: unknown, depth = 0, seen = new WeakSet
   const output: Record<string, unknown> = {};
   const entries = Object.entries(value as Record<string, unknown>);
   for (const [key, entryValue] of entries.slice(0, MAX_LOG_OBJECT_KEYS)) {
-    output[key] = SENSITIVE_LOG_KEY_PATTERN.test(key) ? REDACTED : sanitizeForTradeTunnelLog(entryValue, depth + 1, seen);
+    output[key] = SENSITIVE_LOG_KEY_PATTERN.test(key)
+      ? REDACTED
+      : sanitizeForTradeTunnelLog(entryValue, depth + 1, seen);
   }
   if (entries.length > MAX_LOG_OBJECT_KEYS) {
     output.__truncatedKeys = entries.length - MAX_LOG_OBJECT_KEYS;
@@ -193,32 +196,9 @@ const TUNNEL_PATH =
 const SIGNAPORE_HOW_EGRESS = `wss://fsjnpy143pbz.asia.tealstreet.io${TUNNEL_PATH}`;
 const TOKYO_HOW_EGRESS = `wss://fsjnpy143pbz.jp.tealstreet.io${TUNNEL_PATH}`;
 
-// Exchanges that should use Tokyo egress server
-const TOKYO_EGRESS_EXCHANGES = [
-  // url pattern, so both arkham & arkm
-  'arkham',
-  'arkm',
-  'hlnode',
-  'hyperliquid',
-  'hyperliquidspot',
-  'bitunix',
-  'bitrue',
-  'bitget',
-  'binance',
-  'kucoin',
-  'kraken',
-  'breakout',
-  'aster',
-  'paradex',
-  'grvt',
-  'backpack',
-];
-
 // Exchanges that should bypass the proxy and connect directly
 const BYPASS_PROXY_EXCHANGES = ['grvt'];
 
-// Create regex pattern for Tokyo egress exchanges
-const TOKYO_EGRESS_PATTERN = new RegExp(TOKYO_EGRESS_EXCHANGES.join('|'), 'i');
 const BYPASS_PROXY_PATTERN = new RegExp(BYPASS_PROXY_EXCHANGES.join('|'), 'i');
 
 export let howWebSocketSG = new HOWWebSocket(SIGNAPORE_HOW_EGRESS);
@@ -241,7 +221,7 @@ const createAxiosHttpOverWebsocketAdapter = (
     } else if (region === 'SG') {
       howWebSocket = howWebSocketSG;
     } else {
-      howWebSocket = config.baseURL && TOKYO_EGRESS_PATTERN.test(config.baseURL) ? howWebSocketJA : howWebSocketSG;
+      howWebSocket = config.baseURL && isTokyoEgress(config.baseURL) ? howWebSocketJA : howWebSocketSG;
     }
     const selectedRegion = howWebSocket === howWebSocketJA ? 'JA' : 'SG';
     const baseRouteContext: TradeTunnelRouteContext = {
@@ -451,7 +431,9 @@ const createAxiosHttpOverWebsocketAdapter = (
 
           if (data && typeof data === 'object' && data.error) {
             // Create a proper Error object with URL context for better Sentry tracking
-            const tunnelError = new Error(`${formatTradeTunnelErrorMessage(data.error)} (URL: ${websocketRequest.url})`);
+            const tunnelError = new Error(
+              `${formatTradeTunnelErrorMessage(data.error)} (URL: ${websocketRequest.url})`,
+            );
             tunnelError.name = 'TradeTunnelError';
             (tunnelError as any).url = websocketRequest.url;
             (tunnelError as any).method = websocketRequest.method;
@@ -555,7 +537,7 @@ export const bigIntAxiosHttpOverWebsocketAdapter = createAxiosHttpOverWebsocketA
  * Get the HOWWebSocket instance for a given exchange name
  */
 export const getHOWWebSocketForExchange = (exchangeName: string): HOWWebSocket => {
-  return TOKYO_EGRESS_PATTERN.test(exchangeName) ? howWebSocketJA : howWebSocketSG;
+  return isTokyoEgress(exchangeName) ? howWebSocketJA : howWebSocketSG;
 };
 
 /**
