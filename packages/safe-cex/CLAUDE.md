@@ -73,13 +73,18 @@ fleet while writes keep the primary/whitelisted transport. The feature is
 three references to the _same_ primary client (the read Proxy is never built), so
 routing is **byte-identical** to before. Precedence for the secondary read transport:
 `options.secondaryProxyUrl || otherOptions.proxyUrl || <jp default>`, applied as the
-secondary client's `overrideProxyUrl`. `getReadFleetProxyUrl` returns `undefined`
-today (no fleet wired), so an **opted-in** account's reads currently egress through
-that `<jp default>` = `exchange-proxy.jp.tealstreet.io` — the public CORS/forwarding
-proxy (used tokenless elsewhere, e.g. `virtualClock`/bitmex OHLCV), **not** the
-IP-whitelist private proxy, so no proxy Bearer token is required. Swapping that
-default for the dedicated read fleet (and any auth that fleet needs) is the Epic-3
-activation step; Epic 1 is the plumbing.
+secondary client's `overrideProxyUrl`. `getReadFleetProxyUrl` now returns the live
+**read fleet** endpoint (Epic-3 activation, done), keyed by region: `SG` →
+`read-fleet-sg.tealstreet.io`, everything else (`JA` / unset) →
+`read-fleet-jp.tealstreet.io`, both `/api/exchange_proxy`. These are cheap commodity
+Vultr VPS running the same HAProxy CORS forwarding proxy as the AWS exchange-proxy
+boxes, fronted by Cloudflare (orange-cloud, zone SSL "Full" so CF accepts the boxes'
+self-signed certs) — so an **opted-in** account's reads egress from the fleet's many
+IPs (rate-limit spreading) while writes stay on the primary/whitelisted transport.
+The fleet is public/tokenless (same posture as `exchange-proxy.jp.tealstreet.io`), so
+no proxy Bearer token is required. Terraform for the fleet lives in
+`terraform/vultr-read-fleet/` (isolated local state, not the prod AWS workspace).
+Still **default-off**: with no `secondary_apiKey`, none of this is reached.
 
 **Wiring is per-exchange, gated by `exchangeSupportsSecondaryKey()`.** Every HMAC
 exchange builds its authed `this.xhr` via the base helper

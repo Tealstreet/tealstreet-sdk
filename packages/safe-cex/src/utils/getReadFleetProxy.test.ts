@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { getReadFleetProxyUrl } from './getReadFleetProxy';
 
 describe('getReadFleetProxyUrl', () => {
-  it('returns undefined until fleet endpoints are wired (default-off)', () => {
-    expect(getReadFleetProxyUrl('bybit')).toBeUndefined();
-    expect(getReadFleetProxyUrl('binance', 'JA')).toBeUndefined();
+  it('routes JA and unset region to the Tokyo read-fleet pool', () => {
+    expect(getReadFleetProxyUrl('bybit')).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
+    expect(getReadFleetProxyUrl('binance', 'JA')).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
+  });
+
+  it('routes SG region to the Singapore read-fleet pool', () => {
+    expect(getReadFleetProxyUrl('bybit', 'SG')).toBe('https://read-fleet-sg.tealstreet.io/api/exchange_proxy');
   });
 });
