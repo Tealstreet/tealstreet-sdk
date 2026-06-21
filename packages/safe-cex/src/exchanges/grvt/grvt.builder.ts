@@ -11,6 +11,7 @@
 import { BrowserProvider, Eip1193Provider, isAddress } from 'ethers';
 
 import { getProxyToken } from '../../accessToken';
+import { PRIVATE_PROXY_GRVT_TINY } from '../../utils/transportResolution';
 import { BASE_URLS } from './grvt.types';
 
 // Tealstreet builder wallet addresses
@@ -144,7 +145,7 @@ interface AuthorizeBuilderMessage {
 }
 
 // GRVT proxy — requires Tealstreet-Authorization header
-const GRVT_PROXY_URL = 'https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy';
+const GRVT_PROXY_URL = PRIVATE_PROXY_GRVT_TINY;
 
 const LOG_PREFIX = '[GRVT Builder]';
 const IS_DEV = process.env.NODE_ENV !== 'production';
