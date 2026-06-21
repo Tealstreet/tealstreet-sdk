@@ -41,6 +41,13 @@ type TransportMetadata = Pick<
   'requiresCors' | 'enforceWsTunnel' | 'supportsTunnel' | 'privateProxyRegions'
 >;
 
+// The default region for an account that needs a region but hasn't picked one:
+// the exchange's first declared private-proxy region, else Singapore. Shared by
+// resolveAccountTransport and normalizeExchangeAccountConfig (whose GUARDS differ
+// — requiresCors vs tealstreetProxy — but whose default VALUE is identical).
+export const defaultProxyRegion = (metadata: Pick<ExchangeMetadata, 'privateProxyRegions'>): string =>
+  Object.keys(metadata?.privateProxyRegions || {})[0] || 'SG';
+
 // Resolve the effective proxy / tunnel / region for a saved account from its
 // transport preferences plus exchange metadata. Extracted verbatim from
 // accountToExchangeOptions — `requiresCors`/`enforceWsTunnel` force the proxy on,
@@ -48,7 +55,7 @@ type TransportMetadata = Pick<
 export const resolveAccountTransport = (account: TransportAccount, metadata: TransportMetadata): ResolvedTransport => {
   let proxyRegion = account.proxyRegion;
   if (metadata.requiresCors && !proxyRegion) {
-    proxyRegion = Object.keys(metadata?.privateProxyRegions || {})[0] || 'SG';
+    proxyRegion = defaultProxyRegion(metadata);
   }
 
   const tealstreetProxy = account.tealstreetProxy || metadata.requiresCors || metadata.enforceWsTunnel;

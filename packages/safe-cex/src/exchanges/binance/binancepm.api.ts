@@ -53,7 +53,6 @@ export const createBinanceAPI = (options: ExchangeOptions, exchange: BaseExchang
         headers: AxiosHeaders.from({
           'Content-Type': 'application/json, charset=utf-8',
         }),
-        //baseURL: 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com',
         timeout: 20_000,
       };
     }
@@ -128,7 +127,6 @@ export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange
       headers: AxiosHeaders.from({
         'Content-Type': 'application/json, charset=utf-8',
       }),
-      //baseURL: 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com',
       timeout: 20_000,
     };
   });
