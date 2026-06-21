@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { Candle, OHLCVOptions } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
@@ -23,9 +24,8 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
-      this.ws = this.createWebsocket(
-        this.parent.options.tealstreetProxy ? 'wss://fsjnpy143pbz.asia.tealstreet.io/okx/business' : this.endpoint,
-      );
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsBusiness;
+      this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);

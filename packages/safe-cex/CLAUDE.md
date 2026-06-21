@@ -40,6 +40,8 @@ yarn test          # Watch mode
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.
 
+**Routing source of truth (`src/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. Behavior is locked by `routing/__tests__/routing.equivalence.test.ts` + `transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (okxeu→okx, bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`.
+
 Canonical saved account shaping lives in
 `src/accounts/normalizeExchangeAccountConfig.ts`. Web, CLI, key-audit, and
 other "add API key" flows should produce an `ExchangeAccountConfig`, normalize

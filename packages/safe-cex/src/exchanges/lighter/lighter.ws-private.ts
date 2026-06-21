@@ -1,4 +1,5 @@
 import type { LighterExchange } from './lighter.exchange';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import type { LighterPrivateCloseClassification } from './lighter.ws-policy';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -7,7 +8,7 @@ import { LogSeverity, OrderStatus, Position, PositionSide } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, WS_PROXY_URL } from './lighter.types';
+import { BASE_WS_URL } from './lighter.types';
 import {
   LIGHTER_POLICY_REASON_RE,
   calculateLighterPrivateReconnectDelay,
@@ -688,7 +689,7 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
 
     const useWsProxyRoute = this.isWsProxyRouteEnabled();
     const baseUrl = useWsProxyRoute
-      ? WS_PROXY_URL.private
+      ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.host!
       : BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'];
     const shouldUseReadonlyFallback = this.useReadonlyFallback && !useWsProxyRoute;
     const wsUrl = shouldUseReadonlyFallback ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}readonly=true` : baseUrl;

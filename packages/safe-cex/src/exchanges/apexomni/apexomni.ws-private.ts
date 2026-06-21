@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { LogSeverity, OrderStatus, Position } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -142,7 +143,6 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
   // delta and avoid double-counting against contents.fills rows.
   private lastCumFilledByOrderId: Map<string, number> = new Map();
   private lastCumFeeByOrderId: Map<string, number> = new Map();
-  private static readonly PROXY_URL = 'wss://fsjnpy143pbz.asia.tealstreet.io/apex/private';
 
   throttleFetchOrders = () => {
     if (this.ordersThrottleTimeout) {
@@ -187,9 +187,8 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       const endpointWithLiveTimestamp = defaultEndpoint.replace(/timestamp=\d+/, `timestamp=${liveTimestamp}`);
       const joinChar = endpointWithLiveTimestamp.includes('?') ? '&' : '?';
       const requestIdEndpoint = `${endpointWithLiveTimestamp}${joinChar}requestId=${nanoid()}`;
-      this.ws = this.createWebsocket(
-        this.parent.options.tealstreetProxy ? ApexOmniPrivateWebsocket.PROXY_URL : requestIdEndpoint,
-      );
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      this.ws = this.createWebsocket(route.tunnelled ? route.host! : requestIdEndpoint);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
@@ -239,7 +238,9 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
         const incomingArgs = Array.isArray(json?.args) && json.args.length > 0 ? json.args : undefined;
         this.send(
           JSON.stringify(
-            incomingArgs ? { op: 'pong', args: incomingArgs } : { op: 'pong', args: [`${virtualClock.getCurrentTimeMs()}`] },
+            incomingArgs
+              ? { op: 'pong', args: incomingArgs }
+              : { op: 'pong', args: [`${virtualClock.getCurrentTimeMs()}`] },
           ),
         );
       }

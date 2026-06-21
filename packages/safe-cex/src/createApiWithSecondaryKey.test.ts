@@ -113,7 +113,7 @@ describe('createApiWithSecondaryKey', () => {
       createApiWithSecondaryKey(optionsWithSecondary, mockExchange, mockCreateApi);
 
       const secondCallOptions = mockCreateApi.mock.calls[1][0];
-      expect(secondCallOptions.overrideProxyUrl).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+      expect(secondCallOptions.overrideProxyUrl).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
     });
 
     it('should use custom proxyUrl when provided', () => {

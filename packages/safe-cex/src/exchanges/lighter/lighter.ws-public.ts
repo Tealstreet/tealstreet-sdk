@@ -1,4 +1,5 @@
 import flatten from 'lodash/flatten';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -11,7 +12,7 @@ import { updateOrderBook } from '../../utils/updateOrderBook';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { LighterExchange } from './lighter.exchange';
-import { BASE_WS_URL, ENDPOINTS, INTERVAL, WS_PROXY_URL } from './lighter.types';
+import { BASE_WS_URL, ENDPOINTS, INTERVAL } from './lighter.types';
 import { calculateLighterPublicReconnectDelay, classifyLighterPublicClose } from './lighter.ws-policy';
 import {
   buildLighterCandleTopic,
@@ -156,7 +157,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       const shouldUseProxyRoute = this.isWsProxyRouteEnabled() && !this.useDirectFallbackRoute;
       const shouldUseReadonlyDirectRoute = this.useReadonlyDirectRoute && !shouldUseProxyRoute;
       const endpoint = shouldUseProxyRoute
-        ? WS_PROXY_URL.public
+        ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic.host!
         : BASE_WS_URL.public[this.parent.options.testnet ? 'testnet' : 'livenet'];
       const separator = endpoint.includes('?') ? '&' : '?';
       const query = `requestId=${nanoid()}${shouldUseReadonlyDirectRoute ? '&readonly=true' : ''}`;

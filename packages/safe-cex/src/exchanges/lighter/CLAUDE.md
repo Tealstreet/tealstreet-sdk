@@ -224,7 +224,7 @@ Topics are tracked per channel and re-subscribed on reconnect.
 **Connection**:
 
 - Direct route: `BASE_WS_URL.private` (`wss://mainnet.zklighter.elliot.ai/stream` or testnet equivalent)
-- Proxy route (when `tealstreetWsRoute` is enabled): `WS_PROXY_URL.private`
+- Proxy route (when `tealstreetWsRoute` is enabled): `resolveExchangeRouting(name, options).wsPrivate.host` (routing table)
 - Readonly fallback appends `?readonly=true` on direct route only
 
 **Authentication/subscription flow**: Subscribes to `account_all/<accountIndex>` first, then attempts token-authenticated subscribe for `account_all_orders/<accountIndex>`.

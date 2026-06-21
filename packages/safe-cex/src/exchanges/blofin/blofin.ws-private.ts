@@ -8,6 +8,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { roundUSD } from '../../utils/roundUSD';
 import { multiply, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -41,9 +42,8 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       //this.ws = new WebSocket(this.endpoint);
-      this.ws = this.createWebsocket(
-        this.parent.options.tealstreetProxy ? 'wss://fsjnpy143pbz.asia.tealstreet.io/blofin/private' : this.endpoint,
-      );
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
@@ -229,7 +229,8 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
             const price = parseFloat(o.averagePrice);
             if (Number.isFinite(price) && price > 0 && fillDeltaNative > 0) {
               const rawTimestamp = Number(o.fillTime || o.uTime || o.cTime || Date.now());
-              const timestamp = rawTimestamp > 1_000_000_000_000 ? Math.floor(rawTimestamp / 1000) : Math.floor(rawTimestamp);
+              const timestamp =
+                rawTimestamp > 1_000_000_000_000 ? Math.floor(rawTimestamp / 1000) : Math.floor(rawTimestamp);
               this.emitter.emit('fill', {
                 id: orderId || orders[0].id,
                 orderId: orderId || orders[0].id,

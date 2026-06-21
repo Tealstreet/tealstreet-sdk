@@ -1,4 +1,5 @@
 import type { Ticker, Writable } from '../../types';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import type { BitgetExchange } from './bitget.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -6,7 +7,6 @@ import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL } from './bitget.types';
 
-const FALLBACK_WS_URL = 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -102,7 +102,7 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
           {},
         );
 
-      const url = this.useFallbackUrl ? FALLBACK_WS_URL : BASE_WS_URL;
+      const url = this.useFallbackUrl ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic.fallback! : BASE_WS_URL;
       if (this.useFallbackUrl) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bitget proxy (secondary public)');

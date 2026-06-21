@@ -1,4 +1,5 @@
 import throttle from 'lodash/throttle';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -51,7 +52,7 @@ export class ArkhamPrivateWebSocket extends BaseWebSocket<ArkhamExchange> {
   constructor(parent: ArkhamExchange) {
     super(parent);
     // Use the proxy WebSocket server
-    this.connectUrl = 'wss://fsjnpy143pbz.jp.tealstreet.io/arkm';
+    this.connectUrl = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.host!;
   }
 
   connectAndSubscribe = () => {

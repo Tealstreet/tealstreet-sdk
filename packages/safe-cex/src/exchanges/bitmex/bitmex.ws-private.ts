@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { OrderSide, Position } from '../../types';
 import { vn } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -45,11 +46,8 @@ export class BitmexPrivateWebsocket extends BaseWebSocket<BitmexExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       this.clearAuthRefreshTimeout();
-      const proxyHost =
-        this.parent.options.proxyRegion === 'JA'
-          ? 'wss://fsjnpy143pbz.jp.tealstreet.io/bitmex/private'
-          : 'wss://fsjnpy143pbz.asia.tealstreet.io/bitmex/private';
-      this.ws = this.createWebsocket(this.parent.options.tealstreetProxy ? proxyHost : this.endpoint);
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);

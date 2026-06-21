@@ -1,4 +1,5 @@
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import {
   LogSeverity,
   Order,
@@ -37,7 +38,6 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   private subscriptions: Map<number, any> = new Map();
   private requestId = 1;
   private authenticated = false;
-  private readonly connectUrl = 'wss://fsjnpy143pbz.jp.tealstreet.io/grvt';
 
   // Relaxed idle thresholds for event-driven private stream.
   // This WS only sends messages on order/position/fill changes, so long
@@ -113,7 +113,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       // Connect to the proxy WebSocket - auth happens after connection
-      this.ws = this.createWebsocket(this.connectUrl);
+      this.ws = this.createWebsocket(resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.host!);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);

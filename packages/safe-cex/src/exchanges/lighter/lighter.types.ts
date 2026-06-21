@@ -19,11 +19,6 @@ export const BASE_WS_URL = {
   },
 };
 
-export const WS_PROXY_URL = {
-  public: 'wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true',
-  private: 'wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream',
-};
-
 export const ENDPOINTS = {
   // Account endpoints
   ACCOUNT: '/api/v1/account',

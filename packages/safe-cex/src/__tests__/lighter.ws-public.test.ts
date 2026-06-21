@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BASE_WS_URL, ENDPOINTS, WS_PROXY_URL } from '../exchanges/lighter/lighter.types';
+import { BASE_WS_URL, ENDPOINTS } from '../exchanges/lighter/lighter.types';
 import { LighterPublicWebsocket } from '../exchanges/lighter/lighter.ws-public';
+import { resolveExchangeRouting } from '../routing/resolveExchangeRouting';
+
+// Lighter's public proxy WS host, now sourced from the routing table (was WS_PROXY_URL.public).
+const WS_PROXY_PUBLIC = resolveExchangeRouting('lighter', { tealstreetWsRoute: true }).wsPublic.host!;
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 
@@ -56,7 +60,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
-    expect(firstUrl).toContain(WS_PROXY_URL.public);
+    expect(firstUrl).toContain(WS_PROXY_PUBLIC);
     expect(firstUrl).not.toContain(BASE_WS_URL.public.livenet);
   });
 
@@ -74,7 +78,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
     expect(firstUrl).toContain(BASE_WS_URL.public.livenet);
-    expect(firstUrl).not.toContain(WS_PROXY_URL.public);
+    expect(firstUrl).not.toContain(WS_PROXY_PUBLIC);
   });
 
   it('primes ticker REST fallback immediately on socket open', async () => {
@@ -625,7 +629,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     const latestUrl = String(createWebsocketSpy.mock.calls.at(-1)?.[0] || '');
     expect(latestUrl).toContain(BASE_WS_URL.public.livenet);
-    expect(latestUrl).not.toContain(WS_PROXY_URL.public);
+    expect(latestUrl).not.toContain(WS_PROXY_PUBLIC);
   });
 
   it('returns to proxy route when direct fallback fails', () => {
@@ -645,7 +649,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const latestUrl = String(createWebsocketSpy.mock.calls.at(-1)?.[0] || '');
-    expect(latestUrl).toContain(WS_PROXY_URL.public);
+    expect(latestUrl).toContain(WS_PROXY_PUBLIC);
   });
 
   it('pauses repeated direct fallback probes after direct route fails in proxy mode', () => {
@@ -672,7 +676,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const latestUrl = String(createWebsocketSpy.mock.calls.at(-1)?.[0] || '');
-    expect(latestUrl).toContain(WS_PROXY_URL.public);
+    expect(latestUrl).toContain(WS_PROXY_PUBLIC);
     expect(latestUrl).not.toContain(BASE_WS_URL.public.livenet);
   });
 

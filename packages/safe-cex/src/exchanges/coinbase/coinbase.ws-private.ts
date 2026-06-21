@@ -3,6 +3,7 @@ import type { CoinbaseExchange } from './coinbase.exchange';
 import { formatOrderState, formatOrderType, sign } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
 import { Order, OrderSide } from '@tealstreet/safe-cex/src/types';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { multiply } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -11,10 +12,9 @@ import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
       this.ws = this.createWebsocket(
-        this.parent.options.tealstreetProxy
-          ? 'wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private'
-          : BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'],
+        route.tunnelled ? route.host! : BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'],
       );
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);

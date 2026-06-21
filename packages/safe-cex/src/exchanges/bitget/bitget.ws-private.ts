@@ -1,4 +1,5 @@
 import type { BitgetExchange } from './bitget.exchange';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 
 import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
@@ -11,7 +12,6 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { ORDER_STATUS } from './bitget.types';
 
-const FALLBACK_WS_URL = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private';
 
 export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private messageCount = 0;
@@ -65,7 +65,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.lastMessageCount = this.messageCount;
       this.messageCount = 0; // Reset message counter on new connection
 
-      const url = this.useFallbackUrl ? FALLBACK_WS_URL : 'wss://ws.bitget.com/v2/ws/private';
+      const url = this.useFallbackUrl ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.fallback! : 'wss://ws.bitget.com/v2/ws/private';
       if (this.useFallbackUrl) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bitget proxy (private)');
