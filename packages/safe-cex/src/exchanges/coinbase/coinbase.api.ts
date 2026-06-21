@@ -41,7 +41,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     // proxy use with non base url
     if (config?.url?.startsWith('http')) {
-      const privateProxyUrl = getProxyForAxios(config, options);
+      const privateProxyUrl = getProxyForAxios(config, options, 'coinbase');
       const isPrivateProxyEnabled = privateProxyUrl !== '';
       config.url = isPrivateProxyEnabled ? `${privateProxyUrl}/${config.url}` : config.url;
     }

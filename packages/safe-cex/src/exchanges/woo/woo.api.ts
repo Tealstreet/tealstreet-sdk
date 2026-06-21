@@ -17,7 +17,7 @@ const signV1 = (config: AxiosRequestConfig, options: ExchangeOptions) => {
 
   // proxy use with non base url
   if (nextConfig?.url?.startsWith('http')) {
-    const privateProxyUrl = getProxyForAxios(nextConfig, options);
+    const privateProxyUrl = getProxyForAxios(nextConfig, options, 'woo');
     const isPrivateProxyEnabled = privateProxyUrl !== '';
     nextConfig.url = isPrivateProxyEnabled ? `${privateProxyUrl}/${nextConfig.url}` : nextConfig.url;
   }
@@ -62,7 +62,7 @@ const signV3 = (c: AxiosRequestConfig, options: ExchangeOptions) => {
 
   // proxy use with non base url
   if (nextConfig?.url?.startsWith('http')) {
-    const privateProxyUrl = getProxyForAxios(nextConfig, options);
+    const privateProxyUrl = getProxyForAxios(nextConfig, options, 'woo');
     const isPrivateProxyEnabled = privateProxyUrl !== '';
     nextConfig.url = isPrivateProxyEnabled ? `${privateProxyUrl}/${nextConfig.url}` : nextConfig.url;
   }

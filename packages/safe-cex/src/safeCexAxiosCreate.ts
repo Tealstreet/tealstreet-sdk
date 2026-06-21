@@ -1,12 +1,12 @@
-import type { ExchangeOptions } from './types';
+import type { ExchangeName, ExchangeOptions } from './types';
 
 import axios, { AxiosInstance, CreateAxiosDefaults } from 'axios';
 
 import { getProxyToken } from './accessToken';
 import { BaseExchange } from './exchanges/base';
 import { createRemoteSigningAdapter } from './remoteSigningAdapter';
+import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
-import { getPrivateProxy } from './utils/getPrivateProxy';
 import { isDevelopment } from './utils/isDevelopment';
 import { PUBLIC_CORS_PROXY } from './utils/transportResolution';
 
@@ -141,12 +141,16 @@ class HttpRequestStatsTracker {
 // Global HTTP request stats tracker
 export const httpStats = new HttpRequestStatsTracker();
 
-export const getProxyForAxios = (config: CreateAxiosDefaults, options: ExchangeOptions): string =>
+export const getProxyForAxios = (
+  config: CreateAxiosDefaults,
+  options: ExchangeOptions,
+  exchange: ExchangeName,
+): string =>
   config.baseURL?.includes('binance') &&
   (options.publicDataOnly || !Boolean((config?.headers as any)?.['X-MBX-APIKEY']))
     ? PUBLIC_CORS_PROXY
     : options.tealstreetProxy
-      ? getPrivateProxy(config?.baseURL, true, options.proxyRegion === 'JA' ? true : false)
+      ? resolveExchangeRouting(exchange, options).restProxyHost
       : '';
 
 const lastLogReq: { [key: string]: number } = {};
@@ -204,7 +208,7 @@ export const safeCexAxiosCreate = (
   const privateProxyUrl =
     options.tealstreetTunnel && exchange.name !== 'blofin' && exchange.name !== 'grvt'
       ? ''
-      : getProxyForAxios(config, effectiveOptions);
+      : getProxyForAxios(config, effectiveOptions, exchange.name);
   const isPrivateProxyEnabled = privateProxyUrl !== '';
   const baseURLWithProxy = isPrivateProxyEnabled ? `${privateProxyUrl}/${config?.baseURL}` : config?.baseURL;
   const finalBaseURLWithProxy =

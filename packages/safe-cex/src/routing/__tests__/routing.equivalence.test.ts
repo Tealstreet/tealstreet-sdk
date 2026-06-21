@@ -3,9 +3,21 @@ import type { ExchangeName } from '../../types';
 import { describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { getPrivateProxy } from '../../utils/getPrivateProxy';
 import { PRIVATE_PROXY_ASIA, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from '../../utils/transportResolution';
 import { resolveExchangeRouting } from '../resolveExchangeRouting';
+
+// Frozen copy of the original getPrivateProxy (deleted when REST consumers were cut
+// over to resolveExchangeRouting), including its requiresCors=false -> '' guard. Kept
+// here verbatim as the immutable oracle the resolver's REST pool selection is proven
+// against.
+const legacyGetPrivateProxy = (url: string, requiresCors: boolean, forceJa: boolean): string => {
+  if (!requiresCors) return '';
+  return url.includes('grvt')
+    ? PRIVATE_PROXY_GRVT_TINY
+    : /binance|okx|okex|bitget/.test(url) || forceJa
+      ? PRIVATE_PROXY_JP
+      : PRIVATE_PROXY_ASIA;
+};
 
 // Epic 1 net: prove the declarative routing table + resolver reproduce the CURRENT
 // observed packet path exactly, BEFORE later epics cut consumers over to it. WS
@@ -77,21 +89,21 @@ describe('routing table / resolver (Epic 1 net)', () => {
   it('REST pool host matches getPrivateProxy across every branch', () => {
     // grvt -> tiny pool (wins over forceJa).
     expect(resolveExchangeRouting('grvt', proxy).restProxyHost).toBe(PRIVATE_PROXY_GRVT_TINY);
-    expect(getPrivateProxy('https://grvt.io/api', true, false)).toBe(PRIVATE_PROXY_GRVT_TINY);
+    expect(legacyGetPrivateProxy('https://grvt.io/api', true, false)).toBe(PRIVATE_PROXY_GRVT_TINY);
 
     // binance/okx/bitget -> jp pool.
     for (const ex of ['binance', 'okx', 'bitget'] as ExchangeName[]) {
       expect(resolveExchangeRouting(ex, proxy).restProxyHost).toBe(PRIVATE_PROXY_JP);
     }
-    expect(getPrivateProxy('https://fapi.binance.com', true, false)).toBe(PRIVATE_PROXY_JP);
+    expect(legacyGetPrivateProxy('https://fapi.binance.com', true, false)).toBe(PRIVATE_PROXY_JP);
 
     // others -> asia; proxyRegion JA forces jp.
     expect(resolveExchangeRouting('bybit', proxy).restProxyHost).toBe(PRIVATE_PROXY_ASIA);
     expect(resolveExchangeRouting('bybit', { tealstreetProxy: true, proxyRegion: 'JA' }).restProxyHost).toBe(
       PRIVATE_PROXY_JP,
     );
-    expect(getPrivateProxy('https://api.bybit.com', true, false)).toBe(PRIVATE_PROXY_ASIA);
-    expect(getPrivateProxy('https://api.bybit.com', true, true)).toBe(PRIVATE_PROXY_JP);
+    expect(legacyGetPrivateProxy('https://api.bybit.com', true, false)).toBe(PRIVATE_PROXY_ASIA);
+    expect(legacyGetPrivateProxy('https://api.bybit.com', true, true)).toBe(PRIVATE_PROXY_JP);
 
     // no tealstreetProxy -> direct REST.
     expect(resolveExchangeRouting('bybit', offProxy).restProxyHost).toBe('');

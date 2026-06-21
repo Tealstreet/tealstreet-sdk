@@ -12,7 +12,6 @@ import {
   safeCexAxiosCreate,
   safeCexAxiosCreateNoProxy,
 } from './safeCexAxiosCreate';
-import { getPrivateProxy } from './utils/getPrivateProxy';
 
 // Mock dependencies
 vi.mock('axios', () => ({
@@ -28,10 +27,6 @@ vi.mock('axios', () => ({
       },
     })),
   },
-}));
-
-vi.mock('./utils/getPrivateProxy', () => ({
-  getPrivateProxy: vi.fn(() => 'https://mock-proxy.tealstreet.io'),
 }));
 
 vi.mock('./accessToken', () => ({
@@ -112,8 +107,8 @@ describe('safeCexAxiosCreate', () => {
         publicDataOnly: true,
       };
 
-      const result = getProxyForAxios(config, options);
-      expect(result).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+      const result = getProxyForAxios(config, options, 'binance');
+      expect(result).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return exchange proxy URL for binance without API key', () => {
@@ -124,8 +119,8 @@ describe('safeCexAxiosCreate', () => {
         publicDataOnly: false,
       };
 
-      const result = getProxyForAxios(config, options);
-      expect(result).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+      const result = getProxyForAxios(config, options, 'binance');
+      expect(result).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return private proxy URL when tealstreetProxy is enabled', () => {
@@ -136,9 +131,8 @@ describe('safeCexAxiosCreate', () => {
         tealstreetProxy: true,
       };
 
-      const result = getProxyForAxios(config, options);
-      expect(getPrivateProxy).toHaveBeenCalledWith('https://api.bybit.com', true, false);
-      expect(result).toBe('https://mock-proxy.tealstreet.io');
+      const result = getProxyForAxios(config, options, 'bybit');
+      expect(result).toBe('https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return private proxy URL for Japan region', () => {
@@ -150,8 +144,8 @@ describe('safeCexAxiosCreate', () => {
         proxyRegion: 'JA',
       };
 
-      const result = getProxyForAxios(config, options);
-      expect(getPrivateProxy).toHaveBeenCalledWith('https://api.bybit.com', true, true);
+      const result = getProxyForAxios(config, options, 'bybit');
+      expect(result).toBe('https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return empty string when no proxy is needed', () => {
@@ -162,7 +156,7 @@ describe('safeCexAxiosCreate', () => {
         tealstreetProxy: false,
       };
 
-      const result = getProxyForAxios(config, options);
+      const result = getProxyForAxios(config, options, 'bybit');
       expect(result).toBe('');
     });
 
@@ -177,7 +171,7 @@ describe('safeCexAxiosCreate', () => {
         publicDataOnly: false,
       };
 
-      const result = getProxyForAxios(config, options);
+      const result = getProxyForAxios(config, options, 'binance');
       expect(result).toBe('');
     });
 
@@ -189,7 +183,7 @@ describe('safeCexAxiosCreate', () => {
         publicDataOnly: true,
       };
 
-      const result = getProxyForAxios(config, options);
+      const result = getProxyForAxios(config, options, 'bybit');
       expect(result).toBe('');
     });
   });
@@ -325,8 +319,9 @@ describe('safeCexAxiosCreate', () => {
 
         safeCexAxiosCreate(config, options, grvtExchange);
 
-        // getPrivateProxy should be called since GRVT uses proxy even with tunnel
-        expect(getPrivateProxy).toHaveBeenCalled();
+        // GRVT routes through the private proxy even with tunnel (effectiveOptions forces tealstreetProxy).
+        const grvtBaseURL = vi.mocked(axios.create).mock.calls.at(-1)?.[0]?.baseURL;
+        expect(grvtBaseURL).toContain('fsjnpy143pbz');
       });
     });
 
@@ -345,8 +340,9 @@ describe('safeCexAxiosCreate', () => {
 
         safeCexAxiosCreate(config, options, blofinExchange);
 
-        // getPrivateProxy should be called since blofin uses proxy even with tunnel
-        expect(getPrivateProxy).toHaveBeenCalled();
+        // BloFin routes through the private proxy even with tunnel (effectiveOptions forces tealstreetProxy).
+        const blofinBaseURL = vi.mocked(axios.create).mock.calls.at(-1)?.[0]?.baseURL;
+        expect(blofinBaseURL).toContain('fsjnpy143pbz');
       });
     });
 

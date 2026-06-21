@@ -69,17 +69,17 @@ describe('transport resolution (golden master)', () => {
   });
 
   it('getProxyForAxios: representative base URLs x proxy/region/auth permutations', () => {
-    const URLS = [
-      'https://api.bybit.com',
-      'https://fapi.binance.com',
-      'https://www.okx.com/api',
-      'https://api.bitget.com',
-      'https://grvt.io/api',
-      'https://www.bitmex.com/api',
-      'https://api.hyperliquid.xyz',
+    const URLS: Array<[string, ExchangeName]> = [
+      ['https://api.bybit.com', 'bybit'],
+      ['https://fapi.binance.com', 'binance'],
+      ['https://www.okx.com/api', 'okx'],
+      ['https://api.bitget.com', 'bitget'],
+      ['https://grvt.io/api', 'grvt'],
+      ['https://www.bitmex.com/api', 'bitmex'],
+      ['https://api.hyperliquid.xyz', 'hyperliquid'],
     ];
     const matrix: Record<string, Record<string, string>> = {};
-    for (const baseURL of URLS) {
+    for (const [baseURL, exchange] of URLS) {
       const perUrl: Record<string, string> = {};
       for (const tealstreetProxy of BOOL) {
         for (const proxyRegion of REGIONS) {
@@ -92,7 +92,7 @@ describe('transport resolution (golden master)', () => {
             } as ExchangeOptions;
             const key = `proxy=${Number(tealstreetProxy)} region=${proxyRegion ?? 'NONE'} authed=${Number(authed)}`;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            perUrl[key] = getProxyForAxios(config as any, options) || 'DIRECT';
+            perUrl[key] = getProxyForAxios(config as any, options, exchange) || 'DIRECT';
           }
         }
       }
