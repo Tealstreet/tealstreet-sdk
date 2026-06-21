@@ -2,7 +2,7 @@ import type { AxiosRequestConfig } from 'axios';
 
 import { LighterApiClient, LighterApiError, TransactionClient } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
-import { BASE_URL, RECV_WINDOW } from './lighter.types';
+import { getBaseUrl, RECV_WINDOW } from './lighter.types';
 
 type RuntimeProcess = {
   env?: Record<string, string | undefined>;
@@ -183,7 +183,7 @@ const resolveConfig = (): ProbeConfig => {
   const now = Date.now();
   const apiPrivateKey = getEnv('LIGHTER_API_PRIVATE_KEY');
 
-  const baseUrl = normalizeBaseUrl(getEnv('LIGHTER_API_URL') ?? BASE_URL[useTestnet ? 'testnet' : 'livenet']);
+  const baseUrl = normalizeBaseUrl(getEnv('LIGHTER_API_URL') ?? getBaseUrl(useTestnet ? 'testnet' : 'livenet'));
   const accountIndex = parseBigIntValue('LIGHTER_ACCOUNT_INDEX');
   const apiKeyIndex = parseInteger('LIGHTER_API_KEY_INDEX', 0);
   const headerAccountIndex = getEnv('LIGHTER_HEADER_ACCOUNT_INDEX') ?? accountIndex.toString();

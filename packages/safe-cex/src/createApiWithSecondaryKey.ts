@@ -3,7 +3,7 @@ import type { BaseExchange } from './exchanges/base';
 import { AxiosInstance, AxiosRequestConfig } from 'axios';
 
 import { ExchangeOptions, Writable } from './types';
-import { PUBLIC_CORS_PROXY } from './utils/transportResolution';
+import { getPublicCorsProxy } from './utils/transportResolution';
 
 export const createApiWithSecondaryKey = (
   options: ExchangeOptions,
@@ -15,7 +15,7 @@ export const createApiWithSecondaryKey = (
     secondaryRateLimit?: (axiosInstance: AxiosInstance) => AxiosInstance;
   } = {},
 ) => {
-  const proxyUrl = options.secondaryProxyUrl || otherOptions.proxyUrl || PUBLIC_CORS_PROXY;
+  const proxyUrl = options.secondaryProxyUrl || otherOptions.proxyUrl || getPublicCorsProxy();
 
   let defaultXhr = createApi(options, exchange);
   if (otherOptions.rateLimit) {

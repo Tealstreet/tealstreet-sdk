@@ -12,6 +12,7 @@ import {
   safeCexAxiosCreate,
   safeCexAxiosCreateNoProxy,
 } from './safeCexAxiosCreate';
+import { setAwsProxyMigrationEnabled } from './utils/transportResolution';
 
 // Mock dependencies
 vi.mock('axios', () => ({
@@ -42,6 +43,10 @@ vi.mock('./utils/isDevelopment', () => ({
 }));
 
 describe('safeCexAxiosCreate', () => {
+  // getProxyForAxios resolves the public CORS host via getPublicCorsProxy(), gated by
+  // ENABLE_AWS_PROXY_MIGRATION (default off = legacy AWS). Reset the module global.
+  afterEach(() => setAwsProxyMigrationEnabled(false));
+
   describe('LAST_LOG_PERIODICY', () => {
     it('should be 30 seconds in milliseconds', () => {
       expect(LAST_LOG_PERIODICY).toBe(30000);
@@ -99,7 +104,20 @@ describe('safeCexAxiosCreate', () => {
       vi.clearAllMocks();
     });
 
-    it('should return exchange proxy URL for binance public data', () => {
+    it('returns the legacy AWS CORS proxy for binance public data (migration off)', () => {
+      const config = { baseURL: 'https://api.binance.com' };
+      const options: ExchangeOptions = {
+        key: '',
+        secret: '',
+        publicDataOnly: true,
+      };
+
+      const result = getProxyForAxios(config, options, 'binance');
+      expect(result).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+    });
+
+    it('returns the read fleet for binance public data when migration is on', () => {
+      setAwsProxyMigrationEnabled(true);
       const config = { baseURL: 'https://api.binance.com' };
       const options: ExchangeOptions = {
         key: '',
@@ -111,7 +129,7 @@ describe('safeCexAxiosCreate', () => {
       expect(result).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
     });
 
-    it('should return exchange proxy URL for binance without API key', () => {
+    it('returns the legacy AWS CORS proxy for binance without API key (migration off)', () => {
       const config = { baseURL: 'https://api.binance.com', headers: {} };
       const options: ExchangeOptions = {
         key: '',
@@ -120,7 +138,7 @@ describe('safeCexAxiosCreate', () => {
       };
 
       const result = getProxyForAxios(config, options, 'binance');
-      expect(result).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
+      expect(result).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return private proxy URL when tealstreetProxy is enabled', () => {

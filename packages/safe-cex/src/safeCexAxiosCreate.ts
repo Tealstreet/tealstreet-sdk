@@ -8,7 +8,7 @@ import { createRemoteSigningAdapter } from './remoteSigningAdapter';
 import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
-import { PUBLIC_CORS_PROXY } from './utils/transportResolution';
+import { getPublicCorsProxy } from './utils/transportResolution';
 
 /**
  * Tracks the "real" inner adapter for remote signing instances.
@@ -148,7 +148,7 @@ export const getProxyForAxios = (
 ): string =>
   config.baseURL?.includes('binance') &&
   (options.publicDataOnly || !Boolean((config?.headers as any)?.['X-MBX-APIKEY']))
-    ? PUBLIC_CORS_PROXY
+    ? getPublicCorsProxy()
     : options.tealstreetProxy
       ? resolveExchangeRouting(exchange, options).restProxyHost
       : '';

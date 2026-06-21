@@ -5,7 +5,7 @@ import {
   TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET,
   TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET,
 } from './lighter.builder-fee';
-import { BASE_URL, RECV_WINDOW } from './lighter.types';
+import { getBaseUrl as getLighterBaseUrl, RECV_WINDOW } from './lighter.types';
 import { isLighterL1Address, parseLighterPositiveIntegerString } from './lighter.utils';
 
 const LIGHTER_CHAIN_ID = {
@@ -68,7 +68,7 @@ const getBaseUrl = (testnet: boolean, overrideBaseUrl?: string): string => {
   if (overrideBaseUrl && overrideBaseUrl.trim().length > 0) {
     return overrideBaseUrl.trim().replace(/\/$/, '');
   }
-  return testnet ? BASE_URL.testnet : BASE_URL.livenet;
+  return testnet ? getLighterBaseUrl('testnet') : getLighterBaseUrl('livenet');
 };
 
 const shouldAttachLighterAuthHeaders = (url: string): boolean => {
@@ -331,10 +331,10 @@ export const checkLighterBuilderApproved = async (params: {
   const requiredFeeValue = params.requiredFeeValue ?? DEFAULT_LIGHTER_APPROVAL_FEE_VALUE;
   const hasSufficientFeeCap = Boolean(
     integrator &&
-      integrator.maxPerpsTakerFee >= requiredFeeValue &&
-      integrator.maxPerpsMakerFee >= requiredFeeValue &&
-      integrator.maxSpotTakerFee >= requiredFeeValue &&
-      integrator.maxSpotMakerFee >= requiredFeeValue,
+    integrator.maxPerpsTakerFee >= requiredFeeValue &&
+    integrator.maxPerpsMakerFee >= requiredFeeValue &&
+    integrator.maxSpotTakerFee >= requiredFeeValue &&
+    integrator.maxSpotMakerFee >= requiredFeeValue,
   );
   const approvalStatus = !integrator
     ? 'missing'

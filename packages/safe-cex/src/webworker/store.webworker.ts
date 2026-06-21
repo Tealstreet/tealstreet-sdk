@@ -1,6 +1,7 @@
 import { ExchangeName } from '../types';
+import { setAwsProxyMigrationEnabled } from '../utils/transportResolution';
 import { ExchangeWorker } from './ExchangeWorker';
-import { StoreWorkerPayload } from './StoreWorkerPayload';
+import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
 import { TelegramWorker } from './TelgramWorker';
 
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
@@ -268,6 +269,15 @@ const start = (ctx: Worker, shared = false) => {
       } catch (_e) {
         // ignore — if postMessage throws, the port is dead anyway
       }
+      return;
+    }
+
+    // Global worker config: the host app derives these knobs from per-user feature flags
+    // and pushes them once, before any 'init', so safe-cex resolves the right hosts from
+    // the start. Applied via typed setters — safe-cex never sees flag names.
+    if (payload?.op === '__workerConfig') {
+      const cfg = (payload.data ?? {}) as WorkerConfig;
+      if ('awsProxyMigration' in cfg) setAwsProxyMigrationEnabled(Boolean(cfg.awsProxyMigration));
       return;
     }
 

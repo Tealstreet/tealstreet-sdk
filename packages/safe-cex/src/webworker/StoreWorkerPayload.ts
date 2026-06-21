@@ -42,7 +42,10 @@ export type StoreWorkerIncomingOp =
   // Signing
   | 'sign-res'
   // Liveness
-  | '__worker_ping__';
+  | '__worker_ping__'
+  // Global worker config: host app pushes flag-derived knobs once, before any init.
+  // Follows the __verbose/__perf convention (global op, handled before exchange routing).
+  | '__workerConfig';
 
 /** Ops the worker sends to the main thread */
 export type StoreWorkerOutgoingOp =
@@ -98,4 +101,16 @@ export interface StoreWorkerPayload {
   op: StoreWorkerOp;
   instanceId?: string;
   data?: any;
+}
+
+/**
+ * Typed global worker config carried by the '__workerConfig' op. The host app derives
+ * these knobs from feature flags and pushes them once before any init; safe-cex applies
+ * them through typed setters and never sees flag names (keeps the mirrored package
+ * flag-agnostic). To add a worker-gated knob: add a field here, map it from a flag on the
+ * web side, and apply it via a setter in the '__workerConfig' handler in store.webworker.
+ */
+export interface WorkerConfig {
+  // ENABLE_AWS_PROXY_MIGRATION — false (default) => legacy AWS CORS host; true => read fleet.
+  awsProxyMigration?: boolean;
 }

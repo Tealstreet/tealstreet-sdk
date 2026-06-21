@@ -23,6 +23,8 @@ import { logAccountRoute } from './account-log';
 import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
+import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/utils/transportResolution';
+import { ensureAwsProxyMigrationFlag } from './aws-proxy-migration';
 
 // Default timeout for exchange operations (30 seconds)
 const EXCHANGE_OPERATION_TIMEOUT = 30000;
@@ -193,13 +195,17 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     // Exchange management
     async createExchange(account: ExchangeAccountConfig): Promise<ExchangeLike> {
-      // Mirror safe-cex's accountToExchangeOptions: tunnel/proxy may be forced
-      // on by metadata (enforceWsTunnel / requiresCors) even when the user
-      // didn't explicitly enable it on the account.
+      // Resolve the AWS->Vultr proxy-migration gate (memoized, once per process) before
+      // building the exchange. This is the REPL/ExchangeManager path; the recorder and
+      // exchange-factory paths await it independently.
+      await ensureAwsProxyMigrationFlag();
+      // Use safe-cex's single source of truth for transport resolution instead of
+      // re-deriving it: tunnel/proxy may be forced on by metadata (enforceWsTunnel /
+      // requiresCors) even when the user didn't enable it on the account.
       const metadata = getExchangeMetadata(account.exchange as ExchangeName);
-      const requiresAuth =
-        account.tealstreetTunnel || account.tealstreetProxy || metadata.requiresCors || metadata.enforceWsTunnel;
-      const resolvedProxyRegion = account.proxyRegion || Object.keys(metadata.privateProxyRegions || {})[0] || 'SG';
+      const transport = resolveAccountTransport(account, metadata);
+      const requiresAuth = Boolean(transport.tealstreetProxy || transport.tealstreetTunnel);
+      const resolvedProxyRegion = account.proxyRegion || defaultProxyRegion(metadata);
 
       logAccountRoute('account-route createExchange', account, {
         runtime: 'cli',

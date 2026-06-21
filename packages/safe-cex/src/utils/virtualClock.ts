@@ -4,7 +4,7 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import { PUBLIC_CORS_PROXY } from './transportResolution';
+import { getPublicCorsProxy } from './transportResolution';
 
 dayjs.extend(utc);
 
@@ -126,7 +126,7 @@ class VirtualClock {
     try {
       const {
         data: { time },
-      } = await axios.get(`${PUBLIC_CORS_PROXY}/https://api.bybit.com/v5/market/time`, { timeout: 5000 });
+      } = await axios.get(`${getPublicCorsProxy()}/https://api.bybit.com/v5/market/time`, { timeout: 5000 });
       if (time != null) {
         return dayjs(time);
       }
@@ -177,7 +177,7 @@ class VirtualClock {
     try {
       const {
         data: { time },
-      } = await axios.get(`${PUBLIC_CORS_PROXY}/https://api.bybit.com/v5/market/time`, { timeout: 5000 });
+      } = await axios.get(`${getPublicCorsProxy()}/https://api.bybit.com/v5/market/time`, { timeout: 5000 });
       if (time != null) {
         return dayjs(time);
       }

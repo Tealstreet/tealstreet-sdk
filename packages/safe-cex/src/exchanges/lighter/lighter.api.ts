@@ -3,7 +3,7 @@ import type { ExchangeOptions } from '../../types';
 import { LighterApiClient } from '@tealstreet/lighter-sdk';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { BASE_URL, RECV_WINDOW } from './lighter.types';
+import { getBaseUrl, RECV_WINDOW } from './lighter.types';
 import { toLighterApiKeyIndexString } from './lighter.utils';
 
 /**
@@ -13,7 +13,7 @@ import { toLighterApiKeyIndexString } from './lighter.utils';
  * @returns LighterApiClient instance
  */
 export const createLighterSDKClient = (options: ExchangeOptions, exchange: BaseExchange): LighterApiClient => {
-  const baseUrl = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
+  const baseUrl = getBaseUrl(options.testnet ? 'testnet' : 'livenet');
 
   const client = new LighterApiClient({
     baseUrl,

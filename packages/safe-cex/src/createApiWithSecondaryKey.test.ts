@@ -2,9 +2,14 @@ import type { AxiosInstance, AxiosRequestConfig } from 'axios';
 import type { BaseExchange } from './exchanges/base';
 import type { ExchangeOptions } from './types';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApiWithSecondaryKey } from './createApiWithSecondaryKey';
+import { setAwsProxyMigrationEnabled } from './utils/transportResolution';
+
+// Default-off secondary read transport is the legacy AWS host; the read-fleet host
+// only applies under ENABLE_AWS_PROXY_MIGRATION. Always reset the module global.
+afterEach(() => setAwsProxyMigrationEnabled(false));
 
 type CreateApiFn = (options: ExchangeOptions, exchange: BaseExchange) => AxiosInstance;
 
@@ -109,7 +114,15 @@ describe('createApiWithSecondaryKey', () => {
       expect(secondCallOptions.secret).toBe('secondary-secret');
     });
 
-    it('should set overrideProxyUrl for secondary options', () => {
+    it('defaults the secondary read transport to legacy AWS (migration off)', () => {
+      createApiWithSecondaryKey(optionsWithSecondary, mockExchange, mockCreateApi);
+
+      const secondCallOptions = mockCreateApi.mock.calls[1][0];
+      expect(secondCallOptions.overrideProxyUrl).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+    });
+
+    it('routes the secondary read transport to the read fleet when migration is on', () => {
+      setAwsProxyMigrationEnabled(true);
       createApiWithSecondaryKey(optionsWithSecondary, mockExchange, mockCreateApi);
 
       const secondCallOptions = mockCreateApi.mock.calls[1][0];

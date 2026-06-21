@@ -1,12 +1,12 @@
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, Timeframe } from '../../types';
-import { PUBLIC_CORS_PROXY } from '../../utils/transportResolution';
+import { getPublicCorsProxy } from '../../utils/transportResolution';
 
 export const RECV_WINDOW = 20_000;
 
-export const BASE_URL = {
-  livenet: `${PUBLIC_CORS_PROXY}/https://mainnet.zklighter.elliot.ai`,
-  testnet: `${PUBLIC_CORS_PROXY}/https://testnet-api.lighter.xyz`,
-};
+// Resolved at CALL time (not a module-eval const) so the ENABLE_AWS_PROXY_MIGRATION
+// startup flip is reflected — the public CORS host prefix changes legacy AWS <-> read-fleet.
+export const getBaseUrl = (net: 'livenet' | 'testnet'): string =>
+  `${getPublicCorsProxy()}/${net === 'livenet' ? 'https://mainnet.zklighter.elliot.ai' : 'https://testnet-api.lighter.xyz'}`;
 
 export const BASE_WS_URL = {
   public: {

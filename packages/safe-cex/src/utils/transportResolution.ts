@@ -23,11 +23,26 @@ export const PRIVATE_PROXY_ASIA = 'https://fsjnpy143pbz.asia.tealstreet.io/api/e
 export const READ_FLEET_JP = 'https://read-fleet-jp.tealstreet.io/api/exchange_proxy';
 export const READ_FLEET_SG = 'https://read-fleet-sg.tealstreet.io/api/exchange_proxy';
 
-// Public CORS proxy: used to CORS-unblock public and unwhitelisted requests in the
-// browser. Migrated AWS (exchange-proxy.jp) -> the read fleet. These requests carry no
-// per-user region, so they use the Tokyo pool (matching the old exchange-proxy.jp
-// default). The secondary-key read transport picks jp/sg per region via getReadFleetProxy.ts.
-export const PUBLIC_CORS_PROXY = READ_FLEET_JP;
+// Legacy AWS public CORS proxy — the pre-migration host the read fleet replaced.
+// This is the OFF / default value of the ENABLE_AWS_PROXY_MIGRATION rollout.
+export const LEGACY_AWS_PUBLIC_CORS = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
+
+// ENABLE_AWS_PROXY_MIGRATION rollout gate. The unwhitelisted/public CORS proxy and
+// the secondary-key read host are the only transport that moved AWS -> Vultr; this
+// flag gates that whole switch (+ the secondary-key UI, gated app-side). Default OFF
+// = legacy AWS, the zero-impact pre-migration baseline. safe-cex NEVER reads feature
+// flags — the host app (web worker) flips this once at startup from the per-user
+// flag; non-web runtimes (CLI / exchange-server) leave it OFF and stay on AWS.
+let awsProxyMigrationEnabled = false;
+export const setAwsProxyMigrationEnabled = (enabled: boolean): void => {
+  awsProxyMigrationEnabled = enabled;
+};
+export const isAwsProxyMigrationEnabled = (): boolean => awsProxyMigrationEnabled;
+
+// Public CORS proxy (CORS-unblocks public/unwhitelisted browser requests). Resolved
+// at CALL time so the startup flip is always reflected — never cache it into a
+// module-eval string. ON -> read-fleet-jp; OFF -> legacy AWS exchange-proxy.jp.
+export const getPublicCorsProxy = (): string => (awsProxyMigrationEnabled ? READ_FLEET_JP : LEGACY_AWS_PUBLIC_CORS);
 
 // --- Preference resolution -------------------------------------------------
 
