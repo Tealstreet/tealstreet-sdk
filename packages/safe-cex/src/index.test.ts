@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { buildPublicExchangeOptions, createPublicExchange } from './index';
+
 const testState = vi.hoisted(() => {
   const constructorCalls: Array<{ name: string; options: Record<string, unknown> }> = [];
 
@@ -12,7 +14,10 @@ const testState = vi.hoisted(() => {
   return { constructorCalls, MockExchange };
 });
 
-vi.mock('./exchangeMetadata', () => ({
+// Keep the real `exchangeMetadata` record (routing table needs its keys, now reachable
+// via getReadFleetProxy); only override the getExchangeMetadata function this suite controls.
+vi.mock('./exchangeMetadata', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./exchangeMetadata')>()),
   getExchangeMetadata: vi.fn((exchangeName: string) => ({
     exchangeName,
     requiresCors: exchangeName === 'coinbase',
@@ -34,8 +39,6 @@ vi.mock('./utils/virtualClock', () => ({
     start: vi.fn(),
   },
 }));
-
-import { buildPublicExchangeOptions, createPublicExchange } from './index';
 
 describe('createPublicExchange', () => {
   beforeEach(() => {

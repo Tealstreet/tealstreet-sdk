@@ -42,6 +42,14 @@ const poolHost = (pool: RestPool): string =>
 const resolveRestPool = (declared: RestPool, proxyRegion?: string): RestPool =>
   declared === 'tiny' ? 'tiny' : proxyRegion === 'JA' ? 'jp' : declared;
 
+// The REST egress *region* for an exchange — the same region the primary REST pool
+// resolves to (the jp pool & grvt's 'tiny' pool egress Tokyo; 'asia' egresses Singapore).
+// Exported so the read fleet (secondary-key reads) lands in the IDENTICAL region AWS
+// picks per exchange — true parity, not a coarse SG-or-Tokyo guess. Single source of
+// truth: the per-exchange routing table + resolveRestPool.
+export const restEgressRegion = (exchange: ExchangeName, proxyRegion?: string): 'jp' | 'sg' =>
+  resolveRestPool(routingTable[exchange].restPool, proxyRegion) === 'asia' ? 'sg' : 'jp';
+
 const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions): ResolvedWs => {
   if (!strategy) return { tunnelled: false };
   switch (strategy.kind) {

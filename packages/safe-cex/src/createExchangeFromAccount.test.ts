@@ -1,8 +1,9 @@
 import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
+import { setAwsProxyMigrationEnabled } from './utils/transportResolution';
 
 // Partial metadata for testing - only fields used by accountToExchangeOptions
 interface TestMetadata {
@@ -19,8 +20,11 @@ interface TestMetadata {
   privateProxyRegions: Record<string, string[]>;
 }
 
-// Mock the exchangeMetadata module
-vi.mock('./exchangeMetadata', () => ({
+// Mock the exchangeMetadata module. Keep the real `exchangeMetadata` record (the routing
+// table needs its keys, now reachable via getReadFleetProxy) and only override the
+// getExchangeMetadata function this suite controls.
+vi.mock('./exchangeMetadata', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./exchangeMetadata')>()),
   getExchangeMetadata: vi.fn((exchange: string) => {
     // Return different metadata based on exchange
     const metadataMap: Record<string, TestMetadata> = {
@@ -240,6 +244,44 @@ describe('accountToExchangeOptions', () => {
 
       expect(options.secondary_key).toBeUndefined();
       expect(options.secondary_secret).toBeUndefined();
+    });
+
+    // End-to-end: the per-exchange read-fleet region must thread from the account through
+    // getReadFleetProxyUrl into options.secondaryProxyUrl (the unit test covers the region
+    // function in isolation; this proves the wiring).
+    describe('secondaryProxyUrl read-fleet region wiring (migration on)', () => {
+      afterEach(() => setAwsProxyMigrationEnabled(false));
+
+      const withSecondary = (
+        exchange: ExchangeAccountConfig['exchange'],
+        proxyRegion?: string,
+      ): ExchangeAccountConfig => ({
+        exchange,
+        name: 'test-account',
+        apiKey: 'primary-key',
+        apiSecret: 'primary-secret',
+        secondary_apiKey: 'secondary-key',
+        secondary_apiSecret: 'secondary-secret',
+        ...(proxyRegion ? { proxyRegion } : {}),
+      });
+
+      it('threads the per-exchange region into secondaryProxyUrl', () => {
+        setAwsProxyMigrationEnabled(true);
+        // okx declares the jp pool — SG must NOT override it to Singapore (parity with AWS).
+        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(
+          'https://read-fleet-jp.tealstreet.io/api/exchange_proxy',
+        );
+        // bybit declares the asia pool — unset region egresses Singapore.
+        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(
+          'https://read-fleet-sg.tealstreet.io/api/exchange_proxy',
+        );
+      });
+
+      it('sets no secondaryProxyUrl without a secondary key, even with migration on', () => {
+        setAwsProxyMigrationEnabled(true);
+        const account: ExchangeAccountConfig = { exchange: 'bybit', name: 't', apiKey: 'k', apiSecret: 's' };
+        expect(accountToExchangeOptions(account).secondaryProxyUrl).toBeUndefined();
+      });
     });
   });
 

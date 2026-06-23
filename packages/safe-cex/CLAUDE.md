@@ -80,10 +80,15 @@ fleet while writes keep the primary/whitelisted transport. The feature is
 three references to the _same_ primary client (the read Proxy is never built), so
 routing is **byte-identical** to before. Precedence for the secondary read transport:
 `options.secondaryProxyUrl || otherOptions.proxyUrl || <jp default>`, applied as the
-secondary client's `overrideProxyUrl`. `getReadFleetProxyUrl` now returns the live
-**read fleet** endpoint (Epic-3 activation, done), keyed by region: `SG` →
-`read-fleet-sg.tealstreet.io`, everything else (`JA` / unset) →
-`read-fleet-jp.tealstreet.io`, both `/api/exchange_proxy`. These are cheap commodity
+secondary client's `overrideProxyUrl`. `getReadFleetProxyUrl` returns the live
+**read fleet** endpoint, region-matched to the **same region the primary REST pool uses
+for that exchange** via `restEgressRegion` (`routing/resolveExchangeRouting.ts`) — the
+per-exchange declared pool + the `JA` override: the jp/okx/bitget pool **and** grvt's
+`tiny` pool → `read-fleet-jp.tealstreet.io`, every `asia`-pool exchange →
+`read-fleet-sg.tealstreet.io`, both `/api/exchange_proxy`. This is **true parity** with
+`getPrivateProxy`/`resolveExchangeRouting`, not a coarse `SG`-or-Tokyo split — e.g.
+`binance`+`SG` stays Tokyo (its declared jp pool; only `JA` overrides), and `bybit` with
+no region goes Singapore (its `asia` pool). These are cheap commodity
 Vultr VPS running the same HAProxy CORS forwarding proxy as the AWS exchange-proxy
 boxes, fronted by Cloudflare (orange-cloud, zone SSL "Full" so CF accepts the boxes'
 self-signed certs) — so an **opted-in** account's reads egress from the fleet's many
