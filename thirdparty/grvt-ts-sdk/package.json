@@ -55,7 +55,7 @@
     "@tealstreet/grvt-client": "*",
     "@metamask/eth-sig-util": "^8.2.0",
     "@types/ws": "^8.18.1",
-    "ethers": "^6.16.0",
+    "ethers": "^6.17.0",
     "set-cookie-parser": "^3.0.1",
     "ws": "^8.21.0"
   },
