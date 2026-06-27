@@ -144,6 +144,12 @@ export class BinanceExchange extends BaseExchange {
     return '';
   };
 
+  // Standalone balance fetch (wraps the existing tick path) so callers like the
+  // new-account validate / entitlement check can read balance.total without start().
+  // At validate time tickers aren't loaded, so the per-asset USD aggregation falls
+  // back to the exchange-reported totalWalletBalance (already USD).
+  fetchBalance = async () => (await this.fetchPositionsAndBalance()).balance;
+
   start = async () => {
     const useExternalPublicData = await this.initExternalPublicData();
 

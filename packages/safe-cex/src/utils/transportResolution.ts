@@ -53,8 +53,8 @@ export interface ResolvedTransport {
   proxyRegion?: string;
 }
 
-type TransportAccount = Pick<ExchangeAccountConfig, 'tealstreetProxy' | 'tealstreetTunnel' | 'proxyRegion'>;
-type TransportMetadata = Pick<
+export type TransportAccount = Pick<ExchangeAccountConfig, 'tealstreetProxy' | 'tealstreetTunnel' | 'proxyRegion'>;
+export type TransportMetadata = Pick<
   ExchangeMetadata,
   'requiresCors' | 'enforceWsTunnel' | 'supportsTunnel' | 'privateProxyRegions'
 >;
