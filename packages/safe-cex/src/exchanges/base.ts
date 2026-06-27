@@ -41,6 +41,7 @@ import {
   Ticker,
   Timeframe,
   UpdateOrderOpts,
+  ValidateAccountResult,
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
 import { tryParseJson } from '../utils/tryParseJson';
@@ -134,7 +135,7 @@ export interface Exchange {
   off: TinyEmitter['off'];
   dispose: () => void;
   getAccount: () => Promise<ExchangeAccount>;
-  validateAccount: () => Promise<string>;
+  validateAccount: () => Promise<ValidateAccountResult>;
   fetchPositions: (symbols?: string[]) => Promise<Position[]>;
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
   start: () => Promise<void>;
@@ -497,9 +498,9 @@ export class BaseExchange implements Exchange {
     return {} as ExchangeAccount;
   };
 
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     await Promise.reject(new Error('Not implemented'));
-    return '';
+    return { error: '' };
   };
 
   fetchPositions = async (_symbols?: string[]): Promise<Position[]> => {

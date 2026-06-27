@@ -135,10 +135,10 @@ export class OrderlyExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.xhr.get(ENDPOINTS.ACCOUNT);
-      return '';
+      return { error: '' };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
   };
 

@@ -18,6 +18,7 @@ import type {
   Ticker,
   Timeframe,
   UpdateOrderOpts,
+  ValidateAccountResult,
   Writable,
 } from '../../types';
 import type {
@@ -277,7 +278,7 @@ export class AsterDEXExchange extends BaseExchange {
     }
   };
 
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     try {
       if (!this.options.key) {
         throw new Error('Missing required credentials: API key');
@@ -307,7 +308,7 @@ export class AsterDEXExchange extends BaseExchange {
 
       await this.getAccount();
       this.log(`Account validated successfully`, LogSeverity.Info);
-      return '';
+      return { error: '' };
     } catch (error: any) {
       this.log(`Account validation failed: ${error.message}`, LogSeverity.Error);
       throw error;

@@ -93,14 +93,14 @@ describe('GRVT fetchBalance Test', () => {
     console.log('Testing authentication...');
     const result = await exchange!.validateAccount();
 
-    console.log('Authentication result:', result === '' ? '✅ Success' : `❌ ${result}`);
+    console.log('Authentication result:', result.error === '' ? '✅ Success' : `❌ ${result.error}`);
 
-    if (result !== '') {
-      console.error('Authentication failed:', result);
-      throw new Error(`Authentication failed: ${result}`);
+    if (result.error !== '') {
+      console.error('Authentication failed:', result.error);
+      throw new Error(`Authentication failed: ${result.error}`);
     }
 
-    expect(result).toBe('');
+    expect(result.error).toBe('');
     expect(exchange!.apiExtras).toBeDefined();
     expect(exchange!.apiExtras?.accountId).toBeDefined();
     expect(exchange!.apiExtras?.sessionCookie).toBeDefined();
@@ -120,8 +120,8 @@ describe('GRVT fetchBalance Test', () => {
     // Ensure we're authenticated
     if (!exchange.apiExtras?.sessionCookie) {
       const authResult = await exchange.validateAccount();
-      if (authResult !== '') {
-        throw new Error(`Failed to authenticate: ${authResult}`);
+      if (authResult.error !== '') {
+        throw new Error(`Failed to authenticate: ${authResult.error}`);
       }
     }
 

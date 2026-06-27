@@ -73,7 +73,7 @@ async function main() {
   // ---- shared bootstrap: validate + load markets/tickers ----
   const bootstrap = async () => {
     const v = await exchange.validateAccount();
-    log('validateAccount →', v === '' ? 'OK' : `ERROR: ${v}`);
+    log('validateAccount →', v.error === '' ? 'OK' : `ERROR: ${v.error}`);
     const markets = await exchange.fetchMarkets();
     store.update({ markets, loaded: { ...store.loaded, markets: true } });
     const tickers = await exchange.fetchTickers();
@@ -101,7 +101,7 @@ async function main() {
   if (PHASE === 'rest' || PHASE === 'all') {
     hr('REST');
     const v = await exchange.validateAccount();
-    log('validateAccount →', v === '' ? 'OK (empty)' : `ERROR: ${v}`);
+    log('validateAccount →', v.error === '' ? 'OK (empty)' : `ERROR: ${v.error}`);
 
     const markets = await exchange.fetchMarkets();
     store.update({ markets, loaded: { ...store.loaded, markets: true } });

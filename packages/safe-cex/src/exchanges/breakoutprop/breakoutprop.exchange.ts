@@ -93,9 +93,9 @@ export class BreakoutpropExchange extends BaseExchange {
       await this.getSessionToken();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
-    return '';
+    return { error: '' };
   };
 
   getSessionToken = async () => {

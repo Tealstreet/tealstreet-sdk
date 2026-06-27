@@ -181,7 +181,7 @@ export class ApexOmniExchange extends BaseExchange {
       await this.xhr.get<UserObject>(ENDPOINTS.USER);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
 
     try {
@@ -190,10 +190,10 @@ export class ApexOmniExchange extends BaseExchange {
       const signer = sdk.newRpcSignerWithProvider({});
       await signer.initZklinkSigner(this.options.omniKeySeed);
     } catch (_e) {
-      return 'Invalid OmniKey seed';
+      return { error: 'Invalid OmniKey seed' };
     }
 
-    return '';
+    return { error: '' };
   };
 
   start = async () => {

@@ -94,10 +94,10 @@ export class CryptocomExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.xhr.post(ENDPOINTS.BALANCE, {});
-      return '';
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.message || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.message || err?.message || 'Invalid API key or secret' };
     }
   };
 

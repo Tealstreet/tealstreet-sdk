@@ -27,6 +27,7 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
+  ValidateAccountResult,
 } from '../../types';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
@@ -102,21 +103,21 @@ export class KucoinSpotExchange extends BaseExchange {
     }
   };
 
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     try {
       const { data } = await this.xhr.get(KUCOIN_SPOT_ENDPOINTS.ACCOUNTS, {
         params: { type: 'trade' },
       });
 
       if (data.code !== '200000') {
-        return data.msg || 'Failed to validate KuCoin Spot account';
+        return { error: data.msg || 'Failed to validate KuCoin Spot account' };
       }
 
-      return '';
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       const errorMessage = err?.response?.data?.msg || err?.message || 'Failed to validate KuCoin Spot account';
       this.emitAndLogError(errorMessage);
-      return errorMessage;
+      return { error: errorMessage };
     }
   };
 

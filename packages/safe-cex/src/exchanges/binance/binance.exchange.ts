@@ -11,6 +11,7 @@ import { forEachSeries } from 'p-iteration';
 
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
 import {
+  Balance,
   Candle,
   ExchangeName,
   ExchangeOptions,
@@ -127,28 +128,31 @@ export class BinanceExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
+    let balance: Balance | undefined;
     try {
-      await this._primaryXhr.get(ENDPOINTS.ACCOUNT);
+      const { data } = await this._primaryXhr.get(ENDPOINTS.ACCOUNT);
+      // /fapi/v2/account reports USD totals at the top level. Good enough for the
+      // new-account balance gate; full per-asset aggregation needs live tickers.
+      const total = parseFloat(data?.totalWalletBalance);
+      if (Number.isFinite(total)) {
+        const free = parseFloat(data?.availableBalance) || 0;
+        const upnl = parseFloat(data?.totalUnrealizedProfit) || 0;
+        balance = { total, free, used: total - free, upnl };
+      }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
 
     if (this.options.secondary_key) {
       try {
         await this._secondaryXhr.get(ENDPOINTS.ACCOUNT);
       } catch (err: any) {
-        return `Secondary Key: ${err?.response?.data?.msg || err?.message}`;
+        return { error: `Secondary Key: ${err?.response?.data?.msg || err?.message}` };
       }
     }
-    return '';
+    return { error: '', balance };
   };
-
-  // Standalone balance fetch (wraps the existing tick path) so callers like the
-  // new-account validate / entitlement check can read balance.total without start().
-  // At validate time tickers aren't loaded, so the per-asset USD aggregation falls
-  // back to the exchange-reported totalWalletBalance (already USD).
-  fetchBalance = async () => (await this.fetchPositionsAndBalance()).balance;
 
   start = async () => {
     const useExternalPublicData = await this.initExternalPublicData();

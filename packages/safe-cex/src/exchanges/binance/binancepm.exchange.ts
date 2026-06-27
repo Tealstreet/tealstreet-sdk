@@ -109,17 +109,23 @@ export class BinancePMExchange extends BaseExchange {
       await this._primaryXhr!.get(ENDPOINTS.ACCOUNT);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
 
     if (this.options.secondary_key) {
       try {
         await this._secondaryXhr!.get(ENDPOINTS.ACCOUNT);
       } catch (err: any) {
-        return `Secondary Key: ${err?.response?.data?.msg || err?.message}`;
+        return { error: `Secondary Key: ${err?.response?.data?.msg || err?.message}` };
       }
     }
-    return '';
+    // Key validated; balance is best-effort for the new-account gate.
+    return {
+      error: '',
+      balance: await this.fetchBalance()
+        .then((r) => r.balance)
+        .catch(() => undefined),
+    };
   };
 
   start = async () => {

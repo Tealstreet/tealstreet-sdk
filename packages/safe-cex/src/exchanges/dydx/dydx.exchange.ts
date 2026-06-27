@@ -242,10 +242,10 @@ export class DydxExchange extends BaseExchange {
         `dYdX account validated successfully${!hasSubaccount ? ' (empty account - no deposits yet)' : ''}`,
         LogSeverity.Info,
       );
-      return '';
+      return { error: '' };
     } catch (err: any) {
       this.emitAndLogError(err?.message || 'Failed to validate dYdX account');
-      return err?.message || 'Invalid dYdX credentials';
+      return { error: err?.message || 'Invalid dYdX credentials' };
     }
   };
 

@@ -125,21 +125,26 @@ export class WeexExchange extends BaseExchange {
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT_CONFIG);
       if (data?.canTrade === false) {
-        return 'WEEX API key is valid but trading is disabled';
+        return { error: 'WEEX API key is valid but trading is disabled' };
       }
-      return '';
+      return {
+        error: '',
+        balance: await this.fetchBalanceAndPositions()
+          .then((r) => r.balance)
+          .catch(() => undefined),
+      };
     } catch (err: any) {
       const message =
         err?.response?.data?.msg || err?.response?.data?.message || err?.message || 'Invalid API key or secret';
       this.emitAndLogError(message);
-      return message;
+      return { error: message };
     }
   };
 
   getAccount = async (): Promise<ExchangeAccount> => {
     const validationError = await this.validateAccount();
-    if (validationError) {
-      throw new Error(validationError);
+    if (validationError.error) {
+      throw new Error(validationError.error);
     }
 
     const userId = createHash('sha256')

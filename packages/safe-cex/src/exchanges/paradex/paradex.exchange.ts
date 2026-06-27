@@ -185,22 +185,22 @@ export class ParadexExchange extends BaseExchange {
       if (!this.jwtManager) {
         // Provide specific error messages based on what's missing
         if (!this.options.paradexAddress) {
-          return 'Missing Paradex address - please enter your Paradex account address';
+          return { error: 'Missing Paradex address - please enter your Paradex account address' };
         }
         if (!this.options.subkeyAddress) {
-          return 'Missing subkey address - please enter your subkey public address';
+          return { error: 'Missing subkey address - please enter your subkey public address' };
         }
         if (!this.options.key) {
-          return 'Missing subkey private key - please enter your subkey private key';
+          return { error: 'Missing subkey private key - please enter your subkey private key' };
         }
-        return 'Authentication failed - SDK initialization error';
+        return { error: 'Authentication failed - SDK initialization error' };
       }
 
       await this.xhr.get(ENDPOINTS.ACCOUNT);
-      return '';
+      return { error: '' };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.error?.message || err?.message);
-      return err?.response?.data?.error?.message || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.error?.message || err?.message || 'Invalid API key or secret' };
     }
   };
 

@@ -43,8 +43,8 @@ async function testDydxOrderFlow() {
     // Step 1: Validate account
     console.log('1️⃣ Validating account...');
     const validationResult = await exchange.validateAccount();
-    if (validationResult !== '') {
-      console.error('❌ Account validation failed:', validationResult);
+    if (validationResult.error !== '') {
+      console.error('❌ Account validation failed:', validationResult.error);
       return;
     }
     console.log('✅ Account validated\n');

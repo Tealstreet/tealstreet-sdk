@@ -79,10 +79,15 @@ export class BinanceSpotExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.xhr.get(ENDPOINTS.ACCOUNT);
-      return '';
+      return {
+        error: '',
+        balance: await this.fetchPositionsAndBalance()
+          .then((r) => r.balance)
+          .catch(() => undefined),
+      };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
   };
 

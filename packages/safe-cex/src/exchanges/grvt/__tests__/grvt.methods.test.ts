@@ -54,10 +54,10 @@ describe('GrvtExchange - Core Methods', () => {
       console.log('Testing validateAccount with authentication...');
       const result = await exchange.validateAccount();
 
-      console.log('✅ Validation result:', result === '' ? 'Success' : result);
+      console.log('✅ Validation result:', result.error === '' ? 'Success' : result.error);
 
       // Empty string means success
-      expect(result).toBe('');
+      expect(result.error).toBe('');
 
       // Check that session was established
       expect(exchange.apiExtras).toBeDefined();
@@ -85,8 +85,8 @@ describe('GrvtExchange - Core Methods', () => {
       console.log('✅ Expected failure:', result);
 
       // Should return error message
-      expect(result).not.toBe('');
-      expect(result.length).toBeGreaterThan(0);
+      expect(result.error).not.toBe('');
+      expect(result.error.length).toBeGreaterThan(0);
     }, 60000);
   });
 

@@ -25,6 +25,7 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
+  ValidateAccountResult,
 } from '../../types';
 import { precisionToString } from '../../utils/ccxt_helpers/precision';
 import { v } from '../../utils/get-key';
@@ -1204,7 +1205,7 @@ export class KrakenExchange extends BaseExchange {
     }
   };
 
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     try {
       // Try to fetch account info to validate credentials
       const { data } = await this.xhr.get<{ result: string; error?: string[]; accounts?: any }>(ENDPOINTS.ACCOUNT);
@@ -1216,33 +1217,36 @@ export class KrakenExchange extends BaseExchange {
         // Check for common error patterns and provide helpful messages
         const lowerError = errorMsg.toLowerCase();
         if (lowerError.includes('invalid key') || lowerError.includes('apikey')) {
-          return 'Invalid API key. Please verify your API key is correct and active.';
+          return { error: 'Invalid API key. Please verify your API key is correct and active.' };
         }
         if (lowerError.includes('invalid nonce') || lowerError.includes('nonce')) {
-          return 'Invalid nonce. Please ensure your system time is synchronized (NTP).';
+          return { error: 'Invalid nonce. Please ensure your system time is synchronized (NTP).' };
         }
         if (lowerError.includes('permission') || lowerError.includes('denied')) {
-          return 'API key lacks required permissions. Please ensure General API is set to "Full access" (not "Read only") on your Kraken Futures API key.';
+          return {
+            error:
+              'API key lacks required permissions. Please ensure General API is set to "Full access" (not "Read only") on your Kraken Futures API key.',
+          };
         }
         if (lowerError.includes('signature') || lowerError.includes('authentication')) {
-          return 'Invalid API secret or authentication failed. Please verify your API secret is correct.';
+          return { error: 'Invalid API secret or authentication failed. Please verify your API secret is correct.' };
         }
         if (lowerError.includes('ip') || lowerError.includes('whitelist')) {
-          return 'IP address not whitelisted. Please add your IP to the API key whitelist on Kraken.';
+          return { error: 'IP address not whitelisted. Please add your IP to the API key whitelist on Kraken.' };
         }
 
-        return `Kraken API Error: ${errorMsg}`;
+        return { error: `Kraken API Error: ${errorMsg}` };
       }
 
       // Check if the account has the required permissions
       // We need at least read permissions for basic operations
       const accounts = data?.accounts;
       if (!accounts || Object.keys(accounts).length === 0) {
-        return 'No accounts found. API key may lack required permissions or account may be empty.';
+        return { error: 'No accounts found. API key may lack required permissions or account may be empty.' };
       }
 
-      // If we got here, credentials are valid
-      return '';
+      // If we got here, credentials are valid; balance is best-effort for the gate.
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       const errorMsg =
         err?.response?.data?.error?.[0] ||
@@ -1253,28 +1257,31 @@ export class KrakenExchange extends BaseExchange {
 
       // Handle specific HTTP error codes
       if (err?.response?.status === 401) {
-        return 'Authentication failed (401). Please check your API key and secret are correct.';
+        return { error: 'Authentication failed (401). Please check your API key and secret are correct.' };
       }
       if (err?.response?.status === 403) {
-        return 'Access forbidden (403). Your API key may lack required permissions or your IP address is not whitelisted.';
+        return {
+          error:
+            'Access forbidden (403). Your API key may lack required permissions or your IP address is not whitelisted.',
+        };
       }
       if (err?.response?.status === 429) {
-        return 'Rate limit exceeded (429). Please wait a moment and try again.';
+        return { error: 'Rate limit exceeded (429). Please wait a moment and try again.' };
       }
       if (err?.response?.status === 400) {
-        return 'Bad request (400). Please verify your API credentials are in the correct format.';
+        return { error: 'Bad request (400). Please verify your API credentials are in the correct format.' };
       }
 
       // Check error message content for more specific guidance
       const lowerError = errorMsg.toLowerCase();
       if (lowerError.includes('network') || lowerError.includes('timeout')) {
-        return 'Network error. Please check your internet connection and try again.';
+        return { error: 'Network error. Please check your internet connection and try again.' };
       }
       if (lowerError.includes('cors')) {
-        return 'CORS error. Please enable "Use Tealstreet IPs" option.';
+        return { error: 'CORS error. Please enable "Use Tealstreet IPs" option.' };
       }
 
-      return `Validation failed: ${errorMsg}`;
+      return { error: `Validation failed: ${errorMsg}` };
     }
   };
 

@@ -128,16 +128,16 @@ export class BybitSpotExchange extends BaseExchange {
         this.emitAndLogError(data.retMsg);
 
         if (data.retMsg.includes('timestamp and recv_window param')) {
-          return 'Check your computer time and date';
+          return { error: 'Check your computer time and date' };
         }
 
-        return data.retMsg;
+        return { error: data.retMsg };
       }
 
-      return '';
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
   };
 

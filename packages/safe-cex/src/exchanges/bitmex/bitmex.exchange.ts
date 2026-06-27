@@ -114,14 +114,15 @@ export class BitmexExchange extends BaseExchange {
       if ((data as any)?.error) {
         const msg = this.normalizeBitmexValidationError(this.parseError(data));
         this.emitAndLogError(msg);
-        return msg;
+        return { error: msg };
       }
     } catch (err: any) {
       const msg = this.normalizeBitmexValidationError(this.parseError(err));
       this.emitAndLogError(msg);
-      return msg;
+      return { error: msg };
     }
-    return '';
+    // Key validated; balance is best-effort for the new-account gate.
+    return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
   };
 
   start = async () => {

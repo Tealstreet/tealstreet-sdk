@@ -178,9 +178,7 @@ export class BitunixExchange extends BaseExchange {
     for (const candidate of this.getResponseCandidates(payload)) {
       if (Array.isArray(candidate)) {
         const rows = candidate.filter(isAccountRow);
-        const preferred = rows.find(
-          (row) => String(row.marginCoin || '').toUpperCase() === marginCoin.toUpperCase(),
-        );
+        const preferred = rows.find((row) => String(row.marginCoin || '').toUpperCase() === marginCoin.toUpperCase());
         if (preferred || rows[0]) {
           return preferred || rows[0];
         }
@@ -231,9 +229,14 @@ export class BitunixExchange extends BaseExchange {
       this.extractAccountRow(response?.data);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
-    return '';
+    return {
+      error: '',
+      balance: await this.fetchBalance()
+        .then((r) => r.balance)
+        .catch(() => undefined),
+    };
   };
 
   start = async () => {
@@ -482,9 +485,14 @@ export class BitunixExchange extends BaseExchange {
           id: createPositionId(symbol, side, positionMode),
           symbol,
           side,
-          entryPrice: this.parseFiniteNumber(this.getFirstValue(p, ['avgOpenPrice', 'entryPrice', 'openPrice', 'avgPrice'])),
+          entryPrice: this.parseFiniteNumber(
+            this.getFirstValue(p, ['avgOpenPrice', 'entryPrice', 'openPrice', 'avgPrice']),
+          ),
           notional: this.parseFiniteNumber(this.getFirstValue(p, ['entryValue', 'notional', 'positionValue'])),
-          leverage: this.parseFiniteNumber(this.getFirstValue(p, ['leverage', 'lever']), symbolSettings?.leverage || 10),
+          leverage: this.parseFiniteNumber(
+            this.getFirstValue(p, ['leverage', 'lever']),
+            symbolSettings?.leverage || 10,
+          ),
           unrealizedPnl: this.parseFiniteNumber(
             this.getFirstValue(p, ['unrealizedPNL', 'unrealizedPnl', 'unRealizedProfit', 'upl']),
           ),
@@ -541,12 +549,11 @@ export class BitunixExchange extends BaseExchange {
       const positionModeStr = String(this.getFirstValue(account, ['positionMode', 'posMode']) || '').toUpperCase();
       this.accountPositionMode = positionModeStr === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
 
-      const free = this.parseFiniteNumber(this.getFirstValue(account, ['available', 'availableBalance', 'availableMargin']));
+      const free = this.parseFiniteNumber(
+        this.getFirstValue(account, ['available', 'availableBalance', 'availableMargin']),
+      );
       const crossUnrealizedPnl = this.getFirstValue(account, ['crossUnrealizedPNL', 'crossUnrealizedPnl']);
-      const isolationUnrealizedPnl = this.getFirstValue(account, [
-        'isolationUnrealizedPNL',
-        'isolationUnrealizedPnl',
-      ]);
+      const isolationUnrealizedPnl = this.getFirstValue(account, ['isolationUnrealizedPNL', 'isolationUnrealizedPnl']);
       const upnl =
         crossUnrealizedPnl !== undefined || isolationUnrealizedPnl !== undefined
           ? this.parseFiniteNumber(crossUnrealizedPnl) + this.parseFiniteNumber(isolationUnrealizedPnl)

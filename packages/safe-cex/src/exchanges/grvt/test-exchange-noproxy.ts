@@ -98,7 +98,7 @@ async function main() {
     console.log('\n--- Step 4: Testing validateAccount() ---');
     try {
       const result = await exchange.validateAccount();
-      console.log('  validateAccount() returned:', result === '' ? '(empty - success)' : result);
+      console.log('  validateAccount() returned:', result.error === '' ? '(empty - success)' : result.error);
     } catch (err: any) {
       console.log('  validateAccount() FAILED:', err.message);
     }

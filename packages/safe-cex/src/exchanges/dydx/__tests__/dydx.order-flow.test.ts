@@ -91,8 +91,8 @@ describe('dYdX Order Flow Integration Test', () => {
 
       // Validate account
       const validationResult = await exchange.validateAccount();
-      if (validationResult !== '') {
-        log('❌ Account validation failed: ' + validationResult);
+      if (validationResult.error !== '') {
+        log('❌ Account validation failed: ' + validationResult.error);
         exchange = null;
         return;
       }

@@ -15,9 +15,9 @@ import { mapSeries } from 'p-iteration';
 
 import {
   Candle,
+  ExchangeOptions,
   Execution,
   ExecutionsOptions,
-  ExchangeOptions,
   HistoricalTradeOptions,
   MarginType,
   Market,
@@ -94,17 +94,25 @@ export class PhemexExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
+    let balance: Balance | undefined;
     try {
-      await this.xhr.get(ENDPOINTS.ACCOUNT, {
+      const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT, {
         params: {
           currency: 'USDT',
         },
       });
-      return '';
+      // Same ACCOUNT response fetchPositionsAndBalance parses (account.accountBalanceRv).
+      const account = data?.data?.account;
+      const total = parseFloat(account?.accountBalanceRv);
+      if (Number.isFinite(total)) {
+        const used = parseFloat(account?.totalUsedBalanceRv) || 0;
+        balance = { total, used, free: total - used, upnl: 0 };
+      }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
+    return { error: '', balance };
   };
 
   start = async () => {

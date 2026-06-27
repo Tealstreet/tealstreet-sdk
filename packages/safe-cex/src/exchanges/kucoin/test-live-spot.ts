@@ -68,7 +68,7 @@ async function main() {
 
   const bootstrap = async () => {
     const v = await exchange.validateAccount();
-    log('validateAccount →', v === '' ? 'OK' : `ERROR: ${v}`);
+    log('validateAccount →', v.error === '' ? 'OK' : `ERROR: ${v.error}`);
     const markets = await exchange.fetchMarkets();
     store.update({ markets, loaded: { ...store.loaded, markets: true } });
     const tickers = await exchange.fetchTickers();

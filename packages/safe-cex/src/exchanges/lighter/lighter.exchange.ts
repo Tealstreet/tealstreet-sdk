@@ -824,7 +824,7 @@ export class LighterExchange extends BaseExchange {
       try {
         this.getValidatedApiKeyIndex();
       } catch {
-        return 'Invalid API key index. Expected an integer from 0 to 255.';
+        return { error: 'Invalid API key index. Expected an integer from 0 to 255.' };
       }
 
       // Validate account lookup and cache account index
@@ -855,26 +855,26 @@ export class LighterExchange extends BaseExchange {
           .toLowerCase()
           .includes('invalid account l1 address')
       ) {
-        return (
+        return { error: (
           'Invalid L1 address for account lookup. For Lighter, the Public Key field is an API key, not an L1 address. ' +
           'Enter account index in Application ID.'
-        );
+        ) };
       }
       if (
         String(message || '')
           .toLowerCase()
           .includes('not found')
       ) {
-        return (
+        return { error: (
           'Lighter account lookup failed. API Key Index is not account index. ' +
           'Enter your account index in Application ID.'
-        );
+        ) };
       }
 
-      return message || 'Invalid API key or credentials';
+      return { error: message || 'Invalid API key or credentials' };
     }
 
-    return '';
+    return { error: '' };
   };
 
   start = async () => {

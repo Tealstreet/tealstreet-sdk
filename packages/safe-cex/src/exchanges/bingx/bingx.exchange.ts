@@ -132,13 +132,29 @@ export class BingxExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
+    let balance: Balance | undefined;
     try {
-      await this.xhr.get(ENDPOINTS.BALANCE);
-      return '';
+      // Same BALANCE response fetchBalance parses (total=balance, free=availableMargin,
+      // used=usedMargin, upnl=unrealizedProfit).
+      const {
+        data: {
+          data: { balance: bal },
+        },
+      } = await this.xhr.get<Record<string, Record<string, any>>>(ENDPOINTS.BALANCE);
+      const total = parseFloat(bal?.balance);
+      if (Number.isFinite(total)) {
+        balance = {
+          total,
+          free: parseFloat(bal?.availableMargin) || 0,
+          used: parseFloat(bal?.usedMargin) || 0,
+          upnl: parseFloat(bal?.unrealizedProfit) || 0,
+        };
+      }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
+    return { error: '', balance };
   };
 
   start = async () => {

@@ -585,10 +585,11 @@ export class WOOXExchange extends BaseExchange {
       if (this.options.secondary_key) {
         await this._secondaryXhr.get(ENDPOINTS.ACCOUNT);
       }
-      return '';
+      // Key validated; balance is best-effort for the new-account gate.
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
   };
 

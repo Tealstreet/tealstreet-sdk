@@ -98,10 +98,10 @@ export class ArkhamExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.xhr.get(ENDPOINTS.ACCOUNT);
-      return '';
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.error?.message || err?.message);
-      return err?.response?.data?.error?.message || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.error?.message || err?.message || 'Invalid API key or secret' };
     }
   };
 

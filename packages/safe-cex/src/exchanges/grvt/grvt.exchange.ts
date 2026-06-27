@@ -36,6 +36,7 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
+  ValidateAccountResult,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
@@ -375,7 +376,7 @@ export class GrvtExchange extends BaseExchange {
     }
   };
 
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     try {
       // Authenticate and get session
       await this.authenticate();
@@ -390,16 +391,16 @@ export class GrvtExchange extends BaseExchange {
 
       if (response) {
         this.log('Account validated successfully', LogSeverity.Info);
-        return '';
+        return { error: '' };
       }
 
-      return 'Failed to validate account';
+      return { error: 'Failed to validate account' };
     } catch (err: any) {
       // The error message has already been formatted by the API interceptor
       const errorMsg = err.message || 'Invalid API credentials';
 
       this.emitAndLogError(errorMsg);
-      return errorMsg;
+      return { error: errorMsg };
     }
   };
 

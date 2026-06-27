@@ -191,6 +191,16 @@ export type ExchangeOptions = {
  * Exchange account configuration - used across web, CLI, telegram, etc.
  * This represents a user's saved exchange account with credentials.
  */
+// Result of validating an account's credentials. `error` is '' when the keys are
+// valid (preserving the old "empty string = ok" semantics). `balance` is the Balance
+// the validation call fetched in the same request (read `.total` for the USD value),
+// so callers get key-validity AND balance from one round-trip. Undefined for venues
+// whose validation doesn't fetch balance.
+export interface ValidateAccountResult {
+  error: string;
+  balance?: Balance;
+}
+
 export interface ExchangeAccountConfig {
   exchange: ExchangeName;
   name: string;

@@ -38,6 +38,7 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
+  ValidateAccountResult,
   Writable,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
@@ -142,7 +143,7 @@ export class PolymarketExchange extends BaseExchange {
   /**
    * Validate account credentials
    */
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     try {
       // Try to derive API key if we have a wallet but no credentials
       if (this.wallet && !this.credentials) {
@@ -152,14 +153,14 @@ export class PolymarketExchange extends BaseExchange {
       // Test by fetching balance
       if (this.credentials) {
         await this.api.getBalanceAllowance();
-        return '';
+        return { error: '' };
       }
 
-      return 'No wallet configured';
+      return { error: 'No wallet configured' };
     } catch (err: any) {
       const errorMsg = err?.message || 'Failed to validate account';
       this.log(`Validation error: ${errorMsg}`, LogSeverity.Error);
-      return errorMsg;
+      return { error: errorMsg };
     }
   };
 

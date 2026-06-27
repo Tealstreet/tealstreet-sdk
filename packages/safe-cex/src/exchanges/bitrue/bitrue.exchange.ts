@@ -313,9 +313,14 @@ export class BitrueExchange extends BaseExchange {
   validateAccount = async () => {
     const { data } = await this.xhr.get<FETCH_ACCOUNT_RESPONSE>(ENDPOINTS.ACCOUNT);
     if (!this.isSuccessCode(data?.code)) {
-      return data?.msg || 'Invalid API Key or Secret';
+      return { error: data?.msg || 'Invalid API Key or Secret' };
     }
-    return '';
+    return {
+      error: '',
+      balance: await this.fetchBalanceAndPositions()
+        .then((r) => r.balance)
+        .catch(() => undefined),
+    };
   };
 
   start = async () => {

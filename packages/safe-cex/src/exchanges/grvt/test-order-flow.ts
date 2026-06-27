@@ -43,8 +43,8 @@ async function testGrvtOrderFlow() {
     // Step 1: Validate account (also authenticates)
     console.log('1️⃣ Validating account and authenticating...');
     const validationResult = await exchange.validateAccount();
-    if (validationResult !== '') {
-      console.error('❌ Account validation failed:', validationResult);
+    if (validationResult.error !== '') {
+      console.error('❌ Account validation failed:', validationResult.error);
       return;
     }
     console.log('✅ Account validated and authenticated');

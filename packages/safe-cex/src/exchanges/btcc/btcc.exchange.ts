@@ -240,11 +240,11 @@ export class BtccExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.ensureLoggedIn(true);
-      return '';
+      return { error: '' };
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message || 'Invalid credentials';
       this.emitAndLogError(err, 'BTCC account validation failed');
-      return message;
+      return { error: message };
     }
   };
 

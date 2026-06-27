@@ -260,17 +260,25 @@ export class BybitExchange extends BaseExchange {
         this.emitAndLogError(data.retMsg);
 
         if (data.retMsg.includes('timestamp and recv_window param')) {
-          return 'Check your computer time and date';
+          return { error: 'Check your computer time and date' };
         }
 
-        return data.retMsg;
+        return { error: data.retMsg };
       }
-
-      return '';
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
+
+    // Key validated above; balance is best-effort for the new-account gate (a
+    // separate wallet-balance call) and never fails validation.
+    let balance: Balance | undefined;
+    try {
+      balance = await this.fetchBalance();
+    } catch {
+      // best-effort
+    }
+    return { error: '', balance };
   };
 
   start = async () => {

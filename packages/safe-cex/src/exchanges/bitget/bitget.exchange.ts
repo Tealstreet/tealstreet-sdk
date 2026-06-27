@@ -187,9 +187,10 @@ export class BitgetExchange extends BaseExchange {
 
   validateAccount = async () => {
     try {
-      await this.xhr.get(ENDPOINTS.BALANCE, {
-        params: { productType: this.apiProductType },
-      });
+      // fetchBalance hits the BALANCE endpoint (validating the key) and throws on
+      // auth failure, so it doubles as the validation call — one round-trip.
+      const balance = await this.fetchBalance();
+      return { error: '', balance };
     } catch (err: any) {
       const errorMsg = err?.response?.data?.msg || err?.message;
 
@@ -199,13 +200,12 @@ export class BitgetExchange extends BaseExchange {
         const suggestedMode = this.options.testnet ? 'Live/Production' : 'Demo/Testnet';
         const helpfulMsg = `API key environment mismatch: Your API key appears to be for ${suggestedMode} trading, but Tealstreet is configured for ${currentMode}. Please check your Testnet setting.`;
         this.emitAndLogError(helpfulMsg);
-        return helpfulMsg;
+        return { error: helpfulMsg };
       }
 
       this.emitAndLogError(errorMsg);
-      return errorMsg || 'Invalid API key or secret';
+      return { error: errorMsg || 'Invalid API key or secret' };
     }
-    return '';
   };
 
   dispose = () => {

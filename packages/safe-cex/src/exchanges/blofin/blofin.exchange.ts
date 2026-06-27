@@ -16,10 +16,10 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
-  Execution,
-  ExecutionsOptions,
   ExchangeName,
   ExchangeOptions,
+  Execution,
+  ExecutionsOptions,
   FetchedLeverage,
   LogSeverity,
   MarginType,
@@ -111,6 +111,7 @@ export class BlofinExchange extends BaseExchange {
   }
 
   validateAccount = async () => {
+    let balance: Balance | undefined;
     try {
       const { data } = await this.xhr.get(ENDPOINTS.BALANCE, {
         params: {
@@ -120,11 +121,21 @@ export class BlofinExchange extends BaseExchange {
       if (data.code !== '0') {
         throw new Error(data.msg);
       }
-      return '';
+      // Same BALANCE response fetchBalanceAndPositions parses: collateral = sum of
+      // available + frozen (no positions at validate time, so used/upnl are 0).
+      const bal = data?.data;
+      if (Array.isArray(bal)) {
+        const total = add(
+          roundUSD(sumBy(bal, (b: any) => parseFloat(b.available))),
+          roundUSD(sumBy(bal, (b: any) => parseFloat(b.frozen))),
+        );
+        if (Number.isFinite(total)) balance = { total, free: total, used: 0, upnl: 0 };
+      }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || err?.message || 'Invalid API key or secret' };
     }
+    return { error: '', balance };
   };
 
   dispose = () => {
@@ -237,43 +248,41 @@ export class BlofinExchange extends BaseExchange {
         data: { data },
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(`${ENDPOINTS.MARKETS}?${nanoid()}`);
 
-      return data
-        .filter(isBlofinLinearSwapMarket)
-        .map((m) => {
-          const maxAmount = Math.min(parseFloat(m.maxLimitSize), parseFloat(m.maxMarketSize));
-          const contractValue = parseFloat(m.contractValue);
-          const lotSize = m.lotSize ? parseFloat(m.lotSize) : parseFloat(m.minSize);
+      return data.filter(isBlofinLinearSwapMarket).map((m) => {
+        const maxAmount = Math.min(parseFloat(m.maxLimitSize), parseFloat(m.maxMarketSize));
+        const contractValue = parseFloat(m.contractValue);
+        const lotSize = m.lotSize ? parseFloat(m.lotSize) : parseFloat(m.minSize);
 
-          return {
-            id: m.instId,
-            symbol: m.instId.replace(/-SWAP$/, '').replace(/-/g, ''),
-            base: m.baseCurrency,
-            quote: m.quoteCurrency,
-            active: m.state === 'live',
-            precision: {
-              // Native order size precision (contracts).
-              amount: lotSize,
-              price: parseFloat(m.tickSize),
+        return {
+          id: m.instId,
+          symbol: m.instId.replace(/-SWAP$/, '').replace(/-/g, ''),
+          base: m.baseCurrency,
+          quote: m.quoteCurrency,
+          active: m.state === 'live',
+          precision: {
+            // Native order size precision (contracts).
+            amount: lotSize,
+            price: parseFloat(m.tickSize),
+          },
+          limits: {
+            amount: {
+              min: parseFloat(m.minSize) * contractValue,
+              max: maxAmount,
             },
-            limits: {
-              amount: {
-                min: parseFloat(m.minSize) * contractValue,
-                max: maxAmount,
-              },
-              leverage: {
-                min: 1,
-                max: parseFloat(m.maxLeverage),
-              },
+            leverage: {
+              min: 1,
+              max: parseFloat(m.maxLeverage),
             },
-            contractSize: contractValue,
-            info: {
-              ...m,
-              // Keep raw instrument values for exchange-specific sizing logic.
-              contractValue: contractValue,
-              lotSize: lotSize,
-            },
-          };
-        });
+          },
+          contractSize: contractValue,
+          info: {
+            ...m,
+            // Keep raw instrument values for exchange-specific sizing logic.
+            contractValue: contractValue,
+            lotSize: lotSize,
+          },
+        };
+      });
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return this.store.markets;
@@ -870,7 +879,10 @@ export class BlofinExchange extends BaseExchange {
         primaryRows = await fetchRows(ENDPOINTS.FILLS);
       } catch (error: any) {
         if (isUnsupportedOperationError(error)) {
-          this.log(`Blofin fills endpoint not supported for this account: ${getErrorMessage(error)}`, LogSeverity.Warning);
+          this.log(
+            `Blofin fills endpoint not supported for this account: ${getErrorMessage(error)}`,
+            LogSeverity.Warning,
+          );
           primaryRows = [];
         } else {
           throw error;
@@ -1137,10 +1149,7 @@ export class BlofinExchange extends BaseExchange {
 
     // Both margin type and position mode are account-global on Blofin, so the
     // cached values populated during `start()` are reused here without REST.
-    const [marginType, positionMode] = await Promise.all([
-      this.getOrFetchMarginType(),
-      this.getOrFetchPositionMode(),
-    ]);
+    const [marginType, positionMode] = await Promise.all([this.getOrFetchMarginType(), this.getOrFetchPositionMode()]);
 
     const baseRequest = {
       instId: market.id,
@@ -1793,7 +1802,8 @@ export class BlofinExchange extends BaseExchange {
         continue;
       }
 
-      const remainingAmount = Number.isFinite(Number(order.remaining)) && Number(order.remaining) > 0 ? order.remaining : order.amount;
+      const remainingAmount =
+        Number.isFinite(Number(order.remaining)) && Number(order.remaining) > 0 ? order.remaining : order.amount;
       if (!Number.isFinite(Number(remainingAmount)) || Number(remainingAmount) <= 0) {
         continue;
       }

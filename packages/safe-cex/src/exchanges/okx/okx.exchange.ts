@@ -1,6 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
+import type { OkxRegion } from './okx.types';
 
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
@@ -15,10 +16,10 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
-  Execution,
-  ExecutionsOptions,
   ExchangeName,
   ExchangeOptions,
+  Execution,
+  ExecutionsOptions,
   MarginType,
   Market,
   OHLCVOptions,
@@ -52,7 +53,6 @@ import {
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   INTERVAL,
-  type OkxRegion,
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TYPE,
@@ -96,11 +96,19 @@ export class OKXExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.xhr.get(ENDPOINTS.BALANCE);
-      return '';
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return err?.response?.data?.msg || err?.message || err?.message;
+      return { error: err?.response?.data?.msg || err?.message || err?.message };
     }
+    // Key validated; balance is best-effort for the new-account gate (okx's balance
+    // calc is store/ticker-dependent, so reuse the tested method rather than inline).
+    let balance: Balance | undefined;
+    try {
+      balance = await this.fetchBalance();
+    } catch {
+      // best-effort
+    }
+    return { error: '', balance };
   };
 
   dispose = () => {
@@ -649,7 +657,12 @@ export class OKXExchange extends BaseExchange {
 
         const fillPrice = parseFloat(row.fillPx || row.px || row.avgPx || '0');
         const fillAmountNative = parseFloat(row.fillSz || row.sz || row.accFillSz || '0');
-        if (!Number.isFinite(fillPrice) || !Number.isFinite(fillAmountNative) || fillPrice <= 0 || fillAmountNative <= 0) {
+        if (
+          !Number.isFinite(fillPrice) ||
+          !Number.isFinite(fillAmountNative) ||
+          fillPrice <= 0 ||
+          fillAmountNative <= 0
+        ) {
           return acc;
         }
 

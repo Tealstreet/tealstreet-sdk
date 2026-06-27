@@ -22,6 +22,7 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
+  ValidateAccountResult,
 } from '../../types';
 import { loop } from '../../utils/loop';
 import { adjust } from '../../utils/safe-math';
@@ -587,7 +588,7 @@ export class KrakenSpotExchange extends BaseExchange {
     return token;
   };
 
-  validateAccount = async (): Promise<string> => {
+  validateAccount = async (): Promise<ValidateAccountResult> => {
     try {
       const { data } = await this.xhr.post(ENDPOINTS.BALANCE, {});
 
@@ -596,37 +597,37 @@ export class KrakenSpotExchange extends BaseExchange {
         const lower = errorStr.toLowerCase();
 
         if (lower.includes('invalid key')) {
-          return 'Invalid API key. Please verify your API key is correct and active.';
+          return { error: 'Invalid API key. Please verify your API key is correct and active.' };
         }
         if (lower.includes('invalid nonce')) {
-          return 'Invalid nonce. Please ensure your system time is synchronized.';
+          return { error: 'Invalid nonce. Please ensure your system time is synchronized.' };
         }
         if (lower.includes('invalid signature')) {
-          return 'Invalid API secret. Please verify your API secret is correct.';
+          return { error: 'Invalid API secret. Please verify your API secret is correct.' };
         }
         if (lower.includes('permission denied')) {
-          return 'API key lacks required permissions.';
+          return { error: 'API key lacks required permissions.' };
         }
 
-        return `Kraken Spot API Error: ${errorStr}`;
+        return { error: `Kraken Spot API Error: ${errorStr}` };
       }
 
-      return '';
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       const errorMsg = err?.message || 'Failed to validate account';
       const lower = errorMsg.toLowerCase();
 
       if (err?.response?.status === 401 || err?.response?.status === 403) {
-        return 'Authentication failed. Please check your API key and secret.';
+        return { error: 'Authentication failed. Please check your API key and secret.' };
       }
       if (err?.response?.status === 429) {
-        return 'Rate limit exceeded. Please wait and try again.';
+        return { error: 'Rate limit exceeded. Please wait and try again.' };
       }
       if (lower.includes('network') || lower.includes('timeout')) {
-        return 'Network error. Please check your internet connection.';
+        return { error: 'Network error. Please check your internet connection.' };
       }
 
-      return `Validation failed: ${errorMsg}`;
+      return { error: `Validation failed: ${errorMsg}` };
     }
   };
 

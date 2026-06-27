@@ -158,14 +158,14 @@ export class KucoinExchange extends BaseExchange {
       if (data.code !== '200000') {
         const errorMessage = data.msg || 'Failed to validate account';
         this.emitAndLogError(errorMessage);
-        return errorMessage;
+        return { error: errorMessage };
       }
 
-      return ''; // Return empty string on success
+      return { error: '', balance: await this.fetchBalance().catch(() => undefined) }; // valid + best-effort balance
     } catch (err: any) {
       const errorMessage = err?.response?.data?.msg || err?.message || 'Unknown error validating account';
       this.emitAndLogError(errorMessage);
-      return errorMessage;
+      return { error: errorMessage };
     }
   };
 

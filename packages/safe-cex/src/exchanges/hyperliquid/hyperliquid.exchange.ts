@@ -557,10 +557,10 @@ export class HyperliquidExchange extends BaseExchange {
         throw new Error('Invalid private key & wallet address pair');
       }
 
-      return '';
+      return { error: '' };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return err?.response?.data?.msg || err?.message || 'Invalid API key or secret';
+      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
   };
 
