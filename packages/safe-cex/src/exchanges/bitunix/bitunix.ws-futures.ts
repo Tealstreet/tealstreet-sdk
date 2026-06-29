@@ -106,9 +106,7 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
       let strData = data;
       if (data instanceof Blob) {
         try {
-          strData = inflate(await data.arrayBuffer(), {
-            to: 'string',
-          });
+          strData = new TextDecoder().decode(inflate(new Uint8Array(await data.arrayBuffer())));
         } catch (e) {
           console.error('bitunix: error reading blob', e);
         }
