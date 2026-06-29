@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import pako from 'pako';
+import { inflate } from 'pako';
 import { Candle, OHLCVOptions, OrderBook } from '../../types';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
@@ -106,7 +106,7 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
       let strData = data;
       if (data instanceof Blob) {
         try {
-          strData = pako.inflate(await data.arrayBuffer(), {
+          strData = inflate(await data.arrayBuffer(), {
             to: 'string',
           });
         } catch (e) {
