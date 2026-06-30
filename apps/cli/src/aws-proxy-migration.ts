@@ -33,7 +33,9 @@ export function ensureAwsProxyMigrationFlag(): Promise<void> {
       });
       if (!res.ok) return;
       const flags = (await res.json()) as Record<string, unknown> | null;
-      setAwsProxyMigrationEnabled(Boolean(flags?.ENABLE_AWS_PROXY_MIGRATION));
+      // A flag value may now be a boolean OR a residual rule object (the CLI doesn't run the rule
+      // engine). Only an explicit `true` enables it — a residual (or anything non-boolean) → OFF.
+      setAwsProxyMigrationEnabled(flags?.ENABLE_AWS_PROXY_MIGRATION === true);
     } catch {
       // best-effort; leave OFF (legacy AWS)
     }
