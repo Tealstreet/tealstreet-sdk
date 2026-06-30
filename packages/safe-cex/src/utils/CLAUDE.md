@@ -174,9 +174,8 @@ accuracy, so the edge `/api/time` clock is plenty.
 ## Files
 
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
-- `convertSymbol.ts` — Old pure converter (hand-wavy, being replaced)
-- `currencyUtils.ts` — USD/BTC equivalence helpers
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `orderbook.ts` — `sortOrderBook` (full sort, snapshot-only) + `calcOrderBookTotal` (cumulative, hot-path safe)
 - `safe-math.ts` — Decimal-aware arithmetic; for placement/display only — see `../exchanges/CLAUDE.md` for hot-path rules
+- `transportResolution.ts` — Proxy pool hosts + public CORS-proxy resolver (`PRIVATE_PROXY_JP` / `PRIVATE_PROXY_ASIA` / `PRIVATE_PROXY_GRVT_TINY`, `READ_FLEET_JP`/`_SG`, `getPublicCorsProxy`); consumed by the routing resolver (`../routing/resolveExchangeRouting.ts`)
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges

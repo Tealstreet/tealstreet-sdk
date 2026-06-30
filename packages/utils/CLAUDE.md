@@ -2,7 +2,7 @@
 
 General-purpose utility functions for compression, formatting, account parsing, and API policy management.
 
-- **Key files** (23 total):
+- **Key files**:
   - `formatting/` — `formatPrice.ts`, `formatCurrencyValue.ts`, `formatCompact.ts`, `formatLargeAmounts.ts`
   - `accounts/` — `parseImportAccountData.ts`
   - `compression.ts`, `base64ToBlob.ts`, `stableHash.ts`, `sleep.ts`

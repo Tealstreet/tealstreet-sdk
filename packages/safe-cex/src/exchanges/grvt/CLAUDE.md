@@ -40,15 +40,15 @@ GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack
 
 ### Core
 
-| File                 | Purpose                                                                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `grvt.exchange.ts`   | Main exchange class (1852 lines). Authentication, order placement with EIP-712 signing, balance/position/order fetching, leverage management, tick loop       |
-| `grvt.api.ts`        | Three Axios instances: MDG (public market data), Edge (authentication), TDG (private trading). Session cookie management, auto-reauthentication on error 1000 |
-| `grvt.types.ts`      | TypeScript types, enums, endpoint constants, WebSocket message interfaces. Defines both full and lite API format interfaces                                   |
-| `grvt.signing.ts`    | EIP-712 order signing utilities using ethers.js. Domain definitions, order type schemas, nonce/expiration generation                                          |
-| `grvt.builder.ts`    | Builder fee authorization. Browser wallet signing for builder authorization, proxy-based API calls, check/authorize builder status                            |
-| `grvt.ws-public.ts`  | Public WebSocket: ticker (delta), orderbook (snapshot), candles. JSON-RPC 2.0 protocol                                                                        |
-| `grvt.ws-private.ts` | Private WebSocket: orders, positions, fills. Connects through Tealstreet proxy with session cookie authentication                                             |
+| File                 | Purpose                                                                                                                                                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `grvt.exchange.ts`   | Main exchange class (1852 lines). Authentication, order placement with EIP-712 signing, balance/position/order fetching, leverage management, tick loop                                                                                                                                           |
+| `grvt.api.ts`        | Three Axios instances: MDG (public market data), Edge (authentication), TDG (private trading). Session cookie management, auto-reauthentication on error 1000                                                                                                                                     |
+| `grvt.types.ts`      | TypeScript types, enums, endpoint constants, WebSocket message interfaces. Defines both full and lite API format interfaces                                                                                                                                                                       |
+| `grvt.signing.ts`    | **Legacy / mostly dead.** Only `validatePrivateKey` is imported (by `grvt.exchange.ts`). The `signOrder` / `generateNonce` / `generateExpiration` exports are unused — real order signing goes through `GrvtSigner.sign()` / `.decode()` from `@tealstreet/grvt-ts-sdk` (see `grvt.exchange.ts`). |
+| `grvt.builder.ts`    | Builder fee authorization. Browser wallet signing for builder authorization, proxy-based API calls, check/authorize builder status                                                                                                                                                                |
+| `grvt.ws-public.ts`  | Public WebSocket: ticker (delta), orderbook (snapshot), candles. JSON-RPC 2.0 protocol                                                                                                                                                                                                            |
+| `grvt.ws-private.ts` | Private WebSocket: orders, positions, fills. Connects through Tealstreet proxy with session cookie authentication                                                                                                                                                                                 |
 
 ### Helper Scripts
 
@@ -425,7 +425,7 @@ If the user has authorized the Tealstreet builder:
 2. If authorized, includes `builder` (address) and `builderFee` (rate) in both:
    - EIP-712 signed message (uses `OrderWithBuilderFee` type template)
    - API payload (full and lite formats)
-3. Builder fee: `0.0001` (1 bps) -> `builderFeeInt = 1` (for EIP-712 as uint32)
+3. Builder fee: default `0.03` (3 bps) -> `builderFeeInt = 300` for EIP-712 as uint32 (via `grvtBuilderFeeRateToRaw`, which is `percent * 10000`)
 
 ## Symbol Format
 

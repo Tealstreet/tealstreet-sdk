@@ -83,10 +83,9 @@ order otherwise stuck forever as the wrong status.
 attached-TP/SL rejections call `emitAndLogError` before throwing (per the
 `exchanges/CLAUDE.md` rule) — a bare throw produced no toast.
 
-`kucoinspot` is intentionally dev-only for the web app via exchange metadata:
-`enabled: false`, `enabledInDev: true`, and `enableInPreview: false`.
-`apps/web` consumes these flags in the new API flow and account availability
-helpers.
+`kucoinspot` exchange metadata: `enabled: true`, `enabledInDev: true`, and
+`enableInPreview: true`. `apps/web` consumes these flags in the new API flow
+and account availability helpers.
 
 ## KuCoin Futures Exchange Integration
 
@@ -100,8 +99,9 @@ The existing `kucoin.*` files target KuCoin Futures (linear perpetual) trading A
 | `prettyName`                                     | `Kucoin`                 |
 | `requiresPassphrase`                             | `true`                   |
 | `requiresApplicationId`                          | `false`                  |
-| `enabled`                                        | `false` (dev only)       |
+| `enabled`                                        | `true`                   |
 | `enabledInDev`                                   | `true`                   |
+| `enableInPreview`                                | `true`                   |
 | `supportsTestnet`                                | `false`                  |
 | `supportsTradesHistory`                          | `false`                  |
 | `orderbookTickDelay`                             | `60`                     |
@@ -585,8 +585,9 @@ so `formatCreateOrder` sends `size = adjust(opts.amount, lotSize)` **unchanged**
 
 **Regression guard:** omitting `contractSize` here is a silent 1000× bug on
 XBTUSDTM — it inflates every USD/leverage/drawdown readout and makes the web
-close path (`contracts / contractSize`) over-close by 1/contractSize. Only
-masked in prod because KuCoin is dev-only (`enabled: false`). All `kucoin`
+close path (`contracts / contractSize`) over-close by 1/contractSize. KuCoin is
+`enabled: true` with `enableInPreview: true` (no longer dev-only), so the guard
+matters for live traffic. All `kucoin`
 markets are linear (metadata filters to `quote === apiMarginCoin` USDT), so the
 conversion is the simple linear `native * contractSize`; there is no inverse
 path here.
@@ -737,20 +738,28 @@ All KuCoin API responses follow this structure:
 
 ## Kline Interval Mapping
 
-| Internal | KuCoin   |
-| -------- | -------- |
-| `1m`     | `1min`   |
-| `3m`     | `3min`   |
-| `5m`     | `5min`   |
-| `15m`    | `15min`  |
-| `30m`    | `30min`  |
-| `1h`     | `1hour`  |
-| `2h`     | `2hour`  |
-| `4h`     | `4hour`  |
-| `6h`     | `6hour`  |
-| `12h`    | `12hour` |
-| `1d`     | `1day`   |
-| `1w`     | `1week`  |
+There are **two separate constants** in `kucoin.types.ts` — REST and WS use
+different value shapes, do not mix them:
+
+- **REST `INTERVAL`** — used by `fetchOHLCV` (`kucoin.exchange.ts`) as the
+  `granularity` param. Values are **numeric minutes**.
+- **WS `WS_INTERVAL`** — used by `kucoin.ws-public.ts` for the
+  `/contractMarket/limitCandle:{symbol}_{interval}` topic. Values are **text**.
+
+| Internal | REST `INTERVAL` (numeric, `granularity`) | WS `WS_INTERVAL` (text, topic) |
+| -------- | ---------------------------------------- | ------------------------------ |
+| `1m`     | `1`                                      | `1min`                         |
+| `3m`     | `3`                                      | `3min`                         |
+| `5m`     | `5`                                      | `5min`                         |
+| `15m`    | `15`                                     | `15min`                        |
+| `30m`    | `30`                                     | `30min`                        |
+| `1h`     | `60`                                     | `1hour`                        |
+| `2h`     | `120`                                    | `2hour`                        |
+| `4h`     | `240`                                    | `4hour`                        |
+| `6h`     | `360`                                    | `6hour`                        |
+| `12h`    | `720`                                    | `12hour`                       |
+| `1d`     | `1440`                                   | `1day`                         |
+| `1w`     | `10080`                                  | `1week`                        |
 
 ### OHLCV Fetching
 

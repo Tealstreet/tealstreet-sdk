@@ -31,7 +31,7 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), builder fee amount (10 tenths bps = 1bp = 0.01%).                                                                                                                 |
 | `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`). |
 | `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                |
-| `hyperliquid.ws-private.ts`  | Private WebSocket handling `webData2`, `clearinghouseState`, mode-gated `spotClearinghouseState` (unified/portfolio), `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, `notification`.                                                                                          |
+| `hyperliquid.ws-private.ts`  | Private WebSocket handling `webData2`, `clearinghouseState`, mode-gated `spotClearinghouseState` (unified/portfolio), `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, `notification`.                                                                                           |
 | `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                |
 | `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                   |
 | `hyperliquid.rateLimiter.ts` | Token bucket rate limiter (1200 tokens/minute capacity).                                                                                                                                                                                                                                                      |
@@ -58,7 +58,6 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | File                                   | Description                                                                                           |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `docs/HIP3_API_CAPABILITIES_MATRIX.md` | Detailed report on HIP-3 WS/REST coverage, data flow architecture, known bugs, and improvement areas. |
-| `AGENTS.md`                            | Agent scope and validation instructions.                                                              |
 | `.gitignore`                           | Ignores `.apikey.json`.                                                                               |
 
 ## Authentication
@@ -249,24 +248,24 @@ Hyperliquid uses only two REST endpoints. All operations are differentiated by t
 
 ### Info Types (POST /info, `type` field)
 
-| Type                            | Purpose                                         | When Called                       |
-| ------------------------------- | ----------------------------------------------- | --------------------------------- |
-| `metaAndAssetCtxs`              | Market metadata + ticker data (core perps)      | Startup                           |
-| `metaAndAssetCtxs` with `dex`   | Market metadata per HIP-3 DEX                   | Startup (per DEX)                 |
-| `perpDexs`                      | List of HIP-3 DEXes                             | Startup                           |
-| `userFees`                      | User fee rates (taker/maker)                    | Startup                           |
-| `maxBuilderFee`                 | Check builder fee approval status               | Startup                           |
-| `userRole`                      | Resolve missing applicationId from key          | Startup (legacy accounts only)    |
-| `userAbstraction`               | Resolve abstraction mode (`unified`/`portfolio`/`standard`-like) | Startup (private accounts)        |
-| `clearinghouseState`            | Account positions + margin (core perps)         | Startup (initial balance)         |
-| `clearinghouseState` with `dex` | HIP-3 positions per DEX                         | Startup + every 120s safety net   |
-| `frontendOpenOrders`            | Open orders with type/trigger info (core perps) | Startup + on-demand refresh       |
-| `frontendOpenOrders` with `dex` | HIP-3 open orders per DEX                       | Startup + on-demand + retry chain |
-| `candleSnapshot`                | OHLCV candle data                               | On chart load                     |
-| `userFills`                     | User fill history                               | Executions tab                    |
-| `userFillsByTime`               | User fills filtered by time                     | Executions tab                    |
-| `spotMetaAndAssetCtxs`          | Spot market metadata                            | Spot startup                      |
-| `spotClearinghouseState`        | Spot balances / holds (collateral source for unified/portfolio) | Spot exchange + perps unified/portfolio |
+| Type                            | Purpose                                                          | When Called                             |
+| ------------------------------- | ---------------------------------------------------------------- | --------------------------------------- |
+| `metaAndAssetCtxs`              | Market metadata + ticker data (core perps)                       | Startup                                 |
+| `metaAndAssetCtxs` with `dex`   | Market metadata per HIP-3 DEX                                    | Startup (per DEX)                       |
+| `perpDexs`                      | List of HIP-3 DEXes                                              | Startup                                 |
+| `userFees`                      | User fee rates (taker/maker)                                     | Startup                                 |
+| `maxBuilderFee`                 | Check builder fee approval status                                | Startup                                 |
+| `userRole`                      | Resolve missing applicationId from key                           | Startup (legacy accounts only)          |
+| `userAbstraction`               | Resolve abstraction mode (`unified`/`portfolio`/`standard`-like) | Startup (private accounts)              |
+| `clearinghouseState`            | Account positions + margin (core perps)                          | Startup (initial balance)               |
+| `clearinghouseState` with `dex` | HIP-3 positions per DEX                                          | Startup + every 120s safety net         |
+| `frontendOpenOrders`            | Open orders with type/trigger info (core perps)                  | Startup + on-demand refresh             |
+| `frontendOpenOrders` with `dex` | HIP-3 open orders per DEX                                        | Startup + on-demand + retry chain       |
+| `candleSnapshot`                | OHLCV candle data                                                | On chart load                           |
+| `userFills`                     | User fill history                                                | Executions tab                          |
+| `userFillsByTime`               | User fills filtered by time                                      | Executions tab                          |
+| `spotMetaAndAssetCtxs`          | Spot market metadata                                             | Spot startup                            |
+| `spotClearinghouseState`        | Spot balances / holds (collateral source for unified/portfolio)  | Spot exchange + perps unified/portfolio |
 
 ### Exchange Types (POST /exchange, `action.type` field)
 
@@ -355,18 +354,18 @@ HIP-3 (per dex):
 
 Subscribed for the user (or vault address):
 
-| Channel                       | Core Perps     | HIP-3 (per dex)                 | Data                                                                                                              |
-| ----------------------------- | -------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `webData2`                    | Yes            | Yes (with `dex` param)          | Positions, orders, tickers, balance (periodic snapshot ~0.4/s)                                                    |
-| `clearinghouseState`          | Yes            | Yes (with `dex` param)          | Positions + margin (real-time, primary for positions)                                                             |
-| `spotClearinghouseState`      | Conditional (unified/portfolio mode only) | No              | Spot balances/holds used to compute unified collateral balance on perp route                                       |
-| `activeAssetData`             | Yes (per coin) | No (subscription limit concern) | Leverage, margin info per market                                                                                  |
-| `orderUpdates`                | Yes            | Yes (with `dex` param)          | Order status: open, filled, canceled, triggered, rejected, marginCanceled, reduceOnlyCanceled, reduceOnlyRejected |
-| `userFills`                   | Yes            | Yes (with `dex` param)          | Fill notifications with deduplication                                                                             |
-| `userEvents`                  | Yes            | Yes (with `dex` param)          | Order lifecycle (backup to orderUpdates)                                                                          |
-| `userFundings`                | Yes            | -                               | Funding payments                                                                                                  |
-| `userNonFundingLedgerUpdates` | Yes            | -                               | Deposits, withdrawals, transfers, liquidations                                                                    |
-| `notification`                | Yes            | -                               | User notifications                                                                                                |
+| Channel                       | Core Perps                                | HIP-3 (per dex)                 | Data                                                                                                              |
+| ----------------------------- | ----------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `webData2`                    | Yes                                       | Yes (with `dex` param)          | Positions, orders, tickers, balance (periodic snapshot ~0.4/s)                                                    |
+| `clearinghouseState`          | Yes                                       | Yes (with `dex` param)          | Positions + margin (real-time, primary for positions)                                                             |
+| `spotClearinghouseState`      | Conditional (unified/portfolio mode only) | No                              | Spot balances/holds used to compute unified collateral balance on perp route                                      |
+| `activeAssetData`             | Yes (per coin)                            | No (subscription limit concern) | Leverage, margin info per market                                                                                  |
+| `orderUpdates`                | Yes                                       | Yes (with `dex` param)          | Order status: open, filled, canceled, triggered, rejected, marginCanceled, reduceOnlyCanceled, reduceOnlyRejected |
+| `userFills`                   | Yes                                       | Yes (with `dex` param)          | Fill notifications with deduplication                                                                             |
+| `userEvents`                  | Yes                                       | Yes (with `dex` param)          | Order lifecycle (backup to orderUpdates)                                                                          |
+| `userFundings`                | Yes                                       | -                               | Funding payments                                                                                                  |
+| `userNonFundingLedgerUpdates` | Yes                                       | -                               | Deposits, withdrawals, transfers, liquidations                                                                    |
+| `notification`                | Yes                                       | -                               | User notifications                                                                                                |
 
 **HIP-3 subscription channels per dex**: `webData2`, `clearinghouseState`, `userFills`, `orderUpdates`, `userEvents` (5 channels per dex). `activeAssetData` is NOT subscribed for HIP-3 markets to avoid exceeding the 1000 channel limit.
 

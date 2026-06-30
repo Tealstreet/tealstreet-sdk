@@ -94,7 +94,7 @@ this.log(`Order rejected: ${err}`, LogSeverity.Error);
 ```
 
 - Signature: `log(message: string, severity: LogSeverity = LogSeverity.Info)`
-  defined at `base.ts:501`.
+  defined in `BaseExchange` (`base.ts`).
 - `LogSeverity` is exported from `packages/safe-cex/src/types.ts`. Values:
   `Info`, `Warning`, `Error`, `Debug`.
 - Always pass severity explicitly for warnings and errors — the default is

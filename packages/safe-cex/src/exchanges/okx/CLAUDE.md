@@ -142,8 +142,8 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | `KLINE`                | `/api/v5/market/candles`                | GET    | Fetch OHLCV candlestick data                                                  |
 | `UNFILLED_ORDERS`      | `/api/v5/trade/orders-pending`          | GET    | Fetch unfilled regular orders (paginated, 100 per page)                       |
 | `UNFILLED_ALGO_ORDERS` | `/api/v5/trade/orders-algo-pending`     | GET    | Fetch unfilled algo orders (paginated, 100 per page)                          |
-| `FILLS`                | `/api/v5/trade/fills`                    | GET    | Recent fills (primary for `fetchExecutions`)                                  |
-| `FILLS_HISTORY`        | `/api/v5/trade/fills-history`            | GET    | Older fills fallback for `fetchExecutions`                                    |
+| `FILLS`                | `/api/v5/trade/fills`                   | GET    | Recent fills (primary for `fetchExecutions`)                                  |
+| `FILLS_HISTORY`        | `/api/v5/trade/fills-history`           | GET    | Older fills fallback for `fetchExecutions`                                    |
 | `PLACE_ORDERS`         | `/api/v5/trade/batch-orders`            | POST   | Place batch orders (up to 20 per batch)                                       |
 | `PLACE_ALGO_ORDER`     | `/api/v5/trade/order-algo`              | POST   | Place single algo order                                                       |
 | `UPDATE_ORDER`         | `/api/v5/trade/amend-order`             | POST   | Amend an existing order                                                       |
@@ -171,12 +171,19 @@ OKX uses **three separate WebSocket connections**, all on port 8443.
 | Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://ws.okx.com:8443/ws/v5/private?brokerId=9999`  |
 | Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://ws.okx.com:8443/ws/v5/business?brokerId=9999` |
 
-Private and business WebSockets also support Tealstreet proxy routing:
+Private and business WebSockets support Tealstreet proxy routing. Both
+`connectAndSubscribe` methods resolve their host from the shared routing
+resolver instead of hardcoding a URL:
 
-- Private: `wss://fsjnpy143pbz.asia.tealstreet.io/okx/private`
-- Business: `wss://fsjnpy143pbz.asia.tealstreet.io/okx/business`
+```ts
+const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate; // or .wsBusiness
+this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
+```
 
-Enabled when `options.tealstreetProxy` is true (`okx.ws-private.ts:23`, `okx.ws-business.ts:25`).
+The actual tunnelled host (the `wss://fsjnpy143pbz.*` family) and the
+`tealstreetProxy` gating live in `routing/routingTable.ts` + the
+`resolveExchangeRouting` resolver — not in the OKX ws classes. To change
+where OKX private/business traffic egresses, edit the table.
 
 ### Ping/Pong
 

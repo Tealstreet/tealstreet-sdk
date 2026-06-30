@@ -58,7 +58,6 @@ This directory contains three Binance exchange variants for Tealstreet: **USD-M 
 | -------------- | ---------------------------------- |
 | `.apikey.json` | Local API key storage (gitignored) |
 | `.gitignore`   | Ignores `.apikey.json`             |
-| `AGENTS.md`    | Agent instructions                 |
 
 ## Authentication
 
@@ -87,7 +86,7 @@ All orders use the broker prefix `x-s3vFFRQp` followed by a UUID:
 ### Secondary Key Support
 
 - **Futures**: Supports a secondary API key via `createApiWithSecondaryKey` (`binance.exchange.ts:92`). The `xhr` property automatically rotates between primary and secondary keys. Both keys are validated on startup. The secondary key rate limit is commented out.
-- **Portfolio Margin**: Has a `secondary_key` validation block but uses `papiXhr.get(ENDPOINTS.ACCOUNT)` for both primary and secondary (validation bug -- both calls use the same primary key; `binancepm.exchange.ts:103-109`).
+- **Portfolio Margin**: `validateAccount()` validates both keys explicitly via `_primaryXhr` and `_secondaryXhr` (wired through `createApiWithSecondaryKey`, kept on the PM instance directly since PM has no single `this.xhr`) when `secondary_key` is set (`binancepm.exchange.ts` → `validateAccount`).
 - **Spot**: No secondary key support.
 
 ## Startup Sequence
@@ -689,10 +688,6 @@ PM uses a different naming convention than futures:
 
 Calling `changeMarginType()` on PM always throws an error with "Portfolio margin is not supported" (`binancepm.exchange.ts:595-598`). PM accounts only support cross margin. The metadata has `hideMarginTypeSelector: true` to hide the UI control.
 
-### Portfolio Margin Secondary Key Bug
-
-The `validateAccount()` method in PM validates both primary and secondary keys using `this.papiXhr.get(ENDPOINTS.ACCOUNT)` -- but both calls use the same primary key since `createApiWithSecondaryKey` is not used (`binancepm.exchange.ts:96-111`).
-
 ### Spot Limitations
 
 - Order type is hardcoded to `OrderType.Limit` in WebSocket handler (TODO in code, `binancespot.ws-private.ts:81`)
@@ -804,7 +799,7 @@ For batch order placement via `/fapi/v1/batchOrders`, each item in the response 
 | Private WS events       | `ACCOUNT_UPDATE`, `ORDER_TRADE_UPDATE`, `ALGO_UPDATE` | `ACCOUNT_UPDATE`, `ORDER_TRADE_UPDATE`, `CONDITIONAL_ORDER_TRADE_UPDATE` | `outboundAccountPosition`, `executionReport` |
 | Private WS path         | `/ws/{listenKey}`                                     | `/pm/ws/{listenKey}`                                                     | `/ws/{listenKey}`                            |
 | Mark price stream       | Yes                                                   | Yes                                                                      | No (uses last price)                         |
-| Secondary key           | Supported                                             | Not used (validation bug)                                                | Not supported                                |
+| Secondary key           | Supported                                             | Supported (validates both)                                               | Not supported                                |
 | Income history          | Supported                                             | Not implemented                                                          | Not implemented                              |
 | Public trades           | Supported                                             | Not implemented                                                          | Not implemented                              |
 | Executions              | Supported                                             | Not implemented                                                          | Not implemented                              |

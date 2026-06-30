@@ -327,7 +327,7 @@ The mode should be set once at application startup:
 
 - **CLI app**: Uses the default `'terminal'` mode (no explicit call needed since `'terminal'` is the default)
 - **Web terminal**: Sets `'web'` mode in `apps/web/src/components/cli/webPlatformAdapter.ts`
-- **Web worker (safe-cex)**: Sets `'web'` mode in `packages/safe-cex/src/webworker/commands/WorkerPlatformAdapter.ts`
+- **Web worker (cli-core worker-host)**: Sets `'web'` mode in `packages/cli-core/src/worker-host/WorkerPlatformAdapter.ts`
 
 ### Cell Helper
 

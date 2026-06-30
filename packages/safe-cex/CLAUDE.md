@@ -183,7 +183,7 @@ Is requiresCors true?
 - **`supportsTunnel: false` in defaults**: Many exchanges inherit this. If adding `enforceWsTunnel: true` to a new exchange, you don't need to also set `supportsTunnel: true` — `enforceWsTunnel` takes precedence in `createExchangeFromAccount.ts`.
 - **`requiresCors: true` needs `privateProxyIps`**: The proxy IPs are shown to users for IP whitelisting. Without them, users can't configure their API keys.
 - **Runtime checks for proxy resolution**: treat browser main thread and WebWorker as browser runtimes. Do not use `typeof window === 'undefined'` alone to infer "server"; that breaks worker-local proxy routing.
-- **Package-boundary discipline**: do not import proxy helpers from `apps/web` into `packages/safe-cex`. Shared routing logic must live in `packages/safe-cex/src/utils/getPrivateProxy.ts`.
+- **Package-boundary discipline**: do not import proxy helpers from `apps/web` into `packages/safe-cex`. Shared routing logic lives in `packages/safe-cex/src/routing/resolveExchangeRouting.ts` and `packages/safe-cex/src/utils/transportResolution.ts`.
 - **Multi-tenant token contexts**: `accessToken.ts` supports a per-async-context
   proxy token provider used by exchange-server. Contextual tokens are checked
   before the browser shared-worker or CLI/global refresh path, but invalid,
@@ -212,7 +212,7 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
   routing helper used by `createPublicExchange()` and exchange-server shared
   public exchanges. Keep those paths aligned through this helper.
 - `src/safeCexAxiosCreate.ts` — Axios instance creation, HOW adapter setup
-- `src/utils/getPrivateProxy.ts` — CORS proxy URL resolver used by safe-cex REST clients
+- `src/routing/resolveExchangeRouting.ts` + `src/utils/transportResolution.ts` — CORS proxy URL / transport resolver used by safe-cex REST clients (the old `src/utils/getPrivateProxy.ts` no longer exists)
 - `src/types.ts` — Shared types (`ExchangeOptions`, `ExchangeAccountConfig`, etc.)
 - `src/exchanges/*/` — Per-exchange implementations
 
@@ -237,7 +237,7 @@ store write from the web app; the worker owns live exchange state and its
 
 ## Worker CLI Exec Result Bridge
 
-`src/webworker/commands/router.ts` emits `exec-result` only when the
+`src/webworker/handlers/CommandHandler.ts` emits `exec-result` only when the
 incoming `exec` payload includes a `reqId`. Shape:
 `{ reqId, handled, success?, error?, data? }`, where `data.orderIds`
 is used by the web CLI capture syntax. Preserve `success` / `error`:

@@ -39,9 +39,10 @@ name, and don't assume `accountName` is globally unique here. See
   the bridge speaks in either direction.
 - `WorkerShim.ts` — main-thread fallback that runs the same
   pipeline in a synchronous shim when Workers are disabled.
-- `handlers/`, `commands/`, `chaserOrder/`, `postProcessors/` —
+- `handlers/`, `chaserOrder/`, `postProcessors/` —
   per-subsystem detail; each has its own `CLAUDE.md` where the
-  bar is met.
+  bar is met. The `exec` worker command is handled by
+  `handlers/CommandHandler.ts` (there is no `commands/` directory).
 
 ## Worker → main thread bridge: structured-clone race
 
