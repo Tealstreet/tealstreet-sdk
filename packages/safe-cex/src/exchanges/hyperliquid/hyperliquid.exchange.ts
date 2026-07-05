@@ -556,12 +556,55 @@ export class HyperliquidExchange extends BaseExchange {
       if (!validateWalletAndPrivateKey(this.options.secret, this.options.key)) {
         throw new Error('Invalid private key & wallet address pair');
       }
+      await this.validateApiWalletRole();
 
       return { error: '' };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
     }
+  };
+
+  private validateApiWalletRole = async (): Promise<void> => {
+    const { data } = await this.infoXhr.post(
+      ENDPOINTS.INFO,
+      {
+        type: INFO_TYPES.USER_ROLE,
+        user: this.options.key,
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+
+    const role = data?.role;
+    if (role === 'missing') {
+      throw new Error(
+        `Hyperliquid does not recognise API wallet ${this.options.key}. Recreate and re-add the API wallet.`,
+      );
+    }
+
+    if (role === 'agent') {
+      const master = data?.data?.user;
+      if (!master) {
+        throw new Error('Hyperliquid recognises this API wallet but did not return its main wallet.');
+      }
+      if (this.options.applicationId && master.toLowerCase() !== this.options.applicationId.toLowerCase()) {
+        throw new Error(`API wallet belongs to ${master}, not ${this.options.applicationId}.`);
+      }
+      return;
+    }
+
+    if (role === 'user') {
+      if (this.options.applicationId && this.options.key.toLowerCase() !== this.options.applicationId.toLowerCase()) {
+        throw new Error(`Main wallet ${this.options.applicationId} does not match signing wallet ${this.options.key}.`);
+      }
+      return;
+    }
+
+    if (role === 'subAccount' || role === 'vault') return;
+
+    throw new Error(`Unexpected Hyperliquid wallet role: ${role || 'unknown'}`);
   };
 
   /**
