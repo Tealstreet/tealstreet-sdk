@@ -58,7 +58,7 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         exchangeName: 'hyperliquid',
         requiresCors: true,
         requiresPassphrase: false,
-        requiresApplicationId: true,
+        requiresApplicationId: false,
         requiresApiKeyIndex: false,
         supportsVault: true,
         requiresOmniKeySeed: false,

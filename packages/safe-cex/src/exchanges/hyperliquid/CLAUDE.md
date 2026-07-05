@@ -68,20 +68,12 @@ Hyperliquid is a DEX and uses Ethereum wallet signing instead of API key/secret 
 
 | Field                   | Maps To             | Description                                                                                                                            |
 | ----------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `options.key`           | Signing wallet      | API/agent wallet address, or a main wallet address for direct main-wallet signing                                                       |
-| `options.secret`        | Private key         | Private key for `options.key`                                                                                                          |
+| `options.key`           | Wallet address      | Main wallet address (used as `user` for info queries)                                                                                  |
+| `options.secret`        | Private key         | Private key for the wallet (agent or main)                                                                                             |
 | `options.applicationId` | Main wallet address | The main wallet address (for wallet-based connections). Used for builder fee checks.                                                   |
 | `options.vault`         | Vault address       | Optional vault address (for vault trading). When set, sent as `vaultAddress` in exchange requests and used as `user` for info queries. |
 
 **`applicationId` is load-bearing.** All private info queries (`clearinghouseState`, `frontendOpenOrders`, etc.) key off `vault || applicationId`. Without one of them, `hasPrivateSessionIdentity` is false → `isPublicDataOnly` flips true → balance/orders/positions never load. Both registration paths now require it: the auto flow (`HyperliquidAutoSetup.tsx`) writes `applicationId = mainWallet` from the connected MetaMask address; the manual form (`ApiKeyFormFragment.tsx`) renders a required "Main Wallet Address" input gated on `requiresApplicationId`. Legacy accounts predating this enforcement may ship without it — see "applicationId auto-resolution" below.
-
-**Validation must check live API-wallet role, not just keypair math.**
-`validateAccount()` first verifies `secret` derives `key`, then calls
-`/info { type: "userRole", user: key }`. `role: "missing"` is rejected so an
-expired/deregistered API wallet cannot be saved and later fail every order with
-`User or API Wallet ... does not exist`. `role: "agent"` must return a master
-wallet matching `applicationId`; `role: "user"` must match `applicationId` when
-one is supplied.
 
 ### applicationId auto-resolution (legacy accounts)
 
