@@ -8,8 +8,8 @@ This directory contains the OKX exchange integration for Tealstreet. It focuses 
 - **Type**: Centralized Exchange (CEX)
 - **Supported products**: Linear perpetual swaps only (`ctType === 'linear'`)
 - **API version**: v5
-- **Base URL**: `https://www.okx.com`
-- **Latency domain**: `www.okx.com`
+- **Base URL**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`)
+- **Latency domain**: `www.okx.com` (`okxeu`: `eea.okx.com`)
 
 ## API Documentation
 
@@ -75,6 +75,10 @@ Both private and business WebSockets authenticate after connecting via a `login`
 ### Time Sync
 
 The `virtualClock` is used for both REST and WebSocket authentication timestamps. This ensures clock synchronization even if the local system clock drifts.
+
+### Account Validation
+
+Regular OKX validates credentials by fetching `ENDPOINTS.BALANCE` (`/api/v5/account/account-position-risk`). OKX EU overrides `validateAccount()` to fetch `ENDPOINTS.ACCOUNT_CONFIG` (`/api/v5/account/config`) instead, because the OKX EU host can return HTTP 503 on `account-position-risk` during the new-account validation gate even when the key, secret, and passphrase are otherwise valid. Startup still fetches balance and positions through the normal SWAP-scoped balance path after account config has loaded.
 
 ## Startup Sequence
 
