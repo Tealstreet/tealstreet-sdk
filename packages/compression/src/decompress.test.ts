@@ -110,6 +110,52 @@ describe('decompress', () => {
     });
   });
 
+  describe('large payloads', () => {
+    it('round-trips a large JSON blob', async () => {
+      const original = JSON.stringify({
+        rows: Array.from({ length: 5000 }, (_, i) => ({
+          id: i,
+          name: `row-${i}`,
+          value: Math.sin(i) * 1000,
+          tags: ['alpha', 'beta', 'gamma'],
+        })),
+      });
+
+      const compressed = await compress(original);
+      const result = await decompress(compressed);
+
+      expect(result).toBe(original);
+    });
+  });
+
+  describe('error propagation', () => {
+    it('rejects (not unhandled) when fed invalid gzip data', async () => {
+      // Bytes lacking the gzip magic header (0x1f 0x8b) cause the
+      // DecompressionStream to error. The write/close promises must be awaited
+      // so this surfaces as a rejected promise rather than an unhandled rejection.
+      const garbage = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).buffer;
+
+      await expect(decompress(garbage, 'gzip')).rejects.toThrow();
+    });
+
+    it('does not emit an unhandled rejection when decompression fails', async () => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+
+      try {
+        const garbage = new Uint8Array([255, 254, 253, 252, 251, 250]).buffer;
+        await decompress(garbage, 'gzip').catch(() => undefined);
+        // Give the microtask/macrotask queue a chance to flush any stray rejection.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+
+      expect(unhandled).toHaveLength(0);
+    });
+  });
+
   describe('roundtrip consistency', () => {
     it('should produce consistent results for repeated operations', async () => {
       const original = 'consistent data';
