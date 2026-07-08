@@ -827,6 +827,14 @@ export class BaseWebSocket<T extends BaseExchange> {
       // Mark as initialized once we receive our first message
       this.isInitialized = true;
 
+      // Connection confirmed healthy again — reset the close/reconnect
+      // counters so their `> 100` caps bound a single unhealthy streak,
+      // not the socket's lifetime. Without this, long-lived sessions
+      // (flaky networks, exchanges with 24h WS session limits) accumulate
+      // 100 closes and the socket silently dies forever.
+      this.onCloseCount = 0;
+      this.reconnectCount = 0;
+
       // Notify parent that socket health changed
       this.parent.syncSocketHealthToStore?.();
 

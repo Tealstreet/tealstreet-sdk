@@ -1,18 +1,18 @@
 import type { LighterExchange } from './lighter.exchange';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import type { LighterPrivateCloseClassification } from './lighter.ws-policy';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET, WS_MIN_RECONNECTION_DELAY } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { LogSeverity, OrderStatus, Position, PositionSide } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL } from './lighter.types';
 import {
-  LIGHTER_POLICY_REASON_RE,
   calculateLighterPrivateReconnectDelay,
   classifyLighterPrivateClose,
+  LIGHTER_POLICY_REASON_RE,
 } from './lighter.ws-policy';
 
 const LIGHTER_GEORESTRICTED_DEGRADED_CONNECTIVITY_MESSAGE =
@@ -645,6 +645,11 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
     }
     if (this.readonlyFallbackFailures > 0) {
       this.readonlyFallbackFailures = 0;
+    }
+    // Healthy again — keep the processClose `> 100` cap a per-unhealthy-streak
+    // bound, not a lifetime one (long-lived sessions would otherwise die forever).
+    if (this.onCloseCount > 0) {
+      this.onCloseCount = 0;
     }
     this.accountStreamMessageCount += 1;
     this.lastAccountStreamMessageAt = virtualClock.getCurrentTimeMs();

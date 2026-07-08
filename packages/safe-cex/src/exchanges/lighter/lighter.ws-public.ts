@@ -1,9 +1,9 @@
 import flatten from 'lodash/flatten';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { WS_MIN_RECONNECTION_DELAY } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, PositionSide, Ticker, Writable } from '../../types';
 import { getCandleStartTime } from '../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../utils/orderbook';
@@ -655,7 +655,10 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
           }
           return;
         }
-        this.parent.log(`[Lighter] REST ticker fallback failed: ${error?.message || String(error)}`, LogSeverity.Warning);
+        this.parent.log(
+          `[Lighter] REST ticker fallback failed: ${error?.message || String(error)}`,
+          LogSeverity.Warning,
+        );
       }
     })().finally(() => {
       this.tickerRestFallbackInFlight = undefined;
@@ -906,6 +909,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       if (!this.hasReceivedMessageSinceConnect) {
         this.hasReceivedMessageSinceConnect = true;
         this.failedConnections = 0;
+        // Healthy again — keep the processClose `> 100` cap a per-unhealthy-streak
+        // bound, not a lifetime one (long-lived sessions would otherwise die forever).
+        this.onCloseCount = 0;
         if (!this.connectedViaProxyRoute && this.directRouteFailureCount > 0) {
           this.directRouteFailureCount = 0;
         }

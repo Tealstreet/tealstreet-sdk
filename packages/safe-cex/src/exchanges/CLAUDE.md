@@ -215,6 +215,16 @@ contributing to 9-wide e2e "stuck" load failures via signer/CPU contention.
 **If you add another reconnect-triggered REST/auth path, gate it on
 `isDisposed` the same way** — a disposed account must never sign again.
 
+### Reconnect caps are streak-scoped, not lifetime
+
+The `> 100` guards on `BaseWebSocket.onCloseCount` / `reconnectCount` (mirrored
+in the Lighter ws classes and `external-public-data.ts`) bound a single
+**unhealthy streak**: they reset once the connection is confirmed healthy again
+(base: the first-message branch of `trackLastReceived`; each mirror: its own
+healthy-traffic point). Don't turn them back into lifetime counters — long-lived
+sessions (flaky networks, 24h WS session limits) legitimately accumulate 100+
+closes, and a lifetime cap silently kills the socket forever.
+
 ### virtualClock
 
 Don't use `Date.now()` for request timestamps. Use

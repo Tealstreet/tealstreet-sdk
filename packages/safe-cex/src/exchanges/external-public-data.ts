@@ -1,25 +1,19 @@
+import type { BaseExchange } from './base';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import {
   ENABLE_RECONNECTING_WEBSOCKET,
   RECONNECTING_WEBSOCKET_TUNING,
   WS_MIN_RECONNECTION_DELAY,
 } from '../config/config';
-import { Candle, LogSeverity, OrderBook, Ticker, Market, OHLCVOptions, Timeframe } from '../types';
-import type { BaseExchange } from './base';
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { Candle, LogSeverity, Market, OHLCVOptions, OrderBook, Ticker, Timeframe } from '../types';
 
 /**
  * Gateway message types for public data multiplexing
  */
 export type GatewayMessageType =
-  | 'subscribe'
-  | 'unsubscribe'
-  | 'subscribed'
-  | 'unsubscribed'
-  | 'data'
-  | 'error'
-  | 'ping'
-  | 'pong';
+  'subscribe' | 'unsubscribe' | 'subscribed' | 'unsubscribed' | 'data' | 'error' | 'ping' | 'pong';
 
 /**
  * Gateway data channels
@@ -113,10 +107,7 @@ export class ExternalPublicDataProvider {
   // Candle callbacks by symbol:interval
   private candleCallbacks = new Map<string, Set<(candle: Candle) => void>>();
 
-  constructor(
-    parent: BaseExchange,
-    config: { url: string; exchangeId: string; authToken?: string },
-  ) {
+  constructor(parent: BaseExchange, config: { url: string; exchangeId: string; authToken?: string }) {
     this.parent = parent;
     this.url = config.url;
     this.exchangeId = config.exchangeId;
@@ -179,6 +170,13 @@ export class ExternalPublicDataProvider {
     if (this.isDisposed) return;
 
     this.lastReceived = Date.now();
+
+    // Receiving traffic means the connection recovered — reset the counter so
+    // the onClose `> 100` cap bounds a single unhealthy streak, not the
+    // provider's lifetime (long-lived sessions would otherwise die forever).
+    if (this.reconnectCount !== 0) {
+      this.reconnectCount = 0;
+    }
 
     const message = jsonParse(event.data) as GatewayMessage;
     if (!message) return;

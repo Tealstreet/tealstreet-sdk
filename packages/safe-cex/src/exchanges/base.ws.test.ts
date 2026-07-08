@@ -116,6 +116,32 @@ describe('BaseWebSocket', () => {
     });
   });
 
+  describe('trackLastReceived', () => {
+    it('should reset onCloseCount and reconnectCount on first message after a close (streak-scoped caps)', () => {
+      baseWs.onCloseCount = 42;
+      baseWs.reconnectCount = 17;
+      // lastReceived === 0 simulates the post-close state (processClose zeroes it)
+      expect(baseWs.lastReceived).toBe(0);
+
+      baseWs.trackLastReceived();
+
+      expect(baseWs.onCloseCount).toBe(0);
+      expect(baseWs.reconnectCount).toBe(0);
+      expect(baseWs.isInitialized).toBe(true);
+    });
+
+    it('should not touch counters on subsequent messages while connection stays healthy', () => {
+      baseWs.trackLastReceived();
+      baseWs.onCloseCount = 5;
+      baseWs.reconnectCount = 3;
+
+      baseWs.trackLastReceived();
+
+      expect(baseWs.onCloseCount).toBe(5);
+      expect(baseWs.reconnectCount).toBe(3);
+    });
+  });
+
   describe('isDisposed getter', () => {
     it('should return parent isDisposed value', () => {
       expect(baseWs.isDisposed).toBe(false);
