@@ -62,6 +62,25 @@ import { OKXBusinessWebsocket } from './okx.ws-business';
 import { OKXPrivateWebsocket } from './okx.ws-private';
 import { OKXPublicWebsocket } from './okx.ws-public';
 
+/**
+ * Resolve the USD mark price for a balance currency by matching the exact
+ * OKX instrument, not a prefix. OKX tickers carry both an instId `id`
+ * (e.g. `ETH-USDT-SWAP`) and a compact `symbol` (e.g. `ETHUSDT`); a prefix
+ * match (`symbol.startsWith(ccy)`) collides `ETH` with `ETHFI`, `SOL` with
+ * `SOLO`, etc. and multiplies equity by an unrelated instrument's mark.
+ * Falls back to 1 for stablecoins / currencies with no linear instrument.
+ */
+export const findTickerMarkForCurrency = (
+  tickers: Array<{ id?: string; symbol?: string; mark?: number }>,
+  ccy: string,
+): number => {
+  const candidates = [`${ccy}-USDT-SWAP`, `${ccy}-USD-SWAP`, `${ccy}USDT`, `${ccy}USD`];
+  const ticker = tickers.find(
+    (t) => (t.id != null && candidates.includes(t.id)) || (t.symbol != null && candidates.includes(t.symbol)),
+  );
+  return ticker && typeof ticker.mark === 'number' ? ticker.mark : 1;
+};
+
 export class OKXExchange extends BaseExchange {
   xhr: Axios;
   region: OkxRegion;
@@ -419,9 +438,8 @@ export class OKXExchange extends BaseExchange {
 
       const eqNotional: { [currency: string]: number } = {};
       for (const b of bal) {
-        // TODO:  some way better?
-        const ticker = this.store.tickers.find((t) => t.symbol.startsWith(b.ccy));
-        eqNotional[b.ccy] = this.toFiniteNumber(b.eq) * (ticker ? ticker.mark : 1);
+        const mark = findTickerMarkForCurrency(this.store.tickers, b.ccy);
+        eqNotional[b.ccy] = this.toFiniteNumber(b.eq) * mark;
       }
 
       const totalCollateral = roundUSD(sumBy(Object.values(eqNotional)));
