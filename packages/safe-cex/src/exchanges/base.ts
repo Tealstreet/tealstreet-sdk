@@ -749,22 +749,30 @@ export class BaseExchange implements Exchange {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
-      // close all positions
-      const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+      try {
+        // close all positions
+        const openPositions = this.store.positions.filter((position) => position.contracts > 0);
 
-      await forEachSeries(openPositions, async (position) => {
-        await this.placeOrder({
-          symbol: position.symbol,
-          side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
-          type: OrderType.Market,
-          amount: position.contracts,
-          reduceOnly: true,
+        await forEachSeries(openPositions, async (position) => {
+          try {
+            await this.placeOrder({
+              symbol: position.symbol,
+              side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
+              type: OrderType.Market,
+              amount: position.contracts,
+              reduceOnly: true,
+            });
+          } catch (err: any) {
+            // don't let one failing symbol abort closing the remaining positions
+            this.log(`Nuke: failed to close position on ${position.symbol}: ${err?.message || err}`, LogSeverity.Error);
+          }
         });
-      });
 
-      // cancel all orders
-      await this.cancelAllOrders();
-      this.isNuking = false;
+        // cancel all orders
+        await this.cancelAllOrders();
+      } finally {
+        this.isNuking = false;
+      }
     }
 
     const openPositions = this.store.positions.filter((position) => position.contracts > 0);
@@ -779,20 +787,27 @@ export class BaseExchange implements Exchange {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
-      // close all positions
-      const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+      try {
+        // close all positions
+        const openPositions = this.store.positions.filter((position) => position.contracts > 0);
 
-      await forEachSeries(openPositions, async (position) => {
-        await this.placeOrder({
-          symbol: position.symbol,
-          side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
-          type: OrderType.Market,
-          amount: position.contracts,
-          reduceOnly: true,
+        await forEachSeries(openPositions, async (position) => {
+          try {
+            await this.placeOrder({
+              symbol: position.symbol,
+              side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
+              type: OrderType.Market,
+              amount: position.contracts,
+              reduceOnly: true,
+            });
+          } catch (err: any) {
+            // don't let one failing symbol abort closing the remaining positions
+            this.log(`Nuke: failed to close position on ${position.symbol}: ${err?.message || err}`, LogSeverity.Error);
+          }
         });
-      });
-
-      this.isNuking = false;
+      } finally {
+        this.isNuking = false;
+      }
     }
 
     const openPositions = this.store.positions.filter((position) => position.contracts > 0);
@@ -806,9 +821,12 @@ export class BaseExchange implements Exchange {
   nukeOrders = async () => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
-      // cancel all orders
-      await this.cancelAllOrders();
-      this.isNuking = false;
+      try {
+        // cancel all orders
+        await this.cancelAllOrders();
+      } finally {
+        this.isNuking = false;
+      }
     }
   };
 
