@@ -851,15 +851,24 @@ export class BaseExchange implements Exchange {
         resolve(true);
         return;
       }
+      // `settled` + `finish` ensure the promise resolves exactly once, whether
+      // the signer becomes available or the exchange is disposed while waiting.
+      let settled = false;
+      const finish = (available: boolean) => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        this.remoteSignerAvailabilityCleanups.delete(disposalCleanup);
+        if (available) this.emitter.emit('remoteSignerStatus', 'connected');
+        resolve(available);
+      };
       const unsubscribe = remoteSigner.onAvailabilityChange((available) => {
-        if (available) {
-          this.remoteSignerAvailabilityCleanups.delete(unsubscribe);
-          unsubscribe();
-          this.emitter.emit('remoteSignerStatus', 'connected');
-          resolve(!this.isDisposed);
-        }
+        if (available) finish(true);
       });
-      this.remoteSignerAvailabilityCleanups.add(unsubscribe);
+      // Registered so dispose() settles this waiter with `false` (and unsubscribes)
+      // instead of leaving it pending forever after the listener is torn down.
+      const disposalCleanup = () => finish(false);
+      this.remoteSignerAvailabilityCleanups.add(disposalCleanup);
     });
   }
 
@@ -959,7 +968,12 @@ export class BaseExchange implements Exchange {
     this.emitter.emit('updatePositions', { symbols, requestId });
 
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout updatePositionsInWebworker')), 5000);
+      const timeout = setTimeout(() => {
+        // Timeout path must also remove the listener, otherwise every timed-out
+        // call leaks a handleDone closure permanently attached to the emitter.
+        this.emitter.off('updatePositions:done', handleDone);
+        reject(new Error('Timeout updatePositionsInWebworker'));
+      }, 5000);
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
@@ -987,7 +1001,12 @@ export class BaseExchange implements Exchange {
     this.emitter.emit('callMethod', { method, args, requestId });
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout callMethodInWorker')), 5000);
+      const timeout = setTimeout(() => {
+        // Timeout path must also remove the listener, otherwise every timed-out
+        // call leaks a handleDone closure permanently attached to the emitter.
+        this.emitter.off('callMethod:done', handleDone);
+        reject(new Error('Timeout callMethodInWorker'));
+      }, 5000);
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
