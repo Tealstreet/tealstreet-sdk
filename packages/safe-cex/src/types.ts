@@ -507,6 +507,7 @@ export type DisplayedPosition = Position & {
 };
 
 export type HistoricalTrade = {
+  readonly id?: string;
   readonly symbol: string;
   readonly orderId: string;
   readonly price: number;
@@ -577,6 +578,7 @@ export type Candle = {
 };
 
 export type Execution = {
+  readonly id?: string;
   readonly timestamp: number;
   readonly symbol: string;
   readonly orderId?: string;
