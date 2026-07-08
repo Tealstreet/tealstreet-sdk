@@ -746,6 +746,7 @@ export class BinanceExchange extends BaseExchange {
     const trades = Array.isArray(data) ? data : [];
 
     return trades.map((entry) => ({
+      id: entry.id?.toString(),
       symbol: entry.symbol,
       orderId: entry.orderId?.toString(),
       price: +entry.price,
@@ -1030,17 +1031,15 @@ export class BinanceExchange extends BaseExchange {
       return [];
     }
 
-    return data.map(
-      (trade: any): PublicTrade => ({
-        id: trade.id.toString(),
-        symbol,
-        price: parseFloat(trade.price),
-        qty: parseFloat(trade.qty),
-        quoteQty: parseFloat(trade.quoteQty),
-        timestamp: trade.time,
-        side: trade.isBuyerMaker ? OrderSide.Sell : OrderSide.Buy, // isBuyerMaker means sell order was in the book (taker was buyer)
-      }),
-    );
+    return data.map((trade: any): PublicTrade => ({
+      id: trade.id.toString(),
+      symbol,
+      price: parseFloat(trade.price),
+      qty: parseFloat(trade.qty),
+      quoteQty: parseFloat(trade.quoteQty),
+      timestamp: trade.time,
+      side: trade.isBuyerMaker ? OrderSide.Sell : OrderSide.Buy, // isBuyerMaker means sell order was in the book (taker was buyer)
+    }));
   };
 
   fetchPositionMode = async () => {

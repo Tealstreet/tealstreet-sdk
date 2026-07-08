@@ -1200,6 +1200,7 @@ export class BybitExchange extends BaseExchange {
           const timestamp = rawExecTime > 100_000_000_000 ? Math.floor(rawExecTime / 1000) : Math.floor(rawExecTime);
 
           executions.push({
+            id: exec.execId,
             timestamp,
             symbol: exec.symbol || symbol,
             orderId: exec.orderId,

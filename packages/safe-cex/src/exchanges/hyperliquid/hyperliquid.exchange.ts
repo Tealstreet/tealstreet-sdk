@@ -18,8 +18,8 @@ import {
 } from '@tealstreet/ccxt-compat/src/functions/number';
 import { safeString } from '@tealstreet/ccxt-compat/src/functions/type';
 import {
-  CoinBalance,
   Candle,
+  CoinBalance,
   ExchangeName,
   ExchangeOptions,
   Execution,
@@ -472,7 +472,11 @@ export class HyperliquidExchange extends BaseExchange {
     });
   };
 
-  public applyCorePerpsBalanceSnapshot = (snapshot: { accountValue: number; totalMarginUsed: number; upnl: number }): void => {
+  public applyCorePerpsBalanceSnapshot = (snapshot: {
+    accountValue: number;
+    totalMarginUsed: number;
+    upnl: number;
+  }): void => {
     const accountValue = Number(snapshot.accountValue);
     const totalMarginUsed = Number(snapshot.totalMarginUsed);
     const upnl = Number(snapshot.upnl);
@@ -486,7 +490,9 @@ export class HyperliquidExchange extends BaseExchange {
     this.applyBalanceFromCurrentMode();
   };
 
-  public handleSpotClearinghouseStateUpdate = (balances: Array<{ coin: string; hold: string; total: string }>): void => {
+  public handleSpotClearinghouseStateUpdate = (
+    balances: Array<{ coin: string; hold: string; total: string }>,
+  ): void => {
     if (!this.shouldUseSpotCollateralBalance()) {
       return;
     }
@@ -496,7 +502,9 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     this.hasSpotCollateralSnapshot = true;
-    this.cachedSpotCollateralBalances = balances.filter((entry) => typeof entry?.coin === 'string' && entry.coin.length > 0);
+    this.cachedSpotCollateralBalances = balances.filter(
+      (entry) => typeof entry?.coin === 'string' && entry.coin.length > 0,
+    );
     this.applyBalanceFromCurrentMode();
   };
 
@@ -2325,6 +2333,7 @@ export class HyperliquidExchange extends BaseExchange {
 
           const feeRaw = Number.parseFloat(String(fill?.fee || 0));
           const execution: Execution = {
+            id: fill?.tid !== undefined && fill?.tid !== null ? `${fill.tid}` : undefined,
             timestamp: Math.floor(timestampMilliseconds / 1000),
             symbol,
             orderId: executionOrderId || undefined,
