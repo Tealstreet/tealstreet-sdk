@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CommandRegistry } from './CommandRegistry';
 import type { Command, CommandContext, CommandResult } from './Command';
 import { CommandCategory } from './Command';
+import { PromptCommand } from './session/PromptCommand';
+import { PositionsCommand } from './trading/PositionsCommand';
 
 // Helper to create mock commands
 const createMockCommand = (name: string, options: Partial<Command> = {}): Command => ({
@@ -313,6 +315,25 @@ describe('CommandRegistry', () => {
       const result = await registry.execute('pos', ctx);
       expect(result?.success).toBe(true);
       expect(command.execute).toHaveBeenCalled();
+    });
+  });
+
+  // Regression: `ps` used to be declared as an alias on BOTH PromptCommand and
+  // PositionsCommand. The lenient register() silently let the later
+  // registration shadow the earlier one, and in the default registration order
+  // PromptCommand registers first, so `ps` resolved to `positions` and
+  // PromptCommand's `ps` was dead. The fix drops `ps` from PromptCommand so
+  // `ps` unambiguously belongs to `positions`.
+  describe('ps alias belongs to positions (collision fix)', () => {
+    it('PromptCommand no longer declares the ps alias', () => {
+      expect(new PromptCommand().aliases).not.toContain('ps');
+    });
+
+    it('resolves ps to positions in the default registration order', () => {
+      // Mirror CommandExecutor: PromptCommand is registered before PositionsCommand.
+      registry.register(new PromptCommand());
+      registry.register(new PositionsCommand());
+      expect(registry.find('ps')?.name).toBe('positions');
     });
   });
 });
