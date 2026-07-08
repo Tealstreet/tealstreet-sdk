@@ -76,6 +76,9 @@ export class RingBuffer<T> {
    * @param items Items to push to this buffer.
    */
   public add(...items: T[]): void {
+    if (this.size === 0) {
+      return;
+    }
     items.forEach((item) => {
       this.buffer[this.pos] = item;
       this.pos = (this.pos + 1) % this.size;
@@ -91,7 +94,7 @@ export class RingBuffer<T> {
       index += this.buffer.length;
     }
 
-    if (index < 0 || index > this.buffer.length) {
+    if (index < 0 || index >= this.buffer.length) {
       return undefined;
     }
 
@@ -156,7 +159,7 @@ export class RingBuffer<T> {
       index += this.buffer.length;
     }
 
-    if (index < 0 || index > this.buffer.length) {
+    if (index < 0 || index >= this.buffer.length) {
       return [];
     }
 
