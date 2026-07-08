@@ -31,15 +31,9 @@ export const ENDPOINTS = {
 
 export const PUBLIC_ENDPOINTS = [ENDPOINTS.MARKETS, ENDPOINTS.TICKERS_24H, ENDPOINTS.KLINE, ENDPOINTS.ORDERBOOK];
 
-export const GRAFANA_ENDPOINTS_EVERY = [
-  ENDPOINTS.ORDER,
-  ENDPOINTS.CANCEL_SYMBOL_ORDERS,
-];
+export const GRAFANA_ENDPOINTS_EVERY = [ENDPOINTS.ORDER, ENDPOINTS.CANCEL_SYMBOL_ORDERS];
 
-export const GRAFANA_ENDPOINTS_PERIODIC = [
-  ENDPOINTS.ACCOUNT,
-  ENDPOINTS.OPEN_ORDERS,
-];
+export const GRAFANA_ENDPOINTS_PERIODIC = [ENDPOINTS.ACCOUNT, ENDPOINTS.OPEN_ORDERS];
 
 export const ORDER_TYPE: Record<string, OrderType> = {
   LIMIT: OrderType.Limit,
@@ -47,6 +41,21 @@ export const ORDER_TYPE: Record<string, OrderType> = {
   STOP_MARKET: OrderType.StopLoss,
   TAKE_PROFIT_MARKET: OrderType.TakeProfit,
   TRAILING_STOP_MARKET: OrderType.TrailingStopLoss,
+};
+
+// Spot `executionReport` reports the order type in the `o` field with SPOT
+// values (LIMIT/MARKET/STOP_LOSS[_LIMIT]/TAKE_PROFIT[_LIMIT]/LIMIT_MAKER) —
+// NOT the futures `ot` field or the futures values (STOP_MARKET, etc.).
+// LIMIT_MAKER is a post-only limit → OrderType.Limit. Spot has no trailing
+// stop. See https://developers.binance.com/docs/binance-spot-api-docs/user-data-stream
+export const ORDER_TYPE_SPOT: Record<string, OrderType> = {
+  LIMIT: OrderType.Limit,
+  MARKET: OrderType.Market,
+  LIMIT_MAKER: OrderType.Limit,
+  STOP_LOSS: OrderType.StopLoss,
+  STOP_LOSS_LIMIT: OrderType.StopLoss,
+  TAKE_PROFIT: OrderType.TakeProfit,
+  TAKE_PROFIT_LIMIT: OrderType.TakeProfit,
 };
 
 export const ORDER_SIDE: Record<string, OrderSide> = {

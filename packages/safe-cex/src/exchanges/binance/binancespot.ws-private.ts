@@ -1,10 +1,11 @@
+import type { BinanceSpotExchange } from './binancespot.exchange';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG } from '../../config/config';
 import { OrderStatus, OrderType, PositionSide } from '../../types';
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import type { BinanceSpotExchange } from './binancespot.exchange';
-import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE } from './binancespot.types';
+import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TYPE_SPOT } from './binancespot.types';
 
 export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> {
   connectAndSubscribe = async () => {
@@ -62,7 +63,10 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
 
   handleOrderEvents = (events: Array<Record<string, any>>) => {
     events.forEach(({ o: data }) => {
-      if (data.X === 'TRADE') {
+      // Spot `executionReport`: `x` is the execution type (NEW/TRADE/CANCELED/…),
+      // `X` is the order status (NEW/PARTIALLY_FILLED/FILLED/CANCELED/…). Fills
+      // arrive with `x === 'TRADE'`.
+      if (data.x === 'TRADE') {
         this.parent.emitter.emit('fill', {
           id: data.c,
           side: ORDER_SIDE[data.S],
@@ -70,6 +74,27 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
           price: parseFloat(data.p),
           amount: parseFloat(data.l),
         });
+
+        // Mirror the cumulative fill (`z`) onto the stored order so a partially
+        // or fully filled order reflects its real filled/remaining before the
+        // next REST fetchOrders — same reason as futures (chaser reads
+        // order.filled from the store). See binance.ws-private.ts.
+        const orderId = data.c;
+        const filled = parseFloat(data.z);
+        const amount = parseFloat(data.q);
+        this.store.updateOrder(
+          { id: orderId },
+          {
+            filled,
+            remaining: amount - filled,
+            lastUpdate: virtualClock.getCurrentTimeMs(),
+          },
+        );
+
+        // Fully filled (`z === q`, or order status FILLED) → transition out of Open.
+        if (data.X === 'FILLED' || filled >= amount) {
+          this.store.updateOrderStatus({ id: orderId }, OrderStatus.Closed);
+        }
       }
 
       if (data.X === 'NEW') {
@@ -77,8 +102,9 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
           id: data.c,
           status: OrderStatus.Open,
           symbol: data.s,
-          //type: ORDER_TYPE[data.ot],
-          type: OrderType.Limit, // TODO XXX
+          // Spot reports the order type in `o` (LIMIT/STOP_LOSS_LIMIT/LIMIT_MAKER/…),
+          // NOT the futures `ot` field. Spot has no reduceOnly concept.
+          type: ORDER_TYPE_SPOT[data.o] || OrderType.Limit,
           side: ORDER_SIDE[data.S],
           price: parseFloat(data.p) || parseFloat(data.sp),
           amount: parseFloat(data.q),

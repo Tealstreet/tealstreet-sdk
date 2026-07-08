@@ -289,7 +289,11 @@ Connection uses listenKey-based authentication (no WebSocket-level auth required
 | `outboundAccountPosition` | Balance changes per asset |
 | `executionReport`         | Order lifecycle events    |
 
-**Spot-specific**: Uses `data.c` (clientOrderId) as order ID (not `data.i` like futures). Order events use the same nested `o` object pattern as futures (`events.forEach(({ o: data })` at `binancespot.ws-private.ts:64`).
+**Spot-specific**: Uses `data.c` (clientOrderId) as order ID (not `data.i` like futures). Order events use the same nested `o` object pattern as futures (`events.forEach(({ o: data })`).
+
+**Spot order-type mapping.** Spot `executionReport` reports the order type in the `o` field (values `LIMIT`/`MARKET`/`STOP_LOSS`/`STOP_LOSS_LIMIT`/`TAKE_PROFIT`/`TAKE_PROFIT_LIMIT`/`LIMIT_MAKER`) — **not** the futures `ot` field or futures values. `handleOrderEvents` maps via `ORDER_TYPE_SPOT` (in `binancespot.types.ts`); `LIMIT_MAKER` → `OrderType.Limit`, both `STOP_LOSS*` → `StopLoss`, both `TAKE_PROFIT*` → `TakeProfit`. Spot has no `reduceOnly` (kept `false`).
+
+**Spot execution-type vs order-status.** In `executionReport`, `x` is the **execution type** (`NEW`/`TRADE`/`CANCELED`/…) and `X` is the **order status** (`NEW`/`PARTIALLY_FILLED`/`FILLED`/`CANCELED`/…). Fills arrive with `x === 'TRADE'` (the handler previously checked `X === 'TRADE'`, which never matched). On a `TRADE` the handler emits `fill` **and** mirrors the cumulative fill onto the store row (`filled = z`, `remaining = q - z`), transitioning to `Closed` when `X === 'FILLED'` / `z === q`. Without the store update a filled spot order stayed `Open` until the next REST `fetchOrders` — same class of bug the futures `PARTIALLY_FILLED` note describes.
 
 #### Portfolio Margin (`BinancePMPrivateWebsocket`)
 
@@ -690,7 +694,7 @@ Calling `changeMarginType()` on PM always throws an error with "Portfolio margin
 
 ### Spot Limitations
 
-- Order type is hardcoded to `OrderType.Limit` in WebSocket handler (TODO in code, `binancespot.ws-private.ts:81`)
+- Order type in the WS handler is now mapped from the spot `o` field via `ORDER_TYPE_SPOT` (see "Spot order-type mapping" below) — previously hardcoded to `OrderType.Limit`
 - No mark price or funding rate data (uses last price for mark and index, `binancespot.exchange.ts:239-240`)
 - No hedge mode or margin type management
 - No position risk or leverage endpoints
@@ -717,7 +721,7 @@ Both futures and PM support the Tealstreet tunnel (`supportsTunnel: true`):
 - `binance.exchange.ts:67`: `// TODO: translate our err messages`
 - `binancepm.exchange.ts:57`: `// TODO: translate our err messages`
 - `binancespot.exchange.ts:51`: `// TODO: translate our err messages`
-- `binancespot.ws-private.ts:81`: `type: OrderType.Limit, // TODO XXX` -- order type hardcoded
+- (resolved) `binancespot.ws-private.ts` order-type hardcode — now mapped from the `o` field
 - `binance.ws-public.ts:43`: `// TODO: maybe something better here...` -- regarding publicDataOnly bookTicker skip
 - `binance.types.ts:39`: `// migrating to v3 requires fake positions as in portfolio margin implementation` -- regarding POSITION_RISK endpoint
 
