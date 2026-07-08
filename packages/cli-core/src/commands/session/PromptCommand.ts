@@ -37,7 +37,10 @@ export class PromptCommand extends BaseCommand {
   readonly name = 'prompt';
   readonly description = 'Configure the CLI prompt format';
   readonly category = CommandCategory.Session;
-  readonly aliases = ['ps'];
+  // NOTE: `ps` intentionally removed — it collides with PositionsCommand's
+  // `ps` alias, which is the winner in the default registration order and the
+  // intuitive one. `prompt` has no short alias.
+  readonly aliases: string[] = [];
   readonly examples = [
     'prompt',
     'prompt list',

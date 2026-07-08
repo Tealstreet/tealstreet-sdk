@@ -380,7 +380,7 @@ Source: `ConnectionCommand.ts`.
 
 `help` for general index, `help <cmd>` for a specific command.
 
-### `prompt` &nbsp; _(alias `ps`)_
+### `prompt`
 
 Configure the REPL prompt format. See [Output → Prompt](./output.md#prompt).
 Source: `PromptCommand.ts`.
