@@ -428,4 +428,34 @@ describe('RingBuffer', () => {
     ringBuffer.remove(2, 2);
     expect(ringBuffer.toArray()).toEqual([44, 66, 99]);
   });
+
+  test('Get at index === length on full wrapped buffer returns undefined.', () => {
+    const ringBuffer = new RingBuffer<number>(5);
+    ringBuffer.add(1, 2, 3, 4, 5, 6);
+    expect(ringBuffer.isFull()).toBeTruthy();
+    // index === length must be out of bounds (not wrap to the first element)
+    expect(ringBuffer.get(5)).toBe(undefined);
+    // sanity: valid indices still work
+    expect(ringBuffer.get(0)).toBe(2);
+    expect(ringBuffer.get(4)).toBe(6);
+  });
+
+  test('Remove at index === length on full wrapped buffer is a no-op.', () => {
+    const ringBuffer = new RingBuffer<number>(5);
+    ringBuffer.add(1, 2, 3, 4, 5, 6);
+    expect(ringBuffer.remove(5)).toEqual([]);
+    expect(ringBuffer.toArray()).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  test('Size-0 buffer add is a safe no-op (no NaN pos corruption).', () => {
+    const ringBuffer = new RingBuffer<number>(0);
+    ringBuffer.add(1, 2, 3);
+    expect(ringBuffer.getPos()).toBe(0);
+    expect(ringBuffer.getBufferLength()).toBe(0);
+    expect(ringBuffer.toArray()).toEqual([]);
+    // subsequent adds after a resize back up must still work correctly
+    ringBuffer.resize(3);
+    ringBuffer.add(4, 5, 6);
+    expect(ringBuffer.toArray()).toEqual([4, 5, 6]);
+  });
 });
