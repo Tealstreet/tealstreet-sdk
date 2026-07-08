@@ -58,7 +58,7 @@ Every REST request is signed via an axios request interceptor (`apexomni.api.ts:
 - **Headers**: `APEX-SIGNATURE`, `APEX-API-KEY`, `APEX-PASSPHRASE`, `APEX-TIMESTAMP`
 - **Signature construction**: Concatenates `[timestamp, HTTP_METHOD, '/api', endpoint, '?' (for GET/DELETE with params), sorted_params, body_for_order_endpoint]`
 - **Key handling**: `Buffer.from(options.secret).toString('base64')` is the HMAC key
-- **Hash**: `crypto-js` HMAC-SHA256, output as base64 string
+- **Hash**: `@noble/hashes` HMAC-SHA256, output as base64 string (`hmacSha256Base64` in `apexomni.utils.ts`)
 - **Parameter sorting**: Both GET params and POST data are serialized with `qs.stringify()` with alphabetical sorting and filtering of falsy values (`apexomni.api.ts:58-71`)
 - **Credentials required**: `key` (API key), `secret` (API secret), `passphrase`
 - **Exception**: Kline endpoint (`/v3/klines`) is sent with empty headers (no auth) (`apexomni.api.ts:54-56`)
@@ -122,20 +122,20 @@ The `start()` method (`apexomni.exchange.ts:193-265`) proceeds as follows:
 
 All endpoints are prefixed with the base URL (`https://omni.apex.exchange/api`):
 
-| Constant        | Path                          | Method | Description                                                                        |
-| --------------- | ----------------------------- | ------ | ---------------------------------------------------------------------------------- |
-| `USER`          | `/v3/user`                    | GET    | Validate API credentials, fetch user info                                          |
-| `SYMBOLS`       | `/v3/symbols`                 | GET    | Fetch all trading pairs and contract configs (includes `contractConfig`)           |
-| `KLINE`         | `/v3/klines`                  | GET    | Fetch OHLCV data (**no auth headers sent**)                                        |
-| `ACCOUNT`       | `/v3/account`                 | GET    | Fetch account data: positions, l2key, ethereumAddress, wallets                     |
-| `BALANCE`       | `/v3/account-balance`         | GET    | Fetch `totalEquityValue`, `availableBalance`, `initialMargin`, `maintenanceMargin` |
-| `OPEN_ORDERS`   | `/v3/open-orders`             | GET    | Fetch all open/untriggered orders                                                  |
-| `FILLS`         | `/v3/fills`                   | GET    | User fills history (primary for `fetchExecutions`)                                 |
-| `HISTORY_ORDERS`| `/v3/history-orders`          | GET    | Filled-history fallback (`fetchExecutions`)                                        |
-| `CREATE_ORDER`  | `/v3/order`                   | POST   | Place a new order (form-urlencoded body with zkLink signature)                     |
-| `CANCEL_ORDER`  | `/v3/delete-order`            | POST   | Cancel a single order by ID (form-urlencoded)                                      |
-| `CANCEL_ORDERS` | `/v3/delete-open-orders`      | POST   | Cancel all open orders for a symbol (form-urlencoded)                              |
-| `SET_LEVERAGE`  | `/v3/set-initial-margin-rate` | POST   | Set leverage via initial margin rate (`multipart/form-data`)                       |
+| Constant         | Path                          | Method | Description                                                                        |
+| ---------------- | ----------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `USER`           | `/v3/user`                    | GET    | Validate API credentials, fetch user info                                          |
+| `SYMBOLS`        | `/v3/symbols`                 | GET    | Fetch all trading pairs and contract configs (includes `contractConfig`)           |
+| `KLINE`          | `/v3/klines`                  | GET    | Fetch OHLCV data (**no auth headers sent**)                                        |
+| `ACCOUNT`        | `/v3/account`                 | GET    | Fetch account data: positions, l2key, ethereumAddress, wallets                     |
+| `BALANCE`        | `/v3/account-balance`         | GET    | Fetch `totalEquityValue`, `availableBalance`, `initialMargin`, `maintenanceMargin` |
+| `OPEN_ORDERS`    | `/v3/open-orders`             | GET    | Fetch all open/untriggered orders                                                  |
+| `FILLS`          | `/v3/fills`                   | GET    | User fills history (primary for `fetchExecutions`)                                 |
+| `HISTORY_ORDERS` | `/v3/history-orders`          | GET    | Filled-history fallback (`fetchExecutions`)                                        |
+| `CREATE_ORDER`   | `/v3/order`                   | POST   | Place a new order (form-urlencoded body with zkLink signature)                     |
+| `CANCEL_ORDER`   | `/v3/delete-order`            | POST   | Cancel a single order by ID (form-urlencoded)                                      |
+| `CANCEL_ORDERS`  | `/v3/delete-open-orders`      | POST   | Cancel all open orders for a symbol (form-urlencoded)                              |
+| `SET_LEVERAGE`   | `/v3/set-initial-margin-rate` | POST   | Set leverage via initial margin rate (`multipart/form-data`)                       |
 
 ### Request Content Types
 
@@ -149,6 +149,7 @@ All endpoints are prefixed with the base URL (`https://omni.apex.exchange/api`):
 The API client has a response interceptor (`apexomni.api.ts:107-115`) that checks for non-zero `code` field in response data and throws with format `[code] msg`.
 
 Execution-history behavior (`fetchExecutions`):
+
 - Calls `/v3/fills` first
 - Uses the rate-limited API client for execution-history polling (to reduce HOW/tunnel timeout bursts from concurrent unlimited requests)
 - Tries symbol variants (`market.id` and `market.symbol`) to handle response/query format drift
@@ -215,6 +216,7 @@ Execution-history behavior (`fetchExecutions`):
 ### Private WebSocket (`apexomni.ws-private.ts`)
 
 **URL**:
+
 - Direct: `wss://quote.omni.apex.exchange/realtime_private?v=2&timestamp=<current>&requestId=<nanoid>` (or testnet equivalent)
 - Proxy (when `tealstreetProxy` is enabled): `wss://fsjnpy143pbz.asia.tealstreet.io/apex/private`
 
@@ -539,10 +541,10 @@ All orders include `brokerId: '6587'` for Tealstreet attribution (`apexomni.exch
 
 ## Testnet/Demo
 
-| Environment | REST Base URL                            | Public WS                                                   | Private WS                                                       |
-| ----------- | ---------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| Livenet     | `https://omni.apex.exchange/api`         | `wss://quote.omni.apex.exchange/realtime_public?v=2&...`    | `wss://quote.omni.apex.exchange/realtime_private?v=2&...` (or proxy when enabled) |
-| Testnet     | `https://testnet.omni.apex.exchange/api` | `wss://qa-quote.omni.apex.exchange/realtime_public?v=2&...` | `wss://qa-quote.omni.apex.exchange/realtime_private?v=2&...` (or proxy when enabled)     |
+| Environment | REST Base URL                            | Public WS                                                   | Private WS                                                                           |
+| ----------- | ---------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Livenet     | `https://omni.apex.exchange/api`         | `wss://quote.omni.apex.exchange/realtime_public?v=2&...`    | `wss://quote.omni.apex.exchange/realtime_private?v=2&...` (or proxy when enabled)    |
+| Testnet     | `https://testnet.omni.apex.exchange/api` | `wss://qa-quote.omni.apex.exchange/realtime_public?v=2&...` | `wss://qa-quote.omni.apex.exchange/realtime_private?v=2&...` (or proxy when enabled) |
 
 Note: Private WS now follows `BASE_WS_URL.private` for livenet/testnet and appends a live timestamp + requestId. Proxy routing is opt-in via `tealstreetProxy`.
 

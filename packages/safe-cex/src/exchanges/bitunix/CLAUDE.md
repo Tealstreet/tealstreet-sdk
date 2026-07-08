@@ -19,7 +19,7 @@
 | `bitunix.exchange.ts`      | Main exchange class extending `BaseExchange` (~1400 lines)              |
 | `bitunix.exchange.test.ts` | Unit tests for positions, order formatting, retry logic, batch ordering |
 | `bitunix.types.ts`         | Type definitions, endpoint constants, type mapping objects              |
-| `bitunix.utils.ts`         | SHA256 hex hashing utility (uses `crypto-js`)                           |
+| `bitunix.utils.ts`         | SHA256 hex hashing utility (uses `@noble/hashes`)                       |
 | `bitunix.ws-futures.ts`    | Futures-specific WebSocket for klines and orderbook (gzip-compressed)   |
 | `bitunix.ws-private.ts`    | Private WebSocket for orders, positions, TP/SL, balance (login auth)    |
 | `bitunix.ws-public.ts`     | Public WebSocket for tickers, mark prices, depth_book1                  |

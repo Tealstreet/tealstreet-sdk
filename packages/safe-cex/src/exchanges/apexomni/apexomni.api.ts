@@ -2,7 +2,6 @@ import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
-import cryptojs from 'crypto-js';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
@@ -10,6 +9,7 @@ import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './apexomni.types';
+import { hmacSha256Base64 } from './apexomni.utils';
 
 const serializeApexPayload = (payload: unknown) => {
   if (payload === undefined || payload === null) return '';
@@ -117,8 +117,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     })();
 
     const key = Buffer.from(options.secret).toString('base64');
-    const hash = cryptojs.HmacSHA256(messageToSign, key);
-    const signature = hash.toString(cryptojs.enc.Base64);
+    const signature = hmacSha256Base64(messageToSign, key);
 
     const headers = new AxiosHeaders({
       ...nextConfig.headers,
@@ -149,8 +148,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // once with the legacy signing path before surfacing the error to the caller.
       const responseCode = Number(response.data.code);
       const responseMessage = `${response.data.msg ?? ''}`;
-      const isSignCheckFailed =
-        responseCode === 20016 || responseCode === 401 || /sign(ature)?/i.test(responseMessage);
+      const isSignCheckFailed = responseCode === 20016 || responseCode === 401 || /sign(ature)?/i.test(responseMessage);
 
       if (isSignCheckFailed && !config.__apexLegacyRetried) {
         return xhr.request({
