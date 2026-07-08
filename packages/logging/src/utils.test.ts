@@ -522,4 +522,67 @@ describe('utils.ts', () => {
       );
     });
   });
+
+  describe('retry mechanism', () => {
+    it('should retry after backoff when fetch rejects (connection failure)', async () => {
+      // fetch always rejects, simulating an offline/connection failure
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      utils.logInfo('Test message');
+      utils.dumpLogQueue();
+
+      // Flush the pending compress()/fetch() microtasks -> first attempt fires
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Advance past the 5s backoff -> the retry must actually re-issue fetch.
+      // On the buggy code the rejection is never caught (fetch not awaited),
+      // so the retry path is dead and this stays at 1.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should treat a non-ok response (e.g. 500) as a failure and retry', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 500 });
+
+      utils.logInfo('Test message');
+      utils.dumpLogQueue();
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // A 500 must be treated as failure and retried after backoff.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should NOT retry when fetch resolves ok', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+      utils.logInfo('Test message');
+      utils.dumpLogQueue();
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // No backoff should have been scheduled; advancing time changes nothing.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should stop retrying once the retry cap is exceeded', async () => {
+      mockFetch.mockRejectedValue(new Error('Persistent network error'));
+
+      utils.logInfo('Test message');
+      utils.dumpLogQueue();
+
+      // Drive far past the cap. Attempts run for retries 0..5 (guard drops
+      // retries > 5), so fetch is issued exactly 6 times and then stops.
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(5_000);
+      }
+
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+    });
+  });
 });
