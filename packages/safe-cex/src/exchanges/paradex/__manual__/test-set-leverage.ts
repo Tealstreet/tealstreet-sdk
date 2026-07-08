@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
-import { ParadexExchange } from './paradex.exchange';
-import { DefaultStore } from '../../store/store.base';
-import type { ExchangeOptions } from '../../types';
+import { ParadexExchange } from '../paradex.exchange';
+import { DefaultStore } from '../../../store/store.base';
+import type { ExchangeOptions } from '../../../types';
 
 const test = async () => {
   console.log('🔍 Testing Paradex Set Leverage for BTC-USD-PERP...\n');

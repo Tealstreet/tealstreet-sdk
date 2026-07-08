@@ -2,7 +2,7 @@ import type { AxiosRequestConfig } from 'axios';
 
 import { LighterApiClient, LighterApiError, TransactionClient } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
-import { getBaseUrl, RECV_WINDOW } from './lighter.types';
+import { getBaseUrl, RECV_WINDOW } from '../lighter.types';
 
 type RuntimeProcess = {
   env?: Record<string, string | undefined>;

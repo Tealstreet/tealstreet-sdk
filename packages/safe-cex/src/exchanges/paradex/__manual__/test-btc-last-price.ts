@@ -7,9 +7,9 @@
  */
 
 import { readFileSync } from 'fs';
-import { ParadexExchange } from './paradex.exchange';
-import { DefaultStore } from '../../store/store.base';
-import type { ExchangeOptions } from '../../types';
+import { ParadexExchange } from '../paradex.exchange';
+import { DefaultStore } from '../../../store/store.base';
+import type { ExchangeOptions } from '../../../types';
 
 async function testBTCLastPrice() {
   console.log('🔍 Testing BTC-USD-PERP Last Price Updates (45 seconds)...\n');

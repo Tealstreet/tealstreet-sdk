@@ -1,5 +1,5 @@
-import { ParadexExchange } from './paradex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { ParadexExchange } from '../paradex.exchange';
+import { DefaultStore } from '../../../store/store.base';
 
 const test = async () => {
   console.log('Testing Paradex setLeverage for ETH-USD-PERP...');

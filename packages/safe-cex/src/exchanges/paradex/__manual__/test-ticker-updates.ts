@@ -4,9 +4,9 @@
  */
 
 import { readFileSync } from 'fs';
-import { ParadexExchange } from './paradex.exchange';
-import { DefaultStore } from '../../store/store.base';
-import type { ExchangeOptions } from '../../types';
+import { ParadexExchange } from '../paradex.exchange';
+import { DefaultStore } from '../../../store/store.base';
+import type { ExchangeOptions } from '../../../types';
 
 async function testTickerUpdates() {
   console.log('🔍 Testing Paradex Ticker Updates from Trades Feed...\n');

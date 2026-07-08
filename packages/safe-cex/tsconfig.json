@@ -30,7 +30,7 @@
       "@tealstreet/poseidon-crypto/src": ["../poseidon-crypto/src"]
     }
   },
-  "exclude": ["**/node_modules", "**/.*/*", "dist"],
+  "exclude": ["**/node_modules", "**/.*/*", "**/__manual__/**", "dist"],
   "include": [
     ".eslintrc.*",
     "**/*.ts",
