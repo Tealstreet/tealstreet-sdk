@@ -38,6 +38,16 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
   constructor(parent: AsterDEXExchange, _store: Store) {
     super(parent);
+
+    // BaseWebSocket.onClose is an instance arrow-function field (not a
+    // prototype method), so retain the base instance handler and wrap it.
+    const baseOnClose = this.onClose;
+    this.onClose = (event?: any): void => {
+      this.clearListenKeyRefreshTimer();
+      this.clearListenKeyWatchdogTimer();
+
+      baseOnClose(event);
+    };
   }
 
   connectAndSubscribe = async () => {
@@ -85,16 +95,6 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
         // Fetch initial snapshot of private data
         this.parent.fetchAndSetPrivateSnapshot(10);
       }
-    }
-  };
-
-  protected onClose = (event?: any): void => {
-    this.clearListenKeyRefreshTimer();
-    this.clearListenKeyWatchdogTimer();
-
-    const parentProto = Object.getPrototypeOf(Object.getPrototypeOf(this));
-    if (parentProto.onClose) {
-      parentProto.onClose.call(this, event);
     }
   };
 
@@ -577,10 +577,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.clearListenKeyWatchdogTimer();
     this.clearConnectRetryTimer();
 
-    // Call parent dispose
-    const parentProto = Object.getPrototypeOf(Object.getPrototypeOf(this));
-    if (parentProto.dispose) {
-      parentProto.dispose.call(this);
-    }
+    // Call parent dispose (regular prototype method, so super works here)
+    super.dispose();
   };
 }

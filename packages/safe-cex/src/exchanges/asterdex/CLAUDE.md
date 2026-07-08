@@ -107,24 +107,24 @@ Private-mode checks are based on `!isPublicDataOnly` (which now respects V3 auth
 
 Most endpoints use `/fapi/{apiVersion}/...` where `apiVersion` is `v1` or `v3`.
 
-| Endpoint (logical) | V1 Path | V3 Path | Notes |
-| --- | --- | --- | --- |
-| account | `/fapi/v4/account` | `/fapi/v3/account` | V1 keeps v4 account endpoint |
-| position risk | `/fapi/v1/positionRisk` | `/fapi/v3/positionRisk` | signed |
-| open orders | `/fapi/v1/openOrders` | `/fapi/v3/openOrders` | signed |
-| order place/cancel | `/fapi/v1/order` | `/fapi/v3/order` | signed |
-| exchange info | `/fapi/v1/exchangeInfo` | `/fapi/v3/exchangeInfo` | public |
-| leverage bracket | `/fapi/v1/leverageBracket` | `/fapi/v3/leverageBracket` | signed |
-| ticker 24h | `/fapi/v1/ticker/24hr` | `/fapi/v3/ticker/24hr` | public |
-| klines | `/fapi/v1/klines` | `/fapi/v3/klines` | public |
-| depth | `/fapi/v1/depth` | `/fapi/v3/depth` | public |
-| trades | `/fapi/v1/trades` | `/fapi/v3/trades` | public |
-| user trades | `/fapi/v1/userTrades` | `/fapi/v3/userTrades` | signed |
-| leverage | `/fapi/v1/leverage` | `/fapi/v3/leverage` | signed |
-| position mode | `/fapi/v1/positionSide/dual` | `/fapi/v3/positionSide/dual` | signed |
-| margin type | `/fapi/v1/marginType` | `/fapi/v3/marginType` | signed |
-| listen key | `/fapi/v1/listenKey` | `/fapi/v3/listenKey` | private WS lifecycle |
-| time | `/fapi/v1/time` | `/fapi/v3/time` | public |
+| Endpoint (logical) | V1 Path                      | V3 Path                      | Notes                        |
+| ------------------ | ---------------------------- | ---------------------------- | ---------------------------- |
+| account            | `/fapi/v4/account`           | `/fapi/v3/account`           | V1 keeps v4 account endpoint |
+| position risk      | `/fapi/v1/positionRisk`      | `/fapi/v3/positionRisk`      | signed                       |
+| open orders        | `/fapi/v1/openOrders`        | `/fapi/v3/openOrders`        | signed                       |
+| order place/cancel | `/fapi/v1/order`             | `/fapi/v3/order`             | signed                       |
+| exchange info      | `/fapi/v1/exchangeInfo`      | `/fapi/v3/exchangeInfo`      | public                       |
+| leverage bracket   | `/fapi/v1/leverageBracket`   | `/fapi/v3/leverageBracket`   | signed                       |
+| ticker 24h         | `/fapi/v1/ticker/24hr`       | `/fapi/v3/ticker/24hr`       | public                       |
+| klines             | `/fapi/v1/klines`            | `/fapi/v3/klines`            | public                       |
+| depth              | `/fapi/v1/depth`             | `/fapi/v3/depth`             | public                       |
+| trades             | `/fapi/v1/trades`            | `/fapi/v3/trades`            | public                       |
+| user trades        | `/fapi/v1/userTrades`        | `/fapi/v3/userTrades`        | signed                       |
+| leverage           | `/fapi/v1/leverage`          | `/fapi/v3/leverage`          | signed                       |
+| position mode      | `/fapi/v1/positionSide/dual` | `/fapi/v3/positionSide/dual` | signed                       |
+| margin type        | `/fapi/v1/marginType`        | `/fapi/v3/marginType`        | signed                       |
+| listen key         | `/fapi/v1/listenKey`         | `/fapi/v3/listenKey`         | private WS lifecycle         |
+| time               | `/fapi/v1/time`              | `/fapi/v3/time`              | public                       |
 
 ## WebSocket Implementation
 
@@ -392,6 +392,8 @@ Four API instances with different rate limits (`asterdex.api.ts:294-323`):
 Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.types.ts:5`). WebSocket URLs are not differentiated for testnet in the current implementation.
 
 ## Known Quirks / Implementation Notes
+
+0. **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern, matching `bitmex.ws-private.ts`) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
 
 1. **Update order not supported**: AsterDEX has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one.
 1. **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).

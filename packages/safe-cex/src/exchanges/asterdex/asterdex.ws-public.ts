@@ -35,6 +35,20 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
   constructor(parent: AsterDEXExchange, _store: Store) {
     super(parent);
+
+    // BaseWebSocket.onClose is an instance arrow-function field (not a
+    // prototype method), so retain the base instance handler and wrap it.
+    const baseOnClose = this.onClose;
+    this.onClose = (event?: any): void => {
+      // console.log('AsterDEX public WebSocket connection closed');
+
+      // Reset initialization state on close but keep topics for reconnection
+      this.wsReady = false;
+      this.pendingSubscriptions = [];
+      // DON'T clear topics here - we need them for reconnection!
+
+      baseOnClose(event);
+    };
   }
 
   get connectionURL(): string {
@@ -67,21 +81,6 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
   private pendingSubscriptions: Array<() => void> = [];
   private wsReady = false;
-
-  protected onClose = () => {
-    // console.log('AsterDEX public WebSocket connection closed');
-
-    // Reset initialization state on close but keep topics for reconnection
-    this.wsReady = false;
-    this.pendingSubscriptions = [];
-    // DON'T clear topics here - we need them for reconnection!
-
-    // Call parent's onClose implementation
-    const parentProto = Object.getPrototypeOf(Object.getPrototypeOf(this));
-    if (parentProto.onClose) {
-      parentProto.onClose.call(this);
-    }
-  };
 
   onOpen = () => {
     if (!this.isDisposed) {
@@ -735,10 +734,7 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.topics = {};
     this.pendingSubscriptions = [];
     this.wsReady = false;
-    // Call parent dispose
-    const parentProto = Object.getPrototypeOf(Object.getPrototypeOf(this));
-    if (parentProto.dispose) {
-      parentProto.dispose.call(this);
-    }
+    // Call parent dispose (regular prototype method, so super works here)
+    super.dispose();
   };
 }
