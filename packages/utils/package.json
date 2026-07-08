@@ -16,6 +16,7 @@
     "typecheck": "tsc --project ./tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@tealstreet/compression": "*",
     "@tealstreet/math": "*",
     "@tealstreet/sleep": "*",
     "dequal": "^2.0.3",
