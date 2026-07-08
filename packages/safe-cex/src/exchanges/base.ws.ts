@@ -83,7 +83,7 @@ const WS_CLOSE_CODE_DESCRIPTIONS: Record<number, string> = {
  * Get a human-readable description for a WebSocket close code
  */
 export function getCloseCodeDescription(code: number): string {
-  return WS_CLOSE_CODE_DESCRIPTIONS[code] || `Unknown close code`;
+  return WS_CLOSE_CODE_DESCRIPTIONS[code] || `Unknown close code (${code})`;
 }
 
 /*
@@ -867,6 +867,7 @@ export class BaseWebSocket<T extends BaseExchange> {
         LogSeverity.Error,
       );
       clearTimeout(this.lastReceivedTimer);
+      this.lastReceivedTimer = undefined;
       this.lastReceived = 0;
       this.pingSent = false;
       this.reconnect();

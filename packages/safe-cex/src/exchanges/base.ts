@@ -1302,34 +1302,11 @@ export class BaseExchange implements Exchange {
 
   /** Aggregates socket health from all websockets and syncs to store */
   public syncSocketHealthToStore = () => {
-    // Start watchdog on first sync (when websockets start receiving messages)
+    // Start watchdog on first sync (when websockets start receiving messages).
+    // startWatchdog is idempotent; the aggregation itself lives in the internal
+    // variant, which the watchdog audit also calls.
     this.startWatchdog();
-
-    const publicSockets = this.getPublicSockets();
-    const privateSockets = this.getPrivateSockets();
-
-    // Aggregate public socket health
-    const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
-    const publicHealthy = initializedPublicSockets.length === 0 || initializedPublicSockets.some((s) => s.isHealthy);
-    const publicInitialized = initializedPublicSockets.length > 0;
-    const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
-    const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
-
-    // Aggregate private socket health
-    const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
-    const privateHealthy = initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy);
-    const privateInitialized = initializedPrivateSockets.length > 0;
-    const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
-    const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
-
-    this.store.updateSocketHealth({
-      publicHealthy,
-      privateHealthy,
-      publicInitialized,
-      privateInitialized,
-      publicLastMessage,
-      privateLastMessage,
-    });
+    this.syncSocketHealthToStoreInternal();
   };
 
   /** Starts the watchdog timer to detect stuck websockets */
