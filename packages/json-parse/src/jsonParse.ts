@@ -9,7 +9,7 @@ export const jsonParse = <T extends Record<string, any>>(str: string): T | null 
 // Pre-compiled regex for better performance
 const BIG_INT_TEST_REGEX = /[0-9]{16,}/;
 // Match big integers after colon (object values), comma, or bracket (array elements)
-const BIG_INT_REPLACE_REGEX = /([:,[\]]\s*)([0-9]{16,})(?![0-9"])/g;
+const BIG_INT_REPLACE_REGEX = /([:,[\]]\s*)(-?[0-9]{16,})(?![0-9."eE])/g;
 
 export const bigIntAsStringJsonParse = <T extends Record<string, any>>(str: string): T | null => {
   if (typeof str !== 'string') {
