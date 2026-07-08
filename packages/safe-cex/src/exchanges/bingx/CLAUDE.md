@@ -83,8 +83,8 @@ BingX uses BigInt order IDs that exceed JavaScript's `Number.MAX_SAFE_INTEGER`. 
 The `axiosHttpOverWebsocketAdapter` is enabled for non-public-data-only
 clients **unless** `options.tealstreetTunnel === false` (`bingx.api.ts:44–51`).
 Browser callers leave the flag undefined and inherit the tunnel; headless
-callers (e.g. `llt/copytrader/`) set it to `false` explicitly and use
-direct REST. The previous unconditional behavior crashed in Node where
+callers (Node/Bun services with direct egress) set it to `false`
+explicitly and use direct REST. The previous unconditional behavior crashed in Node where
 the tunnel infrastructure isn't reachable.
 
 ## Startup Sequence

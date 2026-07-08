@@ -43,7 +43,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   // Browser callers go through the HTTP-over-WebSocket tunnel by default
   // (BingX requires CORS + the tunnel hops through tealstreet's proxy IPs).
-  // Headless callers (e.g. the copytrader engine) have direct egress and
+  // Headless callers (Node/Bun services) have direct egress and
   // opt out via `tealstreetTunnel: false`. Keeping the gate explicit so a
   // future audit doesn't reintroduce the unconditional adapter.
   if (!options.publicDataOnly && options.tealstreetTunnel !== false) {
