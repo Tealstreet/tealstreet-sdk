@@ -129,13 +129,21 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: nu
       ],
     };
     const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-    fetch(`${baseUrl}/api/logs`, {
+    // NOTE: body is a gzip ArrayBuffer sent with Content-Type: 'application/json';
+    // the /api/logs route decompresses it. That header/body mismatch is intentional.
+    // The fetch MUST be awaited and response.ok checked — otherwise a rejected
+    // request (offline/connection failure) or a 5xx never reaches the catch below,
+    // leaving the retry path dead and dropping the already-cleared batch.
+    const response = await fetch(`${baseUrl}/api/logs`, {
       method: 'POST',
       body: await compress(JSON.stringify(nr)),
       headers: {
         'Content-Type': 'application/json',
       },
     });
+    if (!response.ok) {
+      throw new Error(`Logs API responded with status ${response.status}`);
+    }
   } catch (ir) {
     // Use console.error to avoid recursive calls
     console.error(`Error in startLoggingToGrafana: ${ir}. Retrying in 5s`);
