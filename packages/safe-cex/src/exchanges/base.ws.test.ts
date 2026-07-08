@@ -48,10 +48,18 @@ describe('getCloseCodeDescription', () => {
     expect(getCloseCodeDescription(1015)).toBe('TLS handshake failure');
   });
 
-  it('should return unknown for unrecognized close codes', () => {
-    expect(getCloseCodeDescription(9999)).toBe('Unknown close code');
-    expect(getCloseCodeDescription(0)).toBe('Unknown close code');
-    expect(getCloseCodeDescription(-1)).toBe('Unknown close code');
+  it('should return unknown for unrecognized close codes, including the code', () => {
+    expect(getCloseCodeDescription(9999)).toBe('Unknown close code (9999)');
+    expect(getCloseCodeDescription(0)).toBe('Unknown close code (0)');
+    expect(getCloseCodeDescription(-1)).toBe('Unknown close code (-1)');
+  });
+
+  it('should not collapse distinct vendor-specific close codes (3000-4999) to the same string', () => {
+    const a = getCloseCodeDescription(4001);
+    const b = getCloseCodeDescription(4002);
+    expect(a).toBe('Unknown close code (4001)');
+    expect(b).toBe('Unknown close code (4002)');
+    expect(a).not.toBe(b);
   });
 });
 
