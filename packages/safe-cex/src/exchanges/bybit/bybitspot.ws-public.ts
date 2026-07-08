@@ -177,7 +177,9 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
       const hasPrefix = prefix && prefix.length > 0;
       if (!hasExact && !hasPrefix) return;
 
-      this.recordMessageHandlerStats(fullTopic);
+      // Record stats under the key that actually matched — prefix key when
+      // only a prefix handler fired. See linear ws-public for rationale.
+      this.recordMessageHandlerStats(hasExact ? fullTopic : fullTopic.slice(0, dotIdx));
       const json = jsonParse(data);
       if (!json) return;
       // Indexed for-loop — see linear ws-public for rationale.

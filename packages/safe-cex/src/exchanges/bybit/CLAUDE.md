@@ -718,8 +718,13 @@ applications in this directory:
   lookup**, with a first-segment prefix fallback for handlers keyed by
   short prefix (`tickers`, `kline`). Don't reintroduce the
   `Object.entries + data.includes(\`topic":"${topic}\`)` walk — it was
-  removed because every WS frame paid N substring scans (one per
-  registered handler) over multi-KB payloads.
+removed because every WS frame paid N substring scans (one per
+registered handler) over multi-KB payloads. **`recordMessageHandlerStats`
+must be called with the handler key that matched, not the raw wire
+topic** — on a prefix-only match (`tickers`, `kline`) record the prefix
+key. Recording `fullTopic`there once ballooned`messageHandlersStats`
+  to one entry per subscribed symbol (~600 on linear) and put every
+  ticker under reconnect-banner performance tracking.
 - **Orderbook deltas don't trail a `sortOrderBook`.** Bybit V5 sends
   snapshots pre-sorted (bids DESC, asks ASC) and `updateOrderBook` does
   binary-search sorted insertion. The trailing sort that used to live

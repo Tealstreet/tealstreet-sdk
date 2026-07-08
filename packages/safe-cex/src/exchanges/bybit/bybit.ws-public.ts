@@ -160,7 +160,13 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
       const hasPrefix = prefix && prefix.length > 0;
       if (!hasExact && !hasPrefix) return;
 
-      this.recordMessageHandlerStats(fullTopic);
+      // Record stats under the key that actually matched. When only a
+      // prefix handler fired (e.g. the single 'tickers' handler covering
+      // every tickers.<symbol> frame), recording the full per-symbol wire
+      // topic would grow messageHandlersStats by one entry per subscribed
+      // symbol (~600 on linear) and put every ticker under
+      // reconnect-banner tracking.
+      this.recordMessageHandlerStats(hasExact ? fullTopic : fullTopic.slice(0, dotIdx));
       const json = jsonParse(data);
       if (!json) return;
       // Indexed for-loop instead of `for...of` over the handler array
