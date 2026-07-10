@@ -68,6 +68,13 @@ import { BinancePublicWebsocket } from './binance.ws-public';
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
   private hasLoggedBalanceAggregation = false;
+  private positionStateVersion = 0;
+
+  markPositionStateUpdatedByWebsocket = () => {
+    this.positionStateVersion += 1;
+  };
+
+  getPositionStateVersion = () => this.positionStateVersion;
 
   // Helper to detect if availableBalance is 0 but user has stablecoin balances
   detectBalanceIssue(_accountData: any): boolean {
@@ -241,16 +248,20 @@ export class BinanceExchange extends BaseExchange {
     if (!this.isDisposed) {
       try {
         if (count % 16 === 0) {
+          const positionStateVersion = this.getPositionStateVersion();
           const positionsWithRisk = await this.fetchPositions();
-          this.store.update({ positions: positionsWithRisk });
+          if (positionStateVersion === this.getPositionStateVersion()) {
+            this.store.update({ positions: positionsWithRisk });
+          }
           if (this.isDisposed) return;
         }
+        const positionStateVersion = this.getPositionStateVersion();
         const { balance, positions } = await this.fetchPositionsAndBalance();
         if (this.isDisposed) return;
 
         this.store.update({
           balance,
-          positions,
+          ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
           loaded: {
             ...this.store.loaded,
             balance: true,

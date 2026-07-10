@@ -532,6 +532,8 @@ The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with ma
 
 **Merge strategy** (`binance.exchange.ts:574-607`): When processing `/fapi/v2/account`, the code finds the existing position in the store by ID and spreads it (`...foundPosition`) before overwriting with fresh data. This preserves fields from `/positionRisk` (like liquidation price) that are not present in `/account` responses.
 
+**Stale snapshot guard**: Every WS position event advances a shared position-state version. Both event-triggered `/positionRisk` repairs and periodic `/account`/`positionRisk` snapshots capture that version before requesting; if a newer WS event arrives before the response, its position rows are discarded. `/account` balance data and loaded flags still commit because they are independent of the stale position rows.
+
 ### Order Reconciliation
 
 **WebSocket real-time updates**: `ORDER_TRADE_UPDATE` and `ALGO_UPDATE` events apply immediate order status changes (NEW, FILLED, CANCELED, etc.) to the store.

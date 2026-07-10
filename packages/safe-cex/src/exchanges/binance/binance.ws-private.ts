@@ -15,7 +15,6 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private positionFetchScheduled = false;
   private positionFetchInFlight = false;
   private hasPendingPositionEvents = false;
-  private positionEventVersion = 0;
   private ordersThrottleTimeout?: NodeJS.Timeout;
 
   connectAndSubscribe = async () => {
@@ -227,7 +226,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   handleAccountEvents = (events: Array<Record<string, any>>) => {
     events.forEach((event) => {
       if (event.a?.P?.length) {
-        this.positionEventVersion += 1;
+        this.parent.markPositionStateUpdatedByWebsocket();
         this.hasPendingPositionEvents = true;
         this.throttledFetchPositions();
       }
@@ -308,14 +307,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private executePositionFetch = async () => {
     if (this.positionFetchInFlight || this.isDisposed) return;
 
-    const eventVersionAtStart = this.positionEventVersion;
+    const eventVersionAtStart = this.parent.getPositionStateVersion();
     this.positionFetchInFlight = true;
     this.lastPositionFetchTime = Date.now();
     this.hasPendingPositionEvents = false;
 
     try {
       const positions = await this.parent.fetchPositions();
-      if (!this.isDisposed && eventVersionAtStart === this.positionEventVersion) {
+      if (!this.isDisposed && eventVersionAtStart === this.parent.getPositionStateVersion()) {
         this.store.addOrUpdatePositionsFull(positions);
       }
     } catch {

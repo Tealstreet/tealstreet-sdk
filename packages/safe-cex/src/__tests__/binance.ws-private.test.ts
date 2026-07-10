@@ -13,6 +13,7 @@ describe('Binance private websocket position refresh', () => {
     const positions = [{ id: 'BTCUSDT:long', liquidationPrice: 45000 }];
     const parent = {
       isDisposed: false,
+      getPositionStateVersion: vi.fn().mockReturnValue(0),
       fetchPositions: vi.fn().mockResolvedValue(positions),
       store: {
         addOrUpdatePositionsFull: vi.fn(),
@@ -30,6 +31,7 @@ describe('Binance private websocket position refresh', () => {
     const positions = [{ id: 'ETHUSDT:short', liquidationPrice: 2500 }];
     const parent = {
       isDisposed: false,
+      getPositionStateVersion: vi.fn().mockReturnValue(0),
       fetchPositions: vi.fn().mockResolvedValue(positions),
       store: {
         addOrUpdatePositionsFull: vi.fn(),
@@ -46,6 +48,7 @@ describe('Binance private websocket position refresh', () => {
   it('creates a new one-way position immediately and schedules a full repair', () => {
     const parent = {
       isDisposed: false,
+      markPositionStateUpdatedByWebsocket: vi.fn(),
       fetchPositions: vi.fn().mockResolvedValue([]),
       store: {
         positions: [],
@@ -92,6 +95,7 @@ describe('Binance private websocket position refresh', () => {
     };
     const parent = {
       isDisposed: false,
+      markPositionStateUpdatedByWebsocket: vi.fn(),
       fetchPositions: vi.fn().mockResolvedValue([]),
       store: {
         positions: [existing],
@@ -113,6 +117,7 @@ describe('Binance private websocket position refresh', () => {
   it('does not create unknown zero-size websocket positions', () => {
     const parent = {
       isDisposed: false,
+      markPositionStateUpdatedByWebsocket: vi.fn(),
       store: {
         positions: [],
         addOrUpdatePosition: vi.fn(),
@@ -135,6 +140,13 @@ describe('Binance private websocket position refresh', () => {
     const freshPositions = [{ id: 'BTCUSDT', contracts: 2, liquidationPrice: 45000 }];
     const parent = {
       isDisposed: false,
+      positionStateVersion: 0,
+      markPositionStateUpdatedByWebsocket: vi.fn(function (this: { positionStateVersion: number }) {
+        this.positionStateVersion += 1;
+      }),
+      getPositionStateVersion: vi.fn(function (this: { positionStateVersion: number }) {
+        return this.positionStateVersion;
+      }),
       fetchPositions: vi.fn().mockReturnValueOnce(firstFetch).mockResolvedValueOnce(freshPositions),
       store: {
         positions: [],
