@@ -3,7 +3,7 @@
 Private proxy IP addresses database organized by region.
 
 - **Key file**: `src/index.ts`
-- **Exports**: `privateProxyIpsSingapore`, `privateProxyIpsFrankfurt`, `privateProxyIpsTokyo`, `tokyoK8sNatGatewayIp`, `wsProxyIps`, `exchangesRequireWsIp`
+- **Exports**: `privateProxyIpsSingapore`, `privateProxyIpsTokyo`, `tokyoK8sNatGatewayIp`, `wsProxyIps`, `exchangesRequireWsIp`
 - **Build**: `yarn build-force` (tsup)
 - **Note**: Data-only package. Lists exchanges that require WebSocket proxy.
   `tokyoK8sNatGatewayIp` is not part of `privateProxyIpsTokyo`; it is the
@@ -17,3 +17,5 @@ Private proxy IP addresses database organized by region.
   form's region field reads back `undefined` on first render, so a strict equality
   silently drops `tokyoK8sNatGatewayIp` from the suggested whitelist until the
   user touches the selector.
+- The former Frankfurt private proxy pool was retired in July 2026. Do not add
+  its released addresses back to user-facing allowlist suggestions.

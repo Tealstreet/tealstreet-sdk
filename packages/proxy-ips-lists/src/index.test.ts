@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   exchangesRequireWsIp,
-  privateProxyIpsFrankfurt,
   privateProxyIpsSingapore,
   privateProxyIpsTokyo,
   privateProxyIpsTokyoSmallPP,
@@ -40,24 +39,6 @@ describe('privateProxyIpsSingapore', () => {
   it('should contain unique IP addresses', () => {
     const uniqueIps = new Set(privateProxyIpsSingapore);
     expect(uniqueIps.size).toBe(privateProxyIpsSingapore.length);
-  });
-});
-
-describe('privateProxyIpsFrankfurt', () => {
-  it('should export a non-empty array', () => {
-    expect(Array.isArray(privateProxyIpsFrankfurt)).toBe(true);
-    expect(privateProxyIpsFrankfurt.length).toBeGreaterThan(0);
-  });
-
-  it('should contain valid IPv4 addresses', () => {
-    privateProxyIpsFrankfurt.forEach((ip) => {
-      expect(isValidIPv4(ip)).toBe(true);
-    });
-  });
-
-  it('should contain unique IP addresses', () => {
-    const uniqueIps = new Set(privateProxyIpsFrankfurt);
-    expect(uniqueIps.size).toBe(privateProxyIpsFrankfurt.length);
   });
 });
 
