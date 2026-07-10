@@ -105,7 +105,7 @@ All three variants follow the same high-level pattern, with variant-specific dif
 
 1. **`privateWebsocket.connectAndSubscribe()`** -- Fetches listen key via `POST /fapi/v1/listenKey`, opens WebSocket to `wss://fstream.binance.com/private/ws?listenKey={listenKey}` (post-2026-04-23 format; the old `/ws/{listenKey}` path was decommissioned). Non-blocking.
 2. **`fetchPositionMode()`** -- `GET /fapi/v1/positionSide/dual`. Sets `isHedged` store setting based on `dualSidePosition`.
-3. **`tick()`** -- First tick executes immediately (count=0 triggers `fetchPositions()`), then calls `fetchPositionsAndBalance()`. Starts a 30s REST reconciliation loop; private WebSocket `ACCOUNT_UPDATE` events remain the real-time position path. Detailed `positionRisk` is refreshed every third tick (about 90s).
+3. **`tick()`** -- First tick executes immediately (count=0, so `count % 16 === 0` triggers `fetchPositions()`), then calls `fetchPositionsAndBalance()`. Starts the 5s tick loop.
 4. **`fetchOrders()`** -- Two parallel calls: `GET /fapi/v1/openOrders` + `GET /fapi/v1/openAlgoOrders?algoType=CONDITIONAL`. Merges regular + algo orders. Updates store.
 5. **`fetchPositions()`** -- Background call (no await), kicks off a detailed `GET /fapi/v2/positionRisk` fetch.
 
@@ -523,8 +523,8 @@ The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with ma
 
 **REST full snapshots**: Two REST endpoints provide position data at different detail levels:
 
-1. **`/fapi/v2/account`** (every 30s via `tick()`): Returns positions with entry price, contracts, unrealized PnL, leverage, isolated flag. Does NOT include liquidation price or adlQuantile. This is deliberately a fallback reconciliation rather than the real-time path: the endpoint returns every position row and was the dominant TradeTunnel byte source when polled every 5s.
-2. **`/fapi/v2/positionRisk`** (every ~90s, every third reconciliation tick, and after WS account-update throttled refreshes): Returns full position risk data including liquidation price, margin type, max notional, and adlQuantile.
+1. **`/fapi/v2/account`** (every 5s via `tick()`): Returns positions with entry price, contracts, unrealized PnL, leverage, isolated flag. Does NOT include liquidation price or adlQuantile.
+2. **`/fapi/v2/positionRisk`** (every ~80s, at `count % 16 === 0`, and after WS account-update throttled refreshes): Returns full position risk data including liquidation price, margin type, max notional, and adlQuantile.
 
 **Merge strategy** (`binance.exchange.ts:574-607`): When processing `/fapi/v2/account`, the code finds the existing position in the store by ID and spreads it (`...foundPosition`) before overwriting with fresh data. This preserves fields from `/positionRisk` (like liquidation price) that are not present in `/account` responses.
 
@@ -731,7 +731,7 @@ All three variants set `doesNotSupportOpenInterest: true` in metadata, and `open
 
 ### Tick Polling
 
-Futures reconciles `/account` every 30 seconds because the private WebSocket is the real-time position path. Full position risk data (via `/positionRisk`) is re-fetched every third tick (~90 seconds) to get detailed info like liquidation price, and is also committed after private WS account-update throttled position refreshes. PM retains its 5-second `/balance` tick and 16-tick (~80-second) position-risk cadence because its response is materially smaller. Spot uses `options.extra?.tickInterval` for its interval.
+Futures and PM tick every 5 seconds. Full position risk data (via `/positionRisk`) is re-fetched every 16th tick (~80 seconds) to get detailed info like liquidation price, and is also committed after private WS account-update throttled position refreshes. The intervening ticks use `/account` (futures) or `/balance` (PM) for lighter updates. Spot uses `options.extra?.tickInterval` for its interval.
 
 ## Error Handling
 

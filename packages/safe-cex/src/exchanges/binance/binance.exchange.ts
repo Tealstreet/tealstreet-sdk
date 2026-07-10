@@ -65,9 +65,6 @@ import {
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
 
-const ACCOUNT_RECONCILIATION_INTERVAL_MS = 30_000;
-const POSITION_RISK_RECONCILIATION_EVERY_TICKS = 3;
-
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
   private hasLoggedBalanceAggregation = false;
@@ -243,7 +240,7 @@ export class BinanceExchange extends BaseExchange {
   tick = async (count = 0) => {
     if (!this.isDisposed) {
       try {
-        if (count % POSITION_RISK_RECONCILIATION_EVERY_TICKS === 0) {
+        if (count % 16 === 0) {
           const positionsWithRisk = await this.fetchPositions();
           this.store.update({ positions: positionsWithRisk });
           if (this.isDisposed) return;
@@ -265,7 +262,7 @@ export class BinanceExchange extends BaseExchange {
       }
 
       if (!this.isDisposed) {
-        loop(() => this.tick(count + 1), ACCOUNT_RECONCILIATION_INTERVAL_MS);
+        loop(() => this.tick(count + 1), 5_000);
       }
     }
   };
