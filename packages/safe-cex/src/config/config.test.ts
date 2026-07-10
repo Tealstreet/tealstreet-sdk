@@ -56,8 +56,8 @@ describe('config', () => {
       expect(typeof ENABLE_RECONNECTING_WEBSOCKET).toBe('boolean');
     });
 
-    it('should have ENABLE_PWS_LOG as true', () => {
-      expect(ENABLE_PWS_LOG).toBe(true);
+    it('should disable raw private WebSocket logging by default', () => {
+      expect(ENABLE_PWS_LOG).toBe(false);
     });
   });
 

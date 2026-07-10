@@ -4,6 +4,7 @@ import { RingBuffer } from '@tealstreet/data-structures/src/RingBuffer';
 import { Options, ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
+  ENABLE_PWS_LOG,
   ENABLE_RECONNECTING_WEBSOCKET,
   ENABLE_WS_LIFECYCLE_DEBUG_LOGS,
   RECONNECTING_WEBSOCKET_TUNING,
@@ -255,7 +256,7 @@ export class BaseWebSocket<T extends BaseExchange> {
 
   sendWithLog = (data: string) => {
     this.send(data);
-    this.parent.emitter.emit('grafana-pws-sub', `${data}`);
+    if (ENABLE_PWS_LOG) this.parent.emitter.emit('grafana-pws-sub', `${data}`);
   };
 
   emitAndLogError(err: string | Error, msg?: string, extraData?: Record<string, any>) {
