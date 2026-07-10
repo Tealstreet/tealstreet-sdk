@@ -51,6 +51,7 @@ describe('utils.ts', () => {
 
     // Dynamically import the module to ensure fresh state
     utils = await import('./utils');
+    utils.resetLoggingStateForTests();
   });
 
   afterEach(() => {

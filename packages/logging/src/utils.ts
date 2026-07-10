@@ -23,12 +23,24 @@ let localUserId = '';
 let sessionKey = nanoid();
 let flushInterval: ReturnType<typeof setInterval> | undefined;
 let visibilityListener: (() => void) | undefined;
+let uploadInProgress = false;
+let pendingLogBatches: Array<typeof logQueue> = [];
 
 const LOG_FLUSH_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
 const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_PENDING_LOG_BATCHES = 3;
 
 export const getSessionKey = () => sessionKey;
+
+// Test-only reset for module-scoped queues. Production code must use the
+// lifecycle returned by startLoggingToGrafana instead.
+export const resetLoggingStateForTests = () => {
+  logQueue = [];
+  logQueueSizeApprox = 0;
+  pendingLogBatches = [];
+  uploadInProgress = false;
+};
 
 function splitStringByBytes(input: string, byteSize: number = 200000): string[] {
   const buffer = Buffer.from(input, 'utf-8');
@@ -87,7 +99,17 @@ export const dumpLogQueue = () => {
   const ir = [...logQueue];
   logQueue = [];
   logQueueSizeApprox = 0;
-  sendToGrafana(localUserId, ir);
+  if (ir.length === 0) return;
+
+  // A noisy source can pressure-flush faster than the network can complete.
+  // Keep only a bounded amount of diagnostic data and never fan it out into
+  // parallel Vercel function invocations.
+  if (pendingLogBatches.length >= MAX_PENDING_LOG_BATCHES) {
+    pendingLogBatches.shift();
+    console.warn('[Logging] Dropped oldest pending batch because the upload queue is full');
+  }
+  pendingLogBatches.push(ir);
+  void drainLogBatches();
 };
 
 export const startLoggingToGrafana = (userId: string) => {
@@ -110,13 +132,16 @@ export const startLoggingToGrafana = (userId: string) => {
   const activeVisibilityListener = () => {
     if (document.visibilityState === 'visible') {
       flushIfVisible();
+      void drainLogBatches();
     }
   };
+  const activeOnlineListener = () => void drainLogBatches();
   flushInterval = activeFlushInterval;
   visibilityListener = activeVisibilityListener;
 
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', activeVisibilityListener);
+    window.addEventListener('online', activeOnlineListener);
   }
 
   return () => {
@@ -126,12 +151,37 @@ export const startLoggingToGrafana = (userId: string) => {
     }
     if (visibilityListener === activeVisibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', activeVisibilityListener);
+      window.removeEventListener('online', activeOnlineListener);
       visibilityListener = undefined;
     }
   };
 };
 
-const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: number = 0) => {
+const isPageReadyForLogging = () => {
+  const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
+  const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+  return isVisible && isOnline;
+};
+
+const drainLogBatches = async () => {
+  if (uploadInProgress) return;
+  uploadInProgress = true;
+  try {
+    while (pendingLogBatches.length > 0) {
+      if (!isPageReadyForLogging()) return;
+      const batch = pendingLogBatches[0];
+      if (batch) {
+        const complete = await sendToGrafana(localUserId, batch);
+        if (!complete) return;
+        pendingLogBatches.shift();
+      }
+    }
+  } finally {
+    uploadInProgress = false;
+  }
+};
+
+const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<boolean> => {
   // Skip logging in development unless explicitly forced
   // Default to logging if process is undefined (e.g., in web workers)
   let isDevelopment = false;
@@ -146,14 +196,12 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: nu
   }
 
   if (isDevelopment && !forceLogging) {
-    return;
+    return true;
   }
-  if (retries > MAX_RETRIES) {
-    // Drop after a bounded number of retries to avoid flooding the logs API.
-    return;
-  }
-  try {
-    if (queue.length === 0) return;
+  if (queue.length === 0) return true;
+
+  for (let retries = 0; retries <= MAX_RETRIES; retries++) {
+    if (!isPageReadyForLogging()) return false;
     const nr = {
       streams: [
         {
@@ -168,29 +216,26 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: nu
         },
       ],
     };
-    const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-    // NOTE: body is a gzip ArrayBuffer sent with Content-Type: 'application/json';
-    // the /api/logs route decompresses it. That header/body mismatch is intentional.
-    // The fetch MUST be awaited and response.ok checked — otherwise a rejected
-    // request (offline/connection failure) or a 5xx never reaches the catch below,
-    // leaving the retry path dead and dropping the already-cleared batch.
-    const response = await fetch(`${baseUrl}/api/logs`, {
-      method: 'POST',
-      body: await compress(JSON.stringify(nr)),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`Logs API responded with status ${response.status}`);
+    try {
+      const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
+      const response = await fetch(`${baseUrl}/api/logs`, {
+        method: 'POST',
+        body: await compress(JSON.stringify(nr)),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
+      return true;
+    } catch (error) {
+      if (retries === MAX_RETRIES) {
+        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${MAX_RETRIES} retries`);
+        return true;
+      }
+      const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);
+      console.error(`Error in startLoggingToGrafana: ${error}. Retrying in ${retryDelayMs / 1000}s`);
+      await sleep(retryDelayMs);
     }
-  } catch (ir) {
-    // Use console.error to avoid recursive calls
-    const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);
-    console.error(`Error in startLoggingToGrafana: ${ir}. Retrying in ${retryDelayMs / 1000}s`);
-    await sleep(retryDelayMs);
-    sendToGrafana(userId, queue, retries + 1);
   }
+  return true;
 };
 
 export const logInfo = (...msg: string[]) => {
