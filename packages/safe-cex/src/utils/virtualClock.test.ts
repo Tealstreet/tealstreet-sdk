@@ -2,7 +2,7 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { virtualClock } from './virtualClock';
+import { TIME_SYNC_INTERVAL_MS, virtualClock } from './virtualClock';
 
 // Mock axios before importing virtualClock
 vi.mock('axios', () => ({
@@ -218,6 +218,23 @@ describe('virtualClock', () => {
 
       expect(startedFirst).toBe(true);
       expect(virtualClock.started).toBe(true);
+
+      (global as any).window = originalWindow;
+    });
+
+    it('resyncs after two minutes rather than every minute', async () => {
+      const originalWindow = global.window;
+      (global as any).window = {};
+      vi.mocked(axios.get).mockResolvedValue({ data: { time: Date.now() + 10_000 } });
+
+      await virtualClock.start();
+      expect(axios.get).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(TIME_SYNC_INTERVAL_MS - 1);
+      expect(axios.get).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(axios.get).toHaveBeenCalledTimes(2);
 
       (global as any).window = originalWindow;
     });

@@ -169,7 +169,9 @@ it inflates the e2e load-gate's diagnostic counters.
 
 If you "simplify" either chain back to a direct Bybit lead, you reintroduce
 the 403 noise for every geo-blocked user. The offset only needs ~1s
-accuracy, so the edge `/api/time` clock is plenty.
+accuracy, so the edge `/api/time` clock is plenty. Generic clock sync starts
+immediately, then runs every 120 seconds; do not shorten it without a new
+drift measurement.
 
 ## Files
 

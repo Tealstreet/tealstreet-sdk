@@ -8,6 +8,8 @@ import { getPublicCorsProxy } from './transportResolution';
 
 dayjs.extend(utc);
 
+export const TIME_SYNC_INTERVAL_MS = 120_000;
+
 class VirtualClock {
   started = false;
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -57,7 +59,7 @@ class VirtualClock {
       }
       await this.syncClientServerTime();
       this.scheduleNextSync();
-    }, 60_000);
+    }, TIME_SYNC_INTERVAL_MS);
   };
 
   getCurrentTime = () => {
