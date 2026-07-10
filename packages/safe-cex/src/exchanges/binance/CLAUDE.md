@@ -277,6 +277,10 @@ Connection uses listenKey-based authentication (no WebSocket-level auth required
 - Otherwise, schedule a delayed fetch for the remaining time.
 - Uses `hasPendingPositionEvents` flag to ensure events during throttle delay are not lost.
 - `positionFetchScheduled` prevents duplicate scheduled fetches.
+- Only one position repair may be in flight. Each WS position event increments
+  a version; a REST response started before a newer event is discarded and a
+  fresh repair is scheduled, so stale REST cannot overwrite the immediate WS
+  state.
 - The fetch result from `/positionRisk` must be committed with
   `store.addOrUpdatePositionsFull()`. Calling `fetchPositions()` without
   storing its return value drops the only Binance field that carries

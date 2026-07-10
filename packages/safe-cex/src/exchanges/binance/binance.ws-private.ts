@@ -13,7 +13,9 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private lastPositionFetchTime = 0;
   private positionFetchThrottleMs = 500;
   private positionFetchScheduled = false;
+  private positionFetchInFlight = false;
   private hasPendingPositionEvents = false;
+  private positionEventVersion = 0;
   private ordersThrottleTimeout?: NodeJS.Timeout;
 
   connectAndSubscribe = async () => {
@@ -225,6 +227,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   handleAccountEvents = (events: Array<Record<string, any>>) => {
     events.forEach((event) => {
       if (event.a?.P?.length) {
+        this.positionEventVersion += 1;
         this.hasPendingPositionEvents = true;
         this.throttledFetchPositions();
       }
@@ -303,15 +306,28 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   };
 
   private executePositionFetch = async () => {
+    if (this.positionFetchInFlight || this.isDisposed) return;
+
+    const eventVersionAtStart = this.positionEventVersion;
+    this.positionFetchInFlight = true;
+    this.lastPositionFetchTime = Date.now();
+    this.hasPendingPositionEvents = false;
+
     try {
-      this.lastPositionFetchTime = Date.now();
-      this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
-      if (!this.isDisposed) {
+      if (!this.isDisposed && eventVersionAtStart === this.positionEventVersion) {
         this.store.addOrUpdatePositionsFull(positions);
       }
     } catch {
       // Silent failure, will retry on next event
+    } finally {
+      this.positionFetchInFlight = false;
+
+      // A newer WS event makes this response stale. Keep its immediate store
+      // update and schedule a fresh full snapshot instead of overwriting it.
+      if (!this.isDisposed && this.hasPendingPositionEvents) {
+        this.throttledFetchPositions();
+      }
     }
   };
 

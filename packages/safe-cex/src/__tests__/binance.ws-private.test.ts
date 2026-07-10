@@ -126,4 +126,35 @@ describe('Binance private websocket position refresh', () => {
     expect(parent.store.addOrUpdatePosition).not.toHaveBeenCalled();
     expect((ws as any).throttledFetchPositions).toHaveBeenCalledTimes(1);
   });
+
+  it('does not commit a position snapshot made stale by a newer websocket event', async () => {
+    let resolveFirstFetch!: (positions: Array<Record<string, unknown>>) => void;
+    const firstFetch = new Promise<Array<Record<string, unknown>>>((resolve) => {
+      resolveFirstFetch = resolve;
+    });
+    const freshPositions = [{ id: 'BTCUSDT', contracts: 2, liquidationPrice: 45000 }];
+    const parent = {
+      isDisposed: false,
+      fetchPositions: vi.fn().mockReturnValueOnce(firstFetch).mockResolvedValueOnce(freshPositions),
+      store: {
+        positions: [],
+        addOrUpdatePosition: vi.fn(),
+        addOrUpdatePositionsFull: vi.fn(),
+      },
+    };
+    const ws = new BinancePrivateWebsocket(parent as any);
+    const scheduleRepair = vi.spyOn(ws as any, 'throttledFetchPositions').mockImplementation(() => undefined);
+
+    const staleRequest = (ws as any).executePositionFetch();
+    ws.handleAccountEvents([{ a: { P: [{ s: 'BTCUSDT', ps: 'BOTH', pa: '2', ep: '60000', up: '0' }] } }]);
+    resolveFirstFetch([{ id: 'BTCUSDT', contracts: 1, liquidationPrice: 40000 }]);
+    await staleRequest;
+
+    expect(parent.store.addOrUpdatePositionsFull).not.toHaveBeenCalled();
+    expect(scheduleRepair).toHaveBeenCalledTimes(2);
+
+    await (ws as any).executePositionFetch();
+
+    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith(freshPositions);
+  });
 });
