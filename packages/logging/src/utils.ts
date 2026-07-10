@@ -21,6 +21,12 @@ let logQueue: Array<[string, string, { level: string }]> = [];
 let logQueueSizeApprox = 0;
 let localUserId = '';
 let sessionKey = nanoid();
+let flushInterval: ReturnType<typeof setInterval> | undefined;
+let visibilityListener: (() => void) | undefined;
+
+const LOG_FLUSH_INTERVAL_MS = 60_000;
+const MAX_RETRIES = 5;
+const MAX_RETRY_DELAY_MS = 30_000;
 
 export const getSessionKey = () => sessionKey;
 
@@ -86,9 +92,43 @@ export const dumpLogQueue = () => {
 
 export const startLoggingToGrafana = (userId: string) => {
   localUserId = userId;
-  setInterval(() => {
-    dumpLogQueue();
-  }, 10_000);
+
+  if (flushInterval) {
+    clearInterval(flushInterval);
+  }
+  if (visibilityListener && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', visibilityListener);
+  }
+
+  const flushIfVisible = () => {
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      dumpLogQueue();
+    }
+  };
+
+  const activeFlushInterval = setInterval(flushIfVisible, LOG_FLUSH_INTERVAL_MS);
+  const activeVisibilityListener = () => {
+    if (document.visibilityState === 'visible') {
+      flushIfVisible();
+    }
+  };
+  flushInterval = activeFlushInterval;
+  visibilityListener = activeVisibilityListener;
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', activeVisibilityListener);
+  }
+
+  return () => {
+    if (flushInterval === activeFlushInterval) {
+      clearInterval(activeFlushInterval);
+      flushInterval = undefined;
+    }
+    if (visibilityListener === activeVisibilityListener && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', activeVisibilityListener);
+      visibilityListener = undefined;
+    }
+  };
 };
 
 const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: number = 0) => {
@@ -108,8 +148,8 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: nu
   if (isDevelopment && !forceLogging) {
     return;
   }
-  if (retries > 5) {
-    // drop retries if already > 5 to avoid flooding the logs api
+  if (retries > MAX_RETRIES) {
+    // Drop after a bounded number of retries to avoid flooding the logs API.
     return;
   }
   try {
@@ -146,8 +186,9 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue, retries: nu
     }
   } catch (ir) {
     // Use console.error to avoid recursive calls
-    console.error(`Error in startLoggingToGrafana: ${ir}. Retrying in 5s`);
-    await sleep(5_000);
+    const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);
+    console.error(`Error in startLoggingToGrafana: ${ir}. Retrying in ${retryDelayMs / 1000}s`);
+    await sleep(retryDelayMs);
     sendToGrafana(userId, queue, retries + 1);
   }
 };

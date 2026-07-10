@@ -25,6 +25,10 @@ global.fetch = mockFetch;
 // Mock console methods
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+const setVisibilityState = (visibilityState: DocumentVisibilityState) => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: visibilityState });
+};
+
 describe('utils.ts', () => {
   let utils: any;
 
@@ -43,6 +47,7 @@ describe('utils.ts', () => {
       ok: true,
       status: 200,
     });
+    setVisibilityState('visible');
 
     // Dynamically import the module to ensure fresh state
     utils = await import('./utils');
@@ -205,6 +210,35 @@ describe('utils.ts', () => {
       expect(() => {
         vi.runOnlyPendingTimers();
       }).not.toThrow();
+    });
+
+    it('flushes queued logs once per minute instead of every ten seconds', async () => {
+      const stopLogging = utils.startLoggingToGrafana('test-user');
+      utils.logInfo('queued log');
+      mockFetch.mockClear();
+
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      stopLogging();
+    });
+
+    it('keeps queued logs local while the document is hidden', async () => {
+      const stopLogging = utils.startLoggingToGrafana('test-user');
+      utils.logInfo('queued log');
+      mockFetch.mockClear();
+      setVisibilityState('hidden');
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      setVisibilityState('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      stopLogging();
     });
   });
 
@@ -535,10 +569,10 @@ describe('utils.ts', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
-      // Advance past the 5s backoff -> the retry must actually re-issue fetch.
+      // Advance past the first 1s backoff -> the retry must actually re-issue fetch.
       // On the buggy code the rejection is never caught (fetch not awaited),
       // so the retry path is dead and this stays at 1.
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
@@ -552,7 +586,7 @@ describe('utils.ts', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
       // A 500 must be treated as failure and retried after backoff.
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
@@ -578,9 +612,7 @@ describe('utils.ts', () => {
 
       // Drive far past the cap. Attempts run for retries 0..5 (guard drops
       // retries > 5), so fetch is issued exactly 6 times and then stops.
-      for (let i = 0; i < 10; i++) {
-        await vi.advanceTimersByTimeAsync(5_000);
-      }
+      await vi.advanceTimersByTimeAsync(60_000);
 
       expect(mockFetch).toHaveBeenCalledTimes(6);
     });
