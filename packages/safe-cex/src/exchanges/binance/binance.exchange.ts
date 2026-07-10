@@ -65,10 +65,17 @@ import {
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
 
+const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
+const ACCOUNT_RECONCILIATION_INTERVAL_MS = 25_000;
+const DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS = 3_000;
+const POSITION_RISK_RECONCILIATION_INTERVAL_MS = 75_000;
+
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
   private hasLoggedBalanceAggregation = false;
   private positionStateVersion = 0;
+  private lastAccountReconciliationAt = 0;
+  private lastPositionRiskReconciliationAt = 0;
 
   markPositionStateUpdatedByWebsocket = () => {
     this.positionStateVersion += 1;
@@ -244,36 +251,51 @@ export class BinanceExchange extends BaseExchange {
     });
   };
 
-  tick = async (count = 0) => {
+  tick = async (_count = 0) => {
     if (!this.isDisposed) {
+      const now = Date.now();
+      const accountReconciliationInterval = this.privateWebsocket.isConnected
+        ? ACCOUNT_RECONCILIATION_INTERVAL_MS
+        : DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS;
+      const shouldReconcilePositionRisk =
+        this.lastPositionRiskReconciliationAt === 0 ||
+        now - this.lastPositionRiskReconciliationAt >= POSITION_RISK_RECONCILIATION_INTERVAL_MS;
+      const shouldReconcileAccount =
+        this.lastAccountReconciliationAt === 0 ||
+        now - this.lastAccountReconciliationAt >= accountReconciliationInterval;
+
       try {
-        if (count % 16 === 0) {
+        if (shouldReconcilePositionRisk) {
           const positionStateVersion = this.getPositionStateVersion();
           const positionsWithRisk = await this.fetchPositions();
           if (positionStateVersion === this.getPositionStateVersion()) {
             this.store.update({ positions: positionsWithRisk });
           }
+          this.lastPositionRiskReconciliationAt = Date.now();
           if (this.isDisposed) return;
         }
-        const positionStateVersion = this.getPositionStateVersion();
-        const { balance, positions } = await this.fetchPositionsAndBalance();
-        if (this.isDisposed) return;
+        if (shouldReconcileAccount) {
+          const positionStateVersion = this.getPositionStateVersion();
+          const { balance, positions } = await this.fetchPositionsAndBalance();
+          if (this.isDisposed) return;
 
-        this.store.update({
-          balance,
-          ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
-            positions: true,
-          },
-        });
+          this.store.update({
+            balance,
+            ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
+              positions: true,
+            },
+          });
+          this.lastAccountReconciliationAt = Date.now();
+        }
       } catch (err: any) {
         this.emitAndLogError(err?.message);
       }
 
       if (!this.isDisposed) {
-        loop(() => this.tick(count + 1), 5_000);
+        loop(() => this.tick(), PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS);
       }
     }
   };
