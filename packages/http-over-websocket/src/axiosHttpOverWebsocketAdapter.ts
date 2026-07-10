@@ -15,6 +15,7 @@ const MAX_LOG_OBJECT_KEYS = 50;
 const MAX_LOG_DEPTH = 4;
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '[TRUNCATED]';
+export const TRADE_TUNNEL_RPC_VERSION = 2;
 const SENSITIVE_LOG_KEY_PATTERN =
   /authorization|cookie|password|passphrase|secret|token|signature|api[-_]?key|apikey|access[-_]?key|x-mbx-apikey|x-bitmex/i;
 
@@ -447,7 +448,7 @@ const createAxiosHttpOverWebsocketAdapter = (
             return;
           }
 
-          if (customParser && data.data_raw) {
+          if (customParser && typeof data.data_raw === 'string') {
             data.data = customParser(data.data_raw);
           }
           // Attach the original adapter config so response interceptors see
@@ -475,6 +476,7 @@ const createAxiosHttpOverWebsocketAdapter = (
 
         howWebSocket.send({
           type: 'rpc.http',
+          rpc_version: TRADE_TUNNEL_RPC_VERSION,
           ...(customParser ? { format: 'raw' } : {}),
           ...(shouldBypassProxy ? { bypass_proxy: true } : {}),
           nonce,

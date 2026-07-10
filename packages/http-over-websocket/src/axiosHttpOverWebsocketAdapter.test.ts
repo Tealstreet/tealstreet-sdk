@@ -10,6 +10,8 @@
 import Emitter from 'tiny-emitter';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
+import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
+
 // MUST mock before importing the adapter — the adapter constructs
 // `howWebSocketSG` / `howWebSocketJA` singletons at module load, so the
 // mock class has to be in place by then.
@@ -49,7 +51,12 @@ vi.mock('./HOWWebSocket', () => {
 });
 
 import { configureHOW } from './config';
-import { createAxiosHttpOverWebsocketAdapter, howWebSocketJA, howWebSocketSG } from './axiosHttpOverWebsocketAdapter';
+import {
+  TRADE_TUNNEL_RPC_VERSION,
+  createAxiosHttpOverWebsocketAdapter,
+  howWebSocketJA,
+  howWebSocketSG,
+} from './axiosHttpOverWebsocketAdapter';
 
 const mockWs = howWebSocketSG as unknown as {
   emitter: Emitter.TinyEmitter;
@@ -109,6 +116,61 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     expect(response.config).toBe(callerConfig);
     expect(response.config.__suppressExchangeError).toBe(true);
     expect(response.config.headers['X-Custom-Header']).toBe('custom-value');
+  });
+
+  it.each([
+    ['Binance', '{"orderId":9007199254740993}', 'orderId', '9007199254740993'],
+    ['OKX', '{"data":[{"ordId":1234567890123456789}]}', 'ordId', '1234567890123456789'],
+    ['Bitrue', '{"orderId":2334151155877155281}', 'orderId', '2334151155877155281'],
+  ])('uses a versioned raw-only response for %s large integers', async (_exchange, rawBody, key, expected) => {
+    const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: bigIntAsStringJsonParse });
+    const callerConfig: any = {
+      url: '/api/order',
+      method: 'GET',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    mockWs.replyTo = (sent) => {
+      expect(sent).toMatchObject({
+        type: 'rpc.http',
+        rpc_version: TRADE_TUNNEL_RPC_VERSION,
+        format: 'raw',
+      });
+      // New tunnel servers omit `data`; the adapter must reconstruct it from
+      // the one transmitted body without losing integer precision.
+      mockWs.emitter.emit('sub:' + sent.nonce, {
+        data_raw: rawBody,
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const response: any = await adapter(callerConfig);
+    const parsed = Array.isArray(response.data?.data) ? response.data.data[0] : response.data;
+    expect(parsed[key]).toBe(expected);
+  });
+
+  it('keeps compatibility with legacy tunnel responses that include both data fields', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: bigIntAsStringJsonParse });
+    const callerConfig: any = {
+      url: '/api/order',
+      method: 'GET',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    mockWs.replyTo = (sent) => {
+      mockWs.emitter.emit('sub:' + sent.nonce, {
+        data: { orderId: 9007199254740992 },
+        data_raw: '{"orderId":9007199254740993}',
+        status: 200,
+        headers: {},
+      });
+    };
+
+    const response: any = await adapter(callerConfig);
+    expect(response.data.orderId).toBe('9007199254740993');
   });
 
   it('attaches caller config to the rejected tunnel error', async () => {
