@@ -1,6 +1,7 @@
 import axios, { AxiosAdapter } from 'axios';
 import { nanoid } from 'nanoid';
 
+import { decompress } from '@tealstreet/compression/src/decompress';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
@@ -15,7 +16,9 @@ const MAX_LOG_OBJECT_KEYS = 50;
 const MAX_LOG_DEPTH = 4;
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '[TRUNCATED]';
-export const TRADE_TUNNEL_RPC_VERSION = 2;
+export const TRADE_TUNNEL_RPC_VERSION = 3;
+const TRADE_TUNNEL_ACCEPT_ENCODING = ['gzip'] as const;
+const TRADE_TUNNEL_GZIP_BASE64_ENCODING = 'gzip+base64';
 const SENSITIVE_LOG_KEY_PATTERN =
   /authorization|cookie|password|passphrase|secret|token|signature|api[-_]?key|apikey|access[-_]?key|x-mbx-apikey|x-bitmex/i;
 
@@ -26,6 +29,23 @@ type TradeTunnelRouteContext = {
   bypassProxy?: boolean;
   simulated?: boolean;
 };
+
+function decodeBase64(encoded: string): ArrayBuffer {
+  const binary = globalThis.atob(encoded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return bytes.buffer;
+}
+
+async function decodeTradeTunnelRawBody(data: any): Promise<string | undefined> {
+  if (
+    data?.data_encoding === TRADE_TUNNEL_GZIP_BASE64_ENCODING &&
+    typeof data?.data_encoded === 'string'
+  ) {
+    return decompress(decodeBase64(data.data_encoded), 'gzip');
+  }
+
+  return typeof data?.data_raw === 'string' ? data.data_raw : undefined;
+}
 
 function isTradeTunnelVerboseLoggingEnabled(): boolean {
   if (typeof process === 'undefined') return false;
@@ -424,39 +444,52 @@ const createAxiosHttpOverWebsocketAdapter = (
           reject(timeoutError);
         }, 20_000);
 
-        howWebSocket.once('sub:' + nonce, (data: any) => {
+        howWebSocket.once('sub:' + nonce, async (data: any) => {
           clearTimeout(timeoutTimer);
 
-          // Log response before processing
-          logTradeTunnelResponse(websocketRequest, data, routeContext);
+          try {
+            // Log response before processing
+            logTradeTunnelResponse(websocketRequest, data, routeContext);
 
-          if (data && typeof data === 'object' && data.error) {
-            // Create a proper Error object with URL context for better Sentry tracking
-            const tunnelError = new Error(
-              `${formatTradeTunnelErrorMessage(data.error)} (URL: ${websocketRequest.url})`,
-            );
-            tunnelError.name = 'TradeTunnelError';
+            if (data && typeof data === 'object' && data.error) {
+              // Create a proper Error object with URL context for better Sentry tracking
+              const tunnelError = new Error(
+                `${formatTradeTunnelErrorMessage(data.error)} (URL: ${websocketRequest.url})`,
+              );
+              tunnelError.name = 'TradeTunnelError';
+              (tunnelError as any).url = websocketRequest.url;
+              (tunnelError as any).method = websocketRequest.method;
+              (tunnelError as any).originalError = data.error;
+              (tunnelError as any).tradeTunnelRoute = routeContext;
+              // Attach the caller's config so error-path interceptors (e.g.
+              // `error?.config?.__suppressExchangeError` in Lighter) can see
+              // request-time suppression flags through the tunnel.
+              (tunnelError as any).config = config;
+              reject(tunnelError);
+              return;
+            }
+
+            if (customParser) {
+              const rawBody = await decodeTradeTunnelRawBody(data);
+              if (rawBody !== undefined) {
+                data.data = customParser(rawBody);
+              }
+            }
+            // Attach the original adapter config so response interceptors see
+            // the caller's custom keys/headers (e.g. __suppressExchangeError).
+            // Tunnel frames carry only {data, status, headers}, so without this
+            // the response config is empty and per-request suppression flags
+            // are lost.
+            resolve({ ...data, config });
+          } catch (error) {
+            const tunnelError = error instanceof Error ? error : new Error(String(error));
+            tunnelError.name = 'TradeTunnelResponseDecodeError';
             (tunnelError as any).url = websocketRequest.url;
             (tunnelError as any).method = websocketRequest.method;
-            (tunnelError as any).originalError = data.error;
             (tunnelError as any).tradeTunnelRoute = routeContext;
-            // Attach the caller's config so error-path interceptors (e.g.
-            // `error?.config?.__suppressExchangeError` in Lighter) can see
-            // request-time suppression flags through the tunnel.
             (tunnelError as any).config = config;
             reject(tunnelError);
-            return;
           }
-
-          if (customParser && typeof data.data_raw === 'string') {
-            data.data = customParser(data.data_raw);
-          }
-          // Attach the original adapter config so response interceptors see
-          // the caller's custom keys/headers (e.g. __suppressExchangeError).
-          // Tunnel frames carry only {data, status, headers}, so without this
-          // the response config is empty and per-request suppression flags
-          // are lost.
-          resolve({ ...data, config });
         });
 
         let data: any;
@@ -477,7 +510,9 @@ const createAxiosHttpOverWebsocketAdapter = (
         howWebSocket.send({
           type: 'rpc.http',
           rpc_version: TRADE_TUNNEL_RPC_VERSION,
-          ...(customParser ? { format: 'raw' } : {}),
+          ...(customParser
+            ? { format: 'raw', accept_encoding: TRADE_TUNNEL_ACCEPT_ENCODING }
+            : {}),
           ...(shouldBypassProxy ? { bypass_proxy: true } : {}),
           nonce,
           arg: { ...websocketRequest, data },

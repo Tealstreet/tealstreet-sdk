@@ -136,6 +136,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
         type: 'rpc.http',
         rpc_version: TRADE_TUNNEL_RPC_VERSION,
         format: 'raw',
+        accept_encoding: ['gzip'],
       });
       // New tunnel servers omit `data`; the adapter must reconstruct it from
       // the one transmitted body without losing integer precision.
@@ -149,6 +150,72 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     const response: any = await adapter(callerConfig);
     const parsed = Array.isArray(response.data?.data) ? response.data.data[0] : response.data;
     expect(parsed[key]).toBe(expected);
+  });
+
+  it.each([
+    [
+      'Binance',
+      'H4sIAAAAAAAEA6tWyi9KSS3yTFGysjQwMDe0tDQyNTE3MbC0NK4FAERmNdIcAAAA',
+      'orderId',
+      '9007199254740993',
+    ],
+    [
+      'OKX',
+      'H4sIAAAAAAAEA6tWSkksSVSyiq5Wyi9K8UxRsjI0MjYxNTO3sDSAs2pjawE+xw12KAAAAA==',
+      'ordId',
+      '1234567890123456789',
+    ],
+    [
+      'Bitrue',
+      'H4sIAAAAAAAEA6tWyi9KSS3yTFGyMjI2NjE0NTQ0NbUwNzc0NTWyMKwFAKiI3scfAAAA',
+      'orderId',
+      '2334151155877155281',
+    ],
+  ])('decodes a negotiated gzip response for %s large integers', async (_exchange, encodedBody, key, expected) => {
+    const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: bigIntAsStringJsonParse });
+    const callerConfig: any = {
+      url: '/api/order',
+      method: 'GET',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    mockWs.replyTo = (sent) => {
+      mockWs.emitter.emit('sub:' + sent.nonce, {
+        data_encoded: encodedBody,
+        data_encoding: 'gzip+base64',
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const response: any = await adapter(callerConfig);
+    const parsed = Array.isArray(response.data?.data) ? response.data.data[0] : response.data;
+    expect(parsed[key]).toBe(expected);
+  });
+
+  it('rejects a corrupt negotiated gzip response without waiting for the request timeout', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: bigIntAsStringJsonParse });
+    const callerConfig: any = {
+      url: '/api/order',
+      method: 'GET',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    mockWs.replyTo = (sent) => {
+      mockWs.emitter.emit('sub:' + sent.nonce, {
+        data_encoded: 'bm90LWd6aXA=',
+        data_encoding: 'gzip+base64',
+        status: 200,
+        headers: {},
+      });
+    };
+
+    await expect(adapter(callerConfig)).rejects.toMatchObject({
+      name: 'TradeTunnelResponseDecodeError',
+      config: callerConfig,
+    });
   });
 
   it('keeps compatibility with legacy tunnel responses that include both data fields', async () => {

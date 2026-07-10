@@ -95,7 +95,9 @@ yarn test           # Vitest
   `undefined` and per-call opt-outs silently no-op. The tunnel frame has
   only `{data, status, headers}`; attaching the original `config` is what
   every built-in axios adapter does.
-- Custom-parser requests advertise `rpc_version: 2` with `format: "raw"`.
-  Compatible tradetunnel servers return only `data_raw`, which the adapter
-  parses into `data`; older servers may still return both fields and remain
-  supported. Do not remove the explicit version gate during rollout.
+- Custom-parser requests advertise `rpc_version: 3`, `format: "raw"`, and gzip
+  support. Compatible tradetunnel servers return either negotiated
+  `data_encoded` / `data_encoding: "gzip+base64"` or an uncompressed `data_raw`
+  fallback, which the adapter parses into `data`. Version-2 servers may return
+  only `data_raw`, while legacy servers may return both fields; all remain
+  supported.
