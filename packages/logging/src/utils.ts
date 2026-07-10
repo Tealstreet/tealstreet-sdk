@@ -30,6 +30,28 @@ const LOG_FLUSH_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
 const MAX_RETRY_DELAY_MS = 30_000;
 const MAX_PENDING_LOG_BATCHES = 3;
+const METRICS_REPORT_INTERVAL_MS = 10 * 60_000;
+
+type LoggingMetrics = {
+  generatedEvents: number;
+  generatedBytes: number;
+  pressureFlushes: number;
+  droppedBatches: number;
+  uploadsStarted: number;
+  uploadsSucceeded: number;
+  retries: number;
+};
+
+let loggingMetrics: LoggingMetrics = {
+  generatedEvents: 0,
+  generatedBytes: 0,
+  pressureFlushes: 0,
+  droppedBatches: 0,
+  uploadsStarted: 0,
+  uploadsSucceeded: 0,
+  retries: 0,
+};
+let lastMetricsReportAt = Date.now();
 
 export const getSessionKey = () => sessionKey;
 
@@ -74,6 +96,7 @@ const pushLogsToQueue = (level: LogSeverity, rawMessage: string) => {
       const finalMessage = `${localUserId} [${sessionKey}]: ${stringifyMessage(message)}`;
 
       if (logQueueSizeApprox + finalMessage.length > 200_000) {
+        loggingMetrics.pressureFlushes++;
         dumpLogQueue();
       }
 
@@ -88,6 +111,8 @@ const pushLogsToQueue = (level: LogSeverity, rawMessage: string) => {
       }
 
       logQueueSizeApprox += finalMessage.length;
+      loggingMetrics.generatedEvents++;
+      loggingMetrics.generatedBytes += Buffer.byteLength(finalMessage, 'utf8');
     }
   } catch (e) {
     // Use console.error to avoid recursive calls
@@ -106,6 +131,7 @@ export const dumpLogQueue = () => {
   // parallel Vercel function invocations.
   if (pendingLogBatches.length >= MAX_PENDING_LOG_BATCHES) {
     pendingLogBatches.shift();
+    loggingMetrics.droppedBatches++;
     console.warn('[Logging] Dropped oldest pending batch because the upload queue is full');
   }
   pendingLogBatches.push(ir);
@@ -202,6 +228,8 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
 
   for (let retries = 0; retries <= MAX_RETRIES; retries++) {
     if (!isPageReadyForLogging()) return false;
+    const reportMetrics = Date.now() - lastMetricsReportAt >= METRICS_REPORT_INTERVAL_MS;
+    const metricsSnapshot = reportMetrics ? { ...loggingMetrics } : undefined;
     const nr = {
       streams: [
         {
@@ -212,11 +240,23 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
             sessionKey,
             env: typeof process !== 'undefined' ? process.env?.NODE_ENV : undefined,
           },
-          values: [...queue],
+          values: [
+            ...queue,
+            ...(metricsSnapshot
+              ? [
+                  [
+                    Date.now().toString() + '000000',
+                    JSON.stringify({ kind: 'logging_metrics', ...metricsSnapshot }),
+                    { level: 'INFO' },
+                  ],
+                ]
+              : []),
+          ],
         },
       ],
     };
     try {
+      loggingMetrics.uploadsStarted++;
       const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
       const response = await fetch(`${baseUrl}/api/logs`, {
         method: 'POST',
@@ -224,6 +264,13 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
+      loggingMetrics.uploadsSucceeded++;
+      if (metricsSnapshot) {
+        for (const key of Object.keys(metricsSnapshot) as Array<keyof LoggingMetrics>) {
+          loggingMetrics[key] = Math.max(0, loggingMetrics[key] - metricsSnapshot[key]);
+        }
+        lastMetricsReportAt = Date.now();
+      }
       return true;
     } catch (error) {
       if (retries === MAX_RETRIES) {
@@ -231,6 +278,7 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
         return true;
       }
       const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);
+      loggingMetrics.retries++;
       console.error(`Error in startLoggingToGrafana: ${error}. Retrying in ${retryDelayMs / 1000}s`);
       await sleep(retryDelayMs);
     }
