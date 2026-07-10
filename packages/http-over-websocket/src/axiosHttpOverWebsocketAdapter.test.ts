@@ -137,6 +137,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
         rpc_version: TRADE_TUNNEL_RPC_VERSION,
         format: 'raw',
         accept_encoding: ['gzip'],
+        accept_binary: true,
       });
       // New tunnel servers omit `data`; the adapter must reconstruct it from
       // the one transmitted body without losing integer precision.
@@ -184,6 +185,49 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       mockWs.emitter.emit('sub:' + sent.nonce, {
         data_encoded: encodedBody,
         data_encoding: 'gzip+base64',
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const response: any = await adapter(callerConfig);
+    const parsed = Array.isArray(response.data?.data) ? response.data.data[0] : response.data;
+    expect(parsed[key]).toBe(expected);
+  });
+
+  it.each([
+    [
+      'Binance',
+      'H4sIAAAAAAAEA6tWyi9KSS3yTFGysjQwMDe0tDQyNTE3MbC0NK4FAERmNdIcAAAA',
+      'orderId',
+      '9007199254740993',
+    ],
+    [
+      'OKX',
+      'H4sIAAAAAAAEA6tWSkksSVSyiq5Wyi9K8UxRsjI0MjYxNTO3sDSAs2pjawE+xw12KAAAAA==',
+      'ordId',
+      '1234567890123456789',
+    ],
+    [
+      'Bitrue',
+      'H4sIAAAAAAAEA6tWyi9KSS3yTFGyMjI2NjE0NTQ0NbUwNzc0NTWyMKwFAKiI3scfAAAA',
+      'orderId',
+      '2334151155877155281',
+    ],
+  ])('decodes a negotiated binary gzip response for %s large integers', async (_exchange, encodedBody, key, expected) => {
+    const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: bigIntAsStringJsonParse });
+    const callerConfig: any = {
+      url: '/api/order',
+      method: 'GET',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    mockWs.replyTo = (sent) => {
+      const binary = Uint8Array.from(globalThis.atob(encodedBody), (character) => character.charCodeAt(0));
+      mockWs.emitter.emit('sub:' + sent.nonce, {
+        data_binary: binary.buffer,
+        data_encoding: 'gzip',
         status: 200,
         headers: { 'content-type': 'application/json' },
       });

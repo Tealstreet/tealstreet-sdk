@@ -2,9 +2,9 @@ import { nanoid } from 'nanoid';
 import Emitter from 'tiny-emitter';
 
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
 import { getUniqueLatencyDomains, syncServerTime } from './config';
+import { decodeTradeTunnelMessage } from './tradeTunnelBinaryFrame';
 import { HOWWebSocketAuthState, LatencyEntry } from './types';
 
 // Import ws package for Node.js/Bun - needed because Bun's native WebSocket
@@ -113,6 +113,7 @@ export class HOWWebSocket {
     wsUrl.searchParams.set('v', '2');
     wsUrl.searchParams.set('t', String(Date.now()));
     ws = new ReconnectingWebSocket(wsUrl.toString(), protocols, options);
+    ws.binaryType = 'arraybuffer';
 
     // Add error handler immediately to prevent uncaught errors
     ws.addEventListener('error', this.handleWebSocketError as any);
@@ -225,10 +226,10 @@ export class HOWWebSocket {
     this.validateAndSend(message, data, true);
   };
 
-  onMessage = ({ data: msgData }: MessageEvent): void => {
+  onMessage = async ({ data: msgData }: MessageEvent): Promise<void> => {
     if (!this.isDisposed) {
       try {
-        const json = jsonParse(msgData);
+        const json = await decodeTradeTunnelMessage(msgData);
         if (json?.type === 'rpc.auth') {
           //{"type":"rpc.auth","error":"ExpiredSignature"}
           if (Boolean(json?.error)) {

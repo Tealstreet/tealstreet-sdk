@@ -16,7 +16,7 @@ const MAX_LOG_OBJECT_KEYS = 50;
 const MAX_LOG_DEPTH = 4;
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '[TRUNCATED]';
-export const TRADE_TUNNEL_RPC_VERSION = 3;
+export const TRADE_TUNNEL_RPC_VERSION = 4;
 const TRADE_TUNNEL_ACCEPT_ENCODING = ['gzip'] as const;
 const TRADE_TUNNEL_GZIP_BASE64_ENCODING = 'gzip+base64';
 const SENSITIVE_LOG_KEY_PATTERN =
@@ -37,6 +37,10 @@ function decodeBase64(encoded: string): ArrayBuffer {
 }
 
 async function decodeTradeTunnelRawBody(data: any): Promise<string | undefined> {
+  if (data?.data_encoding === 'gzip' && data?.data_binary instanceof ArrayBuffer) {
+    return decompress(data.data_binary, 'gzip');
+  }
+
   if (
     data?.data_encoding === TRADE_TUNNEL_GZIP_BASE64_ENCODING &&
     typeof data?.data_encoded === 'string'
@@ -511,7 +515,11 @@ const createAxiosHttpOverWebsocketAdapter = (
           type: 'rpc.http',
           rpc_version: TRADE_TUNNEL_RPC_VERSION,
           ...(customParser
-            ? { format: 'raw', accept_encoding: TRADE_TUNNEL_ACCEPT_ENCODING }
+            ? {
+                format: 'raw',
+                accept_encoding: TRADE_TUNNEL_ACCEPT_ENCODING,
+                accept_binary: true,
+              }
             : {}),
           ...(shouldBypassProxy ? { bypass_proxy: true } : {}),
           nonce,
