@@ -2,7 +2,8 @@ import type { BinanceExchange } from './binance.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG } from '../../config/config';
-import { OrderRejectReason, OrderStatus, OrderType } from '../../types';
+import { MarginType, OrderRejectReason, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -223,30 +224,47 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
 
   handleAccountEvents = (events: Array<Record<string, any>>) => {
     events.forEach((event) => {
-      if (event.a?.B) {
+      if (event.a?.P?.length) {
         this.hasPendingPositionEvents = true;
         this.throttledFetchPositions();
       }
 
       event.a.P?.forEach((p: Record<string, any>) => {
         const symbol = p.s;
-        const side = POSITION_SIDE[p.ps];
+        const signedContracts = parseFloat(p.pa);
+        const positionMode = p.ps === 'BOTH' ? PositionMode.OneWay : PositionMode.Hedged;
+        const eventSide = POSITION_SIDE[p.ps] || (signedContracts >= 0 ? PositionSide.Long : PositionSide.Short);
+        const id = createPositionId(symbol, eventSide, positionMode);
+        const position = this.parent.store.positions.find((candidate) => candidate.id === id);
+        const side = signedContracts === 0 && position ? position.side : eventSide;
 
-        const position = this.parent.store.positions.find((p2) => p2.symbol === symbol && p2.side === side);
+        // WS updates omit leverage, margin type and liquidation price. Preserve
+        // those fields until the immediate REST repair fills them in. Unknown
+        // zero rows are flat-symbol noise, not positions that need creating.
+        if (!position && signedContracts === 0) return;
 
-        if (position) {
-          const entryPrice = parseFloat(p.ep);
-          const contracts = parseFloat(p.pa);
-          const upnl = parseFloat(p.up);
+        const entryPrice = parseFloat(p.ep);
+        const contracts = Math.abs(signedContracts);
+        const upnl = parseFloat(p.up);
 
-          this.store.updatePosition(position, {
-            entryPrice,
-            contracts: Math.abs(contracts),
-            notional: Math.abs(contracts) * entryPrice + upnl,
-            unrealizedPnl: upnl,
-            info: position,
-          });
-        }
+        this.store.addOrUpdatePosition({
+          ...position,
+          id,
+          symbol,
+          side,
+          entryPrice,
+          contracts,
+          notional: Math.abs(signedContracts * entryPrice + upnl),
+          unrealizedPnl: upnl,
+          leverage: position?.leverage ?? 0,
+          liquidationPrice: position?.liquidationPrice ?? 0,
+          marginType: position?.marginType ?? MarginType.Cross,
+          positionMode,
+          info: {
+            ...position?.info,
+            ...p,
+          },
+        });
       });
     });
   };

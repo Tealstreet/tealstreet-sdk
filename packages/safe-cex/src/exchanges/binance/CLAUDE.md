@@ -519,7 +519,7 @@ The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with ma
 
 ### Position Reconciliation
 
-**WebSocket partial updates**: `ACCOUNT_UPDATE` events provide real-time position changes (entry price, contracts, unrealized PnL). These are applied immediately to matching positions in the store via `store.updatePosition()` (`binance.ws-private.ts:181-209`).
+**WebSocket partial updates**: `ACCOUNT_UPDATE` events provide real-time position changes (entry price, contracts, unrealized PnL). They are upserted immediately via `store.addOrUpdatePosition()`, including brand-new positions; one-way `ps=BOTH` events derive long/short from the signed amount. Unknown zero-size rows are ignored, while a zero update for an existing row closes it immediately. Every event containing position rows schedules a full `/positionRisk` repair because the WS payload omits leverage, margin type, and liquidation price.
 
 **REST full snapshots**: Two REST endpoints provide position data at different detail levels:
 
