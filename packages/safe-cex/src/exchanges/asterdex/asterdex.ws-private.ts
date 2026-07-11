@@ -17,6 +17,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
   private static readonly LISTEN_KEY_FAILURE_RETRY_MS = 30 * 1000;
   private static readonly LISTEN_KEY_WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
   private static readonly LISTEN_KEY_WATCHDOG_STALE_MS = 70 * 60 * 1000;
+  private static readonly ACCOUNT_UPDATE_RECONCILE_DELAY_MS = 1000;
 
   private listenKey = '';
   private lastListenKeyKeepAliveAt = 0;
@@ -25,6 +26,9 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
   private listenKeyWatchdogTimer?: NodeJS.Timeout;
   private connectRetryTimer?: NodeJS.Timeout;
   private connectRetryCount = 0;
+  private accountUpdateReconcileTimer?: NodeJS.Timeout;
+  private accountUpdateReconcileInFlight = false;
+  private accountUpdateReconcileQueued = false;
 
   messageHandlers: MessageHandlers = {
     // AsterDEX uses the same event types as Binance Futures
@@ -45,6 +49,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.onClose = (event?: any): void => {
       this.clearListenKeyRefreshTimer();
       this.clearListenKeyWatchdogTimer();
+      this.clearAccountUpdateReconcileTimer();
 
       baseOnClose(event);
     };
@@ -371,37 +376,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
       // Emit positions update immediately
       this.parent.emitter.emit('positions', this.parent.store.positions);
 
-      // Trigger full position and order fetch after 1 second to ensure full sync
-      // This handles new positions and ensures consistency
-      // Also fetch orders since position changes often mean orders were filled
-      this.parent.log('Scheduling delayed position and order fetch (1s)...', LogSeverity.Info);
-      setTimeout(() => {
-        if (!this.isDisposed) {
-          // Fetch positions
-          this.parent
-            .fetchPositions()
-            .then((positions) => {
-              this.parent.log('Delayed position fetch completed successfully', LogSeverity.Info);
-              // Update store with fetched positions
-              this.parent.store.update({ positions });
-            })
-            .catch((error) => {
-              this.parent.log(`Failed to fetch positions after update: ${error.message}`, LogSeverity.Warning);
-            });
-
-          // Also fetch orders since position changes often mean orders were filled
-          this.parent
-            .fetchOrders()
-            .then((orders) => {
-              this.parent.log('Delayed order fetch completed successfully', LogSeverity.Info);
-              // Update store with fetched orders
-              this.parent.store.update({ orders });
-            })
-            .catch((error) => {
-              this.parent.log(`Failed to fetch orders after position update: ${error.message}`, LogSeverity.Warning);
-            });
-        }
-      }, 1000);
+      this.scheduleAccountUpdateReconcile();
     }
 
     // Update account balance
@@ -568,6 +543,76 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     }
   };
 
+  private scheduleAccountUpdateReconcile = (): void => {
+    if (this.isDisposed) return;
+
+    this.accountUpdateReconcileQueued = true;
+
+    if (this.accountUpdateReconcileTimer || this.accountUpdateReconcileInFlight) {
+      return;
+    }
+
+    this.parent.log('Scheduling coalesced AsterDEX position/order reconcile (1s)...', LogSeverity.Debug);
+    this.accountUpdateReconcileTimer = setTimeout(() => {
+      this.accountUpdateReconcileTimer = undefined;
+      void this.runAccountUpdateReconcile();
+    }, AsterDEXPrivateWebsocket.ACCOUNT_UPDATE_RECONCILE_DELAY_MS);
+  };
+
+  private runAccountUpdateReconcile = async (): Promise<void> => {
+    if (this.isDisposed || this.accountUpdateReconcileInFlight) return;
+
+    this.accountUpdateReconcileQueued = false;
+    this.accountUpdateReconcileInFlight = true;
+
+    try {
+      const [positionsResult, ordersResult] = await Promise.allSettled([
+        this.parent.fetchPositions(),
+        this.parent.fetchOrders(),
+      ]);
+
+      if (this.isDisposed) return;
+
+      if (positionsResult.status === 'fulfilled') {
+        this.parent.log('AsterDEX coalesced position reconcile completed successfully', LogSeverity.Debug);
+        this.parent.store.update({ positions: positionsResult.value });
+      } else {
+        this.parent.log(
+          `Failed to reconcile AsterDEX positions after account update: ${
+            positionsResult.reason?.message || positionsResult.reason
+          }`,
+          LogSeverity.Warning,
+        );
+      }
+
+      if (ordersResult.status === 'fulfilled') {
+        this.parent.log('AsterDEX coalesced order reconcile completed successfully', LogSeverity.Debug);
+        this.parent.store.update({ orders: ordersResult.value });
+      } else {
+        this.parent.log(
+          `Failed to reconcile AsterDEX orders after account update: ${
+            ordersResult.reason?.message || ordersResult.reason
+          }`,
+          LogSeverity.Warning,
+        );
+      }
+    } finally {
+      this.accountUpdateReconcileInFlight = false;
+
+      if (this.accountUpdateReconcileQueued && !this.isDisposed) {
+        this.scheduleAccountUpdateReconcile();
+      }
+    }
+  };
+
+  private clearAccountUpdateReconcileTimer = (): void => {
+    if (this.accountUpdateReconcileTimer) {
+      clearTimeout(this.accountUpdateReconcileTimer);
+      this.accountUpdateReconcileTimer = undefined;
+    }
+    this.accountUpdateReconcileQueued = false;
+  };
+
   dispose = (): void => {
     this.listenKey = '';
     this.lastListenKeyKeepAliveAt = 0;
@@ -576,6 +621,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.clearListenKeyRefreshTimer();
     this.clearListenKeyWatchdogTimer();
     this.clearConnectRetryTimer();
+    this.clearAccountUpdateReconcileTimer();
 
     // Call parent dispose (regular prototype method, so super works here)
     super.dispose();

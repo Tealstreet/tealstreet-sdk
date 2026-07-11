@@ -190,11 +190,11 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 - Wait-for-connection with exponential backoff: `100ms * 1.5^(floor(retryCount/10))`, max 2000ms
 - If connected but not initialized, queues subscription in `pendingSubscriptions`
 
-**Reconnection behavior** (`onClose`, `asterdex.ws-public.ts:71-84`):
+**Reconnection behavior** (`onClose`, `asterdex.ws-public.ts`):
 
 - Resets `wsReady = false` and clears `pendingSubscriptions`
 - Does NOT clear `topics` (needed for reconnection resubscription)
-- Calls parent class `onClose` via prototype chain
+- Calls the captured base `onClose` instance handler. `BaseWebSocket.onClose` is an arrow field, not a prototype method, so do not use `getPrototypeOf` for this.
 
 ### Private WebSocket (`asterdex.ws-private.ts`)
 
@@ -240,7 +240,7 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 - For non-zero positions: Updates existing position or logs that `fetchPositions()` will create it
 - For zero positions: Removes all positions for that symbol (position closed)
 - Handles position flip: If new side doesn't match existing, removes opposite side position
-- **Delayed sync**: Schedules a 1-second delayed `fetchPositions()` + `fetchOrders()` to ensure full sync after WS update
+- **Coalesced delayed sync**: Schedules one delayed `fetchPositions()` + `fetchOrders()` pair to ensure full sync after WS updates. Repeated `ACCOUNT_UPDATE` frames share the same pending timer/in-flight fetch, and if a frame arrives while the fetch is running, exactly one follow-up fetch is queued.
 - Processes balance updates from `data.a.B` array (wallet balance, cross wallet balance)
 
 ## Order Types and Mappings
@@ -362,7 +362,7 @@ Four API instances with different rate limits (`asterdex.api.ts:294-323`):
   - Updates existing positions if found in store
   - Handles position flips (removes opposite side in one-way mode)
   - Handles position close (removes all positions for symbol)
-- **Delayed sync**: After WS position update, schedules a 1-second delayed REST fetch for full reconciliation (`asterdex.ws-private.ts:342-368`)
+- **Coalesced delayed sync**: After WS position update, schedules a 1-second delayed REST fetch for full reconciliation (`asterdex.ws-private.ts`). The scheduler allows one pending timer and one in-flight fetch pair; additional `ACCOUNT_UPDATE` frames coalesce instead of stacking unbounded `fetchPositions` / `fetchOrders` calls.
 - **Fake positions**: Created for all active non-spot markets with both Long and Short sides, 0 contracts, leverage 10
 
 ### Balance State
@@ -393,25 +393,24 @@ Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.t
 
 ## Known Quirks / Implementation Notes
 
-0. **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern, matching `bitmex.ws-private.ts`) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
-
-1. **Update order not supported**: AsterDEX has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one.
-1. **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).
-1. **Close-position TP/SL**: `amount=0` uses `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.
-1. **Crossed orderbook handling**: depth processing applies multi-step uncrossing/fallback strategies and post-sort safety checks.
-1. **Historical trades disabled**: `fetchHistoricalTrades` currently returns an empty array with a warning.
-1. **Virtual clock**: uses dedicated Aster clock with proxy fallback and V1/V3 time endpoint fallback.
-1. **Orders placed individually**: no batch endpoint usage in `placeOrders`/`cancelOrders`; failures are tolerated per-item.
-1. **Trigger defaults**: TP defaults to `CONTRACT_PRICE` and SL defaults to `MARK_PRICE` (Binance-like behavior).
-1. **All signed params in query**: POST/PUT/DELETE signed requests use query parameters and clear request body.
-1. **Dual signing**: V1 routes use HMAC-SHA256; V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`.
-1. **Binance-style 200-with-error handling**: interceptor treats negative `code` values as API errors.
-1. **Ticker bid/ask source**: bid/ask are derived from orderbook streams, not 24h ticker REST payload.
-1. **Private WS delayed reconciliation**: `ACCOUNT_UPDATE` schedules delayed REST refresh for positions + orders.
-1. **WS error forwarding**: public WS error events route through close/reconnect flow.
-1. **Position flip cleanup**: one-way mode updates remove stale opposite-side positions.
-1. **O(1) ticker lookup**: uses `tickersBySymbol` map instead of linear scans.
-1. **Fake position baseline leverage**: synthetic empty positions use hardcoded leverage `10`.
+- **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern, matching `bitmex.ws-private.ts`) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
+- **Update order not supported**: AsterDEX has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one.
+- **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).
+- **Close-position TP/SL**: `amount=0` uses `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.
+- **Crossed orderbook handling**: depth processing applies multi-step uncrossing/fallback strategies and post-sort safety checks.
+- **Historical trades disabled**: `fetchHistoricalTrades` currently returns an empty array with a warning.
+- **Virtual clock**: uses dedicated Aster clock with proxy fallback and V1/V3 time endpoint fallback.
+- **Orders placed individually**: no batch endpoint usage in `placeOrders`/`cancelOrders`; failures are tolerated per-item.
+- **Trigger defaults**: TP defaults to `CONTRACT_PRICE` and SL defaults to `MARK_PRICE` (Binance-like behavior).
+- **All signed params in query**: POST/PUT/DELETE signed requests use query parameters and clear request body.
+- **Dual signing**: V1 routes use HMAC-SHA256; V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`.
+- **Binance-style 200-with-error handling**: interceptor treats negative `code` values as API errors.
+- **Ticker bid/ask source**: bid/ask are derived from orderbook streams, not 24h ticker REST payload.
+- **Private WS delayed reconciliation is coalesced**: `ACCOUNT_UPDATE` schedules a delayed positions + orders REST refresh, but the private WS keeps only one pending timer and one in-flight fetch pair. If more account updates arrive during the in-flight fetch, one follow-up delayed fetch is scheduled. This prevents account-update bursts from stacking unbounded REST calls on top of the 5s tick loop.
+- **WS error forwarding**: public WS error events route through close/reconnect flow.
+- **Position flip cleanup**: one-way mode updates remove stale opposite-side positions.
+- **O(1) ticker lookup**: uses `tickersBySymbol` map instead of linear scans.
+- **Fake position baseline leverage**: synthetic empty positions use hardcoded leverage `10`.
 
 ## Error Handling
 
