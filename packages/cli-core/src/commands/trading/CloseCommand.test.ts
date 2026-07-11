@@ -7,7 +7,12 @@ import { MemoryPreprocessStore } from '../../preprocess/memoryStore';
 
 // Helper to create mock exchange
 function createMockExchange(
-  positions: Array<{ symbol: string; side: PositionSide; contracts: number }> = [],
+  positions: Array<{
+    symbol: string;
+    side: PositionSide;
+    contracts: number;
+    extra?: { contractsNative?: number };
+  }> = [],
   overrides: Partial<ExchangeLike> = {},
 ): ExchangeLike {
   return {
@@ -15,12 +20,29 @@ function createMockExchange(
     store: {
       markets: [
         { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', precision: { amount: 0.001, price: 0.01 } },
+        {
+          symbol: 'XBTUSD',
+          base: 'XBT',
+          quote: 'USD',
+          isInverse: true,
+          precision: { amount: 1, price: 0.5 },
+        },
         { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT', precision: { amount: 0.01, price: 0.01 } },
+        {
+          symbol: 'ETHUSD',
+          base: 'ETH',
+          quote: 'USD',
+          isInverse: false,
+          precision: { amount: 0.000001, price: 0.05 },
+          info: { isQuanto: true },
+        },
         { symbol: 'WIFUSDT', base: 'WIF', quote: 'USDT', precision: { amount: 1, price: 0.0001 } },
       ],
       tickers: [
         { symbol: 'BTCUSDT', last: 50000 },
+        { symbol: 'XBTUSD', last: 64308 },
         { symbol: 'ETHUSDT', last: 3000 },
+        { symbol: 'ETHUSD', last: 3000 },
         { symbol: 'WIFUSDT', last: 2.5 },
       ],
       orders: [],
@@ -167,6 +189,60 @@ describe('CloseCommand', () => {
       );
     });
 
+    it.each([
+      ['OneWay long', ['close'], PositionSide.Long, OrderSide.Sell],
+      ['Hedge long', ['close', 'long'], PositionSide.Long, OrderSide.Sell],
+      ['Hedge short', ['close', 'short'], PositionSide.Short, OrderSide.Buy],
+    ])(
+      'uses native contract quantity for inverse BitMEX %s full close',
+      async (_mode, args, side, orderSide) => {
+        const exchange = createMockExchange([
+          {
+            symbol: 'XBTUSD',
+            side,
+            contracts: side === PositionSide.Long ? 0.0311 : -0.0311,
+            extra: { contractsNative: 2000 },
+          },
+        ]);
+
+        await command.execute(createMockContext(args, exchange, 'XBTUSD'));
+
+        expect(exchange.placeOrder).toHaveBeenCalledWith(
+          expect.objectContaining({
+            symbol: 'XBTUSD',
+            side: orderSide,
+            amount: 2000,
+            reduceOnly: true,
+          }),
+        );
+      },
+    );
+
+    it.each([
+      ['focused', ['close']],
+      ['global', ['close', 'allpos']],
+    ])('keeps base quantity for BitMEX quanto ETHUSD %s full close', async (_scope, args) => {
+      const exchange = createMockExchange([
+        {
+          symbol: 'ETHUSD',
+          side: PositionSide.Long,
+          contracts: 0.0311,
+          extra: { contractsNative: 2000 },
+        },
+      ]);
+
+      await command.execute(createMockContext(args, exchange, 'ETHUSD'));
+
+      expect(exchange.placeOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: 'ETHUSD',
+          side: OrderSide.Sell,
+          amount: 0.0311,
+          reduceOnly: true,
+        }),
+      );
+    });
+
     it('closes only long positions when "long" specified', async () => {
       const exchange = createMockExchange([
         { symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.5 },
@@ -308,6 +384,52 @@ describe('CloseCommand', () => {
       expect(order.amount).toBeCloseTo(0.3);
     });
 
+    it.each([
+      ['OneWay long', ['close', '50%'], PositionSide.Long, OrderSide.Sell],
+      ['Hedge long', ['close', 'long', '50%'], PositionSide.Long, OrderSide.Sell],
+      ['Hedge short', ['close', 'short', '50%'], PositionSide.Short, OrderSide.Buy],
+    ])(
+      'uses native contract quantity for inverse BitMEX %s percent close',
+      async (_mode, args, side, orderSide) => {
+        const exchange = createMockExchange([
+          {
+            symbol: 'XBTUSD',
+            side,
+            contracts: side === PositionSide.Long ? 0.0311 : -0.0311,
+            extra: { contractsNative: 2000 },
+          },
+        ]);
+
+        await command.execute(createMockContext(args, exchange, 'XBTUSD'));
+
+        expect(exchange.placeOrder).toHaveBeenCalledWith(
+          expect.objectContaining({
+            symbol: 'XBTUSD',
+            side: orderSide,
+            amount: 1000,
+            reduceOnly: true,
+          }),
+        );
+      },
+    );
+
+    it('keeps explicit USD sizing in native contracts for inverse BitMEX closes', async () => {
+      const exchange = createMockExchange([
+        {
+          symbol: 'XBTUSD',
+          side: PositionSide.Long,
+          contracts: 0.0311,
+          extra: { contractsNative: 2000 },
+        },
+      ]);
+
+      await command.execute(createMockContext(['close', '$1000'], exchange, 'XBTUSD'));
+
+      expect(exchange.placeOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1000 }),
+      );
+    });
+
     it('caps at the position size — 200% does not flip', async () => {
       const exchange = createMockExchange([
         { symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
@@ -413,6 +535,63 @@ describe('CloseCommand', () => {
         );
       }
     });
+
+    it.each([
+      ['allpos', PositionSide.Long, OrderSide.Sell],
+      ['longs', PositionSide.Long, OrderSide.Sell],
+      ['shorts', PositionSide.Short, OrderSide.Buy],
+    ])(
+      'uses native contract quantity for quantity-less global "%s" closes',
+      async (head, side, orderSide) => {
+        const exchange = createMockExchange([
+          {
+            symbol: 'XBTUSD',
+            side,
+            contracts: side === PositionSide.Long ? 0.0311 : -0.0311,
+            extra: { contractsNative: 2000 },
+          },
+        ]);
+
+        await command.execute(createMockContext(['close', head], exchange, 'XBTUSD'));
+
+        expect(exchange.placeOrder).toHaveBeenCalledWith(
+          expect.objectContaining({
+            symbol: 'XBTUSD',
+            side: orderSide,
+            amount: 2000,
+            reduceOnly: true,
+          }),
+        );
+      },
+    );
+
+    it.each([
+      ['longs', PositionSide.Long, OrderSide.Sell],
+      ['shorts', PositionSide.Short, OrderSide.Buy],
+    ])(
+      'uses native contract quantity for inverse global "%s 50%%" closes',
+      async (head, side, orderSide) => {
+        const exchange = createMockExchange([
+          {
+            symbol: 'XBTUSD',
+            side,
+            contracts: side === PositionSide.Long ? 0.0311 : -0.0311,
+            extra: { contractsNative: 2000 },
+          },
+        ]);
+
+        await command.execute(createMockContext(['close', head, '50%'], exchange, 'XBTUSD'));
+
+        expect(exchange.placeOrder).toHaveBeenCalledWith(
+          expect.objectContaining({
+            symbol: 'XBTUSD',
+            side: orderSide,
+            amount: 1000,
+            reduceOnly: true,
+          }),
+        );
+      },
+    );
 
     it('"close longs <pct>" partial-closes every long', async () => {
       const exchange = createMockExchange([

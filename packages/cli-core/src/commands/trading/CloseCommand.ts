@@ -1,6 +1,7 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { OrderSide, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
+import { adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
 
 /**
  * Close command - closes positions, optionally partial.
@@ -124,6 +125,7 @@ export class CloseCommand extends TradingBaseCommand {
 
       for (const position of symbolPositions) {
         let amount: number;
+        const market = exchange.store?.markets?.find((candidate) => candidate.symbol === symbol);
         if (sizeArg) {
           try {
             amount = this.parseSizeAndConvertIfUsd(
@@ -137,11 +139,24 @@ export class CloseCommand extends TradingBaseCommand {
           } catch (e) {
             return this.error((e as Error).message);
           }
+          const nativeContracts = market?.isInverse ? position.extra?.contractsNative : undefined;
+          if (nativeContracts !== undefined && /^\d+(\.\d+)?(%|%pos)$/.test(sizeArg)) {
+            amount = adjust(
+              (Math.abs(nativeContracts) * parseFloat(sizeArg)) / 100,
+              market?.precision.amount ?? 0.00000001,
+            );
+          }
           // Cap at the position size — `close 200%` should not flip the position.
-          const capped = Math.min(Math.abs(amount), Math.abs(position.contracts));
-          amount = capped;
+          amount = Math.min(
+            Math.abs(amount),
+            Math.abs(nativeContracts ?? position.contracts),
+          );
         } else {
-          amount = Math.abs(position.contracts);
+          amount = Math.abs(
+            market?.isInverse
+              ? position.extra?.contractsNative ?? position.contracts
+              : position.contracts,
+          );
         }
 
         const order: PlaceOrderOpts = {
@@ -229,6 +244,9 @@ export class CloseCommand extends TradingBaseCommand {
     let placed = 0;
     for (const position of targets) {
       let amount: number;
+      const market = exchange.store?.markets?.find(
+        (candidate) => candidate.symbol === position.symbol,
+      );
       if (sizeArg) {
         try {
           amount = this.parseSizeAndConvertIfUsd(
@@ -243,9 +261,23 @@ export class CloseCommand extends TradingBaseCommand {
           this.printError(ctx, `${position.symbol}: ${(e as Error).message}`);
           continue;
         }
-        amount = Math.min(Math.abs(amount), Math.abs(position.contracts));
+        const nativeContracts = market?.isInverse ? position.extra?.contractsNative : undefined;
+        if (nativeContracts !== undefined && /^\d+(\.\d+)?(%|%pos)$/.test(sizeArg)) {
+          amount = adjust(
+            (Math.abs(nativeContracts) * parseFloat(sizeArg)) / 100,
+            market?.precision.amount ?? 0.00000001,
+          );
+        }
+        amount = Math.min(
+          Math.abs(amount),
+          Math.abs(nativeContracts ?? position.contracts),
+        );
       } else {
-        amount = Math.abs(position.contracts);
+        amount = Math.abs(
+          market?.isInverse
+            ? position.extra?.contractsNative ?? position.contracts
+            : position.contracts,
+        );
       }
 
       const order: PlaceOrderOpts = {
