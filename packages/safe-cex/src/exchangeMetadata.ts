@@ -1672,7 +1672,7 @@ const BitMEXMetadata: ExchangeMetadata = {
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsMaxCrossLeverage: false,
-  positionModes: [PositionMode.OneWay],
+  positionModes: [PositionMode.OneWay, PositionMode.Hedged],
   supportedTPSLTriggerTypes: [
     OrderStopTriggerType.LastPrice,
     OrderStopTriggerType.MarkPrice,

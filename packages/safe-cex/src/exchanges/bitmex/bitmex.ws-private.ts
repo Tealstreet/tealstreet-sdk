@@ -166,22 +166,29 @@ export class BitmexPrivateWebsocket extends BaseWebSocket<BitmexExchange> {
 
   handlePosition = (_json: any) => {
     const json = _json as any as POSITION_WS_UPDATE;
+    this.parent.observePositionMode(json.data);
     const positionsMap = new Map<string, BITMEX_POSITION>();
+    const prevBitmexPositions = this.store.positions.map((p) => p.info);
     const rawPositions = json.data.filter(this.parent.filterBitmexPosition);
     for (const position of rawPositions) {
-      positionsMap.set(position.symbol, position);
+      let strategy = position.strategy;
+      if (!strategy && json.action !== 'partial') {
+        const previousForSymbol = prevBitmexPositions.filter((previous) => previous?.symbol === position.symbol);
+        if (previousForSymbol.length !== 1) continue;
+        strategy = previousForSymbol[0].strategy;
+      }
+      positionsMap.set(`${position.symbol}:${strategy}`, position);
     }
-
-    const prevBitmexPositions = this.store.positions.map((p) => p.info);
     for (let i = 0; i < prevBitmexPositions.length; i++) {
-      if (positionsMap.has(prevBitmexPositions[i]?.symbol)) {
-        const prevBitmexPosition = prevBitmexPositions[i];
-        const update = positionsMap.get(prevBitmexPosition.symbol);
+      const previousPosition = prevBitmexPositions[i];
+      const previousKey = `${previousPosition?.symbol}:${previousPosition?.strategy}`;
+      if (positionsMap.has(previousKey)) {
+        const update = positionsMap.get(previousKey);
         const combinedUpdate = {
-          ...prevBitmexPosition,
+          ...previousPosition,
           ...update,
         };
-        positionsMap.set(prevBitmexPosition.symbol, combinedUpdate);
+        positionsMap.set(previousKey, combinedUpdate);
       }
     }
 

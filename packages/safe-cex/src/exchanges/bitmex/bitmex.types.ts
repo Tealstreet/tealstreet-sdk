@@ -21,6 +21,8 @@ export const BASE_WS_URL = {
   },
 };
 
+export type BitmexStrategy = 'OneWay' | 'Long' | 'Short';
+
 export const ENDPOINTS = {
   BALANCE: '/user/margin',
   MARKETS: '/instrument/activeAndIndices',
@@ -31,6 +33,7 @@ export const ENDPOINTS = {
   TICKERS: '/instrument/activeAndIndices',
   SET_LEVERAGE: '/position/leverage', // POST
   SET_ISOLATE: '/position/isolate', // POST
+  SET_POSITION_MODE: '/user/positionMode', // POST
   ORDER: '/order',
   ORDERBOOK: '/orderBook/L2',
   KLINE: '/udf/history',
