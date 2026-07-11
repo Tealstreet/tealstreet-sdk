@@ -472,6 +472,10 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         break;
       case 'clearinghouseState':
         if (json?.data) {
+          // Hyperliquid wraps both core and HIP-3 subscription payloads as
+          // `{ user, dex, clearinghouseState }`. Core uses `dex: ''`, so use
+          // the nested state before routing it to the core handler.
+          const chState = json.data.clearinghouseState || json.data;
           if (json.data.dex) {
             // HIP-3 clearinghouseState with dex parameter — route through handleWebData2
             // which already handles per-dex position preservation correctly.
@@ -479,7 +483,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             //   { dex: "xyz", assetPositions: [...] }
             //   { dex: "xyz", clearinghouseState: { assetPositions: [...] } }
             // Normalize to the format handleWebData2 expects.
-            const chState = json.data.clearinghouseState || json.data;
             this.handleWebData2({
               clearinghouseState: {
                 assetPositions: chState.assetPositions,
@@ -489,7 +492,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             });
           } else {
             // Core perps clearinghouseState (no dex)
-            this.handleClearinghouseState(json.data);
+            this.handleClearinghouseState(chState);
           }
         }
         break;

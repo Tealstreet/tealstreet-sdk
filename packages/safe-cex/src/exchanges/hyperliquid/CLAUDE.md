@@ -556,7 +556,7 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 
 ### Position Reconciliation
 
-**Core perps**: Primary source is `clearinghouseState` WS channel. When recent `clearinghouseState` data exists (within `WEB_DATA2_CORE_POSITION_FALLBACK_MS = 20,000ms`), `webData2` position snapshots are skipped to prevent stale leverage snapback.
+**Core perps**: Primary source is `clearinghouseState` WS channel. Hyperliquid's live subscription frame is wrapped as `{ user, dex: '', clearinghouseState }`, so the private WS must unwrap `data.clearinghouseState ?? data` before giving it to `handleClearinghouseState`; passing the outer wrapper silently drops positions and balance updates. When recent `clearinghouseState` data exists (within `WEB_DATA2_CORE_POSITION_FALLBACK_MS = 20,000ms`), `webData2` position snapshots are skipped to prevent stale leverage snapback.
 
 **HIP-3 positions**: Primary source is `clearinghouseState` WS with `dex` parameter. When updating:
 

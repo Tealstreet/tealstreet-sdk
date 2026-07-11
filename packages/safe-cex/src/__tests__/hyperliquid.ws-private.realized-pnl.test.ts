@@ -104,6 +104,31 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
     expect(hasCoreClearinghouseSubscription).toBe(true);
   });
 
+  it('unwraps the live core clearinghouseState subscription payload', () => {
+    const parent = createParentMock();
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+
+    // The live subscription frame wraps the state and represents core perps
+    // with an empty dex string rather than omitting dex.
+    (ws as any).processMessage({
+      channel: 'clearinghouseState',
+      data: {
+        user: '0xuser',
+        dex: '',
+        clearinghouseState: createSampleClearinghouseState(),
+      },
+    });
+
+    expect(parent.store.addOrUpdatePositions).toHaveBeenCalledWith([
+      expect.objectContaining({
+        symbol: 'BTC-PERP',
+        contracts: 0.25,
+        side: PositionSide.Long,
+      }),
+    ]);
+    expect(parent.syncBalanceFromLivePositions).toHaveBeenCalledTimes(1);
+  });
+
   it('routes userEvents fill payloads through fill handling', () => {
     const parent = createParentMock();
     const ws = new HyperliquidPrivateWebSocket(parent as any);
