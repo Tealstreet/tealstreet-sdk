@@ -4,6 +4,8 @@ import { compress } from '@tealstreet/compression/src/compress';
 import { StoreData, Writable } from '../../../types';
 import { BaseTaskPostprocessor } from './BaseTaskPostprocessor';
 
+const SNAPSHOT_INTERVAL_MS = 5 * 60_000;
+
 export class SnapshotPostprocessor extends BaseTaskPostprocessor {
   private _lastUpdate: number = Date.now() - 60_000;
   private _lastLongUpdate: number = 0;
@@ -53,7 +55,7 @@ export class SnapshotPostprocessor extends BaseTaskPostprocessor {
       return;
     }
 
-    if (this._lastUpdate === 0 || Date.now() - this._lastUpdate > 60_000) {
+    if (this._lastUpdate === 0 || Date.now() - this._lastUpdate > SNAPSHOT_INTERVAL_MS) {
       this._lastUpdate = Date.now();
 
       // Prepare snapshot data object

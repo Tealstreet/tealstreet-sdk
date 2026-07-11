@@ -4,6 +4,11 @@ Pipeline of post-processors that runs on every throttled store
 update (4 Hz default). Each one mutates the snapshot before
 `postMessage` ships it to the main thread.
 
+`SnapshotPostprocessor` is the exception: it only uploads changed historical
+account data every five minutes. It is non-critical admin/history telemetry,
+not the trading-state path; do not restore per-minute uploads without a
+freshness requirement and cost review.
+
 For the broader hot-path rule set, see `../../exchanges/CLAUDE.md`
 → "Public WebSocket Hot-Path Patterns".
 
