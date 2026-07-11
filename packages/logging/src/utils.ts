@@ -53,6 +53,16 @@ let loggingMetrics: LoggingMetrics = {
 };
 let lastMetricsReportAt = Date.now();
 
+type LogIngestToken = {
+  expiresAt: number;
+  token: string;
+};
+
+let cachedLogIngestToken: LogIngestToken | undefined;
+let logIngestTokenRequest: Promise<LogIngestToken> | undefined;
+
+const LOG_INGEST_TOKEN_REFRESH_SKEW_MS = 60_000;
+
 export const getSessionKey = () => sessionKey;
 
 // Test-only reset for module-scoped queues. Production code must use the
@@ -62,6 +72,8 @@ export const resetLoggingStateForTests = () => {
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
   uploadInProgress = false;
+  cachedLogIngestToken = undefined;
+  logIngestTokenRequest = undefined;
 };
 
 function splitStringByBytes(input: string, byteSize: number = 200000): string[] {
@@ -189,6 +201,39 @@ const isPageReadyForLogging = () => {
   return isVisible && isOnline;
 };
 
+const getLogIngestOrigin = () => {
+  const origin = typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_LOG_INGEST_ORIGIN : undefined;
+  return origin?.replace(/\/+$/, '') || undefined;
+};
+
+const getLogIngestToken = async (baseUrl: string) => {
+  if (cachedLogIngestToken && cachedLogIngestToken.expiresAt - Date.now() > LOG_INGEST_TOKEN_REFRESH_SKEW_MS) {
+    return cachedLogIngestToken.token;
+  }
+
+  if (!logIngestTokenRequest) {
+    logIngestTokenRequest = fetch(`${baseUrl}/api/logs/token`, { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Log token API responded with status ${response.status}`);
+        }
+
+        const payload = (await response.json()) as Partial<LogIngestToken>;
+        if (typeof payload.token !== 'string' || typeof payload.expiresAt !== 'number') {
+          throw new Error('Log token API returned an invalid response');
+        }
+
+        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token };
+        return cachedLogIngestToken;
+      })
+      .finally(() => {
+        logIngestTokenRequest = undefined;
+      });
+  }
+
+  return (await logIngestTokenRequest).token;
+};
+
 const drainLogBatches = async () => {
   if (uploadInProgress) return;
   uploadInProgress = true;
@@ -258,10 +303,16 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
     try {
       loggingMetrics.uploadsStarted++;
       const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-      const response = await fetch(`${baseUrl}/api/logs`, {
+      const logIngestOrigin = getLogIngestOrigin();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (logIngestOrigin) {
+        headers.Authorization = `Bearer ${await getLogIngestToken(baseUrl)}`;
+      }
+
+      const response = await fetch(logIngestOrigin ? `${logIngestOrigin}/v1/logs` : `${baseUrl}/api/logs`, {
         method: 'POST',
         body: await compress(JSON.stringify(nr)),
-        headers: { 'Content-Type': 'application/json' },
+        headers,
       });
       if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
       loggingMetrics.uploadsSucceeded++;

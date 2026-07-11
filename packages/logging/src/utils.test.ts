@@ -40,6 +40,7 @@ describe('utils.ts', () => {
 
     // Reset environment variables
     delete process.env.NEXT_PUBLIC_FORCE_EXTERNAL_LOGGING;
+    delete process.env.NEXT_PUBLIC_LOG_INGEST_ORIGIN;
     process.env.NODE_ENV = 'production'; // Default to production for tests
 
     // Mock fetch to resolve successfully by default
@@ -556,6 +557,34 @@ describe('utils.ts', () => {
         }),
       );
     });
+  });
+
+  it('uses one cached short-lived token for direct Cloudflare log ingestion', async () => {
+    process.env.NEXT_PUBLIC_LOG_INGEST_ORIGIN = 'https://log-ingest.tealstreet.io';
+    mockFetch
+      .mockResolvedValueOnce({
+        json: async () => ({ expiresAt: Date.now() + 10 * 60_000, token: 'log-token' }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+
+    utils.logInfo('send through the worker');
+    utils.dumpLogQueue();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('/api/logs/token'),
+      expect.objectContaining({ credentials: 'same-origin' }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      'https://log-ingest.tealstreet.io/v1/logs',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer log-token' }),
+        method: 'POST',
+      }),
+    );
   });
 
   describe('retry mechanism', () => {
