@@ -71,6 +71,10 @@ import { asterDEXVirtualClock } from './asterdex.virtualClock';
 import { AsterDEXPrivateWebsocket } from './asterdex.ws-private';
 import { AsterDEXPublicWebsocket } from './asterdex.ws-public';
 
+const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
+const BALANCE_RECONCILIATION_INTERVAL_MS = 25_000;
+const PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS = 75_000;
+
 export class AsterDEXExchange extends BaseExchange {
   private static readonly OPEN_INTEREST_POLL_INTERVAL_MS = 15000;
   private static readonly OPEN_INTEREST_BATCH_SIZE = 25;
@@ -83,6 +87,10 @@ export class AsterDEXExchange extends BaseExchange {
 
   publicWebsocket: AsterDEXPublicWebsocket;
   privateWebsocket: AsterDEXPrivateWebsocket;
+  private positionStateVersion = 0;
+  private lastBalanceReconciliationAt = 0;
+  private lastPositionSafetyReconciliationAt = 0;
+  private lastOrderSafetyReconciliationAt = 0;
   private openInterestCursor = 0;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
@@ -108,6 +116,12 @@ export class AsterDEXExchange extends BaseExchange {
 
     return Boolean(this.options.secret);
   }
+
+  markPositionStateUpdatedByWebsocket = (): void => {
+    this.positionStateVersion += 1;
+  };
+
+  getPositionStateVersion = (): number => this.positionStateVersion;
 
   getFapiPath = (endpoint: string, versionOverride?: AsterDEXAPIVersion | 'v4'): string => {
     return getAsterDEXFapiPath(endpoint, versionOverride ?? this.apiVersion);
@@ -175,6 +189,7 @@ export class AsterDEXExchange extends BaseExchange {
         try {
           const positions = await this.fetchPositions();
           this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+          this.lastPositionSafetyReconciliationAt = Date.now();
           this.log(`Loaded ${positions.length} positions`, LogSeverity.Info);
         } catch (error: any) {
           this.log(`Failed to fetch initial positions: ${error.message}`, LogSeverity.Warning);
@@ -184,6 +199,7 @@ export class AsterDEXExchange extends BaseExchange {
         try {
           const orders = await this.fetchOrders();
           this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+          this.lastOrderSafetyReconciliationAt = Date.now();
           this.log(`Loaded ${orders.length} open orders`, LogSeverity.Info);
         } catch (error: any) {
           this.log(`Failed to fetch initial orders: ${error.message}`, LogSeverity.Warning);
@@ -216,24 +232,56 @@ export class AsterDEXExchange extends BaseExchange {
   private tick = async (): Promise<void> => {
     if (this.isDisposed) return;
 
-    try {
-      // Fetch balance every tick (5 seconds)
-      const balance = await this.fetchBalance();
-      this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+    const now = Date.now();
+    const shouldReconcileBalance =
+      this.lastBalanceReconciliationAt === 0 ||
+      now - this.lastBalanceReconciliationAt >= BALANCE_RECONCILIATION_INTERVAL_MS;
+    const shouldReconcilePositions =
+      this.lastPositionSafetyReconciliationAt === 0 ||
+      now - this.lastPositionSafetyReconciliationAt >= PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS;
+    const shouldReconcileOrders =
+      this.lastOrderSafetyReconciliationAt === 0 ||
+      now - this.lastOrderSafetyReconciliationAt >= PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS;
 
-      // Fetch positions and orders on every tick
-      // Note: Previously used count-based intervals, now fetching more frequently
-      const positions = await this.fetchPositions();
-      this.store.update({ positions });
+    if (shouldReconcileBalance) {
+      try {
+        const balance = await this.fetchBalance();
+        if (this.isDisposed) return;
+        this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+        this.lastBalanceReconciliationAt = Date.now();
+      } catch (error: any) {
+        this.log(`Balance reconciliation failed: ${error.message}`, LogSeverity.Warning);
+      }
+    }
 
-      const orders = await this.fetchOrders();
-      this.store.update({ orders });
-    } catch (error: any) {
-      this.log(`Tick error: ${error.message}`, LogSeverity.Warning);
+    if (shouldReconcilePositions) {
+      const positionStateVersion = this.getPositionStateVersion();
+      try {
+        const positions = await this.fetchPositions();
+        if (this.isDisposed) return;
+        if (positionStateVersion === this.getPositionStateVersion()) {
+          this.store.addOrUpdatePositionsFull(positions);
+          this.store.update({ loaded: { ...this.store.loaded, positions: true } });
+        }
+        this.lastPositionSafetyReconciliationAt = Date.now();
+      } catch (error: any) {
+        this.log(`Position safety reconciliation failed: ${error.message}`, LogSeverity.Warning);
+      }
+    }
+
+    if (shouldReconcileOrders) {
+      try {
+        const orders = await this.fetchOrders();
+        if (this.isDisposed) return;
+        this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+        this.lastOrderSafetyReconciliationAt = Date.now();
+      } catch (error: any) {
+        this.log(`Order safety reconciliation failed: ${error.message}`, LogSeverity.Warning);
+      }
     }
 
     if (!this.isDisposed) {
-      loop(() => this.tick(), 5000);
+      loop(() => this.tick(), PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS);
     }
   };
 

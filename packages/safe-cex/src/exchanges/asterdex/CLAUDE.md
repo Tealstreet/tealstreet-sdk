@@ -99,7 +99,9 @@ Both V1 and V3 public prefixes are treated as public (examples):
 6. fetch current position mode via `GET /fapi/{version}/positionSide/dual` and set `store.options.isHedged`
 7. connect public WS (unless external public data is configured)
 8. connect private WS (private mode only)
-9. start 5-second tick loop (private mode only)
+9. start the private health loop (private mode only). The loop wakes every
+   3 seconds but only performs REST work when the balance or safety
+   reconciliation interval is due.
 
 Private-mode checks are based on `!isPublicDataOnly` (which now respects V3 auth readiness via overridden `canSign`).
 
@@ -226,21 +228,32 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 | `executionReport`         | `handleExecutionReport`       | Legacy/spot order execution reports         |
 | `outboundAccountPosition` | `handleAccountUpdate`         | Legacy account balance updates              |
 
-**ORDER_TRADE_UPDATE handling** (`asterdex.ws-private.ts:138-227`):
+**ORDER_TRADE_UPDATE handling** (`asterdex.ws-private.ts`):
 
 - `NEW`: Adds order to store via `addOrUpdateOrder`
-- `PARTIALLY_FILLED` / `FILLED`: Emits `fill` event with `ap` (average price) and `l` (last filled qty)
+- `PARTIALLY_FILLED` / `FILLED`: Mirrors cumulative `filled` / `remaining`
+  onto the existing store order immediately, then emits the `fill` event
+  with `ap` (average price) and `l` (last filled qty). Do not remove the
+  immediate store update — chasers and order rows should not wait for the
+  slower REST order refresh to see partial fill size.
 - `FILLED`: Updates status to `Closed`, remaining to 0
 - `CANCELED` / `REJECTED` / `EXPIRED`: Updates status to `Canceled`
+- Every order lifecycle event schedules a separate debounced REST order
+  reconciliation. Order repair does not run from account position events.
 
-**ACCOUNT_UPDATE handling** (`asterdex.ws-private.ts:252-389`):
+**ACCOUNT_UPDATE handling** (`asterdex.ws-private.ts`):
 
 - Processes position updates from `data.a.P` array
 - In one-way mode (`ps === 'BOTH'`), determines side from position amount sign
 - For non-zero positions: Updates existing position or logs that `fetchPositions()` will create it
 - For zero positions: Removes all positions for that symbol (position closed)
 - Handles position flip: If new side doesn't match existing, removes opposite side position
-- **Coalesced delayed sync**: Schedules one delayed `fetchPositions()` + `fetchOrders()` pair to ensure full sync after WS updates. Repeated `ACCOUNT_UPDATE` frames share the same pending timer/in-flight fetch, and if a frame arrives while the fetch is running, exactly one follow-up fetch is queued.
+- **Position repair only**: Increments the exchange's
+  `positionStateVersion`, writes the WS deltas to the store, then schedules a
+  delayed `fetchPositions()` repair. The repair commits only if
+  `positionStateVersion` did not advance while the REST request was in
+  flight; otherwise the stale response is discarded and a queued follow-up
+  repair runs. Do not schedule order refreshes from `ACCOUNT_UPDATE`.
 - Processes balance updates from `data.a.B` array (wallet balance, cross wallet balance)
 
 ## Order Types and Mappings
@@ -349,25 +362,37 @@ Four API instances with different rate limits (`asterdex.api.ts:294-323`):
 
 ### Order State
 
-- **REST polling**: Fetched every tick (5 seconds) via `GET /fapi/{version}/openOrders`
+- **REST polling**: Fetched as a safety reconciliation roughly every 75
+  seconds, not on every private health-loop tick.
 - **WebSocket updates**: `ORDER_TRADE_UPDATE` events update individual orders in real-time
   - `NEW` orders are added via `addOrUpdateOrder`
   - Status changes update existing orders via `updateOrder`
+  - cumulative partial/full fill quantities are mirrored onto the store row
+    immediately
+- **Debounced order repair**: `ORDER_TRADE_UPDATE` and `executionReport`
+  schedule a 10-second debounced `fetchOrders()` refresh. This is separate
+  from position repair and coalesces bursty order lifecycle events.
 - **Reconnection**: `fetchAndSetPrivateSnapshot(10)` called on private WS reconnect
 
 ### Position State
 
-- **REST polling**: Fetched every tick via `GET /fapi/{version}/positionRisk`
+- **REST polling**: Fetched as a safety reconciliation roughly every 75
+  seconds, with a stale-response guard based on `positionStateVersion`
 - **WebSocket updates**: `ACCOUNT_UPDATE` events provide immediate position changes
   - Updates existing positions if found in store
   - Handles position flips (removes opposite side in one-way mode)
   - Handles position close (removes all positions for symbol)
-- **Coalesced delayed sync**: After WS position update, schedules a 1-second delayed REST fetch for full reconciliation (`asterdex.ws-private.ts`). The scheduler allows one pending timer and one in-flight fetch pair; additional `ACCOUNT_UPDATE` frames coalesce instead of stacking unbounded `fetchPositions` / `fetchOrders` calls.
+- **Coalesced position repair**: After a WS position update, schedules a
+  1-second delayed `fetchPositions()` repair. The scheduler allows one
+  pending timer and one in-flight repair; additional `ACCOUNT_UPDATE` frames
+  coalesce, and stale REST responses are discarded when a newer WS position
+  version arrived during the request.
 - **Fake positions**: Created for all active non-spot markets with both Long and Short sides, 0 contracts, leverage 10
 
 ### Balance State
 
-- Fetched every tick from account endpoint (`/fapi/v4/account` on V1, `/fapi/v3/account` on V3)
+- Fetched by the private health loop roughly every 25 seconds from the account
+  endpoint (`/fapi/v4/account` on V1, `/fapi/v3/account` on V3)
 - Also updated from `ACCOUNT_UPDATE` WS events (wallet balance, cross wallet balance)
 
 ## Exchange Metadata
@@ -406,7 +431,12 @@ Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.t
 - **Dual signing**: V1 routes use HMAC-SHA256; V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`.
 - **Binance-style 200-with-error handling**: interceptor treats negative `code` values as API errors.
 - **Ticker bid/ask source**: bid/ask are derived from orderbook streams, not 24h ticker REST payload.
-- **Private WS delayed reconciliation is coalesced**: `ACCOUNT_UPDATE` schedules a delayed positions + orders REST refresh, but the private WS keeps only one pending timer and one in-flight fetch pair. If more account updates arrive during the in-flight fetch, one follow-up delayed fetch is scheduled. This prevents account-update bursts from stacking unbounded REST calls on top of the 5s tick loop.
+- **Private WS repair is split by purpose**: `ACCOUNT_UPDATE` schedules
+  delayed position-only repair with `positionStateVersion` stale-response
+  protection. Order lifecycle events (`ORDER_TRADE_UPDATE` /
+  `executionReport`) schedule a separate 10-second debounced order refresh.
+  This prevents account-update bursts from stacking order and position REST
+  calls on top of the periodic safety loop.
 - **WS error forwarding**: public WS error events route through close/reconnect flow.
 - **Position flip cleanup**: one-way mode updates remove stale opposite-side positions.
 - **O(1) ticker lookup**: uses `tickersBySymbol` map instead of linear scans.
@@ -441,10 +471,18 @@ Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.t
 
 ## Tick Loop
 
-- Runs every 5 seconds (hardcoded `5000` in `loop()` call, `asterdex.exchange.ts:173`)
-- **Every tick**: Fetches balance (account endpoint), positions (`/fapi/{version}/positionRisk`), and orders (`/fapi/{version}/openOrders`)
-- Only runs if `!isPublicDataOnly` (includes V1 key/secret or valid V3 wallet auth)
-- Uses `loop()` utility for scheduling, which handles `isDisposed` check
+- Runs as a 3-second private-state health loop, but most ticks do no REST
+  work. It is a scheduler, not a full refresh loop.
+- **Balance reconciliation**: roughly every 25 seconds via the account
+  endpoint.
+- **Position safety reconciliation**: roughly every 75 seconds via
+  `positionRisk`, guarded by `positionStateVersion` so stale REST cannot
+  overwrite newer WS position deltas.
+- **Order safety reconciliation**: roughly every 75 seconds via
+  `openOrders`. Faster order repair comes from the private WS debounce.
+- Only runs if `!isPublicDataOnly` (includes V1 key/secret or valid V3 wallet auth).
+- Open-interest polling remains separate from this private-state loop.
+- Uses `loop()` utility for scheduling, which handles `isDisposed` check.
 
 ## Testing / Validation
 
