@@ -1,5 +1,6 @@
 import { ExchangeName } from '../types';
 import { setAwsProxyMigrationEnabled } from '../utils/transportResolution';
+import { virtualClock } from '../utils/virtualClock';
 import { ExchangeWorker } from './ExchangeWorker';
 import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
 import { TelegramWorker } from './TelgramWorker';
@@ -278,6 +279,17 @@ const start = (ctx: Worker, shared = false) => {
     if (payload?.op === '__workerConfig') {
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('awsProxyMigration' in cfg) setAwsProxyMigrationEnabled(Boolean(cfg.awsProxyMigration));
+      return;
+    }
+
+    // The browser main thread owns network time synchronization and fans the
+    // result out to every local exchange worker. This keeps the request rate
+    // per tab, rather than per open account.
+    if (payload?.op === 'sync-time') {
+      const timeMs = payload.data?.timeMs;
+      if (typeof timeMs === 'number' && Number.isFinite(timeMs)) {
+        virtualClock.syncFromServerTime(timeMs);
+      }
       return;
     }
 

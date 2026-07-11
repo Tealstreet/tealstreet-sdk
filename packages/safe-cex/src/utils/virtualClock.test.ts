@@ -21,6 +21,9 @@ describe('virtualClock', () => {
     (virtualClock as any).started = false;
     (virtualClock as any).server = null;
     (virtualClock as any).client = null;
+    (virtualClock as any).offsetMs = 0;
+    (virtualClock as any).syncInFlight = null;
+    delete process.env.NEXT_PUBLIC_TIME_API_ORIGIN;
   });
 
   afterEach(() => {
@@ -222,7 +225,7 @@ describe('virtualClock', () => {
       (global as any).window = originalWindow;
     });
 
-    it('resyncs after two minutes rather than every minute', async () => {
+    it('resyncs every five minutes', async () => {
       const originalWindow = global.window;
       (global as any).window = {};
       vi.mocked(axios.get).mockResolvedValue({ data: { time: Date.now() + 10_000 } });
@@ -237,6 +240,19 @@ describe('virtualClock', () => {
       expect(axios.get).toHaveBeenCalledTimes(2);
 
       (global as any).window = originalWindow;
+    });
+  });
+
+  describe('dedicated time origin', () => {
+    it('uses the configured public endpoint instead of the Vercel route', async () => {
+      (global as any).window = {};
+      process.env.NEXT_PUBLIC_TIME_API_ORIGIN = 'https://time.tealstreet.io///';
+      vi.mocked(axios.get).mockResolvedValueOnce({ data: { time: new Date().toISOString(), unixMs: Date.now() } });
+
+      await virtualClock.syncClientServerTime();
+
+      expect(axios.get).toHaveBeenCalledWith('https://time.tealstreet.io/v1/time', { timeout: 5000 });
+      delete (global as any).window;
     });
   });
 

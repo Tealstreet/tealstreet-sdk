@@ -7,6 +7,15 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## Time synchronization
+
+The browser main thread owns public time polling. It synchronizes once per
+tab, then sends the `sync-time` payload with the measured epoch milliseconds
+to every local worker; `store.webworker.ts` applies it before exchange routing.
+Do not make each exchange worker call the public endpoint: one tab may have
+many accounts, and foreground/page-show handling already forces a fresh
+main-thread sync after sleep.
+
 ## The `exchangeWorkers` registry is keyed by accountName — single-tenant only
 
 `store.webworker.ts` keeps module-global `exchangeWorkers` /

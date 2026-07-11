@@ -15,6 +15,7 @@ export type StoreWorkerIncomingOp =
   | 'merge-message-handler-stats'
   | 'sendSnapshot'
   | 'settings'
+  | 'sync-time'
   // Subscriptions
   | 'subscribeOHLCV'
   | 'unsubscribeOHLCV'

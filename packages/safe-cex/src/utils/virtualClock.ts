@@ -8,7 +8,9 @@ import { getPublicCorsProxy } from './transportResolution';
 
 dayjs.extend(utc);
 
-export const TIME_SYNC_INTERVAL_MS = 120_000;
+export const TIME_SYNC_INTERVAL_MS = 300_000;
+
+type TimeSyncListener = (timeMs: number) => void;
 
 class VirtualClock {
   started = false;
@@ -23,6 +25,8 @@ class VirtualClock {
   // from `mapOrder` / `mapPosition` / `lastUpdate` writes / etc.
   // (~209 callsites in safe-cex), this was steady allocator pressure.
   private offsetMs = 0;
+  private syncInFlight: Promise<void> | null = null;
+  private readonly syncListeners = new Set<TimeSyncListener>();
 
   start = async () => {
     if (!this.started) {
@@ -42,6 +46,41 @@ class VirtualClock {
 
   private getBaseUrl = (): string => {
     return typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
+  };
+
+  private getTimeEndpoint = (): string => {
+    const configuredOrigin = process.env.NEXT_PUBLIC_TIME_API_ORIGIN?.trim().replace(/\/+$/, '');
+    return configuredOrigin ? `${configuredOrigin}/v1/time` : `${this.getBaseUrl()}/api/time`;
+  };
+
+  private notifyTimeSync = () => {
+    const timeMs = this.getCurrentTimeMs();
+    for (const listener of this.syncListeners) {
+      listener(timeMs);
+    }
+  };
+
+  subscribeToTimeSync = (listener: TimeSyncListener) => {
+    this.syncListeners.add(listener);
+    return () => this.syncListeners.delete(listener);
+  };
+
+  // Browser workers receive the main-thread clock through this method instead
+  // of each polling a public endpoint. The host tab therefore makes one time
+  // request regardless of the number of exchange accounts it has open.
+  syncFromServerTime = (timeMs: number) => {
+    const client = dayjs.utc();
+    const server = dayjs.utc(timeMs);
+
+    if (Math.abs(server.diff(client, 'milliseconds')) < 1000) {
+      this.server = null;
+      this.client = null;
+      this.offsetMs = 0;
+    } else {
+      this.server = server;
+      this.client = client;
+      this.offsetMs = server.valueOf() - client.valueOf();
+    }
   };
 
   private scheduleNextSync = () => {
@@ -82,7 +121,19 @@ class VirtualClock {
   // `dayjs.utc().valueOf()` minus the per-call dayjs allocation.
   getCurrentTimeMs = () => Date.now() + this.offsetMs;
 
-  public syncClientServerTime = async () => {
+  public syncClientServerTime = () => {
+    if (this.syncInFlight) {
+      return this.syncInFlight;
+    }
+
+    this.syncInFlight = this.syncClientServerTimeInner().finally(() => {
+      this.syncInFlight = null;
+    });
+
+    return this.syncInFlight;
+  };
+
+  private syncClientServerTimeInner = async () => {
     if (typeof window === 'undefined') {
       // assume we are running onto a server
       // this should have a better time sync
@@ -93,33 +144,27 @@ class VirtualClock {
       return;
     }
 
-    this.server = await this.fetchServerTime();
-    this.client = dayjs.utc();
-
-    // if the difference is less than 5 seconds
-    // assume the time is correct
-    if (Math.abs(this.server.diff(this.client, 'milliseconds')) < 1000) {
-      this.server = null;
-      this.client = null;
-      this.offsetMs = 0;
-    } else {
-      this.offsetMs = this.server.valueOf() - this.client.valueOf();
-    }
+    this.syncFromServerTime((await this.fetchServerTime()).valueOf());
+    this.notifyTimeSync();
   };
 
   private fetchServerTime = async () => {
-    // Lead with our own same-origin /api/time: no CORS, no geo-block, always
-    // reachable wherever the app is served. Offset is only applied when drift
-    // exceeds 1s, so an NTP-synced edge clock is more than accurate enough.
-    // (Previously this led with a direct api.bybit.com call, which 403s from
-    // any region Bybit's CloudFront blocks — spamming a failed request +
-    // console error on every page load for those users.)
+    // Lead with the dedicated public time service when configured, otherwise
+    // keep the same-origin route as a rollout-safe fallback. The dedicated
+    // service is CloudFront-fronted and makes this hot endpoint independent of
+    // the Vercel deployment that serves the UI.
     try {
+      const requestedAt = Date.now();
       const {
-        data: { time },
-      } = await axios.get(`${this.getBaseUrl()}/api/time`, { timeout: 5000 });
-      if (time != null) {
-        return dayjs.utc(time);
+        data: { time, unixMs },
+      } = await axios.get(this.getTimeEndpoint(), { timeout: 5000 });
+      const receivedAt = Date.now();
+      const serverMs = typeof unixMs === 'number' ? unixMs : dayjs.utc(time).valueOf();
+      if (Number.isFinite(serverMs)) {
+        // Account for half the request round-trip. The endpoint records its
+        // timestamp immediately before responding, so this is conservative
+        // while avoiding a systematic network-latency lag.
+        return dayjs.utc(serverMs + Math.floor((receivedAt - requestedAt) / 2));
       }
     } catch {
       // ignore
