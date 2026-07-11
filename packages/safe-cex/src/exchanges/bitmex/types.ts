@@ -1,4 +1,5 @@
 import { Timeframe } from '../../types';
+import type { BitmexStrategy } from './bitmex.types';
 
 export const SupportedTimeframes: { [key in Timeframe]?: string } = {
   '1m': '1',
@@ -162,6 +163,8 @@ export type BITMEX_POSITION = {
   account: number;
   symbol: string;
   currency: string;
+  leverage: number;
+  crossMargin: boolean;
   rebalancedPnl: number;
   openOrderBuyQty: number;
   openOrderBuyCost: number;
@@ -189,6 +192,7 @@ export type BITMEX_POSITION = {
   liquidationPrice: number;
   bankruptPrice: number;
   timestamp: string;
+  strategy: BitmexStrategy;
 };
 
 export type POSITION_WS_UPDATE = {

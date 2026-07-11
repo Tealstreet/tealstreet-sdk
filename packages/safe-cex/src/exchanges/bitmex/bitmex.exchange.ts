@@ -49,6 +49,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bitmex.api';
 import { aggregateBitmexCandles, getBitmexOHLCVPlan } from './bitmex.ohlcv-helpers';
+import type { BitmexStrategy } from './bitmex.types';
 import {
   Currency,
   ENDPOINTS,
@@ -83,6 +84,7 @@ export class BitmexExchange extends BaseExchange {
   private currencies: { [code: string]: Currency } = {};
   private lastExecutionHistorySignatureWarningAt = 0;
   private maxSlippagePct?: number;
+  private accountPositionMode?: PositionMode;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -171,8 +173,10 @@ export class BitmexExchange extends BaseExchange {
     this.privateWebsocket.connectAndSubscribe();
     void this.seedBitmexMaxSlippagePctFromRecentOrder();
 
-    // hedge is not supported by BitMEX
-    this.store.setSetting('isHedged', false);
+    // Resolve the account-level mode before announcing readiness. Order
+    // submission also gates on this value in case the response has no rows.
+    await this.fetchOpenPositions();
+    if (this.isDisposed) return;
 
     // Start the REST tick loop in the background. Private WS snapshots can
     // hydrate balance/positions first, so a slow HOW request should not make
@@ -566,6 +570,44 @@ export class BitmexExchange extends BaseExchange {
     }
   };
 
+  observePositionMode = (positions: Array<Pick<BITMEX_POSITION, 'strategy'>>) => {
+    const strategies = positions.map((position) => position.strategy);
+    let positionMode = strategies.some((strategy) => strategy === 'Long' || strategy === 'Short')
+      ? PositionMode.Hedged
+      : strategies.some((strategy) => strategy === 'OneWay')
+        ? PositionMode.OneWay
+        : undefined;
+    if (!positions.length && this.accountPositionMode === undefined) {
+      positionMode = this.store.options?.isHedged ? PositionMode.Hedged : PositionMode.OneWay;
+    }
+
+    if (positionMode !== undefined) {
+      this.accountPositionMode = positionMode;
+      this.store.setSetting('isHedged', positionMode === PositionMode.Hedged);
+    }
+  };
+
+  private ensurePositionModeResolved = async () => {
+    if (this.accountPositionMode === undefined) {
+      await this.fetchOpenPositions();
+    }
+    if (this.accountPositionMode === undefined) {
+      throw new Error('Unable to determine BitMEX position mode from the /position response');
+    }
+  };
+
+  private getOrderStrategy = (opts: Pick<PlaceOrderOpts, 'side' | 'reduceOnly'>): BitmexStrategy => {
+    const positionMode =
+      this.accountPositionMode ?? (this.store.options?.isHedged ? PositionMode.Hedged : PositionMode.OneWay);
+    if (positionMode === PositionMode.OneWay) {
+      return 'OneWay';
+    }
+    if (opts.reduceOnly) {
+      return opts.side === OrderSide.Buy ? 'Short' : 'Long';
+    }
+    return opts.side === OrderSide.Buy ? 'Long' : 'Short';
+  };
+
   fetchPositionMetadata = async (
     symbols: string[],
   ): Promise<
@@ -577,13 +619,19 @@ export class BitmexExchange extends BaseExchange {
       marginType: MarginType;
     }[]
   > => {
-    return symbols.map((symbol) => ({
-      symbol,
-      side: PositionSide.Long,
-      leverage: this.store?.marketsBySymbol[symbol]?.limits?.leverage?.max || 100,
-      positionMode: PositionMode.OneWay,
-      marginType: MarginType.Cross,
-    }));
+    const positionMode =
+      this.accountPositionMode ?? (this.store.options?.isHedged ? PositionMode.Hedged : PositionMode.OneWay);
+    const sides =
+      positionMode === PositionMode.Hedged ? [PositionSide.Long, PositionSide.Short] : [PositionSide.Long];
+    return symbols.flatMap((symbol) =>
+      sides.map((side) => ({
+        symbol,
+        side,
+        leverage: this.store?.marketsBySymbol[symbol]?.limits?.leverage?.max || 100,
+        positionMode,
+        marginType: MarginType.Cross,
+      })),
+    );
   };
 
   fetchPositions = async (symbols?: string[]) => {
@@ -638,6 +686,7 @@ export class BitmexExchange extends BaseExchange {
     try {
       const { data } = await this.xhr.get<Array<BITMEX_POSITION>>(ENDPOINTS.POSITIONS);
       if ((data as any).error) throw new Error(this.parseError(data));
+      this.observePositionMode(data);
       // [
       //   {
       //     "account": 2169568,
@@ -824,12 +873,20 @@ export class BitmexExchange extends BaseExchange {
       notional = add(baseNotional, unrealizedPnl);
     }
 
-    // If account is not on hedge mode,
-    // we need to define the side of the position with the contracts amount
-    const side = contracts > 0 ? PositionSide.Long : PositionSide.Short;
+    const strategy = v(p, 'strategy') as BitmexStrategy | undefined;
+    const positionMode =
+      strategy === 'Long' || strategy === 'Short' ? PositionMode.Hedged : PositionMode.OneWay;
+    const side =
+      strategy === 'Long'
+        ? PositionSide.Long
+        : strategy === 'Short'
+          ? PositionSide.Short
+          : contracts > 0
+            ? PositionSide.Long
+            : PositionSide.Short;
 
     return {
-      id: createPositionId(p.symbol),
+      id: createPositionId(p.symbol, side, positionMode),
       symbol: p.symbol,
       side,
       entryPrice,
@@ -839,7 +896,7 @@ export class BitmexExchange extends BaseExchange {
       ...(realizedPnl !== undefined ? { realizedPnl } : {}),
       contracts: Math.abs(contractsInBase),
       liquidationPrice: parseFloat(v(p, 'liquidationPrice')),
-      positionMode: PositionMode.OneWay,
+      positionMode,
       marginType: p.crossMargin ? MarginType.Cross : MarginType.Isolated,
       extra: {
         contractsNative: Math.abs(contracts),
@@ -1393,6 +1450,27 @@ export class BitmexExchange extends BaseExchange {
     }
   };
 
+  changePositionMode = async (hedged: boolean) => {
+    try {
+      const { data } = await this.xhr.post(
+        ENDPOINTS.SET_POSITION_MODE,
+        hedged ? { positionMode: 'MultiWay' } : {},
+      );
+      if (data?.error) throw new Error(this.parseError(data));
+
+      this.accountPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
+      this.store.setSetting('isHedged', hedged);
+      this.store.update({ positions: [] });
+      const positions = await this.fetchPositions();
+      if (!this.isDisposed) {
+        this.store.addOrUpdatePositionsFull(positions);
+      }
+    } catch (err: unknown) {
+      this.emitAndLogError(this.parseError(err));
+      throw err;
+    }
+  };
+
   cancelOrders = async (orders: Order[]) => {
     try {
       const groupedBySymbol = groupBy(orders, 'symbol');
@@ -1506,11 +1584,13 @@ export class BitmexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    await this.ensurePositionModeResolved();
     const payloads = this.formatCreateOrder(opts);
     return await this.placeOrderBatch(payloads);
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    await this.ensurePositionModeResolved();
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };
@@ -1560,6 +1640,7 @@ export class BitmexExchange extends BaseExchange {
     const req = omitUndefined({
       symbol: opts.symbol,
       side: inverseObj(ORDER_SIDE)[opts.side],
+      strategy: this.getOrderStrategy(opts),
       ordType,
       orderQty: amount ? `${amount}` : undefined,
       [priceField]: price ? `${price}` : undefined,

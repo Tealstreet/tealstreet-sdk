@@ -10,8 +10,8 @@ This directory contains the BitMEX exchange integration for Tealstreet.
 | Pretty Name     | BitMEX                                                      |
 | Class           | `BitmexExchange` extends `BaseExchange`                     |
 | Testnet Support | Configured in code but `supportsTestnet: false` in metadata |
-| Position Modes  | One-Way only                                                |
-| Hedge Mode      | Not supported (`isHedged` forced to `false`)                |
+| Position Modes  | One-Way and MultiWay (hedged)                               |
+| Hedge Mode      | Supported with per-order `Long`/`Short` strategy            |
 | CORS Required   | Yes (`requiresCors: true`)                                  |
 | WS Tunnel       | Enforced (`enforceWsTunnel: true`)                          |
 | Default Quote   | `USD`                                                       |
@@ -641,15 +641,16 @@ Used margin is computed as `availableMargin * marginUsedPcnt` (not directly from
 
 ### Position Mode
 
-BitMEX only supports **one-way mode** (`PositionMode.OneWay`). Hedge mode is explicitly disabled:
+The authenticated `/position` response determines the account-level mode from each row's required `strategy`: `OneWay` selects `PositionMode.OneWay`, while `Long` or `Short` selects `PositionMode.Hedged`. Startup waits for this response, and order submission resolves it again before the first order if necessary. An empty response uses BitMEX's official OneWay account default unless an explicit or persisted hedge selection already exists.
 
-```typescript
-this.store.setSetting('isHedged', false);
-```
+Mode changes use `POST /user/positionMode`. MultiWay sends `{ positionMode: 'MultiWay' }`; OneWay sends an empty body, matching BitMEX's official client contract. After a successful change, stale position identities are cleared and authoritative positions are fetched again so OneWay and hedge-leg IDs cannot coexist.
+
+Every order sends a strategy. OneWay orders send `OneWay`. In MultiWay, opening buys target `Long`, opening sells target `Short`, reduce-only buys target `Short`, and reduce-only sells target `Long`. Attached stop-loss and take-profit children inherit the entry's target leg.
 
 ### Position Side
 
-Determined by `currentQty`: positive = Long, negative = Short (`bitmex.exchange.ts:640`).
+In MultiWay mode, `strategy` determines side and produces strategy-aware IDs (`symbol:long` or `symbol:short`). In OneWay mode, signed `currentQty` determines side and the ID remains the bare symbol.
+
 
 ### Margin Type
 
