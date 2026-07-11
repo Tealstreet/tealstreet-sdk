@@ -102,6 +102,27 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
     );
 
     expect(hasCoreClearinghouseSubscription).toBe(true);
+    expect(payloads.some((payload: any) => payload?.subscription?.type === 'webData2')).toBe(false);
+  });
+
+  it('does not send rejected webData2 subscriptions for HIP-3 DEXes', () => {
+    const parent = createParentMock();
+    (parent as any).options = { ...parent.options, applicationId: '0xuser' };
+    (parent as any).hip3DexNames = ['vntls'];
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+    const sendMock = vi.fn();
+
+    (ws as any).send = sendMock;
+    (ws as any).subscribeSystemTopics();
+
+    const payloads = sendMock.mock.calls.map((args: any[]) => JSON.parse(args[0]));
+    expect(payloads.some((payload: any) => payload?.subscription?.type === 'webData2')).toBe(false);
+    expect(
+      payloads.some(
+        (payload: any) =>
+          payload?.subscription?.type === 'clearinghouseState' && payload?.subscription?.dex === 'vntls',
+      ),
+    ).toBe(true);
   });
 
   it('unwraps the live core clearinghouseState subscription payload', () => {
@@ -127,6 +148,56 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       }),
     ]);
     expect(parent.syncBalanceFromLivePositions).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a sanitized Hyperliquid server error', () => {
+    const parent = createParentMock();
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+
+    (ws as any).processMessage({
+      channel: 'error',
+      data: 'Error parsing {"subscription":{"type":"webData2","user":"0xprivate"}}',
+    });
+
+    expect(parent.log).toHaveBeenCalledWith(
+      'Hyperliquid WebSocket server error: rejected webData2 subscription',
+      'warning',
+    );
+    expect(parent.log).not.toHaveBeenCalledWith(expect.stringContaining('0xprivate'), expect.anything());
+  });
+
+  it('authoritatively clears stale core positions while preserving HIP-3 positions', () => {
+    const parent = createParentMock();
+    const hip3Market = {
+      id: 'vntls:GAS',
+      symbol: 'VNTLS|GAS-PERP',
+      info: { hip3Dex: 'vntls' },
+    };
+    (parent.store as any).marketsById['vntls:GAS'] = hip3Market;
+    (parent.store as any).marketsBySymbol['VNTLS|GAS-PERP'] = hip3Market;
+    (parent.store as any).positions = [
+      { id: 'BTC-PERP', symbol: 'BTC-PERP', contracts: 1 },
+      { id: 'VNTLS|GAS-PERP', symbol: 'VNTLS|GAS-PERP', contracts: 2 },
+    ];
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+
+    ws.applyCoreClearinghouseState({ assetPositions: [] }, true);
+
+    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'VNTLS|GAS-PERP', contracts: 2 }),
+    ]);
+  });
+
+  it('does not let an older REST snapshot overwrite a newer core WebSocket state', () => {
+    const parent = createParentMock();
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+
+    ws.applyCoreClearinghouseState({ ...createSampleClearinghouseState(), time: 200 });
+    (parent.store.addOrUpdatePositionsFull as any).mockClear();
+
+    ws.applyCoreClearinghouseState({ assetPositions: [], time: 100 }, true);
+
+    expect(parent.store.addOrUpdatePositionsFull).not.toHaveBeenCalled();
   });
 
   it('routes userEvents fill payloads through fill handling', () => {
@@ -227,7 +298,7 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       user: '0xuser',
     });
 
-    (ws as any).handleClearinghouseState(createSampleClearinghouseState());
+    ws.applyCoreClearinghouseState(createSampleClearinghouseState());
 
     expect(parent.store.addOrUpdatePositions).toHaveBeenCalledTimes(1);
     const firstUpdate = (parent.store.addOrUpdatePositions as any).mock.calls[0][0];
@@ -267,7 +338,7 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       user: '0xuser',
     });
 
-    (ws as any).handleClearinghouseState(createSampleClearinghouseState());
+    ws.applyCoreClearinghouseState(createSampleClearinghouseState());
 
     expect(parent.store.addOrUpdatePositions).toHaveBeenCalledTimes(1);
     const firstUpdate = (parent.store.addOrUpdatePositions as any).mock.calls[0][0];

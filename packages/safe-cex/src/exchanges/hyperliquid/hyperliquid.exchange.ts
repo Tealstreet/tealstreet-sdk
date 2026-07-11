@@ -724,19 +724,13 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   /**
-   * Fetch initial balance from REST API on startup.
-   * This ensures balance is populated even if WebSocket connection is slow or fails.
-   * Returns null if fetch fails - WebSocket will populate balance when it connects.
+   * Fetch a complete core-perp account snapshot from REST. It seeds both
+   * balance and positions at startup and reconciles missed state on reconnect.
    */
-  private fetchInitialBalance = async (): Promise<{
-    total: number;
-    used: number;
-    free: number;
-    upnl: number;
-  } | null> => {
+  private fetchCorePerpsState = async (): Promise<any | null> => {
     const user = this.options.vault || this.options.applicationId;
     if (!user) {
-      this.log('Skipping initial balance fetch: no applicationId/vault configured', LogSeverity.Warning);
+      this.log('Skipping core-perp account-state fetch: no applicationId/vault configured', LogSeverity.Warning);
       return null;
     }
 
@@ -749,50 +743,34 @@ export class HyperliquidExchange extends BaseExchange {
         'Content-Type': 'application/json',
       },
     };
-    const parseBalance = (
-      data: any,
-    ): {
-      total: number;
-      used: number;
-      free: number;
-      upnl: number;
-    } | null => {
+    const logBalanceSummary = (data: any): void => {
       const summary = this.extractClearinghouseBalanceSummary(data);
       if (!summary) {
         this.log(
           `No usable balance summary. marginSummary=${Boolean(data?.marginSummary)} crossMarginSummary=${Boolean(data?.crossMarginSummary)}`,
           LogSeverity.Warning,
         );
-        return null;
+        return;
       }
 
       const used = summary.totalMarginUsed;
       const free = summary.accountValue - used;
-      // upnl is 0 at startup (positions not loaded yet)
-      // accountValue includes unrealized PnL, so we subtract it to get actual balance
-      const upnl = 0;
-      const total = summary.accountValue - upnl;
 
       this.log(
-        `Initial balance fetched (${summary.sourceField}): total=${total.toFixed(2)}, used=${used.toFixed(2)}, free=${free.toFixed(2)}`,
+        `Core-perp account state fetched (${summary.sourceField}): total=${summary.accountValue.toFixed(2)}, used=${used.toFixed(2)}, free=${free.toFixed(2)}`,
         LogSeverity.Info,
       );
 
-      return {
-        total,
-        used,
-        free,
-        upnl,
-      };
     };
 
     try {
-      this.log('Fetching initial balance via REST API', LogSeverity.Debug);
+      this.log('Fetching core-perp account state via REST API', LogSeverity.Debug);
 
       const { data } = await this.infoXhr.post(ENDPOINTS.INFO, requestBody, requestConfig);
-      return parseBalance(data);
+      logBalanceSummary(data);
+      return data;
     } catch (error) {
-      this.log(`Initial balance fetch failed: ${error}`, LogSeverity.Warning);
+      this.log(`Core-perp account-state fetch failed: ${error}`, LogSeverity.Warning);
       return null;
     }
   };
@@ -852,9 +830,9 @@ export class HyperliquidExchange extends BaseExchange {
 
     // Keep private startup tasks non-blocking so public market data can hydrate immediately
     // even when account-level REST calls are delayed by route congestion/retries.
-    const initialBalancePromise = shouldStartPrivateData
-      ? this.fetchInitialBalance().catch((error) => {
-          this.log(`Initial balance fetch failed: ${error}`, LogSeverity.Warning);
+    const initialCorePerpsStatePromise = shouldStartPrivateData
+      ? this.fetchCorePerpsState().catch((error) => {
+          this.log(`Initial core-perp account-state fetch failed: ${error}`, LogSeverity.Warning);
           return null;
         })
       : null;
@@ -924,15 +902,12 @@ export class HyperliquidExchange extends BaseExchange {
       }
     }
 
-    // Seed balance when the asynchronous startup fetch completes (if it succeeds).
-    if (initialBalancePromise) {
-      initialBalancePromise.then((fetchedBalance) => {
-        if (this.isDisposed || !fetchedBalance) return;
-        this.applyCorePerpsBalanceSnapshot({
-          accountValue: Number(fetchedBalance.free) + Number(fetchedBalance.used),
-          totalMarginUsed: Number(fetchedBalance.used),
-          upnl: Number(fetchedBalance.upnl),
-        });
+    // The REST response is a complete core-perp snapshot, so it also covers
+    // existing positions if the first private WebSocket frame is delayed.
+    if (initialCorePerpsStatePromise) {
+      initialCorePerpsStatePromise.then((fetchedState) => {
+        if (this.isDisposed || !fetchedState) return;
+        this.privateWebsocket.applyCoreClearinghouseState(fetchedState, true);
       });
     }
 
@@ -957,6 +932,22 @@ export class HyperliquidExchange extends BaseExchange {
 
     await this.tick();
     if (this.isDisposed) return;
+  };
+
+  fetchAndSetPrivateSnapshot = async (_tries = 1): Promise<void> => {
+    if (this.isPublicDataOnly || this.isDisposed) return;
+
+    // `fetchOrders()` already handles its own API failures and in-flight
+    // coalescing, so keep the reconnect snapshot parallel and bounded rather
+    // than inheriting the generic order-only retry loop.
+    const [orders, coreState] = await Promise.all([this.fetchOrders(), this.fetchCorePerpsState()]);
+    if (this.isDisposed) return;
+
+    this.store.update({
+      orders,
+      loaded: { ...this.store.loaded, orders: true },
+    });
+    if (coreState) this.privateWebsocket.applyCoreClearinghouseState(coreState, true);
   };
 
   // Periodic HIP-3 position refresh interval (120 seconds) as a safety net

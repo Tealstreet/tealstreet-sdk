@@ -2,7 +2,6 @@
 export const singularSubscriptionTypes: readonly string[] = ['allMids'];
 export const systemSubscriptionTypes: readonly string[] = [
   'notification',
-  'webData2',
   'orderUpdates',
   'userEvents',
   'userFills',

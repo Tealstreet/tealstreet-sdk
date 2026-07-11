@@ -41,6 +41,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
   // Core-perp clearinghouseState is the primary source of truth for positions.
   // webData2 snapshots can be stale and must only be used as fallback.
   private lastCoreClearinghouseStateAt = 0;
+  private lastCoreClearinghouseStateServerTime = 0;
   private static readonly WEB_DATA2_CORE_POSITION_FALLBACK_MS = 20_000;
   private static readonly MAX_TRACKED_REALIZED_PNL_FILL_IDS = 20_000;
   private static readonly CORE_FILL_POSITION_EPSILON = 1e-10;
@@ -175,20 +176,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           },
         }),
       );
-      // webData2 with dex for position/balance/order snapshots + market data
-      this.send(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'webData2',
-            user,
-            dex: dexName,
-          },
-        }),
-      );
       // clearinghouseState with dex for faster real-time position updates
-      // This fires more frequently than webData2 snapshots and eliminates the need
-      // for REST position polling after fills
+      // This is the authoritative position snapshot for the DEX.
       this.send(
         JSON.stringify({
           method: 'subscribe',
@@ -467,6 +456,9 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       case 'webData2':
         this.handleWebData2(json?.data || {});
         break;
+      case 'error':
+        this.handleServerError(json?.data);
+        break;
       case 'spotClearinghouseState':
         this.parent.handleSpotClearinghouseStateUpdate(json?.data?.balances || []);
         break;
@@ -492,7 +484,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             });
           } else {
             // Core perps clearinghouseState (no dex)
-            this.handleClearinghouseState(chState);
+            this.applyCoreClearinghouseState(chState);
           }
         }
         break;
@@ -594,8 +586,31 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     routeOrders(data?.orders);
   };
 
-  // Handle clearinghouseState updates
-  private handleClearinghouseState(data: any) {
+  private handleServerError(data: unknown): void {
+    // Hyperliquid includes the complete rejected subscription in its error
+    // text, including the public wallet address. Keep diagnostics useful
+    // without forwarding account identifiers or raw protocol frames.
+    const subscriptionType =
+      typeof data === 'string' ? data.match(/"type"\s*:\s*"([^\"]+)"/)?.[1] : undefined;
+    this.parent.log(
+      `Hyperliquid WebSocket server error${subscriptionType ? `: rejected ${subscriptionType} subscription` : ''}`,
+      LogSeverity.Warning,
+    );
+  }
+
+  /**
+   * Apply core-perp account state from either the private WebSocket or the
+   * authoritative REST reconciliation. REST snapshots replace core positions
+   * in full so a position closed while disconnected is removed; streaming
+   * frames remain incremental because Hyperliquid can scope them.
+   */
+  public applyCoreClearinghouseState(data: any, authoritative = false): void {
+    const serverTime = this.getMessageTimestamp(data);
+    if (serverTime !== null) {
+      if (serverTime < this.lastCoreClearinghouseStateServerTime) return;
+      this.lastCoreClearinghouseStateServerTime = serverTime;
+    }
+
     if (data?.assetPositions) {
       this.lastCoreClearinghouseStateAt = Date.now();
 
@@ -634,10 +649,31 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         });
       }
 
-      // Core clearinghouseState updates can arrive more frequently and may be
-      // partial/scoped. Merge incrementally to avoid wiping symbol leverage to
-      // fake/default values between updates.
-      this.parent.store.addOrUpdatePositions(corePositions);
+      if (authoritative) {
+        // A REST clearinghouseState response is a complete core-perp snapshot.
+        // Preserve HIP-3 rows, then replace all core rows (including the empty
+        // response case) while retaining fake rows for order-entry defaults.
+        const merged = new Map<string, Position>();
+        const fakes = this.parent.getFakePositions();
+        for (let i = 0; i < fakes.length; i++) merged.set(fakes[i].id, fakes[i]);
+
+        const currentPositions = this.parent.store.positions;
+        for (let i = 0; i < currentPositions.length; i++) {
+          const position = currentPositions[i];
+          const market = this.parent.store.marketsBySymbol[position.symbol];
+          if (market?.info?.hip3Dex) merged.set(position.id, position);
+        }
+
+        for (let i = 0; i < corePositions.length; i++) {
+          merged.set(corePositions[i].id, corePositions[i]);
+        }
+        this.parent.store.addOrUpdatePositionsFull(Array.from(merged.values()));
+      } else {
+        // Core clearinghouseState updates can arrive more frequently and may be
+        // partial/scoped. Merge incrementally to avoid wiping symbol leverage
+        // to fake/default values between updates.
+        this.parent.store.addOrUpdatePositions(corePositions);
+      }
     }
 
     const balanceSummary = this.extractCoreBalanceSummary(data);

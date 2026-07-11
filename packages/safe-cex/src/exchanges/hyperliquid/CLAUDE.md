@@ -89,7 +89,7 @@ Hyperliquid is a DEX and uses Ethereum wallet signing instead of API key/secret 
 
 Wrapped in `withStartupTimeout(USER_ROLE_RESOLVE_TIMEOUT_MS = 6_000)` so a slow `userRole` call can't block startup; on timeout/error, falls back to public-data-only.
 
-**Why the in-place patch is correct.** `ExchangeOptions` is `Readonly<>`, so the resolver casts `this.options as { applicationId?: string; vault?: string; key?: string }` and writes through that. This is intentional — the resolved value has to be visible to every downstream read (`hasPrivateSessionIdentity`, `fetchInitialBalance`, builder-fee check, WS subscribe). Don't refactor this to "return the resolved id and pass it explicitly" without updating every consumer that reads `options.applicationId` directly.
+**Why the in-place patch is correct.** `ExchangeOptions` is `Readonly<>`, so the resolver casts `this.options as { applicationId?: string; vault?: string; key?: string }` and writes through that. This is intentional — the resolved value has to be visible to every downstream read (`hasPrivateSessionIdentity`, `fetchCorePerpsState`, builder-fee check, WS subscribe). Don't refactor this to "return the resolved id and pass it explicitly" without updating every consumer that reads `options.applicationId` directly.
 
 **The resolved value is NOT persisted back to the saved account record**, so the `userRole` round-trip is paid on every startup for legacy accounts. Persisting upstream is a follow-up that touches the account-config layer outside `safe-cex`.
 
@@ -202,7 +202,7 @@ Phase 1: Parallel initial data fetch
 │   └── fetchHip3Dexs() → POST /info { type: "perpDexs" }  — HIP-3 DEX list
 │       └── For each DEX (parallel): POST /info { type: "metaAndAssetCtxs", dex: name }
 ├── fetchBuilderFeeApproval() → POST /info { type: "maxBuilderFee" }
-└── fetchInitialBalance() → POST /info { type: "clearinghouseState" }
+└── fetchCorePerpsState() → POST /info { type: "clearinghouseState" }; authoritative core-position + balance bootstrap
 
 Phase 2: Build data structures (synchronous)
 ├── buildMarketsLowerCaseMap()   — O(1) case-insensitive lookup map
@@ -556,7 +556,7 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 
 ### Position Reconciliation
 
-**Core perps**: Primary source is `clearinghouseState` WS channel. Hyperliquid's live subscription frame is wrapped as `{ user, dex: '', clearinghouseState }`, so the private WS must unwrap `data.clearinghouseState ?? data` before giving it to `handleClearinghouseState`; passing the outer wrapper silently drops positions and balance updates. When recent `clearinghouseState` data exists (within `WEB_DATA2_CORE_POSITION_FALLBACK_MS = 20,000ms`), `webData2` position snapshots are skipped to prevent stale leverage snapback.
+**Core perps**: Primary source is `clearinghouseState` WS channel. Hyperliquid's live subscription frame is wrapped as `{ user, dex: '', clearinghouseState }`, so the private WS must unwrap `data.clearinghouseState ?? data` before giving it to `applyCoreClearinghouseState`; passing the outer wrapper silently drops positions and balance updates. Core WS frames merge incrementally because they can be scoped; the startup and reconnect REST `clearinghouseState` snapshot is authoritative and replaces core rows in full while preserving HIP-3 rows and fake position defaults, so closures during a disconnect are removed. A source-time guard prevents an older REST response from overwriting newer WS state. `webData2` is no longer subscribed by either perp or spot: Hyperliquid rejects it, and the perp handler remains only to normalize HIP-3 `clearinghouseState` frames.
 
 **HIP-3 positions**: Primary source is `clearinghouseState` WS with `dex` parameter. When updating:
 
@@ -743,7 +743,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 ### Startup Error Resilience
 
 - `fetchBuilderFeeApproval()`: Logs warning on failure, sets `_builderFeeApproved = null` (lazy re-check on first order)
-- `fetchInitialBalance()`: Returns null on failure; store falls back to `{ total: 0, free: 0, used: 0, upnl: 0 }` until WebSocket populates
+- `fetchCorePerpsState()`: Returns null on failure; store falls back to `{ total: 0, free: 0, used: 0, upnl: 0 }` until WebSocket populates
 - `resolveUserAbstractionMode()`: Bounded startup timeout; on timeout/error/unexpected value, falls back to standard balance mode. Public market hydration does not wait on this call, but private WS startup does.
 - Unified spot collateral refresh: on failure logs warning and continues with core-perp snapshot view until next refresh succeeds. After an empty spot snapshot is received, unified balance math stays active with zero spot collateral.
 - `fetchOrders()`: Logged as warning on failure, does not block startup
