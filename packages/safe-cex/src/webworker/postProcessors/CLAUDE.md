@@ -7,7 +7,11 @@ update (4 Hz default). Each one mutates the snapshot before
 `SnapshotPostprocessor` is the exception: it only uploads changed historical
 account data every five minutes. It is non-critical admin/history telemetry,
 not the trading-state path; do not restore per-minute uploads without a
-freshness requirement and cost review.
+freshness requirement and cost review. New web builds use the authenticated
+`snapshot-ingest.tealstreet.io` Worker when `NEXT_PUBLIC_SNAPSHOT_INGEST_ORIGIN`
+is set; the relative Vercel route is only the legacy/configuration rollback
+path. The Worker derives the user ID from a scoped token, so do not put a user
+ID in the browser payload or weaken its exact Tealstreet/Disrupt CORS allowlist.
 
 For the broader hot-path rule set, see `../../exchanges/CLAUDE.md`
 → "Public WebSocket Hot-Path Patterns".

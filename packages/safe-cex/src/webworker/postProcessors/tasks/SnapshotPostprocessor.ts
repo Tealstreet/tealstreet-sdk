@@ -5,6 +5,47 @@ import { StoreData, Writable } from '../../../types';
 import { BaseTaskPostprocessor } from './BaseTaskPostprocessor';
 
 const SNAPSHOT_INTERVAL_MS = 5 * 60_000;
+const SNAPSHOT_INGEST_TOKEN_REFRESH_SKEW_MS = 60_000;
+
+type SnapshotIngestToken = {
+  expiresAt: number;
+  token: string;
+};
+
+let cachedSnapshotIngestToken: SnapshotIngestToken | undefined;
+let snapshotIngestTokenRequest: Promise<SnapshotIngestToken> | undefined;
+
+const getSnapshotIngestOrigin = () => {
+  const origin = typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_SNAPSHOT_INGEST_ORIGIN : undefined;
+  return origin?.replace(/\/+$/, '') || undefined;
+};
+
+const getSnapshotIngestToken = async (baseUrl: string) => {
+  if (
+    cachedSnapshotIngestToken &&
+    cachedSnapshotIngestToken.expiresAt - Date.now() > SNAPSHOT_INGEST_TOKEN_REFRESH_SKEW_MS
+  ) {
+    return cachedSnapshotIngestToken.token;
+  }
+
+  if (!snapshotIngestTokenRequest) {
+    snapshotIngestTokenRequest = fetch(`${baseUrl}/api/snapshot/token`, { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Snapshot token API responded with status ${response.status}`);
+        const payload = (await response.json()) as Partial<SnapshotIngestToken>;
+        if (typeof payload.token !== 'string' || typeof payload.expiresAt !== 'number') {
+          throw new Error('Snapshot token API returned an invalid response');
+        }
+        cachedSnapshotIngestToken = { expiresAt: payload.expiresAt, token: payload.token };
+        return cachedSnapshotIngestToken;
+      })
+      .finally(() => {
+        snapshotIngestTokenRequest = undefined;
+      });
+  }
+
+  return (await snapshotIngestTokenRequest).token;
+};
 
 export class SnapshotPostprocessor extends BaseTaskPostprocessor {
   private _lastUpdate: number = Date.now() - 60_000;
@@ -109,10 +150,17 @@ export class SnapshotPostprocessor extends BaseTaskPostprocessor {
 
       // Send all data in a single request to snapshot endpoint
       if (Object.keys(snapshotData).length > 0) {
-        const url = `${this._baseUrl}/api/snapshot?api_key_name=${this._accountName}&exchange=${this._exchangeName}`;
+        const query = new URLSearchParams({ api_key_name: this._accountName, exchange: this._exchangeName });
+        const snapshotIngestOrigin = getSnapshotIngestOrigin();
+        const url = snapshotIngestOrigin
+          ? `${snapshotIngestOrigin}/v1/snapshots?${query}`
+          : `${this._baseUrl}/api/snapshot?${query}`;
         try {
           const compressedData = await compress(this.safeStringify(snapshotData));
-          await axios.post(url, compressedData);
+          const headers = snapshotIngestOrigin
+            ? { Authorization: `Bearer ${await getSnapshotIngestToken(this._baseUrl)}` }
+            : undefined;
+          await axios.post(url, compressedData, { headers });
         } catch (error) {
           // Log error but don't throw - snapshots are non-critical
           console.error('[SnapshotPostprocessor] Failed to send snapshot:', error);
