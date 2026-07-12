@@ -10,6 +10,10 @@ describe('exchangeSupportsSecondaryKey', () => {
     expect(exchangeSupportsSecondaryKey('arkham')).toBe(true);
   });
 
+  it('is true for asterdex — V3 agent model supports a distinct read-only agent wallet', () => {
+    expect(exchangeSupportsSecondaryKey('asterdex')).toBe(true);
+  });
+
   it('is false for wallet/private-key and Orderly-ed25519 venues', () => {
     expect(exchangeSupportsSecondaryKey('hyperliquid')).toBe(false);
     expect(exchangeSupportsSecondaryKey('dydx')).toBe(false);

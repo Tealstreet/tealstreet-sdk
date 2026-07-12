@@ -10,9 +10,11 @@ import type { ExchangeName } from '../types';
 //    REST via this.xhr.request(), which the read-routing Proxy does not intercept).
 // There is nothing to put in a "secondary read-only key" field for these. Every
 // other exchange uses standard per-request HMAC/ed25519/JWT key+secret and can opt in.
+// AsterDEX is deliberately NOT excluded: its V3 agent model issues a distinct
+// read-only agent wallet (secondary_apiKey = agent address, secondary_apiSecret =
+// its private key) sharing the main wallet (applicationId) — a real second read credential.
 export const exchangesWithoutSecondaryKey: ExchangeName[] = [
   'apexomni',
-  'asterdex',
   'breakoutprop',
   'btcc',
   'dydx',

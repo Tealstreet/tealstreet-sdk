@@ -1,4 +1,5 @@
 import type { AsterDEXExchange } from './asterdex.exchange';
+import type { AsterDEXAPIVersion } from './asterdex.types';
 
 import * as crypto from 'crypto';
 
@@ -7,10 +8,10 @@ import axiosRateLimit from 'axios-rate-limit';
 import axiosRetry from 'axios-retry';
 import { ethers } from 'ethers';
 
+import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
-import { LogSeverity } from '../../types';
-import type { AsterDEXAPIVersion } from './asterdex.types';
+import { ExchangeOptions, LogSeverity } from '../../types';
 import {
   ASTERDEX_ENDPOINTS,
   isAsterDEXV3PrivateKey,
@@ -164,7 +165,14 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
   return rateLimitedAPI;
 };
 
-export const createAPI = (exchange: AsterDEXExchange, options: AsterDEXAPIOptions = {}): AxiosInstance => {
+export const createAPI = (
+  exchange: AsterDEXExchange,
+  options: AsterDEXAPIOptions = {},
+  // Transport (proxy/tunnel/overrideProxyUrl) is read from here, defaulting to the
+  // primary account. The secondary read-only client passes its own ExchangeOptions so
+  // its GETs pick up overrideProxyUrl (read fleet) — mirrors bitget's createAPI.
+  transportOptions: ExchangeOptions = exchange.options,
+): AxiosInstance => {
   const baseURL = options.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
 
   const api = safeCexAxiosCreate(
@@ -175,12 +183,12 @@ export const createAPI = (exchange: AsterDEXExchange, options: AsterDEXAPIOption
         'Content-Type': 'application/json',
       },
     },
-    exchange.options,
+    transportOptions,
     exchange,
   );
 
   // Set up HTTP over WebSocket adapter if tunnel is enabled
-  if (exchange.options.tealstreetTunnel) {
+  if (transportOptions.tealstreetTunnel) {
     setInnerAdapterForRemoteSigning(api, axiosHttpOverWebsocketAdapter);
   }
 
@@ -394,21 +402,33 @@ export const createAPI = (exchange: AsterDEXExchange, options: AsterDEXAPIOption
 
 // Helper function to create multiple API instances with different rate limits
 export const createAPIInstances = (exchange: AsterDEXExchange) => {
-  const apiVersion = resolveAsterDEXApiVersion(exchange.options);
-  const v3Auth = resolveAsterDEXV3AuthContext(exchange.options);
-
-  const options: AsterDEXAPIOptions = {
-    apiKey: exchange.options.key,
-    apiSecret: exchange.options.secret,
-    apiVersion,
-    v3UserAddress: v3Auth.userAddress,
-    v3SignerAddress: v3Auth.signerAddress,
-    v3SignerPrivateKey: v3Auth.signerPrivateKey,
-    testnet: exchange.options.testnet,
+  // Resolve Aster REST auth from a primary OR secondary-key ExchangeOptions. For
+  // V3 the read-only secondary agent shares the main wallet (applicationId) and
+  // differs only in signer address (secondary_apiKey) + private key (secondary_apiSecret).
+  // INVARIANT: Aster accounts carry creds flat (key/secret/applicationId), never
+  // options.auth — the secondary_* overrides map to those. A populated auth.* block
+  // would shadow the secondary signer creds; createExchangeFromAccount never sets it.
+  const toAsterOptions = (o: ExchangeOptions): AsterDEXAPIOptions => {
+    const v3Auth = resolveAsterDEXV3AuthContext(o);
+    return {
+      apiKey: o.key,
+      apiSecret: o.secret,
+      apiVersion: resolveAsterDEXApiVersion(o),
+      v3UserAddress: v3Auth.userAddress,
+      v3SignerAddress: v3Auth.signerAddress,
+      v3SignerPrivateKey: v3Auth.signerPrivateKey,
+      testnet: o.testnet,
+    };
   };
 
-  // Primary API with standard rate limit
-  const primary = createAPI(exchange, options);
+  const options = toAsterOptions(exchange.options);
+
+  // Primary read/write client: with a secondary (read-only) key set, GET (read)
+  // requests route to a client built from the read-only V3 agent while writes stay
+  // on the primary agent. Default-off (identical client) when no secondary key set.
+  const [primary] = createApiWithSecondaryKey(exchange.options, exchange, (o) =>
+    createAPI(exchange, toAsterOptions(o), o),
+  );
 
   // Secondary API with reduced rate limit for heavy endpoints
   const secondary = axiosRateLimit(createAPI(exchange, options), {

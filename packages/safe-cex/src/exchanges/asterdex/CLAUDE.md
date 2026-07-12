@@ -69,6 +69,36 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
 - Request body is deleted for signed requests.
 - Timestamp recovery (`-1021`) resyncs clock and retries once with fresh signature.
 
+### Secondary read-only key (read/write signing split)
+
+Unlike the single-keypair wallet DEXs (hyperliquid, dydx, paradex, lighter, …),
+AsterDEX **does** support a secondary read-only key — so it is NOT in
+`exchangesWithoutSecondaryKey` (`utils/exchangeSupportsSecondaryKey.ts`). It works
+via the V3 **agent** model: a read-only agent wallet shares the account's main
+wallet (`applicationId` → `userAddress`) and differs only in the agent's signer
+address (`secondary_apiKey` → `signerAddress`) and its private key
+(`secondary_apiSecret` → `signerPrivateKey`).
+
+Wiring: `createAPIInstances`'s **`primary`** client is built through
+`createApiWithSecondaryKey`, so when a secondary key is set, GET (read) requests —
+account, positions, open orders, balance, user trades, leverage bracket — sign with
+the read-only agent, while writes (order place/cancel via `secondaryAPI`; leverage/
+margin changes) stay on the primary agent. Default-off: with no secondary key all
+clients are identical (byte-for-byte unchanged behavior). `validateAccount` is a GET,
+so with a secondary key present it validates the **read** key (the write key is
+exercised on first order) — same caveat as the other non-binance HMAC exchanges.
+
+**Egress.** `createAPI` takes its transport from a per-call `transportOptions`
+argument (default = the primary account). The secondary read client passes its own
+`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the Vultr read fleet
+(`getReadFleetProxyUrl`, region-matched, gated by `ENABLE_AWS_PROXY_MIGRATION`) —
+reads egress through the read fleet while writes stay on the primary transport. This
+is the same handling as the tunnelled CORS HMAC exchanges (bitget et al.); Aster's
+`createAPI` previously read transport from `exchange.options` and ignored the override,
+which is why the split had to thread `transportOptions` through. Default-off: with no
+secondary key `transportOptions` defaults to the primary and every client is
+byte-identical to before.
+
 ### Public Endpoints (No Auth)
 
 Both V1 and V3 public prefixes are treated as public (examples):
