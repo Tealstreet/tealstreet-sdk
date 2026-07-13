@@ -256,6 +256,19 @@ Connection uses listenKey-based authentication (no WebSocket-level auth required
 | `ORDER_TRADE_UPDATE` | Regular order lifecycle (NEW, PARTIALLY_FILLED, FILLED, CANCELED, EXPIRED)               |
 | `ALGO_UPDATE`        | Algo order lifecycle (NEW, TRIGGERED, TRIGGERING, CANCELED, EXPIRED, REJECTED, FINISHED) |
 
+`ACCOUNT_UPDATE` applies position quantity/PnL immediately, but the payload omits
+leverage, margin type, and liquidation price. The follow-up `/positionRisk`
+repair is therefore capped at one request per 10 seconds; repeated position
+events coalesce into the pending repair instead of consuming the shared proxy
+IP's request-weight budget at the old 500 ms cadence. Periodic reconciliation
+still provides a full safety snapshot.
+
+USD-M background `/account` and `/positionRisk` reconciliation also observes
+Binance's `X-MBX-USED-WEIGHT-1M` response header. At 80% of the 2,400 IP-weight
+limit it pauses background reads for 60 seconds; HTTP 429/418 uses
+`Retry-After` when present. This guard never blocks explicit trading requests,
+and WebSocket account/order updates continue while reconciliation is paused.
+
 **ORDER_TRADE_UPDATE fields** (nested in `o` object):
 
 - `i` = orderId, `s` = symbol, `S` = side (BUY/SELL), `ot` = order type

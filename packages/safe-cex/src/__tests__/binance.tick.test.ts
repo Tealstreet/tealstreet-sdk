@@ -94,4 +94,90 @@ describe('Binance REST reconciliation ordering', () => {
     expect(loop).toHaveBeenCalledTimes(5);
     expect(loop).toHaveBeenCalledWith(expect.any(Function), 3_000);
   });
+
+  it('pauses background snapshots before the shared IP request-weight limit is exhausted', async () => {
+    const store = {
+      loaded: {},
+      subscribe: vi.fn(),
+      update: vi.fn(),
+    };
+    const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
+    const fetchPositions = vi.fn().mockResolvedValue([]);
+    const fetchPositionsAndBalance = vi.fn().mockResolvedValue({
+      balance: { total: 0, free: 0, used: 0, upnl: 0 },
+      positions: [],
+    });
+
+    Object.assign(exchange, {
+      isDisposed: false,
+      privateWebsocket: { isConnected: true },
+      fetchPositions,
+      fetchPositionsAndBalance,
+      emitAndLogError: vi.fn(),
+    });
+
+    (exchange as any).observeRequestWeight({
+      status: 200,
+      headers: { 'x-mbx-used-weight-1m': '1920' },
+    });
+
+    await exchange.tick();
+    expect(fetchPositions).not.toHaveBeenCalled();
+    expect(fetchPositionsAndBalance).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(60_000);
+    await exchange.tick();
+    expect(fetchPositions).toHaveBeenCalledTimes(1);
+    expect(fetchPositionsAndBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors Binance retry-after after a rate-limit response', async () => {
+    const store = {
+      loaded: {},
+      subscribe: vi.fn(),
+      update: vi.fn(),
+    };
+    const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
+
+    (exchange as any).observeRequestWeight({
+      status: 429,
+      headers: { 'retry-after': '30' },
+    });
+
+    expect(exchange.isBackgroundReconciliationPaused()).toBe(true);
+    vi.advanceTimersByTime(29_999);
+    expect(exchange.isBackgroundReconciliationPaused()).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(exchange.isBackgroundReconciliationPaused()).toBe(false);
+  });
+
+  it('stops the second background snapshot when the first response reaches the weight threshold', async () => {
+    const store = {
+      loaded: {},
+      subscribe: vi.fn(),
+      update: vi.fn(),
+    };
+    const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
+    const fetchPositions = vi.fn().mockImplementation(async () => {
+      (exchange as any).observeRequestWeight({
+        status: 200,
+        headers: { 'x-mbx-used-weight-1m': '1920' },
+      });
+      return [];
+    });
+    const fetchPositionsAndBalance = vi.fn();
+
+    Object.assign(exchange, {
+      isDisposed: false,
+      privateWebsocket: { isConnected: true },
+      fetchPositions,
+      fetchPositionsAndBalance,
+      emitAndLogError: vi.fn(),
+    });
+
+    await exchange.tick();
+
+    expect(fetchPositions).toHaveBeenCalledTimes(1);
+    expect(fetchPositionsAndBalance).not.toHaveBeenCalled();
+  });
 });

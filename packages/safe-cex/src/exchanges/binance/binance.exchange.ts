@@ -69,6 +69,9 @@ const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
 const ACCOUNT_RECONCILIATION_INTERVAL_MS = 25_000;
 const DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS = 3_000;
 const POSITION_RISK_RECONCILIATION_INTERVAL_MS = 75_000;
+const REQUEST_WEIGHT_LIMIT_PER_MINUTE = 2_400;
+const REQUEST_WEIGHT_BACKOFF_THRESHOLD = REQUEST_WEIGHT_LIMIT_PER_MINUTE * 0.8;
+const REQUEST_WEIGHT_BACKOFF_MS = 60_000;
 
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
@@ -76,6 +79,7 @@ export class BinanceExchange extends BaseExchange {
   private positionStateVersion = 0;
   private lastAccountReconciliationAt = 0;
   private lastPositionRiskReconciliationAt = 0;
+  private backgroundReconciliationPausedUntil = 0;
 
   markPositionStateUpdatedByWebsocket = () => {
     this.positionStateVersion += 1;
@@ -120,12 +124,60 @@ export class BinanceExchange extends BaseExchange {
     this._secondaryXhr = secondaryXhr;
 
     this.publicXhr = createPublicAPI(opts, this);
-
     this.unlimitedXHR = createAPI(opts, this);
+    this.installRequestWeightGuards([primaryXhr, secondaryXhr, this.publicXhr, this.unlimitedXHR]);
 
     this.publicWebsocket = new BinancePublicWebsocket(this);
     this.privateWebsocket = new BinancePrivateWebsocket(this);
   }
+
+  private getResponseHeader = (headers: any, name: string): unknown => {
+    if (!headers) return undefined;
+    if (typeof headers.get === 'function') return headers.get(name);
+    return headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+  };
+
+  private pauseBackgroundReconciliation = (durationMs: number) => {
+    this.backgroundReconciliationPausedUntil = Math.max(
+      this.backgroundReconciliationPausedUntil,
+      Date.now() + durationMs,
+    );
+  };
+
+  private observeRequestWeight = (response: any) => {
+    const status = response?.status;
+    if (status === 429 || status === 418) {
+      const retryAfterSeconds = Number(this.getResponseHeader(response?.headers, 'retry-after'));
+      this.pauseBackgroundReconciliation(
+        Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+          ? retryAfterSeconds * 1_000
+          : REQUEST_WEIGHT_BACKOFF_MS,
+      );
+      return;
+    }
+
+    const usedWeight = Number(this.getResponseHeader(response?.headers, 'x-mbx-used-weight-1m'));
+    if (Number.isFinite(usedWeight) && usedWeight >= REQUEST_WEIGHT_BACKOFF_THRESHOLD) {
+      this.pauseBackgroundReconciliation(REQUEST_WEIGHT_BACKOFF_MS);
+    }
+  };
+
+  private installRequestWeightGuards = (clients: Axios[]) => {
+    new Set(clients).forEach((client) => {
+      client.interceptors.response.use(
+        (response) => {
+          this.observeRequestWeight(response);
+          return response;
+        },
+        (error) => {
+          this.observeRequestWeight(error?.response);
+          return Promise.reject(error);
+        },
+      );
+    });
+  };
+
+  isBackgroundReconciliationPaused = () => Date.now() < this.backgroundReconciliationPausedUntil;
 
   dispose = () => {
     super.dispose();
@@ -258,11 +310,13 @@ export class BinanceExchange extends BaseExchange {
         ? ACCOUNT_RECONCILIATION_INTERVAL_MS
         : DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS;
       const shouldReconcilePositionRisk =
-        this.lastPositionRiskReconciliationAt === 0 ||
-        now - this.lastPositionRiskReconciliationAt >= POSITION_RISK_RECONCILIATION_INTERVAL_MS;
+        !this.isBackgroundReconciliationPaused() &&
+        (this.lastPositionRiskReconciliationAt === 0 ||
+          now - this.lastPositionRiskReconciliationAt >= POSITION_RISK_RECONCILIATION_INTERVAL_MS);
       const shouldReconcileAccount =
-        this.lastAccountReconciliationAt === 0 ||
-        now - this.lastAccountReconciliationAt >= accountReconciliationInterval;
+        !this.isBackgroundReconciliationPaused() &&
+        (this.lastAccountReconciliationAt === 0 ||
+          now - this.lastAccountReconciliationAt >= accountReconciliationInterval);
 
       try {
         if (shouldReconcilePositionRisk) {
@@ -274,7 +328,7 @@ export class BinanceExchange extends BaseExchange {
           this.lastPositionRiskReconciliationAt = Date.now();
           if (this.isDisposed) return;
         }
-        if (shouldReconcileAccount) {
+        if (shouldReconcileAccount && !this.isBackgroundReconciliationPaused()) {
           const positionStateVersion = this.getPositionStateVersion();
           const { balance, positions } = await this.fetchPositionsAndBalance();
           if (this.isDisposed) return;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BinancePrivateWebsocket } from '../exchanges/binance/binance.ws-private';
 import { BinancePMPrivateWebsocket } from '../exchanges/binance/binancepm.ws-private';
@@ -8,11 +8,16 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('Binance private websocket position refresh', () => {
   it('commits fetched USD-M position risk snapshots to the store', async () => {
     const positions = [{ id: 'BTCUSDT:long', liquidationPrice: 45000 }];
     const parent = {
       isDisposed: false,
+      isBackgroundReconciliationPaused: vi.fn(() => false),
       getPositionStateVersion: vi.fn().mockReturnValue(0),
       fetchPositions: vi.fn().mockResolvedValue(positions),
       store: {
@@ -141,6 +146,7 @@ describe('Binance private websocket position refresh', () => {
     const parent = {
       isDisposed: false,
       positionStateVersion: 0,
+      isBackgroundReconciliationPaused: vi.fn(() => false),
       markPositionStateUpdatedByWebsocket: vi.fn(function (this: { positionStateVersion: number }) {
         this.positionStateVersion += 1;
       }),
@@ -168,5 +174,41 @@ describe('Binance private websocket position refresh', () => {
     await (ws as any).executePositionFetch();
 
     expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith(freshPositions);
+  });
+
+  it('caps event-triggered position repairs at one request per ten seconds', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-13T20:00:00Z'));
+
+    const parent = {
+      isDisposed: false,
+      positionStateVersion: 0,
+      markPositionStateUpdatedByWebsocket: vi.fn(function (this: { positionStateVersion: number }) {
+        this.positionStateVersion += 1;
+      }),
+      getPositionStateVersion: vi.fn(function (this: { positionStateVersion: number }) {
+        return this.positionStateVersion;
+      }),
+      isBackgroundReconciliationPaused: vi.fn(() => false),
+      fetchPositions: vi.fn().mockResolvedValue([]),
+      store: {
+        positions: [],
+        addOrUpdatePosition: vi.fn(),
+        addOrUpdatePositionsFull: vi.fn(),
+      },
+    };
+    const ws = new BinancePrivateWebsocket(parent as any);
+    const event = { a: { P: [{ s: 'BTCUSDT', ps: 'BOTH', pa: '0.25', ep: '60000', up: '0' }] } };
+
+    ws.handleAccountEvents([event]);
+    await Promise.resolve();
+    expect(parent.fetchPositions).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 20; i += 1) ws.handleAccountEvents([event]);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(parent.fetchPositions).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(parent.fetchPositions).toHaveBeenCalledTimes(2);
   });
 });

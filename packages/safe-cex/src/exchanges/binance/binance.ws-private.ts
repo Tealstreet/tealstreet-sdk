@@ -11,7 +11,7 @@ import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE, POS
 
 export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private lastPositionFetchTime = 0;
-  private positionFetchThrottleMs = 500;
+  private positionFetchThrottleMs = 10_000;
   private positionFetchScheduled = false;
   private positionFetchInFlight = false;
   private hasPendingPositionEvents = false;
@@ -274,7 +274,8 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private throttledFetchPositions = () => {
     const now = Date.now();
 
-    if (this.isDisposed) {
+    if (this.isDisposed || this.parent.isBackgroundReconciliationPaused()) {
+      this.hasPendingPositionEvents = false;
       return;
     }
 
@@ -305,7 +306,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   };
 
   private executePositionFetch = async () => {
-    if (this.positionFetchInFlight || this.isDisposed) return;
+    if (this.positionFetchInFlight || this.isDisposed || this.parent.isBackgroundReconciliationPaused()) return;
 
     const eventVersionAtStart = this.parent.getPositionStateVersion();
     this.positionFetchInFlight = true;
