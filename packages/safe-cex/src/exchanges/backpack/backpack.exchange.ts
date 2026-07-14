@@ -18,6 +18,7 @@ import {
   Order,
   OrderBook,
   OrderSide,
+  OrderStopTriggerType,
   OrderStatus,
   OrderTimeInForce,
   OrderType,
@@ -29,6 +30,7 @@ import {
   UpdateOrderOpts,
   Writable,
 } from '../../types';
+import { getExchangeMetadata } from '../../exchangeMetadata';
 import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
 import { virtualClock } from '../../utils/virtualClock';
@@ -426,11 +428,7 @@ export class BackpackExchange extends BaseExchange {
     }
   };
 
-  /**
-   * Detects trigger orders with missing triggerBy and recreates them with the correct value.
-   * - TakeProfit orders use LastPrice (triggers on actual trade execution)
-   * - StopLoss orders use MarkPrice (prevents manipulation)
-   */
+  /** Detects trigger orders with missing triggerBy and recreates them with the advertised default reference. */
   private fixTriggerOrdersWithoutTriggerBy = async (orders: BackpackOrder[]): Promise<void> => {
     // Find trigger orders with null triggerBy
     const ordersToFix = orders.filter((o) => {
@@ -453,8 +451,7 @@ export class BackpackExchange extends BaseExchange {
         // Determine if this is a TP or SL order
         const orderType = this.determineTriggerOrderType(order.symbol, side, triggerPrice);
 
-        // Determine the correct triggerBy value
-        const triggerBy = orderType === OrderType.TakeProfit ? 'LastPrice' : 'MarkPrice';
+        const triggerBy = this.getTriggerBy(orderType === OrderType.TakeProfit ? 'tp' : 'sl');
 
         this.log(
           `Fixing order ${order.id}: ${order.symbol} ${side} @ ${order.triggerPrice} (${orderType === OrderType.TakeProfit ? 'TP' : 'SL'}) -> triggerBy=${triggerBy}`,
@@ -600,6 +597,24 @@ export class BackpackExchange extends BaseExchange {
     }
   };
 
+  private getTriggerBy = (
+    kind: 'tp' | 'sl',
+    explicitTriggerType?: OrderStopTriggerType,
+  ): NonNullable<BackpackOrderRequest['triggerBy']> => {
+    const metadata = getExchangeMetadata('backpack');
+    const triggerType = explicitTriggerType ?? (kind === 'tp' ? metadata.defaultTPTriggerType : metadata.defaultSLTriggerType);
+
+    switch (triggerType) {
+      case OrderStopTriggerType.LastPrice:
+        return 'LastPrice';
+      case OrderStopTriggerType.IndexPrice:
+        return 'IndexPrice';
+      case OrderStopTriggerType.MarkPrice:
+      default:
+        return 'MarkPrice';
+    }
+  };
+
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     try {
       const market = this.store.marketsBySymbol[opts.symbol];
@@ -674,15 +689,10 @@ export class BackpackExchange extends BaseExchange {
           orderRequest.triggerPrice = formatPrice(triggerPrice);
         }
         orderRequest.triggerQuantity = formatAmount(opts.amount);
-        // Set triggerBy based on order type:
-        // - TakeProfit uses LastPrice (triggers on actual trade execution)
-        // - StopLoss uses MarkPrice (triggers on mark price to prevent manipulation)
-        // Without triggerBy, orders may not trigger properly when price crosses the trigger level
-        if (opts.type === OrderType.TakeProfit) {
-          orderRequest.triggerBy = 'LastPrice';
-        } else {
-          orderRequest.triggerBy = 'MarkPrice';
-        }
+        orderRequest.triggerBy = this.getTriggerBy(
+          opts.type === OrderType.TakeProfit ? 'tp' : 'sl',
+          opts.type === OrderType.TakeProfit ? opts.tpTriggerType : opts.slTriggerType,
+        );
         // Stop/TP orders should always be reduce-only to close positions
         if (isStopOrTP) {
           orderRequest.reduceOnly = true;
@@ -720,7 +730,7 @@ export class BackpackExchange extends BaseExchange {
               orderType: 'Market', // Trigger orders use Market type
               triggerPrice: formatPrice(opts.takeProfit),
               triggerQuantity: formatAmount(opts.amount),
-              triggerBy: 'LastPrice', // TP uses LastPrice (triggers on actual trade execution)
+              triggerBy: this.getTriggerBy('tp', opts.tpTriggerType),
               reduceOnly: true,
             };
             const { data: tpData } = await this.xhr.post<BackpackOrder>(ENDPOINTS.ORDER, tpRequest);
@@ -739,7 +749,7 @@ export class BackpackExchange extends BaseExchange {
               orderType: 'Market', // Trigger orders use Market type
               triggerPrice: formatPrice(opts.stopLoss),
               triggerQuantity: formatAmount(opts.amount),
-              triggerBy: 'MarkPrice', // SL uses MarkPrice (prevents manipulation)
+              triggerBy: this.getTriggerBy('sl', opts.slTriggerType),
               reduceOnly: true,
             };
             const { data: slData } = await this.xhr.post<BackpackOrder>(ENDPOINTS.ORDER, slRequest);
@@ -756,11 +766,13 @@ export class BackpackExchange extends BaseExchange {
       if (opts.takeProfit !== undefined) {
         orderRequest.takeProfitTriggerPrice = formatPrice(opts.takeProfit);
         orderRequest.takeProfitLimitPrice = formatPrice(opts.takeProfit);
+        orderRequest.takeProfitTriggerBy = this.getTriggerBy('tp', opts.tpTriggerType);
       }
 
       if (opts.stopLoss !== undefined) {
         orderRequest.stopLossTriggerPrice = formatPrice(opts.stopLoss);
         orderRequest.stopLossLimitPrice = formatPrice(opts.stopLoss);
+        orderRequest.stopLossTriggerBy = this.getTriggerBy('sl', opts.slTriggerType);
       }
 
       const { data } = await this.xhr.post<BackpackOrder>(ENDPOINTS.ORDER, orderRequest);

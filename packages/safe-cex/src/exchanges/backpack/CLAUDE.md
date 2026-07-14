@@ -165,14 +165,15 @@ The 2-second delay on market subscriptions (`setTimeout` in `subscribeToAllMarke
 | Stream                      | Format                     | Throttle | Description                  |
 | --------------------------- | -------------------------- | -------- | ---------------------------- |
 | `ticker.<symbol>`           | `ticker.BTC_USDC_PERP`     | 1000ms   | 24h ticker updates           |
-| `depth.<symbol>`            | `depth.BTC_USDC_PERP`      | 100ms    | Order book delta updates     |
+| `depth.<symbol>`            | `depth.BTC_USDC_PERP`      | handler: none; ticker: 100ms per symbol | Order book delta updates |
 | `trade.<symbol>`            | `trade.BTC_USDC_PERP`      | none     | Individual trade stream      |
 | `bookTicker.<symbol>`       | `bookTicker.BTC_USDC_PERP` | none     | Best bid/ask updates         |
 | `kline.<interval>.<symbol>` | `kline.1m.BTC_USDC_PERP`   | none     | Candlestick data (on demand) |
 
 **Throttling details**:
 
-- `handleDepthUpdate`: lodash `throttle(fn, 100, {leading: true, trailing: true})`
+- Depth updates dispatch to every active orderbook handler immediately. Only the derived ticker bid/ask write is throttled, independently per symbol, so one market's depth traffic cannot discard another market's deltas.
+- Backpack documents depth events as sequential: an aggregate event may span `U..u`, but its `U` must equal the prior event's `u + 1`. After a REST snapshot, buffer deltas and apply only that exact bridge; a mismatch triggers a bounded resnapshot. The recovery streak resets only after a snapshot bridges every buffered delta. After three consecutive non-bridging resnapshots, clear and disable the local book until the socket reconnects; do not retain a stale book, buffer later deltas, or reconnect from the depth handler.
 - `handleTickerUpdate`: lodash `throttle(fn, 1000, {leading: true, trailing: true})`
 - Trade and bookTicker updates are not throttled
 
@@ -231,8 +232,8 @@ Backpack's API supports two native order types: `Limit` and `Market`. Stop-loss 
 | --------------- | --------------- | --------------------------------------------------------------------------- |
 | Market          | `Market`        | `quantity`                                                                  |
 | Limit           | `Limit`         | `price`, `quantity`, `timeInForce`, `postOnly`                              |
-| StopLoss        | `Market`        | `triggerPrice`, `triggerQuantity`, `triggerBy=MarkPrice`, `reduceOnly=true` |
-| TakeProfit      | `Market`        | `triggerPrice`, `triggerQuantity`, `triggerBy=LastPrice`, `reduceOnly=true` |
+| StopLoss        | `Market`        | `triggerPrice`, `triggerQuantity`, `triggerBy`, `reduceOnly=true` |
+| TakeProfit      | `Market`        | `triggerPrice`, `triggerQuantity`, `triggerBy`, `reduceOnly=true` |
 
 ### Time In Force
 
@@ -248,14 +249,13 @@ Backpack uses `Bid` (buy) and `Ask` (sell) instead of standard buy/sell terminol
 ### Trigger Orders
 
 - `triggerBy` determines which price triggers the order: `MarkPrice`, `IndexPrice`, or `LastPrice`
-- TakeProfit defaults to `triggerBy: 'LastPrice'` (triggers on actual trade execution)
-- StopLoss defaults to `triggerBy: 'MarkPrice'` (prevents manipulation)
+- Primary TP/SL orders use `opts.tpTriggerType` / `opts.slTriggerType` when supplied; otherwise they use Backpack metadata's advertised defaults (currently `MarkPrice` for both).
 - Trigger orders use `triggerQuantity` instead of `quantity`
 
 ### Attached TP/SL
 
-- Market orders support attached TP/SL via `takeProfitTriggerPrice`/`stopLossTriggerPrice` fields (plus corresponding `*LimitPrice` fields)
-- Limit orders with TP/SL place separate trigger orders instead (attached TP/SL only works for immediately-filling orders). The main limit order is placed first, then TP and SL are placed sequentially with error handling per order (`backpack.exchange.ts:695-742`)
+- Market orders support attached TP/SL via `takeProfitTriggerPrice`/`stopLossTriggerPrice` fields (plus corresponding `*LimitPrice` and `*TriggerBy` fields); their trigger references use the same explicit-or-metadata-default mapping as primary TP/SL orders.
+- Limit orders with TP/SL place separate trigger orders instead (attached TP/SL only works for immediately-filling orders). `placeOrder` submits the main limit order first, then TP and SL sequentially with per-order error handling.
 
 ### Self-Trade Prevention
 
@@ -268,7 +268,7 @@ Supported values: `RejectTaker`, `RejectMaker`, `RejectBoth`, `Allow`
 1. Look up market, validate it exists
 2. Determine `apiOrderType` (`Limit` or `Market`), handle PostOnly via `postOnly: true` + `timeInForce: GTC`
 3. Format price and amount to market precision using `formatPrice()` / `formatAmount()` helpers
-4. For trigger orders: set `triggerPrice`, `triggerQuantity`, `triggerBy`, and `reduceOnly: true`
+4. For trigger orders: set `triggerPrice`, `triggerQuantity`, the explicit-or-metadata-default `triggerBy`, and `reduceOnly: true`
 5. For limit orders with TP/SL: place main order, then separate TP/SL trigger orders sequentially
 6. For market orders with TP/SL: use attached `takeProfitTriggerPrice`/`stopLossTriggerPrice` params
 7. Returns array of order IDs
@@ -297,7 +297,7 @@ On every `fetchOrders()` call (startup and each tick), scans for trigger orders 
 1. Identifies affected orders (has `triggerPrice` but missing `triggerBy`)
 2. For each: determines if TP or SL via `determineTriggerOrderType()` (compares trigger price to current market price)
 3. Cancels the old order
-4. Recreates with correct `triggerBy` (`LastPrice` for TP, `MarkPrice` for SL)
+4. Recreates with the metadata default `triggerBy` for the classified TP or SL order
 5. Updates the orders array in-place so the caller gets corrected data
 6. Continues with other orders even if one fix fails
 
@@ -370,7 +370,7 @@ Same algorithm as `formatPrice` but uses `market.precision.amount`.
 
 ### WebSocket Throttling
 
-- **Depth updates**: Throttled to 100ms (leading + trailing)
+- **Depth updates**: Orderbook deltas are unthrottled. Only the derived ticker bid/ask side effect is throttled to 100ms per symbol (leading + trailing).
 - **Ticker updates**: Throttled to 1000ms (leading + trailing)
 - **Position fetch after fill**: Min 500ms interval
 - **Balance fetch after fill**: Min 500ms interval
@@ -396,16 +396,17 @@ Same algorithm as `formatPrice` but uses `market.precision.amount`.
 
 ### Orderbook
 
-Snapshot-then-delta approach (`backpack.ws-public.ts:437-556`):
+Snapshot-then-delta approach (`listenOrderBook` in `backpack.ws-public.ts`):
 
 1. Subscribe to `depth.<symbol>` WebSocket stream
 2. Initialize buffer state (`OrderBookState`: `updates[]`, `isSnapshotLoaded`, `lastUpdateId`)
 3. Fetch full snapshot via REST `GET /api/v1/depth`
 4. Drop buffered updates older than snapshot's `lastUpdateId`
-5. Apply remaining buffered updates
+5. Apply the first remaining buffered update when its aggregate `U`/`u` range spans `lastUpdateId + 1` (`U <= expected <= u`); after that initial bridge, require each delta's `U` to equal the prior `u + 1`. `lastUpdateId` advances to each applied `u`.
 6. Mark snapshot as loaded, clear buffer
 7. Apply subsequent delta updates in real-time via `updateOrderBook()` utility
-8. On WebSocket reconnect (`resetAndRefetchOrderBooks`, line 74-91): reset all states and refetch all snapshots
+8. On a non-bridging sequence range, stop applying deltas and perform an authoritative REST resnapshot. Recovery is capped at three resnapshots per active connection and never reconnects the WebSocket; reconnect resets that budget and refetches all snapshots. Terminal failure emits exactly one exchange error, then clears every listener's local book.
+9. On WebSocket reconnect, reset all states and refetch all snapshots
 
 ### Balance
 
@@ -474,7 +475,7 @@ Account-level leverage limits rather than per-symbol:
 
 1. **WebSocket Ping/Pong**: Backpack does not support standard PING. Sending `{"method":"PING"}` returns error code 4002, which is used as a pong response for latency measurement.
 
-2. **Trigger order `triggerBy` fix**: On every `fetchOrders()` call, `fixTriggerOrdersWithoutTriggerBy()` scans for trigger orders with null `triggerBy` and recreates them. Without `triggerBy`, orders may not trigger when price crosses the trigger level.
+2. **Trigger order `triggerBy` fix**: On every `fetchOrders()` call, `fixTriggerOrdersWithoutTriggerBy()` scans for trigger orders with null `triggerBy` and recreates them using the corresponding Backpack metadata default. Without `triggerBy`, orders may not trigger when price crosses the trigger level.
 
 3. **Kline null values**: WS kline updates with `null` OHLCV values (sent on empty candle close) are skipped (`backpack.ws-public.ts:360-361,388-396`).
 

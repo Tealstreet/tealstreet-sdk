@@ -1,7 +1,7 @@
 import throttle from 'lodash/throttle';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { Candle, OHLCVOptions, OrderBook, Ticker } from '../../types';
+import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker } from '../../types';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBook } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
@@ -20,8 +20,17 @@ import {
 interface OrderBookState {
   updates: BackpackWsDepthUpdate[];
   isSnapshotLoaded: boolean;
+  isTerminal: boolean;
   lastUpdateId: number;
+  isSnapshotFetchInFlight: boolean;
+  isRecoveryScheduled: boolean;
+  recoveryAttempts: number;
+  terminalErrorEmitted: boolean;
+  terminalHandlers: Set<(reason: string) => void>;
 }
+
+const MAX_ORDERBOOK_RESNAPSHOT_ATTEMPTS = 3;
+const MAX_BUFFERED_ORDERBOOK_UPDATES = 1_000;
 
 export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
   private subscriptions: Set<string> = new Set();
@@ -29,6 +38,7 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
   private orderBookState: Record<string, OrderBookState> = {};
   // Store snapshot fetch functions to refetch on reconnect
   private orderBookSnapshotFetchers: Record<string, () => Promise<void>> = {};
+  private depthTickerUpdateThrottles: Record<string, ReturnType<typeof throttle>> = {};
 
   constructor(parent: BackpackExchange) {
     super(parent);
@@ -74,11 +84,9 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
   private resetAndRefetchOrderBooks = () => {
     // Reset all orderbook states to force re-buffering of updates
     Object.keys(this.orderBookState).forEach((marketId) => {
-      this.orderBookState[marketId] = {
-        updates: [],
-        isSnapshotLoaded: false,
-        lastUpdateId: 0,
-      };
+      const nextState = this.createOrderBookState();
+      nextState.terminalHandlers = this.orderBookState[marketId].terminalHandlers;
+      this.orderBookState[marketId] = nextState;
     });
 
     // Refetch snapshots for all active orderbook subscriptions
@@ -233,43 +241,61 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
     }
   };
 
-  private handleDepthUpdate = throttle(
-    (data: BackpackWsDepthUpdate) => {
-      try {
-        // Backpack market id == symbol (e.g. BTC_USDC_PERP), so a single
-        // tickersBySymbol hashmap lookup replaces the prior O(N) markets.find
-        // + O(N) tickers.find pair.
-        const ticker = this.store.tickersBySymbol[data.s];
+  private handleDepthUpdate = (data: BackpackWsDepthUpdate) => {
+    const topic = `depth.${data.s}`;
+    const handlers = this.messageHandlers[topic];
 
-        // Call registered orderbook handlers
-        const topic = `depth.${data.s}`;
-        const handlers = this.messageHandlers[topic];
-        if (handlers && handlers.length > 0) {
-          this.recordMessageHandlerStats(topic);
-          handlers.forEach((handler) => handler(data));
+    if (handlers && handlers.length > 0) {
+      this.recordMessageHandlerStats(topic);
+      handlers.forEach((handler) => {
+        try {
+          handler(data);
+        } catch (error) {
+          this.parent.emitAndLogError(`Error handling depth update: ${error}`);
         }
+      });
+    }
 
-        // Update best bid/ask in ticker if available and valid
-        if (ticker && (data.b.length > 0 || data.a.length > 0)) {
-          const bid = data.b.length > 0 ? parseFloat(data.b[0][0]) : NaN;
-          const ask = data.a.length > 0 ? parseFloat(data.a[0][0]) : NaN;
+    this.getDepthTickerUpdateThrottle(data.s)(data);
+  };
 
-          const update: Partial<Ticker> = {
-            ...(!Number.isNaN(bid) && { bid }),
-            ...(!Number.isNaN(ask) && { ask }),
-          };
+  private getDepthTickerUpdateThrottle = (symbol: string) => {
+    if (!this.depthTickerUpdateThrottles[symbol]) {
+      this.depthTickerUpdateThrottles[symbol] = throttle(this.updateTickerFromDepth, 100, {
+        leading: true,
+        trailing: true,
+      });
+    }
 
-          if (Object.keys(update).length > 0) {
-            this.store.updateTicker(ticker, update);
-          }
+    return this.depthTickerUpdateThrottles[symbol];
+  };
+
+  private updateTickerFromDepth = (data: BackpackWsDepthUpdate) => {
+    try {
+      // Backpack market id == symbol (e.g. BTC_USDC_PERP), so a single
+      // tickersBySymbol hashmap lookup replaces the prior O(N) markets.find
+      // + O(N) tickers.find pair.
+      const ticker = this.store.tickersBySymbol[data.s];
+
+      // Update best bid/ask in ticker if available and valid. This is the only
+      // throttled depth side effect; orderbook deltas are always dispatched.
+      if (ticker && (data.b.length > 0 || data.a.length > 0)) {
+        const bid = data.b.length > 0 ? parseFloat(data.b[0][0]) : NaN;
+        const ask = data.a.length > 0 ? parseFloat(data.a[0][0]) : NaN;
+
+        const update: Partial<Ticker> = {
+          ...(!Number.isNaN(bid) && { bid }),
+          ...(!Number.isNaN(ask) && { ask }),
+        };
+
+        if (Object.keys(update).length > 0) {
+          this.store.updateTicker(ticker, update);
         }
-      } catch (error) {
-        this.parent.emitAndLogError(`Error handling depth update: ${error}`);
       }
-    },
-    100,
-    { leading: true, trailing: true },
-  );
+    } catch (error) {
+      this.parent.emitAndLogError(`Error updating ticker from depth: ${error}`);
+    }
+  };
 
   private handleTickerUpdate = throttle(
     (data: BackpackWsTickerUpdate) => {
@@ -436,24 +462,32 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
 
     // Initialize state for this subscription
     if (!this.orderBookState[marketId]) {
-      this.orderBookState[marketId] = {
-        updates: [],
-        isSnapshotLoaded: false,
-        lastUpdateId: 0,
-      };
+      this.orderBookState[marketId] = this.createOrderBookState();
     }
 
     // Maintain orderbook state for this subscription
     const orderBook: OrderBook = { bids: [], asks: [] };
+    const terminate = () => {
+      orderBook.bids = [];
+      orderBook.asks = [];
+      callback(orderBook);
+    };
+    this.orderBookState[marketId].terminalHandlers.add(terminate);
 
     // Fetch initial snapshot from REST API
     const fetchSnapshot = async () => {
+      const state = this.orderBookState[marketId];
+      if (!state || state.isSnapshotFetchInFlight || state.isTerminal) return;
+
+      state.isSnapshotFetchInFlight = true;
+      let shouldRecover = false;
+
       try {
         const { data } = await this.parent.xhr.get(ENDPOINTS.DEPTH, {
           params: { symbol: marketId },
         });
 
-        if (this.isDisposed) return;
+        if (this.isDisposed || this.orderBookState[marketId] !== state || state.isTerminal) return;
 
         // Populate orderbook from snapshot
         orderBook.bids = data.bids.map(([price, amount]: [string, string]) => ({
@@ -469,27 +503,56 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         }));
 
         // Get lastUpdateId from snapshot (if available)
-        const lastUpdateId = data.lastUpdateId || 0;
+        const lastUpdateId = Number(data.lastUpdateId) || 0;
 
         // Drop any buffered updates that are older than the snapshot
-        this.orderBookState[marketId].updates = this.orderBookState[marketId].updates.filter(
-          (update) => (update.u || 0) > lastUpdateId,
-        );
+        const updates = state.updates.filter((update) => update.u === undefined || update.u > lastUpdateId);
+        state.updates = [];
+        state.lastUpdateId = lastUpdateId;
+        state.isSnapshotLoaded = true;
 
-        // Apply any buffered updates that came while loading snapshot
-        this.orderBookState[marketId].updates.forEach((update) => {
+        // The first buffered delta may aggregate updates from before and after
+        // the snapshot. It only has to span the next expected update ID; every
+        // delta after that must strictly continue from the previous one.
+        let awaitingInitialBridge = true;
+        for (let index = 0; index < updates.length; index++) {
+          const update = updates[index];
+          if (update.u !== undefined && update.u <= state.lastUpdateId) continue;
+          const isValidUpdate = awaitingInitialBridge
+            ? this.isInitialOrderBookBridge(state, update)
+            : this.isContinuousOrderBookUpdate(state, update);
+          if (!isValidUpdate) {
+            state.isSnapshotLoaded = false;
+            // Preserve the first unapplied update (and every newer one). A
+            // successful snapshot must bridge it before recovery is reset.
+            state.updates = updates.slice(index);
+            shouldRecover = true;
+            break;
+          }
+
           this.applyOrderBookUpdate(orderBook, update);
-        });
+          state.lastUpdateId = update.u!;
+          awaitingInitialBridge = false;
+        }
 
+        if (shouldRecover) return;
+
+        state.recoveryAttempts = 0;
         calcOrderBookTotal(orderBook);
-
-        this.orderBookState[marketId].isSnapshotLoaded = true;
-        this.orderBookState[marketId].lastUpdateId = lastUpdateId;
-        this.orderBookState[marketId].updates = [];
 
         callback(orderBook);
       } catch (error) {
         this.parent.emitAndLogError(`Error fetching orderbook snapshot: ${error}`);
+        if (this.orderBookState[marketId] === state && !state.isTerminal) {
+          shouldRecover = true;
+        }
+      } finally {
+        if (this.orderBookState[marketId] === state) {
+          state.isSnapshotFetchInFlight = false;
+          if (shouldRecover) {
+            this.recoverOrderBook(marketId, 'snapshot did not provide a continuous delta sequence');
+          }
+        }
       }
     };
 
@@ -497,13 +560,33 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
       if (data.s !== marketId) return;
 
       // If snapshot not loaded yet, buffer the update
-      if (!this.orderBookState[marketId].isSnapshotLoaded) {
-        this.orderBookState[marketId].updates.push(data);
+      const state = this.orderBookState[marketId];
+      if (!state || state.isTerminal) return;
+
+      // Buffer only while a snapshot is loading. The server documents U/u as
+      // sequential, so an unbounded queue would turn a stalled REST request
+      // into an unbounded memory sink.
+      if (!state.isSnapshotLoaded) {
+        if (state.updates.length >= MAX_BUFFERED_ORDERBOOK_UPDATES) {
+          this.terminateOrderBook(marketId, state, 'too many deltas buffered while awaiting a snapshot');
+          return;
+        }
+        state.updates.push(data);
+        return;
+      }
+
+      if (data.u !== undefined && data.u <= state.lastUpdateId) return;
+
+      if (!this.isContinuousOrderBookUpdate(state, data)) {
+        state.isSnapshotLoaded = false;
+        state.updates = [data];
+        this.recoverOrderBook(marketId, `expected update ${state.lastUpdateId + 1}, received ${data.U}-${data.u}`);
         return;
       }
 
       // Apply the update to the orderbook
       this.applyOrderBookUpdate(orderBook, data);
+      state.lastUpdateId = data.u!;
 
       calcOrderBookTotal(orderBook);
 
@@ -536,8 +619,13 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         this.cleanupMessageHandlerStats(handler);
         this.unsubscribe([topic]);
         // Clean up state
+        this.depthTickerUpdateThrottles[marketId]?.cancel();
+        delete this.depthTickerUpdateThrottles[marketId];
+        this.orderBookState[marketId]?.terminalHandlers.delete(terminate);
         delete this.orderBookState[marketId];
         delete this.orderBookSnapshotFetchers[marketId];
+      } else {
+        this.orderBookState[marketId]?.terminalHandlers.delete(terminate);
       }
     };
   };
@@ -571,6 +659,86 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
     }
   };
 
+  private createOrderBookState = (): OrderBookState => ({
+    updates: [],
+    isSnapshotLoaded: false,
+    isTerminal: false,
+    lastUpdateId: 0,
+    isSnapshotFetchInFlight: false,
+    isRecoveryScheduled: false,
+    recoveryAttempts: 0,
+    terminalErrorEmitted: false,
+    terminalHandlers: new Set(),
+  });
+
+  private isInitialOrderBookBridge = (state: OrderBookState, update: BackpackWsDepthUpdate) => {
+    if (update.U === undefined || update.u === undefined || update.u < update.U) return false;
+
+    const expectedUpdateId = state.lastUpdateId + 1;
+    return update.U <= expectedUpdateId && expectedUpdateId <= update.u;
+  };
+
+  private isContinuousOrderBookUpdate = (state: OrderBookState, update: BackpackWsDepthUpdate) => {
+    if (update.U === undefined || update.u === undefined) return false;
+
+    return update.u >= update.U && update.U === state.lastUpdateId + 1;
+  };
+
+  private recoverOrderBook = (marketId: string, reason: string) => {
+    const state = this.orderBookState[marketId];
+    const fetchSnapshot = this.orderBookSnapshotFetchers[marketId];
+    if (!state || !fetchSnapshot || state.isTerminal || state.isSnapshotFetchInFlight || state.isRecoveryScheduled) return;
+
+    if (state.recoveryAttempts >= MAX_ORDERBOOK_RESNAPSHOT_ATTEMPTS) {
+      // Do not keep a stale snapshot marked usable or emit once per later
+      // delta. A natural socket reconnect creates a fresh state and retries.
+      this.terminateOrderBook(
+        marketId,
+        state,
+        `recovery exhausted after ${MAX_ORDERBOOK_RESNAPSHOT_ATTEMPTS} consecutive resnapshots; orderbook disabled until reconnect`,
+      );
+      return;
+    }
+
+    state.recoveryAttempts += 1;
+    state.isSnapshotLoaded = false;
+    state.lastUpdateId = 0;
+    state.isRecoveryScheduled = true;
+    this.parent.log(
+      `Backpack orderbook sequence gap for ${marketId} (${reason}); resnapshot ${state.recoveryAttempts}/${MAX_ORDERBOOK_RESNAPSHOT_ATTEMPTS}`,
+      LogSeverity.Warning,
+    );
+
+    Promise.resolve().then(() => {
+      if (this.isDisposed || this.orderBookState[marketId] !== state) return;
+      state.isRecoveryScheduled = false;
+      fetchSnapshot();
+    });
+  };
+
+  private terminateOrderBook = (
+    marketId: string,
+    state: OrderBookState,
+    reason: string,
+  ) => {
+    if (state.isTerminal) return;
+
+    state.isTerminal = true;
+    state.isSnapshotLoaded = false;
+    state.updates = [];
+    if (!state.terminalErrorEmitted) {
+      state.terminalErrorEmitted = true;
+      this.parent.emitAndLogError(`Backpack orderbook disabled for ${marketId}: ${reason}`);
+    }
+    state.terminalHandlers.forEach((handler) => {
+      try {
+        handler(reason);
+      } catch (error) {
+        this.parent.log(`Error clearing Backpack orderbook for ${marketId}: ${error}`, LogSeverity.Warning);
+      }
+    });
+  };
+
   unsubscribe = (streams: string[]) => {
     if (streams.length > 0) {
       this.send(
@@ -588,6 +756,8 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
     this.subscriptions.clear();
     this.orderBookState = {};
     this.orderBookSnapshotFetchers = {};
+    Object.values(this.depthTickerUpdateThrottles).forEach((throttleTickerUpdate) => throttleTickerUpdate.cancel());
+    this.depthTickerUpdateThrottles = {};
     if (this.ws) {
       this.ws.close();
     }

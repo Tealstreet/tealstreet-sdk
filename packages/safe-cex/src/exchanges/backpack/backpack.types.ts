@@ -219,9 +219,11 @@ export interface BackpackOrderRequest {
   // Take Profit attached to order
   takeProfitTriggerPrice?: string;
   takeProfitLimitPrice?: string;
+  takeProfitTriggerBy?: 'MarkPrice' | 'IndexPrice' | 'LastPrice';
   // Stop Loss attached to order
   stopLossTriggerPrice?: string;
   stopLossLimitPrice?: string;
+  stopLossTriggerBy?: 'MarkPrice' | 'IndexPrice' | 'LastPrice';
 }
 
 export interface BackpackFill {
