@@ -226,6 +226,9 @@ export class BitunixExchange extends BaseExchange {
           marginCoin: 'USDT',
         },
       });
+      if (response.data.code !== 0) {
+        return { error: response.data.msg || 'Bitunix account validation failed' };
+      }
       this.extractAccountRow(response?.data);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);

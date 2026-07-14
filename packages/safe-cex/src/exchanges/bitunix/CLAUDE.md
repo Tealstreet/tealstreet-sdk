@@ -489,7 +489,7 @@ Similarly, TP/SL orders may be direct array or wrapped in `orderList` (`bitunix.
 
 7. **Binance log messages**: `start()` method logs "Ready to trade on Binance" and "Loaded Binance orders" (`bitunix.exchange.ts:161,168`) -- copy-paste artifact from Binance implementation.
 
-8. **HTTP 200 for errors**: Bitunix returns HTTP 200 even for API errors. Must check `data.code !== 0` to detect failures (`bitunix.exchange.ts:1313, 1365`).
+8. **HTTP 200 for errors**: Bitunix returns HTTP 200 even for API errors. `validateAccount` must reject every `data.code !== 0` envelope before fetching the balance, using `data.msg` or the stable truthy fallback `Bitunix account validation failed`; the response interceptor only logs these errors and does not throw.
 
 9. **Position side inconsistency**: API returns `side` as `BUY`/`SELL` or `LONG`/`SHORT` depending on endpoint version. Code handles both (`bitunix.exchange.ts:329-330`).
 
