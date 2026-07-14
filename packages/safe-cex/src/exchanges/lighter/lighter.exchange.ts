@@ -50,11 +50,11 @@ import {
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TIME_IN_FORCE,
   ORDER_TYPE,
+  resolveLighterInterval,
 } from './lighter.types';
 import {
   getLighterAmountDecimals,
@@ -1757,7 +1757,7 @@ export class LighterExchange extends BaseExchange {
     }
 
     const limit = Math.min(opts.limit || 500, 1500);
-    const interval = INTERVAL[opts.interval];
+    const interval = resolveLighterInterval(opts.interval);
     const [, amount, unit] = opts.interval.split(/(\d+)/);
 
     const hypotheticalEnd = opts.to ? dayjs(opts.to) : dayjs();
@@ -1768,7 +1768,7 @@ export class LighterExchange extends BaseExchange {
         : hypotheticalEnd.subtract(parseFloat(amount) * limit, unit as ManipulateType);
 
     const marketId = parseInt(market.id, 10);
-    const data = await this.lighterApiClient.get<any>('/api/v1/candles', {
+    const data = await this.lighterApiClient.get<any>(ENDPOINTS.CANDLES, {
       params: {
         market_id: marketId,
         resolution: interval,

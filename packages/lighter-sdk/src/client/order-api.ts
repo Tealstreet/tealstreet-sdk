@@ -4,10 +4,14 @@
  * Provides methods for querying orders, order books, trades, and exchange statistics.
  */
 
+import type { AxiosRequestConfig } from 'axios';
+
 import { LighterApiClient } from './api-client';
 import type { ApiResponse } from './http-types';
 import { OrderStatus } from '../types/constants';
 import { Trade, OrderBookLevel } from '../types/common';
+
+type LighterRequestConfig = AxiosRequestConfig & { __suppressExchangeError?: boolean };
 
 /**
  * Order with market details from API
@@ -473,21 +477,34 @@ export class OrderApi {
   public async getOrderBookOrders(
     marketId: number,
     limit?: number,
+    requestConfig?: LighterRequestConfig,
   ): Promise<OrderBookOrdersResponse> {
     const params: Record<string, string> = {
       limit: (limit || 50).toString(),
     };
 
-    const response = await this.client.get<ApiResponse<OrderBookOrdersResponse>>(
-      `/api/v1/order-books/${marketId}/orders`,
-      { params },
+    const response = await this.client.get<any>(
+      '/api/v1/orderBookOrders',
+      {
+        ...requestConfig,
+        params: { ...params, ...(requestConfig?.params || {}), market_id: marketId.toString() },
+      } as AxiosRequestConfig,
     );
 
-    if (!response.success || !response.data) {
-      throw new Error(response.error?.message || 'Failed to get order book orders');
+    if (response?.success && response.data) {
+      return response.data;
     }
 
-    return response.data;
+    if (response?.code === 200 && (Array.isArray(response.bids) || Array.isArray(response.asks))) {
+      return {
+        marketId,
+        bids: response.bids || [],
+        asks: response.asks || [],
+        timestamp: response.timestamp || Date.now(),
+      };
+    }
+
+    throw new Error(response?.error?.message || response?.message || 'Failed to get order book orders');
   }
 
   /**

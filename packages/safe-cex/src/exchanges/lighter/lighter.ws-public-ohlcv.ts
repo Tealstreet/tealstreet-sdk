@@ -1,9 +1,9 @@
-export function buildLighterCandleTopic(resolvedInterval: string, symbol: string): string {
-  return `candle_${resolvedInterval}_${symbol}`;
+export function buildLighterCandleTopic(marketId: string | number, resolution: string): string {
+  return `candle/${marketId}/${resolution}`;
 }
 
-export function buildLighterTradesTopic(symbol: string): string {
-  return `trades_${symbol}`;
+export function buildLighterTradesTopic(marketId: string | number): string {
+  return `trade/${marketId}`;
 }
 
 export function shouldAttemptLighterOhlcvRecovery(params: {

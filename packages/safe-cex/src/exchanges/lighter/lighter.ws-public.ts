@@ -7,12 +7,12 @@ import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, PositionSide, Ticker, Writable } from '../../types';
 import { getCandleStartTime } from '../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../utils/orderbook';
-import { add, divide } from '../../utils/safe-math';
+import { add } from '../../utils/safe-math';
 import { updateOrderBook } from '../../utils/updateOrderBook';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { LighterExchange } from './lighter.exchange';
-import { BASE_WS_URL, ENDPOINTS, INTERVAL } from './lighter.types';
+import { BASE_WS_URL, ENDPOINTS, resolveLighterInterval } from './lighter.types';
 import { calculateLighterPublicReconnectDelay, classifyLighterPublicClose } from './lighter.ws-policy';
 import {
   buildLighterCandleTopic,
@@ -191,6 +191,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       // Prime mark/last/bid/ask quickly while ticker subscriptions spin up.
       this.primeTickerRestFallback();
       this.armExistingOrderBookTimeouts();
+      this.armExistingOhlcvNoDataTimeouts();
       this.armTickerRestFallbackWatchdog();
       this.ping();
 
@@ -482,10 +483,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     }
     this.orderBookRestFallbackInFlight[incomingChannel] = true;
     try {
-      const payload = await this.parent.lighterApiClient.get<any>(ENDPOINTS.ORDERBOOK, {
-        params: { market_id: Number.parseInt(marketId, 10) },
+      const payload = await this.parent.orderApi.getOrderBookOrders(Number.parseInt(marketId, 10), 100, {
         __suppressExchangeError: true,
-      } as any);
+      });
       const levels = this.parseRestOrderBookLevels(payload);
       if (!levels) {
         return;
@@ -495,7 +495,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       calcOrderBookTotal(orderBook);
       callback(orderBook);
     } catch (error: any) {
-      const statusCode = Number(error?.response?.status ?? error?.status);
+      const statusCode = Number(error?.response?.status ?? error?.status ?? error?.statusCode);
       if (statusCode === 403) {
         this.orderBookRestFallbackCooldownUntilByTopic[incomingChannel] =
           virtualClock.getCurrentTimeMs() + LighterPublicWebsocket.ORDER_BOOK_REST_FALLBACK_403_COOLDOWN_MS;
@@ -576,6 +576,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
 
   private parseRestTickerItems = (payload: any): any[] => {
     const candidates = [
+      payload?.order_book_stats,
+      payload?.data?.order_book_stats,
+      payload?.result?.order_book_stats,
       payload?.tickers,
       payload?.data?.tickers,
       payload?.result?.tickers,
@@ -616,7 +619,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
 
     this.tickerRestFallbackInFlight = (async () => {
       try {
-        const payload = await this.parent.lighterApiClient.get<any>(ENDPOINTS.TICKERS, {
+        const payload = await this.parent.lighterApiClient.get<any>(ENDPOINTS.EXCHANGE_STATS, {
           __suppressExchangeError: true,
         } as any);
         if (payload?.market_stats && typeof payload.market_stats === 'object') {
@@ -635,7 +638,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
         }
         this.syncTickerRestFallbackToPriceHydration();
       } catch (error: any) {
-        const statusCode = Number(error?.response?.status ?? error?.status);
+        const statusCode = Number(error?.response?.status ?? error?.status ?? error?.statusCode);
         if (statusCode === 403) {
           this.tickerRestFallbackCooldownUntil =
             virtualClock.getCurrentTimeMs() + LighterPublicWebsocket.TICKER_REST_FALLBACK_403_COOLDOWN_MS;
@@ -645,14 +648,6 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
           );
           this.clearTickerRestFallbackWatchdog();
           this.stopTickerRestFallback(false);
-          if (!this.isWsProxyRouteEnabled() && !this.connectedViaProxyRoute && !this.useReadonlyDirectRoute) {
-            this.useReadonlyDirectRoute = true;
-            this.parent.log(
-              '[Lighter] Promoting public WS to readonly direct route after REST 403 during fallback.',
-              LogSeverity.Warning,
-            );
-            this.reconnect();
-          }
           return;
         }
         this.parent.log(
@@ -758,6 +753,15 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     }, LighterPublicWebsocket.OHLCV_DIRECT_ROUTE_NO_DATA_TIMEOUT_MS);
   };
 
+  private armExistingOhlcvNoDataTimeouts = () => {
+    for (const topic of Object.keys(this.topics)) {
+      if (!topic.startsWith('candle/') || !this.messageHandlers[topic]?.length) {
+        continue;
+      }
+      this.armOhlcvNoDataTimeout(topic);
+    }
+  };
+
   private attemptOhlcvRecovery = (topic: string, reason: string): void => {
     const now = virtualClock.getCurrentTimeMs();
     const shouldAttemptRecovery = shouldAttemptLighterOhlcvRecovery({
@@ -794,7 +798,11 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
   };
 
   maybeRecoverOhlcvStream = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>, reason = 'stale OHLCV stream') => {
-    const topic = buildLighterCandleTopic(INTERVAL[opts.interval], opts.symbol);
+    const market = this.parent.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      return;
+    }
+    const topic = buildLighterCandleTopic(market.id, resolveLighterInterval(opts.interval));
     this.attemptOhlcvRecovery(topic, reason);
   };
 
@@ -938,11 +946,36 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     }
   };
 
-  private toOrderBookLevel = (level: any) => ({
-    price: parseFloat(level.price || level[0]),
-    amount: parseFloat(level.size || level[1]),
-    total: 0,
-  });
+  private toOrderBookLevel = (level: any) => {
+    const price = parseFloat(level.price ?? level[0]);
+    const amount = parseFloat(level.remaining_base_amount ?? level.remainingBaseAmount ?? level.size ?? level.quantity ?? level[1]);
+    if (!Number.isFinite(price) || !Number.isFinite(amount) || price <= 0 || amount < 0) {
+      return undefined;
+    }
+    return { price, amount, total: 0 };
+  };
+
+  private aggregateOrderBookSnapshotLevels = (levels: ReadonlyArray<any>) => {
+    const levelsByPrice = new Map<number, NonNullable<ReturnType<typeof this.toOrderBookLevel>>>();
+
+    for (const rawLevel of levels) {
+      const level = this.toOrderBookLevel(rawLevel);
+      if (!level || level.amount <= 0) {
+        continue;
+      }
+
+      const existing = levelsByPrice.get(level.price);
+      if (existing) {
+        // REST returns individual orders, not guaranteed one level per price.
+        // Keep exact prices separate; only equal prices are combined.
+        existing.amount = add(existing.amount, level.amount);
+      } else {
+        levelsByPrice.set(level.price, level);
+      }
+    }
+
+    return [...levelsByPrice.values()];
+  };
 
   private applyOrderBookLevels = (
     orderBook: OrderBook,
@@ -951,15 +984,16 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     mode: 'snapshot' | 'delta',
   ) => {
     if (mode === 'snapshot') {
-      orderBook[side] = [];
-      levels.forEach((level) => {
-        orderBook[side].push(this.toOrderBookLevel(level));
-      });
+      orderBook[side] = this.aggregateOrderBookSnapshotLevels(levels)
+        .sort((left, right) => (side === 'bids' ? right.price - left.price : left.price - right.price));
       return;
     }
 
     levels.forEach((level) => {
-      updateOrderBook(orderBook, side, this.toOrderBookLevel(level));
+      const mappedLevel = this.toOrderBookLevel(level);
+      if (mappedLevel) {
+        updateOrderBook(orderBook, side, mappedLevel);
+      }
     });
   };
 
@@ -1127,109 +1161,141 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const topic = buildLighterCandleTopic(INTERVAL[opts.interval], opts.symbol);
-    const secondaryTopic = buildLighterTradesTopic(opts.symbol);
+    const market = this.parent.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      throw new Error(`Market not found for symbol: ${opts.symbol}`);
+    }
+    const topic = buildLighterCandleTopic(market.id, resolveLighterInterval(opts.interval));
+    const secondaryTopic = buildLighterTradesTopic(market.id);
+    const usesTrades = !this.parent.options.publicDataOnly;
 
     let lastCandle: Candle | undefined = undefined;
+    let isActive = true;
+    let pendingRetryTimeout: NodeJS.Timeout | undefined;
 
-    const parser = ({ data }: Data) => {
-      if (!data || !data.candle) return;
+    const parser = (message: Data) => {
+      const data = message.data ?? message;
+      const candles = Array.isArray(data?.candles) ? data.candles : data?.candle ? [data.candle] : [];
+      for (const candle of candles) {
+        const rawTimestamp = Number(candle.t ?? candle.timestamp);
+        const timestamp = rawTimestamp > 10_000_000_000 ? rawTimestamp / 1000 : rawTimestamp;
+        const open = parseFloat(candle.o ?? candle.open);
+        const high = parseFloat(candle.h ?? candle.high);
+        const low = parseFloat(candle.l ?? candle.low);
+        const close = parseFloat(candle.c ?? candle.close);
+        const volume = parseFloat(candle.v ?? candle.volume);
+        if (![timestamp, open, high, low, close, volume].every(Number.isFinite)) {
+          continue;
+        }
+        if (lastCandle && lastCandle.timestamp > timestamp) {
+          continue;
+        }
 
-      this.clearOhlcvNoDataTimeout(topic);
-
-      const candle = data.candle;
-      const timestamp = candle.timestamp / 1000;
-
-      if (lastCandle && lastCandle.timestamp > timestamp) {
-        return;
+        this.clearOhlcvNoDataTimeout(topic);
+        lastCandle = { timestamp, open, high, low, close, volume };
+        callback(lastCandle);
       }
-
-      lastCandle = {
-        timestamp,
-        open: parseFloat(candle.open),
-        high: parseFloat(candle.high),
-        low: parseFloat(candle.low),
-        close: parseFloat(candle.close),
-        volume: parseFloat(candle.volume),
-      };
-      callback(lastCandle);
     };
 
-    const secondaryParser = ({ data }: Data) => {
-      if (!data || !data.trade) return;
+    const secondaryParser = (message: Data) => {
+      const data = message.data ?? message;
       if (!lastCandle) return;
+      const trades = Array.isArray(data?.trades) ? data.trades : data?.trade ? [data.trade] : [];
+      for (const trade of trades) {
+        const rawTimestamp = Number(trade.timestamp ?? trade.t);
+        const timestamp = rawTimestamp > 10_000_000_000 ? rawTimestamp / 1000 : rawTimestamp;
+        const candleStart = getCandleStartTime(opts.interval, timestamp);
+        const price = parseFloat(trade.price);
+        const size = parseFloat(trade.size);
+        if (![candleStart, price, size].every(Number.isFinite) || price <= 0 || size < 0) {
+          continue;
+        }
 
-      const trade = data.trade;
-      const timestamp = trade.timestamp / 1000;
-      const candleStart = getCandleStartTime(opts.interval, timestamp);
-      const price = parseFloat(trade.price);
+        if (lastCandle.timestamp > candleStart) {
+          continue;
+        }
 
-      if (lastCandle.timestamp > candleStart) {
-        return;
-      }
+        if (lastCandle.timestamp < candleStart) {
+          lastCandle = {
+            timestamp: candleStart,
+            open: lastCandle.close,
+            high: lastCandle.close,
+            low: lastCandle.close,
+            close: lastCandle.close,
+            volume: 0,
+          };
+        }
 
-      if (lastCandle.timestamp < candleStart) {
         lastCandle = {
-          timestamp: candleStart,
-          open: lastCandle.close,
-          high: lastCandle.close,
-          low: lastCandle.close,
-          close: lastCandle.close,
-          volume: 0,
+          ...lastCandle,
+          high: Math.max(lastCandle.high, price),
+          low: Math.min(lastCandle.low, price),
+          close: price,
+          volume: add(lastCandle.volume, size),
         };
+        callback(lastCandle);
       }
-
-      lastCandle = {
-        ...lastCandle,
-        high: Math.max(lastCandle.high, price),
-        low: Math.min(lastCandle.low, price),
-        close: price,
-        volume: add(lastCandle.volume, divide(parseFloat(trade.size), price)),
-      };
-      callback(lastCandle);
     };
 
     const waitForConnectedAndSubscribe = () => {
+      if (!isActive || this.isDisposed) {
+        return;
+      }
       if (this.isConnected) {
-        if (!this.isDisposed) {
+        pendingRetryTimeout = undefined;
+        if (isActive && !this.isDisposed) {
+          const shouldSubscribeCandle = !this.messageHandlers[topic]?.length;
+          const shouldSubscribeTrades = usesTrades && !this.messageHandlers[secondaryTopic]?.length;
           this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
-          if (!this.parent.options.publicDataOnly) {
+          if (usesTrades) {
             this.messageHandlers[secondaryTopic] = [...(this.messageHandlers[secondaryTopic] || []), secondaryParser];
           }
 
-          const payload = { type: 'subscribe', channel: topic };
-          this.sendPayload(payload);
+          if (shouldSubscribeCandle) {
+            this.sendPayload({ type: 'subscribe', channel: topic });
+          }
           this.armOhlcvNoDataTimeout(topic);
 
-          if (!this.parent.options.publicDataOnly) {
-            const secondaryPayload = { type: 'subscribe', channel: secondaryTopic };
-            this.sendPayload(secondaryPayload);
+          if (shouldSubscribeTrades) {
+            this.sendPayload({ type: 'subscribe', channel: secondaryTopic });
           }
 
           // Store subscribed topic to re-subscribe on reconnect
           this.topics[topic] = topic;
-          if (!this.parent.options.publicDataOnly) {
+          if (usesTrades) {
             this.topics[secondaryTopic] = secondaryTopic;
           }
         }
       } else {
-        setTimeout(() => waitForConnectedAndSubscribe(), 100);
+        pendingRetryTimeout = setTimeout(() => {
+          pendingRetryTimeout = undefined;
+          waitForConnectedAndSubscribe();
+        }, 100);
       }
     };
 
     waitForConnectedAndSubscribe();
 
     return () => {
+      isActive = false;
+      if (pendingRetryTimeout) {
+        clearTimeout(pendingRetryTimeout);
+        pendingRetryTimeout = undefined;
+      }
       this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
-      this.clearOhlcvNoDataTimeout(topic);
 
       this.messageHandlers[secondaryTopic] = [
         ...(this.messageHandlers[secondaryTopic] || []).filter((f) => f !== secondaryParser),
       ];
 
       if (!this.messageHandlers[topic].length) {
+        this.clearOhlcvNoDataTimeout(topic);
         delete this.topics[topic];
-        delete this.topics[secondaryTopic];
+        if (usesTrades) {
+          delete this.topics[secondaryTopic];
+        }
+        this.cleanupMessageHandlerStats(topic);
+        this.cleanupMessageHandlerStats(secondaryTopic);
       }
 
       if (this.isConnected && !this.messageHandlers[topic].length) {
@@ -1237,10 +1303,8 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
         this.sendPayload(payload);
       }
 
-      if (this.isConnected && !this.messageHandlers[secondaryTopic].length) {
+      if (usesTrades && this.isConnected && !this.messageHandlers[secondaryTopic].length) {
         const payload = { type: 'unsubscribe', channel: secondaryTopic };
-        this.cleanupMessageHandlerStats(topic);
-        this.cleanupMessageHandlerStats(secondaryTopic);
         this.sendPayload(payload);
       }
     };

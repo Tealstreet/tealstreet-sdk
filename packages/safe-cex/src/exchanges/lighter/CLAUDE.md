@@ -15,7 +15,7 @@ This directory contains the Lighter exchange integration for Tealstreet. Lighter
 
 Official API documentation:
 
-- Get started: <https://apidocs.lighter.xyz/docs/get-started-for-programmers-1#/>
+- Get started: <https://apidocs.lighter.xyz/docs/get-started-for-programmers>
 - Rate limits: <https://apidocs.lighter.xyz/docs/rate-limits>
 - Account tiers: <https://apidocs.lighter.xyz/docs/account-types>
 - Premium volume quota: <https://apidocs.lighter.xyz/docs/volume-quota-program>
@@ -31,6 +31,10 @@ Lighter is not available in CCXT. Use <https://github.com/ccxt/ccxt> for general
 | `lighter.types.ts`      | Constants and type mappings: URLs, endpoints, interval/order/status maps, Grafana endpoints                |
 | `lighter.utils.ts`      | Utility functions: client order ID generation, precision extraction, hex prefix helpers, BigInt conversion |
 | `lighter.ws-public.ts`  | Public WebSocket (`LighterPublicWebsocket`); market data: tickers, orderbook, candles, trades              |
+| `lighter.ws-public-ohlcv.ts` | Public candle/trade channel builders and OHLCV recovery guards                                      |
+| `lighter.ws-public-parsers.ts` | Public-frame dispatch and numeric parsing helpers                                               |
+| `lighter.ws-policy.ts` | Public/private close classification and reconnect delay policy                                          |
+| `lighter.signer.ts` | Lighter transaction signer adapter                                                                          |
 | `lighter.ws-private.ts` | Private WebSocket (`LighterPrivateWebsocket`); account events: orders, positions, fills, balance           |
 
 ## Authentication
@@ -137,10 +141,9 @@ Additional account-related endpoints used in discovery/integration:
 | -------------------------- | ------ | --------------------------------------------------------------------------------------------- |
 | `/api/v1/orderBookDetails` | GET    | Preferred market metadata source: margin mode, margin fractions, precision, and limits         |
 | `/api/v1/orderBooks`       | GET    | Fallback active-market list (perps + spot rows), missing some risk metadata                   |
-| `/api/v1/tickers`          | GET    | Get all tickers                                                                               |
-| `/api/v1/ticker`           | GET    | Get single ticker                                                                             |
-| `/api/v1/klines`           | GET    | Get candlestick data                                                                          |
-| `/api/v1/orderbook`        | GET    | Get order book                                                                                |
+| `/api/v1/exchangeStats`    | GET    | Public ticker/statistics fallback (`order_book_stats`)                                        |
+| `/api/v1/candles`          | GET    | Candlestick data for supported raw resolutions                                                |
+| `/api/v1/orderBookOrders`  | GET    | Current orderbook levels (`market_id`, `limit`), via `OrderApi.getOrderBookOrders()`          |
 | `/api/v1/trades`           | GET    | Get recent trades                                                                             |
 
 ### Orders
@@ -189,8 +192,8 @@ Topics are tracked per channel and re-subscribed on reconnect.
 | `market_stats/all`           | Market stats snapshot/update stream                          |
 | `ticker/<marketId>`          | Per-market BBO/ticker updates                                |
 | `order_book/<marketId>`      | Order book snapshots and incremental updates                 |
-| `candle_<interval>_<symbol>` | Candlestick updates for a specific interval and symbol       |
-| `trades_<symbol>`            | Trade stream (secondary source for real-time candle updates) |
+| `candle/<marketId>/<resolution>` | Candlestick updates for a specific market and supported resolution |
+| `trade/<marketId>`              | Trade stream (secondary source for real-time candle updates)       |
 
 **Ping/pong**: Sends ping on open, responds to server ping with pong, and tracks latency via base WS helpers.
 
@@ -202,13 +205,14 @@ Topics are tracked per channel and re-subscribed on reconnect.
 
 **Ticker fallback behavior**:
 
-- Immediately fetches ticker snapshot via REST on open.
+- Immediately fetches ticker snapshot from `/api/v1/exchangeStats` on open.
 - Starts REST ticker polling when no WS messages are seen shortly after connect (watchdog).
 - Keeps REST ticker polling active while stream is quiet/disconnected, or while WS traffic exists but no positive ticker price has been hydrated yet. Generic orderbook/candle/pong traffic is socket liveness, not ticker recovery; stop ticker REST fallback only after `mark`, `last`, `index`, `bid`, or `ask` is positive.
 
 **Orderbook fallback behavior**:
 
-- On subscribe, primes orderbook immediately from REST (before waiting for first WS snapshot).
+- On subscribe, primes orderbook immediately through `OrderApi.getOrderBookOrders()` (before waiting for first WS snapshot). The SDK maps the current official `/api/v1/orderBookOrders` route and normalizes its `{ bids, asks, remaining_base_amount }` response.
+- That endpoint returns raw orders, so the public socket coalesces equal-price orders per side before sorting and calculating cumulative depth totals.
 - If initial WS snapshot does not arrive quickly, enables periodic REST orderbook fallback.
 - If WS orderbook goes stale, attempts recovery with re-subscribe first, then reconnect on repeated failure.
 
@@ -216,6 +220,7 @@ Topics are tracked per channel and re-subscribed on reconnect.
 
 - Primary source is WS candle channel, with trades channel as secondary interpolation source.
 - Per-topic no-data timeout is intentionally quiet-tolerant: ~120s without OHLCV data before guarded WS recovery (`attemptOhlcvRecovery`).
+- The timeout is shared by all listeners on that candle topic: it stays armed until the final listener unsubscribes, a listener that unsubscribes before connect cancels its pending subscribe retry, and reconnect re-arms one guard for each still-active candle topic.
 - Public socket health also uses the ~120s quiet-stream threshold so lightly traded symbols do not falsely mark the account degraded.
 - `lighter.exchange.ts` additionally polls REST latest candle every 5s and only emits when changed if WS candle flow is stale for ~120s.
 
@@ -644,7 +649,7 @@ WASM initialization is performed during `validateAccount()` and again during `st
 
 ## Supported Timeframes
 
-`1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `12h`, `1d`, `1w`
+Raw Lighter requests support only `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `12h`, and `1d`. `fetchOHLCV()` and `listenOHLCV()` reject `3m`, `2h`, `6h`, and `1w` with an explicit error before making a Lighter request. TradingView continues to aggregate those display intervals client-side from supported base resolutions.
 
 ## Grafana Monitoring
 

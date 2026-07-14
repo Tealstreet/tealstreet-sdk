@@ -1,11 +1,5 @@
 export function shouldDispatchLighterPublicMessage(topic: string, data: string): boolean {
-  const channelVariants = new Set<string>([topic]);
-  if (topic.includes(':')) {
-    channelVariants.add(topic.replace(':', '/'));
-  }
-  if (topic.includes('/')) {
-    channelVariants.add(topic.replace('/', ':'));
-  }
+  const channelVariants = new Set<string>([topic, topic.replace(/:/g, '/'), topic.replace(/\//g, ':')]);
 
   const hasMatchingChannel = Array.from(channelVariants).some((channel) => data.includes(`"channel":"${channel}"`));
   const isTickerPerMarketChannel =

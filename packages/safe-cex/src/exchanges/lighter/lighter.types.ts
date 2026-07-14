@@ -32,9 +32,10 @@ export const ENDPOINTS = {
   // Market data endpoints
   MARKETS: '/api/v1/orderBooks',
   ORDER_BOOK_DETAILS: '/api/v1/orderBookDetails',
+  EXCHANGE_STATS: '/api/v1/exchangeStats',
+  CANDLES: '/api/v1/candles',
+  // Legacy aliases retained for downstream compatibility; public fallback code must not call these routes.
   TICKERS: '/api/v1/tickers',
-  TICKER: '/api/v1/ticker',
-  KLINES: '/api/v1/klines',
   ORDERBOOK: '/api/v1/orderbook',
   TRADES: '/api/v1/trades',
 
@@ -63,19 +64,25 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.OPEN_ORDERS,
 ];
 
-export const INTERVAL: Record<Timeframe, string> = {
+export const INTERVAL: Partial<Record<Timeframe, string>> = {
   '1m': '1m',
-  '3m': '3m',
   '5m': '5m',
   '15m': '15m',
   '30m': '30m',
   '1h': '1h',
-  '2h': '2h',
   '4h': '4h',
-  '6h': '6h',
   '12h': '12h',
   '1d': '1d',
-  '1w': '1w',
+};
+
+export const resolveLighterInterval = (interval: Timeframe): string => {
+  const resolution = INTERVAL[interval];
+  if (!resolution) {
+    throw new Error(
+      `Lighter does not support raw ${interval} candles. Supported resolutions: 1m, 5m, 15m, 30m, 1h, 4h, 12h, 1d.`,
+    );
+  }
+  return resolution;
 };
 
 export const ORDER_STATUS: Record<string, OrderStatus> = {
