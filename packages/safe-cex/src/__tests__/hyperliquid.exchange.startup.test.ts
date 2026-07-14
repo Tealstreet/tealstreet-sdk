@@ -65,17 +65,25 @@ const coreTickers = [
   },
 ] as any;
 
+const coreState = (accountValue = 0, totalMarginUsed = 0) => ({
+  assetPositions: [],
+  marginSummary: {
+    accountValue: String(accountValue),
+    totalMarginUsed: String(totalMarginUsed),
+  },
+});
+
 describe('HyperliquidExchange startup sequencing', () => {
   it('does not block startup on private REST bootstrap calls', async () => {
     const exchange = createExchange();
 
-    const pendingBalance = createDeferred<any>();
+    const pendingCoreState = createDeferred<any>();
     const pendingBuilder = createDeferred<void>();
 
     vi.spyOn(exchange as any, 'initExternalPublicData').mockResolvedValue(false);
     vi.spyOn(exchange as any, 'resolveUserAbstractionMode').mockResolvedValue(undefined);
     vi.spyOn(exchange as any, 'fetchMarketsAndTickers').mockResolvedValue([coreMarkets, coreTickers]);
-    vi.spyOn(exchange as any, 'fetchInitialBalance').mockReturnValue(pendingBalance.promise);
+    vi.spyOn(exchange as any, 'fetchCorePerpsState').mockReturnValue(pendingCoreState.promise);
     vi.spyOn(exchange as any, 'fetchBuilderFeeApproval').mockReturnValue(pendingBuilder.promise);
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
     vi.spyOn(exchange, 'fetchAllHip3Positions').mockResolvedValue(undefined);
@@ -110,25 +118,20 @@ describe('HyperliquidExchange startup sequencing', () => {
 
     // Cleanup pending promises to avoid cross-test leakage.
     pendingBuilder.resolve();
-    pendingBalance.resolve({
-      used: 0,
-      free: 0,
-      total: 0,
-      upnl: 0,
-    });
+    pendingCoreState.resolve(coreState());
     await Promise.resolve();
   });
 
   it('hydrates public data before user abstraction resolution completes', async () => {
     const exchange = createExchange();
     const pendingAbstraction = createDeferred<void>();
-    const pendingBalance = createDeferred<any>();
+    const pendingCoreState = createDeferred<any>();
     const pendingBuilder = createDeferred<void>();
 
     vi.spyOn(exchange as any, 'initExternalPublicData').mockResolvedValue(false);
     vi.spyOn(exchange as any, 'resolveUserAbstractionMode').mockReturnValue(pendingAbstraction.promise);
     vi.spyOn(exchange as any, 'fetchMarketsAndTickers').mockResolvedValue([coreMarkets, coreTickers]);
-    vi.spyOn(exchange as any, 'fetchInitialBalance').mockReturnValue(pendingBalance.promise);
+    vi.spyOn(exchange as any, 'fetchCorePerpsState').mockReturnValue(pendingCoreState.promise);
     vi.spyOn(exchange as any, 'fetchBuilderFeeApproval').mockReturnValue(pendingBuilder.promise);
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
     vi.spyOn(exchange, 'fetchAllHip3Positions').mockResolvedValue(undefined);
@@ -152,24 +155,19 @@ describe('HyperliquidExchange startup sequencing', () => {
     expect(privateConnectSpy).toHaveBeenCalledTimes(1);
 
     pendingBuilder.resolve();
-    pendingBalance.resolve({
-      used: 0,
-      free: 0,
-      total: 0,
-      upnl: 0,
-    });
+    pendingCoreState.resolve(coreState());
     await Promise.resolve();
   });
 
-  it('applies initial balance asynchronously after startup store hydration', async () => {
+  it('applies initial core state atomically after startup store hydration', async () => {
     const exchange = createExchange();
-    const deferredBalance = createDeferred<{ total: number; used: number; free: number; upnl: number } | null>();
+    const deferredCoreState = createDeferred<any>();
 
     vi.spyOn(exchange as any, 'initExternalPublicData').mockResolvedValue(false);
     vi.spyOn(exchange as any, 'resolveUserAbstractionMode').mockResolvedValue(undefined);
     vi.spyOn(exchange as any, 'fetchMarketsAndTickers').mockResolvedValue([coreMarkets, coreTickers]);
     vi.spyOn(exchange as any, 'fetchBuilderFeeApproval').mockResolvedValue(undefined);
-    vi.spyOn(exchange as any, 'fetchInitialBalance').mockReturnValue(deferredBalance.promise);
+    vi.spyOn(exchange as any, 'fetchCorePerpsState').mockReturnValue(deferredCoreState.promise);
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
     vi.spyOn(exchange, 'fetchAllHip3Positions').mockResolvedValue(undefined);
     vi.spyOn(exchange, 'tick').mockResolvedValue(undefined);
@@ -179,6 +177,7 @@ describe('HyperliquidExchange startup sequencing', () => {
     vi.spyOn(exchange.privateWebsocket, 'connectAndSubscribe').mockImplementation(() => {
       privateConnectSawMarkets = exchange.store.markets.length;
     });
+    const applyCoreStateSpy = vi.spyOn(exchange.privateWebsocket, 'applyCoreClearinghouseState');
 
     await exchange.start();
 
@@ -188,15 +187,12 @@ describe('HyperliquidExchange startup sequencing', () => {
     expect(exchange.store.balance.free).toBe(0);
     expect(exchange.store.balance.upnl).toBe(0);
 
-    deferredBalance.resolve({
-      total: 1250,
-      used: 250,
-      free: 1000,
-      upnl: 0,
-    });
+    const snapshot = coreState(1250, 250);
+    deferredCoreState.resolve(snapshot);
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(applyCoreStateSpy).toHaveBeenCalledExactlyOnceWith(snapshot, true);
     expect(exchange.store.balance).toEqual({
       total: 1250,
       used: 250,
@@ -207,6 +203,32 @@ describe('HyperliquidExchange startup sequencing', () => {
         source: 'clearinghouseState',
       },
     });
+  });
+
+  it('does not apply a deferred core REST snapshot after disposal', async () => {
+    const exchange = createExchange();
+    const deferredCoreState = createDeferred<any>();
+
+    vi.spyOn(exchange as any, 'initExternalPublicData').mockResolvedValue(false);
+    vi.spyOn(exchange as any, 'resolveUserAbstractionMode').mockResolvedValue(undefined);
+    vi.spyOn(exchange as any, 'fetchMarketsAndTickers').mockResolvedValue([coreMarkets, coreTickers]);
+    vi.spyOn(exchange as any, 'fetchCorePerpsState').mockReturnValue(deferredCoreState.promise);
+    vi.spyOn(exchange as any, 'fetchBuilderFeeApproval').mockResolvedValue(undefined);
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+    vi.spyOn(exchange, 'fetchAllHip3Positions').mockResolvedValue(undefined);
+    vi.spyOn(exchange, 'tick').mockResolvedValue(undefined);
+    vi.spyOn(exchange.publicWebsocket, 'connectAndSubscribe').mockImplementation(() => {});
+    vi.spyOn(exchange.privateWebsocket, 'connectAndSubscribe').mockImplementation(() => {});
+    const applyCoreStateSpy = vi.spyOn(exchange.privateWebsocket, 'applyCoreClearinghouseState');
+
+    await exchange.start();
+    exchange.dispose();
+    deferredCoreState.resolve(coreState(1250, 250));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(applyCoreStateSpy).not.toHaveBeenCalled();
+    expect(exchange.store.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0 });
   });
 
   it('keeps standard-mode core balance math unchanged', () => {
