@@ -257,7 +257,8 @@ Order book is subscribed on-demand (not at startup):
 5. **Delta updates** (`action === 'update'`): Applies incremental updates via `updateOrderBook()`
 6. **Post-processing**: Filters out invalid prices (bids > last price, asks < last price), sorts, and calculates totals
 7. Stores topic for re-subscription on reconnect
-8. Returns cleanup function that unsubscribes the channel
+8. The cleanup function filters out its parser; when the last parser is
+   removed, it deletes the reconnect topic and sends the channel unsubscribe
 
 ### OHLCV Subscription Pattern (`okx.ws-business.ts:143-218`)
 
@@ -423,19 +424,19 @@ A single OKX `oco` or `conditional` order can produce **two** internal orders:
 
 ### Order Size Splitting (`okx.exchange.ts` around lines 1230–1250)
 
-If an order amount exceeds `market.limits.amount.max`, it is automatically split:
+If an adjusted order amount exceeds `market.limits.amount.max`, it is
+automatically split by `formatCreateOrder`:
 
+- `maxSize` and amount precision must both be finite positive numbers; the
+  adjusted amount must also be finite and positive before the fast path or
+  splitting can create an outbound `sz`
 - `maxSize` is the minimum of `maxIcebergSz`, `maxLmtSz`, `maxMktSz`, `maxStopSz`, `maxTriggerSz`, `maxTwapSz`
-- Orders are split into `Math.ceil(amount / maxSize)` equal lots
-- Remainder lot (if any) is added separately
-- **Confirmed bug**: The remainder lot uses `qty` instead of `sz` at
-  `okx.exchange.ts:1246`: `payloads.push({ ...req, qty: rest })`. The
-  spread preserves `req.sz = ${amount}` (set at line 1232 to the FULL
-  order amount), so the resulting payload has both an invalid `qty`
-  field (OKX v5 only knows `sz`) AND an `sz` equal to the full
-  pre-split amount instead of the remainder. OKX will either reject
-  the payload or silently execute at the wrong size — the remainder
-  lot path has never worked. See also the Known Quirks entry below.
+- The maximum lot is rounded down to the nearest amount-precision step, then
+  emitted repeatedly with a final precision-aligned remainder
+- Every lot uses OKX's native `sz` field, is at most `maxSize`, and all lots
+  sum exactly to the already-adjusted requested amount
+- Every payload receives its own broker-prefixed `clOrdId`; IDs are never
+  reused within a split batch
 
 ### Batch Processing
 
@@ -671,13 +672,6 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 - **Position mode in one-way mode**: `fetchPositionMetadata` creates two virtual positions (Long + Short) for each symbol in one-way mode so that both sides are represented in the store (`okx.exchange.ts:291-307`).
 - **Balance info passthrough**: `formatBalanceUsedAvail` stores the raw `bal` array in `balance.info` so it can be reused in the tick loop without re-fetching (`okx.exchange.ts:168-173`).
 - **Partner check**: The `PARTNER` endpoint (`/api/v5/users/partner/if-rebate`) is defined but not called in any code path within this directory.
-- **Order lot splitting bug** (confirmed): When splitting oversized
-  orders, the remainder lot uses `qty` instead of `sz` as the key
-  (`okx.exchange.ts:1246`: `payloads.push({ ...req, qty: rest })`).
-  OKX v5 does not recognize `qty`, and the spread preserves
-  `req.sz = ${amount}` (the full pre-split amount set at line 1232),
-  so the remainder payload is malformed in two ways simultaneously.
-  See "Order Size Splitting" above for details.
 - **Stablecoin mark price fallback**: When calculating balance equity notional, if no ticker is found for a currency (e.g., USDT), the mark price defaults to 1 (`okx.exchange.ts:392`).
 - **Trailing stop price calculation**: For trailing stop loss orders, the displayed price is calculated relative to the position entry price and last price, with special handling when a position exists (`okx.exchange.ts:871-891`).
 - **`afterMethodCalledInWorker`**: When `changePositionMode` is called in a WebWorker, the local `_accountPositionMode` cache is updated to match (`okx.exchange.ts:767-775`).

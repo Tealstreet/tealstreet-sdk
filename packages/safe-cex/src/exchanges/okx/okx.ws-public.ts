@@ -288,7 +288,7 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
-      this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+      this.messageHandlers[handler] = (this.messageHandlers[handler] || []).filter((f) => f !== parser);
 
       if (!this.messageHandlers[handler].length) {
         delete this.topics[handler];

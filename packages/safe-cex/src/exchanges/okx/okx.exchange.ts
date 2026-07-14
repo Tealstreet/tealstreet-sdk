@@ -9,7 +9,6 @@ import chunk from 'lodash/chunk';
 import flatten from 'lodash/flatten';
 import partition from 'lodash/partition';
 import sumBy from 'lodash/sumBy';
-import times from 'lodash/times';
 import { forEachSeries, map, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
@@ -1379,32 +1378,64 @@ export class OKXExchange extends BaseExchange {
 
     const pAmount = market.precision.amount;
 
+    if (!Number.isFinite(maxSize) || maxSize <= 0) {
+      const message = `Market ${opts.symbol} maximum order size must be a finite positive number`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    if (!Number.isFinite(pAmount) || pAmount <= 0) {
+      const message = `Market ${opts.symbol} amount precision must be a finite positive number`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     const amount = adjust(opts.amount, pAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      const message = `Order amount for ${opts.symbol} must be finite and positive after adjustment`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     const price = opts.price ? adjust(opts.price, pPrice) : null;
 
     const req = omitUndefined({
       instId: market.id,
-      clOrdId: `${BROKER_ID}${uuid()}`.slice(0, 32),
       tag: BROKER_ID,
       tdMode: 'cross',
       side: inverseObj(ORDER_SIDE)[opts.side],
       ordType:
         opts.type === OrderType.Limit && opts.timeInForce === 'PostOnly' ? 'post_only' : REVERSE_ORDER_TYPE[opts.type],
-      sz: `${amount}`,
       px: opts.type === OrderType.Limit ? `${price}` : undefined,
       reduceOnly: opts.reduceOnly || undefined,
       posSide: this.getPositionSide(opts),
     });
 
-    const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
-    const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
-
-    const lotSize = adjust((amount - rest) / lots, pAmount);
-    const payloads: Array<Record<string, any>> = times(lots, () => {
-      return { ...req, sz: `${lotSize}` };
+    const createPayload = (size: BigNumber) => ({
+      ...req,
+      clOrdId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      sz: size.toFixed(),
     });
 
-    if (rest) payloads.push({ ...req, qty: rest });
+    if (amount <= maxSize) {
+      return [createPayload(new BigNumber(amount))];
+    }
+
+    const amountStep = new BigNumber(pAmount);
+    const maxLotSize = new BigNumber(maxSize).dividedToIntegerBy(amountStep).multipliedBy(amountStep);
+    if (maxLotSize.lte(0)) {
+      const message = `Market ${opts.symbol} maximum order size is below its amount precision`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    const payloads: Array<Record<string, any>> = [];
+    let remaining = new BigNumber(amount);
+    while (remaining.gt(0)) {
+      const lotSize = BigNumber.minimum(remaining, maxLotSize);
+      payloads.push(createPayload(lotSize));
+      remaining = remaining.minus(lotSize);
+    }
 
     return payloads;
   };
