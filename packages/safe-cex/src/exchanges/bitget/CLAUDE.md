@@ -155,7 +155,8 @@ The implementation uses **four WebSocket connections** simultaneously:
   - `ticker` for 1/3 of all markets (index `i % 3 === 0`)
   - `candle{interval}` for active chart symbol (subscribed on-demand via `listenOHLCV`)
   - `books` for active order book symbol (subscribed on-demand via `listenOrderBook`)
-- **instType**: `USDT-FUTURES` (hardcoded, see `bitget.ws-public.ts:86`)
+- **instType**: Derived from `this.parent.apiProductType.toUpperCase()` for every subscribe and unsubscribe frame, so each variant uses its own product type.
+- **On-demand subscriptions**: Candle and order-book listeners are reference-counted. Cleanup is idempotent, cancels a pending pre-connect subscription, and deletes the final topic key before sending its unsubscribe so reconnects cannot revive a stopped stream.
 - Handles snapshot/update actions for order books with incremental updates
 
 ### 2. Secondary Public WebSocket #1 (`bitget.ws-secondary-public.ts`, index=1)
@@ -170,7 +171,7 @@ The implementation uses **four WebSocket connections** simultaneously:
 - **Channels**: `ticker` for 1/3 of all markets (index `i % 3 === 2`)
 - Ticker-only stream for the remaining third of markets
 
-**Note**: Both the primary public WS (`bitget.ws-public.ts:86`) and secondary public WS (`bitget.ws-secondary-public.ts:89`) hardcode `instType: 'USDT-FUTURES'` in their subscriptions. In contrast, the private WS dynamically uses `this.parent.apiProductType.toUpperCase()`. This means USDC-M and Inverse variants may receive incorrect or missing ticker data from the public WebSocket connections.
+**Note**: Both public WS classes derive `instType` from `this.parent.apiProductType.toUpperCase()`, matching the private WS. This keeps ticker, candle, and orderbook subscriptions on the selected variant's product type.
 
 ### 4. Private WebSocket (`bitget.ws-private.ts`)
 
@@ -457,7 +458,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 ## Known Quirks / Implementation Notes
 
-1. **Three public WebSocket connections for tickers**: Markets are split into thirds (`i % 3`) across three separate WebSocket connections to stay within Bitget's per-connection subscription limits.
+1. **Three public WebSocket connections for tickers**: Markets are split into thirds (`i % 3`) across three separate WebSocket connections to stay within Bitget's per-connection subscription limits. Both public WS classes derive `instType` from the parent exchange, so USDT-M, USDC-M, and future enabled variants subscribe to their matching product type.
 
 2. **Virtual TP/SL orders on limits**: Bitget allows `presetStopSurplusPrice`/`presetStopLossPrice` on limit orders, but these do not stream via the private WebSocket. They are polled every 4th tick and mapped to virtual orders with `__stop_loss`/`__take_profit` ID suffixes.
 

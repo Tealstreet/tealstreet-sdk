@@ -135,7 +135,7 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
     const newArgs = added
       .filter((_, i) => (existingMarketCount + i) % 3 === 0)
       .map((m) => ({
-        instType: 'USDT-FUTURES',
+        instType: this.parent.apiProductType.toUpperCase(),
         channel: 'ticker',
         instId: m.symbol,
       }));
@@ -160,7 +160,7 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
   subscribe = () => {
     const args = Object.entries(this.topics).flatMap(([channel, symbols]) =>
       Object.keys(symbols).map((instId) => ({
-        instType: 'USDT-FUTURES',
+        instType: this.parent.apiProductType.toUpperCase(),
         channel,
         instId,
       })),
@@ -243,6 +243,9 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
     const interval = INTERVAL[opts.interval];
     const topic = `candle_${opts.symbol}_${interval}`;
     const channel = `candle${interval}`;
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isActive = true;
+    let subscribed = false;
 
     const parser = (data: Data) => {
       const c = Array.isArray(data?.data) ? data.data[0] : undefined;
@@ -260,51 +263,73 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
     };
 
     const waitForConnectedAndSubscribe = () => {
+      if (!isActive || this.isDisposed) return;
+
       if (this.isConnected) {
-        if (!this.isDisposed) {
-          this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
+        this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
 
-          const payload = {
-            op: 'subscribe',
-            args: [
-              {
-                instType: 'USDT-FUTURES',
-                channel,
-                instId: opts.symbol,
-              },
-            ],
-          };
+        const payload = {
+          op: 'subscribe',
+          args: [
+            {
+              instType: this.parent.apiProductType.toUpperCase(),
+              channel,
+              instId: opts.symbol,
+            },
+          ],
+        };
 
-          if (!this.topics[channel]) {
-            this.topics[channel] = {};
-          }
-          this.topics[channel][opts.symbol] = (this.topics[channel][opts.symbol] || 0) + 1;
-
-          this.send(JSON.stringify(payload));
-          //this.parent.log(`Switched to [${opts.symbol}:${opts.interval}]`);
+        if (!this.topics[channel]) {
+          this.topics[channel] = {};
         }
+        this.topics[channel][opts.symbol] = (this.topics[channel][opts.symbol] || 0) + 1;
+        subscribed = true;
+
+        this.send(JSON.stringify(payload));
+        //this.parent.log(`Switched to [${opts.symbol}:${opts.interval}]`);
       } else {
-        setTimeout(() => waitForConnectedAndSubscribe(), 100);
+        timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);
       }
     };
 
     waitForConnectedAndSubscribe();
 
     return () => {
-      this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
+      if (!isActive) return;
+      isActive = false;
 
-      if (!this.topics[channel]) {
-        this.topics[channel] = {};
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
-      this.topics[channel][opts.symbol]--;
 
-      if (this.isConnected && this.topics[channel][opts.symbol] <= 0) {
+      const nextHandlers = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
+      if (nextHandlers.length) {
+        this.messageHandlers[topic] = nextHandlers;
+      } else {
+        delete this.messageHandlers[topic];
+      }
+
+      if (!subscribed) return;
+      subscribed = false;
+
+      const nextTopicCount = (this.topics[channel]?.[opts.symbol] || 0) - 1;
+      if (nextTopicCount > 0) {
+        this.topics[channel][opts.symbol] = nextTopicCount;
+      } else {
+        delete this.topics[channel]?.[opts.symbol];
+        if (Object.keys(this.topics[channel] || {}).length === 0) {
+          delete this.topics[channel];
+        }
+      }
+
+      if (this.isConnected && nextTopicCount <= 0) {
         this.send(
           JSON.stringify({
             op: 'unsubscribe',
             args: [
               {
-                instType: 'USDT-FUTURES',
+                instType: this.parent.apiProductType.toUpperCase(),
                 channel: `candle${interval}`,
                 instId: opts.symbol,
               },
@@ -318,6 +343,8 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
     let timeoutId: NodeJS.Timeout | null = null;
+    let isActive = true;
+    let subscribed = false;
 
     const orderBook: OrderBook = { bids: [], asks: [] };
     const channel = 'books';
@@ -387,28 +414,29 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
     };
 
     const waitForConnectedAndSubscribe = () => {
+      if (!isActive || this.isDisposed) return;
+
       if (this.isConnected) {
-        if (!this.isDisposed) {
-          this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
+        this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
 
-          const payload = {
-            op: 'subscribe',
-            args: [
-              {
-                instType: 'USDT-FUTURES',
-                channel,
-                instId: symbol,
-              },
-            ],
-          };
+        const payload = {
+          op: 'subscribe',
+          args: [
+            {
+              instType: this.parent.apiProductType.toUpperCase(),
+              channel,
+              instId: symbol,
+            },
+          ],
+        };
 
-          if (!this.topics[channel]) {
-            this.topics[channel] = {};
-          }
-          this.topics[channel][symbol] = (this.topics[channel][symbol] || 0) + 1;
-
-          this.send(JSON.stringify(payload));
+        if (!this.topics[channel]) {
+          this.topics[channel] = {};
         }
+        this.topics[channel][symbol] = (this.topics[channel][symbol] || 0) + 1;
+        subscribed = true;
+
+        this.send(JSON.stringify(payload));
       } else {
         timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);
       }
@@ -417,33 +445,50 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
-      this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
+      if (!isActive) return;
+      isActive = false;
+
+      const nextHandlers = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
+      if (nextHandlers.length) {
+        this.messageHandlers[topic] = nextHandlers;
+      } else {
+        delete this.messageHandlers[topic];
+      }
 
       orderBook.asks = [];
       orderBook.bids = [];
-
-      this.cleanupMessageHandlerStats(topic);
 
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
 
-      if (!this.topics[channel]) {
-        this.topics[channel] = {};
+      if (!subscribed) return;
+      subscribed = false;
+
+      const nextTopicCount = (this.topics[channel]?.[symbol] || 0) - 1;
+      if (nextTopicCount > 0) {
+        this.topics[channel][symbol] = nextTopicCount;
+      } else {
+        delete this.topics[channel]?.[symbol];
+        if (Object.keys(this.topics[channel] || {}).length === 0) {
+          delete this.topics[channel];
+        }
       }
-      if (this.isConnected && this.topics[channel][symbol] <= 0) {
+
+      if (this.isConnected && nextTopicCount <= 0) {
         const payload = {
           op: 'unsubscribe',
           args: [
             {
-              instType: 'USDT-FUTURES',
+              instType: this.parent.apiProductType.toUpperCase(),
               channel: 'books',
               instId: symbol,
             },
           ],
         };
 
+        this.cleanupMessageHandlerStats(topic);
         this.send(JSON.stringify(payload));
       }
     };

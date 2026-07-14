@@ -138,7 +138,7 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
     const newArgs = added
       .filter((_, i) => (existingMarketCount + i) % 3 === this.index)
       .map((m) => ({
-        instType: 'USDT-FUTURES',
+        instType: this.parent.apiProductType.toUpperCase(),
         channel: 'ticker',
         instId: m.symbol,
       }));
@@ -163,7 +163,7 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
   subscribe = () => {
     const args = Object.entries(this.topics).flatMap(([channel, symbols]) =>
       Object.keys(symbols).map((instId) => ({
-        instType: 'USDT-FUTURES',
+        instType: this.parent.apiProductType.toUpperCase(),
         channel,
         instId,
       })),
