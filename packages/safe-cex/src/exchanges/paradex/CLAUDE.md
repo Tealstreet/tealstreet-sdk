@@ -358,11 +358,16 @@ Execution-history behavior (`fetchExecutions`):
 | `LIMIT`                 | `OrderType.Limit`      |
 | `STOP_MARKET`           | `OrderType.StopLoss`   |
 | `STOP_LIMIT`            | `OrderType.StopLoss`   |
-| `STOP_LOSS_MARKET` (\*) | `OrderType.StopLoss`   |
+| `STOP_LOSS_MARKET`      | `OrderType.StopLoss`   |
+| `STOP_LOSS_LIMIT`       | `OrderType.StopLoss`   |
 | `TAKE_PROFIT_MARKET`    | `OrderType.TakeProfit` |
 | `TAKE_PROFIT_LIMIT`     | `OrderType.TakeProfit` |
 
-(\*) **Discrepancy**: `STOP_LOSS_MARKET` is present in the `ORDER_TYPE` constant (`paradex.types.ts:72`) but is **missing** from the runtime `reverseMapOrderType` method (`paradex.exchange.ts:1424-1434`). If the API returns an order with type `STOP_LOSS_MARKET`, it would fall through to the default `OrderType.Limit`, which is incorrect.
+The REST and private-WebSocket mappers share `ORDER_TYPE` and
+`isParadexTriggerOrderType` from `paradex.types.ts`. Keep all documented
+trigger variants in those definitions so readback displays `trigger_price` and
+cancel-and-replace retains the protective `OrderType` instead of recreating a
+resting limit order.
 
 ### Order Status Mapping
 

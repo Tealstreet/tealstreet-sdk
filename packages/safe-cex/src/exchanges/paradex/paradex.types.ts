@@ -70,10 +70,24 @@ export const ORDER_TYPE: Record<string, OrderType> = {
   MARKET: OrderType.Market,
   STOP_LIMIT: OrderType.StopLoss,
   STOP_MARKET: OrderType.StopLoss,
+  STOP_LOSS_LIMIT: OrderType.StopLoss,
   STOP_LOSS_MARKET: OrderType.StopLoss,
   TAKE_PROFIT_LIMIT: OrderType.TakeProfit,
   TAKE_PROFIT_MARKET: OrderType.TakeProfit,
 };
+
+export const isParadexTriggerOrderType = (type: string): boolean =>
+  [
+    'STOP_LIMIT',
+    'STOP_MARKET',
+    'STOP_LOSS_LIMIT',
+    'STOP_LOSS_MARKET',
+    'TAKE_PROFIT_LIMIT',
+    'TAKE_PROFIT_MARKET',
+  ].includes(type);
+
+export const isParadexMarketOrderType = (type: string): boolean =>
+  ['MARKET', 'STOP_MARKET', 'STOP_LOSS_MARKET', 'TAKE_PROFIT_MARKET'].includes(type);
 
 export const ORDER_SIDE: Record<string, OrderSide> = {
   BUY: OrderSide.Buy,
@@ -175,7 +189,15 @@ export type ORDER_RESPONSE = {
   price: string;
   average_fill_price: string;
   status: 'NEW' | 'OPEN' | 'PENDING' | 'FILLED' | 'CANCELED' | 'UNTRIGGERED' | 'REJECTED';
-  type: 'LIMIT' | 'MARKET' | 'STOP_LIMIT' | 'STOP_MARKET' | 'STOP_LOSS_MARKET' | 'TAKE_PROFIT_LIMIT' | 'TAKE_PROFIT_MARKET';
+  type:
+    | 'LIMIT'
+    | 'MARKET'
+    | 'STOP_LIMIT'
+    | 'STOP_MARKET'
+    | 'STOP_LOSS_LIMIT'
+    | 'STOP_LOSS_MARKET'
+    | 'TAKE_PROFIT_LIMIT'
+    | 'TAKE_PROFIT_MARKET';
   time_in_force: 'GTT' | 'FOK' | 'IOC';
   created_at: string;
   updated_at: string;

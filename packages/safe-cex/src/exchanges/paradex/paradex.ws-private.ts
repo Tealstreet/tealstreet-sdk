@@ -3,7 +3,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { createPositionId } from '../../utils/createPositionId';
 import { BaseWebSocket } from '../base.ws';
 import { ParadexExchange } from './paradex.exchange';
-import { BASE_WS_URL, ORDER_SIDE } from './paradex.types';
+import { BASE_WS_URL, isParadexTriggerOrderType, ORDER_SIDE } from './paradex.types';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -138,7 +138,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       const orderType = this.parent['reverseMapOrderType'](order.type);
 
       // For stop orders, use trigger_price as the price (since _MARKET types have no limit price)
-      const isStopOrder = ['STOP_MARKET', 'TAKE_PROFIT_MARKET', 'STOP_LIMIT', 'TAKE_PROFIT_LIMIT', 'STOP_LOSS_MARKET'].includes(order.type);
+      const isStopOrder = isParadexTriggerOrderType(order.type);
       const displayPrice = isStopOrder && order.trigger_price ? parseFloat(order.trigger_price) : (order.price ? parseFloat(order.price) : 0);
 
       const update: Order = {

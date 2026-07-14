@@ -42,6 +42,9 @@ import {
   ENDPOINTS,
   MARGIN_RESPONSE,
   MARKET_RESPONSE,
+  isParadexMarketOrderType,
+  isParadexTriggerOrderType,
+  ORDER_TYPE,
   ORDER_RESPONSE,
   ORDER_SIDE,
   ORDERBOOK_RESPONSE,
@@ -1112,14 +1115,8 @@ export class ParadexExchange extends BaseExchange {
       const type = this.mapOrderType(opts.type);
 
       // Check if this is a stop/trigger order type
-      const isStopOrder = [
-        'STOP_LIMIT',
-        'TAKE_PROFIT_LIMIT',
-        'STOP_MARKET',
-        'TAKE_PROFIT_MARKET',
-        'STOP_LOSS_MARKET',
-      ].includes(type);
-      const isMarketTypeOrder = ['MARKET', 'STOP_MARKET', 'TAKE_PROFIT_MARKET', 'STOP_LOSS_MARKET'].includes(type);
+      const isStopOrder = isParadexTriggerOrderType(type);
+      const isMarketTypeOrder = isParadexMarketOrderType(type);
 
       // For stop/take-profit orders, opts.price is the trigger price
       // For regular orders, opts.price is the limit price
@@ -1146,13 +1143,7 @@ export class ParadexExchange extends BaseExchange {
 
       // For TP/SL orders, always include REDUCE_ONLY flag as required by Paradex
       // Paradex API rejects TPSL orders without REDUCE_ONLY flag
-      const isTpSlType = [
-        'STOP_LIMIT',
-        'TAKE_PROFIT_LIMIT',
-        'STOP_MARKET',
-        'TAKE_PROFIT_MARKET',
-        'STOP_LOSS_MARKET',
-      ].includes(type);
+      const isTpSlType = isParadexTriggerOrderType(type);
       const shouldBeReduceOnly = opts.reduceOnly || isTpSlType;
 
       // Build payload with signature
@@ -1595,13 +1586,7 @@ export class ParadexExchange extends BaseExchange {
     const status = this.mapOrderStatus(o.status);
 
     // For stop orders, use trigger_price as the price (since _MARKET types have no limit price)
-    const isStopOrder = [
-      'STOP_MARKET',
-      'TAKE_PROFIT_MARKET',
-      'STOP_LIMIT',
-      'TAKE_PROFIT_LIMIT',
-      'STOP_LOSS_MARKET',
-    ].includes(o.type);
+    const isStopOrder = isParadexTriggerOrderType(o.type);
     const displayPrice =
       isStopOrder && o.trigger_price ? parseFloat(o.trigger_price) : o.price ? parseFloat(o.price) : 0;
 
@@ -1653,15 +1638,7 @@ export class ParadexExchange extends BaseExchange {
   };
 
   private reverseMapOrderType = (type: string): OrderType => {
-    const mapping: Record<string, OrderType> = {
-      MARKET: OrderType.Market,
-      LIMIT: OrderType.Limit,
-      STOP_MARKET: OrderType.StopLoss,
-      STOP_LIMIT: OrderType.StopLoss,
-      TAKE_PROFIT_MARKET: OrderType.TakeProfit,
-      TAKE_PROFIT_LIMIT: OrderType.TakeProfit,
-    };
-    return mapping[type] || OrderType.Limit;
+    return ORDER_TYPE[type] || OrderType.Limit;
   };
 
   private mapOrderStatus = (status: string): OrderStatus => {
