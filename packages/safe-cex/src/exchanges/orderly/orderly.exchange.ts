@@ -638,7 +638,7 @@ export class OrderlyExchange extends BaseExchange {
     const market = this.store.marketsBySymbol[symbol];
     if (!market) return null;
     const quantity = o.quantity || o.order_quantity;
-    const executed = o.executed || 0;
+    const executed = v(o, 'totalExecutedQuantity') ?? v(o, 'executed') ?? 0;
 
     const order: Order = {
       id: `${v(o, 'order_id') || v(o, 'orderId')}`,
@@ -951,21 +951,33 @@ export class OrderlyExchange extends BaseExchange {
   };
 
   cancelAllOrders = async () => {
-    try {
-      await this.xhr.delete(ENDPOINTS.CANCEL_ORDERS);
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.message || err?.message);
+    const cancellations = [
+      () => this.xhr.delete(ENDPOINTS.CANCEL_ORDERS),
+      () => this.xhr.delete(ENDPOINTS.CANCEL_ALGO_ORDERS),
+    ];
+
+    for (const cancel of cancellations) {
+      try {
+        await cancel();
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.message || err?.message);
+      }
     }
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    try {
-      const wooSymbol = reverseSymbol(symbol);
-      await this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
-        params: { symbol: wooSymbol },
-      });
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.message || err?.message);
+    const orderlySymbol = reverseSymbol(symbol);
+    const cancellations = [
+      () => this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol: orderlySymbol } }),
+      () => this.xhr.delete(ENDPOINTS.CANCEL_ALGO_ORDERS, { params: { symbol: orderlySymbol } }),
+    ];
+
+    for (const cancel of cancellations) {
+      try {
+        await cancel();
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.message || err?.message);
+      }
     }
   };
 

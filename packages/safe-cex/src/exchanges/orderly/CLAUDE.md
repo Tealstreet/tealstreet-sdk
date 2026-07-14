@@ -194,6 +194,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 - `NEW`, `REPLACED`, `PARTIAL_FILLED`, `PARTIALLY_FILLED`: Adds or updates order in store
 - `CANCELLED`, `FILLED`: Updates order status
 - `FILLED` or partial fills: Emits `fill` event with `executedPrice` and `executedQuantity`
+- **Cumulative fills**: Private `executionreport` events carry `totalExecutedQuantity`; `mapLimitOrder` uses it before the REST-only `executed` fallback so partial orders retain their full amount, cumulative filled quantity, remaining amount, and Open status between polls.
 
 **Algo Execution Report handling** (`handleAlgoExecutionReport`, `orderly.ws-private.ts:218-255`):
 
@@ -229,7 +230,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 ### Algo Orders (TP/SL)
 
 1. **Place**: `POST /v1/algo/order` with `algo_type: 'POSITIONAL_TP_SL'` and `child_orders` array containing `STOP_LOSS` and/or `TAKE_PROFIT` children with `type: 'CLOSE_POSITION'` (`orderly.exchange.ts:834-888`)
-2. **Sibling management**: When placing a new TP or SL, checks for existing sibling orders (same symbol, different type). If found, cancels parent algo order and re-places both together (`orderly.exchange.ts:807-831`). Known race condition with bulk cancel (noted as TODO at line 817).
+2. **Sibling management**: When placing a new TP or SL, checks for existing sibling orders (same symbol, different type). If found, cancels parent algo order and re-places both together. Bulk cancellation deliberately bypasses this helper so a panic/nuke cannot recreate a sibling while cancelling.
 3. **Update**: `PUT /v1/algo/order` with `order_id` (parent) and `child_orders` array containing `order_id` and new `trigger_price` (`orderly.exchange.ts:537-553`)
 4. **Cancel** (`cancelAlgoOrder`, `orderly.exchange.ts:676-701`): Cancels via `DELETE /v1/algo/order?order_id=<parentId>&symbol=<symbol>`. If a sibling order exists, it is automatically re-created to preserve the other side of the TP/SL pair.
 
@@ -319,7 +320,7 @@ Testnet selection is via `options.testnet` boolean.
 3. **Positional TP/SL**: TP/SL are placed as `POSITIONAL_TP_SL` algo orders with `child_orders` array containing `STOP_LOSS` and/or `TAKE_PROFIT` children with `type: 'CLOSE_POSITION'`.
 4. **Sibling order management**: When placing a new TP or SL, the code checks for existing sibling orders. If found, it cancels the parent algo order and re-places both together. This prevents orphaned TP/SL orders.
 5. **Cancel algo order re-creates sibling**: When cancelling one side of a TP/SL pair, the code automatically re-creates the sibling order to preserve it (`orderly.exchange.ts:685-693`).
-6. **TODO: Race condition** (`orderly.exchange.ts:817`): Noted race condition with bulk cancel stops where sibling stop may be recreated after a cancel-all operation.
+6. **Bulk cancellation is direct and complete**: `cancelAllOrders` and `cancelSymbolOrders` sequentially await both normal (`DELETE /v1/orders`) and algo (`DELETE /v1/algo/orders`) paths. They must not call `cancelAlgoOrder`, because that helper re-creates a TP/SL sibling; each path is attempted even if the other fails.
 7. **Update order uses cancel-and-replace**: `updateOrder` for limit orders cancels the old order and places a new one. Commented-out PUT endpoint code exists at `orderly.exchange.ts:520-534`. Algo orders use the PUT `/v1/algo/order` endpoint directly.
 8. **White-label `order_tag`**: Each white-label variant uses a different `order_tag` determined by `this.orderlyExchangeName` in `placeOrder()`.
 9. **Large order splitting**: Orders exceeding `market.limits.amount.max` are automatically split into `Math.ceil(amount / maxSize)` lots plus a remainder.
