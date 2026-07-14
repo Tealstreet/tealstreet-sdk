@@ -3,11 +3,17 @@ import type { ExchangeOptions } from '../../types';
 export const ASTERDEX_ENDPOINTS = {
   REST: {
     PRODUCTION: 'https://fapi.asterdex.com',
-    TESTNET: 'https://testnet-fapi.asterdex.com', // TODO: Verify testnet URL
+    TESTNET: 'https://fapi.asterdex-testnet.com',
   },
   WS: {
-    PUBLIC: 'wss://fstream.asterdex.com/stream',
-    PRIVATE: 'wss://fstream.asterdex.com/stream',
+    PUBLIC: {
+      PRODUCTION: 'wss://fstream.asterdex.com/stream',
+      TESTNET: 'wss://fstream5.asterdex-testnet.com/stream',
+    },
+    PRIVATE: {
+      PRODUCTION: 'wss://fstream.asterdex.com/stream',
+      TESTNET: 'wss://fstream5.asterdex-testnet.com/stream',
+    },
   },
 };
 

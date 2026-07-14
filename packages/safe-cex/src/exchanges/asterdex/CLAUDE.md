@@ -12,7 +12,9 @@ The uplift is intentionally backward-compatible: existing V1 accounts continue t
 
 ## API Documentation
 
-- **Futures API docs**: <https://github.com/asterdex/api-docs/blob/master/aster-finance-futures-api.md>
+- **V1 Futures API docs (legacy)**: <https://github.com/asterdex/api-docs/blob/master/V1%28Legacy%29/EN/aster-finance-futures-api.md>
+- **V3 Futures API docs (recommended)**: <https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md>
+- **Official changelog**: <https://github.com/asterdex/api-docs/blob/master/CHANGELOG.md>
 - **V1 vs V3 overview**: <https://github.com/asterdex/api-docs/blob/master/Aster%20API%20Overview.md>
 - **CCXT REST reference**: <https://github.com/ccxt/ccxt/blob/master/ts/src/aster.ts>
 - **CCXT WS reference**: <https://github.com/ccxt/ccxt/blob/master/ts/src/pro/aster.ts>
@@ -162,16 +164,17 @@ Most endpoints use `/fapi/{apiVersion}/...` where `apiVersion` is `v1` or `v3`.
 
 ### Network Configuration
 
-| Component  | URL                                                    |
-| ---------- | ------------------------------------------------------ |
-| Public WS  | `wss://fstream.asterdex.com/stream?requestId=<nanoid>` |
-| Private WS | `wss://fstream.asterdex.com/ws/<listenKey>`            |
+| Component  | Production | Testnet |
+| ---------- | ---------- | ------- |
+| Public WS  | `wss://fstream.asterdex.com/stream?requestId=<nanoid>` | `wss://fstream5.asterdex-testnet.com/stream?requestId=<nanoid>` |
+| Private WS | `wss://fstream.asterdex.com/ws/<listenKey>` | `wss://fstream5.asterdex-testnet.com/ws/<listenKey>` |
 
-Note: Both share the same host `fstream.asterdex.com` but use different paths.
+Each environment uses one host for public and private streams, with `/stream`
+for public multiplexed traffic and `/ws/<listenKey>` for private user data.
 
 ### Public WebSocket (`asterdex.ws-public.ts`)
 
-**On connect** (`onOpen`, `asterdex.ws-public.ts:86-131`):
+**On connect** (`AsterDEXPublicWebsocket.onOpen`):
 
 1. Sends initial ping
 2. Subscribes to aggregate streams only (to avoid disconnections from too many individual subscriptions):
@@ -189,18 +192,19 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 
 **On-demand subscriptions**:
 
-- `<symbol>@depth@500ms` - Order book depth updates (500ms throttle)
+- `<symbol>@depth20@100ms` - documented 20-level partial-book snapshots
 - `<symbol>@kline_<interval>` - Kline/candlestick updates
 - `<symbol>@aggTrade` - Aggregate trade updates
 
-**Ping mechanism** (`asterdex.ws-public.ts:182-188`):
+**Ping mechanism** (`AsterDEXPublicWebsocket.ping`):
 
-- Sends `{ "id": 42, "method": "LIST_SUBSCRIPTIONS" }` as application-level ping
-- Response with `id: 42` is treated as pong
+- Sends `{ "id": -1, "method": "LIST_SUBSCRIPTIONS" }` as application-level ping
+- `-1` is reserved; normal subscription request IDs are positive and cannot be
+  consumed as pongs.
 
-**Message routing** (`onMessage`, `asterdex.ws-public.ts:190-249`):
+**Message routing** (`AsterDEXPublicWebsocket.onMessage`):
 
-1. Check for pong response (id === 42)
+1. Check for pong response (id === -1)
 2. Check for subscription confirmation (result === null)
 3. Check for error response
 4. Handle stream data with `stream` field:
@@ -210,14 +214,16 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 5. Handle batch updates (array format, legacy)
 6. Handle single events (object with `.e` field)
 
-**Orderbook subscription** (`listenOrderBook`, `asterdex.ws-public.ts:560-660`):
+**Orderbook subscription** (`listenOrderBook`):
 
-- Stores callback under multiple key formats (original symbol, lowercase, full stream name, basic depth)
-- Tracks in `topics` for reconnection
+- Uses the documented `depth20` partial-book stream, never bare `@depth` (which is an incremental diff stream).
+- Publishes only snapshots with positive levels on both sides and a non-crossed best bid/ask. Invalid frames are dropped; the last good book remains visible.
+- Multiplexes listeners by canonical stream: one upstream subscription fans out isolated snapshot copies, per-callback unsubscribe keeps the stream alive, and only the final listener removes the topic and sends `UNSUBSCRIBE`.
+- Tracks active streams in `topics` for reconnection; disposal clears listener registries and pending retries.
 - Uses retry loop: up to 50 attempts with 100ms intervals to wait for WS connection
 - Returns unsubscribe function that cleans up all callback references and topics
 
-**Kline subscription** (`subscribeToKline`, `asterdex.ws-public.ts:663-708`):
+**Kline subscription** (`AsterDEXPublicWebsocket.subscribeToKline`):
 
 - Wait-for-connection with exponential backoff: `100ms * 1.5^(floor(retryCount/10))`, max 2000ms
 - If connected but not initialized, queues subscription in `pendingSubscriptions`
@@ -230,13 +236,15 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 
 ### Private WebSocket (`asterdex.ws-private.ts`)
 
-**Connection** (`connectAndSubscribe`, `asterdex.ws-private.ts:29-46`):
+**Connection** (`AsterDEXPrivateWebsocket.connectAndSubscribe`):
 
 1. Fetches listen key via `POST /fapi/{version}/listenKey` (resolved by `getFapiPath`)
-2. Constructs URL: `wss://fstream.asterdex.com/ws/<listenKey>`
+2. Constructs the environment-specific URL: production
+   `wss://fstream.asterdex.com/ws/<listenKey>` or testnet
+   `wss://fstream5.asterdex-testnet.com/ws/<listenKey>`
 3. No explicit subscription needed - events auto-sent once connected
 
-**Listen key management** (`asterdex.ws-private.ts:391-407`):
+**Listen key management** (`fetchListenKey` / `updateListenKey`):
 
 - Created via `POST /fapi/{version}/listenKey`
 - Refreshed every 30 minutes via `PUT /fapi/{version}/listenKey` (key valid for 60 minutes)
@@ -294,9 +302,9 @@ Note: Both share the same host `fstream.asterdex.com` but use different paths.
 | `OrderType.Market`           | `MARKET`               | No `price` or `timeInForce`            |
 | `OrderType.StopLoss`         | `STOP_MARKET`          | Requires `stopPrice` and `workingType` |
 | `OrderType.TakeProfit`       | `TAKE_PROFIT_MARKET`   | Requires `stopPrice` and `workingType` |
-| `OrderType.TrailingStopLoss` | `TRAILING_STOP_MARKET` |                                        |
+| `OrderType.TrailingStopLoss` | `TRAILING_STOP_MARKET` | Not advertised and rejected by `placeOrder`: Aster requires `callbackRate`, which `PlaceOrderOpts` cannot represent unambiguously. |
 
-Additional reverse mappings exist for `STOP` -> `StopLoss`, `TAKE_PROFIT` -> `TakeProfit`, `TRAILING_STOP` -> `TrailingStopLoss` (`asterdex.exchange.ts:1020-1032`).
+Additional reverse mappings exist for `STOP` -> `StopLoss`, `TAKE_PROFIT` -> `TakeProfit`, `TRAILING_STOP` -> `TrailingStopLoss` (`AsterDEXExchange.reverseMapOrderType`).
 
 ### Time In Force
 
@@ -323,13 +331,13 @@ Additional reverse mappings exist for `STOP` -> `StopLoss`, `TAKE_PROFIT` -> `Ta
 ### Regular Orders (Limit/Market)
 
 1. **Place**: `POST /fapi/{version}/order` via `secondaryAPI` (5 RPS rate limit) with params: `symbol`, `side`, `type`, `quantity`, `price` (limit only), `timeInForce` (non-market), `reduceOnly`
-2. **Close position orders**: When `amount === 0` for TP/SL, sets `closePosition='true'` instead of `quantity`, and omits `reduceOnly` (`asterdex.exchange.ts:545-561`)
-3. **Update** (`updateOrder`, `asterdex.exchange.ts:639-680`): Uses **cancel-and-replace** pattern (no PUT endpoint). For TP/SL orders, maps `Order.price` to `triggerPrice` since the price field holds the trigger price.
+2. **Close position orders**: When `amount === 0` for TP/SL, `placeOrder` sets `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.
+3. **Update** (`AsterDEXExchange.updateOrder`): Uses **cancel-and-replace** pattern (no PUT endpoint). For TP/SL orders, maps `Order.price` to `triggerPrice` since the price field holds the trigger price.
 4. **Cancel**: `DELETE /fapi/{version}/order` with `symbol` and `orderId` params via `secondaryAPI`
 
 ### Bracket Orders (TP/SL with entry)
 
-When `takeProfit` or `stopLoss` is provided with a limit/market order (`asterdex.exchange.ts:477-526`):
+When `takeProfit` or `stopLoss` is provided with a limit/market order (`AsterDEXExchange.placeOrder`):
 
 1. Splits into array of orders: main entry + SL + TP
 2. TP/SL orders have opposite side, `reduceOnly: true`
@@ -337,9 +345,9 @@ When `takeProfit` or `stopLoss` is provided with a limit/market order (`asterdex
 
 ### Batch Operations
 
-`placeOrders` and `cancelOrders` iterate individually (no batch API) following BingX approach (`asterdex.exchange.ts:608-637, 682-714`). Continues on individual failures; only throws if ALL operations fail.
+`placeOrders` and `cancelOrders` iterate individually (no batch API). They continue on individual failures and throw only if all operations fail.
 
-### Stop Price Trigger Types (`asterdex.exchange.ts:583-592`)
+### Stop Price Trigger Types (`AsterDEXExchange.placeOrder`)
 
 - **TakeProfit**: Defaults to `CONTRACT_PRICE` (LastPrice), uses `MARK_PRICE` only if explicitly set to `MarkPrice`
 - **StopLoss**: Defaults to `MARK_PRICE` (MarkPrice), uses `CONTRACT_PRICE` only if explicitly set to `LastPrice`
@@ -352,22 +360,22 @@ When `takeProfit` or `stopLoss` is provided with a limit/market order (`asterdex
 
 ## Data Precision & Conversion
 
-### Market Precision (`asterdex.exchange.ts:940-974`)
+### Market Precision (`AsterDEXExchange.fetchMarkets`)
 
 - `pricePrecision` and `quantityPrecision` from `exchangeInfo` are integer digits (e.g., `2` means 2 decimal places)
 - Converted to decimal step size via `precisionToString()` utility (e.g., `2` -> `0.01`)
-- **Tick size**: Extracted from `PRICE_FILTER` filter's `tickSize` field. Falls back to `market.precision.price` (`asterdex.exchange.ts:1004-1014`)
+- **Tick size**: Extracted from `PRICE_FILTER` filter's `tickSize` field. Falls back to `market.precision.price`.
 - **Lot size**: `minQty` and `maxQty` from `LOT_SIZE` filter
 - Price rounding uses `adjust()` utility with the tick size, not the decimal precision directly
 
-### Balance Calculation (`asterdex.exchange.ts:177-201`)
+### Balance Calculation (`AsterDEXExchange.fetchBalance`)
 
 - `total`: `totalWalletBalance` from account endpoint (`/fapi/v4/account` on V1, `/fapi/v3/account` on V3)
 - `free`: `availableBalance`
 - `used`: `totalInitialMargin + totalOpenOrderInitialMargin`
 - `upnl`: `totalUnrealizedProfit`
 
-### Leverage Brackets (`asterdex.exchange.ts:341-377`)
+### Leverage Brackets (`AsterDEXExchange.fetchLeverageBrackets`)
 
 - Fetched via signed `GET /fapi/{version}/leverageBracket` (`primaryAPI`) during market loading
 - Max leverage is from the first bracket (highest leverage tier) per symbol
@@ -375,14 +383,14 @@ When `takeProfit` or `stopLoss` is provided with a limit/market order (`asterdex
 
 ## Rate Limiting
 
-Four API instances with different rate limits (`asterdex.api.ts:294-323`):
+Four API instances with different rate limits (`createAPIInstances`):
 
 - `primaryAPI` (20 req/s): Account info, positions, orders, balance, user trades, leverage brackets
 - `secondaryAPI` (5 req/s): Order placement, order cancellation
 - `unlimitedAPI` (20 req/s): Time-sensitive operations (same config as primary)
 - `publicAPI` (10 req/s): Market data, tickers, klines, depth, public trades
 
-### Retry Logic (`asterdex.api.ts:65-75, 272-282`)
+### Retry Logic (`createAPI`)
 
 - 3 retries on network errors, 503, and 504 responses
 - Delay: `retryCount * 1000` ms (1s, 2s, 3s)
@@ -423,7 +431,17 @@ Four API instances with different rate limits (`asterdex.api.ts:294-323`):
 
 - Fetched by the private health loop roughly every 25 seconds from the account
   endpoint (`/fapi/v4/account` on V1, `/fapi/v3/account` on V3)
-- Also updated from `ACCOUNT_UPDATE` WS events (wallet balance, cross wallet balance)
+- `ACCOUNT_UPDATE` is accepted only with a strictly numeric, increasing `E`,
+  because Aster explicitly requires user-data consumers to order frames by
+  event time. Missing, malformed, duplicate, and stale frames leave canonical
+  state untouched.
+- A standalone USDT update maps `wb`/`cw` to canonical `total/free/used` and
+  applies position `up` deltas to `upnl`. Any non-USDT or known multi-asset
+  state is retained only under `balance.currencies`; root totals remain
+  last-known-good until one bounded account-endpoint reconciliation succeeds.
+  That reconciliation is version-guarded so an older REST response cannot
+  replace a newer account frame, and it never sums raw asset balances without
+  Aster's conversion rates.
 
 ## Exchange Metadata
 
@@ -434,17 +452,18 @@ Four API instances with different rate limits (`asterdex.api.ts:294-323`):
 - **Leverage**: Per-symbol (unlike Orderly which is account-level)
 - **Supports changing position mode**: `changePositionMode(hedged)` via `POST /fapi/{version}/positionSide/dual`
 - **Supports changing margin type**: `changeMarginType(isolated, symbol)` via `POST /fapi/{version}/marginType`
-- **Timeframe mapping** (`asterdex.exchange.ts:1051-1068`): Supports `1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d, 1w`
+- **Timeframe mapping** (`AsterDEXExchange.fetchOHLCV`): Supports `1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d, 1w`
 
 ## Testnet/Demo
 
-| Component  | Production                          | Testnet                                     |
-| ---------- | ----------------------------------- | ------------------------------------------- |
-| REST API   | `https://fapi.asterdex.com`         | `https://testnet-fapi.asterdex.com`         |
-| Public WS  | `wss://fstream.asterdex.com/stream` | Same (no separate testnet WS URL in config) |
-| Private WS | `wss://fstream.asterdex.com/stream` | Same (no separate testnet WS URL in config) |
+| Component  | Production                          | Testnet                                            |
+| ---------- | ----------------------------------- | -------------------------------------------------- |
+| REST API   | `https://fapi.asterdex.com`         | `https://fapi.asterdex-testnet.com`                |
+| Public WS  | `wss://fstream.asterdex.com/stream` | `wss://fstream5.asterdex-testnet.com/stream`       |
+| Private WS | `wss://fstream.asterdex.com/ws/...` | `wss://fstream5.asterdex-testnet.com/ws/...`       |
 
-Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.types.ts:5`). WebSocket URLs are not differentiated for testnet in the current implementation.
+`ASTERDEX_ENDPOINTS` is the single source for REST and WS environment hosts;
+the dedicated Aster clock uses the same REST constant.
 
 ## Known Quirks / Implementation Notes
 
@@ -452,21 +471,28 @@ Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.t
 - **Update order not supported**: AsterDEX has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one.
 - **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).
 - **Close-position TP/SL**: `amount=0` uses `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.
-- **Crossed orderbook handling**: depth processing applies multi-step uncrossing/fallback strategies and post-sort safety checks.
+- **Trailing stops are intentionally disabled in metadata**: Aster requires a `callbackRate` (and supports an optional activation price), but the shared `PlaceOrderOpts` has only a generic price field. Do not re-enable the UI capability until the order input can encode the rate without guessing.
+- **Orderbook snapshots fail closed**: `handleDepthSnapshot` consumes only documented partial-book streams. Every level must be an exact two-string pair; it drops boolean, numeric, array, object, malformed, zero-quantity, empty-side, or crossed frames rather than treating diffs as snapshots, trimming levels, or synthesizing a spread.
+- **Orderbook registrations are counted, not deduplicated**: subscribing the same callback twice creates two independent registrations. Each returned unsubscribe removes only its own registration; the upstream stream closes only after the final registration is removed.
 - **Historical trades disabled**: `fetchHistoricalTrades` currently returns an empty array with a warning.
-- **Virtual clock**: uses dedicated Aster clock with proxy fallback and V1/V3 time endpoint fallback.
+- **Virtual clock**: uses dedicated Aster clock with proxy fallback and V1/V3
+  time endpoint fallback in browser windows, WebWorkers, and other non-window
+  runtimes. A failed retry keeps the last good offset; lifecycle generations
+  prevent both late offset writes and a late initial sync from installing an
+  interval after `stop()` or disposal.
 - **Orders placed individually**: no batch endpoint usage in `placeOrders`/`cancelOrders`; failures are tolerated per-item.
 - **Trigger defaults**: TP defaults to `CONTRACT_PRICE` and SL defaults to `MARK_PRICE` (Binance-like behavior).
 - **All signed params in query**: POST/PUT/DELETE signed requests use query parameters and clear request body.
 - **Dual signing**: V1 routes use HMAC-SHA256; V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`.
 - **Binance-style 200-with-error handling**: interceptor treats negative `code` values as API errors.
-- **Ticker bid/ask source**: bid/ask are derived from orderbook streams, not 24h ticker REST payload.
+- **Ticker bid/ask source**: bid/ask are derived only from validated partial orderbook snapshots, not 24h ticker REST payload or diff frames.
 - **Private WS repair is split by purpose**: `ACCOUNT_UPDATE` schedules
   delayed position-only repair with `positionStateVersion` stale-response
-  protection. Order lifecycle events (`ORDER_TRADE_UPDATE` /
-  `executionReport`) schedule a separate 10-second debounced order refresh.
-  This prevents account-update bursts from stacking order and position REST
-  calls on top of the periodic safety loop.
+  protection. Non-USDT balance frames additionally schedule one debounced,
+  `balanceStateVersion`-guarded account refresh. Order lifecycle events
+  (`ORDER_TRADE_UPDATE` / `executionReport`) schedule a separate 10-second
+  debounced order refresh. This prevents account-update bursts from stacking
+  order, position, and balance REST calls on the periodic safety loop.
 - **WS error forwarding**: public WS error events route through close/reconnect flow.
 - **Position flip cleanup**: one-way mode updates remove stale opposite-side positions.
 - **O(1) ticker lookup**: uses `tickersBySymbol` map instead of linear scans.
@@ -474,30 +500,30 @@ Note: The testnet REST URL has a `TODO: Verify testnet URL` comment (`asterdex.t
 
 ## Error Handling
 
-### Timestamp Error Recovery (`asterdex.api.ts:198-226`)
+### Timestamp Error Recovery (`createAPI` response interceptor)
 
 - Error code `-1021` with "Timestamp" in message triggers automatic resync
 - Resyncs time via `asterDEXVirtualClock.syncClientServerTime()`
 - Retries the original request once (uses `__isRetryRequest` flag to prevent infinite loop)
 - Strips stale signature params before retry (`timestamp`, `signature`, `recvWindow`, plus `user`/`signer`/`nonce` when present)
 
-### HTTP Status Code Handling (`asterdex.api.ts:248-261`)
+### HTTP Status Code Handling (`createAPI` response interceptor)
 
 - `401`: Logs "Authentication failed. Check API credentials."
 - `429`: Logs "Rate limit exceeded. Reducing request frequency."
 - `503/504`: Logs "Service temporarily unavailable. Will retry." (also covered by axios-retry)
 
-### Binance-style 200-with-error (`asterdex.api.ts:180-189`)
+### Binance-style 200-with-error (`createAPI` response interceptor)
 
 - Checks `response.data.code < 0` to detect errors returned with successful HTTP status
 - Throws error with message: `AsterDEX API Error: <msg> (code: <code>)`
 
 ### Operation-level Error Handling
 
-- Batch order placement: Continues placing remaining orders even if one fails; only throws if ALL fail (`asterdex.exchange.ts:608-637`)
-- Batch cancel: Same pattern - continues on individual failure (`asterdex.exchange.ts:682-714`)
-- Startup: Positions and orders fetch failures are caught individually, startup continues (`asterdex.exchange.ts:114-131`)
-- Tick errors: Caught at tick level, logged as warning, tick loop continues (`asterdex.exchange.ts:168-170`)
+- Batch order placement: Continues placing remaining orders even if one fails; only throws if all fail (`AsterDEXExchange.placeOrders`)
+- Batch cancel: Same pattern - continues on individual failure (`AsterDEXExchange.cancelOrders`)
+- Startup: Positions and orders fetch failures are caught individually; startup continues (`AsterDEXExchange.start`)
+- Tick errors: Caught at tick level, logged as warning, and the tick loop continues (`AsterDEXExchange.tick`)
 
 ## Tick Loop
 
@@ -526,6 +552,19 @@ Current tests validate the production uplift behavior:
 - versioned path builder behavior (`getAsterDEXFapiPath`)
 - deterministic V1 HMAC signature fixture
 - deterministic V3 wallet-signature fixture (sorted payload + keccak + Ethereum signed hash + ECDSA)
+
+`src/__tests__/audit-regressions/asterdex.orderbook-snapshot.test.ts` is the deterministic P0 regression for the partial-stream subscription, authoritative snapshot delivery, exact string-pair validation, independent duplicate registrations, and fail-closed invalid/diff handling.
+
+`src/__tests__/audit-regressions/asterdex.trailing-stop-capability.test.ts` keeps the UI-facing trailing-stop capability disabled until a callback-rate input is added.
+
+`src/__tests__/audit-regressions/asterdex.testnet-clock.test.ts` locks the
+documented testnet REST/public/private WS hosts, worker-safe clock sync, and
+the deferred initial-sync disposal race.
+
+`src/__tests__/audit-regressions/asterdex.private-balance.test.ts` locks
+canonical USDT ACCOUNT_UPDATE mapping, strict `E` ordering, malformed-frame
+rejection, and non-USDT last-known-good root preservation plus stale-guarded
+authoritative reconciliation.
 
 ## CCXT Reference
 

@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
+import { calcOrderBookTotal } from '../../utils/orderbook';
 import { BaseWebSocket } from '../base.ws';
 import { ASTERDEX_ENDPOINTS } from './asterdex.types';
 
@@ -19,15 +19,23 @@ type SubscribedTopics = {
   [id: string]: string[] | string;
 };
 
+type OrderBookSubscription = {
+  callbacks: Map<number, (orderBook: OrderBook) => void>;
+  retryTimer: NodeJS.Timeout | null;
+};
+
+const PARTIAL_DEPTH_STREAM = /@depth(?:5|10|20)(?:@(100|250|500)ms)?$/;
+
 export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
+  private static readonly PING_REQUEST_ID = -1;
   private topics: SubscribedTopics = {};
   private klineCallbacks: Map<string, (candle: Candle) => void> = new Map();
-  private orderBookCallbacks: Map<string, (orderBook: OrderBook) => void> = new Map();
+  private orderBookSubscriptions: Map<string, OrderBookSubscription> = new Map();
   private subscriptionId = 1;
+  private orderBookListenerId = 1;
 
   messageHandlers: MessageHandlers = {
     '24hrTicker': [(d: any) => this.handleTickerUpdate(d)],
-    depthUpdate: [(d: any) => this.handleDepthUpdate(d)],
     aggTrade: [(d: any) => this.handleTradeUpdate(d)],
     markPriceUpdate: [(d: any) => this.handleMarkPriceUpdate(d)],
     kline: [(d: any) => this.handleKlineUpdate(d)],
@@ -53,7 +61,10 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
   get connectionURL(): string {
     // Use the combined stream endpoint
-    return `${ASTERDEX_ENDPOINTS.WS.PUBLIC}?requestId=${nanoid()}`;
+    const baseUrl = this.parent.options.testnet
+      ? ASTERDEX_ENDPOINTS.WS.PUBLIC.TESTNET
+      : ASTERDEX_ENDPOINTS.WS.PUBLIC.PRODUCTION;
+    return `${baseUrl}?requestId=${nanoid()}`;
   }
 
   connectAndSubscribe = () => {
@@ -106,6 +117,10 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
           if (ENABLE_RECONNECTING_WEBSOCKET) {
             this.emitWsReconnected();
           }
+
+          // A connection opening will resubscribe every active topic below, so
+          // cancel per-topic wait retries to avoid duplicate SUBSCRIBEs.
+          this.clearOrderBookSubscriptionRetries();
 
           // Resubscribe to all streams from topics (including depth, kline, etc)
           const allStreams = Object.keys(this.topics).filter(
@@ -182,7 +197,7 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     // AsterDEX (like Binance) supports application-level ping via LIST_SUBSCRIPTIONS
     if (!this.isDisposed && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.pingAt = performance.now();
-      this.ws.send(JSON.stringify({ id: 42, method: 'LIST_SUBSCRIPTIONS' }));
+      this.ws.send(JSON.stringify({ id: AsterDEXPublicWebsocket.PING_REQUEST_ID, method: 'LIST_SUBSCRIPTIONS' }));
     }
   };
 
@@ -195,7 +210,7 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
         if (!json) return;
 
         // Handle pong response
-        if (json.id === 42) {
+        if (json.id === AsterDEXPublicWebsocket.PING_REQUEST_ID) {
           this.handlePongEvent();
           return;
         }
@@ -266,6 +281,17 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     const eventType = streamType.split('_')[0]; // Handle kline_1m, etc
     const mappedType = eventTypeMap[eventType];
 
+    // Aster's bare @depth stream is incremental. Only its explicitly named
+    // partial-depth streams are snapshots that can be handed to consumers as
+    // a complete book.
+    if (mappedType === 'depthUpdate') {
+      if (PARTIAL_DEPTH_STREAM.test(stream)) {
+        if (!data.s) data.s = symbol.toUpperCase();
+        this.handleDepthSnapshot(data);
+      }
+      return;
+    }
+
     if (mappedType && this.messageHandlers[mappedType]) {
       // Add symbol to data if not present
       if (!data.s) {
@@ -306,206 +332,74 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.parent.emitter.emit('ticker', data.s, ticker);
   }
 
-  private handleDepthUpdate(data: AsterDEXStreamDepth): void {
-    // Parse raw orderbook data
-    const rawBids = (data.b || []).map(([price, qty]) => ({
-      price: parseFloat(price),
-      amount: parseFloat(qty),
-      total: 0,
-    }));
-
-    const rawAsks = (data.a || []).map(([price, qty]) => ({
-      price: parseFloat(price),
-      amount: parseFloat(qty),
-      total: 0,
-    }));
-
-    // Remove any zero or negative prices first
-    const cleanBids = rawBids.filter((bid) => bid.price > 0 && bid.amount > 0);
-    const cleanAsks = rawAsks.filter((ask) => ask.price > 0 && ask.amount > 0);
-
-    // Sort the clean data - CRITICAL: must be sorted correctly
-    cleanBids.sort((a, b) => b.price - a.price); // Descending (highest first)
-    cleanAsks.sort((a, b) => a.price - b.price); // Ascending (lowest first)
-
-    // Find the midpoint where bid < ask is satisfied
-    let validBids = [];
-    let validAsks = [];
-
-    if (cleanBids.length > 0 && cleanAsks.length > 0) {
-      const bestBid = cleanBids[0].price;
-      const bestAsk = cleanAsks[0].price;
-
-      if (bestBid < bestAsk) {
-        // Normal case: no crossing
-        validBids = cleanBids;
-        validAsks = cleanAsks;
-      } else {
-        // Crossed orderbook: need to filter intelligently
-        // Algorithm: Remove crossing levels while preserving as much depth as possible
-
-        // Strategy 1: Find the uncrossed region
-        // Get the highest bid that's lower than at least one ask
-        let maxValidBid = -Infinity;
-        for (const bid of cleanBids) {
-          if (cleanAsks.some((ask) => bid.price < ask.price)) {
-            maxValidBid = Math.max(maxValidBid, bid.price);
-            break; // Found the highest valid bid
-          }
+  private handleDepthSnapshot(data: AsterDEXStreamDepth): void {
+    const parseLevels = (levels: unknown) => {
+      if (!Array.isArray(levels)) return undefined;
+      const parsed = [] as OrderBook['bids'];
+      for (let i = 0; i < levels.length; i++) {
+        const level = levels[i];
+        if (
+          !Array.isArray(level) ||
+          level.length !== 2 ||
+          typeof level[0] !== 'string' ||
+          typeof level[1] !== 'string' ||
+          level[0].trim() === '' ||
+          level[1].trim() === ''
+        ) {
+          return undefined;
         }
-
-        // Get the lowest ask that's higher than at least one bid
-        let minValidAsk = Infinity;
-        for (const ask of cleanAsks) {
-          if (cleanBids.some((bid) => bid.price < ask.price)) {
-            minValidAsk = Math.min(minValidAsk, ask.price);
-            break; // Found the lowest valid ask
-          }
-        }
-
-        if (maxValidBid !== -Infinity && minValidAsk !== Infinity) {
-          // We found valid boundaries
-          validBids = cleanBids.filter((bid) => bid.price <= maxValidBid);
-          validAsks = cleanAsks.filter((ask) => ask.price >= minValidAsk);
-        } else {
-          // Strategy 2: Use midpoint splitting as fallback
-          const midPrice = (bestBid + bestAsk) / 2;
-          validBids = cleanBids.filter((bid) => bid.price < midPrice);
-          validAsks = cleanAsks.filter((ask) => ask.price > midPrice);
-        }
-
-        // Strategy 3: If still no valid levels, create artificial spread
-        if (validBids.length === 0 || validAsks.length === 0) {
-          const spread = Math.max(0.01, ((bestBid + bestAsk) / 2) * 0.0001); // 0.01% minimum spread
-          const artificialMid = (bestBid + bestAsk) / 2;
-
-          // Take best levels and adjust them
-          if (cleanBids.length > 0 && cleanAsks.length > 0) {
-            validBids = [
-              {
-                price: artificialMid - spread / 2,
-                amount: cleanBids[0].amount,
-                total: 0,
-              },
-            ];
-            validAsks = [
-              {
-                price: artificialMid + spread / 2,
-                amount: cleanAsks[0].amount,
-                total: 0,
-              },
-            ];
-            console.log(`[AsterDEX] Created artificial spread for ${data.s} at mid=${artificialMid}`);
-          }
-        }
-
-        // Log when we had to filter
-        if (validBids.length !== cleanBids.length || validAsks.length !== cleanAsks.length) {
-          console.log(`[AsterDEX] Filtered crossed orderbook for ${data.s}:`);
-          console.log(`  Original: ${cleanBids.length} bids, ${cleanAsks.length} asks`);
-          console.log(`  Filtered: ${validBids.length} bids, ${validAsks.length} asks`);
-          console.log(`  Best raw: bid=${bestBid}, ask=${bestAsk}`);
-          if (validBids.length > 0 && validAsks.length > 0) {
-            console.log(`  Best valid: bid=${validBids[0].price}, ask=${validAsks[0].price}`);
-          }
-        }
+        const [rawPrice, rawAmount] = level;
+        // Number() rejects malformed prefixes (for example "100junk") that
+        // parseFloat() would silently accept as authoritative market data. The
+        // documented partial-book payload is a pair of strings, never coerced
+        // booleans, arrays, objects, or numeric JSON values.
+        const price = Number(rawPrice);
+        const amount = Number(rawAmount);
+        // Zero quantities are valid only for diff updates. A partial snapshot
+        // containing one is not authoritative, so discard the whole frame.
+        if (!Number.isFinite(price) || !Number.isFinite(amount) || price <= 0 || amount <= 0) return undefined;
+        parsed.push({ price, amount, total: 0 });
       }
-    } else {
-      // One side is empty
-      validBids = cleanBids;
-      validAsks = cleanAsks;
-    }
-
-    // Create the final orderbook with filtered data
-    const orderBook: OrderBook = {
-      bids: validBids,
-      asks: validAsks,
+      return parsed;
     };
 
-    // Sort orderbook (should already be sorted, but ensure consistency)
-    sortOrderBook(orderBook);
+    const bids = parseLevels(data.b || []);
+    const asks = parseLevels(data.a || []);
+    if (!bids || !asks || bids.length === 0 || asks.length === 0) return;
 
-    // Double-check and enforce valid spread after sorting
-    if (orderBook.bids.length > 0 && orderBook.asks.length > 0) {
-      const bestBidAfterSort = orderBook.bids[0].price;
-      const bestAskAfterSort = orderBook.asks[0].price;
+    bids.sort((a, b) => b.price - a.price);
+    asks.sort((a, b) => a.price - b.price);
 
-      if (bestBidAfterSort >= bestAskAfterSort) {
-        // Emergency fix: sortOrderBook might have issues or data was modified
-        console.error(
-          `[AsterDEX] CRITICAL: Invalid spread after sortOrderBook for ${data.s}: bid=${bestBidAfterSort}, ask=${bestAskAfterSort}`,
-        );
+    // Do not manufacture a spread or trim levels. A malformed/crossed
+    // snapshot is unsafe market data and must not replace the last good book.
+    if (bids[0].price >= asks[0].price) return;
 
-        // Remove crossing levels
-        const finalMidPrice = (bestBidAfterSort + bestAskAfterSort) / 2;
-        orderBook.bids = orderBook.bids.filter((bid) => bid.price < finalMidPrice);
-        orderBook.asks = orderBook.asks.filter((ask) => ask.price > finalMidPrice);
-
-        // If we removed everything, create artificial spread
-        if (orderBook.bids.length === 0 || orderBook.asks.length === 0) {
-          const spread = Math.max(0.01, finalMidPrice * 0.0001); // 0.01% spread minimum
-          orderBook.bids = [
-            {
-              price: finalMidPrice - spread / 2,
-              amount: validBids[0]?.amount || 1,
-              total: 0,
-            },
-          ];
-          orderBook.asks = [
-            {
-              price: finalMidPrice + spread / 2,
-              amount: validAsks[0]?.amount || 1,
-              total: 0,
-            },
-          ];
-          console.log(`[AsterDEX] Emergency: Created artificial spread at ${finalMidPrice} +/- ${spread / 2}`);
-        }
-
-        // Re-sort after emergency fix
-        sortOrderBook(orderBook);
-      }
-    }
+    const orderBook: OrderBook = { bids, asks };
 
     // Calculate cumulative totals
     calcOrderBookTotal(orderBook);
 
-    // Update ticker with best bid/ask from filtered orderbook
-    // Use O(1) hashmap lookup instead of O(n) find
+    // Update ticker with best bid/ask from the authoritative snapshot.
     const ticker = this.parent.store.tickersBySymbol[data.s];
-    if (ticker && orderBook.bids.length > 0 && orderBook.asks.length > 0) {
-      const bestBid = orderBook.bids[0].price;
-      const bestAsk = orderBook.asks[0].price;
-
-      // Final validation
-      if (bestBid < bestAsk) {
-        this.parent.store.updateTicker(ticker, {
-          bid: bestBid,
-          ask: bestAsk,
-        });
-      } else {
-        // This really should never happen now
-        console.error(
-          `[AsterDEX] IMPOSSIBLE: Still invalid after all fixes for ${data.s}: bid=${bestBid}, ask=${bestAsk}`,
-        );
-        // Don't update ticker with invalid data
-      }
+    if (ticker) {
+      this.parent.store.updateTicker(ticker, {
+        bid: orderBook.bids[0].price,
+        ask: orderBook.asks[0].price,
+      });
     }
 
-    // Notify callbacks with the filtered orderbook
-    const symbol = data.s;
-    const symbolLower = symbol.toLowerCase();
-    const callbacks = [
-      this.orderBookCallbacks.get(symbol),
-      this.orderBookCallbacks.get(symbolLower),
-      this.orderBookCallbacks.get(`${symbolLower}@depth`),
-      this.orderBookCallbacks.get(`${symbolLower}@depth@500ms`),
-    ].filter(Boolean);
+    const subscription = this.orderBookSubscriptions.get(`${data.s.toLowerCase()}@depth20@100ms`);
+    if (!subscription) return;
 
-    if (callbacks.length > 0) {
-      // console.log(`Delivering orderbook update for ${symbol} to ${callbacks.length} callbacks`);
+    // Callbacks are consumer-owned. Give each listener its own authoritative
+    // snapshot so a mutation in one callback cannot corrupt another listener.
+    for (const [listenerId, callback] of Array.from(subscription.callbacks)) {
+      if (!subscription.callbacks.has(listenerId)) continue;
+      callback({
+        bids: orderBook.bids.map((level) => ({ ...level })),
+        asks: orderBook.asks.map((level) => ({ ...level })),
+      });
     }
-
-    callbacks.forEach((callback) => callback!(orderBook));
   }
 
   private handleTradeUpdate(data: AsterDEXStreamTrade): void {
@@ -570,106 +464,76 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
   // Public method for orderbook subscription (called by exchange class)
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void): (() => void) => {
-    let timeoutId: NodeJS.Timeout | null = null;
-    const stream = `${symbol.toLowerCase()}@depth@500ms`; // Use depth with 500ms updates
+    const stream = `${symbol.toLowerCase()}@depth20@100ms`;
+    const listenerId = this.orderBookListenerId++;
+    const existingSubscription = this.orderBookSubscriptions.get(stream);
 
-    // console.log(`listenOrderBook called for ${symbol}, stream: ${stream}`);
+    if (existingSubscription) {
+      existingSubscription.callbacks.set(listenerId, callback);
+      return () => this.unsubscribeOrderBookListener(stream, listenerId);
+    }
 
-    // Store the callback with multiple key formats for flexible lookup
-    this.orderBookCallbacks.set(symbol, callback); // Original symbol (e.g., BTCUSDT)
-    this.orderBookCallbacks.set(symbol.toLowerCase(), callback); // Lowercase symbol
-    this.orderBookCallbacks.set(stream, callback); // Full stream name
-    this.orderBookCallbacks.set(`${symbol.toLowerCase()}@depth`, callback); // Also map basic depth stream
+    const subscription: OrderBookSubscription = {
+      callbacks: new Map([[listenerId, callback]]),
+      retryTimer: null,
+    };
+    this.orderBookSubscriptions.set(stream, subscription);
 
     // Track subscription in topics immediately for reconnection
     this.topics[stream] = [stream];
-    // console.log(`Added ${stream} to topics for reconnection tracking`);
+    this.subscribeOrderBook(stream, subscription);
 
-    // Subscribe function
-    const doSubscribe = () => {
-      if (!this.isDisposed && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        // console.log(`Subscribing to orderbook stream: ${stream}`);
-
-        // Send subscription message
-        const message = {
-          method: 'SUBSCRIBE',
-          params: [stream],
-          id: this.subscriptionId++,
-        };
-
-        const messageStr = JSON.stringify(message);
-        // console.log(`Sending orderbook subscription: ${messageStr}`);
-        try {
-          this.send(messageStr);
-          return true; // Success
-        } catch {
-          // console.log(`Failed to send orderbook subscription`);
-          return false; // Failed
-        }
-      }
-      return false; // Not ready
-    };
-
-    // Try to subscribe with retries
-    const attemptSubscribe = (retryCount = 0) => {
-      const maxRetries = 50; // 5 seconds total with 100ms intervals
-
-      // console.log(
-      //   `Attempting orderbook subscription (retry ${retryCount}/${maxRetries}), WS state: ${this.ws?.readyState}, Connected: ${this.isConnected}`
-      // );
-
-      if (doSubscribe()) {
-        // Success!
-        // console.log(`Successfully subscribed to orderbook: ${stream}`);
-      } else if (retryCount < maxRetries) {
-        // Retry in 100ms
-        timeoutId = setTimeout(() => attemptSubscribe(retryCount + 1), 100);
-      } else {
-        // console.log(`Failed to subscribe to orderbook after ${maxRetries} attempts: ${stream}`);
-      }
-    };
-
-    // Start attempting to subscribe immediately
-    attemptSubscribe(0);
-
-    // Return unsubscribe function
-    return () => {
-      // Clear timeout if still waiting
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-
-      // Remove from pending if queued
-      const index = this.pendingSubscriptions.indexOf(doSubscribe);
-      if (index > -1) {
-        this.pendingSubscriptions.splice(index, 1);
-      }
-
-      // Remove callbacks
-      this.orderBookCallbacks.delete(symbol);
-      this.orderBookCallbacks.delete(symbol.toLowerCase());
-      this.orderBookCallbacks.delete(stream);
-      this.orderBookCallbacks.delete(`${symbol.toLowerCase()}@depth`);
-
-      // Remove from topics
-      delete this.topics[stream];
-
-      // Cleanup message handler stats
-      this.cleanupMessageHandlerStats(stream);
-
-      // Unsubscribe if connected
-      if (this.isConnected && !this.isDisposed) {
-        const message = {
-          method: 'UNSUBSCRIBE',
-          params: [stream],
-          id: this.subscriptionId++,
-        };
-
-        this.send(JSON.stringify(message));
-      }
-    };
+    return () => this.unsubscribeOrderBookListener(stream, listenerId);
   };
+
+  private subscribeOrderBook(stream: string, subscription: OrderBookSubscription, retryCount = 0): void {
+    if (this.orderBookSubscriptions.get(stream) !== subscription || subscription.callbacks.size === 0) return;
+
+    if (!this.isDisposed && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.send(
+          JSON.stringify({
+            method: 'SUBSCRIBE',
+            params: [stream],
+            id: this.subscriptionId++,
+          }),
+        );
+        return;
+      } catch {
+        // Retry below while listeners remain registered.
+      }
+    }
+
+    if (retryCount < 50) {
+      subscription.retryTimer = setTimeout(() => this.subscribeOrderBook(stream, subscription, retryCount + 1), 100);
+    }
+  }
+
+  private unsubscribeOrderBookListener(stream: string, listenerId: number): void {
+    const subscription = this.orderBookSubscriptions.get(stream);
+    if (!subscription || !subscription.callbacks.delete(listenerId)) return;
+    if (subscription.callbacks.size > 0) return;
+
+    if (subscription.retryTimer) {
+      clearTimeout(subscription.retryTimer);
+    }
+    this.orderBookSubscriptions.delete(stream);
+    delete this.topics[stream];
+    this.cleanupMessageHandlerStats(stream);
+
+    if (!this.isDisposed) {
+      void this.unsubscribe([stream]);
+    }
+  }
+
+  private clearOrderBookSubscriptionRetries(): void {
+    for (const subscription of this.orderBookSubscriptions.values()) {
+      if (subscription.retryTimer) {
+        clearTimeout(subscription.retryTimer);
+        subscription.retryTimer = null;
+      }
+    }
+  }
 
   // Public methods for subscribing to specific data streams
   subscribeToKline(stream: string, callback: (candle: Candle) => void): void {
@@ -730,7 +594,8 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
   dispose = (): void => {
     this.klineCallbacks.clear();
-    this.orderBookCallbacks.clear();
+    this.clearOrderBookSubscriptionRetries();
+    this.orderBookSubscriptions.clear();
     this.topics = {};
     this.pendingSubscriptions = [];
     this.wsReady = false;

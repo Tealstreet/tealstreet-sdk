@@ -3,7 +3,7 @@ import type { AsterDEXExchange } from './asterdex.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { LogSeverity, OrderSide, OrderStatus, PositionSide } from '../../types';
+import { Balance, LogSeverity, OrderSide, OrderStatus, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { ASTERDEX_ENDPOINTS } from './asterdex.types';
@@ -12,7 +12,17 @@ type MessageHandlers = {
   [eventType: string]: Array<(data: any) => void>;
 };
 
+type AssetBalanceUpdate = {
+  asset: string;
+  total: number;
+  free: number;
+  used: number;
+};
+
 export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
+  // Aster's account-level fields (totalWalletBalance, availableBalance, and
+  // totalUnrealizedProfit) are USDT-denominated, including multi-asset mode.
+  private static readonly ACCOUNT_CURRENCY = 'USDT';
   private static readonly LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
   private static readonly LISTEN_KEY_FAILURE_RETRY_MS = 30 * 1000;
   private static readonly LISTEN_KEY_WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
@@ -30,7 +40,11 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
   private positionRepairTimer?: NodeJS.Timeout;
   private positionRepairInFlight = false;
   private positionRepairQueued = false;
+  private balanceReconcileTimer?: NodeJS.Timeout;
+  private balanceReconcileInFlight = false;
+  private balanceReconcileQueued = false;
   private orderReconcileTimer?: NodeJS.Timeout;
+  private lastAccountUpdateEventTime = 0;
 
   messageHandlers: MessageHandlers = {
     // AsterDEX uses the same event types as Binance Futures
@@ -52,6 +66,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
       this.clearListenKeyRefreshTimer();
       this.clearListenKeyWatchdogTimer();
       this.clearPositionRepairTimer();
+      this.clearBalanceReconcileTimer();
       this.clearOrderReconcileTimer();
 
       baseOnClose(event);
@@ -68,9 +83,11 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
       this.clearConnectRetryTimer();
 
-      // User Data Streams are accessed at /ws/<listenKey>
-      // The base URL is wss://fstream.asterdex.com
-      const baseUrl = ASTERDEX_ENDPOINTS.WS.PRIVATE.replace('/stream', '');
+      // User Data Streams are accessed at /ws/<listenKey>.
+      const streamUrl = this.parent.options.testnet
+        ? ASTERDEX_ENDPOINTS.WS.PRIVATE.TESTNET
+        : ASTERDEX_ENDPOINTS.WS.PRIVATE.PRODUCTION;
+      const baseUrl = streamUrl.replace('/stream', '');
       const url = `${baseUrl}/ws/${listenKey}`;
 
       this.parent.log(`Connecting to AsterDEX private WebSocket: ${url}`, LogSeverity.Info);
@@ -304,30 +321,171 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     return Number.isFinite(eventTime) && eventTime > 0 ? eventTime : virtualClock.getCurrentTimeMs();
   }
 
+  private parseFiniteNumber(value: unknown): number | undefined {
+    if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  private parseAssetBalanceUpdates(
+    balances: unknown,
+    fields: { total?: string; free: string; used?: string },
+  ): AssetBalanceUpdate[] | undefined {
+    if (!Array.isArray(balances)) return undefined;
+
+    const updates: AssetBalanceUpdate[] = [];
+    for (const balance of balances) {
+      const asset = typeof balance?.a === 'string' ? balance.a.trim() : '';
+      const free = this.parseFiniteNumber(balance?.[fields.free]);
+      const used = fields.used ? this.parseFiniteNumber(balance?.[fields.used]) : undefined;
+      const total = fields.total
+        ? this.parseFiniteNumber(balance?.[fields.total])
+        : free !== undefined && used !== undefined
+          ? free + used
+          : undefined;
+      const derivedUsed = used ?? (total !== undefined && free !== undefined ? total - free : undefined);
+      if (!asset || total === undefined || free === undefined || derivedUsed === undefined || derivedUsed < 0) return undefined;
+      updates.push({ asset, total, free, used: derivedUsed });
+    }
+    return updates;
+  }
+
+  private getPositionSide(position: any, positionAmount: number): PositionSide {
+    return position.ps === 'BOTH'
+      ? positionAmount > 0
+        ? PositionSide.Long
+        : PositionSide.Short
+      : position.ps === 'LONG'
+        ? PositionSide.Long
+        : PositionSide.Short;
+  }
+
+  private getAccountUpdateUpnlDeltas(positions: unknown): Map<string, number> | undefined {
+    const deltas = new Map<string, number>();
+    if (positions === undefined) return deltas;
+    if (!Array.isArray(positions)) return undefined;
+
+    for (const position of positions) {
+      const symbol = typeof position?.s === 'string' ? position.s : '';
+      const positionAmount = this.parseFiniteNumber(position?.pa);
+      const unrealizedPnl = this.parseFiniteNumber(position?.up);
+      if (!symbol || positionAmount === undefined || unrealizedPnl === undefined) return undefined;
+
+      const positionSide = this.getPositionSide(position, positionAmount);
+      const existing = this.parent.store.positions.find((p) => p.symbol === symbol && p.side === positionSide);
+      const previousUpnl = existing?.unrealizedPnl ?? 0;
+      if (!Number.isFinite(previousUpnl)) return undefined;
+
+      // Account-level Aster values are USDT-denominated. Keep per-asset
+      // details when a matching collateral bucket already exists, but never
+      // infer an FX conversion for another asset from this delta alone.
+      const asset =
+        Object.keys(this.parent.store.balance.currencies || {}).find((currency) => symbol.endsWith(currency)) ||
+        (symbol.endsWith(AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY)
+          ? AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY
+          : undefined);
+      if (asset) deltas.set(asset, (deltas.get(asset) || 0) + unrealizedPnl - previousUpnl);
+    }
+    return deltas;
+  }
+
+  private applyBalanceUpdates(updates: AssetBalanceUpdate[], upnlDeltas: Map<string, number>): boolean {
+    const current = this.parent.store.balance;
+    const currencies: Record<string, Balance> = { ...(current.currencies || {}) };
+
+    for (const update of updates) {
+      const previous = currencies[update.asset];
+      const upnl = (previous?.upnl || 0) + (upnlDeltas.get(update.asset) || 0);
+      currencies[update.asset] = {
+        ...previous,
+        total: update.total,
+        free: update.free,
+        used: update.used,
+        upnl,
+      };
+    }
+
+    const collateralUpdate = updates.find((update) => update.asset === AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY);
+    const collateralUpnlDelta = upnlDeltas.get(AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY) || 0;
+    const previousCollateral = current.currencies?.[AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY];
+    const needsAuthoritativeReconcile =
+      updates.some((update) => update.asset !== AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY) ||
+      Object.keys(currencies).some((asset) => asset !== AsterDEXPrivateWebsocket.ACCOUNT_CURRENCY);
+    let accountFields: Pick<Balance, 'total' | 'free' | 'used'> = {
+      total: current.total,
+      free: current.free,
+      used: current.used,
+    };
+    if (collateralUpdate && !needsAuthoritativeReconcile) {
+      // A standalone USDT update has the same single-asset semantics as the
+      // account root. Multi-asset totals use Aster conversion rates and must
+      // instead come from its authoritative account endpoint.
+      accountFields = previousCollateral
+        ? {
+            total: current.total + collateralUpdate.total - previousCollateral.total,
+            free: current.free + collateralUpdate.free - previousCollateral.free,
+            used: current.used + collateralUpdate.used - previousCollateral.used,
+          }
+        : {
+            total: collateralUpdate.total,
+            free: collateralUpdate.free,
+            used: collateralUpdate.used,
+          };
+    }
+    const nextBalance: Balance = {
+      ...current,
+      currencies,
+      upnl: needsAuthoritativeReconcile ? current.upnl : current.upnl + collateralUpnlDelta,
+      ...accountFields,
+    };
+
+    if (
+      !Number.isFinite(nextBalance.total) ||
+      !Number.isFinite(nextBalance.free) ||
+      !Number.isFinite(nextBalance.used) ||
+      !Number.isFinite(nextBalance.upnl)
+    ) {
+      return needsAuthoritativeReconcile;
+    }
+    this.parent.store.update({ balance: nextBalance });
+    return needsAuthoritativeReconcile;
+  }
+
   private handleAccountUpdate(data: any): void {
-    // Update account balances
     if (data.B) {
-      const balances: Record<string, { free: number; used: number }> = {};
-
-      data.B.forEach((balance: any) => {
-        balances[balance.a] = {
-          free: parseFloat(balance.f || '0'),
-          used: parseFloat(balance.l || '0'),
-        };
-      });
-
-      this.parent.store.update({
-        balance: {
-          ...this.parent.store.balance,
-          ...balances,
-        },
-      });
+      const balances = this.parseAssetBalanceUpdates(data.B, { free: 'f', used: 'l' });
+      if (balances) this.applyBalanceUpdates(balances, new Map());
     }
 
     this.parent.emitter.emit('account', data);
   }
 
   private handleAccountPositionUpdate(data: any): void {
+    const eventTime = data?.E;
+    if (typeof eventTime !== 'number' || !Number.isSafeInteger(eventTime) || eventTime <= 0) {
+      this.parent.log('Ignoring ACCOUNT_UPDATE without a valid numeric event time E', LogSeverity.Warning);
+      return;
+    }
+    if (eventTime <= this.lastAccountUpdateEventTime) {
+      this.parent.log('Ignoring stale ACCOUNT_UPDATE ordered before the current event time E', LogSeverity.Debug);
+      return;
+    }
+    if (!data?.a || typeof data.a !== 'object') {
+      this.parent.log('Ignoring malformed ACCOUNT_UPDATE payload', LogSeverity.Warning);
+      return;
+    }
+
+    const upnlDeltas = this.getAccountUpdateUpnlDeltas(data.a?.P);
+    const balances = data.a.B === undefined ? [] : this.parseAssetBalanceUpdates(data.a.B, { total: 'wb', free: 'cw' });
+    if (!upnlDeltas || !balances) {
+      this.parent.log('Ignoring malformed ACCOUNT_UPDATE balance or position values', LogSeverity.Warning);
+      return;
+    }
+
+    this.lastAccountUpdateEventTime = eventTime;
+    const balanceStateVersion = this.parent.markBalanceStateUpdatedByWebsocket();
+
     // Handle ACCOUNT_UPDATE event for futures positions
     if (data.a?.P) {
       this.parent.markPositionStateUpdatedByWebsocket();
@@ -342,14 +500,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
         // In One-Way mode (ps === 'BOTH'), determine side from position amount
         // In Hedge mode (ps === 'LONG' or 'SHORT'), use the position side directly
-        const positionSide =
-          pos.ps === 'BOTH'
-            ? positionAmount > 0
-              ? PositionSide.Long
-              : PositionSide.Short
-            : pos.ps === 'LONG'
-              ? PositionSide.Long
-              : PositionSide.Short;
+        const positionSide = this.getPositionSide(pos, positionAmount);
 
         if (positionAmount !== 0) {
           // Only process positions with non-zero amount
@@ -415,23 +566,12 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
       this.schedulePositionRepair();
     }
 
-    // Update account balance
-    if (data.a?.B) {
-      data.a.B.forEach((balance: any) => {
-        const asset = balance.a;
-        const walletBalance = parseFloat(balance.wb);
-        const crossWalletBalance = parseFloat(balance.cw);
-
-        this.parent.store.update({
-          balance: {
-            ...this.parent.store.balance,
-            [asset]: {
-              free: walletBalance,
-              used: walletBalance - crossWalletBalance,
-            },
-          },
-        });
-      });
+    // ACCOUNT_UPDATE exposes wallet balance (wb) and cross wallet balance
+    // (cw). For the USDT account collateral, cw is the available/free amount
+    // and wb - cw is margin in use. Do not write assets as arbitrary root
+    // keys; nested currencies retain the rest of the account state.
+    if (this.applyBalanceUpdates(balances, upnlDeltas)) {
+      this.scheduleBalanceReconcile(balanceStateVersion);
     }
   }
 
@@ -636,6 +776,42 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.positionRepairQueued = false;
   };
 
+  private scheduleBalanceReconcile = (balanceStateVersion: number): void => {
+    if (this.isDisposed) return;
+
+    this.balanceReconcileQueued = true;
+    if (this.balanceReconcileTimer || this.balanceReconcileInFlight) return;
+
+    this.balanceReconcileTimer = setTimeout(() => {
+      this.balanceReconcileTimer = undefined;
+      void this.runBalanceReconcile(balanceStateVersion);
+    }, AsterDEXPrivateWebsocket.POSITION_REPAIR_DELAY_MS);
+  };
+
+  private runBalanceReconcile = async (balanceStateVersion: number): Promise<void> => {
+    if (this.isDisposed || this.balanceReconcileInFlight) return;
+
+    this.balanceReconcileQueued = false;
+    this.balanceReconcileInFlight = true;
+    try {
+      const applied = await this.parent.reconcileBalanceAfterPrivateUpdate(balanceStateVersion);
+      if (!applied && !this.isDisposed) this.balanceReconcileQueued = true;
+    } finally {
+      this.balanceReconcileInFlight = false;
+      if (this.balanceReconcileQueued && !this.isDisposed) {
+        this.scheduleBalanceReconcile(this.parent.getBalanceStateVersion());
+      }
+    }
+  };
+
+  private clearBalanceReconcileTimer = (): void => {
+    if (this.balanceReconcileTimer) {
+      clearTimeout(this.balanceReconcileTimer);
+      this.balanceReconcileTimer = undefined;
+    }
+    this.balanceReconcileQueued = false;
+  };
+
   private scheduleOrderReconcile = (): void => {
     if (this.isDisposed) return;
 
@@ -682,6 +858,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     this.clearListenKeyWatchdogTimer();
     this.clearConnectRetryTimer();
     this.clearPositionRepairTimer();
+    this.clearBalanceReconcileTimer();
     this.clearOrderReconcileTimer();
 
     // Call parent dispose (regular prototype method, so super works here)

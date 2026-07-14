@@ -1,5 +1,5 @@
 import type { Dayjs } from 'dayjs';
-import type { AsterDEXAPIVersion } from './asterdex.types';
+import { ASTERDEX_ENDPOINTS, type AsterDEXAPIVersion } from './asterdex.types';
 
 import axios from 'axios';
 import dayjs from 'dayjs';
@@ -17,26 +17,38 @@ class AsterDEXVirtualClock {
   private server: Dayjs | null = null;
   private client: Dayjs | null = null;
   private syncInterval: NodeJS.Timeout | null = null;
+  private syncInFlight: Promise<void> | null = null;
+  private lifecycleVersion = 0;
   private preferredApiVersion: AsterDEXAPIVersion = 'v1';
 
   /**
    * Start the virtual clock and sync with AsterDEX server time
    */
   start = async (testnet: boolean = false, preferredApiVersion: AsterDEXAPIVersion = 'v1') => {
+    // A start may be awaiting its initial sync when stop()/dispose() runs.
+    // Keep the generation from this invocation so it cannot install a timer
+    // after that lifecycle has ended (or after a newer start superseded it).
+    const lifecycleVersion = ++this.lifecycleVersion;
     this.preferredApiVersion = preferredApiVersion;
     await this.syncClientServerTime(testnet, preferredApiVersion);
+
+    if (lifecycleVersion !== this.lifecycleVersion) return;
 
     // Sync every 5 minutes
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
-    this.syncInterval = setInterval(() => this.syncClientServerTime(testnet, preferredApiVersion), 5 * 60 * 1000);
+    this.syncInterval = setInterval(() => {
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      void this.syncClientServerTime(testnet, preferredApiVersion);
+    }, 5 * 60 * 1000);
   };
 
   /**
    * Stop the virtual clock and clear sync interval
    */
   stop = () => {
+    this.lifecycleVersion += 1;
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
@@ -69,20 +81,32 @@ class AsterDEXVirtualClock {
   public syncClientServerTime = async (
     testnet: boolean = false,
     preferredApiVersion: AsterDEXAPIVersion = this.preferredApiVersion,
-  ) => {
-    if (typeof window === 'undefined') {
-      // Running on server - assume better time sync
-      this.server = null;
-      this.client = null;
-      return;
-    }
+  ): Promise<void> => {
+    if (this.syncInFlight) return this.syncInFlight;
 
+    const lifecycleVersion = this.lifecycleVersion;
+    this.syncInFlight = this.syncClientServerTimeInner(testnet, preferredApiVersion, lifecycleVersion).finally(() => {
+      this.syncInFlight = null;
+    });
+    return this.syncInFlight;
+  };
+
+  private syncClientServerTimeInner = async (
+    testnet: boolean,
+    preferredApiVersion: AsterDEXAPIVersion,
+    lifecycleVersion: number,
+  ): Promise<void> => {
     this.preferredApiVersion = preferredApiVersion;
-    this.server = await this.fetchServerTime(testnet, preferredApiVersion);
+    // Axios has browser-worker and non-window runtime transports. Do not use
+    // `window` as a runtime proxy: WebWorkers deliberately do not expose it.
+    const server = await this.fetchServerTime(testnet, preferredApiVersion);
+    if (!server || lifecycleVersion !== this.lifecycleVersion) return;
+
+    this.server = server;
     this.client = dayjs.utc();
 
-    // Always apply the offset, even if small
-    // This ensures we're always in sync with the server
+    // Always apply the offset, even if small. This ensures signatures use
+    // Aster's clock in WebWorkers as well as browser windows.
     const offset = this.server.diff(this.client, 'milliseconds');
     console.log(`[AsterDEX] Time sync: Server time offset is ${offset}ms`);
   };
@@ -97,15 +121,16 @@ class AsterDEXVirtualClock {
   private fetchServerTime = async (
     testnet: boolean = false,
     preferredApiVersion: AsterDEXAPIVersion = this.preferredApiVersion,
-  ): Promise<Dayjs> => {
-    const baseUrl = testnet ? 'https://testnet-fapi.asterdex.com' : 'https://fapi.asterdex.com';
+  ): Promise<Dayjs | null> => {
+    const baseUrl = testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
     const timePathCandidates = this.getTimePathCandidates(preferredApiVersion);
 
     for (const timePath of timePathCandidates) {
       try {
         const { data } = await axios.get(`${baseUrl}${timePath}`, { timeout: 5000 });
-        if (data.serverTime) {
-          return dayjs(data.serverTime);
+        const serverTime = this.parseServerTime(data?.serverTime);
+        if (serverTime !== undefined) {
+          return dayjs.utc(serverTime);
         }
       } catch {
         // Ignore error and continue to next candidate
@@ -116,16 +141,25 @@ class AsterDEXVirtualClock {
     for (const timePath of timePathCandidates) {
       try {
         const { data } = await axios.get(`${getPublicCorsProxy()}/${baseUrl}${timePath}`, { timeout: 5000 });
-        if (data.serverTime) {
-          return dayjs(data.serverTime);
+        const serverTime = this.parseServerTime(data?.serverTime);
+        if (serverTime !== undefined) {
+          return dayjs.utc(serverTime);
         }
       } catch {
         // Ignore error and continue to next candidate
       }
     }
 
-    // Fallback to local time
-    return dayjs.utc();
+    // Keep the last known-good offset on failed sync instead of converting a
+    // transient transport failure into a local-clock reset.
+    return null;
+  };
+
+  private parseServerTime = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   };
 
   /**

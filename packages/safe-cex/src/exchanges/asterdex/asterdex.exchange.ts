@@ -88,6 +88,7 @@ export class AsterDEXExchange extends BaseExchange {
   publicWebsocket: AsterDEXPublicWebsocket;
   privateWebsocket: AsterDEXPrivateWebsocket;
   private positionStateVersion = 0;
+  private balanceStateVersion = 0;
   private lastBalanceReconciliationAt = 0;
   private lastPositionSafetyReconciliationAt = 0;
   private lastOrderSafetyReconciliationAt = 0;
@@ -122,6 +123,27 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   getPositionStateVersion = (): number => this.positionStateVersion;
+
+  markBalanceStateUpdatedByWebsocket = (): number => {
+    this.balanceStateVersion += 1;
+    return this.balanceStateVersion;
+  };
+
+  getBalanceStateVersion = (): number => this.balanceStateVersion;
+
+  reconcileBalanceAfterPrivateUpdate = async (balanceStateVersion: number): Promise<boolean> => {
+    try {
+      const balance = await this.fetchBalance();
+      if (this.isDisposed || balanceStateVersion !== this.balanceStateVersion) return false;
+
+      this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+      this.lastBalanceReconciliationAt = Date.now();
+      return true;
+    } catch (error: any) {
+      this.log(`Balance reconciliation failed: ${error.message}`, LogSeverity.Warning);
+      return true;
+    }
+  };
 
   getFapiPath = (endpoint: string, versionOverride?: AsterDEXAPIVersion | 'v4'): string => {
     return getAsterDEXFapiPath(endpoint, versionOverride ?? this.apiVersion);
@@ -244,14 +266,7 @@ export class AsterDEXExchange extends BaseExchange {
       now - this.lastOrderSafetyReconciliationAt >= PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS;
 
     if (shouldReconcileBalance) {
-      try {
-        const balance = await this.fetchBalance();
-        if (this.isDisposed) return;
-        this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
-        this.lastBalanceReconciliationAt = Date.now();
-      } catch (error: any) {
-        this.log(`Balance reconciliation failed: ${error.message}`, LogSeverity.Warning);
-      }
+      await this.reconcileBalanceAfterPrivateUpdate(this.balanceStateVersion);
     }
 
     if (shouldReconcilePositions) {
@@ -684,6 +699,13 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
+    // Aster requires callbackRate for TRAILING_STOP_MARKET, but shared order
+    // inputs do not expose it. Reject this before any capacity checks or REST
+    // calls so programmatic callers cannot submit an invalid order.
+    if (opts.type === OrderType.TrailingStopLoss) {
+      throw new Error('AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable');
+    }
+
     // Handle bracket orders (TP/SL attached to entry orders)
     // If takeProfit or stopLoss are provided with a limit/market order, place them as separate orders
     const hasBracketOrders =
@@ -739,12 +761,7 @@ export class AsterDEXExchange extends BaseExchange {
       return await this.placeOrders(ordersToPlace, true);
     }
 
-    if (
-      !skipAlgoCapacityCheck &&
-      (opts.type === OrderType.StopLoss ||
-        opts.type === OrderType.TakeProfit ||
-        opts.type === OrderType.TrailingStopLoss)
-    ) {
+    if (!skipAlgoCapacityCheck && (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)) {
       this.assertAlgoOrderCapacity(opts.symbol, 1);
     }
 
@@ -1516,6 +1533,9 @@ export class AsterDEXExchange extends BaseExchange {
   }
 
   private mapOrderType(type: OrderType): string {
+    if (type === OrderType.TrailingStopLoss) {
+      throw new Error('AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable');
+    }
     return asterdexOrderTypeMap[type] || type;
   }
 

@@ -2141,7 +2141,9 @@ const AsterDEXMetadata: ExchangeMetadata = {
   defaultQuote: 'USDT',
   orderPendingUpdateDelay: 250,
   stopOrderPendingUpdateDelay: 250,
-  supportsTrailingStopLoss: true,
+  // PlaceOrderOpts has no unambiguous callback-rate input. Do not advertise a
+  // TRAILING_STOP_MARKET path until it can satisfy Aster's mandatory field.
+  supportsTrailingStopLoss: false,
   tickInterval: 1000,
   supportsChaser: true,
   supportsPositionMargin: false,
