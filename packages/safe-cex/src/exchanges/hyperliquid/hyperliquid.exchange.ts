@@ -2428,7 +2428,7 @@ export class HyperliquidExchange extends BaseExchange {
       );
 
       if (!data || !Array.isArray(data)) {
-        return fillsByOrderId;
+        throw new Error('Hyperliquid fill reconciliation returned an invalid response');
       }
 
       // Filter fills for the requested order IDs and sum up amounts
@@ -2443,7 +2443,7 @@ export class HyperliquidExchange extends BaseExchange {
       return fillsByOrderId;
     } catch (error: any) {
       this.log(`Error fetching fills for order IDs: ${error.message}`, LogSeverity.Warning);
-      return fillsByOrderId;
+      throw error;
     }
   };
 

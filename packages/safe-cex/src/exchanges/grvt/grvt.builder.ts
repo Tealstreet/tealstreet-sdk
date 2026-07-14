@@ -147,14 +147,6 @@ interface AuthorizeBuilderMessage {
 // GRVT proxy — requires Tealstreet-Authorization header
 const GRVT_PROXY_URL = PRIVATE_PROXY_GRVT_TINY;
 
-const LOG_PREFIX = '[GRVT Builder]';
-const IS_DEV = process.env.NODE_ENV !== 'production';
-
-/** Dev-only logger — no-op in production */
-const devLog = (...args: unknown[]) => {
-  if (IS_DEV) console.log(...args);
-};
-
 /**
  * Get GRVT Edge API base URL for authentication endpoints (via proxy)
  */
@@ -229,12 +221,6 @@ const authenticateGrvt = async (
   };
   const body = { api_key: apiKey };
 
-  devLog(
-    `${LOG_PREFIX} → POST ${url}\n` +
-      `  Headers: ${JSON.stringify(headers, null, 2)}\n` +
-      `  Body:    ${JSON.stringify(body)}`,
-  );
-
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -248,11 +234,6 @@ const authenticateGrvt = async (
 
     if (!response.ok) {
       const errorData = (await response.json().catch(() => ({}))) as Record<string, any>;
-      devLog(
-        `${LOG_PREFIX} ← POST ${url}\n` +
-          `  Status:   ${response.status} (FAILED)\n` +
-          `  Response: ${JSON.stringify(errorData, null, 2)}`,
-      );
       return {
         success: false,
         message: errorData.message || `Authentication failed: HTTP ${response.status}`,
@@ -263,13 +244,6 @@ const authenticateGrvt = async (
     const accountId = response.headers.get('x-grvt-account-id');
     // Get session cookie from proxy's custom header (browser can't read Set-Cookie due to CORS)
     const sessionCookie = response.headers.get('x-ts-grvt-session');
-
-    devLog(
-      `${LOG_PREFIX} ← POST ${url}\n` +
-        `  Status:    ${response.status} (OK)\n` +
-        `  AccountId: ${accountId || '(none)'}\n` +
-        `  Session:   ${sessionCookie || '(none)'}`,
-    );
 
     if (!accountId) {
       return {
@@ -286,7 +260,6 @@ const authenticateGrvt = async (
       error.name === 'AbortError'
         ? 'GRVT authentication timed out (10s)'
         : error.message || 'Failed to authenticate with GRVT';
-    devLog(`${LOG_PREFIX} ← POST ${url}\n  Error: ${message}`);
     return { success: false, message };
   }
 };
@@ -418,10 +391,6 @@ export const checkGrvtBuilderAuthorized = async (
 ): Promise<GrvtBuilderCheckResult> => {
   const builder = builderAddress ?? getGrvtBuilderAddress(testnet);
 
-  devLog(
-    `${LOG_PREFIX} Checking builder authorization for ${builder} (subAccount: ${subAccountId}, testnet: ${testnet})`,
-  );
-
   try {
     // Get proxy token for Tealstreet-Authorization header
     const proxyToken = await getProxyToken();
@@ -429,7 +398,6 @@ export const checkGrvtBuilderAuthorized = async (
     // Authenticate with GRVT via proxy
     const authResult = await authenticateGrvt(apiKey, testnet, proxyToken);
     if (!authResult.success) {
-      devLog(`${LOG_PREFIX} Auth failed before checking builders:`, authResult.message);
       return { authorized: false };
     }
 
@@ -450,12 +418,6 @@ export const checkGrvtBuilderAuthorized = async (
 
     const requestBody = { sub_account_id: subAccountId };
 
-    devLog(
-      `${LOG_PREFIX} → POST ${url}\n` +
-        `  Headers: ${JSON.stringify(requestHeaders, null, 2)}\n` +
-        `  Body:    ${JSON.stringify(requestBody)}`,
-    );
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
@@ -470,17 +432,10 @@ export const checkGrvtBuilderAuthorized = async (
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      devLog(`${LOG_PREFIX} ← POST ${url}\n` + `  Status: ${response.status} (FAILED)`);
       return { authorized: false };
     }
 
     const data = (await response.json()) as Record<string, any>;
-
-    devLog(
-      `${LOG_PREFIX} ← POST ${url}\n` +
-        `  Status:   ${response.status} (OK)\n` +
-        `  Response: ${JSON.stringify(data, null, 2)}`,
-    );
 
     // Check if our builder is in the list
     // Response format: { results: [{ builder_address, max_fee_rate, ... }] } or lite format { r: [...] }
@@ -499,9 +454,6 @@ export const checkGrvtBuilderAuthorized = async (
         const feePercent = rawFeeRateString != null ? parseFloat(String(rawFeeRateString)) : NaN;
         const maxFeeRateRaw = Number.isFinite(feePercent) ? Math.round(feePercent * 10_000) : undefined;
         const feePercentage = Number.isFinite(feePercent) ? feePercent.toFixed(4) + '%' : undefined;
-        devLog(
-          `${LOG_PREFIX} Builder ${builder} is AUTHORIZED (maxFeeRate: ${feePercentage || 'N/A'}, raw: ${maxFeeRateRaw ?? 'N/A'})`,
-        );
         return {
           authorized: true,
           maxFeeRate: feePercentage,
@@ -510,10 +462,8 @@ export const checkGrvtBuilderAuthorized = async (
       }
     }
 
-    devLog(`${LOG_PREFIX} Builder ${builder} is NOT authorized (${builders.length} builder(s) found, none matched)`);
     return { authorized: false };
-  } catch (error) {
-    devLog(`${LOG_PREFIX} Failed to check builder authorization:`, error);
+  } catch (_error) {
     return { authorized: false };
   }
 };
@@ -649,13 +599,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     return { success: false, message: 'API key is required for GRVT authentication' };
   }
 
-  devLog(
-    `${LOG_PREFIX} Starting builder authorization flow\n` +
-      `  Builder:    ${builderAddress}\n` +
-      `  MaxFeeRate: ${maxFeeRate}\n` +
-      `  Testnet:    ${testnet}`,
-  );
-
   try {
     // Get proxy token for Tealstreet-Authorization header
     const proxyToken = await getProxyToken();
@@ -675,8 +618,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     }
 
     const signerAddress = accounts[0];
-    devLog(`${LOG_PREFIX} Wallet connected: ${signerAddress}`);
-
     // Switch wallet to the correct chain (325 prod, 326 testnet)
     // Wallets reject EIP-712 signatures when the domain chainId doesn't match the connected chain
     const requiredChainId = testnet ? 326 : 325;
@@ -694,7 +635,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
       }
 
       // Any other error (4902 = chain unknown, or wallet-specific codes) — try adding the chain
-      devLog(`${LOG_PREFIX} wallet_switchEthereumChain failed (code: ${errorCode}), trying wallet_addEthereumChain`);
       try {
         await provider.send('wallet_addEthereumChain', [
           {
@@ -716,8 +656,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
         };
       }
     }
-    devLog(`${LOG_PREFIX} Switched wallet to chain ${requiredChainId}`);
-
     // Generate nonce and expiration
     const nonce = Math.floor(Math.random() * 1e9); // Random nonce up to 1 billion
     const expirationMs = Date.now() + 24 * 60 * 60 * 1000; // 24 hours from now
@@ -738,12 +676,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
       expiration,
     };
 
-    devLog(
-      `${LOG_PREFIX} EIP-712 sign request\n` +
-        `  Domain:  ${JSON.stringify(domain)}\n` +
-        `  Message: ${JSON.stringify(message, null, 2)}`,
-    );
-
     // Sign using EIP-712
     const signer = await provider.getSigner();
     const signature = await signer.signTypedData(domain, AuthorizeBuilderTypes, message);
@@ -753,8 +685,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     const r = '0x' + sigBytes.slice(0, 64);
     const s = '0x' + sigBytes.slice(64, 128);
     const v = parseInt(sigBytes.slice(128, 130), 16);
-
-    devLog(`${LOG_PREFIX} EIP-712 signature obtained\n` + `  r: ${r}\n` + `  s: ${s}\n` + `  v: ${v}`);
 
     // Step 2: Send authorization request to GRVT Edge API via proxy
     const apiUrl = getGrvtEdgeApiUrl(testnet);
@@ -790,12 +720,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
       },
     };
 
-    devLog(
-      `${LOG_PREFIX} → POST ${url}\n` +
-        `  Headers: ${JSON.stringify(requestHeaders, null, 2)}\n` +
-        `  Body:    ${JSON.stringify(requestBody, null, 2)}`,
-    );
-
     const response = await fetch(url, {
       method: 'POST',
       headers: requestHeaders,
@@ -804,12 +728,6 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     });
 
     const responseData = (await response.json()) as Record<string, any>;
-
-    devLog(
-      `${LOG_PREFIX} ← POST ${url}\n` +
-        `  Status:   ${response.status} (${response.ok ? 'OK' : 'FAILED'})\n` +
-        `  Response: ${JSON.stringify(responseData, null, 2)}`,
-    );
 
     // Check for error response
     if (!response.ok) {
@@ -820,22 +738,18 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     // Check for success in response
     const success = responseData.success || responseData.s || response.ok;
     if (success) {
-      devLog(`${LOG_PREFIX} Builder authorization SUCCEEDED`);
       return { success: true, message: 'Builder authorized successfully' };
     }
 
     const errorMsg = responseData.message || responseData.m || 'Unknown error';
-    devLog(`${LOG_PREFIX} Builder authorization FAILED: ${errorMsg}`);
     return { success: false, message: errorMsg };
   } catch (err: unknown) {
     const error = err as { code?: number | string; message?: string };
     // Handle user rejection
     if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
-      devLog(`${LOG_PREFIX} Builder authorization REJECTED by user`);
       return { success: false, message: 'Signature request rejected by user' };
     }
 
-    devLog(`${LOG_PREFIX} Builder authorization ERROR:`, error.message || error);
     return { success: false, message: error.message || 'Failed to authorize builder' };
   }
 };

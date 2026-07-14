@@ -97,15 +97,24 @@ edge; it only re-evaluated on the ticker throttle. With the partial
 fills now visible, we *must* hold steady — otherwise the chaser
 re-evaluates and tries to cancel inside the fill window.
 
-## Fill-based tracking (Hyperliquid only)
+## Fill-based tracking (Hyperliquid and GRVT)
 
-For Hyperliquid, the chaser also subscribes to the `'fill'` event
-(`useFillBasedTracking`) — Hyperliquid's order-status lifecycle
-can lag behind the actual fill, and we want to mark the chase
-complete as soon as the fill event arrives instead of waiting for
-the order to be marked `Filled` in the next snapshot.
+For Hyperliquid and GRVT, the chaser also subscribes to the `'fill'` event
+(`useFillBasedTracking`) — an order-status lifecycle can lag behind the actual
+fill, and we want to mark the chase complete as soon as the fill event arrives
+instead of waiting for the order to be marked `Filled` in the next snapshot.
 
 Other exchanges rely on the order status transition.
+
+## Cancel-replace reconciliation fails closed
+
+After a cancel attempt, a fill-based exchange must provide a complete
+`fetchFillsForOrderIds()` result before the manager places a replacement. A
+cancellation can already have succeeded when its response is ambiguous; if
+reconciliation is unavailable or throws (including a pagination/integrity
+failure), mark the chaser failed, emit an actionable error, detach listeners,
+and clean it up. Never continue to replacement on that path: an unknown fill
+could overfill the user's target.
 
 ## User-cancel must tear down listeners and just-placed orders synchronously
 

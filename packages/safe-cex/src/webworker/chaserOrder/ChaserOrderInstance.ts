@@ -99,10 +99,15 @@ export class ChaserOrderInstance {
    * @param amount The incremental fill amount
    */
   addFillAmount(orderId: string, amount: number) {
-    // Accumulate fill amounts for this order
-    if (amount > 0) {
-      this._lastPartialFillAt = Date.now();
+    // Fill streams are external input. Exchange adapters validate their own
+    // payloads, but keep the shared chaser fail-closed so a malformed event
+    // can never increase remaining size or turn it into NaN/Infinity.
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
     }
+
+    // Accumulate fill amounts for this order
+    this._lastPartialFillAt = Date.now();
     this._filledByOrderId[orderId] = (this._filledByOrderId[orderId] || 0) + amount;
     this.recalculateRemainingSize();
     if (this._remainingSize <= 0) {

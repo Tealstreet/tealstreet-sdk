@@ -56,6 +56,7 @@ import { validatePrivateKey } from './grvt.signing';
 import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, GrvtCandlestickInterval } from './grvt.types';
 import { GrvtPrivateWebSocket } from './grvt.ws-private';
 import { GrvtPublicWebSocket } from './grvt.ws-public';
+import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
 
 type GrvtBuilderAuthState =
   | { status: 'unknown' }
@@ -86,7 +87,13 @@ export class GrvtExchange extends BaseExchange {
   // order_id is needed for cancelOrder API calls. Populated by WS/REST when
   // GRVT assigns a real oi (non-"0x00").
   _nonceToOrderId = new Map<string, string>();
+  // Keep creation times with the canonical nonce lifecycle. `undefined`
+  // means we cannot date a pre-existing order and must query safely broadly.
+  _nonceCreationTimes = new Map<string, number | undefined>();
   private static readonly MAX_NONCE_MAPPINGS = 200;
+  private static readonly CHASER_FILL_CLOCK_SKEW_MS = 5 * 60 * 1000;
+  private static readonly CHASER_FILL_PAGE_SIZE = 1000;
+  private static readonly MAX_CHASER_FILL_PAGES = 20;
 
   /**
    * Detailed builder authorization state. Tealstreet refuses to place GRVT orders
@@ -183,6 +190,44 @@ export class GrvtExchange extends BaseExchange {
     this.privateWebsocket.dispose();
     // Note: loop() automatically stops when isDisposed is true
   };
+
+  recordNonce(nonce: string, realOrderId?: string, creationTimeMs?: number) {
+    const existingCreationTime = this._nonceCreationTimes.get(nonce);
+    const hasExistingCreationTime = this._nonceCreationTimes.has(nonce);
+    const validCreationTime =
+      creationTimeMs !== undefined && Number.isFinite(creationTimeMs) && creationTimeMs > 0;
+
+    if (!hasExistingCreationTime) {
+      this._nonceCreationTimes.set(nonce, validCreationTime ? creationTimeMs : undefined);
+    } else if (validCreationTime && (existingCreationTime === undefined || creationTimeMs < existingCreationTime)) {
+      // Never narrow an existing nonce's reconciliation window.
+      this._nonceCreationTimes.set(nonce, creationTimeMs);
+    }
+
+    if (realOrderId && realOrderId !== '0x00' && realOrderId !== '0x0') {
+      this._nonceToOrderId.set(nonce, realOrderId);
+    }
+
+    while (this._nonceCreationTimes.size > GrvtExchange.MAX_NONCE_MAPPINGS) {
+      const oldestNonce = this._nonceCreationTimes.keys().next().value!;
+      this._nonceCreationTimes.delete(oldestNonce);
+      this._nonceToOrderId.delete(oldestNonce);
+    }
+  }
+
+  getOrderCreationTimeMs(metadata: any): number | undefined {
+    const rawCreationTime = metadata?.create_time ?? metadata?.ct;
+    if (typeof rawCreationTime !== 'string' && typeof rawCreationTime !== 'number') return undefined;
+    const rawString = String(rawCreationTime);
+    if (!/^\d+$/.test(rawString)) return undefined;
+
+    try {
+      const creationTimeMs = Number(BigInt(rawString) / 1_000_000n);
+      return Number.isFinite(creationTimeMs) && creationTimeMs > 0 ? creationTimeMs : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * Periodic balance refresh tick
@@ -461,7 +506,7 @@ export class GrvtExchange extends BaseExchange {
         const builders = data?.results || data?.r || [];
 
         this.log(
-          `get_authorized_builders returned ${builders.length} builder(s): ${JSON.stringify(builders)}`,
+          `get_authorized_builders returned ${builders.length} builder(s)`,
           LogSeverity.Debug,
         );
 
@@ -596,12 +641,7 @@ export class GrvtExchange extends BaseExchange {
 
       if (!useExternalPublicData) {
         // Fetch and set markets in store with loaded flag
-        let markets = await this.fetchMarkets();
-
-        // Update markets with actual leverage limits from API (requires auth)
-        if (!publicDataOnly) {
-          markets = await this.updateMarketLeverageLimits(markets);
-        }
+        const markets = await this.fetchMarkets();
 
         this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
 
@@ -631,6 +671,16 @@ export class GrvtExchange extends BaseExchange {
         this.log(`Error fetching balance: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty balance)
         this.store.update({ loaded: { ...this.store.loaded, balance: true } });
+      }
+
+      // fetchBalance() auto-detects the trading account for ordinary GRVT
+      // accounts. Do not query per-account leverage before that detection:
+      // doing so silently leaves the placeholder max of 100 in the store.
+      // A leverage failure is already contained by updateMarketLeverageLimits,
+      // so startup and the balance-loaded safety contract stay intact.
+      if (!useExternalPublicData && this.grvtTradingAccountId) {
+        const markets = await this.updateMarketLeverageLimits(this.store.markets);
+        this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
       }
 
       // Check builder authorization status (uses tradingXhr, so it's fast)
@@ -686,9 +736,7 @@ export class GrvtExchange extends BaseExchange {
 
   fetchMarkets = async (): Promise<Market[]> => {
     try {
-      console.log('[GRVT] fetchMarkets - START');
       const response = await this.xhr.post<{ r: any[] }>(ENDPOINTS.INSTRUMENTS, {});
-      console.log('[GRVT] fetchMarkets - response received:', response.data?.r?.length || 0, 'instruments');
 
       if (!response.data?.r) {
         return [];
@@ -805,7 +853,6 @@ export class GrvtExchange extends BaseExchange {
 
   fetchTickers = async (): Promise<Ticker[]> => {
     try {
-      console.log('[GRVT] fetchTickers - START (simulating from markets)');
       // GRVT doesn't have a single API to fetch all tickers
       // Simulate tickers from markets so screener can work
       // Real values will be populated via WebSocket ticker updates
@@ -825,7 +872,7 @@ export class GrvtExchange extends BaseExchange {
         quoteVolume: 0,
         info: {},
       }));
-      console.log(`[GRVT] fetchTickers - returning ${tickers.length} simulated tickers`);
+      this.log(`Returning ${tickers.length} simulated GRVT tickers`, LogSeverity.Debug);
       return tickers;
     } catch (err) {
       this.log(`Error fetching tickers: ${err}`, LogSeverity.Error);
@@ -947,7 +994,6 @@ export class GrvtExchange extends BaseExchange {
 
   fetchPositions = async (symbols?: string[]): Promise<Position[]> => {
     try {
-      console.log('[GRVT] fetchPositions - START');
       if (!this.grvtClient) {
         throw new Error('GRVT SDK client not initialized');
       }
@@ -962,7 +1008,6 @@ export class GrvtExchange extends BaseExchange {
       const instrumentIds = symbols?.map((s) => this.symbolToInstrumentId(s));
 
       // Use the SDK's TDG client to fetch positions
-      console.log('[GRVT] fetchPositions - fetching positions from TDG');
       const response = await (this.grvtClient as any).tdgClient.positions(
         {
           sub_account_id: this.grvtTradingAccountId,
@@ -973,7 +1018,7 @@ export class GrvtExchange extends BaseExchange {
 
       // Handle both lite format (r) and full format (result)
       const positionsData = response.r || response.result;
-      console.log('[GRVT] fetchPositions - positions received:', positionsData?.length || 0);
+      this.log(`GRVT positions response: ${positionsData?.length || 0} rows`, LogSeverity.Debug);
 
       if (!positionsData || positionsData.length === 0) {
         return this.getFakePositions();
@@ -1057,7 +1102,6 @@ export class GrvtExchange extends BaseExchange {
 
   fetchOpenOrders = async (symbol?: string): Promise<Order[]> => {
     try {
-      console.log('[GRVT] fetchOpenOrders - START');
       if (!this.grvtClient) {
         throw new Error('GRVT SDK client not initialized');
       }
@@ -1072,7 +1116,6 @@ export class GrvtExchange extends BaseExchange {
       const instrumentId = symbol ? this.symbolToInstrumentId(symbol) : undefined;
 
       // Use the SDK's TDG client to fetch open orders
-      console.log('[GRVT] fetchOpenOrders - fetching orders from TDG');
       const response = await (this.grvtClient as any).tdgClient.openOrders(
         {
           sub_account_id: this.grvtTradingAccountId,
@@ -1083,7 +1126,7 @@ export class GrvtExchange extends BaseExchange {
 
       // Handle both lite format (r) and full format (result)
       const ordersData = response.r || response.result;
-      console.log('[GRVT] fetchOpenOrders - orders received:', ordersData?.length || 0);
+      this.log(`GRVT open-orders response: ${ordersData?.length || 0} rows`, LogSeverity.Debug);
 
       // DEBUG: Log the raw response structure
       this.log(
@@ -1092,10 +1135,7 @@ export class GrvtExchange extends BaseExchange {
       );
 
       if (!ordersData) {
-        this.log(
-          `fetchOpenOrders: No orders data in response. Full response: ${JSON.stringify(response)}`,
-          LogSeverity.Warning,
-        );
+        this.log('fetchOpenOrders: no orders data in response', LogSeverity.Warning);
         return [];
       }
 
@@ -1134,16 +1174,18 @@ export class GrvtExchange extends BaseExchange {
     const rawOrderId = o.order_id || o.oi;
     const orderId = clientOrderId ? String(clientOrderId) : rawOrderId;
 
-    // Save nonce→realId mapping for cancelOrder if we have a real GRVT order_id
-    if (rawOrderId && rawOrderId !== '0x00' && rawOrderId !== '0x0' && clientOrderId) {
-      this._nonceToOrderId.set(String(clientOrderId), rawOrderId);
+    // REST snapshots can contain orders placed before this worker started. An
+    // absent/invalid upstream creation time stays explicitly unknown so the
+    // chaser uses a broad safety query rather than a guessed recent window.
+    if (clientOrderId) {
+      this.recordNonce(String(clientOrderId), rawOrderId, this.getOrderCreationTimeMs(metadata));
     }
 
     // Lookup market to get uppercased symbol
     // Handle both full (instrument) and lite (i) formats
     const instrument = leg.instrument || leg.i;
     if (!instrument) {
-      this.log(`mapOrder: No instrument found in order. leg=${JSON.stringify(leg)}`, LogSeverity.Warning);
+      this.log('mapOrder: no instrument found in order', LogSeverity.Warning);
     }
 
     const market = instrument
@@ -1164,20 +1206,15 @@ export class GrvtExchange extends BaseExchange {
 
     // Determine order type - check for trigger metadata first
     // Handle both full (trigger.trigger_type) and lite (t.tt) formats
-    let type: OrderType;
-    const trigger = metadata.trigger || metadata.t;
-    if (trigger) {
-      const triggerType = trigger.trigger_type || trigger.tt;
-      if (triggerType === 'STOP_LOSS') {
-        type = OrderType.StopLoss;
-      } else if (triggerType === 'TAKE_PROFIT') {
-        type = OrderType.TakeProfit;
-      } else {
-        type = isMarket ? OrderType.Market : OrderType.Limit;
-      }
-    } else {
-      type = isMarket ? OrderType.Market : OrderType.Limit;
-    }
+    const trigger = getGrvtTriggerMetadata(o);
+    const type =
+      trigger?.type === 'STOP_LOSS'
+        ? OrderType.StopLoss
+        : trigger?.type === 'TAKE_PROFIT'
+          ? OrderType.TakeProfit
+          : isMarket
+            ? OrderType.Market
+            : OrderType.Limit;
 
     // Handle both full and lite formats for side
     // Full: is_buying_asset | Lite: ib
@@ -1185,7 +1222,9 @@ export class GrvtExchange extends BaseExchange {
 
     // Handle both full and lite formats for price and size
     // Full: limit_price, size | Lite: lp, s
-    const price = parseFloat(leg.limit_price || leg.lp || '0');
+    const limitPrice = parseFloat(leg.limit_price || leg.lp || '0');
+    // In safe-cex, a standalone TP/SL order's price is its trigger price.
+    const price = trigger?.triggerPrice ?? limitPrice;
     const amount = parseFloat(leg.size || leg.s || '0');
 
     // Handle both full and lite formats for status
@@ -1207,6 +1246,10 @@ export class GrvtExchange extends BaseExchange {
       remaining: bookSize,
       status: this.mapOrderStatus(orderStatus),
       reduceOnly: reduceOnly || false,
+      timeInForce: getGrvtOrderTimeInForce(o),
+      ...(trigger?.close !== undefined ? { close: trigger.close } : {}),
+      ...(type === OrderType.StopLoss && trigger?.triggerType ? { slTriggerType: trigger.triggerType } : {}),
+      ...(type === OrderType.TakeProfit && trigger?.triggerType ? { tpTriggerType: trigger.triggerType } : {}),
       lastUpdate: updateTime ? parseInt(updateTime) / 1000000 : Date.now(),
       info: o,
     };
@@ -1265,7 +1308,7 @@ export class GrvtExchange extends BaseExchange {
       }
 
       // Parse instrument fields (lite format)
-      this.log(`Raw instrument: ${JSON.stringify(instrument)}`, LogSeverity.Debug);
+      this.log(`Instrument payload received (fieldCount=${Object.keys(instrument).length})`, LogSeverity.Debug);
 
       const instrumentHash = instrument.ih; // instrument_hash (e.g., "0x030501")
       const baseDecimals = instrument.bd || 9; // base_decimals
@@ -1373,36 +1416,9 @@ export class GrvtExchange extends BaseExchange {
         message: eip712Message,
       };
 
-      console.log('[GRVT] === EIP-712 Signing Details ===');
-      console.log('[GRVT] Domain:', JSON.stringify(domain));
-      console.log('[GRVT] PrimaryType:', orderTypeTemplate.primaryType);
-      console.log('[GRVT] Message:', JSON.stringify(eip712Message));
-      console.log('[GRVT] Message.legs[0]:', JSON.stringify(eip712Message.legs[0]));
-      console.log(
-        '[GRVT] Raw inputs: size=%s, price=%s, baseDecimals=%s, instrumentHash=%s',
-        size,
-        price,
-        baseDecimals,
-        instrumentHash,
-      );
-      console.log(
-        '[GRVT] Computed: contractSize=%s, limitPrice=%s',
-        eip712Message.legs[0].contractSize,
-        eip712Message.legs[0].limitPrice,
-      );
-      console.log(
-        '[GRVT] Builder: address=%s, feeInt=%s, feeStr=%s',
-        builderInfo.builder,
-        builderInfo.builderFeeInt,
-        builderInfo.builderFee,
-      );
-      console.log('[GRVT] Signer address:', this.wallet.address);
-
       // Sign the order using SDK's Signer
       const rawSignature = GrvtSigner.sign(privateKey, typedData as any);
       const { r, s, v } = GrvtSigner.decode(rawSignature);
-
-      console.log('[GRVT] Signature: r=%s, s=%s, v=%s', r, s, v);
 
       this.log(`Placing order: ${opts.symbol} ${side} ${size} @ ${price || 'market'}`, LogSeverity.Info);
       this.log(
@@ -1510,53 +1526,6 @@ export class GrvtExchange extends BaseExchange {
         builder_fee: builderInfo.builderFee,
       };
 
-      console.log('[GRVT] === API Payload ===');
-      console.log('[GRVT] Payload:', JSON.stringify(fullFormatOrder, null, 2));
-
-      // Convert to lite format (correct field mappings from docs)
-      const liteFormatOrder = {
-        sa: fullFormatOrder.sub_account_id,
-        im: fullFormatOrder.is_market,
-        ti: fullFormatOrder.time_in_force,
-        po: fullFormatOrder.post_only,
-        ro: fullFormatOrder.reduce_only,
-        l: fullFormatOrder.legs.map((leg: any) => ({
-          i: leg.instrument,
-          s: leg.size,
-          lp: leg.limit_price,
-          ib: leg.is_buying_asset,
-        })),
-        s: {
-          s: fullFormatOrder.signature.signer,
-          r: fullFormatOrder.signature.r,
-          s1: fullFormatOrder.signature.s, // Note: s1 to avoid conflict with parent 's'
-          v: fullFormatOrder.signature.v,
-          e: fullFormatOrder.signature.expiration,
-          n: fullFormatOrder.signature.nonce,
-          ci: fullFormatOrder.signature.chain_id,
-        },
-        m: {
-          co: fullFormatOrder.metadata.client_order_id,
-          ct: fullFormatOrder.metadata.create_time,
-          // Add trigger in lite format if present
-          ...(trigger && {
-            t: {
-              tt: trigger.trigger_type,
-              t: {
-                tb: trigger.tpsl.trigger_by,
-                tp: trigger.tpsl.trigger_price,
-                cp: trigger.tpsl.close_position,
-              },
-            },
-          }),
-        },
-        // Builder info after signature and metadata to match GRVT API field ordering
-        b: builderInfo.builder,
-        bf: builderInfo.builderFee,
-      };
-
-      this.log(`Lite format order: ${JSON.stringify(liteFormatOrder)}`, LogSeverity.Debug);
-
       // Use SDK's TDG client to create order (handles authentication via authenticatedEndpoint)
       const response = await (this.grvtClient as any).tdgClient.createOrder(
         { order: fullFormatOrder },
@@ -1596,16 +1565,11 @@ export class GrvtExchange extends BaseExchange {
       const nonceStr = String(nonce);
       this.log(`Order created successfully: nonce=${nonceStr}`, LogSeverity.Info);
 
-      // Save nonce → real oi mapping (will be "0x00" initially, updated by WS when real ID arrives)
+      // Record the locally-created canonical nonce even while GRVT has not
+      // assigned a real ID, so later reconciliation reaches its true start.
       const grvtOrderId =
         response.result?.order_id || response.r?.oi || response.order_id || response.data?.result?.order_id;
-      if (grvtOrderId && grvtOrderId !== '0x00' && grvtOrderId !== '0x0') {
-        this._nonceToOrderId.set(nonceStr, grvtOrderId);
-      }
-      if (this._nonceToOrderId.size > GrvtExchange.MAX_NONCE_MAPPINGS) {
-        const first = this._nonceToOrderId.keys().next().value!;
-        this._nonceToOrderId.delete(first);
-      }
+      this.recordNonce(nonceStr, grvtOrderId, Date.now());
 
       // Emit builder fee event so the UI can show a toast
       const responseOrder = response.result?.order || response.result || response.r;
@@ -1776,23 +1740,59 @@ export class GrvtExchange extends BaseExchange {
     try {
       const { order, update } = opts;
 
-      this.log(`Updating order ${order.id}: ${JSON.stringify(update)}`, LogSeverity.Info);
+      this.log(`Updating order ${order.id} (fieldCount=${Object.keys(update).length})`, LogSeverity.Info);
 
-      // Step 1: Cancel the existing order
-      await this.cancelOrder(order);
-      this.log(`Order ${order.id} cancelled for update`, LogSeverity.Debug);
+      // Build and validate the full replacement before cancelling. A GRVT
+      // cancel-and-replace cannot restore an attribute the upstream payload did
+      // not expose, so fail closed while the original order is still live.
+      if (!order.timeInForce) {
+        throw new Error(`Cannot safely update GRVT order ${order.id}: missing time-in-force`);
+      }
 
-      // Step 2: Create a new order with updated parameters
-      const newOrderOpts: PlaceOrderOpts = {
+      let newOrderOpts: PlaceOrderOpts = {
         symbol: order.symbol,
         type: order.type,
         side: order.side,
         amount: 'amount' in update ? update.amount : order.amount,
         price: 'price' in update ? update.price : order.price,
         reduceOnly: order.reduceOnly,
-        timeInForce: OrderTimeInForce.GoodTillCancel, // Default to GTC
+        timeInForce: order.timeInForce,
       };
 
+      if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
+        const trigger = getGrvtTriggerMetadata(order.info);
+        if (!trigger || trigger.type !== (order.type === OrderType.StopLoss ? 'STOP_LOSS' : 'TAKE_PROFIT')) {
+          throw new Error(`Cannot safely update GRVT order ${order.id}: missing trigger metadata`);
+        }
+        if (!Number.isFinite(trigger.triggerPrice) || trigger.triggerPrice! <= 0) {
+          throw new Error(`Cannot safely update GRVT order ${order.id}: missing trigger price`);
+        }
+        if (!trigger.triggerType || trigger.close === undefined || trigger.isSplitPosition === undefined) {
+          throw new Error(`Cannot safely update GRVT order ${order.id}: incomplete trigger metadata`);
+        }
+        // PlaceOrderOpts has no split-position field, so a cancel-and-replace
+        // would otherwise turn a split TP/SL into a non-split trigger.
+        if (trigger.isSplitPosition) {
+          throw new Error(`Cannot safely update GRVT order ${order.id}: split-position trigger is not supported`);
+        }
+
+        const triggerPrice = 'price' in update ? update.price : trigger.triggerPrice;
+        newOrderOpts = {
+          ...newOrderOpts,
+          price: triggerPrice,
+          triggerPrice,
+          close: trigger.close,
+          ...(order.type === OrderType.StopLoss
+            ? { slTriggerType: trigger.triggerType }
+            : { tpTriggerType: trigger.triggerType }),
+        };
+      }
+
+      // Step 1: Cancel the existing order only after the replacement is safe.
+      await this.cancelOrder(order);
+      this.log(`Order ${order.id} cancelled for update`, LogSeverity.Debug);
+
+      // Step 2: Create the semantically equivalent replacement.
       const newOrderIds = await this.placeOrder(newOrderOpts);
       this.log(
         `Order updated successfully: cancelled ${order.id}, created ${newOrderIds.join(', ')}`,
@@ -2185,37 +2185,108 @@ export class GrvtExchange extends BaseExchange {
         return fillsByOrderId;
       }
 
-      // Fetch recent fill history (last 5 minutes should cover any chaser order)
-      const fiveMinutesAgoNs = String((Date.now() - 5 * 60 * 1000) * 1_000_000);
+      const requestedOrderIds = new Set(orderIds.map((orderId) => String(orderId)));
+      const creationTimes = [...requestedOrderIds].map((orderId) => this._nonceCreationTimes.get(orderId));
+      // A guessed recent start can omit fills. Unknown timestamps deliberately
+      // use the broad start and rely on the finite page cap to fail closed.
+      const oldestCreationTime = creationTimes.every((time) => time !== undefined)
+        ? Math.min(...(creationTimes as number[]))
+        : undefined;
+      const startTimeMs =
+        oldestCreationTime === undefined
+          ? 0
+          : Math.max(0, oldestCreationTime - GrvtExchange.CHASER_FILL_CLOCK_SKEW_MS);
       const nowNs = String(Date.now() * 1_000_000);
+      const startTimeNs = String(startTimeMs * 1_000_000);
 
-      const { data } = await this.tradingXhr.post(ENDPOINTS.FILL_HISTORY, {
-        sa: subAccountId,
-        st: fiveMinutesAgoNs,
-        et: nowNs,
-        l: 200,
-      });
-
-      const fills = data?.r || data?.result || [];
-      if (!Array.isArray(fills)) {
-        return fillsByOrderId;
+      const requestedNonceByOrderId = new Map<string, string>();
+      for (const requestedOrderId of requestedOrderIds) {
+        const realOrderId = this._nonceToOrderId.get(requestedOrderId);
+        if (realOrderId) requestedNonceByOrderId.set(String(realOrderId), requestedOrderId);
       }
 
-      // Aggregate fill amounts by order ID
-      for (const fill of fills) {
-        const orderId = String(fill.oi || fill.order_id || '');
-        if (!orderId || !orderIds.includes(orderId)) continue;
+      let cursor: string | undefined;
+      const seenCursors = new Set<string>();
 
-        const amount = parseFloat(fill.s || fill.size || '0');
-        if (!Number.isFinite(amount)) continue;
+      for (let page = 0; page < GrvtExchange.MAX_CHASER_FILL_PAGES; page++) {
+        const { data } = await this.tradingXhr.post(ENDPOINTS.FILL_HISTORY, {
+          sa: subAccountId,
+          st: startTimeNs,
+          et: nowNs,
+          l: GrvtExchange.CHASER_FILL_PAGE_SIZE,
+          ...(cursor ? { c: cursor } : {}),
+        });
+        if (!data || typeof data !== 'object') {
+          throw new Error(`GRVT fill history page ${page + 1} has an invalid response shape`);
+        }
 
-        fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + amount);
+        const fills = data.r ?? data.result;
+        if (!Array.isArray(fills)) {
+          throw new Error(`GRVT fill history page ${page + 1} has no fill array`);
+        }
+
+        // Client IDs are GRVT's canonical identity for Tealstreet orders. Only
+        // fall back to oi/order_id when the fill did not carry one: treating a
+        // contradictory client ID as a mapping hit could credit another chaser.
+        for (const fill of fills) {
+          const metadata = fill.metadata ?? fill.m;
+          const clientOrderIds = new Set(
+            [fill.co, fill.client_order_id, metadata?.co, metadata?.client_order_id]
+              .filter((id) => id !== undefined && id !== null && id !== '')
+              .map((id) => String(id)),
+          );
+          let orderId: string | undefined;
+
+          if (clientOrderIds.size === 1) {
+            const [clientOrderId] = clientOrderIds;
+            if (requestedOrderIds.has(clientOrderId)) orderId = clientOrderId;
+          } else if (clientOrderIds.size === 0) {
+            const matchingOrderIds = new Set<string>();
+            for (const realOrderId of [fill.oi, fill.order_id]) {
+              if (realOrderId === undefined || realOrderId === null || realOrderId === '') continue;
+              const normalizedOrderId = String(realOrderId);
+              if (requestedOrderIds.has(normalizedOrderId)) matchingOrderIds.add(normalizedOrderId);
+              const requestedNonce = requestedNonceByOrderId.get(normalizedOrderId);
+              if (requestedNonce) matchingOrderIds.add(requestedNonce);
+            }
+            if (matchingOrderIds.size === 1) orderId = [...matchingOrderIds][0];
+          }
+
+          if (!orderId) continue;
+
+          const rawAmount = fill.s ?? fill.size;
+          const amount =
+            typeof rawAmount === 'number'
+              ? rawAmount
+              : typeof rawAmount === 'string' && /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(rawAmount)
+                ? Number(rawAmount)
+                : Number.NaN;
+          if (!Number.isFinite(amount) || amount <= 0) continue;
+
+          fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + amount);
+        }
+
+        const hasN = Object.prototype.hasOwnProperty.call(data, 'n');
+        const hasNext = Object.prototype.hasOwnProperty.call(data, 'next');
+        if (!hasN && !hasNext) {
+          throw new Error(`GRVT fill history page ${page + 1} is missing its cursor`);
+        }
+        const rawNext = hasN ? data.n : data.next;
+        if (typeof rawNext !== 'string') {
+          throw new Error(`GRVT fill history page ${page + 1} has an invalid cursor`);
+        }
+        if (!rawNext) return fillsByOrderId;
+        if (seenCursors.has(rawNext)) {
+          throw new Error(`GRVT fill history pagination repeated cursor on page ${page + 1}`);
+        }
+        seenCursors.add(rawNext);
+        cursor = rawNext;
       }
 
-      return fillsByOrderId;
+      throw new Error(`GRVT fill history exceeded ${GrvtExchange.MAX_CHASER_FILL_PAGES} pages`);
     } catch (e) {
       this.log(`fetchFillsForOrderIds error: ${e}`, LogSeverity.Warning);
-      return fillsByOrderId;
+      throw e;
     }
   };
 }

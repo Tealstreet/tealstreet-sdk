@@ -20,7 +20,15 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
   private subscriptions: Map<number, any> = new Map();
   private requestId = 1;
   private topics: Record<string, number> = {};
-  private tickerSubscriptions: number[] = [];
+  // Keep each market's ticker subscription stable across reconnects. The
+  // subscription map is replayed by resubscribe(), so creating a replacement
+  // here would send duplicate upstream topics on every reconnect.
+  private tickerSubscriptions = new Map<string, number>();
+  // The staggered batch callbacks outlive their originating socket unless we
+  // retain them. Track both handles and a generation so a reconnect, manual
+  // unsubscribe, or disposal cannot let stale work mutate subscription state.
+  private tickerBatchTimers = new Set<ReturnType<typeof setTimeout>>();
+  private tickerBatchGeneration = 0;
 
   constructor(parent: GrvtExchange) {
     super(parent);
@@ -42,7 +50,8 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
     if (!this.isDisposed) {
       this.trackLastReceived();
       this.resubscribe();
-      // Subscribe to all ticker streams (markets are always loaded before WebSocket connects)
+      // subscribeToAllTickers only creates topics that are not already in the
+      // replay map, including batches that were queued before a reconnect.
       this.subscribeToAllTickers();
 
       // Subscribe to new markets dynamically when market list is refreshed
@@ -57,8 +66,7 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
 
     for (const market of added) {
       try {
-        const subscriptionId = this.subscribeToTicker(market.id, 500, 'v1.ticker.d');
-        this.tickerSubscriptions.push(subscriptionId);
+        this.ensureTickerSubscription(market.id);
       } catch (error) {
         this.parent.emitAndLogError(`Error subscribing to ticker for ${market.symbol}: ${error}`);
       }
@@ -77,9 +85,12 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
    * Uses v1.ticker.d (delta) for efficiency - only changed fields are sent
    */
   subscribeToAllTickers = () => {
-    // Clear existing ticker subscriptions
-    this.tickerSubscriptions = [];
+    if (this.isDisposed || !this.isConnected) {
+      return;
+    }
 
+    this.cancelTickerBatches();
+    const batchGeneration = this.tickerBatchGeneration;
     // Subscribe to ticker updates for all markets
     const markets = this.parent.store.markets;
     if (markets.length === 0) {
@@ -91,13 +102,15 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
     for (let i = 0; i < markets.length; i += batchSize) {
       const batch = markets.slice(i, i + batchSize);
 
-      setTimeout(
+      const timeout = setTimeout(
         () => {
+          this.tickerBatchTimers.delete(timeout);
+          if (this.isDisposed || batchGeneration !== this.tickerBatchGeneration || !this.isConnected) {
+            return;
+          }
           for (const market of batch) {
             try {
-              // Subscribe to ticker delta stream (more efficient than snapshot)
-              const subscriptionId = this.subscribeToTicker(market.id, 500, 'v1.ticker.d');
-              this.tickerSubscriptions.push(subscriptionId);
+              this.ensureTickerSubscription(market.id);
             } catch (error) {
               this.parent.emitAndLogError(`Error subscribing to ticker for ${market.symbol}: ${error}`);
             }
@@ -105,7 +118,29 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
         },
         (i / batchSize) * 100,
       ); // Stagger batches by 100ms
+      this.tickerBatchTimers.add(timeout);
     }
+  };
+
+  private cancelTickerBatches = () => {
+    this.tickerBatchGeneration += 1;
+    for (const timer of this.tickerBatchTimers) {
+      clearTimeout(timer);
+    }
+    this.tickerBatchTimers.clear();
+  };
+
+  private ensureTickerSubscription = (instrumentId: string) => {
+    if (this.isDisposed || !this.isConnected) {
+      return;
+    }
+    if (this.tickerSubscriptions.has(instrumentId)) {
+      return this.tickerSubscriptions.get(instrumentId)!;
+    }
+
+    const subscriptionId = this.subscribeToTicker(instrumentId, 500, 'v1.ticker.d');
+    this.tickerSubscriptions.set(instrumentId, subscriptionId);
+    return subscriptionId;
   };
 
   /**
@@ -191,7 +226,9 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
           if (json.error.code === 1100) {
             return;
           }
-          this.parent.emitAndLogError(`WebSocket error: ${JSON.stringify(json.error)}`);
+          this.parent.emitAndLogError(
+            `WebSocket error (code=${typeof json.error.code === 'number' ? json.error.code : 'unknown'})`,
+          );
           return;
         }
 
@@ -333,6 +370,8 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
 
   unsubscribeFromTicker = (subscriptionId: number) => {
     if (this.subscriptions.has(subscriptionId)) {
+      // A pending batch may otherwise recreate the just-removed logical topic.
+      this.cancelTickerBatches();
       const unsubscribe = {
         jsonrpc: '2.0',
         id: this.requestId++,
@@ -344,6 +383,12 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
 
       this.send(JSON.stringify(unsubscribe));
       this.subscriptions.delete(subscriptionId);
+      for (const [instrumentId, tickerSubscriptionId] of this.tickerSubscriptions) {
+        if (tickerSubscriptionId === subscriptionId) {
+          this.tickerSubscriptions.delete(instrumentId);
+          break;
+        }
+      }
     }
   };
 
@@ -616,9 +661,10 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
   };
 
   dispose = () => {
+    this.cancelTickerBatches();
     this.subscriptions.clear();
-    if (this.ws) {
-      this.ws.close();
-    }
+    this.tickerSubscriptions.clear();
+    this.parent.emitter.off('markets:changed', this.onMarketsChanged);
+    super.dispose();
   };
 }

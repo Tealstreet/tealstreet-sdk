@@ -356,7 +356,7 @@ export class BaseWebSocket<T extends BaseExchange> {
 
       // Trigger reconnection when WebSocket is not ready
       this.parent.log(
-        `WebSocket not ready for send (state: ${stateName}). Triggering reconnection. Message preview: ${message.substring(0, 100)}`,
+        `WebSocket not ready for send (state: ${stateName}, stateCode: ${wsState}, messageType: ${typeof message}, messageLength: ${message.length}). Triggering reconnection.`,
         LogSeverity.Warning,
       );
 

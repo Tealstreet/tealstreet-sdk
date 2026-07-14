@@ -346,10 +346,14 @@ export class ChaserOrderManager {
               }
             }
 
-            // For Hyperliquid: Fetch fills from REST API before placing new orders
-            // This catches any fills that WebSocket hasn't delivered yet
-            if (useFillBasedTracking && 'fetchFillsForOrderIds' in exchange) {
+            // Fill-based exchanges must reconcile authoritatively before
+            // replacement. Cancellation can have won even when its response is
+            // ambiguous, so an unavailable or failed REST read is unsafe.
+            if (useFillBasedTracking) {
               try {
+                if (typeof (exchange as any).fetchFillsForOrderIds !== 'function') {
+                  throw new Error('fill reconciliation is unavailable');
+                }
                 const fillsMap = await (exchange as any).fetchFillsForOrderIds(instance.currentOrderIds);
                 for (const [orderId, filledAmount] of fillsMap) {
                   // Only update if we got more filled than we knew about
@@ -363,8 +367,12 @@ export class ChaserOrderManager {
                   return;
                 }
               } catch (e) {
-                this.log(`Failed to fetch fills from REST: ${e}`, instance);
-                // Continue anyway - WebSocket tracking should still work
+                const message = `Chaser reconciliation failed after cancellation; stopped before replacement: ${e}`;
+                this.log(message, instance);
+                instance.markComplete('Failed to reconcile fills after cancellation');
+                exchange?.emitter.emit('error', message);
+                await this.cleanupInstance(instance);
+                return;
               }
             }
 

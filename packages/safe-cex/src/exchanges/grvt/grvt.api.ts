@@ -4,6 +4,7 @@ import type { ExchangeOptions } from '../../types';
 import retry, { isNetworkError } from 'axios-retry';
 
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { LogSeverity } from '../../types';
 import { BASE_URLS } from './grvt.types';
 
 export function createAPI(opts: ExchangeOptions, exchange: any): AxiosInstance {
@@ -150,7 +151,7 @@ export function createEdgeAPI(opts: ExchangeOptions, exchange: any): AxiosInstan
           exchange.apiExtras = {};
         }
         exchange.apiExtras.sessionCookie = proxySessionCookie;
-        console.log('[GRVT] Extracted session cookie from X-Ts-Grvt-Session header');
+        exchange.log?.('GRVT session cookie refreshed from proxy response', LogSeverity.Debug);
       } else {
         // Fallback: try Set-Cookie (works in Node.js/CLI, not in browser)
         const setCookieRaw = response.headers['set-cookie'];
@@ -164,7 +165,7 @@ export function createEdgeAPI(opts: ExchangeOptions, exchange: any): AxiosInstan
               exchange.apiExtras = {};
             }
             exchange.apiExtras.sessionCookie = cookieValue;
-            console.log('[GRVT] Extracted session cookie from Set-Cookie header (fallback)');
+            exchange.log?.('GRVT session cookie refreshed from Set-Cookie response', LogSeverity.Debug);
           }
         }
       }
@@ -175,7 +176,7 @@ export function createEdgeAPI(opts: ExchangeOptions, exchange: any): AxiosInstan
           exchange.apiExtras = {};
         }
         exchange.apiExtras.accountId = accountId;
-        console.log('[GRVT] Extracted account ID from X-Grvt-Account-Id header:', accountId);
+        exchange.log?.('GRVT account ID refreshed from authentication response', LogSeverity.Debug);
       }
 
       return response;
@@ -315,22 +316,11 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
         const data = error.response.data;
         const errorCode = data?.c || data?.code || data?.error?.code;
 
-        // Debug: log the error details
-        console.log('[GRVT] TDG Error interceptor:', {
-          status,
-          errorCode,
-          errorCodeType: typeof errorCode,
-          isReauthenticating,
-          hasConfig: !!error.config,
-          isRetry: error.config?._retry,
-          hasAuthMethod: typeof exchange?.authenticate === 'function',
-        });
-
         // Check for authentication error (code 1000) and try to re-authenticate
         // Use == to handle both string "1000" and number 1000
         if (errorCode == 1000 && !isReauthenticating && error.config && !error.config._retry) {
           isReauthenticating = true;
-          console.log('[GRVT] Authentication error 1000, attempting re-authentication...');
+          exchange.log?.('GRVT authentication error 1000; refreshing session', LogSeverity.Warning);
 
           try {
             // Clear existing session to force re-auth
@@ -346,11 +336,9 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
 
             // Call the exchange's authenticate method
             if (typeof exchange.authenticate === 'function') {
-              console.log('[GRVT] Calling exchange.authenticate()...');
               const authResult = await exchange.authenticate();
-              console.log('[GRVT] authenticate() returned:', authResult);
               if (authResult) {
-                console.log('[GRVT] Re-authentication successful, retrying request...');
+                exchange.log?.('GRVT session refresh succeeded; retrying request', LogSeverity.Debug);
 
                 // Mark the request as a retry to prevent infinite loops
                 error.config._retry = true;
@@ -360,24 +348,18 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
                   // Use custom header - Lambda will convert to Cookie
                   error.config.headers['X-Ts-Grvt-Session'] = exchange.apiExtras.sessionCookie;
                   error.config.grvtCookie = `rm=true; gravity=${exchange.apiExtras.sessionCookie}`;
-                  console.log('[GRVT] Updated X-Ts-Grvt-Session header for retry');
                 }
                 if (exchange.apiExtras?.accountId) {
                   error.config.headers['X-Grvt-Account-Id'] = exchange.apiExtras.accountId;
                   error.config.grvtAccountId = exchange.apiExtras.accountId;
-                  console.log('[GRVT] Updated X-Grvt-Account-Id header for retry');
                 }
 
                 isReauthenticating = false;
                 return instance(error.config);
-              } else {
-                console.log('[GRVT] authenticate() returned falsy, not retrying');
               }
-            } else {
-              console.log('[GRVT] exchange.authenticate is not a function:', typeof exchange?.authenticate);
             }
           } catch (authError) {
-            console.error('[GRVT] Re-authentication failed:', authError);
+            exchange.log?.(`GRVT session refresh failed: ${authError}`, LogSeverity.Warning);
           } finally {
             isReauthenticating = false;
           }
@@ -399,11 +381,6 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
           errorMessage = `GRVT Trading API Error: ${data.message}`;
         } else if (typeof data === 'string') {
           errorMessage = `GRVT Trading API Error: ${data}`;
-        }
-
-        // Enhanced error logging for debugging
-        if (status === 403 || status === 401) {
-          console.log(`GRVT ${status} Error Details:`, JSON.stringify(data, null, 2));
         }
 
         const customError = new Error(`${errorMessage} (${status})`);

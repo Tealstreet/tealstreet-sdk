@@ -268,6 +268,15 @@ Hyperliquid uses only two REST endpoints. All operations are differentiated by t
 | `spotMetaAndAssetCtxs`          | Spot market metadata                                             | Spot startup                            |
 | `spotClearinghouseState`        | Spot balances / holds (collateral source for unified/portfolio)  | Spot exchange + perps unified/portfolio |
 
+### Chaser fill reconciliation
+
+`fetchFillsForOrderIds()` is used after a chaser cancel attempt, before a
+replacement can be placed. It must throw on a failed or malformed `userFills`
+response; returning an empty map is reserved for a valid response with no
+matching fills. The chaser manager treats a thrown reconciliation as a
+fail-closed stop because cancellation may already have succeeded and a missed
+fill would make the replacement overfill the target.
+
 ### Exchange Types (POST /exchange, `action.type` field)
 
 | Type                   | Purpose                                                            |

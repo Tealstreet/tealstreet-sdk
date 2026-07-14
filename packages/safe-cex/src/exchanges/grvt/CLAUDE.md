@@ -18,7 +18,8 @@ GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack
 
 **Official Documentation**: https://api-docs.grvt.io/
 
-**Local API Documentation** (cached from GitHub):
+**Local API Documentation** (cached reference; check the official docs above
+for current protocol behavior before making an integration change):
 
 - **Market Data API**: [./docs/market_data_api.md](./docs/market_data_api.md)
 - **Market Data Streams**: [./docs/market_data_streams.md](./docs/market_data_streams.md)
@@ -136,17 +137,18 @@ Defined in `start()` at `grvt.exchange.ts:369-451`:
    -> POST /auth/api_key/login to Edge Gateway
    -> Extracts session cookie and account ID from response headers
 2. fetchMarkets() -> POST /lite/v1/all_instruments (sequential)
-3. updateMarketLeverageLimits(markets) [requires auth, sequential]
-   -> getAllInitialLeverage() via SDK TDG client
-   -> Updates market.limits.leverage.max for each instrument
-4. store.update({ markets, loaded.markets: true })
-5. publicWebsocket.connectAndSubscribe() (non-blocking)
+3. store.update({ markets, loaded.markets: true })
+4. publicWebsocket.connectAndSubscribe() (non-blocking)
    -> Connects to WSS, subscribes to all ticker delta streams in batches
 6. fetchTickers() -> creates placeholder tickers from markets (sequential)
    -> store.update({ tickers, loaded.tickers: true })
-7. fetchBalance() -> POST /lite/v1/aggregated_account_summary (sequential)
+6. fetchBalance() -> POST /lite/v1/aggregated_account_summary (sequential)
    -> Auto-detects grvtTradingAccountId from sub_account_summaries if not set
    -> store.update({ balance, loaded.balance: true })
+7. updateMarketLeverageLimits(markets) [requires auth, sequential]
+   -> only after the trading account is configured or auto-detected
+   -> getAllInitialLeverage() via SDK TDG client and updates each max
+   -> a failure preserves the existing placeholder limits and startup continues
 8. fetchBuilderAuthorization() [background, non-blocking]
    -> checkGrvtBuilderAuthorized() via proxy API
 9. privateWebsocket.connectAndSubscribe() [after fetchBalance]
@@ -229,7 +231,12 @@ The code handles both formats throughout with fallback patterns like `feed.i || 
 
 1. Tracks last received
 2. Re-subscribes all existing subscriptions (reconnect support)
-3. Subscribes to all ticker streams for loaded markets
+3. Creates ticker subscriptions only for markets without an existing logical
+   topic; queued batches repeat the same check, so reconnect cannot duplicate
+   ticker topics. Batch timers are retained and invalidated on reconnect,
+   ticker unsubscribe, and `dispose()`, so stale work cannot recreate state or
+   send after shutdown. `dispose()` removes the market listener and delegates
+   socket shutdown to `BaseWebSocket.dispose()`.
 
 **Ticker Subscriptions** (`grvt.ws-public.ts:61-88`):
 
@@ -295,6 +302,15 @@ The code handles both formats throughout with fallback patterns like `feed.i || 
    ```
 2. Proxy responds with `{ type: "auth_success" }`
 3. Then subscribes to private streams
+
+If the proxy rejects authentication or GRVT returns official error `1000`
+(authentication required), the socket refreshes the Edge session once and
+reconnects because proxy auth must be the first frame. `auth_success` is only
+transport readiness: it does **not** reset that budget. A private-feed payload
+that remains healthy for five minutes is the sole reset point. A failed refresh
+or another auth error before that bounded healthy session force-closes the
+private socket, clears its timers/socket reference, and emits a redacted,
+actionable error; it must never continue with the stale cookie.
 
 **Subscriptions** (`grvt.ws-private.ts:94-117`):
 
@@ -412,10 +428,52 @@ Trigger metadata format:
 
 ### Order Update (`grvt.exchange.ts:1459-1496`)
 
-GRVT does not support native order modification. Implemented as cancel-and-replace:
+GRVT does not support native order modification. `updateOrder()` builds and
+validates the full replacement *before* cancelling the live order, then
+cancels and places it. REST `mapOrder()` and private-WS `parseOrder()` must
+both preserve GRVT's `time_in_force`/`ti`, `post_only`/`po`, `reduce_only`/`ro`,
+and TP/SL metadata. `post_only: true` is represented as safe-cex
+`OrderTimeInForce.PostOnly`; GTT, IOC, and FOK map to their respective
+safe-cex TIF values.
 
-1. Cancel existing order
-2. Place new order with updated price/amount
+For standalone TP/SL, the store price is `trigger_price`, and replacement
+passes it explicitly as `triggerPrice` together with `trigger_by` and
+`close_position`. Do not default a missing/unsupported TIF, trigger price,
+trigger type, or close flag: fail before cancellation so an existing order is
+never silently replaced with weaker semantics.
+
+Validate the upstream TIF before interpreting `post_only`: only
+`GOOD_TILL_TIME` plus `post_only: true` maps to `PostOnly`. `ALL_OR_NONE`,
+`RETAIL_PRICE_IMPROVEMENT`, unknown TIFs, and maker IOC/FOK combinations do
+not have a safe-cex representation and must leave `timeInForce` undefined so
+`updateOrder()` rejects them before cancellation.
+
+GRVT also requires `is_split_position` on TP/SL metadata. `PlaceOrderOpts`
+cannot represent it, so `updateOrder()` must reject a split TP/SL before
+cancellation rather than silently recreate it as a non-split trigger.
+
+### Chaser REST Fill Verification
+
+`placeOrder()` returns the decimal nonce/client-order ID as the canonical
+safe-cex order ID; GRVT assigns the hex `order_id` asynchronously. The chaser
+therefore passes canonical nonces to `fetchFillsForOrderIds()` when it checks
+for a fill that private WS has not delivered yet. Match a fill's `co` /
+`client_order_id` first, and only use `_nonceToOrderId` to translate a fill
+that omits a client ID. If client-ID fields disagree, do not use the real-ID
+mapping as a fallback: skipping an ambiguous fill is safer than crediting a
+different chaser order and changing its remaining size. GRVT fill history is
+reverse chronological and cursor-paginated: retain each canonical nonce's
+creation time (placement time or `metadata.create_time` / lite `ct`) in the
+same bounded lifecycle as its real-ID mapping, then query from the oldest
+requested creation time less a small clock-skew margin. If any requested nonce
+has an unknown timestamp, query from the safe broad start instead. Use the
+official 1000-record maximum and stop at the explicit bounded page cap. Every
+page must own a string `n` or `next` cursor; only `''` is terminal, while a
+missing, malformed, or repeated cursor and page-cap exhaustion are errors,
+never partial fill results that could permit a replacement order. Credit only
+strict full-string finite, positive decimal fill amounts on both REST history
+and private-WS events; malformed, zero, negative, non-finite, and
+trailing-junk values must not reach (or change) the chaser's remaining size.
 
 ### Builder Fee Integration (`grvt.exchange.ts:304-351`, `grvt.builder.ts`)
 
@@ -592,13 +650,13 @@ Stored in `.apikey.json`:
 
 3. **Instrument re-fetch on every order**: `placeOrder()` re-fetches all instruments to get `instrument_hash`, `base_decimals`, and `quote_decimals` for EIP-712 signing (`grvt.exchange.ts:1005-1009`). This is wasteful and could be cached.
 
-4. **Private WS through proxy**: Private WebSocket connects through Tealstreet's proxy (`wss://fsjnpy143pbz.jp.tealstreet.io/grvt`) rather than directly to GRVT, because browser security prevents sending cookies directly.
+4. **Private WS through proxy**: Private WebSocket gets its Tealstreet proxy host from `resolveExchangeRouting(...).wsPrivate`, rather than connecting directly to GRVT, because browser security prevents sending cookies directly.
 
 5. **Symbol case sensitivity**: GRVT uses mixed case (`BTC_USDT_Perp`) while the store uses uppercase (`BTC_USDT_PERP`). The `symbolToInstrumentId()` method handles conversion, and market lookups try multiple case formats.
 
 6. **Trading account ID auto-detection**: If not provided, auto-detected from the first sub-account in aggregated_account_summary (`grvt.exchange.ts:643-654`). Many operations silently skip if no trading account ID is available.
 
-7. **Console.log statements**: Several `console.log` statements remain in production code (e.g., `grvt.exchange.ts:455`, `574`). These are debug leftovers.
+7. **Diagnostics**: GRVT runtime and builder paths have no console diagnostics. Use only safe `BaseExchange.log()` messages with explicit severity where an exchange instance exists; never log API keys, proxy tokens, session cookies, auth headers, request/response bodies, or signatures. The trusted GRVT audit regression statically rejects console calls in runtime sources.
 
 8. **Chainid discrepancy**: `grvt.signing.ts` defines testnet chainId as 325, but `grvt.exchange.ts` uses 326. The exchange.ts values are authoritative for order signing.
 
@@ -606,7 +664,7 @@ Stored in `.apikey.json`:
 
 10. **Builder authorization cached as tristate**: `_builderAuthorized` is `true`, `false`, or `null` (unknown). If null, `getBuilderInfo()` triggers a fetch before returning.
 
-11. **No batch order placement**: `placeOrders()` loops sequentially. GRVT has a `create_bulk_orders` endpoint that is not used.
+11. **No batch order placement**: `placeOrders()` loops sequentially. Current official GRVT trading docs do not document a bulk-create endpoint.
 
 12. **GRVT SDK client uses `any` casts**: Many SDK client calls use `(this.grvtClient as any).tdgClient.*` because the TypeScript types are incomplete.
 
@@ -731,6 +789,4 @@ The directory contains 30+ test scripts (`test-*.ts`) covering:
 - [ ] Vault operations (invest, redeem, query)
 - [ ] Cross-exchange vault support
 - [ ] Cache instrument data to avoid re-fetching on every order
-- [ ] Use batch order placement API (`create_bulk_orders`)
-- [ ] Remove debug console.log statements
 - [ ] Resolve chainId discrepancy between signing.ts and exchange.ts

@@ -248,6 +248,39 @@ describe('ChaserOrderManager', () => {
     expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
   });
 
+  it('never replaces after cancellation when fill reconciliation fails', async () => {
+    // This regression intentionally lives with the chaser, not GRVT: any
+    // fill-based exchange must fail closed once cancellation may have won.
+    const { emit, exchange, order, store } = createMockExchange();
+    (exchange as any).name = 'grvt';
+    (exchange as any).fetchFillsForOrderIds = vi.fn().mockRejectedValue(new Error('cursor integrity failure'));
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    await emit('update', store);
+
+    (store.tickersBySymbol.BTCUSDT as any).bid = 101;
+    (store.tickersBySymbol.BTCUSDT as any).ask = 102;
+    await emit('update', store);
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([order]);
+    expect((exchange as any).fetchFillsForOrderIds).toHaveBeenCalledWith(['order-1']);
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
+    expect(instance.state.stopReason).toBe('Failed to reconcile fills after cancellation');
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringMatching(/stopped before replacement/i));
+    expect(manager.instances).not.toContain(instance);
+  });
+
   it('stops reduce-only chasers when the reducing position is gone on a store update', async () => {
     const { emit, exchange, store } = createMockExchange();
     const manager = new ChaserOrderManager();

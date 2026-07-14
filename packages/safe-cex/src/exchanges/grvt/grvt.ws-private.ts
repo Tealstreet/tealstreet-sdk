@@ -5,7 +5,6 @@ import {
   Order,
   OrderSide,
   OrderStatus,
-  OrderTimeInForce,
   OrderType,
   Position,
   PositionSide,
@@ -14,11 +13,23 @@ import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { GrvtExchange } from './grvt.exchange';
+import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
+
+const parsePositiveFiniteDecimal = (value: unknown): number | undefined => {
+  const amount =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+
+  return Number.isFinite(amount) && amount > 0 ? amount : undefined;
+};
 
 /**
  * GRVT Private WebSocket - Account and trading streams
  *
- * Connects through WebSocket proxy at wss://fsjnpy143pbz.jp.tealstreet.io/grvt
+ * Connects through the routing-table-selected Tealstreet WebSocket proxy.
  *
  * Automatically subscribes to:
  * - v1.order: Real-time order updates → updates store.orders
@@ -38,6 +49,24 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   private subscriptions: Map<number, any> = new Map();
   private requestId = 1;
   private authenticated = false;
+  /**
+   * A terminal authentication failure deliberately survives close events. The
+   * parent exchange must be recreated (or explicitly force-opened elsewhere)
+   * rather than allowing the base socket's native-close retry path to revive a
+   * stream whose credentials have just been rejected.
+   */
+  private authenticationFailed = false;
+  private sessionRefreshInFlight = false;
+  private sessionRefreshAttempts = 0;
+  private static readonly MAX_SESSION_REFRESH_ATTEMPTS = 1;
+  /**
+   * Proxy auth only proves that the proxy accepted its first frame. A session
+   * becomes healthy only after a private feed has remained usable for this
+   * bounded period; a quick auth_success -> 1000 sequence must retain the
+   * original refresh budget.
+   */
+  private privateStreamHealthyAt?: number;
+  private static readonly HEALTHY_SESSION_RESET_MS = 5 * 60_000;
 
   // Relaxed idle thresholds for event-driven private stream.
   // This WS only sends messages on order/position/fill changes, so long
@@ -65,7 +94,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   }
 
   ping = () => {
-    if (!this.isDisposed) {
+    if (!this.isDisposed && !this.authenticationFailed) {
       this.pingAt = performance.now();
       this.send('ping');
     }
@@ -125,7 +154,9 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   };
 
   onOpen = () => {
-    if (!this.isDisposed) {
+    if (!this.isDisposed && !this.authenticationFailed) {
+      this.authenticated = false;
+      this.privateStreamHealthyAt = undefined;
       this.parent.log('GRVT private WebSocket connected to proxy');
 
       // Send proxy authentication message (must be first message)
@@ -147,6 +178,64 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
 
     this.parent.log('Sending authentication to GRVT proxy');
     this.send(JSON.stringify(authMessage));
+  };
+
+  private resetRetryBudgetAfterHealthySession = () => {
+    if (
+      this.privateStreamHealthyAt !== undefined &&
+      Date.now() - this.privateStreamHealthyAt >= GrvtPrivateWebSocket.HEALTHY_SESSION_RESET_MS
+    ) {
+      this.sessionRefreshAttempts = 0;
+      // Reset only once per authenticated session; otherwise every later 1000
+      // would look like a separate healthy window.
+      this.privateStreamHealthyAt = undefined;
+    }
+  };
+
+  private refreshSessionAndReconnect = (reason: 'proxy authentication rejected' | 'GRVT error 1000' | 'session refresh failed') => {
+    if (this.sessionRefreshInFlight || this.isDisposed || this.authenticationFailed) {
+      return;
+    }
+
+    this.resetRetryBudgetAfterHealthySession();
+
+    if (this.sessionRefreshAttempts >= GrvtPrivateWebSocket.MAX_SESSION_REFRESH_ATTEMPTS) {
+      this.failClosedForAuthentication(reason);
+      return;
+    }
+
+    this.sessionRefreshInFlight = true;
+    this.sessionRefreshAttempts += 1;
+    this.authenticated = false;
+
+    void (async () => {
+      try {
+        const refreshed = await this.parent.authenticate();
+        if (!refreshed || !this.parent.apiExtras?.sessionCookie || !this.parent.apiExtras.accountId) {
+          throw new Error('GRVT authentication did not return a complete session');
+        }
+        if (this.isDisposed) return;
+
+        this.parent.log(`Refreshing GRVT private WebSocket session after ${reason}`, LogSeverity.Warning);
+        await this.reconnect();
+      } catch (_error) {
+        this.failClosedForAuthentication('session refresh failed');
+      } finally {
+        this.sessionRefreshInFlight = false;
+      }
+    })();
+  };
+
+  private failClosedForAuthentication = (reason: 'proxy authentication rejected' | 'GRVT error 1000' | 'session refresh failed') => {
+    this.authenticated = false;
+    this.authenticationFailed = true;
+    // Do not include proxy/GRVT payloads or caught errors here: those can
+    // contain request context. The user-visible remediation is actionable and
+    // safe to persist in diagnostics.
+    this.parent.emitAndLogError(
+      `GRVT private WebSocket authentication failed closed (${reason}). Check the API key and account authorization, then reconnect.`,
+    );
+    this.dispose();
   };
 
   private subscribe = () => {
@@ -196,7 +285,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   };
 
   onMessage = ({ data }: MessageEvent) => {
-    if (!this.isDisposed) {
+    if (!this.isDisposed && !this.authenticationFailed) {
       this.trackLastReceived();
 
       // Handle ping/pong messages
@@ -221,24 +310,35 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         }
 
         if (json.type === 'error') {
-          this.parent.log(`WebSocket proxy error: ${json.error}`, LogSeverity.Error);
+          this.refreshSessionAndReconnect('proxy authentication rejected');
           return;
         }
 
         // Handle subscription confirmations
         if (json.result && json.id) {
-          this.parent.log(`Private WS subscription confirmed: ${JSON.stringify(json.result)}`);
+          this.parent.log(`Private WS subscription confirmed (requestId=${json.id})`);
           return;
         }
 
         // Handle error responses
         if (json.error) {
-          this.parent.emitAndLogError(`Private WS error: ${JSON.stringify(json.error)}`);
+          const errorCode = json.error.code ?? json.error.c;
+          if (errorCode == 1000) {
+            this.refreshSessionAndReconnect('GRVT error 1000');
+            return;
+          }
+          this.parent.emitAndLogError(
+            `Private WS error (code=${typeof errorCode === 'number' ? errorCode : 'unknown'})`,
+          );
           return;
         }
 
         // Handle GRVT-specific error format: { code, message, status }
         if (json.code && json.status) {
+          if (json.code == 1000) {
+            this.refreshSessionAndReconnect('GRVT error 1000');
+            return;
+          }
           // Skip malformed syntax errors (1003) - these are noise
           if (json.code === 1003) {
             return;
@@ -246,10 +346,10 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
           // IP whitelisting error
           if (json.code === 1008) {
             this.parent.emitAndLogError(
-              `${json.message || 'IP not whitelisted'}. Please re-add your API key with correct IP whitelisting (18.176.98.246).`,
+              'GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).',
             );
           } else {
-            this.parent.emitAndLogError(`GRVT error (${json.code}): ${json.message}`);
+            this.parent.emitAndLogError(`GRVT error (code=${json.code})`);
           }
           return;
         }
@@ -259,6 +359,12 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         // Lite format: { s: 'v1.order', f: {...} }
         const stream = json.stream || json.s;
         if (stream) {
+          // This is the explicit healthy-session point. It must survive for
+          // HEALTHY_SESSION_RESET_MS before a later auth failure earns a new
+          // single refresh attempt.
+          if (this.authenticated && this.privateStreamHealthyAt === undefined) {
+            this.privateStreamHealthyAt = Date.now();
+          }
           switch (stream) {
             case 'v1.order':
             case 'v1.state':
@@ -273,8 +379,8 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
               break;
           }
         }
-      } catch (error) {
-        this.parent.emitAndLogError(`Error parsing private WS message: ${error}`);
+      } catch (_error) {
+        this.parent.emitAndLogError('Error parsing private WS message');
       }
     }
   };
@@ -427,6 +533,15 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
       const size = feed.size || feed.s;
       const price = feed.price || feed.p;
       const tradeId = feed.trade_id || feed.ti;
+      // Fill events drive chaser remaining size. Accepting a partial parse
+      // (or a negative/non-finite amount) here can enlarge or poison the
+      // next cancel-replace order, so match the strict REST reconciliation
+      // contract before deduplication or emission.
+      const amount = parsePositiveFiniteDecimal(size);
+      if (amount === undefined) {
+        this.parent.log('Ignoring GRVT fill with invalid size', LogSeverity.Warning);
+        return;
+      }
 
       // Deduplicate fills to prevent duplicate toasters
       const fillKey = tradeId || `${instrument}-${price}-${size}-${Date.now()}`;
@@ -461,12 +576,12 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         side: isBuyer ? OrderSide.Buy : OrderSide.Sell,
         symbol: market.symbol,
         price: parseFloat(price),
-        amount: parseFloat(size),
+        amount,
       });
 
       this.recordMessageHandlerStats('fills');
-    } catch (error) {
-      this.parent.emitAndLogError(`Error handling fill update: ${error}`);
+    } catch (_error) {
+      this.parent.emitAndLogError('Error handling fill update');
     }
   };
 
@@ -475,16 +590,13 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
    */
   private parseOrder = (feed: any): Order | null => {
     try {
-      // DEBUG: Log the raw feed structure
-      this.parent.log(`parseOrder: raw feed keys: ${Object.keys(feed).join(', ')}`, LogSeverity.Debug);
-
       // Get the first leg (support both full and lite formats)
       const firstLeg = feed.legs?.[0] || feed.l?.[0];
       const instrumentId = firstLeg?.instrument || firstLeg?.i;
 
       if (!instrumentId) {
         this.parent.log(
-          `parseOrder: instrumentId is undefined. firstLeg=${JSON.stringify(firstLeg)}, feed.legs=${JSON.stringify(feed.legs)}, feed.l=${JSON.stringify(feed.l)}`,
+          `parseOrder: missing instrument ID (event=order, legCount=${Array.isArray(feed.legs || feed.l) ? (feed.legs || feed.l).length : 0})`,
           LogSeverity.Warning,
         );
         return null;
@@ -498,7 +610,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
 
       if (!market) {
         this.parent.log(
-          `parseOrder: market not found for instrumentId=${instrumentId}. Available markets: ${this.parent.store.markets.length}`,
+          `parseOrder: market not found (event=order, marketCount=${this.parent.store.markets.length})`,
           LogSeverity.Warning,
         );
         return null;
@@ -518,13 +630,18 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
 
       // If we got a real GRVT order_id, save the nonce→realId mapping for cancelOrder
       const isRealOrderId = rawOrderId && rawOrderId !== '0x00' && rawOrderId !== '0x0';
-      if (isRealOrderId && clientOrderId) {
-        (this.parent as GrvtExchange)._nonceToOrderId.set(String(clientOrderId), rawOrderId);
+      if (clientOrderId) {
+        const exchange = this.parent as GrvtExchange;
+        exchange.recordNonce(
+          String(clientOrderId),
+          isRealOrderId ? rawOrderId : undefined,
+          exchange.getOrderCreationTimeMs(metadata),
+        );
       }
 
       if (!orderId || orderId === '0x00' || orderId === '0x0') {
         this.parent.log(
-          `parseOrder: no usable order ID. oi="${rawOrderId}" co="${clientOrderId}"`,
+          `parseOrder: no usable order ID (event=order, hasRawOrderId=${Boolean(rawOrderId)}, hasClientOrderId=${Boolean(clientOrderId)})`,
           LogSeverity.Warning,
         );
       }
@@ -532,7 +649,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
       // DEBUG: Log if state is missing
       if (!state) {
         this.parent.log(
-          `parseOrder: state is undefined. feed.state=${JSON.stringify(feed.state)}, feed.s1=${JSON.stringify(feed.s1)}, feed.s=${JSON.stringify(feed.s)}`,
+          `parseOrder: missing state (event=order, hasFullState=${Boolean(feed.state)}, hasLiteState=${Boolean(feed.s1)})`,
           LogSeverity.Warning,
         );
       }
@@ -568,25 +685,16 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
       const isBuying = leg.is_buying_asset !== undefined ? leg.is_buying_asset : leg.ib;
       const side = isBuying ? OrderSide.Buy : OrderSide.Sell;
 
-      // Parse type - check for trigger metadata first
-      let type: OrderType;
-      const trigger = metadata?.trigger || metadata?.t;
-      if (trigger) {
-        const triggerType = trigger.trigger_type || trigger.tt;
-        if (triggerType === 'STOP_LOSS') {
-          type = OrderType.StopLoss;
-        } else if (triggerType === 'TAKE_PROFIT') {
-          type = OrderType.TakeProfit;
-        } else {
-          // Unknown trigger type, fall back to market/limit
-          const isMarket = feed.is_market !== undefined ? feed.is_market : feed.im;
-          type = isMarket ? OrderType.Market : OrderType.Limit;
-        }
-      } else {
-        // No trigger metadata, use market/limit
-        const isMarket = feed.is_market !== undefined ? feed.is_market : feed.im;
-        type = isMarket ? OrderType.Market : OrderType.Limit;
-      }
+      const trigger = getGrvtTriggerMetadata(feed);
+      const isMarket = feed.is_market !== undefined ? feed.is_market : feed.im;
+      const type =
+        trigger?.type === 'STOP_LOSS'
+          ? OrderType.StopLoss
+          : trigger?.type === 'TAKE_PROFIT'
+            ? OrderType.TakeProfit
+            : isMarket
+              ? OrderType.Market
+              : OrderType.Limit;
 
       // Parse amounts
       const size = parseFloat(leg.size || leg.s || '0');
@@ -595,7 +703,8 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
       const remaining = Math.max(0, size - filled);
 
       // Parse price
-      const price = parseFloat(leg.limit_price || leg.lp || '0');
+      const limitPrice = parseFloat(leg.limit_price || leg.lp || '0');
+      const price = trigger?.triggerPrice ?? limitPrice;
 
       // Parse timestamp
       const updateTime = state.update_time || state.ut || metadata?.create_time || metadata?.ct;
@@ -613,7 +722,10 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         remaining,
         lastUpdate,
         reduceOnly: feed.reduce_only || feed.ro || false,
-        timeInForce: OrderTimeInForce.GoodTillCancel,
+        timeInForce: getGrvtOrderTimeInForce(feed),
+        ...(trigger?.close !== undefined ? { close: trigger.close } : {}),
+        ...(type === OrderType.StopLoss && trigger?.triggerType ? { slTriggerType: trigger.triggerType } : {}),
+        ...(type === OrderType.TakeProfit && trigger?.triggerType ? { tpTriggerType: trigger.triggerType } : {}),
         info: feed,
       };
     } catch (error) {
@@ -801,9 +913,9 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
     this.processedFillIds.clear();
     if (this.ordersThrottleTimeout) {
       clearTimeout(this.ordersThrottleTimeout);
+      this.ordersThrottleTimeout = undefined;
     }
-    if (this.ws) {
-      this.ws.close();
-    }
+    this.privateStreamHealthyAt = undefined;
+    super.dispose();
   };
 }
