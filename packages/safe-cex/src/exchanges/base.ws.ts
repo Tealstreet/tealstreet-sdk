@@ -18,6 +18,17 @@ import {
 import { LogSeverity } from '../types';
 import { MessageHandlers, MessageHandlersStats } from './types';
 
+type FreshHeadersProvider = () => Record<string, string>;
+type WebSocketConnectionOptions = Omit<Options, 'headers'> & {
+  headers?: Record<string, string> | FreshHeadersProvider;
+  /**
+   * `true` only when the socket cannot authenticate without upgrade headers.
+   * Static routing and browser-identification headers remain best effort so
+   * browser/native WebSocket fallback keeps working.
+   */
+  headersRequired?: boolean;
+};
+
 /**
  * Debug helper for BaseWebSocket lifecycle logs. Suppressed by default to keep
  * DevTools usable during reconnect storms; flip ENABLE_WS_LIFECYCLE_DEBUG_LOGS
@@ -44,15 +55,48 @@ const isTealstreetWebSocketUrl = (url: string): boolean => {
   }
 };
 
+type ModuleWithCreateRequire = {
+  createRequire?: (url: string | URL) => (id: string) => unknown;
+};
+
 const getNodeWebSocket = (): typeof WebSocket | undefined => {
   if (typeof process === 'undefined' || !(process.versions?.node || (process as any).isBun)) return undefined;
+
+  // Node 22 ESM has no lexical `require`. `getBuiltinModule` is synchronous,
+  // does not add a browser bundle import, and lets the ESM artifact resolve
+  // the installed `ws` package. Keep the CJS/Bun path for those runtimes.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('ws');
+    const module = (process as typeof process & {
+      getBuiltinModule?: (name: string) => ModuleWithCreateRequire | undefined;
+    }).getBuiltinModule?.('module');
+    if (module?.createRequire) {
+      return module.createRequire(import.meta.url)('ws') as typeof WebSocket;
+    }
   } catch {
-    return undefined;
+    // Try the CommonJS/Bun fallback below.
   }
+
+  try {
+    if (typeof require === 'function') {
+      return require('ws') as typeof WebSocket;
+    }
+  } catch {
+    // A Node-marked renderer may expose neither resolver nor `ws`.
+  }
+
+  return undefined;
 };
+
+/**
+ * Raised instead of opening a native WebSocket that would silently drop
+ * required HTTP upgrade headers.
+ */
+export class HeaderCapableWebSocketUnavailableError extends Error {
+  constructor() {
+    super('Required WebSocket upgrade headers need a header-capable ws transport');
+    this.name = 'HeaderCapableWebSocketUnavailableError';
+  }
+}
 
 // WebSocket health check breakpoints
 export const WS_PING_THRESHOLD_MS = 6_000; // Time after which to send a ping
@@ -288,20 +332,41 @@ export class BaseWebSocket<T extends BaseExchange> {
     }
   };
 
-  createWebsocket(url: string, protocols?: string | string[], options: Options = RECONNECTING_WEBSOCKET_TUNING) {
+  createWebsocket(
+    url: string,
+    protocols?: string | string[],
+    options: WebSocketConnectionOptions = RECONNECTING_WEBSOCKET_TUNING,
+  ) {
     let ws: ReconnectingWebSocket | WebSocket;
+    const NodeWebSocket = getNodeWebSocket();
+    const { headersRequired = false, ...reconnectingOptions } = options;
+    if (headersRequired && !NodeWebSocket) {
+      // Native/browser constructors do not support HTTP upgrade headers. Do
+      // not silently open a socket that cannot carry required authentication.
+      throw new HeaderCapableWebSocketUnavailableError();
+    }
     if (isTealstreetWebSocketUrl(url)) {
-      const NodeWebSocket = getNodeWebSocket();
+      const headers = reconnectingOptions.headers;
       ws = new ReconnectingWebSocket(url, protocols, {
-        ...options,
+        ...reconnectingOptions,
         ...(NodeWebSocket ? { WebSocket: NodeWebSocket } : {}),
-        headers: {
-          ...(options as any).headers,
-          ...TEALSTREET_WS_HEADERS,
-        },
-      });
+        // These proxy-routing headers are best effort: browser-native sockets
+        // cannot attach them, and must retain the existing fallback.
+        headers:
+          typeof headers === 'function'
+            ? () => ({ ...headers(), ...TEALSTREET_WS_HEADERS })
+            : { ...headers, ...TEALSTREET_WS_HEADERS },
+      } as Options);
+    } else if (NodeWebSocket && reconnectingOptions.headers) {
+      // Native/browser WebSocket constructors cannot attach upgrade headers.
+      // Header-authenticated exchange sockets therefore use the vendored RWS
+      // transport in Node/Bun, which also evaluates header providers per retry.
+      ws = new ReconnectingWebSocket(url, protocols, {
+        ...reconnectingOptions,
+        WebSocket: NodeWebSocket,
+      } as Options);
     } else if (ENABLE_RECONNECTING_WEBSOCKET) {
-      ws = new ReconnectingWebSocket(url, protocols, options);
+      ws = new ReconnectingWebSocket(url, protocols, reconnectingOptions as Options);
     } else {
       ws = new WebSocket(url, protocols);
     }

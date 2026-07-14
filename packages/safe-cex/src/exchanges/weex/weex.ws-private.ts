@@ -3,15 +3,19 @@ import type { WeexExchange } from './weex.exchange';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { LogSeverity, Order, OrderStatus } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
-import { BaseWebSocket } from '../base.ws';
+import { BaseWebSocket, HeaderCapableWebSocketUnavailableError } from '../base.ws';
 import { signWeexMessage } from './weex.api';
 import { BASE_WS_URL, PRIVATE_WS_REQUEST_PATH } from './weex.types';
 import { normalizeOrder, normalizePosition, normalizeTimestampToSeconds, toNumber } from './weex.utils';
+
+const isNodeOrBunRuntime = (): boolean =>
+  typeof process !== 'undefined' && !!(process.versions?.node || (process as any).isBun);
 
 export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
   protected override treatAnyMessageAsPong = true;
 
   private subscriptionId = 1;
+  private hasLoggedUnsupportedTransport = false;
   private refreshOrdersTimeout?: NodeJS.Timeout;
   private refreshPositionsTimeout?: NodeJS.Timeout;
   private refreshBalanceTimeout?: NodeJS.Timeout;
@@ -19,20 +23,34 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
   connectAndSubscribe = () => {
     if (this.isDisposed) return;
 
-    const key = this.parent.options.testnet ? 'testnet' : 'livenet';
-    const timestamp = `${virtualClock.getCurrentTimeMs()}`;
-    const headers =
-      this.parent.options.key && this.parent.options.secret
-        ? {
-            'User-Agent': 'Tealstreet',
-            'ACCESS-KEY': this.parent.options.key,
-            'ACCESS-PASSPHRASE': this.parent.options.passphrase || '',
-            'ACCESS-TIMESTAMP': timestamp,
-            'ACCESS-SIGN': signWeexMessage(this.parent.options.secret, `${timestamp}${PRIVATE_WS_REQUEST_PATH}`),
-          }
-        : undefined;
+    // WEEX V3 authenticates private channels only in the HTTP upgrade headers;
+    // browsers cannot set those headers and the exchange offers no login frame.
+    // Do not open an unauthenticated socket or put credentials in the URL.
+    if (!isNodeOrBunRuntime()) {
+      this.logUnsupportedTransport();
+      return;
+    }
 
-    this.ws = this.createWebsocket(BASE_WS_URL.private[key], undefined, { headers });
+    if (!this.parent.options.key || !this.parent.options.secret || !this.parent.options.passphrase) {
+      this.logUnsupportedTransport('credentials are incomplete');
+      return;
+    }
+
+    const key = this.parent.options.testnet ? 'testnet' : 'livenet';
+    try {
+      this.ws = this.createWebsocket(BASE_WS_URL.private[key], undefined, {
+        // ReconnectingWebSocket evaluates this provider immediately before every
+        // Node/Bun connection attempt, keeping WEEX's 30-second auth timestamp fresh.
+        headers: () => this.createAuthHeaders(),
+        headersRequired: true,
+      });
+    } catch (error) {
+      if (error instanceof HeaderCapableWebSocketUnavailableError) {
+        this.logUnsupportedTransport('a header-capable Node/Bun WebSocket transport is unavailable');
+        return;
+      }
+      throw error;
+    }
     this.ws.addEventListener('open', this.onOpen);
     this.ws.addEventListener('message', this.onMessage);
     this.ws.addEventListener('close', this.onClose);
@@ -60,7 +78,7 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
     const json = bigIntAsStringJsonParse<Record<string, any>>(String(data));
     if (!json) return;
 
-    if (json.event === 'ping') {
+    if (json.type === 'ping') {
       this.send(JSON.stringify({ method: 'PONG', id: this.subscriptionId++ }));
       this.handlePongEvent(15_000);
       return;
@@ -108,6 +126,23 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
         id: this.subscriptionId++,
       }),
     );
+  };
+
+  private createAuthHeaders = (): Record<string, string> => {
+    const timestamp = `${virtualClock.getCurrentTimeMs()}`;
+    return {
+      'User-Agent': 'Tealstreet',
+      'ACCESS-KEY': this.parent.options.key!,
+      'ACCESS-PASSPHRASE': this.parent.options.passphrase!,
+      'ACCESS-TIMESTAMP': timestamp,
+      'ACCESS-SIGN': signWeexMessage(this.parent.options.secret!, `${timestamp}${PRIVATE_WS_REQUEST_PATH}`),
+    };
+  };
+
+  private logUnsupportedTransport = (reason = 'browser WebSocket clients cannot attach WEEX private-auth headers') => {
+    if (this.hasLoggedUnsupportedTransport) return;
+    this.hasLoggedUnsupportedTransport = true;
+    this.parent.log(`WEEX private WebSocket disabled: ${reason}; continuing with the REST safety loop`, LogSeverity.Warning);
   };
 
   private handleOrders = (json: Record<string, any>) => {

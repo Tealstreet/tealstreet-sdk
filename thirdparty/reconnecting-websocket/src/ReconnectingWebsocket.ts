@@ -23,6 +23,8 @@ export type Event = Events.Event;
 export type ErrorEvent = Events.ErrorEvent;
 export type CloseEvent = Events.CloseEvent;
 
+export type HeadersProvider = () => Record<string, string>;
+
 export type Options = {
   WebSocket?: any;
   maxReconnectionDelay?: number;
@@ -34,8 +36,12 @@ export type Options = {
   maxEnqueuedMessages?: number;
   startClosed?: boolean;
   debug?: boolean;
-  /** Headers to send with WebSocket connection (Node.js ws library only) */
-  headers?: Record<string, string>;
+  /**
+   * Headers to send with each WebSocket connection (Node.js ws library only).
+   * A provider is evaluated immediately before every Node/Bun reconnect so
+   * short-lived authentication headers can be regenerated safely.
+   */
+  headers?: Record<string, string> | HeadersProvider;
 };
 
 const DEFAULT = {
@@ -417,14 +423,36 @@ export class ReconnectingWebSocket {
         const { headers } = this._options;
         const isNode = typeof process !== 'undefined' && process.versions?.node;
         const isBun = typeof process !== 'undefined' && !!(process as any).isBun;
-        if (isNode || isBun) {
+        // BaseWebSocket supplies `WebSocket` only after resolving the
+        // header-capable `ws` constructor. Trust that explicit transport even
+        // when a renderer-like runtime does not expose a reliable Node marker.
+        const usesHeaderCapableTransport = !!this._options.WebSocket && !!headers;
+        if (isNode || isBun || usesHeaderCapableTransport) {
           // Node.js/Bun environment - pass headers and force HTTP/1.1 via ALPNProtocols
           const wsOptions: Record<string, unknown> = {
             // Force HTTP/1.1 - WebSocket upgrade doesn't work over HTTP/2
             ALPNProtocols: ['http/1.1'],
           };
-          if (headers) {
-            wsOptions.headers = headers;
+          let resolvedHeaders: Record<string, string> | undefined;
+          try {
+            resolvedHeaders = typeof headers === 'function' ? headers() : headers;
+          } catch {
+            // Header providers can produce short-lived auth material. Keep an
+            // exception observable without exposing provider error text, which
+            // may contain credentials, then retry through the normal backoff.
+            this._connectLock = false;
+            if (!this._closeCalled && this._shouldReconnect) {
+              const event = new Events.ErrorEvent(Error('WebSocket header provider failed'), this);
+              if (this.onerror) {
+                this.onerror(event);
+              }
+              this._listeners.error.forEach((listener) => this._callEventListener(event, listener));
+              this._connect();
+            }
+            return;
+          }
+          if (resolvedHeaders) {
+            wsOptions.headers = resolvedHeaders;
           }
           this._ws = new WebSocket(url, this._protocols || [], wsOptions);
         } else {

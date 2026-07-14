@@ -202,6 +202,16 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
   vendored `ReconnectingWebSocket` to force HTTP/1.1 via `ALPNProtocols`. Do not
   use Bun native `WebSocket`, undici/tcp-websocket, or a hand-rolled socket for
   tradetunnel/HOW.
+- **Only required WebSocket upgrade headers fail closed without `ws`.**
+  Set `options.headersRequired: true` for header-authenticated sockets; then
+  `BaseWebSocket` rejects a native/browser constructor that would silently drop
+  auth. Static browser-identification headers and implicit Tealstreet routing
+  headers are best effort, so browser/native fallback remains supported.
+  Header-authenticated exchanges must handle the typed unavailable-transport
+  error and retain their independent REST safety path where present.
+- **The reconnecting-WebSocket path alias targets `thirdparty/`.** Keep
+  `tsconfig.json` pointed at the vendored source so safe-cex tests and
+  typechecks do not resolve a hoisted/stale workspace copy instead.
 
 ## Key Files
 

@@ -51,6 +51,26 @@ signature signs:
 timestamp + "/v3/ws/private"
 ```
 
+Node/Bun and CLI paths use the header-capable reconnecting `ws` transport. It
+evaluates the required private-auth header provider for every connection
+attempt, so the timestamp and signature are regenerated before each reconnect.
+A renderer that exposes a Node marker but cannot load `ws` is also unsupported:
+`BaseWebSocket` fails closed for those required auth headers instead of silently
+dropping them. Browser WebSocket APIs cannot set upgrade headers, and WEEX has
+no private login-message alternative; the private socket is deliberately
+disabled (no credentials are put in the URL) and the exchange continues its
+2-second REST safety loop instead. Public `User-Agent` and Tealstreet routing
+headers are static best-effort headers, not fail-closed authentication.
+
+Private server keepalive frames are `{ "type": "ping", ... }`; reply
+immediately with `{ "method": "PONG", "id": n }`. Public pings instead use
+`event: "ping"`. WEEX closes a connection after more than 10 unanswered pings.
+
+## API Documentation
+
+- [Contract V3 WebSocket overview](https://www.weex.com/api-doc/contract/Websocket/websocket-intro)
+- [Contract V3 introduction](https://www.weex.com/api-doc/contract/intro)
+
 ## Implementation Notes
 
 - `POST /capi/v3/batchOrders` is explicitly unavailable in Contract V3, so
