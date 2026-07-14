@@ -22,11 +22,30 @@ type SubscribedTopics = {
 };
 
 export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
+  private static readonly CONNECTION_FAILURE_NOTICE_DELAY_MS = 20_000;
+  private static readonly CONNECTION_FAILURE_NOTICE =
+    'BloFin live WebSocket connection failed to establish. Historical candles may still load, but live charts and order books will not update. Check your network, VPN, firewall, or browser extensions, then reload Tealstreet.';
+
   // BloFin's upstream has been observed to delay/drop `pong` echoes even while
   // ticker/orderbook updates keep flowing. Any inbound message on this socket
   // is sufficient proof of liveness — fall back to the 20s watchdog for truly
   // dead connections.
   protected override treatAnyMessageAsPong = true;
+
+  private connectionFailureNoticeTimeout?: ReturnType<typeof setTimeout>;
+  private connectionFailureNotified = false;
+
+  constructor(parent: BlofinExchange) {
+    super(parent);
+
+    // BaseWebSocket.onClose is an instance arrow field, so retain that exact
+    // handler before layering BloFin's user-facing connection watchdog on it.
+    const baseOnClose = this.onClose;
+    this.onClose = (event?: any): void => {
+      baseOnClose(event);
+      this.armConnectionFailureNotice();
+    };
+  }
 
   topics: SubscribedTopics = {};
   messageHandlers: MessageHandlers = {
@@ -36,6 +55,7 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
+      this.armConnectionFailureNotice();
       this.ws = this.createWebsocket(BASE_WS_URL.public[this.parent.options.testnet ? 'testnet' : 'livenet']);
 
       this.topics.tickers = this.store.markets.map((m) => ({
@@ -97,6 +117,7 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
 
   onMessage = ({ data }: MessageEvent) => {
     if (this.isDisposed) return;
+    this.markConnectionEstablished();
     this.trackLastReceived();
 
     if (data === 'pong') {
@@ -147,6 +168,29 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
     if (hasExact) {
       for (const cb of exact!) cb(json);
     }
+  };
+
+  private armConnectionFailureNotice = () => {
+    if (this.isDisposed || this.connectionFailureNotified || this.connectionFailureNoticeTimeout) return;
+
+    this.connectionFailureNoticeTimeout = setTimeout(() => {
+      this.connectionFailureNoticeTimeout = undefined;
+      if (this.isDisposed || this.connectionFailureNotified) return;
+
+      this.connectionFailureNotified = true;
+      this.parent.log(BlofinPublicWebsocket.CONNECTION_FAILURE_NOTICE, LogSeverity.Warning);
+      // Force the warning through while the exchange appears disconnected;
+      // ordinary exchange errors are intentionally hidden during reconnects.
+      this.parent.emitter.emit('warning', BlofinPublicWebsocket.CONNECTION_FAILURE_NOTICE, { forceToast: true });
+    }, BlofinPublicWebsocket.CONNECTION_FAILURE_NOTICE_DELAY_MS);
+  };
+
+  private markConnectionEstablished = () => {
+    if (this.connectionFailureNoticeTimeout) {
+      clearTimeout(this.connectionFailureNoticeTimeout);
+      this.connectionFailureNoticeTimeout = undefined;
+    }
+    this.connectionFailureNotified = false;
   };
 
   handleTickerEvents = ({ data: [update] }: Data) => {
@@ -615,4 +659,13 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
       }
     };
   };
+
+  override dispose() {
+    if (this.connectionFailureNoticeTimeout) {
+      clearTimeout(this.connectionFailureNoticeTimeout);
+      this.connectionFailureNoticeTimeout = undefined;
+    }
+    this.parent.emitter.off('markets:changed', this.onMarketsChanged);
+    super.dispose();
+  }
 }

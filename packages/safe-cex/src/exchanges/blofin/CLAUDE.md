@@ -188,6 +188,7 @@ Reconnection is handled by `BaseWebSocket`:
 - On reconnect, public WS calls `emitWsReconnected()` to notify the system
 - On reconnect, private WS calls `parent.fetchAndSetPrivateSnapshot()` from `onOpen` to resync state
 - The `onClose` handler is inherited from `BaseWebSocket` and handles reconnect timing
+- The public socket arms a 20-second first-message watchdog on initial connect and after a close. If no frame arrives, it emits one forced warning explaining that REST history may still load while live charts/order books will not update. Reconnect churn does not repeat the warning; any inbound frame clears it and permits a future outage to warn once again.
 
 ### Public Channels
 
