@@ -35,7 +35,6 @@ dYdX v4 is a decentralized perpetual futures exchange built on the dYdX Chain (C
 | `dydx.types.ts`      | All TypeScript types, enums, endpoint constants, WebSocket message interfaces                                           |
 | `dydx.ws-public.ts`  | Public WebSocket: markets, orderbook, trades, candles, block height                                                     |
 | `dydx.ws-private.ts` | Private WebSocket: subaccount updates (orders, positions, fills, balance)                                               |
-| `test-order-flow.ts` | Manual test script for order placement                                                                                  |
 
 ## Authentication
 
@@ -476,13 +475,9 @@ Network errors on REST calls are retried 3 times via `axios-retry` (`dydx.api.ts
 
 ## Testing / Validation
 
-### Test Credentials
-
-File: `.apikey.json` in the exchange directory.
-
-### Manual Test Script
-
-`test-order-flow.ts` provides a manual end-to-end test for order placement.
+Fresh deterministic regressions belong in the package-level
+`src/__tests__/audit-regressions/` directory. Do not commit credentialed or
+network-dependent test scripts beside exchange runtime code.
 
 ### Validation Flow
 

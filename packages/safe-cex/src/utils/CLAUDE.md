@@ -44,7 +44,7 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 ### Key Gotchas
 
 - **bitgetusdc** uses `BTCPERP` format (NOT `BTCUSDC`) — confirmed via API
-- **Arkham** perps are `BTC_USDT_PERP` (NOT `BTC_PERP`) — confirmed via API and `__testdata__/market-samples.json`. Some older `exchanges/arkham/__tests__/*.ts` files still use `BTC_PERP`; those fixtures are stale.
+- **Arkham** perps are `BTC_USDT_PERP` (NOT `BTC_PERP`) — confirmed via API and `__testdata__/market-samples.json`.
 - **KuCoin** symbols have `M` suffix (`XBTUSDTM`) and use XBT for BTC — code does `split('_')[0]` which is a noop since no underscore exists
 - **KuCoin** code has a bug: uses `m.rootSymbol` for base which returns `USDT` (the margin coin), not the base asset. `baseCurrency` field has the correct value (`XBT`)
 - **Coinbase** perps use `-PERP-INTX` suffix, NOT `-USD` — very different from coinbasespot

@@ -647,23 +647,9 @@ User-friendly messages for known cancel reasons:
 
 ## Testing / Validation
 
-### Test Files
-
-Multiple test files exist in the directory for manual testing:
-
-- `test-balance-manual.ts`, `test-balance-simple.ts` — Balance fetching
-- `test-btc-last-price.ts` — BTC price verification
-- `test-dump-balance.ts` — Balance dump
-- `test-klines-ws.js` — OHLCV WebSocket testing (confirmed WS klines not supported)
-- `test-set-leverage.ts`, `test-set-leverage-eth.ts` — Leverage setting
-- `test-ticker-updates.ts` — Ticker update verification
-- `test-trades-ws.ts` — Trades WebSocket testing
-- `test-validateAccount-error.ts` — Account validation error handling
-- `test-ws-manual.js` — Manual WebSocket testing
-
-### Test Credentials
-
-Available in `.apikey.json` (gitignored) for testing authentication flow, order placement, and other operations.
+Fresh deterministic regressions belong in the package-level
+`src/__tests__/audit-regressions/` directory. Do not commit credentialed or
+network-dependent test scripts beside exchange runtime code.
 
 ### Known Test Gaps (from TODO.md)
 

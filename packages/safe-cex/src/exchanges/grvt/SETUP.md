@@ -57,13 +57,10 @@ Fields:
 - `accountId`: Your main account ID (optional)
 - `subAccountId`: Your sub-account ID (optional, defaults to main account)
 
-### 4. Test Order Placement
+### 4. Verify Configuration
 
-Run the integration test to verify everything works:
-
-```bash
-npx vitest run src/exchanges/grvt/__tests__/grvt.order-flow.test.ts
-```
+No package-local live order-flow test is provided. After tagging the signer,
+verify the configuration only through a separately authorized procedure.
 
 If you see a **403 Forbidden** error with code **1001**, it means the signer address hasn't been tagged correctly. Go back to step 2.
 
@@ -112,14 +109,13 @@ If you want to test without risking real funds:
 2. Create a testnet API key at https://testnet.grvt.io/
 3. Get testnet funds from a faucet (if available)
 4. Tag your signer address to the testnet API key
-5. Run tests against testnet
+5. Use testnet for any separately authorized validation
 
 ## Need Help?
 
 - **GRVT Documentation**: https://api-docs.grvt.io/
 - **Local Documentation**: See `CLAUDE.md` in this directory
 - **Helper Script**: `npx tsx src/exchanges/grvt/get-signer-address.ts`
-- **Debug Test**: `npx vitest run src/exchanges/grvt/__tests__/grvt.debug.test.ts`
 
 ## Architecture Overview
 

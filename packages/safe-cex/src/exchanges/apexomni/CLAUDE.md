@@ -44,8 +44,6 @@ ApeX Omni is a decentralized perpetual futures exchange using zkLink's Layer 2 i
 | `transactions/transfer.ts`     | `signTransfer()` -- signs L2 transfer transactions                        |
 | `transactions/withdraw.ts`     | `signWithdraw()` -- signs withdrawal transactions                         |
 | `transactions/changePubKey.ts` | `signChangePubKey()` -- signs public key change transactions              |
-| `types.test.ts`                | Unit tests for `TxSignature` and `TxEthSignature` type structures         |
-| `utils.test.ts`                | Unit tests for assertion helpers and timestamp utility                    |
 
 ## Authentication
 
@@ -627,12 +625,9 @@ Private WebSocket errors during throttled refetch are caught and logged to conso
 
 ## Testing / Validation
 
-Test files exist for the zkLink signer utilities:
-
-- `zklink/signer/types.test.ts` -- Type structure validation for `TxSignature` and `TxEthSignature`
-- `zklink/signer/utils.test.ts` -- Unit tests for assertion helpers (`assertAddress`, `assertChainId`, `assertAccountId`, etc.) and `timestamp()` utility
-
-Run tests from the `packages/safe-cex` directory:
+Fresh deterministic regressions belong in the package-level
+`src/__tests__/audit-regressions/` directory, not beside exchange runtime
+code. Run the trusted suite from the `packages/safe-cex` directory:
 
 ```bash
 cd packages/safe-cex && yarn test-ci

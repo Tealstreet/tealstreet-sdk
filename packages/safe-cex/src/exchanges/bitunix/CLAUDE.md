@@ -17,7 +17,6 @@
 | -------------------------- | ----------------------------------------------------------------------- |
 | `bitunix.api.ts`           | REST API client with double-SHA256 signature scheme, axios interceptors |
 | `bitunix.exchange.ts`      | Main exchange class extending `BaseExchange` (~1400 lines)              |
-| `bitunix.exchange.test.ts` | Unit tests for positions, order formatting, retry logic, batch ordering |
 | `bitunix.types.ts`         | Type definitions, endpoint constants, type mapping objects              |
 | `bitunix.utils.ts`         | SHA256 hex hashing utility (uses `@noble/hashes`)                       |
 | `bitunix.ws-futures.ts`    | Futures-specific WebSocket for klines and orderbook (gzip-compressed)   |
@@ -548,12 +547,6 @@ Both pre-flight throws inside `formatCreateOrder` (`nothing to reduce`, `Missing
 
 ## Testing / Validation
 
-Test file: `bitunix.exchange.test.ts` (~577 lines)
-
-Covers:
-
-- **fetchPositions**: Direct array vs `positionList` wrapper, null data, `BUY`/`SELL` vs `LONG`/`SHORT` side handling, positionIdCache population, network error fallback
-- **positionIdCache**: Preference for `info.positionId` over cache, cache fallback when info missing, undefined when neither available
-- **formatCreateOrder**: "nothing to reduce" error, "Missing positionId" error, cache-based positionId, info-based positionId
-- **placeOrder retry**: Retry on "Missing positionId", retry on "Position does not exist", no retry on "nothing to reduce"
-- **placeOrderBatch**: orderId extraction from `data.data.orderId`, clientId fallback, TP/SL order IDs, position TP/SL order IDs, batch result handling
+Fresh deterministic regressions belong in the package-level
+`src/__tests__/audit-regressions/` directory, derived from current runtime
+contracts and verified upstream behavior.

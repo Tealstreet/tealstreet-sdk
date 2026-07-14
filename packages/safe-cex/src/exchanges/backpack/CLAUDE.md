@@ -27,7 +27,6 @@
 | `backpack.ws-public.ts`  | Public WebSocket (tickers, trades, depth, klines, bookTicker)            |
 | `backpack.ws-private.ts` | Private WebSocket (order updates, position updates)                      |
 | `backpack.types.ts`      | All TypeScript interfaces, endpoint constants, instruction strings       |
-| `__tests__/`             | Unit tests for API, auth, balance, OHLCV, orders, orderbook              |
 
 ## Authentication
 
@@ -530,25 +529,9 @@ The `tick()` method wraps all fetches in try/catch and logs errors without crash
 
 ## Testing / Validation
 
-Test files in `__tests__/`:
-
-- `backpack.auth.test.ts` - Signature generation and verification
-- `backpack.api.test.ts` - API client setup and interceptors
-- `backpack.fetchBalance.test.ts` - Balance parsing
-- `backpack.methods.test.ts` - Exchange method tests
-- `backpack.ohlcv.test.ts` - OHLCV fetching
-- `backpack.listen-ohlcv.test.ts` - WebSocket OHLCV streaming
-- `backpack.order.test.ts` - Order placement and mapping
-- `backpack.order-flow.test.ts` - Full order flow integration
-- `backpack.orderbook.test.ts` - Orderbook snapshot/delta handling
-- `backpack.integration.test.ts` - Integration tests
-
-Manual test files (not in `__tests__/`):
-
-- `test-balance.ts`, `test-balance-live.ts` - Balance testing
-- `test-place-order-raw.ts`, `test-cancel-order-raw.ts` - Raw order operations
-- `test-order-flow.ts` - Order flow testing
-- `manual-test.ts` - General manual testing
+Fresh deterministic regressions belong in the package-level
+`src/__tests__/audit-regressions/` directory. Do not add test or live-probe
+scripts beside the exchange runtime implementation.
 
 ## Grafana Monitoring
 

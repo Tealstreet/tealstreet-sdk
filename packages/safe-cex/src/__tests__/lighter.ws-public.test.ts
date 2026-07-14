@@ -9,6 +9,15 @@ const WS_PROXY_PUBLIC = resolveExchangeRouting('lighter', { tealstreetWsRoute: t
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 
+const lighterMarketStore = () => ({
+  markets: [{ id: '1', symbol: 'BTCUSDT' }],
+  marketsBySymbol: {
+    BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
+  },
+  positions: [],
+  tickers: [],
+});
+
 const createMockParent = (overrides?: Partial<Record<string, unknown>>) =>
   ({
     name: 'lighter',
@@ -131,7 +140,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.onOpen();
     await Promise.resolve();
 
-    expect(getMock).toHaveBeenCalledWith(ENDPOINTS.TICKERS, expect.any(Object));
+    expect(getMock).toHaveBeenCalledWith(ENDPOINTS.EXCHANGE_STATS, expect.any(Object));
   });
 
   it('primes ticker REST fallback while proxy socket is still connecting', async () => {
@@ -182,7 +191,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
     await Promise.resolve();
 
-    expect(getMock).toHaveBeenCalledWith(ENDPOINTS.TICKERS, expect.any(Object));
+    expect(getMock).toHaveBeenCalledWith(ENDPOINTS.EXCHANGE_STATS, expect.any(Object));
   });
 
   it('does not double-prime ticker REST fallback across proxy connect and open', async () => {
@@ -208,7 +217,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(1);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(1);
   });
 
   it('keeps ticker REST fallback active when only non-ticker websocket frames arrive', async () => {
@@ -250,7 +259,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     ws.connectAndSubscribe();
     await Promise.resolve();
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(1);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(1);
 
     ws.onMessage({
       data: JSON.stringify({
@@ -261,7 +270,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     await Promise.resolve();
 
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(2);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(2);
   });
 
   it('stops ticker REST fallback once a websocket ticker hydrates price fields', async () => {
@@ -320,7 +329,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     await vi.advanceTimersByTimeAsync(3_000);
 
     expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ last: 100, bid: 99, ask: 101 }));
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(1);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(1);
   });
 
   it('keeps market_stats daily price change in percent units', () => {
@@ -598,7 +607,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.ws = createMockWs();
 
     await (ws as any).fetchAndApplyTickerFallback();
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(1);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(1);
 
     (ws as any).startTickerRestFallback('retry during cooldown');
     await vi.advanceTimersByTimeAsync(3_000);
@@ -606,12 +615,12 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     await vi.advanceTimersByTimeAsync(1);
     await (ws as any).fetchAndApplyTickerFallback();
 
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(1);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(60_000);
     await (ws as any).fetchAndApplyTickerFallback();
 
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.TICKERS)).toHaveLength(2);
+    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(2);
   });
 
   it('probes direct public endpoint only after repeated proxy-route failures', () => {
@@ -745,6 +754,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
         testnet: false,
         publicDataOnly: false,
       },
+      store: lighterMarketStore(),
     });
     const ws = new LighterPublicWebsocket(parent);
     const mockSocket = createMockWs();
@@ -758,10 +768,10 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     const [subscribePrimary, subscribeSecondary, unsubscribePrimary, unsubscribeSecondary] = payloads;
 
-    expect(subscribePrimary).toMatchObject({ type: 'subscribe', channel: 'candle_1m_BTCUSDT' });
-    expect(subscribeSecondary).toMatchObject({ type: 'subscribe', channel: 'trades_BTCUSDT' });
-    expect(unsubscribePrimary).toMatchObject({ type: 'unsubscribe', channel: 'candle_1m_BTCUSDT' });
-    expect(unsubscribeSecondary).toMatchObject({ type: 'unsubscribe', channel: 'trades_BTCUSDT' });
+    expect(subscribePrimary).toMatchObject({ type: 'subscribe', channel: 'candle/1/1m' });
+    expect(subscribeSecondary).toMatchObject({ type: 'subscribe', channel: 'trade/1' });
+    expect(unsubscribePrimary).toMatchObject({ type: 'unsubscribe', channel: 'candle/1/1m' });
+    expect(unsubscribeSecondary).toMatchObject({ type: 'unsubscribe', channel: 'trade/1' });
 
     for (const payload of payloads) {
       expect(payload).not.toHaveProperty('channels');
@@ -775,6 +785,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
         testnet: false,
         publicDataOnly: false,
       },
+      store: lighterMarketStore(),
     });
     const ws = new LighterPublicWebsocket(parent);
     ws.ws = createMockWs();
@@ -793,13 +804,14 @@ describe('LighterPublicWebsocket routing and backoff', () => {
         testnet: false,
         publicDataOnly: false,
       },
+      store: lighterMarketStore(),
     });
     const ws = new LighterPublicWebsocket(parent);
     ws.ws = createMockWs();
     const reconnectSpy = vi.spyOn(ws, 'reconnect').mockResolvedValue(undefined);
 
     ws.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
-    const candleHandler = (ws.messageHandlers['candle_1m_BTCUSDT'] || [])[0];
+    const candleHandler = (ws.messageHandlers['candle/1/1m'] || [])[0];
     candleHandler?.({
       data: {
         candle: {
@@ -825,6 +837,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
         testnet: false,
         publicDataOnly: false,
       },
+      store: lighterMarketStore(),
     });
     const ws = new LighterPublicWebsocket(parent);
     ws.ws = createMockWs();
@@ -843,6 +856,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
         testnet: false,
         publicDataOnly: false,
       },
+      store: lighterMarketStore(),
     });
     const ws = new LighterPublicWebsocket(parent);
     ws.ws = createMockWs();
@@ -937,11 +951,9 @@ describe('LighterPublicWebsocket routing and backoff', () => {
   });
 
   it('falls back to REST orderbook when initial WS snapshot never arrives', async () => {
-    const getMock = vi.fn().mockResolvedValue({
-      order_book: {
-        bids: [['100', '1']],
-        asks: [['101', '2']],
-      },
+    const getOrderBookOrders = vi.fn().mockResolvedValue({
+      bids: [['100', '1']],
+      asks: [['101', '2']],
     });
     const parent = createMockParent({
       store: {
@@ -952,8 +964,8 @@ describe('LighterPublicWebsocket routing and backoff', () => {
         positions: [],
         tickers: [],
       },
-      lighterApiClient: {
-        get: getMock,
+      orderApi: {
+        getOrderBookOrders,
       },
     });
     const ws = new LighterPublicWebsocket(parent);
@@ -963,28 +975,21 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.listenOrderBook('BTCUSDT', callback);
     await vi.advanceTimersByTimeAsync(4_100);
 
-    expect(getMock).toHaveBeenCalledWith(
-      ENDPOINTS.ORDERBOOK,
-      expect.objectContaining({
-        params: { market_id: 1 },
-      }),
-    );
+    expect(getOrderBookOrders).toHaveBeenCalledWith(1, 100, expect.objectContaining({ __suppressExchangeError: true }));
     expect(callback).toHaveBeenCalled();
   });
 
   it('cools down orderbook REST fallback after a 403', async () => {
-    const getMock = vi
+    const getOrderBookOrders = vi
       .fn()
       .mockRejectedValueOnce({ response: { status: 403 } })
       .mockResolvedValue({
-        order_book: {
-          bids: [['100', '1']],
-          asks: [['101', '2']],
-        },
+        bids: [['100', '1']],
+        asks: [['101', '2']],
       });
     const parent = createMockParent({
-      lighterApiClient: {
-        get: getMock,
+      orderApi: {
+        getOrderBookOrders,
       },
     });
     const ws = new LighterPublicWebsocket(parent);
@@ -992,15 +997,15 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     const orderBook = { bids: [], asks: [] };
 
     await (ws as any).fetchAndEmitOrderBookFromRest('order_book:50', '50', orderBook, callback);
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.ORDERBOOK)).toHaveLength(1);
+    expect(getOrderBookOrders).toHaveBeenCalledTimes(1);
 
     (ws as any).startOrderBookRestFallback('order_book:50', '50', orderBook, callback, 'retry during cooldown');
     await vi.advanceTimersByTimeAsync(4_100);
     await (ws as any).fetchAndEmitOrderBookFromRest('order_book:50', '50', orderBook, callback);
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.ORDERBOOK)).toHaveLength(1);
+    expect(getOrderBookOrders).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(60_000);
     await (ws as any).fetchAndEmitOrderBookFromRest('order_book:50', '50', orderBook, callback);
-    expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.ORDERBOOK)).toHaveLength(2);
+    expect(getOrderBookOrders).toHaveBeenCalledTimes(2);
   });
 });

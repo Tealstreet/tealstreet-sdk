@@ -36,6 +36,27 @@ yarn test-ci       # Run all tests (deterministic, no network)
 yarn test          # Watch mode
 ```
 
+## Test placement and trust boundary
+
+`src/exchanges/**` is production runtime code only. The legacy tests, manual
+probes, and debug scripts in that tree were removed in July 2026 because they
+were untrusted integration-generation scaffolding. Do not restore, copy, or
+migrate assertions and fixtures from that deleted corpus.
+
+Fresh exchange audit regressions live in
+`src/__tests__/audit-regressions/`. Derive each oracle from current official
+upstream specifications, verified audit evidence, or an explicit runtime
+contract documented in this CLAUDE.md tree. Tests committed to the package must
+be deterministic and must not require network access, API keys, or local secret
+files. Live probes belong outside the test runner and outside `src/exchanges/`.
+
+Vitest discovers deterministic `*.test.*` files throughout `src/` and excludes
+only explicitly named `*.integration.test.*` and `*.network.test.*` suites.
+It does not blanket-exclude `src/exchanges/**`, and coverage includes that tree
+so reports expose the real production-code coverage floor. Keep the runtime tree
+test-free; the absence of an exchange-tree exclusion is intentional and prevents
+future test files from being silently ignored.
+
 ## Proxy & Tunnel Architecture
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.

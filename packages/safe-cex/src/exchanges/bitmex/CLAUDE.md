@@ -37,7 +37,6 @@ This directory contains the BitMEX exchange integration for Tealstreet.
 | `bitmex.ohlcv-helpers.ts`        | Shared OHLCV helpers used by `bitmex.exchange.ts` (timeframe/resolution mapping, UDF response validation, candle dedup).                                                                           |
 | `bitmextestnet.exchange.ts`      | Thin subclass (`BitmexTestnetExchange`) that overrides URLs/WS hosts to point at the BitMEX testnet. Registered separately in the exchange registry.                                               |
 | `types.ts`                       | Shared BitMEX-specific types: `BITMEX_ORDER`, `BITMEX_POSITION`, `BITMEX_MARKET`, WS update types (`ORDER_WS_UPDATE`, `POSITION_WS_UPDATE`, `TRADE_WS_UPDATE`), and `SupportedTimeframes` mapping. |
-| `__tests__/bitmex.ohlcv.test.ts` | Vitest tests for OHLCV fetching via the proxy UDF endpoint.                                                                                                                                        |
 
 ## Authentication
 
@@ -701,14 +700,6 @@ Endpoints are classified for monitoring:
 - **Periodic tracking**: `BALANCE`, `ACCOUNT`, `POSITIONS`, `WALLET_ASSETS`
 
 ## Testing / Validation
-
-### Existing Tests
-
-`__tests__/bitmex.ohlcv.test.ts` contains:
-
-- Test for fetching OHLCV data via proxy endpoint (live network test, 30s timeout).
-- Test for multiple timeframe support (live network test, 60s timeout).
-- Skipped test for `listenOHLCV` polling mechanism.
 
 ### Running Checks
 

@@ -62,9 +62,7 @@ for current protocol behavior before making an integration change):
 ### Other
 
 - `docs/` - Local API documentation reference (cached from GitHub)
-- `__tests__/` - Test files
 - `SETUP.md` - Additional setup instructions
-- `test-*.ts` - Numerous test scripts for various API operations
 
 ## Authentication
 
@@ -737,18 +735,6 @@ File: `.apikey.json` in the exchange directory.
 2. Verify SDK client is initialized
 3. Call `getFundingAccountSummary()` to verify session
 4. Return empty string on success, error message on failure
-
-### Test Scripts
-
-The directory contains 30+ test scripts (`test-*.ts`) covering:
-
-- API key info, authentication flows
-- Balance endpoints, live balance
-- Order flows (placement, cancellation, TP/SL)
-- Market precision, orderbook
-- OHLCV/candlestick data
-- WebSocket streams (ticker, orderbook, private)
-- SDK integration, proxy scenarios, subaccount variations
 
 ### Helper Scripts
 

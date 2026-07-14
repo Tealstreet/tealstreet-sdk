@@ -28,7 +28,6 @@ The uplift is intentionally backward-compatible: existing V1 accounts continue t
 - `asterdex.virtualClock.ts`: Aster-specific time sync with V1/V3 time endpoint fallback and proxy fallback
 - `asterdex.ws-public.ts`: public WebSocket (tickers, depth, trades, mark prices, klines)
 - `asterdex.ws-private.ts`: private WebSocket (listen key lifecycle, order/account events)
-- `__tests__/asterdex.api.test.ts`: version-selection and deterministic signing fixtures (V1 and V3)
 
 ## API Version Selection
 
@@ -541,17 +540,6 @@ the dedicated Aster clock uses the same REST constant.
 - Uses `loop()` utility for scheduling, which handles `isDisposed` check.
 
 ## Testing / Validation
-
-### Test File: `__tests__/asterdex.api.test.ts`
-
-Current tests validate the production uplift behavior:
-
-- V1 default selection for classic API key/secret configs
-- V3 auto-selection only when full wallet auth context is present and private key is valid
-- explicit API version override via `options.extra.asterdexApiVersion`
-- versioned path builder behavior (`getAsterDEXFapiPath`)
-- deterministic V1 HMAC signature fixture
-- deterministic V3 wallet-signature fixture (sorted payload + keccak + Ethereum signed hash + ECDSA)
 
 `src/__tests__/audit-regressions/asterdex.orderbook-snapshot.test.ts` is the deterministic P0 regression for the partial-stream subscription, authoritative snapshot delivery, exact string-pair validation, independent duplicate registrations, and fail-closed invalid/diff handling.
 

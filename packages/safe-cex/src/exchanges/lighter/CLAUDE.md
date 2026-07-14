@@ -712,9 +712,7 @@ This section supersedes older notes that reference direct `transactionClient` us
 
 ### ApproveIntegrator discovery status (current)
 
-- Probe tooling and runbook now exist:
-  - `test-approve-integrator-discovery.ts`
-  - `APPROVE_INTEGRATOR_DISCOVERY.md`
+- The discovery runbook is `APPROVE_INTEGRATOR_DISCOVERY.md`.
 - `tx_type = 45` and PascalCase `tx_info` contract are validated against upstream references.
 - `systemConfig` endpoint confirms current fee caps:
   - perps maker/taker max: `1000`

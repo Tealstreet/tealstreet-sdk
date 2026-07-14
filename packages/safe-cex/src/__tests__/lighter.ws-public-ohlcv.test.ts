@@ -9,8 +9,8 @@ import {
 
 describe('lighter.ws-public-ohlcv helpers', () => {
   it('builds expected candle and trades topics', () => {
-    expect(buildLighterCandleTopic('1m', 'BTC')).toBe('candle_1m_BTC');
-    expect(buildLighterTradesTopic('BTC')).toBe('trades_BTC');
+    expect(buildLighterCandleTopic('BTC', '1m')).toBe('candle/BTC/1m');
+    expect(buildLighterTradesTopic('BTC')).toBe('trade/BTC');
   });
 
   it('allows recovery when handlers exist and cooldown elapsed', () => {

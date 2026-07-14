@@ -29,7 +29,6 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'clover'],
       include: ['src/**/*.{js,jsx,ts,tsx}'],
-      exclude: ['src/exchanges/**'],
       // @ts-expect-error - 'all' is a valid option but types don't include it
       all: true,
     },
@@ -44,7 +43,8 @@ export default defineConfig({
       '**/dist/**',
       '**/.next/**',
       '**/.{idea,git,cache,output,temp}/**',
-      '**/src/exchanges/**', // Exclude exchange integration tests
+      '**/*.integration.test.{js,jsx,ts,tsx}',
+      '**/*.network.test.{js,jsx,ts,tsx}',
     ],
   },
 });

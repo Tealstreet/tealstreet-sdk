@@ -49,9 +49,7 @@ Arkham (ARKM) is a cryptocurrency exchange offering:
 5. **Rate Limits**: https://arkm.com/docs#rate-limits
 6. **Order Types**: https://arkm.com/docs#order-types
 
-### Key Endpoint Corrections (from testing)
-
-Based on actual API testing (see `TESTING_FINDINGS.md`):
+### Historically Verified Endpoint Corrections
 
 - **User Info**: `/user` (not `/account/info`)
 - **Markets**: `/public/pairs` (not `/public/markets`)
@@ -69,9 +67,7 @@ arkham/
 ├── arkham.ws-private.ts      # Private WebSocket (ArkhamPrivateWebSocket)
 ├── cancel-old-orders.ts      # Standalone utility script to cancel all open orders
 ├── cancel-order-by-id.ts     # Standalone utility script to cancel a specific order
-├── CLAUDE.md                 # This documentation
-├── TESTING_FINDINGS.md       # Detailed testing results and API behavior notes
-└── __tests__/                # Test directory
+└── CLAUDE.md                 # This documentation
 ```
 
 ## Authentication
@@ -405,7 +401,8 @@ Arkham uses underscore-separated format:
 
 Symbols are used as-is (no transformation needed). The `market.id` equals `market.symbol`.
 
-**Do not simplify to `BTC_PERP`** — that was an earlier misconception based on stale test fixtures. Older `__tests__/*.ts` files still reference `BTC_PERP`; those tests are out of date and do not reflect the live API.
+**Do not simplify to `BTC_PERP`** — that was an earlier misconception based on
+stale fixtures that did not reflect the live API.
 
 ## Data Precision & Conversion
 
@@ -633,26 +630,10 @@ The `listenOrderBook` handler filters orderbook entries to within 20% of last pr
 
 ## Testing / Validation
 
-### Test Credentials
-
-A working set of test credentials exists in `.apikey.json` (gitignored):
-
-- **File**: `/packages/safe-cex/src/exchanges/arkham/.apikey.json`
-- Contains real API key and secret for testing
-
 ### Utility Scripts
 
 - `cancel-old-orders.ts`: Standalone script to cancel all open orders. Run with `tsx`.
 - `cancel-order-by-id.ts`: Cancel a specific order by numeric ID. Run with `tsx`.
-
-### Testing Findings
-
-See `TESTING_FINDINGS.md` for detailed testing results covering:
-
-- Authentication signature generation (5/5 tests passed)
-- Public data endpoints (7/7 tests passed)
-- Order placement and cancellation (verified)
-- WebSocket connectivity (partial: connects but format issues resolved via proxy)
 
 ### Key Validated Behaviors
 

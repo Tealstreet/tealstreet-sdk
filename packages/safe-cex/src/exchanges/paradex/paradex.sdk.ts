@@ -171,7 +171,8 @@ export class ParadexRequestSigner {
       // Starknet felts can only hold ~252 bits, so long strings need to be hashed
       let messageToSign: string;
       if (fullMessage.length > 31) {
-        // Use starknetKeccak for hashing (as verified in paradex.auth.test.ts)
+        // A Starknet felt only carries a 31-byte short string; hash longer request
+        // messages into a felt before placing them in the typed-data payload.
         const messageHash = hash.starknetKeccak(fullMessage);
         messageToSign = '0x' + messageHash.toString(16);
       } else {

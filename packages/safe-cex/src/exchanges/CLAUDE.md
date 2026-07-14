@@ -21,9 +21,16 @@ packages/safe-cex/src/exchanges/
 ├── in-process-public-data.ts   # In-process public-data sharing
 ├── registry.ts                 # Exchange name → class mapping
 ├── types.ts                    # Shared types
-├── __tests__/                  # Cross-exchange tests
 └── <exchange>/                 # One directory per exchange
 ```
+
+This tree contains production runtime code only. Put freshly authored,
+deterministic exchange regressions in
+`packages/safe-cex/src/__tests__/audit-regressions/`. Do not add `__tests__/`,
+`__manual__/`, `*.test.*`, or live/debug scripts under `src/exchanges/`; the
+legacy corpus there was untrusted integration-generation scaffolding and was
+removed rather than migrated. See `packages/safe-cex/CLAUDE.md` for the test
+trust boundary.
 
 ## Per-Exchange File Convention
 
@@ -868,7 +875,10 @@ These drift fast. Prefer:
 4. Register in `registry.ts`.
 5. Write the per-exchange `CLAUDE.md` against the template above. Link back
    to this parent doc instead of restating shared mechanics.
-6. Run `yarn test-ci` from `packages/safe-cex` — `exchangeMetadata.test.ts`
+6. Freshly author deterministic regressions in
+   `src/__tests__/audit-regressions/` from verified upstream behavior and the
+   runtime contract. Never copy deleted exchange-tree test fixtures.
+7. Run `yarn test-ci` from `packages/safe-cex` — `exchangeMetadata.test.ts`
    has invariant checks that catch impossible flag combinations.
 
 ## Reference
