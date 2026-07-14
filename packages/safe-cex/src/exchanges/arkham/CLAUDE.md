@@ -2,6 +2,20 @@
 
 This directory contains the implementation for Arkham exchange integration in the safe-cex library.
 
+## Availability
+
+**The legacy Arkham CEX integration is disabled in production, development, and
+preview.** The legacy `arkm.com/api` endpoints no longer serve the CEX API, and
+Arkham's current trading product is decentralized Solana trading. Do not
+re-enable the metadata flags until a replacement trading API and its REST and
+WebSocket payloads have been independently validated.
+
+The frozen ticker-update defect is intentionally left unfixed while the venue
+is disabled: its legacy WebSocket payload cannot be verified against a live
+CEX frame. Before any re-enablement, verify the current protocol and then fix
+`ArkhamPublicWebSocket.handleTickerUpdate` together with stable ticker IDs in
+`ArkhamExchange.fetchTickers`.
+
 ## Exchange Information
 
 Arkham (ARKM) is a cryptocurrency exchange offering:

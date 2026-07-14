@@ -2051,9 +2051,11 @@ const ArkhamMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/arkham/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  enabled: true,
-  enabledInDev: true,
-  enableInPreview: true,
+  // The legacy CEX REST and WebSocket API is unavailable. Do not re-enable
+  // until Arkham publishes and we validate a replacement trading protocol.
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
   supportsTestnet: false, // No testnet available yet
   supportsTradesHistory: true,
   orderbookTickDelay: 100,
