@@ -87,10 +87,14 @@ export class PhemexExchange extends BaseExchange {
 
   getAccount = async () => {
     const {
-      data: [{ accountAlias }],
-    } = await this.xhr.get(ENDPOINTS.ACCOUNT);
+      data: {
+        data: { account },
+      },
+    } = await this.xhr.get<{ data: POSITIONS_RESPONSE }>(ENDPOINTS.ACCOUNT, {
+      params: { currency: 'USDT' },
+    });
 
-    return { userId: accountAlias };
+    return { userId: String(account.userID) };
   };
 
   validateAccount = async () => {
@@ -398,30 +402,85 @@ export class PhemexExchange extends BaseExchange {
 
   fetchPositionsAndBalance = async () => {
     try {
-      const { data } = await this.xhr.get<Record<string, any>>(ENDPOINTS.ACCOUNT, {
-        params: {
-          currency: 'USDT',
-        },
-      });
-
-      const {
-        data: { account, positions },
-      } = data;
-
-      // We need to filter out positions that corresponds to
-      // markets that are not supported by safe-cex
-
-      const supportedPositions = positions.filter((p: any) =>
-        this.store.markets.some((m) => m.symbol === this.formatSymbolIn(p.symbol)),
+      const currencies = ['USDT', 'USDC'] as const;
+      const responses = await Promise.allSettled(
+        currencies.map(async (currency) => {
+          const response = await this.xhr.get<Record<string, any>>(ENDPOINTS.ACCOUNT, {
+            params: { currency },
+          });
+          const data = response.data?.data;
+          if (response.data?.code !== 0 || !data?.account || !Array.isArray(data.positions)) {
+            throw new Error(response.data?.msg || `Invalid ${currency} account-position response`);
+          }
+          return { currency, ...data };
+        }),
       );
 
-      const parsedPositions: Position[] = supportedPositions
-        .map(this.mapPosition.bind(this))
-        .filter((position: Position | undefined) => Boolean(position));
+      const accounts: Record<string, any> = {};
+      const currencyBalances: NonNullable<Balance['currencies']> = {};
+      const parsedPositions: Position[] = [];
+      const failedCurrencies = new Set<string>();
 
-      //const totalCollateral = parseFloat(account.accountBalanceRv) + parseFloat(account.bonusBalanceRv);
-      const totalCollateral = parseFloat(account.accountBalanceRv);
-      const used = parseFloat(account.totalUsedBalanceRv);
+      for (let i = 0; i < currencies.length; i++) {
+        const currency = currencies[i];
+        const response = responses[i];
+        if (response.status === 'rejected') {
+          failedCurrencies.add(currency);
+          this.emitAndLogError(response.reason?.response?.data?.msg || response.reason?.message || String(response.reason));
+          continue;
+        }
+
+        const { account, positions } = response.value;
+        accounts[currency] = account;
+
+        const currencyPositions: Position[] = [];
+        for (let j = 0; j < positions.length; j++) {
+          const position = positions[j];
+          if (!this.store.marketsBySymbol[this.formatSymbolIn(position.symbol)]) continue;
+
+          const parsedPosition = this.mapPosition(position);
+          if (!parsedPosition) continue;
+
+          currencyPositions.push(parsedPosition);
+          parsedPositions.push(parsedPosition);
+        }
+
+        const total = parseFloat(account.accountBalanceRv);
+        const used = parseFloat(account.totalUsedBalanceRv);
+        currencyBalances[currency] = {
+          total,
+          used,
+          free: subtract(total, used),
+          upnl: roundUSD(sumBy(currencyPositions, (p) => parseFloat(String(p.unrealizedPnl)))),
+          info: account,
+        };
+      }
+
+      if (Object.keys(currencyBalances).length === 0) {
+        return { balance: this.store.balance, positions: this.store.positions };
+      }
+
+      for (const currency of failedCurrencies) {
+        const previousBalance = this.store.balance.currencies?.[currency];
+        if (previousBalance) {
+          currencyBalances[currency] = previousBalance;
+        } else {
+          // getBalanceSlice falls back to the aggregate for a missing currency.
+          // An unavailable settlement account must therefore fail closed instead.
+          currencyBalances[currency] = { total: 0, used: 0, free: 0, upnl: 0 };
+        }
+        parsedPositions.push(
+          ...this.store.positions.filter((position) => {
+            const market = this.store.marketsBySymbol[position.symbol];
+            return market?.quote === currency || market?.info?.settleCurrency === currency || position.info?.currency === currency;
+          }),
+        );
+      }
+
+      // Both supported settlement assets are USD stablecoins. Per-market consumers
+      // read balance.currencies; this aggregate is the nominal USD-stable total.
+      const totalCollateral = Object.values(currencyBalances).reduce((total, balance) => total + balance.total, 0);
+      const used = Object.values(currencyBalances).reduce((total, balance) => total + balance.used, 0);
       const upnl = roundUSD(sumBy(parsedPositions, (p) => parseFloat(String(p.unrealizedPnl))));
 
       const balance: Balance = {
@@ -429,7 +488,8 @@ export class PhemexExchange extends BaseExchange {
         free: subtract(totalCollateral, used),
         total: totalCollateral,
         upnl,
-        info: account,
+        info: accounts,
+        currencies: currencyBalances,
       };
 
       return { balance, positions: parsedPositions };
@@ -838,7 +898,7 @@ export class PhemexExchange extends BaseExchange {
       const res = (
         await mapSeries(requests, async (request) => {
           if (request.orderIDs.length === 1) {
-            return await this.xhr.delete(ENDPOINTS.CANCEL_ORDER, {
+            return await this.unlimitedXHR.delete(ENDPOINTS.CANCEL_ORDER, {
               params: {
                 symbol: this.formatSymbolOut(request.symbol),
                 posSide: request.posSide,
@@ -849,7 +909,7 @@ export class PhemexExchange extends BaseExchange {
             const lots = chunk(request.orderIDs, 10);
             return (
               await mapSeries(lots, async (lot) => {
-                return await this.xhr.delete(ENDPOINTS.BATCH_ORDERS, {
+                return await this.unlimitedXHR.delete(ENDPOINTS.BATCH_ORDERS, {
                   params: {
                     symbol: this.formatSymbolOut(request.symbol),
                     posSide: request.posSide,
@@ -930,7 +990,7 @@ export class PhemexExchange extends BaseExchange {
     const orderIds = [];
     let errMsg = '';
     for (const payload of payloads) {
-      const { data } = await this.xhr.put(ENDPOINTS.ORDER, undefined, {
+      const { data } = await this.unlimitedXHR.put(ENDPOINTS.ORDER, undefined, {
         params: payload,
       });
       if (data.code !== 0) {

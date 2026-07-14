@@ -75,7 +75,7 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 ### Tick Loop
 
 - `tick()` runs on a configurable interval via `options.extra.tickInterval`
-- Each tick calls `fetchPositionsAndBalance()` which fetches positions and balance from the `/g-accounts/accountPositions` endpoint
+- Each tick calls `fetchPositionsAndBalance()`, which fetches both `currency=USDT` and `currency=USDC`, merges their positions and balances, then returns one complete snapshot for the full store write. If one settlement-account request fails or returns an invalid payload, a successful sibling snapshot still refreshes and the failed currency's last-known balance/positions are retained until its next successful poll. With no prior slice, the unavailable currency is represented as zero so per-market margin lookup fails closed rather than falling back to the sibling aggregate.
 - On error, logs the error and continues the loop
 - Uses `loop()` utility for scheduling
 
@@ -87,7 +87,7 @@ All endpoints are defined in `ENDPOINTS` constant in `phemex.types.ts`:
 | ----------------------- | ----------------------------------- | ------- | ------------------------------------------------------------------------ |
 | `MARKETS`               | `/public/products`                  | GET     | Fetch available perpetual markets (`perpProductsV2`)                     |
 | `TICKERS`               | `/md/v3/ticker/24hr/all`            | GET     | Fetch 24hr ticker data for all symbols                                   |
-| `ACCOUNT`               | `/g-accounts/accountPositions`      | GET     | Fetch account balance and positions (params: `currency=USDT`)            |
+| `ACCOUNT`               | `/g-accounts/accountPositions`      | GET     | Fetch account balance and positions (params: `currency=USDT` or `USDC`)  |
 | `POSITIONS`             | `/g-accounts/accountPositions`      | GET     | Same endpoint as ACCOUNT, also accepts `symbol` param                    |
 | `ORDER`                 | `/g-orders/create`                  | **PUT** | Place a new order                                                        |
 | `CANCEL_ORDER`          | `/g-orders/cancel`                  | DELETE  | Cancel a single order (params: `symbol`, `posSide`, `orderID`)           |
@@ -158,7 +158,7 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 3. Buffer all WS updates while snapshot loads
 4. After snapshot arrives, filter buffered updates by `sequence` number (discard updates older than snapshot)
 5. Apply buffered updates, then process subsequent updates incrementally
-6. Updates use insert/update/delete by price level: amount=0 means delete, new price means insert, existing price means update (`processOrderBookUpdate`, `phemex.ws-public.ts:345-370`)
+6. `processOrderBookUpdate` applies each delta through shared `updateOrderBookByPrice`: bids stay descending, asks stay ascending, and zero-amount updates for absent levels are ignored.
 
 **OHLCV streaming**: Kline topic format is `kline_p.subscribe|||{symbol}|||{resolution}`. Message handler key uses interval and symbol: `kline_p.{interval}.{symbol}`. Each kline message contains up to 2 rows (current and previous candle). The handler processes both and filters by matching interval. Kline data format: `[timestamp, interval, lastClose, open, high, low, close, volume, turnover]`.
 
@@ -328,7 +328,7 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 ## Rate Limiting
 
 - **Rate-limited client** (`xhr`): `maxRPS: 3` (3 requests per second)
-- **Unlimited client** (`unlimitedXHR`): No rate limit, used for order operations
+- **Unlimited client** (`unlimitedXHR`): No local client rate limit; `placeOrder` and `cancelOrders` use it so chaser cancel-and-replace and split orders do not queue behind account polling. Phemex's current REST contract-group quota is 500 requests/minute, so upstream 429 handling still applies.
 - HTTP-over-WebSocket: Uses `axiosHttpOverWebsocketAdapter` when `tealstreetTunnel` is enabled
 - Request timeout: 20,000ms (hardcoded in `phemex.api.ts:25`, overrides `recvWindow`)
 - Axios retry: 3 retries on network errors (`isNetworkError` condition)
@@ -345,7 +345,7 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 
 ### Positions
 
-- **REST polling**: Positions are fetched via REST in the `tick()` loop using `fetchPositionsAndBalance()`
+- **REST polling**: Positions are fetched via REST in the `tick()` loop using `fetchPositionsAndBalance()` across both USDT and USDC settlement accounts before the full replacement
 - **WebSocket updates**: `positions_p` messages map and upsert positions via `store.addOrUpdatePositions()` (not update-only)
 - **Zero-contract guard**: Brand-new zero-contract WS positions are ignored unless they already exist in the store; full cleanup is handled by periodic/full REST sync (`addOrUpdatePositionsFull`)
 - **Filtering**: Only positions for markets present in the store are processed (both REST and WS)
@@ -353,10 +353,10 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 
 ### Balance
 
-- **REST polling**: Fetched alongside positions in `tick()` via `fetchPositionsAndBalance()`
-- **WebSocket updates**: `accounts_p` messages update balance independently
+- **REST polling**: Fetched alongside positions in `tick()` from both settlement accounts; `balance.currencies` is authoritative for per-market margin. Aggregate totals are the nominal USD-stable sum of USDT and USDC, not a conversion-rate feed.
+- **WebSocket updates**: `accounts_p` messages merge every received account by its `currency` into `balance.currencies`, preserving the sibling settlement slice until its own update arrives.
 - **Fast-follow sync**: Terminal order events trigger the same debounced `fetchPositionsAndBalance()` reconciliation used for positions
-- **WS balance total calculation**: `total = accountBalanceRv - upnl` (different from REST which uses just `accountBalanceRv`)
+- **WS balance total calculation**: each updated currency uses `total = accountBalanceRv - currency upnl` (different from REST which uses just `accountBalanceRv`); aggregate fields sum the currency slices.
 
 ## Exchange Metadata
 
@@ -470,4 +470,4 @@ Exchange-specific unit coverage exists for private WS reconciliation:
 
 - `src/__tests__/phemex.ws-private.test.ts` - Covers WS position upsert behavior, zero-contract guard behavior, and debounced REST reconciliation after terminal `orders_p` events.
 - `validateAccount()` - Attempts GET on `/g-accounts/accountPositions` with `currency: USDT`. Returns empty string on success, error message on failure.
-- `getAccount()` - Fetches account alias for user identification.
+- `getAccount()` - Reads `data.account.userID` from the USDT account-position response for user identification.

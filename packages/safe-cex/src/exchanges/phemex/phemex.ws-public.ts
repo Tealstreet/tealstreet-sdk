@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { calcOrderBookTotal } from '../../utils/orderbook';
+import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS } from './phemex.types';
 
@@ -343,29 +344,16 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
   };
 
   private processOrderBookUpdate = (orderBook: OrderBook, update: Record<string, any>) => {
-    const sides = { bids: update.bids, asks: update.asks };
+    const bids = update.bids || [];
+    for (let i = 0; i < bids.length; i++) {
+      const [price, amount] = bids[i];
+      updateOrderBookByPrice(orderBook, 'bids', parseFloat(price), parseFloat(amount));
+    }
 
-    Object.entries(sides).forEach(([side, data]) => {
-      // we need this for ts compile
-      if (side !== 'bids' && side !== 'asks') return;
-
-      data.forEach(([p, a]: string[]) => {
-        const price = parseFloat(p);
-        const amount = parseFloat(a);
-        const index = orderBook[side].findIndex((b) => b.price === price);
-
-        if (index === -1 && amount > 0) {
-          orderBook[side].push({ price, amount, total: 0 });
-          return;
-        }
-
-        if (amount === 0) {
-          orderBook[side].splice(index, 1);
-          return;
-        }
-
-        orderBook[side][index].amount = amount;
-      });
-    });
+    const asks = update.asks || [];
+    for (let i = 0; i < asks.length; i++) {
+      const [price, amount] = asks[i];
+      updateOrderBookByPrice(orderBook, 'asks', parseFloat(price), parseFloat(amount));
+    }
   };
 }

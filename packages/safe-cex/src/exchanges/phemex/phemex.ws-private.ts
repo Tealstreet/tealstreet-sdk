@@ -596,20 +596,41 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
         }
 
         if (json?.accounts_p) {
-          const account = json?.accounts_p?.[0];
           this.recordMessageHandlerStats('account');
-          if (!account) return;
-          //const totalCollateral = parseFloat(account.accountBalanceRv) + parseFloat(account.bonusBalanceRv);
-          const totalCollateral = parseFloat(account.accountBalanceRv);
-          const used = parseFloat(account.totalUsedBalanceRv);
-          const upnl = roundUSD(sumBy(this.store.positions, (p) => parseFloat(String(+p.unrealizedPnl))));
+          if (!Array.isArray(json.accounts_p)) return;
+          const currencies: NonNullable<Balance['currencies']> = { ...(this.store.balance.currencies || {}) };
+          const accounts = this.store.balance.info && !Array.isArray(this.store.balance.info) ? { ...this.store.balance.info } : {};
+
+          for (const account of json.accounts_p) {
+            const currency = account?.currency;
+            if (!currency) continue;
+
+            const currencyPositions = this.store.positions.filter((position) => {
+              const market = this.store.marketsBySymbol[position.symbol];
+              return market?.quote === currency || market?.info?.settleCurrency === currency || position.info?.currency === currency;
+            });
+            const total = parseFloat(account.accountBalanceRv);
+            const used = parseFloat(account.totalUsedBalanceRv);
+            const upnl = roundUSD(sumBy(currencyPositions, (p) => parseFloat(String(+p.unrealizedPnl))));
+            currencies[currency] = {
+              used,
+              free: subtract(total, used),
+              total: subtract(total, upnl),
+              upnl,
+              info: account,
+            };
+            accounts[currency] = account;
+          }
+
+          if (Object.keys(currencies).length === 0) return;
 
           const balance: Balance = {
-            used,
-            free: subtract(totalCollateral, used),
-            total: subtract(totalCollateral, upnl),
-            upnl,
-            info: json?.accounts_p || [],
+            used: sumBy(Object.values(currencies), 'used'),
+            free: sumBy(Object.values(currencies), 'free'),
+            total: sumBy(Object.values(currencies), 'total'),
+            upnl: roundUSD(sumBy(Object.values(currencies), 'upnl')),
+            info: accounts,
+            currencies,
           };
 
           this.store.update({ balance });
