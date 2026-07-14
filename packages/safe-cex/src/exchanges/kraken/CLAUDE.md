@@ -496,7 +496,7 @@ Validates credentials by calling `/v3/accounts`. Checks for:
 - **Type**: Centralized exchange (CEX), spot trading
 - **Position Mode**: One-way only (spot has no true positions)
 - **Margin Types**: Isolated only (no margin trading in this integration)
-- **Status**: Enabled in dev/preview, disabled in production
+- **Status**: Enabled in dev and preview; preview is a production lane with real users, while prod remains disabled.
 
 ## API Documentation
 
@@ -610,6 +610,7 @@ Kraken uses non-standard asset codes. The `normalizeAsset()` function in `kraken
 4. **No mark/index**: Uses `last` trade price as mark and index price
 5. **Balance = portfolio**: Total USD balance includes estimated USD value of all held assets
 6. **No reduce-only**: All `reduceOnly` fields are false
+7. **Client order IDs**: `AddOrder` uses a generated 32-character lowercase hexadecimal short UUID in `cl_ord_id`; it must not send `userref`, because Kraken makes the fields mutually exclusive and `userref` is int32-only. Kraken `txid`s remain the returned, update/cancel, and reconciliation identities.
 
 ## Error Handling
 

@@ -2,6 +2,7 @@ import type { Axios } from 'axios';
 import type { Store } from '../../store/store.interface';
 
 import rateLimit from 'axios-rate-limit';
+import { customAlphabet } from 'nanoid';
 
 import {
   Balance,
@@ -26,7 +27,6 @@ import {
 } from '../../types';
 import { loop } from '../../utils/loop';
 import { adjust } from '../../utils/safe-math';
-import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
 import { createAPI } from './krakenspot.api';
 import {
@@ -39,6 +39,10 @@ import {
 } from './krakenspot.types';
 import { KrakenSpotPrivateWebsocket } from './krakenspot.ws-private';
 import { KrakenSpotPublicWebsocket } from './krakenspot.ws-public';
+
+const KRAKEN_SPOT_CL_ORD_ID_LENGTH = 32;
+const KRAKEN_SPOT_CL_ORD_ID_PATTERN = /^[a-f0-9]{32}$/;
+const createKrakenSpotClientOrderId = customAlphabet('0123456789abcdef', KRAKEN_SPOT_CL_ORD_ID_LENGTH);
 
 export class KrakenSpotExchange extends BaseExchange {
   xhr: Axios;
@@ -293,13 +297,18 @@ export class KrakenSpotExchange extends BaseExchange {
       }
 
       const volume = adjust(opts.amount, market.precision.amount);
+      const clOrdId = createKrakenSpotClientOrderId();
+
+      if (!KRAKEN_SPOT_CL_ORD_ID_PATTERN.test(clOrdId)) {
+        throw new Error('Failed to generate a valid Kraken Spot client order ID');
+      }
 
       const body: Record<string, any> = {
         pair,
         type: opts.side === OrderSide.Buy ? 'buy' : 'sell',
         ordertype,
         volume: String(volume),
-        userref: `ts_${uuid()}`,
+        cl_ord_id: clOrdId,
       };
 
       // Add price for limit orders
