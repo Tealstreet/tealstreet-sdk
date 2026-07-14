@@ -232,6 +232,8 @@ Both `user` and `heartbeats` channels are subscribed sequentially in a loop, eac
 
 **Grafana logging**: If `ENABLE_PWS_LOG` is true (default), every private WebSocket message is emitted as `'grafana-pws'` event (`coinbase.ws-private.ts:37-39`)
 
+**Order snapshot authority**: An upstream `orders: []` snapshot canonically clears the store and marks orders loaded. A non-empty snapshot whose every order is quarantined for missing or invalid market/CFM metadata is not authoritative: it preserves last-known-good orders and their loaded state. Mixed snapshots replace the store with valid siblings and emit an error for each skipped record.
+
 ## Order Types and Mappings
 
 ### Supported Order Configurations
@@ -318,7 +320,7 @@ There is no native amend/edit order API used. Updates are performed as:
 
 **Order price resolution** (`coinbase.ws-private.ts:79`): Uses `stop_price` if present, otherwise `limit_price`, otherwise `'0'`. This means stop-limit orders show their stop price, not their limit price.
 
-**Contract size handling** (`coinbase.ws-private.ts:69-71`): For CFM futures, `remaining` is multiplied by `contractSize` from market info. However, the market lookup uses `m.id === order.product_id` which may not find INTX markets if IDs differ from product IDs.
+**Contract size handling** (`normalizeCfmContractSize`): Expiring CFM products require a positive finite contract-size multiplier; invalid market metadata is quarantined during market loading. CFM orders and positions resolve by product ID and use that same validator before mapping `amount`, `filled`, `remaining`, or contracts to base units. An unresolved market or invalid CFM multiplier is skipped with a non-secret exchange error rather than guessed as `1`; valid `1` remains a valid multiplier. INTX and spot order quantities stay in their API-provided base units.
 
 ### Not Yet Implemented
 
@@ -358,7 +360,7 @@ All Coinbase API responses return numeric values as strings. The code uses `pars
 
 ### Position Size Calculations
 
-- **CFM**: `contracts = multiply(rawSize, contractSize)` -- size is in number of contracts, multiplied by contract size for base amount. Notional = `size * markPrice * contractSize`.
+- **CFM**: `contracts = multiply(rawSize, contractSize)` -- size is in number of contracts, multiplied by a validated positive finite contract size for base amount. Invalid or unresolved products are skipped rather than emitted in a guessed unit. Notional = `size * markPrice * contractSize`.
 - **INTX**: `contracts = abs(net_size)` -- already in base units. Notional = `size * markPrice`. UPNL is manually calculated: `(side === Long ? 1 : -1) * size * (markPrice - entryPrice)` rather than using the API's `unrealized_pnl`.
 
 ### Candle Timestamps

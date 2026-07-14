@@ -155,3 +155,12 @@ export const formatOrderType = (rawType: ORDER_EVENT['orders'][0]['order_type'])
       return OrderType.Limit;
   }
 };
+
+/**
+ * Coinbase CFM quantities arrive in contracts. Expiring products must have a
+ * positive finite base-unit multiplier before they can enter the store.
+ */
+export const normalizeCfmContractSize = (value: unknown): number | undefined => {
+  const contractSize = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  return Number.isFinite(contractSize) && contractSize > 0 ? contractSize : undefined;
+};

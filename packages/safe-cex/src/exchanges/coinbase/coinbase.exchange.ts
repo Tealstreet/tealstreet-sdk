@@ -52,6 +52,7 @@ import {
   PLACE_ORDER_RESPONSE,
   PORTFOLIO_BREAKDOWN_RESPONSE,
 } from './coinbase.types';
+import { normalizeCfmContractSize } from './coinbase.utils';
 import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
 import { CoinbasePublicWebsocket } from './coinbase.ws-public';
 
@@ -551,43 +552,47 @@ export class CoinbaseExchange extends BaseExchange {
         }),
       );
 
-      const markets: Market[] = responses
-        .flatMap((response) => response.data.products)
-        .map((m) => {
-          const p = m.price_increment;
-          const amt = m.base_increment;
-          const isSpot = m.future_product_details === undefined;
-          const isExpiring = m.future_product_details?.contract_expiry_type === 'EXPIRING';
-          const contractSize = parseFloat(m.future_product_details?.contract_size || '1');
-          const base = m.future_product_details?.contract_root_unit || m.base_currency_id || m.product_id.split('-')[0];
+      const markets: Market[] = [];
+      for (const m of responses.flatMap((response) => response.data.products)) {
+        const p = m.price_increment;
+        const amt = m.base_increment;
+        const isSpot = m.future_product_details === undefined;
+        const isExpiring = m.future_product_details?.contract_expiry_type === 'EXPIRING';
+        const cfmContractSize = isExpiring ? normalizeCfmContractSize(m.future_product_details?.contract_size) : undefined;
+        if (isExpiring && cfmContractSize === undefined) {
+          this.emitAndLogError(`Coinbase CFM market skipped: invalid contract size for ${m.product_id}`);
+          continue;
+        }
+        const contractSize = cfmContractSize ?? parseFloat(m.future_product_details?.contract_size || '1');
+        const base = m.future_product_details?.contract_root_unit || m.base_currency_id || m.product_id.split('-')[0];
 
-          const market: Market = {
-            id: m.product_id,
-            symbol: m.product_id,
-            base,
-            quote: m.quote_currency_id,
-            active: m.status === 'TRADING',
-            isExpiring,
-            isSpot,
-            precision: {
-              amount: parseFloat(amt),
-              price: parseFloat(p),
+        const market: Market = {
+          id: m.product_id,
+          symbol: m.product_id,
+          base,
+          quote: m.quote_currency_id,
+          active: m.status === 'TRADING',
+          isExpiring,
+          isSpot,
+          precision: {
+            amount: parseFloat(amt),
+            price: parseFloat(p),
+          },
+          limits: {
+            amount: {
+              min: parseFloat(m.base_min_size),
+              max: parseFloat(m.base_max_size),
             },
-            limits: {
-              amount: {
-                min: parseFloat(m.base_min_size),
-                max: parseFloat(m.base_max_size),
-              },
-              leverage: {
-                min: 1,
-                max: isSpot ? 1 : 10,
-              },
+            leverage: {
+              min: 1,
+              max: isSpot ? 1 : 10,
             },
-            contractSize,
-            info: m,
-          };
-          return market;
-        });
+          },
+          contractSize,
+          info: m,
+        };
+        markets.push(market);
+      }
       return markets;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
@@ -883,69 +888,72 @@ export class CoinbaseExchange extends BaseExchange {
     try {
       const { data } = await this.xhr.get<LIST_POSITIONS_CFM_RESPONSE>(ENDPOINTS.LIST_POSITIONS_CFM);
 
-      const formattedPositions: Position[] = data.positions.map(
-        (position: LIST_POSITIONS_CFM_RESPONSE['positions'][0]) => {
-          // export type Position = {
-          //   readonly id: string;
-          //   readonly symbol: string;
-          //   readonly side: PositionSide;
-          //   readonly entryPrice: number;
-          //   readonly notional: number;
-          //   readonly leverage: number;
-          //   readonly marginType?: MarginType;
-          //   readonly positionMode?: PositionMode;
-          //   readonly unrealizedPnl: number;
-          //   readonly realizedPnl?: number;
-          //   readonly contracts: number;
-          //   readonly liquidationPrice: number;
-          //   readonly info?: any;
-          //   readonly extra?: {
-          //     readonly unrealizedPnlNative?: number;
-          //     readonly nativeCurrency?: string;
-          //   };
-          //   readonly lastUpdate?: number;
-          // };
+      const formattedPositions: Position[] = [];
+      for (const position of data.positions) {
+        // export type Position = {
+        //   readonly id: string;
+        //   readonly symbol: string;
+        //   readonly side: PositionSide;
+        //   readonly entryPrice: number;
+        //   readonly notional: number;
+        //   readonly leverage: number;
+        //   readonly marginType?: MarginType;
+        //   readonly positionMode?: PositionMode;
+        //   readonly unrealizedPnl: number;
+        //   readonly realizedPnl?: number;
+        //   readonly contracts: number;
+        //   readonly liquidationPrice: number;
+        //   readonly info?: any;
+        //   readonly extra?: {
+        //     readonly unrealizedPnlNative?: number;
+        //     readonly nativeCurrency?: string;
+        //   };
+        //   readonly lastUpdate?: number;
+        // };
 
-          // export type LIST_POSITIONS_CFM_RESPONSE = {
-          //   product_id: string;
-          //   expiration_time: string;
-          //   side: 'LONG' | 'SHORT';
-          //   number_of_contracts: string;
-          //   current_price: string;
-          //   avg_entry_price: string;
-          //   unrealized_pnl: string;
-          //   daily_realized_pnl: string;
-          // }[];
+        // export type LIST_POSITIONS_CFM_RESPONSE = {
+        //   product_id: string;
+        //   expiration_time: string;
+        //   side: 'LONG' | 'SHORT';
+        //   number_of_contracts: string;
+        //   current_price: string;
+        //   avg_entry_price: string;
+        //   unrealized_pnl: string;
+        //   daily_realized_pnl: string;
+        // }[];
 
-          const market = this.store.marketsBySymbol[position.product_id];
-          const contractSize = market?.contractSize || 1;
+        const market = this.store.marketsById[position.product_id];
+        const contractSize = market?.isExpiring ? normalizeCfmContractSize(market.contractSize) : undefined;
+        if (contractSize === undefined) {
+          this.emitAndLogError(`Coinbase CFM position skipped: missing or invalid contract size for ${position.product_id}`);
+          continue;
+        }
 
-          const side = position.side === 'LONG' ? PositionSide.Long : PositionSide.Short;
-          const entryPrice = parseFloat(position.avg_entry_price);
-          const markPrice = parseFloat(position.current_price);
-          const size = Math.abs(parseFloat(position.number_of_contracts));
-          const unrealisedPnl = parseFloat(position.unrealized_pnl);
-          const sizeNotional = size * markPrice * contractSize;
-          const sizeInBase = multiply(size, contractSize);
-          return {
-            id: createPositionId(position.product_id),
-            symbol: position.product_id,
-            side,
-            entryPrice: entryPrice,
-            notional: sizeNotional,
-            positionMode: PositionMode.OneWay,
-            marginType: MarginType.Cross,
-            leverage: 10,
-            unrealizedPnl: unrealisedPnl,
-            contracts: sizeInBase,
-            liquidationPrice: 0,
-            extra: {
-              contractsNative: size,
-            },
-            info: position,
-          };
-        },
-      );
+        const side = position.side === 'LONG' ? PositionSide.Long : PositionSide.Short;
+        const entryPrice = parseFloat(position.avg_entry_price);
+        const markPrice = parseFloat(position.current_price);
+        const size = Math.abs(parseFloat(position.number_of_contracts));
+        const unrealisedPnl = parseFloat(position.unrealized_pnl);
+        const sizeNotional = size * markPrice * contractSize;
+        const sizeInBase = multiply(size, contractSize);
+        formattedPositions.push({
+          id: createPositionId(position.product_id),
+          symbol: position.product_id,
+          side,
+          entryPrice: entryPrice,
+          notional: sizeNotional,
+          positionMode: PositionMode.OneWay,
+          marginType: MarginType.Cross,
+          leverage: 10,
+          unrealizedPnl: unrealisedPnl,
+          contracts: sizeInBase,
+          liquidationPrice: 0,
+          extra: {
+            contractsNative: size,
+          },
+          info: position,
+        });
+      }
 
       return formattedPositions;
     } catch (err: any) {

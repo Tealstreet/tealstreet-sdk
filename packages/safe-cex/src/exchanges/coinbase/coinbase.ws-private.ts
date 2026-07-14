@@ -1,10 +1,15 @@
 import type { CoinbaseExchange } from './coinbase.exchange';
 
-import { formatOrderState, formatOrderType, sign } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
+import {
+  formatOrderState,
+  formatOrderType,
+  normalizeCfmContractSize,
+  sign,
+} from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
 import { Order, OrderSide } from '@tealstreet/safe-cex/src/types';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { multiply } from '../../utils/safe-math';
+import { add, multiply } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
@@ -62,14 +67,24 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   };
 
   handleUserEventOrders = (data: ORDER_EVENT) => {
-    const orders: Order[] = data.orders.map((order) => {
-      const filled = parseFloat(order.cumulative_quantity);
+    const orders: Order[] = [];
+    for (const order of data.orders) {
+      const filledNative = parseFloat(order.cumulative_quantity);
       const remainingNative = parseFloat(order.leaves_quantity);
-      const amount = filled + remainingNative;
-      const market = this.store.markets.find((m) => m.id === order.product_id);
-      const contractSize = market?.info.contractSize || 1;
+      const market = this.store.marketsById[order.product_id];
+      if (!market) {
+        this.emitAndLogError(`Coinbase order skipped: missing market for ${order.product_id}`);
+        continue;
+      }
+      const contractSize = market.isExpiring ? normalizeCfmContractSize(market.contractSize) : 1;
+      if (contractSize === undefined) {
+        this.emitAndLogError(`Coinbase CFM order skipped: invalid contract size for ${order.product_id}`);
+        continue;
+      }
+      const filled = multiply(filledNative, contractSize);
       const remaining = multiply(remainingNative, contractSize);
-      return {
+      const amount = add(filled, remaining);
+      orders.push({
         id: order.order_id,
         parentId: order.client_order_id,
         status: formatOrderState(order.status),
@@ -86,9 +101,12 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         reduceOnly: false,
         info: order,
         lastUpdate: virtualClock.getCurrentTimeMs(),
-      };
-    });
-    if (data.type === 'snapshot') {
+      });
+    }
+    // An empty upstream snapshot is authoritative and clears orders. A non-empty
+    // snapshot that yielded no orders only contained quarantined records, so it
+    // must not replace last-known-good state or mark orders as loaded.
+    if (data.type === 'snapshot' && (data.orders.length === 0 || orders.length > 0)) {
       this.store.update({
         orders,
         loaded: { ...this.store.loaded, orders: true },
