@@ -76,6 +76,7 @@ import {
   Meta,
   PerpDex,
   PerpDexs,
+  SpotClearinghouseState,
 } from './hyperliquid.types';
 import { calculatePricePrecision, symbolToCoin } from './hyperliquid.utils';
 import { HyperliquidPrivateWebSocket } from './hyperliquid.ws-private';
@@ -108,7 +109,9 @@ export class HyperliquidExchange extends BaseExchange {
   private spotCollateralRefreshInFlight: Promise<void> | null = null;
   private lastSpotCollateralRefreshAt = 0;
   private hasSpotCollateralSnapshot = false;
-  private cachedSpotCollateralBalances: Array<{ coin: string; hold: string; total: string }> = [];
+  private cachedSpotCollateralState: SpotClearinghouseState = { balances: [] };
+  private latestAuthoritativeUnifiedBalanceSnapshot: { total: number; used: number; free: number } | null = null;
+  private hasAuthoritativeUnifiedSpotWsSnapshot = false;
   private latestCorePerpsAccountValue = 0;
   private latestCorePerpsUsedMargin = 0;
   private latestCorePerpsUpnl = 0;
@@ -305,6 +308,9 @@ export class HyperliquidExchange extends BaseExchange {
   public shouldUseSpotCollateralBalance = (): boolean =>
     this.userAbstractionMode === 'unifiedAccount' || this.userAbstractionMode === 'portfolioMargin';
 
+  public shouldRequestPortfolioMarginSpotState = (): boolean =>
+    this.userAbstractionMode === 'portfolioMargin';
+
   private resolveUserAbstractionMode = async (): Promise<void> => {
     const user = this.options.vault || this.options.applicationId;
     if (!user) return;
@@ -370,7 +376,7 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   private buildUnifiedSpotCollateralSnapshot = (
-    balances: Array<{ coin: string; hold: string; total: string }>,
+    balances: SpotClearinghouseState['balances'],
   ): {
     total: number;
     spotHoldNotional: number;
@@ -420,17 +426,34 @@ export class HyperliquidExchange extends BaseExchange {
     };
   };
 
+  private getAuthoritativeUnifiedUsdcAvailability = (state: SpotClearinghouseState): number | null => {
+    const tokenToAvailableAfterMaintenance = state.tokenToAvailableAfterMaintenance;
+    if (!Array.isArray(tokenToAvailableAfterMaintenance)) return null;
+
+    for (const [token, available] of tokenToAvailableAfterMaintenance) {
+      if (token !== 0) continue;
+      const amount = Number(available);
+      return Number.isFinite(amount) ? amount : null;
+    }
+
+    return null;
+  };
+
   private applyBalanceFromCurrentMode = (): void => {
     if (this.shouldUseSpotCollateralBalance() && this.hasSpotCollateralSnapshot) {
-      const spotSnapshot = this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralBalances);
+      const spotSnapshot = this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralState.balances);
       const upnl = this.latestCorePerpsUpnl;
-      // Keep perps margin usage as source of truth and reserve spot "holds" as non-available collateral.
-      const used = this.latestCorePerpsUsedMargin + spotSnapshot.spotHoldNotional;
-      const free = spotSnapshot.total + upnl - used;
+      // An authoritative spot snapshot is internally consistent at one HyperCore
+      // block. Keep its wallet total/used/free together until the next authoritative
+      // spot state; ticker-derived PnL may update independently between those frames.
+      const authoritativeSnapshot = this.latestAuthoritativeUnifiedBalanceSnapshot;
+      const total = authoritativeSnapshot?.total ?? spotSnapshot.total;
+      const used = authoritativeSnapshot?.used ?? this.latestCorePerpsUsedMargin + spotSnapshot.spotHoldNotional;
+      const free = authoritativeSnapshot?.free ?? spotSnapshot.total + upnl - used;
       const currencies = {
         ...spotSnapshot.spotCurrencies,
         [HyperliquidExchange.UNIFIED_MARGIN_CURRENCY]: {
-          total: spotSnapshot.total,
+          total,
           used,
           free,
           upnl,
@@ -439,7 +462,7 @@ export class HyperliquidExchange extends BaseExchange {
 
       this.store.update({
         balance: {
-          total: spotSnapshot.total,
+          total,
           used,
           free,
           upnl,
@@ -491,20 +514,44 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   public handleSpotClearinghouseStateUpdate = (
-    balances: Array<{ coin: string; hold: string; total: string }>,
+    state: SpotClearinghouseState,
+    source: 'rest' | 'websocket' | 'legacy' = 'legacy',
   ): void => {
     if (!this.shouldUseSpotCollateralBalance()) {
       return;
     }
 
-    if (!Array.isArray(balances)) {
+    if (!Array.isArray(state?.balances)) {
+      return;
+    }
+
+    // REST is a startup/reconnect fallback. Once the live spot stream has
+    // produced an authoritative snapshot, an older in-flight REST response must
+    // not overwrite it. A reconnect delivers a fresh spotState snapshot itself.
+    if (source === 'rest' && this.hasAuthoritativeUnifiedSpotWsSnapshot) {
       return;
     }
 
     this.hasSpotCollateralSnapshot = true;
-    this.cachedSpotCollateralBalances = balances.filter(
-      (entry) => typeof entry?.coin === 'string' && entry.coin.length > 0,
-    );
+    this.cachedSpotCollateralState = {
+      balances: state.balances.filter((entry) => typeof entry?.coin === 'string' && entry.coin.length > 0),
+      tokenToAvailableAfterMaintenance: state.tokenToAvailableAfterMaintenance,
+    };
+    const authoritativeAvailable = this.getAuthoritativeUnifiedUsdcAvailability(state);
+    if (authoritativeAvailable !== null) {
+      if (source === 'websocket') {
+        this.hasAuthoritativeUnifiedSpotWsSnapshot = true;
+      }
+      const spotSnapshot = this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralState.balances);
+      // Unified spot totals already include live perp PnL. Snapshot the wallet
+      // principal and used amount alongside authoritative availability so a later
+      // field-less REST response or ticker-only PnL update cannot mix block states.
+      this.latestAuthoritativeUnifiedBalanceSnapshot = {
+        total: spotSnapshot.total - this.latestCorePerpsUpnl,
+        used: spotSnapshot.total - authoritativeAvailable,
+        free: authoritativeAvailable,
+      };
+    }
     this.applyBalanceFromCurrentMode();
   };
 
@@ -534,7 +581,7 @@ export class HyperliquidExchange extends BaseExchange {
     this.lastSpotCollateralRefreshAt = now;
     this.spotCollateralRefreshInFlight = (async () => {
       try {
-        const { data } = await this.infoXhr.post<{ balances?: Array<{ coin: string; hold: string; total: string }> }>(
+        const { data } = await this.infoXhr.post<SpotClearinghouseState>(
           ENDPOINTS.INFO,
           {
             type: INFO_TYPES.SPOT_CLEARINGHOUSE_STATE,
@@ -548,7 +595,7 @@ export class HyperliquidExchange extends BaseExchange {
         );
 
         if (this.isDisposed) return;
-        this.handleSpotClearinghouseStateUpdate(data?.balances || []);
+        this.handleSpotClearinghouseStateUpdate(data || { balances: [] }, 'rest');
       } catch (error) {
         this.log(`Unified spot collateral refresh failed: ${error}`, LogSeverity.Warning);
       } finally {

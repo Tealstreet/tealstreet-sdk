@@ -240,10 +240,12 @@ describe('HyperliquidExchange startup sequencing', () => {
     });
 
     (exchange as any).userAbstractionMode = 'unifiedAccount';
-    exchange.handleSpotClearinghouseStateUpdate([
-      { coin: 'USDC', total: '1000', hold: '100' },
-      { coin: 'BTC', total: '0.01', hold: '0' },
-    ]);
+    exchange.handleSpotClearinghouseStateUpdate({
+      balances: [
+        { coin: 'USDC', total: '1000', hold: '100' },
+        { coin: 'BTC', total: '0.01', hold: '0' },
+      ],
+    });
     exchange.applyCorePerpsBalanceSnapshot({
       accountValue: 600,
       totalMarginUsed: 200,
@@ -302,6 +304,150 @@ describe('HyperliquidExchange startup sequencing', () => {
     });
   });
 
+  it('uses token 0 post-maintenance availability instead of reconstructing unified free margin', () => {
+    const exchange = createExchange();
+
+    (exchange as any).userAbstractionMode = 'unifiedAccount';
+    exchange.applyCorePerpsBalanceSnapshot({
+      accountValue: 40,
+      totalMarginUsed: 50.324,
+      upnl: 0,
+    });
+    exchange.handleSpotClearinghouseStateUpdate({
+      balances: [{ coin: 'USDC', token: 0, total: '40', hold: '1.68' }],
+      tokenToAvailableAfterMaintenance: [[0, '38.32']],
+    });
+
+    expect(exchange.store.balance).toMatchObject({
+      total: 40,
+      free: 38.32,
+      upnl: 0,
+      currencies: {
+        USDC: {
+          total: 40,
+          free: 38.32,
+          upnl: 0,
+        },
+      },
+      info: {
+        spotCollateralCurrencies: {
+          USDC: {
+            total: 40,
+            used: 1.68,
+            free: 38.32,
+            upnl: 0,
+          },
+        },
+      },
+    });
+    expect(exchange.store.balance.used).toBeCloseTo(1.68, 10);
+    expect(exchange.store.balance.currencies!.USDC.used).toBeCloseTo(1.68, 10);
+    expect(exchange.store.balance.free).not.toBe(-12.004);
+  });
+
+  it('does not add unified perp PnL twice when spot total already contains it', () => {
+    const exchange = createExchange();
+
+    (exchange as any).userAbstractionMode = 'unifiedAccount';
+    exchange.applyCorePerpsBalanceSnapshot({
+      accountValue: 30,
+      totalMarginUsed: 5,
+      upnl: -10,
+    });
+    exchange.handleSpotClearinghouseStateUpdate({
+      balances: [{ coin: 'USDC', token: 0, total: '90', hold: '5' }],
+      tokenToAvailableAfterMaintenance: [[0, '85']],
+    });
+
+    expect(exchange.store.balance).toMatchObject({
+      total: 100,
+      used: 5,
+      free: 85,
+      upnl: -10,
+      currencies: {
+        USDC: {
+          total: 100,
+          used: 5,
+          free: 85,
+          upnl: -10,
+        },
+      },
+    });
+    expect(exchange.store.balance.total + exchange.store.balance.upnl - exchange.store.balance.used).toBe(85);
+
+    exchange.applyCorePerpsBalanceSnapshot({
+      accountValue: 29,
+      totalMarginUsed: 5,
+      upnl: -11,
+    });
+
+    expect(exchange.store.balance).toMatchObject({
+      total: 100,
+      used: 5,
+      free: 85,
+      upnl: -11,
+    });
+  });
+
+  it('does not let a field-less spot refresh downgrade authoritative unified availability', () => {
+    const exchange = createExchange();
+
+    (exchange as any).userAbstractionMode = 'unifiedAccount';
+    exchange.applyCorePerpsBalanceSnapshot({
+      accountValue: 40,
+      totalMarginUsed: 50.324,
+      upnl: 0,
+    });
+    exchange.handleSpotClearinghouseStateUpdate({
+      balances: [{ coin: 'USDC', token: 0, total: '40', hold: '1.68' }],
+      tokenToAvailableAfterMaintenance: [[0, '38.32']],
+    });
+
+    exchange.handleSpotClearinghouseStateUpdate({
+      balances: [{ coin: 'USDC', token: 0, total: '39', hold: '50.324' }],
+    });
+
+    expect(exchange.store.balance).toMatchObject({
+      total: 40,
+      used: expect.closeTo(1.68, 10),
+      free: 38.32,
+      upnl: 0,
+    });
+  });
+
+  it('does not let stale REST availability overwrite a newer spotState snapshot', () => {
+    const exchange = createExchange();
+
+    (exchange as any).userAbstractionMode = 'unifiedAccount';
+    exchange.applyCorePerpsBalanceSnapshot({
+      accountValue: 40,
+      totalMarginUsed: 50.324,
+      upnl: 0,
+    });
+    exchange.handleSpotClearinghouseStateUpdate(
+      {
+        balances: [{ coin: 'USDC', token: 0, total: '40', hold: '1.68' }],
+        tokenToAvailableAfterMaintenance: [[0, '38.32']],
+      },
+      'websocket',
+    );
+
+    exchange.handleSpotClearinghouseStateUpdate(
+      {
+        balances: [{ coin: 'USDC', token: 0, total: '25', hold: '5' }],
+        tokenToAvailableAfterMaintenance: [[0, '20']],
+      },
+      'rest',
+    );
+
+    expect(exchange.store.balance).toMatchObject({
+      total: 40,
+      used: expect.closeTo(1.68, 10),
+      free: 38.32,
+      upnl: 0,
+    });
+  });
+
   it('treats an empty unified spot snapshot as authoritative zero collateral', () => {
     const exchange = createExchange();
 
@@ -323,7 +469,7 @@ describe('HyperliquidExchange startup sequencing', () => {
       },
     });
 
-    exchange.handleSpotClearinghouseStateUpdate([]);
+    exchange.handleSpotClearinghouseStateUpdate({ balances: [] });
 
     expect(exchange.store.balance).toEqual({
       total: 0,
@@ -353,15 +499,24 @@ describe('HyperliquidExchange startup sequencing', () => {
     (exchange as any).userAbstractionMode = 'unifiedAccount';
     const postSpy = vi.spyOn(exchange.infoXhr, 'post').mockResolvedValue({
       data: {
-        balances: [],
+        balances: [{ coin: 'USDC', token: 0, total: '40', hold: '1.68' }],
+        tokenToAvailableAfterMaintenance: [[0, '38.32']],
       },
     } as any);
+    const stateSpy = vi.spyOn(exchange, 'handleSpotClearinghouseStateUpdate');
 
     await (exchange as any).refreshUnifiedSpotCollateralBalance(true);
     await (exchange as any).refreshUnifiedSpotCollateralBalance(false);
     await (exchange as any).refreshUnifiedSpotCollateralBalance(true);
 
     expect(postSpy).toHaveBeenCalledTimes(2);
+    expect(stateSpy).toHaveBeenLastCalledWith(
+      {
+        balances: [{ coin: 'USDC', token: 0, total: '40', hold: '1.68' }],
+        tokenToAvailableAfterMaintenance: [[0, '38.32']],
+      },
+      'rest',
+    );
   });
 
   it('does not force refreshes for non-funding ledger updates', () => {

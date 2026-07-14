@@ -42,6 +42,8 @@ const createParentMock = () => {
     scheduleHip3PositionRefresh: vi.fn(),
     syncBalanceFromLivePositions: vi.fn(),
     shouldUseSpotCollateralBalance: vi.fn(() => false),
+    shouldRequestPortfolioMarginSpotState: vi.fn(() => false),
+    handleSpotClearinghouseStateUpdate: vi.fn(),
   };
 };
 
@@ -123,6 +125,66 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
           payload?.subscription?.type === 'clearinghouseState' && payload?.subscription?.dex === 'vntls',
       ),
     ).toBe(true);
+  });
+
+  it('subscribes to spotState and unwraps its nested unified-account payload', () => {
+    const parent = createParentMock();
+    (parent as any).options = { ...parent.options, applicationId: '0xuser' };
+    (parent as any).shouldUseSpotCollateralBalance.mockReturnValue(true);
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+    const sendMock = vi.fn();
+
+    (ws as any).send = sendMock;
+    (ws as any).subscribeSystemTopics();
+
+    const payloads = sendMock.mock.calls.map((args: any[]) => JSON.parse(args[0]));
+    expect(payloads).toContainEqual({
+      method: 'subscribe',
+      subscription: { type: 'spotState', user: '0xuser' },
+    });
+    expect(payloads.some((payload: any) => payload?.subscription?.type === 'spotClearinghouseState')).toBe(false);
+
+    const spotState = {
+      balances: [{ coin: 'USDC', token: 0, total: '100', hold: '0' }],
+      tokenToAvailableAfterMaintenance: [[0, '38.32']],
+    };
+    (ws as any).processMessage({
+      channel: 'spotState',
+      data: { user: '0xuser', spotState },
+    });
+
+    expect(parent.handleSpotClearinghouseStateUpdate).toHaveBeenCalledWith(spotState, 'websocket');
+  });
+
+  it('requests portfolio-margin spotState for portfolio-margin accounts', () => {
+    const parent = createParentMock();
+    (parent as any).options = { ...parent.options, applicationId: '0xuser' };
+    (parent as any).shouldUseSpotCollateralBalance.mockReturnValue(true);
+    (parent as any).shouldRequestPortfolioMarginSpotState.mockReturnValue(true);
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+    const sendMock = vi.fn();
+
+    (ws as any).send = sendMock;
+    (ws as any).subscribeSystemTopics();
+
+    const payloads = sendMock.mock.calls.map((args: any[]) => JSON.parse(args[0]));
+    expect(payloads).toContainEqual({
+      method: 'subscribe',
+      subscription: { type: 'spotState', user: '0xuser', isPortfolioMargin: true },
+    });
+  });
+
+  it('accepts the legacy spotClearinghouseState channel during migration', () => {
+    const parent = createParentMock();
+    const ws = new HyperliquidPrivateWebSocket(parent as any);
+    const spotState = {
+      balances: [{ coin: 'USDC', token: 0, total: '40', hold: '1.68' }],
+      tokenToAvailableAfterMaintenance: [[0, '38.32']],
+    };
+
+    (ws as any).processMessage({ channel: 'spotClearinghouseState', data: spotState });
+
+    expect(parent.handleSpotClearinghouseStateUpdate).toHaveBeenCalledWith(spotState, 'websocket');
   });
 
   it('unwraps the live core clearinghouseState subscription payload', () => {

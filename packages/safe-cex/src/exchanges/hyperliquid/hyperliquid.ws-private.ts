@@ -143,8 +143,9 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         JSON.stringify({
           method: 'subscribe',
           subscription: {
-            type: 'spotClearinghouseState',
+            type: 'spotState',
             user,
+            ...(this.parent.shouldRequestPortfolioMarginSpotState() ? { isPortfolioMargin: true } : {}),
           },
         }),
       );
@@ -459,8 +460,12 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       case 'error':
         this.handleServerError(json?.data);
         break;
+      case 'spotState':
       case 'spotClearinghouseState':
-        this.parent.handleSpotClearinghouseStateUpdate(json?.data?.balances || []);
+        this.parent.handleSpotClearinghouseStateUpdate(
+          json?.data?.spotState || json?.data || { balances: [] },
+          'websocket',
+        );
         break;
       case 'clearinghouseState':
         if (json?.data) {

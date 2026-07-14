@@ -31,7 +31,7 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), builder fee amount (10 tenths bps = 1bp = 0.01%).                                                                                                                 |
 | `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`). |
 | `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                |
-| `hyperliquid.ws-private.ts`  | Private WebSocket handling `webData2`, `clearinghouseState`, mode-gated `spotClearinghouseState` (unified/portfolio), `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, `notification`.                                                                                           |
+| `hyperliquid.ws-private.ts`  | Private WebSocket handling `webData2`, `clearinghouseState`, mode-gated `spotState` (unified/portfolio), `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, `notification`.                                                                                                      |
 | `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                |
 | `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                   |
 | `hyperliquid.rateLimiter.ts` | Token bucket rate limiter (1200 tokens/minute capacity).                                                                                                                                                                                                                                                      |
@@ -116,10 +116,11 @@ Runtime gating is centralized in `shouldUseSpotCollateralBalance()`:
 
 If mode is unified/portfolio:
 
-- Perp private WS subscribes to `spotClearinghouseState` (mode-gated, not always-on).
+- Perp private WS subscribes to `spotState` (mode-gated, not always-on), adding `isPortfolioMargin: true` for portfolio-margin accounts; its payload is nested as `{ user, spotState: { balances, tokenToAvailableAfterMaintenance } }`.
 - Perp startup triggers a REST `spotClearinghouseState` refresh as bootstrap safety net.
-- Core `clearinghouseState` still supplies perps margin-used + upnl.
-- Spot balances/holds supply collateral totals for displayed balance.
+- REST and WS retain the complete spot state, including each balance's token id and optional `tokenToAvailableAfterMaintenance` pairs.
+- Token id `0` (USDC) in `tokenToAvailableAfterMaintenance` is the authoritative post-maintenance aggregate availability. It is used directly for `balance.free` and synthetic `currencies.USDC.free`, rather than subtracting core margin or PnL a second time. Once received from the live stream, that authoritative aggregate snapshot cannot be downgraded by a later field-less or stale in-flight REST response.
+- Spot balances/holds supply collateral equity for displayed balance. Unified spot totals already include live perp PnL, so the synthetic wallet total removes PnL once while core `clearinghouseState` supplies the separately displayed `upnl` field.
 - `balance.currencies.USDC` is a synthetic aggregate margin slice for order sizing (`total/free/used/upnl`), not the raw spot USDC balance.
 - Raw spot asset slices are preserved under `balance.info.spotCollateralCurrencies`; notional holdings are also exposed via `balance.coins`.
 - `userNonFundingLedgerUpdates` triggers a cooldown-aware spot collateral refresh (10s cooldown + in-flight collapse guard).
@@ -127,7 +128,7 @@ If mode is unified/portfolio:
 Resilience contract:
 
 - `userAbstraction` resolution is bounded by startup timeout and starts before public market hydration, but public markets/public WS do not wait on it.
-- Private WS startup waits for `userAbstraction` so the mode-gated `spotClearinghouseState` subscription is correct.
+- Private WS startup waits for `userAbstraction` so the mode-gated `spotState` subscription is correct.
 - Timeout/error/unexpected mode falls back to `standard` behavior.
 - This keeps standard-mode users stable while supporting early per-account migrations that may happen before network-wide deprecation dates announced in Telegram.
 
@@ -296,7 +297,7 @@ CORE PERPS:
   REST (startup) -+
 
 UNIFIED / PORTFOLIO (perp route only):
-  spotClearinghouseState WS (mode-gated) -----+
+  spotState WS (mode-gated) ------------------+
   spotClearinghouseState REST (startup/ledger)+--> balance merge
 
 HIP-3 (per dex):
@@ -358,7 +359,7 @@ Subscribed for the user (or vault address):
 | ----------------------------- | ----------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `webData2`                    | Yes                                       | Yes (with `dex` param)          | Positions, orders, tickers, balance (periodic snapshot ~0.4/s)                                                    |
 | `clearinghouseState`          | Yes                                       | Yes (with `dex` param)          | Positions + margin (real-time, primary for positions)                                                             |
-| `spotClearinghouseState`      | Conditional (unified/portfolio mode only) | No                              | Spot balances/holds used to compute unified collateral balance on perp route                                      |
+| `spotState`                   | Conditional (unified/portfolio mode only) | No                              | Nested spot state; token 0 `tokenToAvailableAfterMaintenance` is authoritative unified free margin               |
 | `activeAssetData`             | Yes (per coin)                            | No (subscription limit concern) | Leverage, margin info per market                                                                                  |
 | `orderUpdates`                | Yes                                       | Yes (with `dex` param)          | Order status: open, filled, canceled, triggered, rejected, marginCanceled, reduceOnlyCanceled, reduceOnlyRejected |
 | `userFills`                   | Yes                                       | Yes (with `dex` param)          | Fill notifications with deduplication                                                                             |
@@ -575,10 +576,11 @@ This ensures monotonically increasing nonces even if multiple operations happen 
   - `total = accountValue - upnl`
   - `used = totalMarginUsed`
   - `free = accountValue - used`
-- **Unified/portfolio modes** merge spot collateral from `spotClearinghouseState`:
-  - `total = spotCollateralNotionalTotal`
-  - `used = corePerpsMarginUsed + spotHoldNotional`
-  - `free = total + upnl - used`
+- **Unified/portfolio modes** merge the complete spot state from REST `spotClearinghouseState` and WS `spotState`:
+  - spot collateral totals already include live perp PnL; when authoritative availability is present, `total = spotCollateralNotionalTotal - upnl` preserves the `Balance.total` wallet-total convention
+  - when token 0's `tokenToAvailableAfterMaintenance` is present, `free` is that authoritative post-maintenance amount and `used = spotCollateralNotionalTotal - free`
+  - authoritative `total`/`used`/`free` stay snapshot-consistent until the next authoritative spot state; ticker-derived PnL may update the separate `upnl` field between spot frames but must not recompute the other three from stale spot equity
+  - when the field is absent (older responses), `used = corePerpsMarginUsed + spotHoldNotional` and `free = total + upnl - used`
   - `currencies.USDC` is a synthetic aggregate margin slice used by `getBalanceSlice()` / order sizing
   - raw spot per-coin collateral slices are exposed in `balance.info.spotCollateralCurrencies`
   - notional spot holdings are exposed in `balance.coins`
@@ -586,7 +588,7 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 
 Spot collateral freshness:
 
-- Source of truth: mode-gated private WS `spotClearinghouseState`.
+- Source of truth: mode-gated private WS `spotState`; REST `spotClearinghouseState` remains the bootstrap and ledger-refresh fallback.
 - Fallbacks: startup forced REST refresh + cooldown-aware refresh on `userNonFundingLedgerUpdates`.
 - Throttling: 10s cooldown and in-flight promise collapse to avoid REST spam.
 
@@ -684,7 +686,7 @@ Entries expire after 60 seconds.
 
 1. **HIP-3 `orderUpdates` missing fields**: `orderType`, `triggerPx`, `tpsl`, `tif` are omitted (API limitation). Requires the multi-layer inference system described above.
 2. **`webData2` is snapshot-based (~0.4/s)**: Inherently stale. HIP-3 orders use additive-only logic to prevent flicker from stale snapshots.
-3. **Balance scoping depends on account abstraction mode**: `clearinghouseState` with `dex` returns dex-specific margin only. Core perps `clearinghouseState` remains source-of-truth for perps margin-used/upnl. In `unifiedAccount`/`portfolioMargin`, collateral totals/holds come from `spotClearinghouseState` and are merged with core perps margin. Keep `currencies.USDC` as the aggregate margin slice for sizing; raw spot slices belong under `balance.info.spotCollateralCurrencies`.
+3. **Balance scoping depends on account abstraction mode**: `clearinghouseState` with `dex` returns dex-specific margin only. In `unifiedAccount`/`portfolioMargin`, all collateral and holds are in spot state: use the current `spotState` WS channel, not the rejected `spotClearinghouseState` WS channel. Token 0 `tokenToAvailableAfterMaintenance` is authoritative free USDC; only responses without it fall back to core margin plus spot-hold reconstruction. Keep `currencies.USDC` as the aggregate margin slice for sizing; raw spot slices belong under `balance.info.spotCollateralCurrencies`.
 4. **`activeAssetData` not available for HIP-3**: Only subscribes for core perp markets (channel limit concern). HIP-3 leverage defaults until WS delivers.
 5. **Case-insensitive coin names**: HIP-3 API may return coin names with inconsistent casing. All lookups fall back to `marketsLowerCaseMap`.
 6. **Market orders have no IOC**: Sent as GTC limit at 5% slippage from mark price.
@@ -763,7 +765,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 - [ ] Balance fetching from REST on startup and WS updates
 - [ ] `userAbstraction` resolution + fallback path (`timeout/error -> standard`)
 - [ ] Standard-mode balance path unchanged (`clearinghouseState` only)
-- [ ] Unified/portfolio balance merge path (`spotClearinghouseState` + core `clearinghouseState`)
+- [ ] Unified/portfolio balance merge path (REST `spotClearinghouseState` + WS `spotState`)
 - [ ] Spot collateral refresh on `userNonFundingLedgerUpdates` (throttled)
 - [ ] Core perp markets loading from `metaAndAssetCtxs`
 - [ ] HIP-3 markets loading from `perpDexs` + per-dex `metaAndAssetCtxs`

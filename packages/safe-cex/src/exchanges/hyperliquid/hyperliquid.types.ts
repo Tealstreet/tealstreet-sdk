@@ -272,12 +272,17 @@ export interface WsNonUserCancel {
   oid: number;
 }
 
+export interface SpotClearinghouseBalance {
+  coin: string;
+  token?: number;
+  hold: string;
+  total: string;
+  entryNtl?: string;
+}
+
 export interface SpotClearinghouseState {
-  balances: {
-    coin: string;
-    hold: string;
-    total: string;
-  }[];
+  balances: SpotClearinghouseBalance[];
+  tokenToAvailableAfterMaintenance?: [number, string][];
 }
 
 export interface FrontendOpenOrders {
