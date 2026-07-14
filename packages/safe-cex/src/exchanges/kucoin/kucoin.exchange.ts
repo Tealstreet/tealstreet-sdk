@@ -34,7 +34,7 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
-import { adjust, multiply, subtract } from '../../utils/safe-math';
+import { adjust, divide, multiply, subtract } from '../../utils/safe-math';
 import { toBinance } from '../../utils/symbolConverter';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -109,6 +109,13 @@ export class KucoinExchange extends BaseExchange {
   // contracts (opts.amount, same as OKX) — only store OUTPUTS are base.
   private contractSizeFor = (internalSymbol?: string) =>
     (internalSymbol && this.store.marketsBySymbol[internalSymbol]?.contractSize) || 1;
+
+  // Cancel-replace starts from an Order read from the store, whose amount is
+  // base-sized. KuCoin placement takes native contract counts. Prefer the raw
+  // native remainder carried by mapped orders, with a base->native fallback
+  // for callers/orders that predate that metadata.
+  private nativeAmountForCancelReplace = (order: Order) =>
+    order.extra?.remainingNative ?? divide(order.remaining, this.contractSizeFor(order.symbol));
 
   private parseMarginType = (marginMode?: unknown, crossMode?: unknown) => {
     const mode = String(marginMode || '').toUpperCase();
@@ -678,7 +685,41 @@ export class KucoinExchange extends BaseExchange {
     const normalPart = normalOrders ?? this.store.orders.filter((o) => !isStopType(o));
     const stopPart = stopOrders ?? this.store.orders.filter(isStopType);
 
-    return [...normalPart, ...stopPart];
+    return this.reconcileFetchedOrderRemainders([...normalPart, ...stopPart]);
+  };
+
+  // The private order stream includes remainSize, while the REST order-list
+  // response can only provide size and filledSize. `tick` replaces the whole
+  // store snapshot, so a stale REST row must never increase a same-id order's
+  // cancel-replace remainder. A later REST observation can still report more
+  // progress, hence keep the smallest valid native remainder. KuCoin
+  // cancel-replace yields a new order id, so unrelated/new rows deliberately
+  // do not inherit a previous order's remainder.
+  private reconcileFetchedOrderRemainders = (fetchedOrders: Order[]): Order[] => {
+    const existingOrdersById = new Map(this.store.orders.map((order) => [order.id, order]));
+
+    return fetchedOrders.map((fetchedOrder) => {
+      const previousRemainingNative = existingOrdersById.get(fetchedOrder.id)?.extra?.remainingNative;
+      const fetchedRemainingNative = fetchedOrder.extra?.remainingNative;
+
+      if (
+        !Number.isFinite(previousRemainingNative) ||
+        previousRemainingNative! < 0 ||
+        !Number.isFinite(fetchedRemainingNative) ||
+        fetchedRemainingNative! < 0
+      ) {
+        return fetchedOrder;
+      }
+
+      const remainingNative = Math.min(previousRemainingNative!, fetchedRemainingNative!);
+      if (remainingNative === fetchedRemainingNative) return fetchedOrder;
+
+      return {
+        ...fetchedOrder,
+        remaining: multiply(remainingNative, this.contractSizeFor(fetchedOrder.symbol)),
+        extra: { ...fetchedOrder.extra, remainingNative },
+      };
+    });
   };
 
   // Returns `null` on FAILURE so fetchOrders can preserve the category; `[]`
@@ -1090,7 +1131,7 @@ export class KucoinExchange extends BaseExchange {
 
       // Prepare the parameters for the new order
       let price = parentOrder.price;
-      let amount = parentOrder.amount;
+      let amount = this.nativeAmountForCancelReplace(parentOrder);
       let stopLossPrice = stopLossOrder?.price;
       let takeProfitPrice = takeProfitOrder?.price;
 
@@ -1153,7 +1194,7 @@ export class KucoinExchange extends BaseExchange {
         side: order.side,
         type: order.type,
         price: 'price' in update ? update.price : order.price,
-        amount: 'amount' in update ? update.amount : order.amount,
+        amount: 'amount' in update ? update.amount : this.nativeAmountForCancelReplace(order),
         timeInForce: order.timeInForce,
         reduceOnly: order.reduceOnly,
       };
@@ -1181,7 +1222,7 @@ export class KucoinExchange extends BaseExchange {
         side: order.side,
         type: order.type,
         price: 'price' in update ? update.price : order.price,
-        amount: 'amount' in update ? update.amount : order.amount,
+        amount: 'amount' in update ? update.amount : this.nativeAmountForCancelReplace(order),
         reduceOnly: true,
       };
 
@@ -1320,7 +1361,13 @@ export class KucoinExchange extends BaseExchange {
     const contractSize = this.contractSizeFor(symbol);
     const sizeNative = parseFloat(o.size || '0');
     const filledNative = parseFloat(o.filledSize || '0');
-    const remainingNative = subtract(sizeNative, filledNative);
+    // Private order frames carry KuCoin's authoritative native remainder in
+    // `remainSize`. Preserve explicit zero; derive it only when the field is
+    // absent (REST order rows commonly omit it).
+    const remainingNative =
+      o.remainSize !== null && o.remainSize !== undefined
+        ? parseFloat(`${o.remainSize}`)
+        : subtract(sizeNative, filledNative);
 
     // Basic order mapping. KuCoin reports sizes as native contract counts;
     // expose amount/filled/remaining in BASE units (see contractSizeFor), with

@@ -430,6 +430,12 @@ KuCoin has **no PUT endpoint for orders**. `updateOrder` (`kucoin.exchange.ts:10
 3. If algo order: delegates to `updateAlgoOrder`
 4. Otherwise: cancel the old order, then place a new one with updated fields
 
+Store `Order.amount` values are base-sized, but the replacement placement
+payload takes native contract counts. All three replacement branches recover
+the native amount from `order.extra.remainingNative`, falling back to
+`order.remaining / contractSize` for older callers. An explicit `update.amount`
+is already native and must not be divided again.
+
 `updateVirtualTpSlOrder` (`kucoin.exchange.ts:997-1053`):
 
 1. Find parent, SL, and TP orders
@@ -572,8 +578,10 @@ must convert native→base via `contractSizeFor(internalSymbol)`:
 - `mapPosition`: `contracts = |currentQty| * contractSize` (base),
   `notional = |currentQty| * contractSize * markPrice` (≈ exchange `markValue`),
   `extra.contractsNative = |currentQty|`.
-- `mapOrder`: `amount/filled/remaining = nativeSize * contractSize`,
-  `extra.remainingNative = nativeRemaining`.
+- `mapOrder`: `amount/filled = nativeSize * contractSize`; `remainSize` is the
+  authoritative native remaining count when present (including `0`), otherwise
+  remaining is derived as `size - filledSize`. Both base `remaining` and native
+  `extra.remainingNative` come from that value.
 - private-WS `fill`: `amount = matchSize * contractSize`.
 
 Order **placement is the opposite direction**: `opts.amount` is NATIVE
@@ -582,6 +590,10 @@ so `formatCreateOrder` sends `size = adjust(opts.amount, lotSize)` **unchanged**
 — do NOT multiply order placement by `contractSize`. Any comparison that mixes
 `opts.amount` (native) with `position.contracts` (base) must convert one side
 (see `getOrderPlanTypeAndAmount` → `multiply(opts.amount, contractSizeFor(...))`).
+Cancel-replace updates cross both sides of this boundary: their fallback amount
+comes from a store `Order`, so use `extra.remainingNative` or divide the base
+remaining amount by `contractSize`; explicit amount edits remain native
+placement input.
 
 **Regression guard:** omitting `contractSize` here is a silent 1000× bug on
 XBTUSDTM — it inflates every USD/leverage/drawdown readout and makes the web
@@ -635,6 +647,15 @@ parseFloat(matchSize)`, base = `× contractSize`). A fill arrives as a `match`
   gating on `matchSize > 0` (the per-frame increment, present only on fill
   frames) emits exactly once. Mirrors the spot handler.
 - **Algo order events**: `cancel` -> Canceled, `triggered`/`active` -> add/update
+- **REST full replacement keeps order progress monotonic**: `tick()` replaces
+  `store.orders` with `fetchOrders()`, but the Futures Get Order List payload
+  supplies `size`/`filledSize` rather than `remainSize`. Before returning that
+  snapshot, `reconcileFetchedOrderRemainders` takes the smallest valid native
+  remainder for the **same order id** from the existing store and fetched row.
+  This preserves an authoritative WS remainder (including explicit `0`) against
+  a stale REST row, while accepting a smaller REST-derived remainder after a
+  later fill. Do not carry it across ids: KuCoin cancel-replace creates a new
+  id, whose REST remainder is its own source of truth.
 - **No debounced re-fetch**: Unlike BloFin, KuCoin does NOT trigger a throttled full order re-fetch after WS events. State relies on WS events + periodic tick fetches.
 - **Reconnection**: On private WS reconnect, `fetchAndSetPrivateSnapshot()` is called
 
