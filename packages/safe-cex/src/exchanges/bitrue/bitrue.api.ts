@@ -72,34 +72,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     }
 
     const method = nextConfig.method?.toUpperCase() || 'GET';
-    const maybeAbsoluteUrl = `${nextConfig.baseURL || ''}${nextConfig.url || ''}`.toLowerCase();
-    const isOpenApiRequest = maybeAbsoluteUrl.includes('open.bitrue.com');
-
-    // open.bitrue.com listen-key endpoints use Binance-style query signing with X-MBX-APIKEY.
-    if (isOpenApiRequest) {
-      const timestamp = virtualClock.getCurrentTimeMs();
-      const signParams = {
-        ...(nextConfig.params || {}),
-        timestamp,
-        recvWindow,
-      };
-      const asString = qs.stringify(signParams);
-      const signature = createHmac('sha256', options.secret).update(asString).digest('hex');
-
-      const headers = new AxiosHeaders({
-        ...nextConfig.headers,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'X-MBX-APIKEY': options.key,
-      });
-
-      const signedPayload = { ...signParams, signature };
-      if (method === 'GET' || method === 'DELETE') {
-        return { ...nextConfig, params: signedPayload, headers };
-      }
-
-      return { ...nextConfig, params: undefined, data: qs.stringify(signedPayload), headers };
-    }
-
     const basePath = nextConfig.url;
     const body =
       nextConfig.data === undefined || nextConfig.data === null

@@ -6,10 +6,10 @@ export const BROKER_ID = 'Tealstreet';
 export const BASE_URL = 'https://fapi.bitrue.com';
 
 export const BASE_WS_URL = {
-  public: 'wss://futuresws.bitrue.com/kline-api/ws',
-  publicFallback: 'wss://ws.bitrue.com/market/ws',
+  // Bitrue's documented USDT-M futures market-data stream. Do not add the
+  // similarly named spot host here: its futures channel subscriptions go dark.
+  public: 'wss://fmarket-ws.bitrue.com/kline-api/ws',
   private: 'wss://fapiws.bitrue.com/stream',
-  privateFallback: 'wss://wsapi.bitrue.com/stream',
 };
 
 export const ENDPOINTS = {
@@ -23,7 +23,6 @@ export const ENDPOINTS = {
   PLACE_ORDER: '/fapi/v2/order',
   CANCEL_ORDER: '/fapi/v2/cancel',
   LISTEN_KEY: 'https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey',
-  LISTEN_KEY_OPEN: 'https://open.bitrue.com/v1/poseidon/api/v1/listenKey',
   SET_LEVERAGE: '/fapi/v2/level_edit',
 };
 

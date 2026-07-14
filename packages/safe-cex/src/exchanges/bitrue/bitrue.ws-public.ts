@@ -22,7 +22,7 @@ type SubscribedTopics = {
 export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
   topics: SubscribedTopics = {};
   messageHandlers: MessageHandlers = {};
-  private wsUrlIndex = 0;
+  private tickerSymbols = new Set<string>();
 
   resolveRequests: Record<string, ((data: any) => void)[]> = {};
 
@@ -53,21 +53,22 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
     return `e_${normalized}`;
   };
 
+  private ensureTickerSubscription = (symbol: string) => {
+    if (this.tickerSymbols.has(symbol)) return;
+
+    const topic = `market_${this.convertToWsSymbol(symbol)}_ticker`;
+    this.tickerSymbols.add(symbol);
+    this.topics[topic] = 1;
+    this.messageHandlers[topic] = [(json: Data) => this.handleTickersEvent(json, symbol)];
+  };
+
   connectAndSubscribe = (_isReconnect = false) => {
     if (!this.isDisposed) {
       this.parent.store.markets.forEach((m) => {
-        // {"event":"sub","params":{"channel":"market_e_chrusdt_ticker","cb_id":"e_chrusdt"}}
-        const topic = `market_${this.convertToWsSymbol(m.symbol)}_ticker`;
-        const handler = topic;
-        const parser = (json: Data) => this.handleTickersEvent(json, m.symbol);
-        this.topics[topic] = (this.topics[topic] || 0) + 1;
-        this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+        this.ensureTickerSubscription(m.symbol);
       });
 
-      const wsCandidates = [BASE_WS_URL.public, BASE_WS_URL.publicFallback].filter(Boolean);
-      const wsBaseUrl = wsCandidates[this.wsUrlIndex % wsCandidates.length];
-      this.wsUrlIndex++;
-      this.ws = this.createWebsocket(wsBaseUrl + '?requestId=' + nanoid());
+      this.ws = this.createWebsocket(BASE_WS_URL.public + '?requestId=' + nanoid());
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
@@ -90,11 +91,8 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
     if (added.length === 0 || !this.ws || this.isDisposed) return;
 
     for (const m of added) {
+      this.ensureTickerSubscription(m.symbol);
       const topic = `market_${this.convertToWsSymbol(m.symbol)}_ticker`;
-      const handler = topic;
-      const parser = (json: Data) => this.handleTickersEvent(json, m.symbol);
-      this.topics[topic] = (this.topics[topic] || 0) + 1;
-      this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
 
       if (this.isConnected) {
         const payload = { event: 'sub', params: { channel: topic, cb_id: nanoid() } };

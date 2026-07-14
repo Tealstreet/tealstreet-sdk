@@ -10,7 +10,8 @@
 
 ## API Documentation
 
-- **Official API Documentation**: https://github.com/Bitrue-exchange/bitrue-official-api-docs
+- **Official v2 Futures API Documentation**: https://www.bitrue.com/api_docs_includes_file/futures/index.html
+- **Official Futures API repository**: https://github.com/Bitrue-exchange/USDT-M-Future-open-api-docs/tree/main/v2
 
 ## CCXT Reference Implementation
 
@@ -35,9 +36,8 @@
 Signing uses HMAC-SHA256 with the following process:
 
 1. Get current timestamp via `virtualClock.getCurrentTimeMs()`
-2. Concatenate: `timestamp + HTTP_METHOD(uppercase) + path(with query string) + body`
-3. Remove spaces from the concatenated string (`.replace(' ', '')` -- note: only replaces first space)
-4. Sign with `createHmac('sha256', secret).update(concatenated).digest('hex')`
+2. Concatenate: `timestamp + HTTP_METHOD(uppercase) + request path + serialized request body` (the body is empty for GET requests)
+3. Sign that exact serialized string with `createHmac('sha256', secret).update(concatenated).digest('hex')`; no whitespace is removed or normalized.
 
 **Request headers** (set in interceptor, `bitrue.api.ts:51-83`):
 
@@ -58,13 +58,13 @@ Signing uses HMAC-SHA256 with the following process:
 
 Bitrue uses a **listen key** approach (similar to Binance) instead of direct API key signing:
 
-1. `POST` to `https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey` to obtain a `listenKey` (`bitrue.ws-private.ts:244-252`)
-2. Response format: `{ code: 200, data: { listenKey: "..." } }` -- code must be `200` (number, not string)
-3. Connect to WebSocket with `?listenKey={key}` query parameter
-4. Listen key is refreshed every 30 minutes via `PUT` to `{LISTEN_KEY_URL}/{listenKey}` (`bitrue.ws-private.ts:254-258`)
+1. Retry `POST https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey` with bounded 250ms/500ms/1s backoff to obtain a futures `listenKey`.
+2. Success accepts the documented code `200` plus Bitrue's observed equivalent success encodings.
+3. Connect only to `wss://fapiws.bitrue.com/stream?listenKey={key}`.
+4. Listen key is refreshed every 30 minutes via the documented futures `PUT {LISTEN_KEY_URL}/{listenKey}`.
 5. Refresh is scheduled via `setTimeout(() => this.updateListenKey(listenKey), 30 * 60 * 1000)` on both initial fetch and each refresh
 
-No direct WebSocket signing is needed; authentication is handled entirely through the listen key.
+No direct WebSocket signing is needed; authentication is handled entirely through the listen key. There is deliberately no spot endpoint or stream fallback: after retry exhaustion the private socket does not start and emits an actionable error.
 
 ## Startup Sequence
 
@@ -77,7 +77,7 @@ Defined in `bitrue.exchange.ts:102-141` (`start()` method):
 5. **`publicWebsocket.connectAndSubscribe()`** (non-blocking) -- connects public WS, subscribes to tickers for all markets on open
 6. If authenticated:
    - **`privateWebsocket.connectAndSubscribe()`** (non-blocking) -- fetches listen key, connects private WS
-   - **`fetchBalanceAndPositions()`** (sequential) -- fetches `/fapi/v2/account`, parses both balance and positions. Calls `fetchPositionMetadata()` for each symbol with open positions.
+   - **`fetchBalanceAndPositions()`** (sequential) -- fetches `/fapi/v2/account`, parses both balance and positions, and caches each open position's documented `leverageLevel` and `positionType` metadata.
    - **Store update**: balance + positions + loaded flags
    - **`fetchOrders()`** (sequential) -- Since no symbols are provided, calls `fetchAndEmitOrders()` (asynchronous per-symbol fetch with 100ms delays)
    - **Store update**: orders + `loaded.orders = true`
@@ -107,7 +107,7 @@ All endpoints defined in `ENDPOINTS` constant (`bitrue.types.ts:13-23`):
 
 ### WebSocket URLs
 
-- **Public**: `wss://futuresws.bitrue.com/kline-api/ws` (with `?requestId=<nanoid>` appended)
+- **Public**: `wss://fmarket-ws.bitrue.com/kline-api/ws` (with `?requestId=<nanoid>` appended)
 - **Private**: `wss://fapiws.bitrue.com/stream` (with `?listenKey=<key>` appended)
 
 ### Public WebSocket (`bitrue.ws-public.ts`)
@@ -167,8 +167,8 @@ Response: `{ "event_rep": "rep", "channel": "<topic>", "data": [...] }` -- resol
 
 **Connection** (`connectAndSubscribe`, line 10-24):
 
-1. Fetch listen key via `POST` to listen key URL
-2. Connect to private WS URL with `?listenKey=<key>`
+1. Acquire a listen key only from the documented futures endpoint, with bounded retry/backoff
+2. Connect only to the documented futures private WS URL with `?listenKey=<key>`
 3. Register event handlers
 
 **On open** (`onOpen`, line 26-30):
@@ -199,8 +199,8 @@ Response: `{ "event_rep": "rep", "channel": "<topic>", "data": [...] }` -- resol
 Both WebSockets use the `BaseWebSocket.onClose()` handler:
 
 - On close, removes event listeners, schedules reconnect after `WS_MIN_RECONNECTION_DELAY`
-- Private WS: re-fetches listen key on reconnect (new `connectAndSubscribe()` call)
-- Public WS: re-subscribes to all tracked topics and re-registers ticker handlers
+- Private WS: re-fetches a futures listen key on reconnect; if acquisition fails it remains disconnected rather than attaching a mismatched spot stream
+- Public WS: reconnects only to the documented futures host and re-subscribes all tracked topics without duplicating ticker handlers
 
 ## Order Types and Mappings
 
@@ -229,10 +229,20 @@ Both WebSockets use the `BaseWebSocket.onClose()` handler:
 | `open`             | Direction: `OPEN` or `CLOSE` (from `reduceOnly`) |
 | `positionType`     | 1 = cross, 2 = isolated                          |
 | `futureModel`      | Always `normal`                                  |
-| `conditionOrder`   | `true` for stop/TP orders                        |
-| `clientOrderId`    | UUID for conditional orders                      |
+| `conditionOrder`   | `true` for standalone stop/TP orders             |
+| `clientOrderId`    | UUID for standalone conditional orders            |
 | `triggerType`      | 1 = stop loss, 2 = take profit                   |
 | `triggerPriceType` | 1 = last price, 2 = mark price                   |
+
+Attached TP/SL values are atomic children of a normal LIMIT or MARKET parent:
+`formatCreateOrder()` puts them in that parent's documented
+`triggerOrderCreateParams` array. Every child has its own `clientOrderId`,
+`triggerType` (1 SL / 2 TP), `triggerPriceType` (1 last / 2 mark),
+`triggerPrice`, `type: 'MARKET'`, and `price: 0`. Child direction and size are
+bound by Bitrue to the parent; do not send standalone or sibling close orders.
+Attached TP/SL on a conditional parent fails before placement. `placeOrder()` /
+`placeOrders()` refetch attached-order state because the placement response is
+not authoritative for the children.
 
 ### Time In Force
 
@@ -366,7 +376,7 @@ Uses ticker's last price from store.
 ## Rate Limiting
 
 - **Rate-limited client** (`xhr`): `maxRPS: 5` (5 requests per second via `axios-rate-limit`, `bitrue.exchange.ts:81`)
-- **Unlimited client** (`unlimitedXHR`): No rate limit, used for order placement, market fetching, and leverage detection (`bitrue.exchange.ts:82`)
+- **Unlimited client** (`unlimitedXHR`): No rate limit, used for order placement and market fetching (`bitrue.exchange.ts` constructor)
 - **Request timeout**: Configurable via `recvWindow` (default 20,000ms, `bitrue.types.ts:3`)
 - **Axios retry**: 3 retries on network errors OR `error sign!` responses (`bitrue.api.ts:12-17,46-49`)
 - **Order batch placement**: Chunks of 5 orders placed in parallel (`bitrue.exchange.ts:942-964`)
@@ -387,7 +397,7 @@ Uses ticker's last price from store.
 
 - Fetched via `/fapi/v2/account` which returns account data including positions
 - Filters for USDT and USDC margin coins (`bitrue.exchange.ts:346`)
-- For symbols with open positions, `fetchPositionMetadata()` detects leverage and margin type
+- `fetchPositionMetadata()` reads and caches only `/fapi/v2/account` position data: `positionType` determines margin type and `leverageLevel` determines leverage. It never submits an order or changes leverage; malformed or failed account reads preserve the current store snapshot.
 - **Closed position detection** (`tick()`, `bitrue.exchange.ts:168-185`): On each tick, compares current positions with previous to detect closures, then refetches orders for those symbols (stops should be removed)
 - Store updated via `store.addOrUpdatePositionsFull()` which does a full replacement
 
@@ -444,14 +454,14 @@ order downsizing".
 
 - Per-symbol leverage setting via `POST /fapi/v2/level_edit`
 - Payload: `{ contractName: symbol, leverage: number }`
-- Has a `silent` parameter to suppress error logging (used during initial position metadata fetch)
+- `fetchPositionMetadata()` never calls this method. It uses only account data and invalidates cached metadata after a successful explicit leverage change.
 - If leverage exceeds max, error message contains the actual maximum; calling code parses this and retries
 
 ### Margin Type (`changeMarginType`, `bitrue.exchange.ts:1007-1011`)
 
 - **NOT implemented** via API
 - Throws error: "Cannot change Margin Type on Tealstreet as API does not support it. Change it on bitrue.com"
-- Margin type is detected indirectly through `fetchPositionMetadata()` (see below)
+- Margin type comes directly from `/fapi/v2/account.positionType` (1 cross, 2 isolated).
 
 ### Position Mode
 
@@ -468,11 +478,7 @@ order downsizing".
 
 2. **No REST kline fetch**: OHLCV data is fetched via WebSocket request/response (`event: "req"` / `event_rep: "rep"`), not REST API endpoint, despite `/fapi/v1/klines` being defined in endpoints. If no WS connection exists (non-worker context), falls back to `callMethodInWorker('fetchOHLCV')` (`bitrue.exchange.ts:620-651`).
 
-3. **Leverage detection hack** (`fetchPositionMetadata`, `bitrue.exchange.ts:218-313`): Since no direct query endpoint exists, leverage/margin type is detected by attempting to place an invalid order and parsing the error:
-   - Places a dummy CLOSE LIMIT order at price 0 with minimum volume
-   - Error `-1165` ("order type inconsistent with user contract configuration 2"): switch to isolated margin, retry
-   - Error `-1166` ("leverage value inconsistent"): extract current leverage from error message (last word)
-   - No leverage error: set leverage to market max
+3. **Read-only position metadata** (`fetchPositionMetadata`): `/fapi/v2/account` supplies each open position's `leverageLevel` and `positionType`. The integration accepts a documented empty `positionVos: []` as a legitimate clearing snapshot, but treats missing/null/malformed position schemas as a failed snapshot: it preserves existing positions and cached metadata, never probes `/fapi/v2/order`, and never calls `setLeverage()`.
 
 4. **Missing WS cancel updates**: Bitrue WebSocket does not reliably notify about order cancellations. After `cancelOrders()`, manual store cleanup via `callMethodInWorker('removeOrders')` is required (`bitrue.exchange.ts:1046-1047`).
 
@@ -488,9 +494,9 @@ order downsizing".
 
 10. **Listen key refresh**: Must be refreshed every 30 minutes or the private WebSocket will disconnect. Scheduled via `setTimeout` in both `fetchListenKey()` and `updateListenKey()`.
 
-11. **Reversed ping/pong**: Both public and private WS have reversed ping/pong:
+11. **Reversed ping/pong**: Both public and private WS reply to upstream pings:
     - **Public**: Server sends `{ ping: <ts> }`, client responds with literal `"pong"` string, health check with 20-second timeout
-    - **Private**: Server sends `{ event: "ping" }`, client records timestamp only (no pong response, no health check timeout)
+    - **Private**: Server sends `{ event: "ping" }`, client replies with the documented `{ event: "pong" }` form and uses the 20-second health check
 
 12. **Orderbook format**: Full snapshot on each update (not incremental delta). Bids are in `buys` field, not `bids`. Asks are in `asks` field (`bitrue.types.ts:169-172`).
 

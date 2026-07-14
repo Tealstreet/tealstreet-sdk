@@ -2,26 +2,31 @@ import type { BitrueExchange } from './bitrue.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG } from '../../config/config';
-import { Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
 import { reverseWsSymbol } from './bitrue.utils';
 
 export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
   private listenKeyRefreshTimeoutId: NodeJS.Timeout | undefined;
-  private listenKeyEndpoint = ENDPOINTS.LISTEN_KEY;
+  private static readonly LISTEN_KEY_RETRY_DELAYS_MS = [250, 500, 1_000];
 
   connectAndSubscribe = async () => {
     if (!this.isDisposed) {
-      const { listenKey, endpoint, wsBaseUrl } = await this.fetchListenKey();
-      this.listenKeyEndpoint = endpoint;
-      const url = `${wsBaseUrl}?listenKey=${listenKey}`;
+      try {
+        const listenKey = await this.fetchListenKey();
+        if (this.isDisposed) return;
+        this.ws = this.createWebsocket(`${BASE_WS_URL.private}?listenKey=${listenKey}`);
 
-      this.ws = this.createWebsocket(url);
-
-      this.ws.addEventListener('open', this.onOpen);
-      this.ws.addEventListener('message', this.onMessage);
-      this.ws.addEventListener('close', this.onClose);
+        this.ws.addEventListener('open', this.onOpen);
+        this.ws.addEventListener('message', this.onMessage);
+        this.ws.addEventListener('close', this.onClose);
+      } catch (error) {
+        this.emitAndLogError(
+          error instanceof Error ? error : String(error),
+          'Bitrue futures private WebSocket was not started; retry after the documented listen-key endpoint recovers.',
+        );
+      }
     }
   };
 
@@ -229,58 +234,53 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
   };
 
   private fetchListenKey = async () => {
-    const candidates = [
-      { endpoint: ENDPOINTS.LISTEN_KEY, wsBaseUrl: BASE_WS_URL.private },
-      { endpoint: ENDPOINTS.LISTEN_KEY_OPEN, wsBaseUrl: BASE_WS_URL.privateFallback },
-    ];
-
     let lastError: unknown;
-    for (const candidate of candidates) {
+    for (let attempt = 0; attempt <= BitruePrivateWebsocket.LISTEN_KEY_RETRY_DELAYS_MS.length; attempt++) {
       try {
-        const { data } = await this.parent.xhr.post(candidate.endpoint);
+        const { data } = await this.parent.xhr.post(ENDPOINTS.LISTEN_KEY);
         const listenKey = data?.data?.listenKey || data?.listenKey;
         const isOk = this.isSuccessfulCode(data?.code) || data?.status === 'ok' || data?.msg === 'succ';
         if (listenKey && (isOk || data?.code === undefined)) {
           this.scheduleListenKeyRefresh(listenKey);
-          return { listenKey, endpoint: candidate.endpoint, wsBaseUrl: candidate.wsBaseUrl };
+          return listenKey;
         }
+        lastError = new Error(`Bitrue futures listen-key response was invalid (code: ${String(data?.code)})`);
       } catch (error) {
         lastError = error;
       }
+
+      const delay = BitruePrivateWebsocket.LISTEN_KEY_RETRY_DELAYS_MS[attempt];
+      if (delay !== undefined) {
+        this.parent.log(
+          `Bitrue futures listen-key attempt ${attempt + 1} failed; retrying in ${delay}ms.`,
+          LogSeverity.Warning,
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
     }
 
-    this.emitAndLogError(lastError instanceof Error ? lastError : String(lastError || 'Failed to fetch listen key'));
-    throw new Error('Failed to fetch listen key');
+    throw new Error(
+      `Failed to acquire Bitrue futures listen key after ${BitruePrivateWebsocket.LISTEN_KEY_RETRY_DELAYS_MS.length + 1} attempts: ${
+        lastError instanceof Error ? lastError.message : String(lastError || 'unknown error')
+      }`,
+    );
   };
 
   private updateListenKey = async (listenKey: string) => {
     if (!this.isDisposed) {
-      const endpoints = [this.listenKeyEndpoint, ENDPOINTS.LISTEN_KEY, ENDPOINTS.LISTEN_KEY_OPEN].filter(Boolean);
-      for (const endpoint of endpoints) {
-        try {
-          const { data } = await this.parent.xhr.put(`${endpoint}/${listenKey}`);
-          const isOk = this.isSuccessfulCode(data?.code) || data?.status === 'ok' || data?.msg === 'succ';
-          if (isOk) {
-            this.scheduleListenKeyRefresh(listenKey);
-            return;
-          }
-        } catch (_error) {
-          // try next endpoint form
+      try {
+        const { data } = await this.parent.xhr.put(`${ENDPOINTS.LISTEN_KEY}/${listenKey}`);
+        const isOk = this.isSuccessfulCode(data?.code) || data?.status === 'ok' || data?.msg === 'succ';
+        if (isOk) {
+          this.scheduleListenKeyRefresh(listenKey);
+          return;
         }
-
-        try {
-          const { data } = await this.parent.xhr.put(endpoint, { listenKey });
-          const isOk = this.isSuccessfulCode(data?.code) || data?.status === 'ok' || data?.msg === 'succ';
-          if (isOk) {
-            this.scheduleListenKeyRefresh(listenKey);
-            return;
-          }
-        } catch (_error) {
-          // try next endpoint
-        }
+      } catch (_error) {
+        // The documented futures endpoint is temporarily unavailable. Do not
+        // substitute a spot listen key for an active futures account.
       }
 
-      this.emitAndLogError('Failed to refresh listen key');
+      this.emitAndLogError('Failed to refresh Bitrue futures listen key; private updates may stop when it expires.');
     }
   };
 

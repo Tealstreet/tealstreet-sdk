@@ -4,8 +4,6 @@ import type { ExchangeName } from '../../types';
 
 import rateLimit from 'axios-rate-limit';
 import chunk from 'lodash/chunk';
-import flatten from 'lodash/flatten';
-import omit from 'lodash/omit';
 import times from 'lodash/times';
 import { mapSeries } from 'p-iteration';
 
@@ -85,6 +83,14 @@ export class BitrueExchange extends BaseExchange {
   private fastPrivateRefreshTimeoutId: NodeJS.Timeout | undefined;
   private pendingOrderRefreshSymbols = new Set<string>();
   private isFastPrivateRefreshRunning = false;
+  // `/fapi/v2/account` is the only documented source for a position's
+  // leverage and margin type. Keep the last account snapshot for callers
+  // asking about a symbol, but never infer either value by submitting an
+  // order.
+  private positionMetadataBySymbol = new Map<
+    string,
+    Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>
+  >();
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -445,94 +451,100 @@ export class BitrueExchange extends BaseExchange {
     return await this.parsePositions(data);
   };
 
+  /**
+   * Bitrue documents an empty `positionVos` array for an account with no
+   * positions. Anything else missing or malformed is an incomplete account
+   * snapshot, not evidence that positions were closed.
+   */
+  private getPositionAccounts = (data?: FETCH_ACCOUNT_RESPONSE) => {
+    const accounts = data?.data?.account;
+    if (!Array.isArray(accounts)) {
+      return undefined;
+    }
+    const futuresAccounts = accounts.filter((account) => account && ['USDT', 'USDC'].includes(account.marginCoin));
+    if (futuresAccounts.length === 0) {
+      return undefined;
+    }
+
+    const hasValidPositionsSchema = futuresAccounts.every(
+      (account) =>
+        Array.isArray(account.positionVos) &&
+        account.positionVos.every(
+          (positionVo) =>
+            positionVo &&
+            typeof positionVo.contractName === 'string' &&
+            positionVo.contractName.length > 0 &&
+            Array.isArray(positionVo.positions) &&
+            positionVo.positions.every(
+              (position) =>
+                position &&
+                (position.side === 'BUY' || position.side === 'SELL') &&
+                Number.isFinite(Number(position.volume)) &&
+                Number.isFinite(Number(position.openPrice)) &&
+                Number.isFinite(Number(position.leverageLevel)) &&
+                Number(position.leverageLevel) > 0 &&
+                Number.isFinite(Number(position.positionType)),
+            ),
+        ),
+    );
+    return hasValidPositionsSchema ? futuresAccounts : undefined;
+  };
+
+  private getAccountPositionSnapshots = (data?: FETCH_ACCOUNT_RESPONSE) => {
+    const accounts = this.getPositionAccounts(data);
+    if (!accounts) return undefined;
+
+    return accounts.flatMap((account) =>
+      account.positionVos!.flatMap((positionVo) =>
+        positionVo.positions.map((position) => ({
+          symbol: positionVo.contractName,
+          side: position.side === 'BUY' ? PositionSide.Long : PositionSide.Short,
+          leverageLevel: position.leverageLevel,
+          positionType: position.positionType,
+        })),
+      ),
+    );
+  };
+
   fetchPositionMetadata = async (
     symbols: string[],
+    currentPositions?: Array<{
+      symbol: string;
+      side: PositionSide;
+      leverageLevel: number;
+      positionType: number;
+    }>,
   ): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
-    try {
-      return flatten(
-        await mapSeries(
-          symbols,
-          async (symbol): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
-            let marginType = MarginType.Cross;
-            let leverage = 0;
-
-            const market = this.store.marketsBySymbol[symbol];
-            if (!market) {
-              throw new Error(`Market ${symbol} not found`);
-            }
-
-            // absolute madness to fetch leverage bc no actual endpoint...
-            let payload = omitUndefined({
-              // contractId: 1,
-              contractName: symbol,
-
-              leverage: 1,
-              // ...isStopOrTP? {triggerPrice: price} : {},
-              price: 0,
-              volume: market.precision.amount,
-              // ...isStopOrTP? {type: 'MARKET'} : {type},
-              type: 'LIMIT',
-              side: 'BUY',
-              open: 'CLOSE',
-              positionType: marginType === MarginType.Cross ? 1 : 2,
-              futureModel: 'normal',
-            });
-
-            let res = await this.unlimitedXHR.post(ENDPOINTS.PLACE_ORDER, payload);
-            let data = res.data;
-            let code = String(data?.code ?? '');
-            let message = String(data?.msg ?? '');
-
-            if (
-              code === '-1165' &&
-              message.includes('The order type is inconsistent with the user contract configuration 2')
-            ) {
-              marginType = MarginType.Isolated;
-              payload.positionType = 2;
-              res = await this.unlimitedXHR.post(ENDPOINTS.PLACE_ORDER, payload);
-              data = res.data;
-              code = String(data?.code ?? '');
-              message = String(data?.msg ?? '');
-            }
-            // else if (data.code !== '-1166') {
-            //   await this.changeMarginType(false, symbol);
-            // }
-
-            // "The leverage value of the order is inconsistent with the user contract configuration x"
-            if (code === '-1166' && message.includes('The leverage value of the order is inconsistent with the user')) {
-              // extract leverage from err
-              leverage = Number(message.split(' ').pop());
-            } else {
-              leverage = market.limits.leverage.max;
-              try {
-                await this.setLeverage(symbol, leverage, true);
-              } catch (e) {
-                const errMsg = String(e);
-                const maxLeverage = this.parseMaxLeverageFromErrorMessage(errMsg);
-                if (maxLeverage !== null) {
-                  this.setMarketMaxLeverage(symbol, maxLeverage);
-                  leverage = maxLeverage;
-                  await this.setLeverage(symbol, maxLeverage, true);
-                }
-              }
-            }
-            if (this.isDisposed) return [];
-            return [
-              {
-                symbol,
-                side: PositionSide.Long,
-                leverage,
-                positionMode: PositionMode.OneWay,
-                marginType,
-              },
-            ];
-          },
-        ),
-      );
-    } catch (err: any) {
-      this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
-      throw err;
+    if (!currentPositions && symbols.some((symbol) => !this.positionMetadataBySymbol.has(symbol))) {
+      currentPositions = this.getAccountPositionSnapshots(await this.fetchBalanceAndPositionsRaw());
     }
+
+    if (currentPositions) {
+      const nextMetadata = new Map<
+        string,
+        Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>
+      >();
+      for (const position of currentPositions) {
+        const leverage = Number(position.leverageLevel);
+        if (!position.symbol || !Number.isFinite(leverage) || leverage <= 0) {
+          continue;
+        }
+        nextMetadata.set(position.symbol, {
+          symbol: position.symbol,
+          side: position.side,
+          leverage,
+          positionMode: PositionMode.OneWay,
+          marginType: position.positionType === 2 ? MarginType.Isolated : MarginType.Cross,
+        });
+      }
+      this.positionMetadataBySymbol = nextMetadata;
+    }
+
+    if (this.isDisposed) return [];
+    return symbols.flatMap((symbol) => {
+      const metadata = this.positionMetadataBySymbol.get(symbol);
+      return metadata ? [metadata] : [];
+    });
   };
 
   fetchPositions = async (symbols?: string[]) => {
@@ -563,15 +575,15 @@ export class BitrueExchange extends BaseExchange {
   };
 
   parsePositions = async (data?: FETCH_ACCOUNT_RESPONSE) => {
-    if (!data) {
+    const accounts = this.getPositionAccounts(data);
+    const currentPositions = this.getAccountPositionSnapshots(data);
+    if (!accounts || !currentPositions) {
       return this.store.positions;
     }
-    const openPositions = data.data.account.filter((a) => a.positionVos && ['USDT', 'USDC'].includes(a.marginCoin));
+    const symbols = currentPositions.map((position) => position.symbol);
+    const positionMetaData = await this.fetchPositionMetadata(symbols, currentPositions);
 
-    const symbols = openPositions.map((a) => a.positionVos!.map((p) => p.contractName)).flat();
-    const positionMetaData = await this.fetchPositionMetadata(symbols);
-
-    return openPositions
+    return accounts
       .map((account) => {
         // positionVos?: {
         //   contractId: number;
@@ -1038,62 +1050,9 @@ export class BitrueExchange extends BaseExchange {
       // }
     }
 
-    // {
-    //   "contractId": 1,
-    //   "leverageLevel": 5,
-    //   "positionType": 1,
-    //   "side": "SELL",
-    //   "orderList": [
-    //   {
-    //     "triggerType": "2",
-    //     "type": "2",
-    //     "price": "",
-    //     "volume": 187,
-    //     "triggerPrice": "110000",
-    //     "triggerPriceType": "2"
-    //   }
-    // ],
-    //   "uaTime": "2025-01-24 17:54:21",
-    //   "securityInfo": "{\"id\":\"\",\"org\":\"www.bitrue.com\",\"timestamp\":\"2025-01-24 17:54:21\",\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\",\"availableScreenResolution\":\"2056;1291\",\"screenResolution\":\"2056;1329\",\"touchSupport\":\"0;false;false\",\"sessionStorage\":1,\"localStorage\":1,\"indexedDb\":1,\"plugins\":\"PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,Chrome PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,Chromium PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,Microsoft Edge PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,WebKit built-in PDF::Portable Document Format::application/pdf~pdf,text/pdf~pdf\",\"fonts\":\"Andale Mono;Arial;Arial Black;Arial Hebrew;Arial Narrow;Arial Rounded MT Bold;Arial Unicode MS;Comic Sans MS;Courier;Courier New;Geneva;Georgia;Helvetica;Helvetica Neue;Impact;LUCIDA GRANDE;Microsoft Sans Serif;Monaco;Palatino;Tahoma;Times;Times New Roman;Trebuchet MS;Verdana;Wingdings;Wingdings 2;Wingdings 3\",\"client_type\":\"\",\"identity\":\"\",\"device\":\"4b7b90bf02c77dd02fd72727a0557e30\",\"ip\":\"\",\"ip2region\":\"\",\"language\":\"en-US\",\"platform\":\"MacIntel\",\"browser\":\"\",\"browser_version\":\"\",\"os\":\"\",\"os_version\":\"\",\"resolution\":\"\",\"timezone\":\"Asia/Singapore\",\"ctime\":\"\",\"mtime\":\"\"}"
-    // }
-
-    // {
-    //   "contractId": 1,
-    //   "id": 10500659,
-    //   "side": "BUY",
-    //   "positionType": 1,
-    //   "leverageLevel": 5,
-    //   "price": "105066.8",
-    //   "volume": 187,
-    //   "triggerPrice": null,
-    //   "type": "2",
-    //   "isConditionOrder": false,
-    //   "open": "OPEN",
-    //   "futureModel": "normal",
-    //   "triggerOrderType": "3",
-    //   "orderVos": "[{\"contractId\":1,\"id\":10500659,\"side\":\"SELL\",\"positionType\":1,\"leverageLevel\":5,\"price\":0,\"volume\":187,\"triggerPrice\":\"110000\",\"type\":\"2\",\"isConditionOrder\":true,\"open\":\"CLOSE\",\"futureModel\":\"normal\",\"triggerType\":\"2\",\"triggerPriceType\":\"2\"}]",
-    //   "uaTime": "2025-01-24 17:55:24",
-    //   "securityInfo": "{\"id\":\"\",\"org\":\"www.bitrue.com\",\"timestamp\":\"2025-01-24 17:55:24\",\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\",\"availableScreenResolution\":\"2056;1291\",\"screenResolution\":\"2056;1329\",\"touchSupport\":\"0;false;false\",\"sessionStorage\":1,\"localStorage\":1,\"indexedDb\":1,\"plugins\":\"PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,Chrome PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,Chromium PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,Microsoft Edge PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf,WebKit built-in PDF::Portable Document Format::application/pdf~pdf,text/pdf~pdf\",\"fonts\":\"Andale Mono;Arial;Arial Black;Arial Hebrew;Arial Narrow;Arial Rounded MT Bold;Arial Unicode MS;Comic Sans MS;Courier;Courier New;Geneva;Georgia;Helvetica;Helvetica Neue;Impact;LUCIDA GRANDE;Microsoft Sans Serif;Monaco;Palatino;Tahoma;Times;Times New Roman;Trebuchet MS;Verdana;Wingdings;Wingdings 2;Wingdings 3\",\"client_type\":\"\",\"identity\":\"\",\"device\":\"4b7b90bf02c77dd02fd72727a0557e30\",\"ip\":\"\",\"ip2region\":\"\",\"language\":\"en-US\",\"platform\":\"MacIntel\",\"browser\":\"\",\"browser_version\":\"\",\"os\":\"\",\"os_version\":\"\",\"resolution\":\"\",\"timezone\":\"Asia/Singapore\",\"ctime\":\"\",\"mtime\":\"\"}"
-    // }
-
-    // [
-    //   {
-    //     "contractId": 1,
-    //     "id": 10500659,
-    //     "side": "SELL",
-    //     "positionType": 1,
-    //     "leverageLevel": 5,
-    //     "price": 0,
-    //     "volume": 187,
-    //     "triggerPrice": "110000",
-    //     "type": "2",
-    //     "isConditionOrder": true,
-    //     "open": "CLOSE",
-    //     "futureModel": "normal",
-    //     "triggerType": "2",
-    //     "triggerPriceType": "2"
-    //   }
-    // ]
+    if (isStopOrTP && (opts.stopLoss !== undefined || opts.takeProfit !== undefined)) {
+      throw new Error('Bitrue only supports attached TP/SL on limit or market parent orders');
+    }
 
     const req = omitUndefined({
       // contractId: 1,
@@ -1120,77 +1079,6 @@ export class BitrueExchange extends BaseExchange {
           }
         : {}),
     });
-
-    // if (isStopOrTP) {
-    //   req = {
-    //     contractId: 1,
-    //     contractName: opts.symbol,
-    //     leverage,
-    //     price: 0,
-    //     triggerPrice: price,
-    //     volume: amount,
-    //     type: 'MARKET',
-    //     side,
-    //     open: 'CLOSE',
-    //     positionType: 1,
-    //     futureModel: 'normal',
-    //
-    //     conditionOrder: true,
-    //     triggerType: '2',
-    //     triggerPriceType: '2',
-    //   };
-    // }
-
-    // if (isStopOrTP) {
-    //   req = {
-    //     ...req,
-    //     contractName: opts.symbol,
-    //     contractId: 1,
-    //     leverage,
-    //     positionType: 1,
-    //     side: 'SELL',
-    //     type: 'MARKET',
-    //     triggerOrderType: 2,
-    //     conditionOrder: true,
-    //     triggerOrderPrice: '',
-    //     triggerPrice: price,
-    //     // triggerOrderCreateParams: [
-    //     //   {
-    //     //     triggerType: '2',
-    //     //     type: '2',
-    //     //     price,
-    //     //     volume: 160,
-    //     //     triggerPrice: price,
-    //     //     triggerPriceType: '2',
-    //     //   },
-    //     // ],
-    //   };
-    // req = {
-    //   contractName: 'E-SAND-USDT',
-    //   side: 'BUY',
-    //   type: 'LIMIT',
-    //   positionType: 1,
-    //   open: 'OPEN',
-    //   volume: 100,
-    //   amount: 1,
-    //   price: 1,
-    //   leverage: 5,
-    //   triggerOrderType: 0,
-    //   triggerType: 0,
-    //   triggerPriceType: 0,
-    //   triggerPrice: 100.0,
-    //   conditionOrder: true,
-    //   positionId: 1,
-    //   triggerOrderCreateParams: [
-    //     {
-    //       triggerType: 0,
-    //       triggerPriceType: 0,
-    //       triggerPrice: 1,
-    //       type: 'MARKET',
-    //     },
-    //   ],
-    // };
-    // }
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
     const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
@@ -1221,27 +1109,37 @@ export class BitrueExchange extends BaseExchange {
       });
     }
 
-    if (opts.stopLoss) {
-      payloads.push({
-        ...omit(req, 'price'),
-        side: inverseObj(ORDER_SIDE)[opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy],
-        type: inverseObj(ORDER_TYPE)[OrderType.StopLoss],
-        stopPrice: `${opts.stopLoss}`,
-        timeInForce: 'GTC',
-        closePosition: 'true',
-        workingType: opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'CONTRACT_PRICE' : 'MARK_PRICE',
-      });
-    }
-
-    if (opts.takeProfit) {
-      payloads.push({
-        ...omit(req, 'price'),
-        side: inverseObj(ORDER_SIDE)[opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy],
-        type: inverseObj(ORDER_TYPE)[OrderType.TakeProfit],
-        stopPrice: `${opts.takeProfit}`,
-        timeInForce: 'GTC',
-        closePosition: 'true',
-        workingType: opts.tpTriggerType === OrderStopTriggerType.MarkPrice ? 'MARK_PRICE' : 'CONTRACT_PRICE',
+    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined) {
+      payloads = payloads.map((payload) => {
+        const triggerOrderCreateParams = [] as Array<{
+          clientOrderId: string;
+          triggerType: 1 | 2;
+          triggerPriceType: 1 | 2;
+          triggerPrice: number;
+          type: 'MARKET';
+          price: 0;
+        }>;
+        if (opts.stopLoss !== undefined) {
+          triggerOrderCreateParams.push({
+            clientOrderId: uuid(),
+            triggerType: 1,
+            triggerPriceType: opts.slTriggerType === OrderStopTriggerType.LastPrice ? 1 : 2,
+            triggerPrice: opts.stopLoss,
+            type: 'MARKET',
+            price: 0,
+          });
+        }
+        if (opts.takeProfit !== undefined) {
+          triggerOrderCreateParams.push({
+            clientOrderId: uuid(),
+            triggerType: 2,
+            triggerPriceType: opts.tpTriggerType === OrderStopTriggerType.LastPrice ? 1 : 2,
+            triggerPrice: opts.takeProfit,
+            type: 'MARKET',
+            price: 0,
+          });
+        }
+        return { ...payload, triggerOrderCreateParams };
       });
     }
 
@@ -1353,6 +1251,7 @@ export class BitrueExchange extends BaseExchange {
       if (!this.isSuccessCode(data?.code)) {
         throw new Error(String(data?.msg || 'Failed to set leverage'));
       }
+      this.positionMetadataBySymbol.delete(symbol);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.msg || err?.message || 'Failed to set leverage';
       const maxLeverage = this.parseMaxLeverageFromErrorMessage(errorMessage);
