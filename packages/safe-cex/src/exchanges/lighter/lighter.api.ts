@@ -1,10 +1,30 @@
 import type { ExchangeOptions } from '../../types';
 
 import { LighterApiClient } from '@tealstreet/lighter-sdk';
-import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { getBaseUrl, RECV_WINDOW } from './lighter.types';
-import { toLighterApiKeyIndexString } from './lighter.utils';
+
+const UNSUPPORTED_LIGHTER_REST_HEADERS = ['x-timestamp', 'x-account-index'];
+
+export const stripUnsupportedLighterRestHeaders = (headers: unknown): void => {
+  if (!headers || typeof headers !== 'object') {
+    return;
+  }
+
+  const headerRecord = headers as Record<string, unknown> & { delete?: (name: string) => void };
+
+  for (const unsupportedHeader of UNSUPPORTED_LIGHTER_REST_HEADERS) {
+    if (typeof headerRecord.delete === 'function') {
+      headerRecord.delete(unsupportedHeader);
+    }
+
+    for (const headerName of Object.keys(headerRecord)) {
+      if (headerName.toLowerCase() === unsupportedHeader) {
+        delete headerRecord[headerName];
+      }
+    }
+  }
+};
 
 /**
  * Create a Lighter SDK API client with enhanced features
@@ -24,21 +44,10 @@ export const createLighterSDKClient = (options: ExchangeOptions, exchange: BaseE
     },
   });
 
-  // Add request interceptor for timestamps and account index
+  // Lighter auth is carried by signed tx payloads or explicit `auth`/`authorization`
+  // fields. Legacy X-* headers trigger browser CORS preflights through the REST proxy.
   client.addRequestInterceptor((config: any) => {
-    // Skip auth headers for public endpoints
-    if (config.url?.includes('/public/') || config.url?.includes('/markets') || config.url?.includes('/tickers')) {
-      return config;
-    }
-
-    // Add timestamp and account index for authenticated endpoints
-    const timestamp = virtualClock.getCurrentTimeMs();
-    config.headers = {
-      ...config.headers,
-      'X-Timestamp': timestamp.toString(),
-      'X-Account-Index': toLighterApiKeyIndexString(options.apiKeyIndex),
-    };
-
+    stripUnsupportedLighterRestHeaders(config.headers);
     return config;
   });
 

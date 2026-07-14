@@ -43,12 +43,12 @@ Lighter uses a two-layer authentication model:
 
 ### REST API Authentication
 
-Handled by a request interceptor in `lighter.api.ts`. For authenticated (non-public) endpoints, two headers are injected:
+Lighter REST authentication is carried by signed transaction payloads or explicit auth fields on the request:
 
-- `X-Timestamp` — Current virtual clock timestamp in milliseconds
-- `X-Account-Index` — Header account index string used by current API routing/interceptor flow
+- Trading writes use signed `sendTx` / `sendTxBatch` payloads.
+- Account/order read endpoints that need private access pass the signer auth token through documented `auth` query params or `authorization` headers.
 
-Public endpoints (URLs containing `/public/`, `/markets`, or `/tickers`) skip authentication headers.
+`lighter.api.ts` strips stale `X-Timestamp` / `X-Account-Index` headers if they are inherited from older callers. Do not reintroduce those global headers: they are not part of the current upstream REST contract and they trigger browser CORS preflight failures through the Tealstreet REST proxy.
 
 Important identifier distinction:
 
