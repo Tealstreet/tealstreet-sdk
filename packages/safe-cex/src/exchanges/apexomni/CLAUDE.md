@@ -560,7 +560,7 @@ Private WebSocket uses direct ApeX endpoints by default and switches to Tealstre
 
 ### Order Splitting
 
-Large orders exceeding `maxOrderSize` are automatically split into multiple lots (`apexomni.exchange.ts:786-798`). Only the first lot includes TP/SL parameters; subsequent lots omit them.
+Large orders exceeding `maxOrderSize` are automatically split into multiple lots. Only lot zero carries TP/SL parameters; its `tpSize` and `slSize` must equal that lot's `size`, because each attached TP/SL has an independent zkLink signature over its exact size. Later lots submit only their parent order.
 
 ### OHLCV Kline Auth Exception
 

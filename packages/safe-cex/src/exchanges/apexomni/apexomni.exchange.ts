@@ -9,7 +9,6 @@ import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
 import { toHex } from 'ethereum-cryptography/utils';
 import chunk from 'lodash/chunk';
-import omit from 'lodash/omit';
 import orderBy from 'lodash/orderBy';
 import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
@@ -1280,17 +1279,11 @@ export class ApexOmniExchange extends BaseExchange {
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
 
-    const payloads = times(lots, (idx) => {
-      // We want to remove stopLoss and takeProfit from the rest of the orders
-      // because they are already set on the first one
-      const payload = idx > 0 ? omit(req, ['stopLoss', 'takeProfit', 'slTriggerBy', 'tpTriggerBy']) : req;
-
-      return { ...payload, size: `${lotSize}` };
-    });
+    const payloads = times(lots, () => ({ ...req, size: `${lotSize}` }));
 
     if (rest) payloads.push({ ...req, size: `${rest}` });
 
-    const responses = await mapSeries(payloads, async (p, _index) => {
+    const responses = await mapSeries(payloads, async (p, index) => {
       const clientOrderId = generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
       const expirationIsoTimestamp = (virtualClock.getCurrentTimeMs() + 30 * 24 * 60 * 60 * 1000) as any;
 
@@ -1348,11 +1341,13 @@ export class ApexOmniExchange extends BaseExchange {
         clientOrderId,
       };
 
-      if (takeProfit || stopLoss) {
+      const includeBrackets = index === 0;
+
+      if (includeBrackets && (takeProfit || stopLoss)) {
         params.isOpenTpslOrder = true;
       }
 
-      if (takeProfit) {
+      if (includeBrackets && takeProfit) {
         params.isSetOpenTp = true;
 
         const clientOrderId = generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
@@ -1393,12 +1388,12 @@ export class ApexOmniExchange extends BaseExchange {
         params.tpPrice = `${tpPrice}`;
         params.tpSide = side;
         params.tpSignature = await this.signOrder(signer, orderToSign);
-        params.tpSize = `${amount}`;
+        params.tpSize = `${p.size}`;
         params.tpTriggerPrice = takeProfit;
         params.tpTriggerPriceType = opts.tpTriggerType === OrderStopTriggerType.IndexPrice ? 'INDEX' : 'MARKET';
       }
 
-      if (stopLoss) {
+      if (includeBrackets && stopLoss) {
         params.isSetOpenSl = true;
 
         const clientOrderId = generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
@@ -1439,7 +1434,7 @@ export class ApexOmniExchange extends BaseExchange {
         params.slPrice = `${slPrice}`;
         params.slSide = side;
         params.slSignature = await this.signOrder(signer, orderToSign);
-        params.slSize = `${amount}`;
+        params.slSize = `${p.size}`;
         params.slTriggerPrice = stopLoss;
         params.slTriggerPriceType = opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'MARKET' : 'INDEX';
       }
