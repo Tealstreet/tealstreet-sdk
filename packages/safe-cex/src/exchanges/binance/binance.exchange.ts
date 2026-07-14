@@ -816,8 +816,10 @@ export class BinanceExchange extends BaseExchange {
       console.error('[Binance] fetchOrders error response:', error?.response?.data);
       this.log(`fetchOrders error: ${error?.message || error}`, LogSeverity.Error);
 
-      // Return empty array on error
-      return [];
+      // A failed full snapshot is not authoritative. Preserve the current
+      // store state so startup, reconnect, and throttled refresh callers
+      // cannot erase live regular or algo orders on transient failures.
+      return this.store.orders;
     }
   };
 

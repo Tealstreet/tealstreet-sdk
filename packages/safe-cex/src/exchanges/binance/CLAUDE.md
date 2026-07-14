@@ -106,7 +106,7 @@ All three variants follow the same high-level pattern, with variant-specific dif
 1. **`privateWebsocket.connectAndSubscribe()`** -- Fetches listen key via `POST /fapi/v1/listenKey`, opens WebSocket to `wss://fstream.binance.com/private/ws?listenKey={listenKey}` (post-2026-04-23 format; the old `/ws/{listenKey}` path was decommissioned). Non-blocking.
 2. **`fetchPositionMode()`** -- `GET /fapi/v1/positionSide/dual`. Sets `isHedged` store setting based on `dualSidePosition`.
 3. **`tick()`** -- The first tick immediately fetches both `/positionRisk` and `/account`. A 3s health loop then reconciles `/account` every 25s while the private WS is connected, or every 3s while it is disconnected. `/positionRisk` is refreshed every 75s in addition to event-triggered repairs.
-4. **`fetchOrders()`** -- Two parallel calls: `GET /fapi/v1/openOrders` + `GET /fapi/v1/openAlgoOrders?algoType=CONDITIONAL`. Merges regular + algo orders. Updates store.
+4. **`fetchOrders()`** -- Two parallel calls: `GET /fapi/v1/openOrders` + `GET /fapi/v1/openAlgoOrders?algoType=CONDITIONAL`. Merges regular + algo orders. A failed pair returns the current order-store snapshot, rather than an authoritative empty list, so startup/reconnect refreshes preserve live order state until Binance answers successfully.
 5. **`fetchPositions()`** -- Background call (no await), kicks off a detailed `GET /fapi/v2/positionRisk` fetch.
 
 ### Portfolio Margin Startup Differences
@@ -551,7 +551,7 @@ The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with ma
 
 **WebSocket real-time updates**: `ORDER_TRADE_UPDATE` and `ALGO_UPDATE` events apply immediate order status changes (NEW, FILLED, CANCELED, etc.) to the store.
 
-**Throttled REST refresh** (`binance.ws-private.ts:267-290`): After any order/algo WebSocket event, a 10-second debounced `fetchOrders()` re-fetches all open orders from REST and replaces the store's order list. This ensures any missed events or race conditions are corrected.
+**Throttled REST refresh** (`binance.ws-private.ts:267-290`): After any order/algo WebSocket event, a 10-second debounced `fetchOrders()` re-fetches all open orders from REST and replaces the store's order list. This ensures any missed events or race conditions are corrected. A transient REST failure returns the current store snapshot, so this full-store write cannot turn a failed request into an empty-order assertion; a successful empty response still clears the list.
 
 **PM variant**: Does NOT have the throttled order refresh mechanism. Relies solely on WebSocket events for order state.
 
@@ -775,7 +775,7 @@ Most methods follow this pattern:
 1. Try the operation.
 2. On catch, call `this.emitAndLogError(err?.response?.data?.msg || err?.message)` to display in UI.
 3. For critical operations (order placement, cancellation): re-throw the error.
-4. For data-fetching operations (tickers, positions, balance): return current store state as fallback.
+4. For data-fetching operations (tickers, positions, balance, and full order snapshots): return current store state as fallback. A successful empty response remains authoritative; only an error response is preserved as the existing snapshot.
 
 ### Batch Order Error Handling
 
