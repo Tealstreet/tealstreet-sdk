@@ -348,6 +348,76 @@ export class ParadexRequestSigner {
       throw error;
     }
   }
+
+  /**
+   * Sign a native Paradex order amendment.
+   *
+   * Paradex uses a distinct ModifyOrder typed-data payload for amendments. It
+   * is not safe to reuse signOrder(): the stable upstream order id is part of
+   * the signed message.
+   */
+  async signModifyOrder(orderParams: {
+    id: string;
+    market: string;
+    side: 'BUY' | 'SELL';
+    type: string;
+    size: string;
+    price: string;
+  }): Promise<{ signature: string; signature_timestamp: number }> {
+    if (!orderParams.id) {
+      throw new Error('Cannot sign Paradex order amendment without an order id');
+    }
+
+    const signature_timestamp = Date.now();
+    const chainSide = orderParams.side === 'BUY' ? '1' : '2';
+    const chainSize = this.toChainQuantum(orderParams.size, 'size');
+    const chainPrice = this.toChainQuantum(orderParams.price, 'price');
+    const chainIdHex = this.toChainIdHex(this.sdkAccount.config.paradexChainId);
+
+    const typedData = {
+      domain: {
+        name: 'Paradex',
+        chainId: chainIdHex,
+        version: '1',
+      },
+      types: {
+        StarkNetDomain: [
+          { name: 'name', type: 'felt' },
+          { name: 'chainId', type: 'felt' },
+          { name: 'version', type: 'felt' },
+        ],
+        ModifyOrder: [
+          { name: 'timestamp', type: 'felt' },
+          { name: 'market', type: 'felt' },
+          { name: 'side', type: 'felt' },
+          { name: 'orderType', type: 'felt' },
+          { name: 'size', type: 'felt' },
+          { name: 'price', type: 'felt' },
+          { name: 'id', type: 'felt' },
+        ],
+      },
+      primaryType: 'ModifyOrder',
+      message: {
+        timestamp: signature_timestamp.toString(),
+        market: orderParams.market,
+        side: chainSide,
+        orderType: orderParams.type,
+        size: chainSize,
+        price: chainPrice,
+        id: orderParams.id,
+      },
+    };
+
+    const sig = await this.sdkAccount.account.signMessage(typedData);
+    const sigArray = Array.isArray(sig)
+      ? sig.map((value) => (typeof value === 'bigint' ? value.toString() : String(value)))
+      : [String(sig.r), String(sig.s)];
+
+    return {
+      signature: JSON.stringify(sigArray),
+      signature_timestamp,
+    };
+  }
 }
 
 /**

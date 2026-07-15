@@ -151,7 +151,12 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         amount: parseFloat(order.size),
         filled: parseFloat(order.size) - parseFloat(order.remaining_size),
         remaining: parseFloat(order.remaining_size),
-        reduceOnly: order.reduce_only,
+        reduceOnly:
+          typeof order.reduce_only === 'boolean'
+            ? order.reduce_only
+            : Array.isArray(order.flags)
+              ? order.flags.includes('REDUCE_ONLY')
+              : false,
         timeInForce: order.time_in_force,
         lastUpdate: Date.now(),
         info: order, // Store all raw data from WebSocket

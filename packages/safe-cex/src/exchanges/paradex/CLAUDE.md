@@ -404,14 +404,23 @@ resting limit order.
 - Requires explicit order size (no "infinite" TP/SL that closes entire position)
 - If TP/SL placement fails, main order is NOT cancelled (error swallowed with warning log)
 
-### Order Update (`paradex.exchange.ts:1128-1174`)
+### Order Update (`ParadexExchange.updateOrder`)
 
-The integration still uses cancel-and-replace even though Paradex now supports native `PUT /orders/{order_id}` modification:
+The integration uses native `PUT /orders/{order_id}` modification and never
+cancels or places a replacement from `updateOrder()`:
 
-1. Build new order from existing order properties
-2. Apply price/amount updates, preserve timeInForce
-3. Cancel old order via `DELETE /orders/{id}`
-4. Place new order via `placeOrder()`
+- Exact reconciled open `LIMIT` and `UNTRIGGERED` TPSL shapes are supported.
+- The raw upstream side, type, market, stable ID, execution price, total base
+  size, filled/remaining size, reduce-only state, and instruction/post-only
+  state must reconcile before signing.
+- TPSL price edits change `trigger_price` while preserving the exact upstream
+  `STOP_*` / `TAKE_PROFIT_*` type and any separate limit execution price.
+- TIF/post-only, reduce-only, and STP are not fields in Paradex's modify
+  request; keeping the same ID preserves them server-side. They must never be
+  synthesized into the modify payload.
+- Triggered TPSL, market, isolated-margin, stale/mismatched, and otherwise
+  ambiguous shapes reject before signing or writing. There is no
+  cancel-and-replace fallback.
 
 ### Order Cancellation
 
@@ -450,6 +459,9 @@ For order signatures, size and price are scaled by `1e8`:
 - Use deterministic decimal math (BigNumber), not `parseFloat`/`Math.floor`, to avoid IEEE754 drift
 - `chainSize = decimal(size).multipliedBy(1e8).integerValue(ROUND_DOWN)`
 - `chainPrice = decimal(price).multipliedBy(1e8).integerValue(ROUND_DOWN)` (or `"0"` for market orders)
+- Native amendments use the distinct official `ModifyOrder` typed-data shape,
+  which adds the stable order `id`; never reuse the placement `Order`
+  signature for `PUT /orders/{order_id}`.
 
 ### Balance Calculation (`paradex.exchange.ts`)
 
@@ -571,7 +583,10 @@ For order signatures, size and price are scaled by `1e8`:
 
 ## Known Quirks / Implementation Notes
 
-1. **Order update currently uses cancel + replace**: Paradex supports native `PUT /orders/{order_id}`, but `updateOrder()` has not yet adopted it and still cancels the existing order before placing a replacement.
+1. **Native amend is intentionally fail-closed**: `updateOrder()` supports only
+   exact reconciled open LIMIT and untriggered TPSL orders. Triggered TPSL,
+   isolated-margin, and ambiguous/stale shapes reject without a write; do not
+   restore cancel-and-replace as a fallback.
 
 2. **No infinite TP/SL**: Paradex requires explicit order size for TP/SL orders. Zero-sized "close entire position" TP/SL is not supported (`paradex.exchange.ts:978-985`).
 
@@ -640,6 +655,11 @@ User-friendly messages for known cancel reasons:
 Fresh deterministic regressions belong in the package-level
 `src/__tests__/audit-regressions/` directory. Do not commit credentialed or
 network-dependent test scripts beside exchange runtime code.
+
+`paradex.native-amend.test.ts` locks the official REST body, distinct
+`ModifyOrder` signature, stable response identity, partial-fill total-base
+sizing, exact trigger-type preservation, flags-based reduce-only readback, and
+all no-cancel/no-place failure boundaries.
 
 ### Known Test Gaps (from TODO.md)
 

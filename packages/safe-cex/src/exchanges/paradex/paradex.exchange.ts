@@ -34,6 +34,7 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
+import { adjust } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './paradex.api';
@@ -1392,49 +1393,143 @@ export class ParadexExchange extends BaseExchange {
   };
 
   updateOrder = async (opts: UpdateOrderOpts): Promise<string[]> => {
-    // Paradex doesn't support order modification via PATCH
-    // Instead, we cancel the existing order and create a new one
     const { order, update } = opts;
-
-    this.log(`Updating order ${order.id} via cancel-and-replace: ${JSON.stringify(update)}`, LogSeverity.Debug);
-
-    // Build new order from existing order
-    const newOrder: Writable<PlaceOrderOpts> = {
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      price: order.price,
-      amount: order.amount,
-      reduceOnly: order.reduceOnly || false,
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
     };
 
-    // Apply timeInForce if present
-    if (order.timeInForce) {
-      newOrder.timeInForce = order.timeInForce;
+    if (!this.requestSigner) {
+      return rejectPreflight('Paradex cannot amend an order before the request signer is initialized');
     }
 
-    // Apply updates
-    if ('price' in update) {
-      newOrder.price = update.price;
-      this.log(`Updating price: ${order.price} → ${update.price}`, LogSeverity.Debug);
+    const market = this.store.marketsBySymbol[order.symbol];
+    if (!market) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: market ${order.symbol} is not reconciled`);
     }
-    if ('amount' in update) {
-      newOrder.amount = update.amount;
-      this.log(`Updating amount: ${order.amount} → ${update.amount}`, LogSeverity.Debug);
+
+    const raw = order.info as Partial<ORDER_RESPONSE> | undefined;
+    const rawId = raw?.id === undefined || raw?.id === null ? '' : String(raw.id);
+    const rawMarket = String(raw?.market || '');
+    const rawSide = String(raw?.side || '').toUpperCase();
+    const rawType = String(raw?.type || '').toUpperCase();
+    const rawStatus = String(raw?.status || '').toUpperCase();
+    const expectedSide = order.side === OrderSide.Buy ? 'BUY' : 'SELL';
+    const supportedTriggerType = isParadexTriggerOrderType(rawType);
+    const supportedLimit = rawType === 'LIMIT' && (rawStatus === 'NEW' || rawStatus === 'OPEN');
+    const supportedUntriggeredTpSl = supportedTriggerType && rawStatus === 'UNTRIGGERED';
+
+    if (!supportedLimit && !supportedUntriggeredTpSl) {
+      return rejectPreflight(
+        `Paradex native amendment supports only exactly reconciled open LIMIT or untriggered TPSL orders; ${rawType || 'unknown'} ${rawStatus || 'unknown'} is unsupported`,
+      );
+    }
+    if (
+      rawId !== order.id ||
+      rawMarket !== order.symbol ||
+      rawSide !== expectedSide ||
+      this.reverseMapOrderType(rawType) !== order.type
+    ) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: order identity or immutable shape is not reconciled`);
+    }
+    if (raw?.on_behalf_of_account) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: isolated-margin order routing is unsupported`);
+    }
+
+    const rawInstruction = String(raw?.instruction || '').toUpperCase();
+    const knownInstruction = ['GTC', 'POST_ONLY', 'IOC', 'RPI'].includes(rawInstruction);
+    const hasLegacyInstruction =
+      typeof raw?.post_only === 'boolean' || ['GTT', 'FOK', 'IOC'].includes(String(raw?.time_in_force || ''));
+    if (!knownInstruction && !hasLegacyInstruction) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: time-in-force/post-only state is not reconciled`);
+    }
+
+    const rawReduceOnly =
+      typeof raw?.reduce_only === 'boolean'
+        ? raw.reduce_only
+        : Array.isArray(raw?.flags)
+          ? raw.flags.includes('REDUCE_ONLY')
+          : undefined;
+    if (rawReduceOnly === undefined || rawReduceOnly !== order.reduceOnly) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: reduce-only state is not reconciled`);
+    }
+
+    const rawSize = Number(raw?.size);
+    const rawRemaining = Number(raw?.remaining_size);
+    const rawPrice = Number(raw?.price);
+    const rawTriggerPrice = Number(raw?.trigger_price);
+    const reconciledFilled = rawSize - rawRemaining;
+    if (
+      !Number.isFinite(rawSize) ||
+      rawSize <= 0 ||
+      !Number.isFinite(rawRemaining) ||
+      rawRemaining < 0 ||
+      rawRemaining > rawSize ||
+      rawSize !== order.amount ||
+      rawRemaining !== order.remaining ||
+      reconciledFilled !== order.filled
+    ) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: total/filled/remaining base size is not reconciled`);
+    }
+    if (!Number.isFinite(rawPrice) || rawPrice < 0 || (supportedLimit && rawPrice <= 0)) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: existing limit price is not reconciled`);
+    }
+    if (supportedLimit && rawPrice !== order.price) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: displayed limit price is not reconciled`);
+    }
+    if (supportedUntriggeredTpSl && (!Number.isFinite(rawTriggerPrice) || rawTriggerPrice <= 0 || rawTriggerPrice !== order.price)) {
+      return rejectPreflight(`Paradex cannot safely amend ${order.id}: TPSL trigger price is not reconciled`);
+    }
+
+    const amendedSize = adjust('amount' in update ? update.amount : rawSize, market.precision.amount);
+    const amendedPrice = supportedLimit
+      ? adjust('price' in update ? update.price : rawPrice, market.precision.price)
+      : rawPrice;
+    const amendedTriggerPrice = supportedUntriggeredTpSl
+      ? adjust('price' in update ? update.price : rawTriggerPrice, market.precision.price)
+      : undefined;
+    if (!Number.isFinite(amendedSize) || amendedSize <= 0) {
+      return rejectPreflight('Paradex amended total base size must be greater than zero');
+    }
+    if (reconciledFilled > 0 && amendedSize <= reconciledFilled) {
+      return rejectPreflight('Paradex amended total base size must exceed the already-filled base size');
+    }
+    if (!Number.isFinite(amendedPrice) || amendedPrice < 0 || (supportedLimit && amendedPrice <= 0)) {
+      return rejectPreflight('Paradex amended order price is invalid');
+    }
+    if (
+      supportedUntriggeredTpSl &&
+      (amendedTriggerPrice === undefined || !Number.isFinite(amendedTriggerPrice) || amendedTriggerPrice <= 0)
+    ) {
+      return rejectPreflight('Paradex amended TPSL trigger price must be greater than zero');
     }
 
     try {
-      // Cancel old order first
-      await this.cancelOrder(order.id);
-      this.log(`Cancelled old order ${order.id}`, LogSeverity.Debug);
-
-      // Place new order
-      const orderIds = await this.placeOrder(newOrder);
-      this.log(`Placed new order ${orderIds[0]} to replace ${order.id}`, LogSeverity.Info);
-
-      return orderIds;
-    } catch (err) {
-      this.log(`Error in cancel-and-replace for order ${order.id}: ${err}`, LogSeverity.Error);
+      const signatureFields = {
+        id: order.id,
+        market: rawMarket,
+        side: rawSide as 'BUY' | 'SELL',
+        type: rawType,
+        size: String(amendedSize),
+        price: String(amendedPrice),
+      };
+      const { signature, signature_timestamp } = await this.requestSigner.signModifyOrder(signatureFields);
+      const payload = omitUndefined({
+        ...signatureFields,
+        trigger_price: amendedTriggerPrice === undefined ? undefined : String(amendedTriggerPrice),
+        signature,
+        signature_timestamp,
+      });
+      const { data } = await this.xhr.put<ORDER_RESPONSE>(
+        ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id),
+        payload,
+      );
+      if (!data || String(data.id || '') !== order.id) {
+        throw new Error(`Paradex modify response did not confirm stable order id ${order.id}`);
+      }
+      return [order.id];
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err));
       throw err;
     }
   };
@@ -1645,7 +1740,8 @@ export class ParadexExchange extends BaseExchange {
       amount: parseFloat(o.size),
       filled: parseFloat(o.size) - parseFloat(o.remaining_size),
       remaining: parseFloat(o.remaining_size),
-      reduceOnly: o.reduce_only,
+      reduceOnly:
+        typeof o.reduce_only === 'boolean' ? o.reduce_only : Array.isArray(o.flags) ? o.flags.includes('REDUCE_ONLY') : false,
       timeInForce: undefined,
       lastUpdate: new Date(o.created_at).getTime(),
       info: o, // Store all raw data from API

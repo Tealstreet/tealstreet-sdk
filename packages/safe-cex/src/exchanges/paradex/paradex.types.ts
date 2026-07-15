@@ -35,6 +35,7 @@ export const ENDPOINTS = {
   ORDERS: '/orders',
   ORDERS_HISTORY: '/orders-history',
   ORDER: '/orders/{id}',
+  MODIFY_ORDER: '/orders/{id}',
   CANCEL_ORDER: '/orders/{id}', // DELETE method
   CANCEL_ORDER_BY_CLIENT_ID: '/orders/by_client_id/{client_id}', // DELETE method
   CANCEL_ALL_ORDERS: '/orders', // DELETE method with optional ?market= param
@@ -191,13 +192,17 @@ export type ORDER_RESPONSE = {
     | 'STOP_LOSS_MARKET'
     | 'TAKE_PROFIT_LIMIT'
     | 'TAKE_PROFIT_MARKET';
-  time_in_force: 'GTT' | 'FOK' | 'IOC';
+  instruction?: 'GTC' | 'POST_ONLY' | 'IOC' | 'RPI';
+  flags?: string[];
+  stp?: 'EXPIRE_MAKER' | 'EXPIRE_TAKER' | 'EXPIRE_BOTH';
+  on_behalf_of_account?: string;
+  time_in_force?: 'GTT' | 'FOK' | 'IOC';
   created_at: string;
   updated_at: string;
   expires_at: string;
   trigger_price?: string;
-  post_only: boolean;
-  reduce_only: boolean;
+  post_only?: boolean;
+  reduce_only?: boolean;
 };
 
 export type POSITION_RESPONSE = {

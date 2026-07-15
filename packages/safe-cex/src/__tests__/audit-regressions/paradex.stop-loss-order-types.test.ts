@@ -41,17 +41,13 @@ const createExchange = () => {
   const store = new DefaultStore();
   const exchange = new ParadexExchange('paradex', { publicDataOnly: true } as any, store);
   const get = vi.fn();
-  const post = vi.fn().mockResolvedValue({ data: { id: 'replacement-order-id' } });
-  const deleteRequest = vi.fn().mockResolvedValue({ data: {} });
-  const signOrder = vi.fn().mockResolvedValue({ signature: '["r","s"]', signature_timestamp: 1_700_000_000_000 });
 
-  exchange.xhr = { get, post, delete: deleteRequest } as unknown as Axios;
+  exchange.xhr = { get } as unknown as Axios;
   exchange.jwtManager = {} as any;
-  exchange.requestSigner = { signOrder } as any;
   vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
   (exchange.privateWebsocket as any).throttledFetchOrders = vi.fn();
 
-  return { exchange, store, get, post, deleteRequest, signOrder };
+  return { exchange, store, get };
 };
 
 describe('Paradex protective stop order regression', () => {
@@ -84,31 +80,20 @@ describe('Paradex protective stop order regression', () => {
     );
   });
 
-  it.each(ORDER_VARIANTS)(
-    'recreates %s as a protective trigger order after a price edit',
-    async (type, expectedType) => {
-      const { exchange, post, deleteRequest, signOrder } = createExchange();
-      const order = (exchange as any).mapOrder(orderResponse(type));
+  it('maps the current flags-based reduce-only response contract from REST and WebSocket', async () => {
+    const { exchange, store, get } = createExchange();
+    const currentResponse = {
+      ...orderResponse('STOP_LOSS_MARKET'),
+      reduce_only: undefined,
+      flags: ['REDUCE_ONLY'],
+      instruction: 'GTC',
+    };
+    get.mockResolvedValue({ data: { results: [currentResponse] } });
 
-      await expect(exchange.updateOrder({ order, update: { price: 92 } })).resolves.toEqual(['replacement-order-id']);
+    await expect(exchange.fetchOrders()).resolves.toEqual([expect.objectContaining({ reduceOnly: true })]);
 
-      expect(deleteRequest).toHaveBeenCalledWith(`/orders/${type.toLowerCase()}-id`);
-      expect(signOrder).toHaveBeenCalledWith(
-        expect.objectContaining({
-          market: 'BTC-USD-PERP',
-          side: 'SELL',
-          type: expectedType === OrderType.StopLoss ? 'STOP_MARKET' : 'TAKE_PROFIT_MARKET',
-        }),
-      );
-      expect(post).toHaveBeenCalledWith(
-        '/orders',
-        expect.objectContaining({
-          type: expectedType === OrderType.StopLoss ? 'STOP_MARKET' : 'TAKE_PROFIT_MARKET',
-          trigger_price: '92',
-          flags: ['REDUCE_ONLY'],
-        }),
-      );
-      expect(post).not.toHaveBeenCalledWith('/orders', expect.objectContaining({ type: 'LIMIT' }));
-    },
-  );
+    (exchange.privateWebsocket as any).handleOrderUpdate({ data: currentResponse });
+    expect(store.orders).toContainEqual(expect.objectContaining({ id: currentResponse.id, reduceOnly: true }));
+  });
+
 });
