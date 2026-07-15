@@ -27,7 +27,9 @@ write-path migration requires fixture coverage and a credentialed WooX demo life
 The V3 foundation is deliberately non-routable: `woo.v3.contracts.ts` holds the typed route map,
 response/request contracts, and seven hard-false migration gates, while `woo.v3.request.ts` only
 prepares deterministic transport-neutral request descriptors. `woo.v3.public.ts` adds strict
-unknown-input decoders and pure mappers for the five public REST reads, but it is equally inert.
+unknown-input decoders and pure mappers for the five public REST reads. `woo.v3.private.ts` does the
+same for account info, asset balances, futures positions, pending regular/algo orders, and transaction
+history. It is equally inert and accepts no transport, credentials, or mutable store.
 None of these files is imported by
 `woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
@@ -44,6 +46,25 @@ documents both sides as descending, so the inert mapper sorts into safe-cex's re
 whether `status` is present in its example, so the strict decoder treats only that field as optional;
 an absent status does not make a documented perpetual inactive.
 
+Authenticated V3 reads must remain fail-closed. Financial values documented as decimal strings are
+decoded only from strings; the transaction-history `fee` remains the official JSON-number exception.
+Account `freeCollateral` maps to safe-cex `free`, `totalAccountValue` to `total`, and
+`totalCollateral - freeCollateral` to `used`; the endpoint has no uPnL field, so the pure mapper takes
+the previous known-good uPnL explicitly. Token holdings keep trading/free/frozen, stake, vault, earn,
+and interest buckets distinct.
+
+Do not construct a safe-cex `Position` from `/v3/futures/positions` alone: the official response omits
+leverage and margin mode, and even disagrees between `data.positions` in the example and `data.rows`
+in OpenAPI. The inert decoder accepts exactly one envelope key, and its mapper stops at a
+gateway-labelled position read model. Algo reads have similar official drift: `quantity` alternates
+between number and decimal string, response examples add `TAKE_PROFIT`/`STOP_LOSS` child enums absent
+from the schema, and trailing/container rows do not expose a lossless absolute trigger for safe-cex.
+Only decimal-string TP/SL leaves with an explicit `triggerPrice` map; all other valid shapes are
+returned as deferred gateway rows. A future comparator must decode/map a complete page before store
+replacement and retain the previous known-good slice on any failure or deferred ambiguity.
+Transaction rows omit `positionSide`; they map losslessly to `Execution`, while `HistoricalTrade`
+is emitted with `both` only for a separately decoded one-way account and is deferred in hedge mode.
+
 ## CCXT Reference Implementation
 
 - **REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/woo.ts
@@ -55,6 +76,7 @@ an absent status does not make a documented perpetual inactive.
 - `woo.exchange.ts` - Main exchange class (`WOOXExchange`) extending `BaseExchange`
 - `woo.types.ts` - TypeScript type definitions, endpoint constants, type maps
 - `woo.v3.contracts.ts` - Non-routable namespaced V3 endpoints, contracts, migration map, and gates
+- `woo.v3.private.ts` - Inert strict authenticated-read decoders and lossless/deferred state mappers
 - `woo.v3.public.ts` - Inert strict public-REST decoders and pure market/stat/book/candle mappers
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
