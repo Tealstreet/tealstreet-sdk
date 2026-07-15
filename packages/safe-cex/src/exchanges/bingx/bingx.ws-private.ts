@@ -1,7 +1,7 @@
 import type { BingxExchange } from './bingx.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { MarginType, OrderStatus, OrderType, Position, PositionMode, PositionSide } from '../../types';
+import { LogSeverity, MarginType, OrderStatus, OrderType, Position, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { readBlob } from '../../utils/readBlob';
 import { virtualClock } from '../../utils/virtualClock';
@@ -9,16 +9,33 @@ import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRADE_UPDATE, ORDER_TYPE, POSITION_SIDE } from './bingx.types';
 
 export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
+  private static readonly LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
+  private static readonly LISTEN_KEY_RETRY_MS = 30 * 1000;
+
   private lastPositionFetchTime = 0;
   private positionFetchThrottleMs = 750;
   private positionFetchScheduled = false;
   private hasPendingPositionEvents = false;
   private emittedFillQtyByOrderId = new Map<string, number>();
   private listenKey: string | undefined;
+  private listenKeyRefreshTimer?: ReturnType<typeof setTimeout>;
+  private rebuildingListenKey = false;
+
+  constructor(parent: BingxExchange) {
+    super(parent);
+
+    const baseOnClose = this.onClose;
+    this.onClose = (event?: any) => {
+      this.clearListenKeyRefreshTimer();
+      baseOnClose(event);
+    };
+  }
 
   connectAndSubscribe = async () => {
     if (!this.isDisposed) {
+      this.clearListenKeyRefreshTimer();
       const listenKey = await this.fetchListenKey();
+      if (this.isDisposed) return;
 
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';
       const base = BASE_WS_URL.private[key];
@@ -34,6 +51,7 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
 
   onOpen = () => {
     if (!this.isDisposed) {
+      this.scheduleListenKeyRefresh();
       this.ping();
     }
   };
@@ -61,6 +79,12 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
 
       if (strData === 'Pong' || json?.pong) {
         this.handlePongEvent();
+        return;
+      }
+
+      if (json?.e === 'listenKeyExpired') {
+        this.recordMessageHandlerStats('listenKey');
+        await this.rebuildWithFreshListenKey();
         return;
       }
 
@@ -150,6 +174,7 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
       }
       if (status === 'FILLED') {
         this.store.updateOrderStatus({ id: data.i }, OrderStatus.Closed);
+        this.emittedFillQtyByOrderId.delete(String(data.i));
       }
     });
   };
@@ -324,18 +349,88 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
       throw new Error(`BingX listen key missing in response: ${JSON.stringify(data)}`);
     }
     this.listenKey = listenKey;
-    setTimeout(() => this.updateListenKey(), 30 * 60 * 1000);
     return listenKey;
   };
 
   private updateListenKey = async () => {
-    if (!this.isDisposed && this.listenKey) {
+    if (this.isDisposed) return;
+    if (!this.listenKey) {
+      await this.rebuildWithFreshListenKey();
+      return;
+    }
+
+    try {
       await this.parent.xhr.put(ENDPOINTS.LISTEN_KEY, undefined, {
         params: {
           listenKey: this.listenKey,
         },
       });
-      setTimeout(() => this.updateListenKey(), 30 * 60 * 1000);
+      this.scheduleListenKeyRefresh();
+    } catch (error: any) {
+      const message = error?.response?.data?.msg || error?.message || String(error);
+      this.parent.log(
+        `Failed to refresh BingX listen key: ${message}. Retrying in ${BingxPrivateWebsocket.LISTEN_KEY_RETRY_MS / 1000}s`,
+        LogSeverity.Warning,
+      );
+
+      if (error?.response?.status === 404 || /listen.?key.*(expired|does not exist|invalid)/i.test(message)) {
+        await this.rebuildWithFreshListenKey();
+      } else {
+        this.scheduleListenKeyRefresh(BingxPrivateWebsocket.LISTEN_KEY_RETRY_MS);
+      }
     }
+  };
+
+  private rebuildWithFreshListenKey = async () => {
+    if (this.isDisposed || this.rebuildingListenKey) return;
+
+    this.rebuildingListenKey = true;
+    this.clearListenKeyRefreshTimer();
+    this.listenKey = undefined;
+    const staleSocket = this.ws;
+    staleSocket?.removeEventListener('message', this.onMessage);
+    staleSocket?.removeEventListener('close', this.onClose);
+    staleSocket?.removeEventListener('open', this.onOpen);
+    this.ws = undefined;
+    staleSocket?.close();
+
+    try {
+      await this.connectAndSubscribe();
+    } catch (error: any) {
+      const message = error?.response?.data?.msg || error?.message || String(error);
+      this.parent.log(
+        `Failed to rebuild BingX private WebSocket with a fresh listen key: ${message}. Retrying in ${BingxPrivateWebsocket.LISTEN_KEY_RETRY_MS / 1000}s`,
+        LogSeverity.Warning,
+      );
+      this.scheduleListenKeyRecovery();
+    } finally {
+      this.rebuildingListenKey = false;
+    }
+  };
+
+  private scheduleListenKeyRefresh = (delayMs = BingxPrivateWebsocket.LISTEN_KEY_REFRESH_MS) => {
+    this.clearListenKeyRefreshTimer();
+    this.listenKeyRefreshTimer = setTimeout(() => void this.updateListenKey(), delayMs);
+  };
+
+  private scheduleListenKeyRecovery = () => {
+    this.clearListenKeyRefreshTimer();
+    this.listenKeyRefreshTimer = setTimeout(
+      () => void this.rebuildWithFreshListenKey(),
+      BingxPrivateWebsocket.LISTEN_KEY_RETRY_MS,
+    );
+  };
+
+  private clearListenKeyRefreshTimer = () => {
+    if (this.listenKeyRefreshTimer) {
+      clearTimeout(this.listenKeyRefreshTimer);
+      this.listenKeyRefreshTimer = undefined;
+    }
+  };
+
+  dispose = () => {
+    this.clearListenKeyRefreshTimer();
+    this.listenKey = undefined;
+    super.dispose();
   };
 }

@@ -108,12 +108,12 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
           }
         }
       } else {
-        const handlers = Object.entries(this.messageHandlers);
-
-        for (const [topic, callbacks] of handlers) {
+        const topic = json?.dataType;
+        const callbacks = this.messageHandlers[topic];
+        if (callbacks?.length) {
           this.recordMessageHandlerStats(topic);
           for (const callback of callbacks) {
-            if (json && json?.dataType === topic) callback(Array.isArray(json) ? json : [json]);
+            callback(Array.isArray(json) ? json : [json]);
           }
         }
       }

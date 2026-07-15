@@ -16,6 +16,7 @@ import type {
   PolymarketBalanceAllowance,
   PolymarketClobMarket,
   PolymarketCredentials,
+  PolymarketDataPosition,
   PolymarketOrderBook,
   PolymarketOrderResponse,
   PolymarketPrice,
@@ -24,12 +25,16 @@ import type {
 } from './polymarket.types';
 
 import retry, { isNetworkError } from 'axios-retry';
+import { OrderType as PolymarketOrderType, orderToJsonV2 } from '@polymarket/clob-client-v2';
 import qs from 'qs';
 
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { LogSeverity } from '../../types';
 import { ENDPOINTS, POLYMARKET_CONFIG, RATE_LIMITS } from './polymarket.constants';
 import { buildL2Headers } from './polymarket.signing';
+
+const INITIAL_CURSOR = 'MA==';
+const END_CURSOR = 'LTE=';
 
 /** Rate limiter state */
 interface RateLimiterState {
@@ -44,6 +49,7 @@ export function createPolymarketAPI(
   options: ExchangeOptions,
   exchange: BaseExchange,
   getCredentials: () => PolymarketCredentials | null,
+  getWalletAddress: () => string | null,
 ): AxiosInstance {
   const baseURL = POLYMARKET_CONFIG.REST_BASE;
 
@@ -85,6 +91,7 @@ export function createPolymarketAPI(
       ENDPOINTS.MARKETS,
       ENDPOINTS.SIMPLIFIED_MARKETS,
       ENDPOINTS.ORDER_BOOK,
+      ENDPOINTS.ORDER_BOOKS,
       ENDPOINTS.PRICE,
       ENDPOINTS.PRICES,
       ENDPOINTS.MIDPOINT,
@@ -93,6 +100,8 @@ export function createPolymarketAPI(
       ENDPOINTS.SPREADS,
       ENDPOINTS.LAST_TRADE_PRICE,
       ENDPOINTS.PRICE_HISTORY,
+      ENDPOINTS.TIME,
+      ENDPOINTS.DERIVE_API_KEY,
     ];
 
     const isPublic = publicEndpoints.some((endpoint) => url.startsWith(endpoint));
@@ -116,11 +125,20 @@ export function createPolymarketAPI(
         throw new Error('Polymarket credentials not initialized');
       }
 
+      const walletAddress = getWalletAddress();
+      if (!walletAddress) {
+        throw new Error('Polymarket wallet address not initialized');
+      }
+
       const method = config.method?.toUpperCase() || 'GET';
       const path = config.url || '';
-      const body = config.data ? JSON.stringify(config.data) : '';
+      const body = config.data === undefined
+        ? undefined
+        : typeof config.data === 'string'
+          ? config.data
+          : JSON.stringify(config.data);
 
-      const headers = buildL2Headers(credentials, method, path, body);
+      const headers = buildL2Headers(credentials, walletAddress, method, path, body);
 
       Object.entries(headers).forEach(([key, value]) => {
         config.headers.set(key, value);
@@ -175,15 +193,17 @@ export function createPolymarketAPI(
 export class PolymarketAPI {
   private xhr: AxiosInstance;
   private gammaXhr: AxiosInstance;
+  private dataXhr: AxiosInstance;
   private exchange: BaseExchange;
 
   constructor(
     options: ExchangeOptions,
     exchange: BaseExchange,
     private getCredentials: () => PolymarketCredentials | null,
+    getWalletAddress: () => string | null,
   ) {
     this.exchange = exchange;
-    this.xhr = createPolymarketAPI(options, exchange, getCredentials);
+    this.xhr = createPolymarketAPI(options, exchange, getCredentials, getWalletAddress);
 
     // Separate client for Gamma API (market metadata)
     this.gammaXhr = safeCexAxiosCreate(
@@ -204,6 +224,22 @@ export class PolymarketAPI {
       retryCondition: isNetworkError,
       retryDelay: (retryCount) => retryCount * 1000,
     });
+
+    this.dataXhr = safeCexAxiosCreate(
+      {
+        baseURL: POLYMARKET_CONFIG.DATA_API,
+        timeout: 30000,
+        headers: { Accept: 'application/json' },
+      },
+      options,
+      exchange,
+    );
+
+    retry(this.dataXhr, {
+      retries: 3,
+      retryCondition: isNetworkError,
+      retryDelay: (retryCount) => retryCount * 1000,
+    });
   }
 
   // ==================== L1 Public Methods ====================
@@ -213,6 +249,12 @@ export class PolymarketAPI {
    */
   async getMarkets(): Promise<PolymarketClobMarket[]> {
     const { data } = await this.xhr.get<PolymarketClobMarket[]>(ENDPOINTS.MARKETS);
+    return data;
+  }
+
+  /** Get the CLOB server timestamp in Unix seconds. */
+  async getServerTime(): Promise<number> {
+    const { data } = await this.xhr.get<number>(ENDPOINTS.TIME);
     return data;
   }
 
@@ -238,9 +280,10 @@ export class PolymarketAPI {
    * Get order books for multiple tokens
    */
   async getOrderBooks(tokenIds: string[]): Promise<PolymarketOrderBook[]> {
-    const { data } = await this.xhr.post<PolymarketOrderBook[]>(ENDPOINTS.ORDER_BOOK, {
-      token_ids: tokenIds,
-    });
+    const { data } = await this.xhr.post<PolymarketOrderBook[]>(
+      ENDPOINTS.ORDER_BOOKS,
+      tokenIds.map((tokenId) => ({ token_id: tokenId })),
+    );
     return data;
   }
 
@@ -258,9 +301,10 @@ export class PolymarketAPI {
    * Get midpoints for multiple tokens
    */
   async getMidpoints(tokenIds: string[]): Promise<Record<string, number>> {
-    const { data } = await this.xhr.get<Record<string, string>>(ENDPOINTS.MIDPOINTS, {
-      params: { token_ids: tokenIds.join(',') },
-    });
+    const { data } = await this.xhr.post<Record<string, string>>(
+      ENDPOINTS.MIDPOINTS,
+      tokenIds.map((tokenId) => ({ token_id: tokenId })),
+    );
     return Object.fromEntries(
       Object.entries(data).map(([id, price]) => [id, parseFloat(price)]),
     );
@@ -342,11 +386,12 @@ export class PolymarketAPI {
       throw new Error('Credentials not initialized');
     }
 
-    const { data } = await this.xhr.post<PolymarketOrderResponse>(ENDPOINTS.ORDER, {
-      order,
-      owner: credentials.apiKey,
-      orderType,
-    });
+    const payload = orderToJsonV2(
+      order as any,
+      credentials.apiKey,
+      orderType as PolymarketOrderType,
+    );
+    const { data } = await this.xhr.post<PolymarketOrderResponse>(ENDPOINTS.ORDER, payload);
 
     return data;
   }
@@ -377,20 +422,29 @@ export class PolymarketAPI {
    * Get open orders
    */
   async getOpenOrders(market?: string): Promise<PolymarketAPIOrder[]> {
-    const params: Record<string, string> = {};
-    if (market) {
-      params.market = market;
+    const orders: PolymarketAPIOrder[] = [];
+    let nextCursor = INITIAL_CURSOR;
+
+    while (nextCursor !== END_CURSOR) {
+      const params: Record<string, string> = { next_cursor: nextCursor };
+      if (market) params.market = market;
+      const { data } = await this.xhr.get<
+        { data: PolymarketAPIOrder[]; next_cursor: string } | PolymarketAPIOrder[]
+      >(ENDPOINTS.OPEN_ORDERS, { params });
+
+      if (Array.isArray(data)) return data;
+      orders.push(...(data.data || []));
+      nextCursor = data.next_cursor || END_CURSOR;
     }
 
-    const { data } = await this.xhr.get<PolymarketAPIOrder[]>(ENDPOINTS.OPEN_ORDERS, { params });
-    return data;
+    return orders;
   }
 
   /**
    * Get a specific order by ID
    */
   async getOrder(orderId: string): Promise<PolymarketAPIOrder> {
-    const { data } = await this.xhr.get<PolymarketAPIOrder>(`${ENDPOINTS.ORDER}/${orderId}`);
+    const { data } = await this.xhr.get<PolymarketAPIOrder>(`${ENDPOINTS.GET_ORDER}${orderId}`);
     return data;
   }
 
@@ -399,7 +453,7 @@ export class PolymarketAPI {
    */
   async cancelOrder(orderId: string): Promise<void> {
     await this.xhr.delete(ENDPOINTS.CANCEL, {
-      data: { orderIds: [orderId] },
+      data: { orderID: orderId },
     });
   }
 
@@ -408,7 +462,7 @@ export class PolymarketAPI {
    */
   async cancelOrders(orderIds: string[]): Promise<void> {
     await this.xhr.delete(ENDPOINTS.CANCEL_ORDERS, {
-      data: { orderIds },
+      data: orderIds,
     });
   }
 
@@ -432,19 +486,33 @@ export class PolymarketAPI {
    * Get user trades
    */
   async getTrades(market?: string, limit?: number): Promise<PolymarketTrade[]> {
-    const params: Record<string, any> = {};
-    if (market) params.market = market;
-    if (limit) params.limit = limit;
+    const trades: PolymarketTrade[] = [];
+    let nextCursor = INITIAL_CURSOR;
 
-    const { data } = await this.xhr.get<PolymarketTrade[]>(ENDPOINTS.TRADES, { params });
-    return data;
+    while (nextCursor !== END_CURSOR) {
+      const params: Record<string, any> = { next_cursor: nextCursor };
+      if (market) params.market = market;
+      if (limit) params.limit = limit;
+      const { data } = await this.xhr.get<
+        { data: PolymarketTrade[]; next_cursor: string } | PolymarketTrade[]
+      >(ENDPOINTS.TRADES, { params });
+
+      if (Array.isArray(data)) return data;
+      trades.push(...(data.data || []));
+      nextCursor = data.next_cursor || END_CURSOR;
+      if (limit && trades.length >= limit) return trades.slice(0, limit);
+    }
+
+    return trades;
   }
 
   /**
    * Get balance and allowance
    */
-  async getBalanceAllowance(): Promise<PolymarketBalanceAllowance> {
-    const { data } = await this.xhr.get<PolymarketBalanceAllowance>(ENDPOINTS.BALANCE_ALLOWANCE);
+  async getBalanceAllowance(signatureType: number): Promise<PolymarketBalanceAllowance> {
+    const { data } = await this.xhr.get<PolymarketBalanceAllowance>(ENDPOINTS.BALANCE_ALLOWANCE, {
+      params: { asset_type: 'COLLATERAL', signature_type: signatureType },
+    });
     return data;
   }
 
@@ -496,8 +564,34 @@ export class PolymarketAPI {
       offset?: number;
     },
   ): Promise<GammaMarketInfo[]> {
-    const { data } = await this.gammaXhr.get<GammaMarketInfo[]>('/markets', { params });
-    return data;
+    const limit = params?.limit ?? 500;
+    let offset = params?.offset ?? 0;
+    const markets: GammaMarketInfo[] = [];
+
+    while (true) {
+      const { data } = await this.gammaXhr.get<GammaMarketInfo[]>('/markets', {
+        params: { ...params, limit, offset },
+      });
+      markets.push(...data);
+      if (data.length < limit) return markets;
+      offset += limit;
+    }
+  }
+
+  /** Get complete current holdings from the Data API. */
+  async getPositions(user: string): Promise<PolymarketDataPosition[]> {
+    const limit = 500;
+    let offset = 0;
+    const positions: PolymarketDataPosition[] = [];
+
+    while (true) {
+      const { data } = await this.dataXhr.get<PolymarketDataPosition[]>(ENDPOINTS.POSITIONS, {
+        params: { user, limit, offset, sizeThreshold: 0 },
+      });
+      positions.push(...data);
+      if (data.length < limit) return positions;
+      offset += limit;
+    }
   }
 
   /**

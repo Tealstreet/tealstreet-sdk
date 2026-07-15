@@ -20,7 +20,7 @@ export const BASE_WS_URL = {
 };
 
 export const ENDPOINTS = {
-  BALANCE: '/openApi/swap/v2/user/balance',
+  BALANCE: '/openApi/swap/v3/user/balance',
   MARKETS: '/openApi/swap/v2/quote/contracts',
   POSITIONS: '/openApi/swap/v2/user/positions',
   LEVERAGE: '/openApi/swap/v2/trade/leverage',
@@ -32,11 +32,30 @@ export const ENDPOINTS = {
   OPEN_ORDERS: '/openApi/swap/v2/trade/openOrders',
   CANCEL_SYMBOL_ORDERS: '/openApi/swap/v2/trade/allOpenOrders',
   ORDER: '/openApi/swap/v2/trade/order',
+  CANCEL_REPLACE: '/openApi/swap/v1/trade/cancelReplace',
   BATCH_ORDERS: '/openApi/swap/v2/trade/batchOrders',
   KLINE: '/openApi/swap/v3/quote/klines',
   LISTEN_KEY: '/openApi/user/auth/userDataStream',
   ORDERBOOK: '/openApi/swap/v2/quote/depth',
   USER_TRADES: '/openApi/swap/v2/trade/fillHistory',
+};
+
+export type BINGX_BALANCE = {
+  userId: string;
+  asset: string;
+  balance: string;
+  equity: string;
+  unrealizedProfit: string;
+  realisedProfit: string;
+  availableMargin: string;
+  usedMargin: string;
+  freezedMargin: string;
+};
+
+export type FETCH_BALANCE_RESPONSE = {
+  code: number;
+  msg: string;
+  data: BINGX_BALANCE[];
 };
 
 export const GRAFANA_ENDPOINTS_EVERY = [

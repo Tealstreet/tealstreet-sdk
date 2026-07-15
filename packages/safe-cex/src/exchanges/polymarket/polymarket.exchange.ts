@@ -15,6 +15,7 @@
 
 import type { Store } from '../../store/store.interface';
 import type { GammaMarketInfo, PolymarketCredentials, PolymarketExchangeOptions } from './polymarket.types';
+import type { TickSize } from '@polymarket/clob-client-v2';
 
 import { ethers } from 'ethers';
 import sumBy from 'lodash/sumBy';
@@ -55,6 +56,46 @@ import {
   SignatureType,
 } from './polymarket.constants';
 import { createSignedOrder, createWallet, signApiKeyDerivationMessage } from './polymarket.signing';
+import { PolymarketPrivateWebSocket } from './polymarket.ws-private';
+import { PolymarketPublicWebSocket } from './polymarket.ws-public';
+
+const SUPPORTED_TICK_SIZES = new Set(['0.1', '0.01', '0.005', '0.0025', '0.001', '0.0001']);
+
+export function parseGammaMarketTokens(market: GammaMarketInfo): Array<{ tokenId: string; outcome: string }> {
+  if (!market.clobTokenIds || !market.outcomes) return [];
+
+  let tokenIds: unknown;
+  let outcomes: unknown;
+  try {
+    tokenIds = JSON.parse(market.clobTokenIds);
+    outcomes = JSON.parse(market.outcomes);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(tokenIds) || !Array.isArray(outcomes) || tokenIds.length !== outcomes.length) {
+    return [];
+  }
+
+  return tokenIds.flatMap((tokenId, index) => {
+    const outcome = outcomes[index];
+    return typeof tokenId === 'string' && typeof outcome === 'string' ? [{ tokenId, outcome }] : [];
+  });
+}
+
+export function precisionFromTickSize(value: number | string | null): number {
+  const tick = Number(value);
+  if (!Number.isFinite(tick) || tick <= 0) return 2;
+  const text = tick.toFixed(8).replace(/0+$/, '');
+  return Math.max(0, text.length - text.indexOf('.') - 1);
+}
+
+function normalizeTickSize(value: number | string | null): TickSize {
+  const tickSize = String(value ?? '');
+  if (!SUPPORTED_TICK_SIZES.has(tickSize)) {
+    throw new Error(`Unsupported Polymarket tick size: ${tickSize || 'missing'}`);
+  }
+  return tickSize as TickSize;
+}
 
 /**
  * Polymarket Exchange Class
@@ -67,6 +108,8 @@ export class PolymarketExchange extends BaseExchange {
   private credentials: PolymarketCredentials | null = null;
   private signerType: SignatureType = SignatureType.EOA;
   private funderAddress: string | null = null;
+  publicWebsocket: PolymarketPublicWebSocket;
+  privateWebsocket: PolymarketPrivateWebSocket;
 
   // Market metadata cache (condition_id -> GammaMarketInfo)
   private marketMetadata: Map<string, GammaMarketInfo> = new Map();
@@ -110,7 +153,14 @@ export class PolymarketExchange extends BaseExchange {
     }
 
     // Create API client
-    this.api = new PolymarketAPI(opts, this, () => this.credentials);
+    this.api = new PolymarketAPI(
+      opts,
+      this,
+      () => this.credentials,
+      () => this.wallet?.address ?? null,
+    );
+    this.publicWebsocket = new PolymarketPublicWebSocket(this);
+    this.privateWebsocket = new PolymarketPrivateWebSocket(this, () => this.credentials);
   }
 
   get name(): ExchangeName {
@@ -118,8 +168,7 @@ export class PolymarketExchange extends BaseExchange {
   }
 
   dispose = () => {
-    this.isDisposed = true;
-    // WebSockets will be disposed here when implemented
+    super.dispose();
   };
 
   /**
@@ -152,7 +201,7 @@ export class PolymarketExchange extends BaseExchange {
 
       // Test by fetching balance
       if (this.credentials) {
-        await this.api.getBalanceAllowance();
+        await this.api.getBalanceAllowance(this.signerType);
         return { error: '' };
       }
 
@@ -173,8 +222,13 @@ export class PolymarketExchange extends BaseExchange {
     }
 
     try {
-      const nonce = Math.floor(Math.random() * 1000000);
-      const { address, signature, timestamp } = await signApiKeyDerivationMessage(this.wallet, nonce);
+      const nonce = 0;
+      const serverTimestamp = await this.api.getServerTime();
+      const { address, signature, timestamp } = await signApiKeyDerivationMessage(
+        this.wallet,
+        nonce,
+        serverTimestamp,
+      );
 
       this.credentials = await this.api.deriveApiKey(address, nonce, signature, timestamp);
       this.log('Successfully derived API credentials', LogSeverity.Info);
@@ -217,6 +271,10 @@ export class PolymarketExchange extends BaseExchange {
         loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
       });
       return;
+    }
+
+    if (this.credentials) {
+      this.privateWebsocket.connectAndSubscribe();
     }
 
     // Start the periodic tick
@@ -290,9 +348,9 @@ export class PolymarketExchange extends BaseExchange {
    */
   private fetchBalance = async (): Promise<Balance> => {
     try {
-      const balanceData = await this.api.getBalanceAllowance();
+      const balanceData = await this.api.getBalanceAllowance(this.signerType);
 
-      const total = parseFloat(balanceData.balance) / 1e6; // USDC has 6 decimals
+      const total = parseFloat(balanceData.balance) / 1e6; // pUSD has 6 decimals
       const free = total; // All balance is available for trading
 
       return {
@@ -315,7 +373,7 @@ export class PolymarketExchange extends BaseExchange {
    */
   fetchMarkets = async (): Promise<Market[]> => {
     try {
-      const gammaMarkets = await this.api.getGammaMarkets({ active: true });
+      const gammaMarkets = await this.api.getGammaMarkets({ active: true, closed: false });
 
       const markets: Market[] = [];
 
@@ -323,10 +381,10 @@ export class PolymarketExchange extends BaseExchange {
         // Cache market metadata
         this.marketMetadata.set(gm.conditionId, gm);
 
-        // Create a market for each token (YES/NO)
-        for (const token of gm.tokens || []) {
+        // Gamma encodes token IDs and outcomes as parallel JSON arrays.
+        for (const token of parseGammaMarketTokens(gm)) {
           const symbol = `${gm.slug}-${token.outcome}`;
-          const tokenId = token.token_id;
+          const tokenId = token.tokenId;
 
           // Cache token mappings
           this.tokenToSymbol.set(tokenId, symbol);
@@ -336,15 +394,19 @@ export class PolymarketExchange extends BaseExchange {
             id: tokenId,
             symbol,
             base: gm.slug,
-            quote: 'USDC',
-            active: gm.active && !gm.closed,
+            quote: 'pUSD',
+            active:
+              gm.active &&
+              !gm.closed &&
+              gm.enableOrderBook !== false &&
+              gm.acceptingOrders !== false,
             precision: {
-              amount: 2, // Shares precision
-              price: 4, // Price precision (0.0001)
+              amount: 2,
+              price: precisionFromTickSize(gm.orderPriceMinTickSize),
             },
             limits: {
               amount: {
-                min: parseFloat(gm.tokens?.[0]?.price || '0.01') || 0.01,
+                min: Number(gm.orderMinSize) || 0,
                 max: 1000000,
               },
               leverage: {
@@ -357,6 +419,8 @@ export class PolymarketExchange extends BaseExchange {
               conditionId: gm.conditionId,
               tokenId,
               outcome: token.outcome,
+              tickSize: gm.orderPriceMinTickSize,
+              negRisk: gm.negRisk ?? false,
               question: gm.question,
               description: gm.description,
               endDate: gm.endDate,
@@ -431,53 +495,28 @@ export class PolymarketExchange extends BaseExchange {
    */
   fetchPositions = async (_symbols?: string[]): Promise<Position[]> => {
     try {
-      // Get trades to calculate cost basis
-      const trades = await this.api.getTrades();
-
-      // Calculate cost basis from trades
-      const holdingsMap = new Map<string, { size: number; cost: number }>();
-
-      for (const trade of trades) {
-        const tokenId = trade.asset_id;
-        const size = parseFloat(trade.size);
-        const price = parseFloat(trade.price);
-        const isBuy = trade.side === 'BUY';
-
-        const existing = holdingsMap.get(tokenId) || { size: 0, cost: 0 };
-
-        if (isBuy) {
-          existing.cost += size * price;
-          existing.size += size;
-        } else {
-          // For sells, reduce position and cost basis proportionally
-          if (existing.size > 0) {
-            const avgPrice = existing.cost / existing.size;
-            existing.cost -= size * avgPrice;
-            existing.size -= size;
-          }
-        }
-
-        holdingsMap.set(tokenId, existing);
-      }
+      const user = this.funderAddress || this.wallet?.address;
+      if (!user) return [];
+      const holdings = await this.api.getPositions(user);
 
       // Convert to positions
       const positions: Position[] = [];
 
-      for (const [tokenId, holding] of holdingsMap) {
-        if (holding.size <= 0) continue;
+      for (const holding of holdings) {
+        const tokenId = holding.asset;
+        if (!Number.isFinite(holding.size) || holding.size <= 0) continue;
 
         const symbol = this.tokenToSymbol.get(tokenId);
         if (!symbol) continue;
 
-        const avgPrice = holding.cost / holding.size;
+        const avgPrice = holding.avgPrice;
         this.costBasis.set(tokenId, avgPrice);
 
-        // Get current price
         const ticker = this.store.tickersBySymbol[symbol];
-        const currentPrice = ticker?.last || avgPrice;
-
-        // Calculate unrealized PnL
-        const unrealizedPnl = (currentPrice - avgPrice) * holding.size;
+        const currentPrice = holding.curPrice || ticker?.last || avgPrice;
+        const unrealizedPnl = Number.isFinite(holding.cashPnl)
+          ? holding.cashPnl
+          : (currentPrice - avgPrice) * holding.size;
 
         positions.push({
           id: createPositionId(symbol, PositionSide.Long, PositionMode.OneWay),
@@ -492,7 +531,9 @@ export class PolymarketExchange extends BaseExchange {
           positionMode: PositionMode.OneWay,
           info: {
             tokenId,
-            costBasis: holding.cost,
+            conditionId: holding.conditionId,
+            redeemable: holding.redeemable,
+            mergeable: holding.mergeable,
           },
         });
       }
@@ -554,12 +595,14 @@ export class PolymarketExchange extends BaseExchange {
     }
 
     const market = this.store.marketsBySymbol[opts.symbol];
-    const pPrice = market?.precision?.price || 4;
-    const pAmount = market?.precision?.amount || 2;
+    const pPrice = market?.precision?.price ?? 2;
+    const pAmount = market?.precision?.amount ?? 2;
 
     const price = opts.price ? adjust(opts.price, pPrice) : 0.5;
     const size = adjust(opts.amount, pAmount);
     const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
+    const tickSize = normalizeTickSize((market?.info as any)?.tickSize ?? null);
+    const negRisk = (market?.info as any)?.negRisk === true;
 
     // Create and sign the order
     const signedOrder = await createSignedOrder(this.wallet, {
@@ -567,7 +610,10 @@ export class PolymarketExchange extends BaseExchange {
       price,
       size,
       side,
+      tickSize,
+      negRisk,
       signatureType: this.signerType,
+      funderAddress: this.funderAddress ?? undefined,
     });
 
     // Determine order type
@@ -662,33 +708,14 @@ export class PolymarketExchange extends BaseExchange {
     };
   };
 
-  /**
-   * Listen to order book updates (placeholder for WebSocket implementation)
-   */
+  /** Listen to order book updates over the official market channel. */
   listenOrderBook = (symbol: string, callback: (ob: OrderBook) => void): (() => void) => {
-    // Polling fallback until WebSocket is implemented
-    let isActive = true;
+    const tokenId = this.symbolToToken.get(symbol);
+    if (!tokenId) throw new Error(`Unknown symbol: ${symbol}`);
 
-    const poll = async () => {
-      if (!isActive || this.isDisposed) return;
-
-      try {
-        const orderBook = await this.fetchOrderBook(symbol);
-        callback(orderBook);
-      } catch (err) {
-        this.log(`Error polling order book: ${err}`, LogSeverity.Warning);
-      }
-
-      if (isActive && !this.isDisposed) {
-        setTimeout(poll, 2000);
-      }
-    };
-
-    poll();
-
-    return () => {
-      isActive = false;
-    };
+    const unsubscribe = this.publicWebsocket.subscribeToOrderBook(tokenId, callback);
+    this.publicWebsocket.connectAndSubscribe();
+    return unsubscribe;
   };
 
   /**

@@ -28,11 +28,10 @@ type MessageHandlers = {
 };
 
 export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange> {
-  connectUrl = POLYMARKET_CONFIG.WS_CLOB;
+  connectUrl = POLYMARKET_CONFIG.WS_MARKET;
 
   private pingInterval?: NodeJS.Timeout;
   private subscribedAssets = new Set<string>();
-  private subscribedMarkets = new Set<string>();
 
   // Order book callbacks
   private orderbookCallbacks = new Map<string, Set<(ob: OrderBook) => void>>();
@@ -42,6 +41,7 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
     pong: [() => this.handlePongEvent()],
     price_change: [(data: Data) => this.handlePriceChange(data as PolymarketWSPriceChange)],
     book: [(data: Data) => this.handleOrderBookUpdate(data as PolymarketWSOrderBookUpdate)],
+    last_trade_price: [(data: Data) => this.handleLastTradePrice(data)],
   };
 
   constructor(parent: PolymarketExchange) {
@@ -49,7 +49,7 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
   }
 
   connectAndSubscribe = () => {
-    if (!this.isDisposed) {
+    if (!this.isDisposed && !this.ws) {
       this.parent.log('Connecting to Polymarket public WebSocket...', LogSeverity.Info);
 
       this.ws = this.createWebsocket(this.connectUrl);
@@ -83,24 +83,27 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
 
   private sendSubscription = () => {
     const assetIds = Array.from(this.subscribedAssets);
-    const markets = Array.from(this.subscribedMarkets);
-
-    if (assetIds.length === 0 && markets.length === 0) {
+    if (assetIds.length === 0) {
       return;
     }
 
     const subscription: PolymarketWSSubscription = {
       type: WS_MESSAGE_TYPES.MARKET,
       assets_ids: assetIds,
-      markets,
+      custom_feature_enabled: true,
     };
 
     this.send(JSON.stringify(subscription));
-    this.parent.log(`Subscribed to ${assetIds.length} assets, ${markets.length} markets`, LogSeverity.Debug);
+    this.parent.log(`Subscribed to ${assetIds.length} assets`, LogSeverity.Debug);
   };
 
   onMessage = (event: MessageEvent) => {
     this.trackLastReceived();
+
+    if (event.data === 'PONG') {
+      this.handlePongEvent();
+      return;
+    }
 
     const data = jsonParse(event.data) as any;
     if (!data) return;
@@ -124,6 +127,7 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
   onClose = () => {
     this.parent.log('Polymarket public WebSocket closed', LogSeverity.Warning);
     this.clearPingInterval();
+    this.ws = undefined;
 
     // Schedule reconnection
     if (!this.isDisposed) {
@@ -133,7 +137,7 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
 
   ping = () => {
     if (this.isConnected) {
-      this.send(JSON.stringify({ type: 'ping' }));
+      this.send('PING');
     }
 
     this.pingInterval = setTimeout(() => {
@@ -153,13 +157,8 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
   dispose = () => {
     this.clearPingInterval();
     this.subscribedAssets.clear();
-    this.subscribedMarkets.clear();
     this.orderbookCallbacks.clear();
-
-    if (this.ws) {
-      this.ws.close();
-      this.ws = undefined;
-    }
+    super.dispose();
   };
 
   // ==================== Subscription Management ====================
@@ -234,24 +233,24 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
   private handlePriceChange = throttle(
     (data: PolymarketWSPriceChange) => {
       try {
-        const tokenId = data.asset_id;
-        const price = parseFloat(data.price);
+        for (const change of data.price_changes || []) {
+          const tokenId = change.asset_id;
+          const symbol = (this.parent as any).tokenToSymbol?.get(tokenId);
+          if (!symbol) continue;
 
-        // Get symbol from exchange's mapping
-        const symbol = (this.parent as any).tokenToSymbol?.get(tokenId);
-        if (!symbol) return;
+          const bid = parseFloat(change.best_bid);
+          const ask = parseFloat(change.best_ask);
+          const midpoint = Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : undefined;
+          const update: Partial<Ticker> = {
+            id: tokenId,
+            symbol,
+            ...(Number.isFinite(bid) ? { bid } : {}),
+            ...(Number.isFinite(ask) ? { ask } : {}),
+            ...(midpoint !== undefined ? { mark: midpoint, index: midpoint } : {}),
+          };
 
-        const update: Partial<Ticker> = {
-          id: tokenId,
-          symbol,
-          bid: price,
-          ask: price,
-          last: price,
-          mark: price,
-          index: price,
-        };
-
-        this.store.updateTicker(symbol, update);
+          this.store.updateTicker({ id: tokenId }, update);
+        }
       } catch (err) {
         this.parent.log(`Error handling price change: ${err}`, LogSeverity.Error);
       }
@@ -259,6 +258,14 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
     500,
     { leading: true, trailing: true },
   );
+
+  private handleLastTradePrice = (data: Data) => {
+    const tokenId = data.asset_id;
+    const symbol = (this.parent as any).tokenToSymbol?.get(tokenId);
+    const last = parseFloat(data.price);
+    if (!symbol || !Number.isFinite(last)) return;
+    this.store.updateTicker({ id: tokenId }, { id: tokenId, symbol, last });
+  };
 
   /**
    * Handle order book updates

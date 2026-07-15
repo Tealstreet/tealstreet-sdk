@@ -38,7 +38,7 @@ type MessageHandlers = {
 };
 
 export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange> {
-  connectUrl = POLYMARKET_CONFIG.WS_CLOB;
+  connectUrl = POLYMARKET_CONFIG.WS_USER;
 
   private pingInterval?: NodeJS.Timeout;
   private getCredentials: () => PolymarketCredentials | null;
@@ -62,7 +62,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       return;
     }
 
-    if (!this.isDisposed) {
+    if (!this.isDisposed && !this.ws) {
       this.parent.log('Connecting to Polymarket private WebSocket...', LogSeverity.Info);
 
       this.ws = this.createWebsocket(this.connectUrl);
@@ -114,6 +114,11 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
   onMessage = (event: MessageEvent) => {
     this.trackLastReceived();
 
+    if (event.data === 'PONG') {
+      this.handlePongEvent();
+      return;
+    }
+
     const data = jsonParse(event.data) as any;
     if (!data) return;
 
@@ -150,6 +155,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
   onClose = () => {
     this.parent.log('Polymarket private WebSocket closed', LogSeverity.Warning);
     this.clearPingInterval();
+    this.ws = undefined;
 
     // Schedule reconnection
     if (!this.isDisposed) {
@@ -159,7 +165,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
 
   ping = () => {
     if (this.isConnected) {
-      this.send(JSON.stringify({ type: 'ping' }));
+      this.send('PING');
     }
 
     this.pingInterval = setTimeout(() => {
@@ -178,11 +184,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
 
   dispose = () => {
     this.clearPingInterval();
-
-    if (this.ws) {
-      this.ws.close();
-      this.ws = undefined;
-    }
+    super.dispose();
   };
 
   // ==================== Message Handlers ====================
@@ -192,14 +194,14 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
    */
   private handleOrderUpdate = (data: PolymarketWSOrderUpdate) => {
     try {
-      const apiOrder = data.order;
+      const apiOrder = data as PolymarketAPIOrder;
       const order = this.mapOrder(apiOrder);
 
       // Update store
       this.store.addOrUpdateOrders([order]);
 
       // Emit fill event if order was filled
-      if (apiOrder.status === 'matched') {
+      if (apiOrder.status.toLowerCase() === 'matched') {
         this.emitter.emit('fill', {
           id: order.id,
           side: order.side,
@@ -220,7 +222,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
    */
   private handleTradeUpdate = (data: PolymarketWSTrade) => {
     try {
-      const trade = data.trade;
+      const trade = data;
 
       // Get symbol from token ID
       const symbol = (this.parent as any).tokenToSymbol?.get(trade.asset_id) || trade.asset_id;

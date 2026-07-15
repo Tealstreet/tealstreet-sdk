@@ -894,7 +894,8 @@ const BingxMetadata: ExchangeMetadata = {
   supportsChaser: false,
   supportsPositionMargin: true,
   supportsPartialStops: true,
-  supportsInfinityStops: false, // BingX requires explicit quantity, doesn't support closePosition without it
+  supportsTrailingStopLoss: true,
+  supportsInfinityStops: true,
   enforceWsTunnel: true,
   latencyDomain: 'open-api-swap.bingx.com',
   features: {
@@ -2199,7 +2200,7 @@ const PolymarketMetadata: ExchangeMetadata = {
   supportsTradesHistory: true,
   orderbookTickDelay: 100,
   prettyName: 'Polymarket',
-  defaultQuote: 'USDC',
+  defaultQuote: 'pUSD',
   marginTypes: [MarginType.Cross], // No margin in prediction markets
   positionModes: [PositionMode.OneWay], // No hedging in prediction markets
   requiresCors: true, // Polygon CLOB API

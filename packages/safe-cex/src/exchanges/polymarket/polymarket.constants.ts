@@ -12,6 +12,8 @@ export const POLYMARKET_CONFIG = {
 
   /** CLOB WebSocket for order book and trading data */
   WS_CLOB: 'wss://ws-subscriptions-clob.polymarket.com',
+  WS_MARKET: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
+  WS_USER: 'wss://ws-subscriptions-clob.polymarket.com/ws/user',
 
   /** Live data WebSocket for broader market data */
   WS_LIVE: 'wss://ws-live-data.polymarket.com',
@@ -19,15 +21,20 @@ export const POLYMARKET_CONFIG = {
   /** Gamma API for market metadata and indexing */
   GAMMA_API: 'https://gamma-api.polymarket.com',
 
+  /** Data API for account holdings */
+  DATA_API: 'https://data-api.polymarket.com',
+
   /** Polygon Chain ID */
   CHAIN_ID: 137,
 
   /** Contract addresses */
   CONTRACTS: {
-    /** CTF Exchange contract */
-    EXCHANGE: '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E',
-    /** USDC on Polygon */
-    USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+    /** CTF Exchange V2 contract */
+    EXCHANGE_V2: '0xE111180000d2663C0091e4f400237545B87B996B',
+    /** CTF Exchange V2 contract for negative-risk markets */
+    NEG_RISK_EXCHANGE_V2: '0xe2222d279d744050d28e00520010520000310F59',
+    /** pUSD collateral on Polygon */
+    PUSD: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
     /** Conditional Tokens Framework */
     CTF: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
   },
@@ -51,6 +58,7 @@ export const ENDPOINTS = {
   MARKETS: '/markets',
   SIMPLIFIED_MARKETS: '/simplified-markets',
   ORDER_BOOK: '/book',
+  ORDER_BOOKS: '/books',
   PRICE: '/price',
   PRICES: '/prices',
   MIDPOINT: '/midpoint',
@@ -59,19 +67,21 @@ export const ENDPOINTS = {
   SPREADS: '/spreads',
   LAST_TRADE_PRICE: '/last-trade-price',
   PRICE_HISTORY: '/prices-history',
+  TIME: '/time',
 
   // Orders (L2 - auth required)
   ORDER: '/order',
   ORDERS: '/orders',
-  CANCEL: '/cancel',
-  CANCEL_ORDERS: '/cancel-orders',
+  CANCEL: '/order',
+  CANCEL_ORDERS: '/orders',
   CANCEL_ALL: '/cancel-all',
   CANCEL_MARKET_ORDERS: '/cancel-market-orders',
 
   // User data (L2 - auth required)
-  OPEN_ORDERS: '/orders',
-  TRADES: '/trades',
-  POSITIONS: '/positions', // Note: This returns from Gamma API
+  OPEN_ORDERS: '/data/orders',
+  GET_ORDER: '/data/order/',
+  TRADES: '/data/trades',
+  POSITIONS: '/positions',
 
   // Auth
   DERIVE_API_KEY: '/auth/derive-api-key',
@@ -126,9 +136,17 @@ export const ORDER_SIDE_REVERSE: Record<OrderSide, string> = {
  */
 export const ORDER_STATUS_MAP: Record<string, string> = {
   live: 'open',
+  LIVE: 'open',
   matched: 'closed',
+  MATCHED: 'closed',
   cancelled: 'canceled',
+  canceled: 'canceled',
+  CANCELLED: 'canceled',
+  CANCELED: 'canceled',
   delayed: 'open',
+  DELAYED: 'open',
+  unmatched: 'open',
+  UNMATCHED: 'open',
 };
 
 /**
@@ -142,6 +160,7 @@ export enum SignatureType {
   EOA = 0,
   POLY_PROXY = 1,
   POLY_GNOSIS_SAFE = 2,
+  POLY_1271 = 3,
 }
 
 /**
@@ -149,9 +168,8 @@ export enum SignatureType {
  */
 export const EIP712_DOMAIN = {
   name: 'Polymarket CTF Exchange',
-  version: '1',
+  version: '2',
   chainId: POLYMARKET_CONFIG.CHAIN_ID,
-  verifyingContract: POLYMARKET_CONFIG.CONTRACTS.EXCHANGE,
 } as const;
 
 /**
@@ -163,15 +181,14 @@ export const EIP712_ORDER_TYPES: Record<string, Array<{ name: string; type: stri
     { name: 'salt', type: 'uint256' },
     { name: 'maker', type: 'address' },
     { name: 'signer', type: 'address' },
-    { name: 'taker', type: 'address' },
     { name: 'tokenId', type: 'uint256' },
     { name: 'makerAmount', type: 'uint256' },
     { name: 'takerAmount', type: 'uint256' },
-    { name: 'expiration', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'feeRateBps', type: 'uint256' },
     { name: 'side', type: 'uint8' },
     { name: 'signatureType', type: 'uint8' },
+    { name: 'timestamp', type: 'uint256' },
+    { name: 'metadata', type: 'bytes32' },
+    { name: 'builder', type: 'bytes32' },
   ],
 };
 
@@ -180,8 +197,8 @@ export const EIP712_ORDER_TYPES: Record<string, Array<{ name: string; type: stri
  */
 export const WS_MESSAGE_TYPES = {
   // Subscription types
-  USER: 'USER',
-  MARKET: 'MARKET',
+  USER: 'user',
+  MARKET: 'market',
 
   // Operations
   SUBSCRIBE: 'subscribe',
@@ -200,7 +217,7 @@ export const WS_MESSAGE_TYPES = {
  */
 export const WS_CONFIG = {
   /** Ping interval in milliseconds */
-  PING_INTERVAL: 30000,
+  PING_INTERVAL: 10000,
 
   /** Pong timeout in milliseconds */
   PONG_TIMEOUT: 10000,

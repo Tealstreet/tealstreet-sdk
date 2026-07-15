@@ -158,8 +158,7 @@ export interface PolymarketTrade {
 }
 
 /**
- * Position as represented in our system
- * (calculated from token holdings + trade history)
+ * Position as represented in our system.
  */
 export interface PolymarketPosition {
   /** Token ID */
@@ -186,7 +185,7 @@ export interface PolymarketPosition {
  * Balance/allowance response from API
  */
 export interface PolymarketBalanceAllowance {
-  /** USDC balance */
+  /** pUSD balance in six-decimal base units */
   balance: string;
   /** Allowance set for exchange contract */
   allowance: string;
@@ -240,24 +239,24 @@ export interface PolymarketSignedOrder {
   maker: string;
   /** Signer address */
   signer: string;
-  /** Taker address (operator) */
-  taker: string;
   /** Token ID */
   tokenId: string;
   /** Maximum amount maker will spend */
   makerAmount: string;
   /** Minimum amount taker must provide */
   takerAmount: string;
-  /** Expiration timestamp */
+  /** Wire-only expiration timestamp; not part of the V2 EIP-712 struct */
   expiration: string;
-  /** Nonce for replay protection */
-  nonce: string;
-  /** Fee rate in basis points */
-  feeRateBps: string;
-  /** Order side (0 = BUY, 1 = SELL) */
-  side: number;
+  /** Order side */
+  side: 'BUY' | 'SELL';
   /** Signature type */
   signatureType: SignatureType;
+  /** Millisecond creation timestamp used by the V2 signed struct */
+  timestamp: string;
+  /** V2 metadata field */
+  metadata: string;
+  /** V2 builder attribution field */
+  builder: string;
   /** EIP-712 signature */
   signature: string;
 }
@@ -321,7 +320,7 @@ export interface PolymarketWSSubscription {
   /** Asset IDs to subscribe to (token IDs) */
   assets_ids?: string[];
   /** Channel type */
-  type: 'USER' | 'MARKET';
+  type: 'user' | 'market';
   /** Custom feature flag */
   custom_feature_enabled?: boolean;
 }
@@ -346,10 +345,15 @@ export interface PolymarketWSOperation {
 export interface PolymarketWSPriceChange {
   /** Event type */
   event_type: 'price_change';
-  /** Token ID */
-  asset_id: string;
-  /** New price */
-  price: string;
+  /** Price-level changes, potentially spanning both outcome assets. */
+  price_changes: Array<{
+    asset_id: string;
+    price: string;
+    size: string;
+    side: 'BUY' | 'SELL';
+    best_bid: string;
+    best_ask: string;
+  }>;
   /** Timestamp */
   timestamp: number;
 }
@@ -377,22 +381,12 @@ export interface PolymarketWSOrderBookUpdate {
 /**
  * WebSocket trade event
  */
-export interface PolymarketWSTrade {
-  /** Event type */
-  event_type: 'trade';
-  /** Trade data */
-  trade: PolymarketTrade;
-}
+export type PolymarketWSTrade = PolymarketTrade & { event_type: 'trade' };
 
 /**
  * WebSocket order update event
  */
-export interface PolymarketWSOrderUpdate {
-  /** Event type */
-  event_type: 'order';
-  /** Updated order */
-  order: PolymarketAPIOrder;
-}
+export type PolymarketWSOrderUpdate = PolymarketAPIOrder & { event_type: 'order' };
 
 /**
  * API key derivation request
@@ -424,16 +418,14 @@ export interface PolymarketDeriveKeyResponse {
  * L2 authentication headers
  */
 export interface PolymarketL2Headers {
-  /** API key */
+  /** Wallet signer address */
   'POLY_ADDRESS': string;
   /** HMAC signature */
   'POLY_SIGNATURE': string;
   /** Timestamp */
   'POLY_TIMESTAMP': string;
-  /** Nonce */
-  'POLY_NONCE': string;
-  /** API key (alternative header) */
-  'POLY_API_KEY'?: string;
+  /** API key */
+  'POLY_API_KEY': string;
   /** Passphrase */
   'POLY_PASSPHRASE'?: string;
 }
@@ -448,7 +440,7 @@ export interface PolymarketExchangeOptions {
   apiSecret?: string;
   /** API passphrase */
   apiPassphrase?: string;
-  /** Signature type (0 = EOA, 1 = Magic, 2 = Gnosis Safe) */
+  /** Signature type (0 = EOA, 1 = Magic, 2 = Gnosis Safe, 3 = POLY_1271) */
   signerType?: SignatureType;
   /** Funder address if different from signer */
   funderAddress?: string;
@@ -468,15 +460,34 @@ export interface GammaMarketInfo {
   startDate: string;
   fee: string;
   description: string;
-  outcomes: string[];
-  outcomePrices: string[];
+  outcomes: string | null;
+  outcomePrices: string | null;
   volume: string;
   active: boolean;
   closed: boolean;
   marketType: string;
-  tokens: Array<{
-    token_id: string;
-    outcome: string;
-    price: string;
-  }>;
+  clobTokenIds: string | null;
+  orderPriceMinTickSize: number | string | null;
+  orderMinSize: number | string | null;
+  negRisk?: boolean | null;
+  enableOrderBook?: boolean | null;
+  acceptingOrders?: boolean | null;
+}
+
+/** Current holding returned by the public Data API. */
+export interface PolymarketDataPosition {
+  proxyWallet: string;
+  asset: string;
+  conditionId: string;
+  size: number;
+  avgPrice: number;
+  currentValue: number;
+  cashPnl: number;
+  curPrice: number;
+  redeemable: boolean;
+  mergeable: boolean;
+  title: string;
+  slug: string;
+  outcome: string;
+  negativeRisk: boolean;
 }

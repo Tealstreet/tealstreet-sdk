@@ -48,7 +48,9 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI, FETCH_POSITIONS_RESPONSE } from './bingx.api';
 import {
+  BINGX_BALANCE,
   ENDPOINTS,
+  FETCH_BALANCE_RESPONSE,
   FETCH_HEDGE_MODE_RESPONSE,
   FETCH_LEVERAGE_RESPONSE,
   FETCH_MARGIN_MODE_RESPONSE,
@@ -123,24 +125,29 @@ export class BingxExchange extends BaseExchange {
     this.privateWebsocket.dispose();
   };
 
-  getAccount = async () => {
-    const {
-      data: [{ accountAlias }],
-    } = await this.xhr.get(ENDPOINTS.BALANCE);
+  private fetchPrimaryBalanceData = async (): Promise<BINGX_BALANCE> => {
+    const { data } = await this.xhr.get<FETCH_BALANCE_RESPONSE>(ENDPOINTS.BALANCE);
+    if (data.code !== 0) {
+      throw new Error(data.msg || `BingX balance request failed with code ${data.code}`);
+    }
 
-    return { userId: accountAlias };
+    const balance = data.data?.find((row) => row.asset === 'USDT') ?? data.data?.[0];
+    if (!balance) {
+      throw new Error('BingX balance response did not include an account balance');
+    }
+
+    return balance;
+  };
+
+  getAccount = async () => {
+    const balance = await this.fetchPrimaryBalanceData();
+    return { userId: String(balance.userId) };
   };
 
   validateAccount = async () => {
     let balance: Balance | undefined;
     try {
-      // Same BALANCE response fetchBalance parses (total=balance, free=availableMargin,
-      // used=usedMargin, upnl=unrealizedProfit).
-      const {
-        data: {
-          data: { balance: bal },
-        },
-      } = await this.xhr.get<Record<string, Record<string, any>>>(ENDPOINTS.BALANCE);
+      const bal = await this.fetchPrimaryBalanceData();
       const total = parseFloat(bal?.balance);
       if (Number.isFinite(total)) {
         balance = {
@@ -278,11 +285,7 @@ export class BingxExchange extends BaseExchange {
 
   fetchBalance = async () => {
     try {
-      const {
-        data: {
-          data: { balance: data },
-        },
-      } = await this.xhr.get<Record<string, Record<string, any>>>(ENDPOINTS.BALANCE);
+      const data = await this.fetchPrimaryBalanceData();
 
       const total = parseFloat(data.balance);
       const free = parseFloat(data.availableMargin);
@@ -500,6 +503,7 @@ export class BingxExchange extends BaseExchange {
         price: parseFloat(o.price) || parseFloat(v(o, 'stopPrice')),
         amount: parseFloat(v(o, 'origQty')),
         reduceOnly: v(o, 'reduceOnly') || false,
+        close: v(o, 'closePosition') === true || v(o, 'closePosition') === 'true',
         timeInForce: v(o, 'postOnly') ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
         filled: parseFloat(v(o, 'executedQty')),
         lastUpdate: virtualClock.getCurrentTimeMs(),
@@ -851,6 +855,7 @@ export class BingxExchange extends BaseExchange {
       });
 
       await forEachSeries(requests, async (request) => {
+        const canceledOrderIds: string[] = [];
         // Cancel orders one by one - batch cancellation disabled due to signature issues
         for (const orderId of request.orderIdList) {
           try {
@@ -865,21 +870,22 @@ export class BingxExchange extends BaseExchange {
             //   "msg": "order not exist",
             //   "data": {}
             // }
-            if (data.code !== 0) {
-              // Don't throw for individual order failures, just log them
+            if (data.code === 0 || data.code === 80016) {
+              canceledOrderIds.push(orderId);
+            } else {
               this.emitAndLogError(`Failed to cancel order ${orderId}: ${data.msg}`);
             }
           } catch (err: any) {
-            // Log individual order cancellation failures but continue with others
             this.emitAndLogError(`Failed to cancel order ${orderId}: ${err?.response?.data?.msg || err?.message}`);
-            throw err;
           }
         }
 
-        this.store.updateOrdersStatus(
-          request.orderIdList.map((id) => ({ id })),
-          OrderStatus.Canceled,
-        );
+        if (canceledOrderIds.length) {
+          this.store.updateOrdersStatus(
+            canceledOrderIds.map((id) => ({ id })),
+            OrderStatus.Canceled,
+          );
+        }
       });
     } catch (err: any) {
       // Extract error message properly
@@ -917,27 +923,8 @@ export class BingxExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    // For BingX stop/TP orders, we need to handle closePosition orders specially
-    // If the order amount is 0 or very small, it's likely a full position stop (closePosition: true)
     const isStopOrTP = order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit;
-    const isFullPositionStop = isStopOrTP && (!order.amount || order.amount < 0.0001);
-
-    // Find the current position to get the actual size
-    const position = this.store.positions.find(
-      (p) =>
-        p.symbol === order.symbol &&
-        // For stop/TP orders, we need the opposite side's position
-        (isStopOrTP
-          ? p.side === (order.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long)
-          : p.side === (order.side === OrderSide.Buy ? PositionSide.Long : PositionSide.Short)),
-    );
-
-    // Determine the amount to use
-    let orderAmount = order.amount;
-    if (isFullPositionStop && position && position.contracts > 0) {
-      // Use actual position size for full position stops being updated
-      orderAmount = position.contracts;
-    }
+    const isFullPositionStop = isStopOrTP && (order.close || !order.amount || order.amount < 0.0001);
 
     const newOrder: Writable<PlaceOrderOpts> = {
       ...order,
@@ -945,7 +932,8 @@ export class BingxExchange extends BaseExchange {
       type: order.type,
       side: order.side,
       price: order.price,
-      amount: orderAmount,
+      amount: isFullPositionStop ? 0 : order.amount,
+      ...(isFullPositionStop ? { close: true } : {}),
       ...(order.reduceOnly ? { reduceOnly: true } : {}),
     };
 
@@ -953,10 +941,34 @@ export class BingxExchange extends BaseExchange {
     if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;
 
     if ('price' in update) newOrder.price = update.price;
-    if ('amount' in update) newOrder.amount = update.amount;
+    if ('amount' in update) {
+      newOrder.amount = update.amount;
+      newOrder.close = !update.amount;
+    }
 
-    await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    const payloads = await this.formatCreateOrder(newOrder);
+    if (payloads.length !== 1) {
+      const message = 'BingX atomic order replacement requires exactly one replacement payload';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    try {
+      const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_REPLACE, {
+        ...payloads[0],
+        cancelOrderId: order.id,
+        cancelReplaceMode: 'STOP_ON_FAILURE',
+      });
+      if (data.code !== 0 || data?.data?.cancelResult !== 'SUCCESS' || data?.data?.newOrderResult !== 'SUCCESS') {
+        throw new Error(data.msg || 'BingX atomic cancel-and-replace failed');
+      }
+
+      return [String(data.data.newOrderId)];
+    } catch (error: any) {
+      const message = error?.response?.data?.msg || error?.message || String(error);
+      this.emitAndLogError(message);
+      throw error;
+    }
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
@@ -1002,6 +1014,7 @@ export class BingxExchange extends BaseExchange {
 
     const pAmount = market.precision.amount;
     const amount = adjust(opts.amount, pAmount);
+    const wantsFullPositionStop = isStopOrTP && (opts.close || !amount);
 
     // We use price only for limit orders
     // Market order should not define price
@@ -1023,8 +1036,8 @@ export class BingxExchange extends BaseExchange {
           p.symbol === opts.symbol && p.side === oppositePosSide && p.contracts > 0 && p.positionMode === positionMode,
       );
       if (!foundPosition) {
-        if (!amount) {
-          const msg = 'Cannot open infinite stop loss or take profit order without an open position';
+        if (wantsFullPositionStop) {
+          const msg = 'Cannot place a full-position stop loss or take profit order without an open position';
           this.emitAndLogError(msg);
           throw new Error(msg);
         }
@@ -1033,20 +1046,17 @@ export class BingxExchange extends BaseExchange {
       }
     }
 
-    // BingX always requires quantity for TP/SL orders
-    // closePosition is used alongside quantity to indicate "close entire position"
-    // but quantity must still be specified
     const req = omitUndefined({
       symbol: market.id,
       positionSide: pSide,
       side: inverseObj(ORDER_SIDE)[opts.side],
       type: ordType,
-      quantity: amount ? +amount : undefined,
+      quantity: wantsFullPositionStop ? undefined : amount ? +amount : undefined,
       [priceField]: price,
       timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
-      closePosition: isStopOrTP && amount > 0 ? 'true' : undefined,
+      closePosition: wantsFullPositionStop ? 'true' : undefined,
       reduceOnly:
-        positionMode === PositionMode.Hedged
+        wantsFullPositionStop || positionMode === PositionMode.Hedged
           ? undefined
           : ordType === 'TRIGGER_MARKET'
             ? true
@@ -1066,10 +1076,12 @@ export class BingxExchange extends BaseExchange {
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
 
-    const payloads: Array<Record<string, any>> = times(lots, () => ({
-      ...req,
-      quantity: lotSize,
-    }));
+    const payloads: Array<Record<string, any>> = wantsFullPositionStop
+      ? [req]
+      : times(lots, () => ({
+          ...req,
+          quantity: lotSize,
+        }));
 
     if (rest) {
       payloads.push({ ...req, quantity: rest });
@@ -1084,7 +1096,6 @@ export class BingxExchange extends BaseExchange {
         type: 'TRIGGER_MARKET',
         stopPrice: adjust(opts.stopLoss, pPrice),
         quantity: amount ? +amount : undefined,
-        closePosition: amount > 0 ? 'true' : undefined,
         timeInForce: 'GTC',
         reduceOnly: positionMode === PositionMode.Hedged ? undefined : true,
       });
@@ -1099,7 +1110,6 @@ export class BingxExchange extends BaseExchange {
         type: 'TRIGGER_MARKET',
         stopPrice: adjust(opts.takeProfit, pPrice),
         quantity: amount ? +amount : undefined,
-        closePosition: amount > 0 ? 'true' : undefined,
         timeInForce: 'GTC',
         reduceOnly: positionMode === PositionMode.Hedged ? undefined : true,
       });
@@ -1109,18 +1119,34 @@ export class BingxExchange extends BaseExchange {
   };
 
   private formatCreateTrailingStopLossOrder = async (opts: PlaceOrderOpts) => {
-    const market = this.store.marketsById[opts.symbol];
+    const market = this.store.marketsBySymbol[opts.symbol];
     const ticker = this.store.tickersBySymbol[opts.symbol];
 
     const pSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
 
     const position = this.store.positions.find((p) => p.symbol === opts.symbol && p.side === pSide);
 
-    if (!market) throw new Error(`Market ${opts.symbol} not found`);
-    if (!ticker) throw new Error(`Ticker ${opts.symbol} not found`);
+    if (!market) {
+      const message = `Market ${opts.symbol} not found`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+    if (!ticker || !Number.isFinite(ticker.last) || ticker.last <= 0) {
+      const message = `Ticker ${opts.symbol} not found`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
 
     if (!position) {
-      throw new Error(`Position ${opts.symbol} and side ${pSide} not found`);
+      const message = `Position ${opts.symbol} and side ${pSide} not found`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    if (!Number.isFinite(opts.price)) {
+      const message = `Trailing stop price for ${opts.symbol} is required`;
+      this.emitAndLogError(message);
+      throw new Error(message);
     }
 
     const priceDistance = adjust(
@@ -1128,16 +1154,21 @@ export class BingxExchange extends BaseExchange {
       market.precision.price,
     );
 
-    const distancePercentage = Math.round(((priceDistance * 100) / ticker.last) * 10) / 10;
+    const priceRate = Math.round((priceDistance / ticker.last) * 10_000) / 10_000;
+    if (priceRate <= 0 || priceRate > 1) {
+      const message = `BingX trailing stop callback rate must be greater than 0 and at most 1`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
     const positionSide = await this.getOrderPositionSide(opts, position?.positionMode);
 
     const payload = {
-      symbol: opts.symbol,
+      symbol: market.id,
       positionSide,
       side: inverseObj(ORDER_SIDE)[opts.side],
       type: inverseObj(ORDER_TYPE)[OrderType.TrailingStopLoss],
       quantity: `${position.contracts}`,
-      callbackRate: `${distancePercentage}`,
+      priceRate: `${priceRate}`,
       priceProtect: 'true',
       //clientOrderID: uuid(),
     };
