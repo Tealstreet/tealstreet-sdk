@@ -1856,14 +1856,14 @@ export class BitgetExchange extends BaseExchange {
   };
 
   private getOrderSideV2 = (opts: PlaceOrderOpts, positionMode: PositionMode) => {
-    let side = opts.side === OrderSide.Buy ? 'Buy' : 'Sell';
+    let side = opts.side === OrderSide.Buy ? 'buy' : 'sell';
     let tradeSide = undefined;
     if (positionMode === PositionMode.Hedged) {
       if (opts.reduceOnly) {
-        tradeSide = 'Close';
-        side = opts.side === OrderSide.Buy ? 'Sell' : 'Buy';
+        tradeSide = 'close';
+        side = opts.side === OrderSide.Buy ? 'sell' : 'buy';
       } else {
-        tradeSide = 'Open';
+        tradeSide = 'open';
       }
     }
     return [side, tradeSide];

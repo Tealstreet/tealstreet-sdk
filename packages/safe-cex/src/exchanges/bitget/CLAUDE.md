@@ -265,6 +265,8 @@ fail_trigger, cancel, cancelled, canceled, fail_execute -> Canceled
 
 Supports many variations: `open_long`, `open_short`, `close_long`, `close_short`, `reduce_close_*`, `offset_close_*`, `burst_close_*`, `delivery_close_*`, `buy_single`, `sell_single`, `buy`, `sell`.
 
+Outbound V2 order payloads use the documented lowercase `buy`/`sell` and `open`/`close` values. Keep inbound aliases separate from this wire contract.
+
 ### Time In Force Mapping
 
 ```
