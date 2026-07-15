@@ -10,7 +10,7 @@ export const BASE_WS_URL = 'wss://ws.bitget.com/v2/ws/public';
 
 // TODO: these endpoints all use -v2 syntax instead of api/v2/mix/...
 export const ENDPOINTS = {
-  ACCOUNT_SPOT: '/api/spot/v1/account/getInfo',
+  ACCOUNT_SPOT: '/api/v2/spot/account/info',
   ACCOUNT: '/api/v2/mix/account/account',
   BALANCE: '/api/v2/mix/account/accounts',
   MARKETS: '/api/v2/mix/market/contracts',
@@ -35,7 +35,7 @@ export const ENDPOINTS = {
   POSITION_LEVERAGE: '/api/v2/mix/position/single-position',
   SET_POSITION_MODE: '/api/v2/mix/account/set-position-mode',
   SET_MARGIN_MODE: '/api/v2/mix/account/set-margin-mode',
-  PLACE_TRAILING_STOP_ORDER: '/api/v2/mix/plan/place-trail-stop',
+  PLACE_TRAILING_STOP_ORDER: '/api/v2/mix/order/place-plan-order',
   FETCH_SINGLE_ACCOUNT: '/api/v2/mix/account/account',
   ORDER_HISTORY: '/api/v2/mix/order/orders-history',
 };

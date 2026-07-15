@@ -153,7 +153,10 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
     for (const rawOrder of rawOrders) {
       const normalizedStatus = String(rawOrder.status || '').toLowerCase();
-      const isPartialFill = normalizedStatus === 'partial-fill' || normalizedStatus === 'partial_fill';
+      const isPartialFill =
+        normalizedStatus === 'partial-fill' ||
+        normalizedStatus === 'partial_fill' ||
+        normalizedStatus === 'partially_filled';
       const isFullFill =
         normalizedStatus === 'filled' || normalizedStatus === 'full-fill' || normalizedStatus === 'full_fill';
 
@@ -175,7 +178,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
           side: parentOrder.side,
           symbol: parentOrder.symbol,
           price: rawOrder.priceAvg || parentOrder.price,
-          amount: parseFloat(rawOrder.fillSz || rawOrder.size || 0),
+          amount: parseFloat(rawOrder.baseVolume || rawOrder.accBaseVolume || 0),
         });
         this.throttledFetchBalance();
       }

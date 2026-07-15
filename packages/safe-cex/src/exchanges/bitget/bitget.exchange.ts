@@ -179,9 +179,9 @@ export class BitgetExchange extends BaseExchange {
     } = await this.xhr.get(ENDPOINTS.ACCOUNT_SPOT);
 
     return {
-      userId: `${data.parentId}`,
-      subId: data.user_id ? `${data.user_id}` : null,
-      affiliateId: data.inviter_id ? `${data.inviter_id}` : null,
+      userId: `${data.parentId || data.userId}`,
+      subId: data.parentId ? `${data.userId}` : null,
+      affiliateId: data.inviterId ? `${data.inviterId}` : null,
     };
   };
 
@@ -1344,10 +1344,14 @@ export class BitgetExchange extends BaseExchange {
 
       payload.triggerPrice = `${price}`;
       payload.size = `${amount}`;
-      // place-trail-stop uses 'side' (buy/sell), not holdSide (long/short)
-      const trailSide = this.getAlgoOrderSide(opts, positionMode);
-      payload.side = trailSide === 'short' ? 'sell' : trailSide === 'long' ? 'buy' : trailSide;
-      payload.rangeRate = `${distancePercentage}`;
+      payload.planType = 'track_plan';
+      const marginType = await this.getOrFetchMarginType(opts.symbol);
+      payload.marginMode = marginType === MarginType.Cross ? 'crossed' : 'isolated';
+      payload.orderType = 'market';
+      payload.triggerType = opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'fill_price' : 'mark_price';
+      payload.side = opts.side === OrderSide.Buy ? 'buy' : 'sell';
+      if (positionMode === PositionMode.Hedged) payload.tradeSide = 'close';
+      payload.callbackRatio = `${distancePercentage}`;
     }
 
     return payload;
@@ -1394,7 +1398,8 @@ export class BitgetExchange extends BaseExchange {
 
     for (const payload of payloads) {
       try {
-        const endpoint = payload.rangeRate ? ENDPOINTS.PLACE_TRAILING_STOP_ORDER : ENDPOINTS.PLACE_ALGO_ORDER;
+        const endpoint =
+          payload.planType === 'track_plan' ? ENDPOINTS.PLACE_TRAILING_STOP_ORDER : ENDPOINTS.PLACE_ALGO_ORDER;
 
         const { data } = await this.unlimitedXHR.post(endpoint, payload);
 

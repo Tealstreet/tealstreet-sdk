@@ -105,7 +105,7 @@ All endpoints use the V2 API prefix (`/api/v2/mix/`):
 
 | Constant                     | Path                                   | Usage                                                |
 | ---------------------------- | -------------------------------------- | ---------------------------------------------------- |
-| `ACCOUNT_SPOT`               | `/api/spot/v1/account/getInfo`         | Fetch spot account info (for userId)                 |
+| `ACCOUNT_SPOT`               | `/api/v2/spot/account/info`            | Fetch spot account info (for userId)                 |
 | `ACCOUNT`                    | `/api/v2/mix/account/account`          | Fetch single account details (leverage, margin mode) |
 | `BALANCE`                    | `/api/v2/mix/account/accounts`         | Fetch all account balances                           |
 | `POSITIONS` / `POSITIONS_V2` | `/api/v2/mix/position/all-position`    | Fetch all open positions                             |
@@ -132,7 +132,7 @@ All endpoints use the V2 API prefix (`/api/v2/mix/`):
 | `UPDATE_ALGO_ORDER`         | `/api/v2/mix/order/modify-tpsl-order`   | Modify TP/SL algo order   |
 | `ALGO_ORDERS`               | `/api/v2/mix/order/orders-plan-pending` | Fetch pending algo orders |
 | `CANCEL_ALGO_ORDER`         | `/api/v2/mix/order/cancel-plan-order`   | Cancel an algo order      |
-| `PLACE_TRAILING_STOP_ORDER` | `/api/v2/mix/plan/place-trail-stop`     | Place trailing stop order |
+| `PLACE_TRAILING_STOP_ORDER` | `/api/v2/mix/order/place-plan-order`    | Place trailing stop order |
 
 ### Account Settings
 
@@ -183,6 +183,8 @@ The implementation uses **four WebSocket connections** simultaneously:
   - `orders` - Normal order updates (new, partial-fill, filled, cancel)
   - `orders-algo` - Algo/stop order updates (live, triggered, cancel)
 
+Normal-order fill handling recognizes the documented `partially_filled` status. Fill events use `baseVolume` (latest fill quantity), falling back to `accBaseVolume` when the latest-fill field is absent.
+
 ### Reconnection & Fallback URL Logic
 
 All WebSocket connections implement a **fallback URL mechanism** (`bitget.ws-public.ts:26-29`, `bitget.ws-private.ts:16-19`, `bitget.ws-secondary-public.ts:23-27`):
@@ -225,7 +227,7 @@ The public WS `listenOrderBook` (`bitget.ws-public.ts:269-372`) handles incremen
 - **Position-level SL** (`pos_loss`): Stop loss on entire position (amount = 0)
 - **Sized TP** (`profit_plan`): Take profit with specific amount
 - **Sized SL** (`loss_plan`): Stop loss with specific amount
-- **Trailing Stop** (`track_plan`): Trailing stop loss with `rangeRate` (percentage distance)
+- **Trailing Stop** (`track_plan`): Trailing stop loss with `callbackRatio` (percentage distance)
 
 ### Virtual TP/SL on Limit Orders
 
@@ -284,7 +286,7 @@ ioc -> ImmediateOrCancel
 2. **Algo orders** are formatted via `formatAlgoOrder()` (`bitget.exchange.ts:1085-1148`):
    - Placed one at a time via `placeAlgoOrders()`
    - Trailing stops route to `PLACE_TRAILING_STOP_ORDER`, others to `PLACE_ALGO_ORDER`
-   - Trailing stops compute `rangeRate` as percentage distance from current price
+   - Trailing stops compute `callbackRatio` as percentage distance from current price and use the documented `place-plan-order` contract
 
 ### Order Update (Amend vs Cancel-Replace)
 
@@ -478,7 +480,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 10. **Margin type is per-symbol**: `marginTypeIsGlobal: false` means cross/isolated margin can be set independently per symbol.
 
-11. **Trailing stop not exposed**: Despite full implementation, `supportsTrailingStopLoss: false` in metadata. The trailing stop placement endpoint (`place-trail-stop`) uses `rangeRate` (percentage) and `side` (buy/sell) instead of `holdSide`.
+11. **Trailing stop not exposed**: `supportsTrailingStopLoss: false` remains the product gate. The dormant placement path follows the current `place-plan-order` contract (`planType: track_plan`, `callbackRatio`, market execution) so enabling it does not revive the removed legacy endpoint.
 
 12. **`alwaysCalculateUnrealizedPnlFromLastPrice: true`**: The frontend calculates unrealized PnL from last price rather than trusting the exchange-provided value.
 
@@ -591,7 +593,7 @@ Note: 6h and above use UTC-anchored intervals (`Hutc`, `Dutc`, `Wutc`).
 
 - **Hedged mode**: `holdSide` = `long`/`short` (position being protected)
 - **One-way mode**: `holdSide` = `buy`/`sell`
-- **Trailing stop**: Uses `side` instead of `holdSide`, with `buy`/`sell` values (`bitget.exchange.ts:1143`)
+- **Trailing stop**: Uses `side` plus `tradeSide: close` in hedge mode, with `buy`/`sell` order directions.
 
 ## Testing / Validation
 
@@ -604,5 +606,5 @@ cd packages/safe-cex && yarn typecheck
 Key validation points:
 
 - `validateAccount()` tests API key validity by fetching balance
-- `getAccount()` uses the spot API endpoint to get user/parent IDs
+- `getAccount()` uses the V2 spot account-info endpoint and maps its camelCase user, parent, and inviter IDs
 - Environment mismatch detection in both `validateAccount()` and `fetchOpenPositions()`
