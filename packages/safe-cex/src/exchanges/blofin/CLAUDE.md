@@ -403,7 +403,7 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 ### Position-Order Consistency
 
 - **Tick loop** (`tick`): Runs every 10 seconds. Fetches balance+positions and orders independently -- one failing does not block the other.
-- **Order preservation on failure**: If `fetchOrders` returns empty but the store had orders, a warning is logged but the empty result is accepted. On complete failure (all 3 retries exhausted), existing store orders are returned to prevent data loss (see `fetchOrdersWithRetry`).
+- **Order preservation on failure**: If `fetchOrders` returns empty but the store had orders, a warning is logged but the empty result is accepted. Each normal, TPSL, and trigger order family is an atomic paginated snapshot: a first-page or later-page transport/API failure, an invalid/non-advancing cursor, or the pagination safety cap rejects the whole attempt instead of returning partial rows. On complete failure (all 3 retries exhausted), existing store orders are returned to prevent data loss (see `fetchOrdersWithRetry`).
 - **Order update guard** in tick: Only updates orders if new fetch returned results or store was already empty.
 
 ### WebSocket vs REST
@@ -443,7 +443,7 @@ account and order lifecycle against demo trading.
 2. **No batch algo orders**: Unlike normal orders which support batch (up to 20), algo (TP/SL) orders must be placed individually.
 3. **Algo cancel delay**: After canceling algo orders in batches of 10, there is a 1-second sleep between batches (see `cancelAlgoOrders`).
 4. **Order fetch retry**: `fetchOrders` has built-in retry logic (3 attempts with exponential backoff `sleep(1000 * attempt)`). On complete failure, returns existing store orders to prevent data loss (see `fetchOrdersWithRetry`).
-5. **Recursive order pagination (cursor-until-empty)**: `fetchNormalOrders`, `fetchAlgoOrders`, and read-only `fetchTriggerOrders` page via the `after` cursor (last `orderId`, `tpslId`, or `algoId`) until an **empty page** comes back — _not_ until a page smaller than the requested `limit`. BloFin's pending-order endpoints default to small pages even when a larger limit is requested, so the old "stop when `length !== PAGE_SIZE`" check could silently drop later orders. Loops are bounded by `BLOFIN_MAX_ORDER_PAGES` (50) and stop early if the cursor fails to advance.
+5. **Recursive order pagination (cursor-until-empty)**: `fetchNormalOrders`, `fetchAlgoOrders`, and read-only `fetchTriggerOrders` page via the `after` cursor (last `orderId`, `tpslId`, or `algoId`) until an **empty page** comes back — _not_ until a page smaller than the requested `limit`. BloFin's pending-order endpoints default to small pages even when a larger limit is requested, so the old "stop when `length !== PAGE_SIZE`" check could silently drop later orders. Loops are bounded by `BLOFIN_MAX_ORDER_PAGES` (50). Every family treats an invalid/non-advancing cursor or reaching the cap before an empty page as a failed snapshot; the outer retry then preserves the existing store if all attempts fail.
 6. **TP/SL as combined orders**: When placing a TP or SL on a position with no amount (full position), the code checks for existing opposite algo orders, cancels them, and combines both into a single TP/SL order.
 7. **Position conflict detection**: `mapPositions` detects when isolated and cross positions exist simultaneously for the same symbol and warns the user.
 8. **Throttled order sync**: Private WebSocket order events trigger a debounced (2-second) full order re-fetch to ensure state synchronization.

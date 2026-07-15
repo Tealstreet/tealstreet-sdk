@@ -129,6 +129,97 @@ describe('BloFin remaining audit regressions', () => {
     });
   });
 
+  it('retries a failed trigger-order snapshot and preserves the existing store after exhaustion', async () => {
+    vi.useFakeTimers();
+    const exchange = createExchange();
+    const existingOrder = exchange.mapOrders([
+      {
+        algoId: 'existing-trigger',
+        instId: MARKET.id,
+        side: 'sell',
+        orderType: 'trigger',
+        size: '1',
+        state: 'live',
+        triggerPrice: '49000',
+      },
+    ])[0];
+    exchange.store.update({ orders: [existingOrder] });
+    const get = vi.fn().mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS) {
+        return Promise.reject(new Error('trigger snapshot unavailable'));
+      }
+      return Promise.resolve({ data: { code: '0', msg: 'success', data: [] } });
+    });
+    exchange.xhr = { get } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    try {
+      const pending = exchange.fetchOrders();
+      await vi.runAllTimersAsync();
+
+      await expect(pending).resolves.toEqual([existingOrder]);
+      expect(get).toHaveBeenCalledTimes(9);
+      expect(
+        get.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS),
+      ).toHaveLength(3);
+      expect(emitAndLogError).toHaveBeenCalledOnce();
+      expect(emitAndLogError).toHaveBeenCalledWith('trigger snapshot unavailable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards a partial trigger-order snapshot when a later page fails', async () => {
+    vi.useFakeTimers();
+    const exchange = createExchange();
+    const existingOrder = exchange.mapOrders([
+      {
+        algoId: 'existing-trigger',
+        instId: MARKET.id,
+        side: 'sell',
+        orderType: 'trigger',
+        size: '1',
+        state: 'live',
+        triggerPrice: '49000',
+      },
+    ])[0];
+    exchange.store.update({ orders: [existingOrder] });
+    const partialTrigger = {
+      algoId: 'partial-trigger',
+      instId: MARKET.id,
+      side: 'buy',
+      orderType: 'trigger',
+      size: '1',
+      state: 'live',
+      triggerPrice: '51000',
+    };
+    let triggerFetches = 0;
+    const get = vi.fn().mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS) {
+        triggerFetches += 1;
+        if (triggerFetches % 2 === 1) {
+          return Promise.resolve({ data: { code: '0', msg: 'success', data: [partialTrigger] } });
+        }
+        return Promise.reject(new Error('trigger page unavailable'));
+      }
+      return Promise.resolve({ data: { code: '0', msg: 'success', data: [] } });
+    });
+    exchange.xhr = { get } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    try {
+      const pending = exchange.fetchOrders();
+      await vi.runAllTimersAsync();
+
+      await expect(pending).resolves.toEqual([existingOrder]);
+      expect(triggerFetches).toBe(6);
+      expect(emitAndLogError).toHaveBeenCalledOnce();
+      expect(emitAndLogError).toHaveBeenCalledWith('trigger page unavailable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails closed instead of sending trigger orders to normal or TPSL write endpoints', async () => {
     const exchange = createExchange();
     const post = vi.fn();

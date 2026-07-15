@@ -620,138 +620,80 @@ export class BlofinExchange extends BaseExchange {
     return this.store.orders;
   };
 
-  fetchNormalOrders = async () => {
+  private fetchPaginatedOrderRows = async (
+    endpoint: string,
+    cursorKey: 'orderId' | 'tpslId' | 'algoId',
+    family: 'normal' | 'TPSL' | 'trigger',
+    extraParams: Record<string, string> = {},
+  ): Promise<Array<Record<string, any>>> => {
     const recursiveFetch = async (
       orders: Array<Record<string, any>> = [],
       page = 0,
     ): Promise<Array<Record<string, any>>> => {
-      try {
-        const cursor = orders.length ? orders[orders.length - 1].orderId : undefined;
-        const { data } = await this.xhr.get<ORDERS_RESPONSE>(ENDPOINTS.UNFILLED_ORDERS, {
-          params: {
-            after: cursor,
-            limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
-          },
-        });
+      const cursor = orders.length ? orders[orders.length - 1][cursorKey] : undefined;
+      const { data } = await this.xhr.get<ORDERS_RESPONSE>(endpoint, {
+        params: {
+          after: cursor,
+          limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
+          ...extraParams,
+        },
+      });
 
-        if (!data.data) {
-          this.emitAndLogError(data.msg || 'No data found');
-          // Return previously fetched orders instead of empty array to avoid losing data
-          return orders;
-        }
-
-        if (data.data.length === 0) return orders;
-
-        // BloFin caps orders-pending at ~20 rows/page regardless of `limit`, so we
-        // can't detect "more pages" by comparing the count to the requested size.
-        // Page via the `after` cursor until an empty page.
-        const lastRow = data.data[data.data.length - 1] as Record<string, any>;
-        const nextCursor = lastRow.orderId;
-        // Defensive: if a non-first page didn't advance the cursor, the exchange
-        // ignored `after` and re-sent the same page. Stop WITHOUT merging it so the
-        // repeated rows can't duplicate into the store.
-        if (cursor !== undefined && nextCursor === cursor) return orders;
-
-        const merged: Array<Record<string, any>> = [...orders, ...data.data];
-        if (nextCursor && page + 1 < BLOFIN_MAX_ORDER_PAGES) {
-          return recursiveFetch(merged, page + 1);
-        }
-
-        return merged;
-      } catch (err: any) {
-        this.emitAndLogError(err?.response?.data?.msg || err?.message);
-        // On error, return previously fetched orders instead of failing completely
-        return orders;
+      if (!data.data) {
+        const message = data.msg || `No ${family} order data found`;
+        this.emitAndLogError(message);
+        throw new Error(message);
       }
+      if (data.data.length === 0) return orders;
+
+      // BloFin caps pending-order responses below the requested limit, so the
+      // only complete snapshot is one that reaches an empty page.
+      const nextCursor = (data.data[data.data.length - 1] as Record<string, any>)[cursorKey];
+      if (typeof nextCursor !== 'string' || nextCursor.length === 0) {
+        const message = `BloFin ${family} order pagination returned an invalid ${cursorKey}`;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      if (cursor !== undefined && nextCursor === cursor) {
+        const message = `BloFin ${family} order pagination cursor did not advance`;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      const merged = [...orders, ...data.data];
+      if (page + 1 < BLOFIN_MAX_ORDER_PAGES) {
+        return recursiveFetch(merged, page + 1);
+      }
+
+      const message = `BloFin ${family} order pagination exceeded ${BLOFIN_MAX_ORDER_PAGES} pages`;
+      this.emitAndLogError(message);
+      throw new Error(message);
     };
 
-    const blofinOrders = await recursiveFetch();
-    return this.mapOrders(blofinOrders);
+    return recursiveFetch();
+  };
+
+  fetchNormalOrders = async () => {
+    return this.mapOrders(
+      await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_ORDERS, 'orderId', 'normal'),
+    );
   };
 
   fetchAlgoOrders = async () => {
-    const recursiveFetch = async (
-      orders: Array<Record<string, any>> = [],
-      page = 0,
-    ): Promise<Array<Record<string, any>>> => {
-      try {
-        const cursor = orders.length ? orders[orders.length - 1].tpslId : undefined;
-        const { data } = await this.xhr.get<ORDERS_RESPONSE>(ENDPOINTS.UNFILLED_ALGO_ORDERS, {
-          params: {
-            after: cursor,
-            limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
-          },
-        });
-
-        if (!data.data) {
-          this.emitAndLogError(data.msg || 'No data found');
-          // Return previously fetched orders instead of empty array to avoid losing data
-          return orders;
-        }
-
-        if (data.data.length === 0) return orders;
-
-        // Same cursor-based pagination as fetchNormalOrders - orders-tpsl-pending
-        // is likewise capped per page and keyed by `tpslId`.
-        const lastRow = data.data[data.data.length - 1] as Record<string, any>;
-        const nextCursor = lastRow.tpslId;
-        // Defensive: non-advancing cursor on a non-first page means `after` was
-        // ignored and the same page came back. Stop without merging the duplicate.
-        if (cursor !== undefined && nextCursor === cursor) return orders;
-
-        const merged: Array<Record<string, any>> = [...orders, ...data.data];
-        if (nextCursor && page + 1 < BLOFIN_MAX_ORDER_PAGES) {
-          return recursiveFetch(merged, page + 1);
-        }
-
-        return merged;
-      } catch (err: any) {
-        this.emitAndLogError(err?.response?.data?.msg || err?.message);
-        // On error, return previously fetched orders instead of failing completely
-        return orders;
-      }
-    };
-
-    const blofinOrders = await recursiveFetch();
-    return this.mapOrders(blofinOrders);
+    return this.mapOrders(
+      await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_ALGO_ORDERS, 'tpslId', 'TPSL'),
+    );
   };
 
   fetchTriggerOrders = async () => {
-    const recursiveFetch = async (
-      orders: Array<Record<string, any>> = [],
-      page = 0,
-    ): Promise<Array<Record<string, any>>> => {
-      try {
-        const cursor = orders.length ? orders[orders.length - 1].algoId : undefined;
-        const { data } = await this.xhr.get<ORDERS_RESPONSE>(ENDPOINTS.UNFILLED_TRIGGER_ORDERS, {
-          params: {
-            after: cursor,
-            limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
-            orderType: 'trigger',
-          },
-        });
-
-        if (!data.data) {
-          this.emitAndLogError(data.msg || 'No trigger-order data found');
-          return orders;
-        }
-        if (data.data.length === 0) return orders;
-
-        const nextCursor = (data.data[data.data.length - 1] as Record<string, any>).algoId;
-        if (cursor !== undefined && nextCursor === cursor) return orders;
-
-        const merged = [...orders, ...data.data];
-        if (nextCursor && page + 1 < BLOFIN_MAX_ORDER_PAGES) {
-          return recursiveFetch(merged, page + 1);
-        }
-        return merged;
-      } catch (err: any) {
-        this.emitAndLogError(err?.response?.data?.msg || err?.message);
-        return orders;
-      }
-    };
-
-    return this.mapOrders(await recursiveFetch());
+    return this.mapOrders(
+      await this.fetchPaginatedOrderRows(
+        ENDPOINTS.UNFILLED_TRIGGER_ORDERS,
+        'algoId',
+        'trigger',
+        { orderType: 'trigger' },
+      ),
+    );
   };
 
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
