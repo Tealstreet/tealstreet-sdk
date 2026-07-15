@@ -134,7 +134,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
     if (eventType === 'authenticated' || data.authenticated) {
       this.parent.log('Private WebSocket authenticated', LogSeverity.Info);
       // Fetch initial snapshot
-      this.parent.fetchAndSetPrivateSnapshot();
+      this.refreshPositions('authentication');
       return;
     }
 
@@ -242,10 +242,16 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       );
 
       // Update positions after trade
-      this.parent.fetchPositions();
+      this.refreshPositions('trade update');
     } catch (err) {
       this.parent.log(`Error handling trade update: ${err}`, LogSeverity.Error);
     }
+  };
+
+  private refreshPositions = (reason: string) => {
+    void this.parent.fetchAndSetPositions().catch((err) => {
+      this.parent.log(`Error refreshing positions after ${reason}: ${err}`, LogSeverity.Error);
+    });
   };
 
   /**

@@ -109,15 +109,6 @@ export const ORDER_TYPE_MAP: Record<string, OrderType> = {
   FAK: OrderType.Market,
 };
 
-export const ORDER_TYPE_REVERSE: Record<OrderType, string> = {
-  [OrderType.Limit]: 'GTC',
-  [OrderType.Market]: 'FOK',
-  [OrderType.Conditional]: 'GTC', // Not supported, fallback
-  [OrderType.StopLoss]: 'GTC', // Not supported, fallback
-  [OrderType.TakeProfit]: 'GTC', // Not supported, fallback
-  [OrderType.TrailingStopLoss]: 'GTC', // Not supported, fallback
-};
-
 /**
  * Order side mappings
  */

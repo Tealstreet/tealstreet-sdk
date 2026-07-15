@@ -14,7 +14,12 @@
  */
 
 import type { Store } from '../../store/store.interface';
-import type { GammaMarketInfo, PolymarketCredentials, PolymarketExchangeOptions } from './polymarket.types';
+import type {
+  GammaMarketInfo,
+  PolymarketCredentials,
+  PolymarketExchangeOptions,
+  PolymarketOrderResponse,
+} from './polymarket.types';
 import type { TickSize } from '@polymarket/clob-client-v2';
 
 import { ethers } from 'ethers';
@@ -32,6 +37,7 @@ import {
   OrderBook,
   OrderSide,
   OrderStatus,
+  OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
   Position,
@@ -52,7 +58,6 @@ import {
   ORDER_SIDE_MAP,
   ORDER_STATUS_MAP,
   ORDER_TYPE_MAP,
-  ORDER_TYPE_REVERSE,
   SignatureType,
 } from './polymarket.constants';
 import { createSignedOrder, createWallet, signApiKeyDerivationMessage } from './polymarket.signing';
@@ -304,13 +309,8 @@ export class PolymarketExchange extends BaseExchange {
     try {
       // Fetch positions if authenticated
       if (this.credentials) {
-        const positions = await this.fetchPositions();
+        const positions = await this.fetchAndSetPositions();
         if (this.isDisposed) return;
-
-        this.store.update({
-          positions,
-          loaded: { ...this.store.loaded, positions: true },
-        });
 
         // Fetch balance
         const balance = await this.fetchBalance();
@@ -361,7 +361,7 @@ export class PolymarketExchange extends BaseExchange {
       };
     } catch (err) {
       this.log(`Error fetching balance: ${err}`, LogSeverity.Error);
-      return { total: 0, free: 0, used: 0, upnl: 0 };
+      throw err;
     }
   };
 
@@ -541,8 +541,24 @@ export class PolymarketExchange extends BaseExchange {
       return positions;
     } catch (err) {
       this.log(`Error fetching positions: ${err}`, LogSeverity.Error);
-      return [];
+      throw err;
     }
+  };
+
+  /**
+   * Refresh the authoritative position snapshot and commit it only after a
+   * successful fetch. Private WebSocket trade events use the same path as the
+   * periodic poll so a transient read failure cannot erase known positions.
+   */
+  fetchAndSetPositions = async (): Promise<Position[]> => {
+    const positions = await this.fetchPositions();
+    if (!this.isDisposed) {
+      this.store.update({
+        positions,
+        loaded: { ...this.store.loaded, positions: true },
+      });
+    }
+    return positions;
   };
 
   /**
@@ -555,7 +571,7 @@ export class PolymarketExchange extends BaseExchange {
       return apiOrders.map((o) => this.mapOrder(o));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
-      return [];
+      throw err;
     }
   };
 
@@ -585,45 +601,96 @@ export class PolymarketExchange extends BaseExchange {
    * Place an order
    */
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    const rejectOrder = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
+
+    if (opts.type !== OrderType.Limit) {
+      return rejectOrder(`Polymarket does not support ${opts.type} orders in safe-cex`);
+    }
+    if (
+      opts.triggerPrice !== undefined ||
+      opts.stopLoss !== undefined ||
+      opts.takeProfit !== undefined ||
+      opts.reduceOnly === true ||
+      opts.close === true
+    ) {
+      return rejectOrder(
+        'Polymarket limit orders do not support trigger, bracket, or close-only options',
+      );
+    }
+    if (opts.timeInForce !== undefined && opts.timeInForce !== OrderTimeInForce.GoodTillCancel) {
+      return rejectOrder(`Polymarket does not support ${opts.timeInForce} in safe-cex`);
+    }
+    if (opts.side !== OrderSide.Buy && opts.side !== OrderSide.Sell) {
+      return rejectOrder(`Unsupported Polymarket order side: ${opts.side}`);
+    }
+    if (opts.price === undefined || !Number.isFinite(opts.price)) {
+      return rejectOrder('Polymarket limit orders require a finite price');
+    }
+    if (!Number.isFinite(opts.amount) || opts.amount <= 0) {
+      return rejectOrder('Polymarket limit orders require a positive finite amount');
+    }
+
     if (!this.wallet || !this.credentials) {
-      throw new Error('Wallet and credentials required for placing orders');
+      return rejectOrder('Wallet and credentials required for placing orders');
     }
 
     const tokenId = this.symbolToToken.get(opts.symbol);
     if (!tokenId) {
-      throw new Error(`Unknown symbol: ${opts.symbol}`);
+      return rejectOrder(`Unknown symbol: ${opts.symbol}`);
     }
 
     const market = this.store.marketsBySymbol[opts.symbol];
-    const pPrice = market?.precision?.price ?? 2;
     const pAmount = market?.precision?.amount ?? 2;
-
-    const price = opts.price ? adjust(opts.price, pPrice) : 0.5;
-    const size = adjust(opts.amount, pAmount);
+    let tickSize: TickSize;
+    try {
+      tickSize = normalizeTickSize((market?.info as any)?.tickSize ?? null);
+    } catch (err) {
+      return rejectOrder(err instanceof Error ? err.message : String(err));
+    }
+    const price = adjust(opts.price, tickSize);
+    const size = Number(opts.amount.toFixed(pAmount));
     const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-    const tickSize = normalizeTickSize((market?.info as any)?.tickSize ?? null);
     const negRisk = (market?.info as any)?.negRisk === true;
+    const tick = Number(tickSize);
+    const minimumAmount = market?.limits?.amount?.min;
 
-    // Create and sign the order
-    const signedOrder = await createSignedOrder(this.wallet, {
-      tokenId,
-      price,
-      size,
-      side,
-      tickSize,
-      negRisk,
-      signatureType: this.signerType,
-      funderAddress: this.funderAddress ?? undefined,
-    });
+    if (price < tick || price > 1 - tick) {
+      return rejectOrder(`Polymarket limit price must be between ${tick} and ${1 - tick}`);
+    }
+    if (size <= 0 || (minimumAmount !== undefined && size < minimumAmount)) {
+      return rejectOrder(
+        minimumAmount !== undefined
+          ? `Polymarket order amount must be at least ${minimumAmount}`
+          : 'Polymarket order amount is too small for market precision',
+      );
+    }
 
-    // Determine order type
-    const orderType = ORDER_TYPE_REVERSE[opts.type] || 'GTC';
+    let response: PolymarketOrderResponse;
+    try {
+      // Create and sign the order
+      const signedOrder = await createSignedOrder(this.wallet, {
+        tokenId,
+        price,
+        size,
+        side,
+        tickSize,
+        negRisk,
+        signatureType: this.signerType,
+        funderAddress: this.funderAddress ?? undefined,
+      });
 
-    // Post the order
-    const response = await this.api.postOrder(signedOrder, orderType as any);
+      // Post the order
+      response = await this.api.postOrder(signedOrder, 'GTC');
+    } catch (err) {
+      this.emitAndLogError(err as Error, 'Polymarket place order failed');
+      throw err;
+    }
 
     if (!response.success) {
-      throw new Error(response.errorMsg || 'Order placement failed');
+      return rejectOrder(response.errorMsg || 'Order placement failed');
     }
 
     this.log(`Placed ${side} order for ${size} ${opts.symbol} @ ${price}`, LogSeverity.Info);

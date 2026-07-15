@@ -82,10 +82,14 @@ Subscription `type` values are lowercase `market` and `user`. Heartbeats are raw
 
 `start()` initializes external public data first, loads Gamma markets and initial tickers, then starts private polling and the user WebSocket only when credentials exist. Public-data-only startup returns before private work. The market WebSocket connects lazily when an order-book listener subscribes. Both sockets are disposed with the exchange.
 
+Private positions, orders, and balance reads fail closed: a rejected REST/Data API request is logged and rethrown so the periodic tick preserves the last known store snapshot instead of replacing it with empty positions/orders or a zero balance. User-channel authentication and trade events refresh positions through `fetchAndSetPositions()`, which commits only a successfully fetched authoritative snapshot; never fetch position data from a WebSocket handler without persisting its result.
+
+Order placement deliberately supports only plain GTC limit orders. Market orders require the official market-order builder because BUY amounts are collateral while SELL amounts are shares and the price is a worst-price bound; the current safe-cex shape does not encode that distinction safely. Conditional, stop-loss, take-profit, trailing-stop, trigger/bracket, close-only, reduce-only, and unsupported time-in-force shapes must reject before signing or POSTing. A limit order requires a finite price within the market tick bounds and a positive amount at or above the Gamma minimum.
+
 ## Known product limits
 
 - This is a spot/prediction-market model: there is no leverage or liquidation concept.
-- Stop orders are unsupported.
+- Only plain GTC limit orders are supported; market, stop, bracket, close-only, and alternate time-in-force orders fail closed before any write.
 - The adapter is not production-enabled until the credentialed lifecycle gate at the top of this document is completed.
 - Avoid live order tests in automated CI. Signing/auth, REST bodies, market parsing, and WebSocket frames have deterministic audit-regression coverage.
 
