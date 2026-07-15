@@ -1566,6 +1566,7 @@ export class WOOXExchange extends BaseExchange {
     const sibling = this.store.orders.find(
       (o) =>
         o.symbol === opts.symbol &&
+        o.side === opts.side &&
         o.type === (opts.type === OrderType.StopLoss ? OrderType.TakeProfit : OrderType.StopLoss) &&
         o.status === OrderStatus.Open,
     );
@@ -1761,7 +1762,7 @@ export class WOOXExchange extends BaseExchange {
       return data?.rows?.map((r) => String(r.orderId)) || [];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return [];
+      throw err;
     }
   };
 

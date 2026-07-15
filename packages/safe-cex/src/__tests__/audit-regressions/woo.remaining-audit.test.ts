@@ -142,6 +142,84 @@ describe('WooX remaining July audit regressions', () => {
     expect(ids).toEqual(['new-parent']);
   });
 
+  it('selects the same closing side when replacing a hedged positional bracket', async () => {
+    const { exchange, store } = makeExchange();
+    const shortTakeProfit = {
+      id: 'short-tp',
+      parentId: 'short-parent',
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.TakeProfit,
+      status: OrderStatus.Open,
+      price: 80,
+    } as any;
+    const longTakeProfit = {
+      ...shortTakeProfit,
+      id: 'long-tp',
+      parentId: 'long-parent',
+      side: OrderSide.Sell,
+      price: 120,
+    } as any;
+    store.update({ orders: [shortTakeProfit, longTakeProfit] });
+
+    const remove = vi.fn().mockResolvedValue({ data: { success: true } });
+    exchange.xhr = { delete: remove } as any;
+    const placePositional = vi.spyOn(exchange, 'placePositionalAlgoOrder').mockResolvedValue(['new-parent']);
+
+    await exchange.placeAlgoOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      price: 92,
+    } as any);
+
+    expect(remove).toHaveBeenCalledWith(`${ENDPOINTS.ALGO_ORDER}/long-parent`);
+    expect(placePositional).toHaveBeenCalledWith(
+      expect.objectContaining({ stopLoss: 92, takeProfit: 120 }),
+    );
+  });
+
+  it('rejects when replacement bracket placement fails after cancellation', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      orders: [
+        {
+          id: 'tp-child',
+          parentId: 'bracket-parent',
+          symbol: 'BTCUSDT',
+          side: OrderSide.Sell,
+          type: OrderType.TakeProfit,
+          status: OrderStatus.Open,
+          price: 120,
+        } as any,
+      ],
+    });
+    const replacementError = {
+      response: { data: { message: 'replacement rejected' } },
+      message: 'Request failed',
+    };
+    const remove = vi.fn().mockResolvedValue({ data: { success: true } });
+    const post = vi.fn().mockRejectedValue(replacementError);
+    exchange.xhr = { delete: remove, post } as any;
+    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
+
+    await expect(
+      exchange.placeAlgoOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Sell,
+        type: OrderType.StopLoss,
+        price: 92,
+      } as any),
+    ).rejects.toBe(replacementError);
+
+    expect(remove).toHaveBeenCalledWith(`${ENDPOINTS.ALGO_ORDER}/bracket-parent`);
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.ALGO_ORDER,
+      expect.objectContaining({ algoType: 'POSITIONAL_TP_SL' }),
+    );
+    expect(emitError.mock.calls[0]?.[0]).toBe('replacement rejected');
+  });
+
   it('surfaces private websocket authentication failures', () => {
     const { exchange } = makeExchange();
     const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);

@@ -308,9 +308,12 @@ Three distinct paths based on order type and amount:
 
 When placing a new TP or SL, the code checks for an existing sibling (the other type):
 
-1. Find the existing opposite-type sibling in the store.
+1. Find the existing opposite-type sibling with the same symbol and closing side in the store. The
+   side match is required in hedge mode so a long bracket never consumes the short bracket's price.
 2. If a sibling exists, cancel the shared parent through `cancelAlgoOrder(sibling, false)` so the old sibling is not recreated.
 3. Place one combined positional TP/SL parent with the retained sibling price and the new price.
+   Placement failures are emitted and rethrown because the old parent has already been cancelled;
+   callers must never interpret an unprotected position as a successful empty result.
 
 When directly cancelling one side of a TP/SL pair (`cancelAlgoOrder`):
 
