@@ -15,12 +15,18 @@ import {
   assessCoinbaseStarbasePositionParity,
   buildCoinbaseStarbaseAccountSummary,
   buildCoinbaseStarbaseOpenOrders,
+  buildCoinbaseStarbaseOrderHistoryByCurrency,
+  buildCoinbaseStarbaseOrderHistoryByInstrument,
+  buildCoinbaseStarbaseOrderState,
   buildCoinbaseStarbasePositions,
   buildCoinbaseStarbaseUserTrades,
   buildCoinbaseStarbaseUserTradesByTime,
   CoinbaseStarbaseReadOnlyState,
   decodeCoinbaseStarbaseAccountSummary,
   decodeCoinbaseStarbaseOrder,
+  decodeCoinbaseStarbaseOrderHistory,
+  decodeCoinbaseStarbaseOrderHistoryByInstrument,
+  decodeCoinbaseStarbaseOrderState,
   decodeCoinbaseStarbasePosition,
   decodeCoinbaseStarbasePositions,
   decodeCoinbaseStarbaseTrade,
@@ -30,6 +36,8 @@ import {
 } from '../../exchanges/coinbase/coinbase.starbase-private';
 import {
   STARBASE_ACCOUNT_SUMMARY_FIXTURE,
+  STARBASE_ETH_HISTORY_ORDER_FIXTURE,
+  STARBASE_HISTORY_ORDER_FIXTURE,
   STARBASE_OPEN_ORDER_FIXTURE,
   STARBASE_PARTIAL_ORDER_FIXTURE,
   STARBASE_POSITION_FIXTURE,
@@ -69,6 +77,52 @@ describe('Coinbase Starbase inert read-only private state', () => {
 
     expect(() => buildCoinbaseStarbaseUserTrades(0)).toThrow('1 to 1000');
     expect(() => buildCoinbaseStarbaseUserTradesByTime(2, 1)).toThrow('precedes');
+  });
+
+  it('builds exact ID and array-only order-reconciliation requests', () => {
+    expect(buildCoinbaseStarbaseOrderState('USDC-ORDER-1')).toEqual({
+      method: 'private/get_order_state',
+      params: { order_id: 'USDC-ORDER-1' },
+    });
+    expect(buildCoinbaseStarbaseOrderHistoryByCurrency()).toEqual({
+      method: 'private/get_order_history_by_currency',
+      params: { count: 100, currency: 'USDC', kind: 'future' },
+    });
+    expect(
+      buildCoinbaseStarbaseOrderHistoryByCurrency({
+        count: 250,
+        historical: true,
+        includeOld: true,
+        includeUnfilled: true,
+        offset: 10,
+      }),
+    ).toEqual({
+      method: 'private/get_order_history_by_currency',
+      params: {
+        count: 250,
+        currency: 'USDC',
+        historical: true,
+        include_old: true,
+        include_unfilled: true,
+        kind: 'future',
+        offset: 10,
+      },
+    });
+    expect(buildCoinbaseStarbaseOrderHistoryByInstrument('BTC-PERP-INTX', { count: 50 })).toEqual({
+      method: 'private/get_order_history_by_instrument',
+      params: { count: 50, instrument_name: 'BTC_USDC-PERPETUAL' },
+    });
+
+    expect(buildCoinbaseStarbaseOrderHistoryByCurrency().params).not.toHaveProperty('with_continuation');
+    expect(buildCoinbaseStarbaseOrderHistoryByCurrency().params).not.toHaveProperty('continuation');
+    expect(() => buildCoinbaseStarbaseOrderState('')).toThrow('order_id');
+    expect(() => buildCoinbaseStarbaseOrderHistoryByCurrency({ count: 0 })).toThrow('1 to 1000');
+    expect(() => buildCoinbaseStarbaseOrderHistoryByCurrency({ count: 1001 })).toThrow('1 to 1000');
+    expect(() => buildCoinbaseStarbaseOrderHistoryByCurrency({ offset: -1 })).toThrow('offset');
+    expect(() =>
+      buildCoinbaseStarbaseOrderHistoryByCurrency({ includeOld: 'true' as unknown as boolean }),
+    ).toThrow('boolean');
+    expect(() => buildCoinbaseStarbaseOrderHistoryByInstrument('SOL-PERP-INTX')).toThrow('base currency');
   });
 
   it('names account balance and free margin in requested USDC while gating unpublished PnL units', () => {
@@ -218,6 +272,39 @@ describe('Coinbase Starbase inert read-only private state', () => {
     });
   });
 
+  it('strictly decodes order state and array history without normalizing filled amounts', () => {
+    const state = decodeCoinbaseStarbaseOrderState(STARBASE_OPEN_ORDER_FIXTURE, 'USDC-ORDER-1');
+    expect(state.id).toBe('USDC-ORDER-1');
+    expect(() => decodeCoinbaseStarbaseOrderState(STARBASE_OPEN_ORDER_FIXTURE, 'USDC-ORDER-WRONG')).toThrow(
+      'mismatch',
+    );
+
+    const history = decodeCoinbaseStarbaseOrderHistory([
+      STARBASE_OPEN_ORDER_FIXTURE,
+      STARBASE_HISTORY_ORDER_FIXTURE,
+    ]);
+    expect(history.map((order) => order.id)).toEqual(['USDC-ORDER-1', 'USDC-ORDER-2']);
+    expect(history[1].gatewayAmount).toBe(0.1);
+    expect(history[1].gatewayFilledAmount).toBe(50);
+    expect(normalizeCoinbaseStarbaseOrder(history[1])).toMatchObject({
+      status: 'blocked',
+      blockers: ['filled-amount-unit-conflict'],
+    });
+    expect(() => decodeCoinbaseStarbaseOrderHistory({ orders: [] })).toThrow('expected an array');
+    expect(() =>
+      decodeCoinbaseStarbaseOrderHistory([STARBASE_OPEN_ORDER_FIXTURE, STARBASE_OPEN_ORDER_FIXTURE]),
+    ).toThrow('Duplicate');
+    expect(
+      decodeCoinbaseStarbaseOrderHistoryByInstrument(
+        [STARBASE_OPEN_ORDER_FIXTURE, STARBASE_HISTORY_ORDER_FIXTURE],
+        'BTC-PERP-INTX',
+      ),
+    ).toEqual(history);
+    expect(() =>
+      decodeCoinbaseStarbaseOrderHistoryByInstrument([STARBASE_ETH_HISTORY_ORDER_FIXTURE], 'BTC-PERP-INTX'),
+    ).toThrow('instrument mismatch');
+  });
+
   it('strictly decodes fills while gating the inherited OpenAPI amount-unit conflict', () => {
     const trade = decodeCoinbaseStarbaseTrade(STARBASE_USER_TRADE_FIXTURE);
     expect(trade).toEqual({
@@ -258,11 +345,15 @@ describe('Coinbase Starbase inert read-only private state', () => {
   it('preserves last-known-good read state when a later snapshot is malformed', () => {
     const state = new CoinbaseStarbaseReadOnlyState();
     state.applyOpenOrders([STARBASE_OPEN_ORDER_FIXTURE]);
+    state.applyOrderState('USDC-ORDER-1', STARBASE_OPEN_ORDER_FIXTURE);
+    state.applyOrderHistory([STARBASE_OPEN_ORDER_FIXTURE, STARBASE_HISTORY_ORDER_FIXTURE]);
     state.applyPositions([STARBASE_POSITION_FIXTURE]);
     state.applyAccountSummary(STARBASE_ACCOUNT_SUMMARY_FIXTURE);
     state.applyTradePage({ has_more: false, trades: [STARBASE_USER_TRADE_FIXTURE] });
     const before = JSON.stringify({
       account: state.account,
+      orderHistory: state.orderHistory,
+      orderState: state.orderState,
       orders: state.orders,
       positions: state.positions,
       tradePage: state.tradePage,
@@ -271,6 +362,13 @@ describe('Coinbase Starbase inert read-only private state', () => {
     expect(() =>
       state.applyOpenOrders([STARBASE_OPEN_ORDER_FIXTURE, { ...STARBASE_OPEN_ORDER_FIXTURE }]),
     ).toThrow('Duplicate');
+    expect(() => state.applyOrderState('USDC-ORDER-WRONG', STARBASE_OPEN_ORDER_FIXTURE)).toThrow('mismatch');
+    expect(() =>
+      state.applyOrderHistory([STARBASE_OPEN_ORDER_FIXTURE, { ...STARBASE_OPEN_ORDER_FIXTURE }]),
+    ).toThrow('Duplicate');
+    expect(() =>
+      state.applyOrderHistoryByInstrument('BTC-PERP-INTX', [STARBASE_ETH_HISTORY_ORDER_FIXTURE]),
+    ).toThrow('instrument mismatch');
     expect(() => state.applyPositions([{ ...STARBASE_POSITION_FIXTURE, size_currency: '0.1' }])).toThrow(
       CoinbaseStarbaseProtocolError,
     );
@@ -286,6 +384,8 @@ describe('Coinbase Starbase inert read-only private state', () => {
     expect(
       JSON.stringify({
         account: state.account,
+        orderHistory: state.orderHistory,
+        orderState: state.orderState,
         orders: state.orders,
         positions: state.positions,
         tradePage: state.tradePage,
@@ -293,6 +393,7 @@ describe('Coinbase Starbase inert read-only private state', () => {
     ).toBe(before);
 
     expect(state.applyOpenOrders([])).toEqual([]);
+    expect(state.applyOrderHistory([])).toEqual([]);
   });
 
   it('remains absent from active Coinbase runtime, routing, and metadata imports', () => {

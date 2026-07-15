@@ -18,7 +18,10 @@ import {
   OrderType,
 } from '../../types';
 import { CoinbaseStarbaseProtocolError } from './coinbase.starbase';
-import { toCoinbaseLegacyIntxSymbol } from './coinbase.starbase-public';
+import {
+  toCoinbaseLegacyIntxSymbol,
+  toCoinbaseStarbaseInstrumentName,
+} from './coinbase.starbase-public';
 
 const STARBASE_MARGIN_MODELS = ['cross_pm', 'cross_sm', 'segregated_pm', 'segregated_sm'] as const;
 const STARBASE_ORDER_DIRECTIONS = ['buy', 'sell'] as const;
@@ -148,6 +151,22 @@ export type CoinbaseStarbaseTradePage = {
   trades: CoinbaseStarbasePrivateTrade[];
 };
 
+export type CoinbaseStarbaseOrderHistoryOptions = {
+  count?: number;
+  offset?: number;
+  includeOld?: boolean;
+  includeUnfilled?: boolean;
+  historical?: boolean;
+};
+
+export type CoinbaseStarbaseOrderHistoryPageParams = {
+  count: number;
+  offset?: number;
+  include_old?: boolean;
+  include_unfilled?: boolean;
+  historical?: boolean;
+};
+
 export type CoinbaseStarbaseParityBlocker =
   | 'account-pnl-unit-unpublished'
   | 'filled-amount-unit-conflict'
@@ -253,11 +272,35 @@ const assertUnique = <T>(values: readonly T[], id: (value: T) => string, context
   }
 };
 
-const validateCount = (count: number): number => {
+const validateCount = (count: number, context: string): number => {
   if (!Number.isSafeInteger(count) || count < 1 || count > 1000) {
-    protocolError('Starbase user-trade count must be an integer from 1 to 1000');
+    protocolError(`Starbase ${context} count must be an integer from 1 to 1000`);
   }
   return count;
+};
+
+const buildOrderHistoryPageParams = (
+  options: CoinbaseStarbaseOrderHistoryOptions,
+): CoinbaseStarbaseOrderHistoryPageParams => {
+  const params: CoinbaseStarbaseOrderHistoryPageParams = {
+    count: validateCount(options.count ?? 100, 'order-history'),
+  };
+  if (options.offset !== undefined) {
+    if (!Number.isSafeInteger(options.offset) || options.offset < 0) {
+      protocolError('Starbase order-history offset must be a non-negative safe integer');
+    }
+    params.offset = options.offset;
+  }
+  if (options.includeOld !== undefined) {
+    params.include_old = optionalBoolean(options.includeOld, 'Starbase order-history include_old');
+  }
+  if (options.includeUnfilled !== undefined) {
+    params.include_unfilled = optionalBoolean(options.includeUnfilled, 'Starbase order-history include_unfilled');
+  }
+  if (options.historical !== undefined) {
+    params.historical = optionalBoolean(options.historical, 'Starbase order-history historical');
+  }
+  return params;
 };
 
 export const buildCoinbaseStarbaseAccountSummary = (): CoinbaseStarbasePrivateRequest<
@@ -284,6 +327,41 @@ export const buildCoinbaseStarbaseOpenOrders = (): CoinbaseStarbasePrivateReques
   params: { currency: 'USDC', kind: 'future', type: 'all' },
 });
 
+export const buildCoinbaseStarbaseOrderState = (
+  orderId: string,
+): CoinbaseStarbasePrivateRequest<'private/get_order_state', { order_id: string }> => ({
+  method: 'private/get_order_state',
+  params: { order_id: requireString(orderId, 'Starbase order-state order_id') },
+});
+
+export const buildCoinbaseStarbaseOrderHistoryByCurrency = (
+  options: CoinbaseStarbaseOrderHistoryOptions = {},
+): CoinbaseStarbasePrivateRequest<
+  'private/get_order_history_by_currency',
+  CoinbaseStarbaseOrderHistoryPageParams & { currency: 'USDC'; kind: 'future' }
+> => ({
+  method: 'private/get_order_history_by_currency',
+  params: {
+    currency: 'USDC',
+    kind: 'future',
+    ...buildOrderHistoryPageParams(options),
+  },
+});
+
+export const buildCoinbaseStarbaseOrderHistoryByInstrument = (
+  symbol: string,
+  options: CoinbaseStarbaseOrderHistoryOptions = {},
+): CoinbaseStarbasePrivateRequest<
+  'private/get_order_history_by_instrument',
+  CoinbaseStarbaseOrderHistoryPageParams & { instrument_name: string }
+> => ({
+  method: 'private/get_order_history_by_instrument',
+  params: {
+    instrument_name: toCoinbaseStarbaseInstrumentName(symbol),
+    ...buildOrderHistoryPageParams(options),
+  },
+});
+
 export const buildCoinbaseStarbaseUserTrades = (
   count = 100,
 ): CoinbaseStarbasePrivateRequest<
@@ -291,7 +369,13 @@ export const buildCoinbaseStarbaseUserTrades = (
   { count: number; currency: 'USDC'; historical: false; kind: 'future'; sorting: 'desc' }
 > => ({
   method: 'private/get_user_trades_by_currency',
-  params: { count: validateCount(count), currency: 'USDC', historical: false, kind: 'future', sorting: 'desc' },
+  params: {
+    count: validateCount(count, 'user-trade'),
+    currency: 'USDC',
+    historical: false,
+    kind: 'future',
+    sorting: 'desc',
+  },
 });
 
 export const buildCoinbaseStarbaseUserTradesByTime = (
@@ -316,7 +400,7 @@ export const buildCoinbaseStarbaseUserTradesByTime = (
   return {
     method: 'private/get_user_trades_by_currency_and_time',
     params: {
-      count: validateCount(count),
+      count: validateCount(count, 'user-trade'),
       currency: 'USDC',
       end_timestamp: end,
       historical: false,
@@ -501,6 +585,40 @@ export const decodeCoinbaseStarbaseOpenOrders = (value: unknown): CoinbaseStarba
   return orders;
 };
 
+export const decodeCoinbaseStarbaseOrderState = (
+  value: unknown,
+  expectedOrderId: string,
+): CoinbaseStarbasePrivateOrder => {
+  const expected = requireString(expectedOrderId, 'Starbase order-state expected order_id');
+  const order = decodeCoinbaseStarbaseOrder(value);
+  if (order.id !== expected) {
+    protocolError(`Starbase order-state order_id mismatch: expected ${expected}, received ${order.id}`);
+  }
+  return order;
+};
+
+export const decodeCoinbaseStarbaseOrderHistory = (value: unknown): CoinbaseStarbasePrivateOrder[] => {
+  const orders = requireArray(value, 'private/get_order_history result').map(decodeCoinbaseStarbaseOrder);
+  assertUnique(orders, (order) => order.id, 'Starbase order-history order_id');
+  return orders;
+};
+
+export const decodeCoinbaseStarbaseOrderHistoryByInstrument = (
+  value: unknown,
+  expectedSymbol: string,
+): CoinbaseStarbasePrivateOrder[] => {
+  const expectedInstrumentName = toCoinbaseStarbaseInstrumentName(expectedSymbol);
+  const orders = decodeCoinbaseStarbaseOrderHistory(value);
+  for (const order of orders) {
+    if (order.instrumentName !== expectedInstrumentName) {
+      protocolError(
+        `Starbase order-history instrument mismatch: expected ${expectedInstrumentName}, received ${order.instrumentName}`,
+      );
+    }
+  }
+  return orders;
+};
+
 const mapOrderStatus = (state: CoinbaseStarbaseOrderState): OrderStatus => {
   if (state === 'filled') return OrderStatus.Closed;
   if (state === 'cancelled' || state === 'rejected') return OrderStatus.Canceled;
@@ -641,6 +759,8 @@ export class CoinbaseStarbaseReadOnlyState {
   account?: CoinbaseStarbaseAccountSummary;
   positions: CoinbaseStarbasePrivatePosition[] = [];
   orders: CoinbaseStarbasePrivateOrder[] = [];
+  orderState?: CoinbaseStarbasePrivateOrder;
+  orderHistory: CoinbaseStarbasePrivateOrder[] = [];
   tradePage: CoinbaseStarbaseTradePage = { hasMore: false, trades: [] };
 
   applyAccountSummary(value: unknown): CoinbaseStarbaseAccountSummary {
@@ -658,6 +778,24 @@ export class CoinbaseStarbaseReadOnlyState {
   applyOpenOrders(value: unknown): CoinbaseStarbasePrivateOrder[] {
     const next = decodeCoinbaseStarbaseOpenOrders(value);
     this.orders = next;
+    return next;
+  }
+
+  applyOrderState(orderId: string, value: unknown): CoinbaseStarbasePrivateOrder {
+    const next = decodeCoinbaseStarbaseOrderState(value, orderId);
+    this.orderState = next;
+    return next;
+  }
+
+  applyOrderHistory(value: unknown): CoinbaseStarbasePrivateOrder[] {
+    const next = decodeCoinbaseStarbaseOrderHistory(value);
+    this.orderHistory = next;
+    return next;
+  }
+
+  applyOrderHistoryByInstrument(symbol: string, value: unknown): CoinbaseStarbasePrivateOrder[] {
+    const next = decodeCoinbaseStarbaseOrderHistoryByInstrument(value, symbol);
+    this.orderHistory = next;
     return next;
   }
 

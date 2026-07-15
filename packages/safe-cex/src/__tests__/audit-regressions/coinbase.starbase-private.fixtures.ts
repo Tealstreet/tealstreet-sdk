@@ -70,6 +70,22 @@ export const STARBASE_PARTIAL_ORDER_FIXTURE = {
   order_id: 'USDC-ORDER-2',
 } as const;
 
+export const STARBASE_HISTORY_ORDER_FIXTURE = {
+  ...STARBASE_PARTIAL_ORDER_FIXTURE,
+  average_price: 50_400,
+  last_update_timestamp: 1_800_000_000_200,
+  order_state: 'filled',
+} as const;
+
+export const STARBASE_ETH_HISTORY_ORDER_FIXTURE = {
+  ...STARBASE_OPEN_ORDER_FIXTURE,
+  amount: 1,
+  contracts: 10,
+  instrument_name: 'ETH_USDC-PERPETUAL',
+  order_id: 'USDC-ORDER-ETH-1',
+  price: 3_000,
+} as const;
+
 export const STARBASE_USER_TRADE_FIXTURE = {
   amount: 0.05,
   contracts: 50,

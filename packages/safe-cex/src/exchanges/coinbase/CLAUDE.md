@@ -59,11 +59,15 @@ the book and require a new snapshot instead of silently becoming upserts.
 
 The third follow-on is implemented in `coinbase.starbase-private.ts`. It is an
 inert, read-only private-state layer with exact USDC/future request builders for
-account summary, positions, open orders, and user trades. Strict gateway DTOs
-preserve legacy INTX symbol identity plus raw order/trade IDs, state, amount,
-filled amount, and contract-unit fields. Account balance, equity, available
-funds, withdrawal funds, initial margin, and maintenance margin are explicitly
-named as USDC because the requests select `currency: USDC`. Position
+account summary, positions, open orders, ID-addressed order state,
+currency/instrument order history, and user trades. Order-history requests
+deliberately omit `with_continuation` and `continuation`: the current official
+response schema publishes only an `order[]` result even though the optional
+request parameters describe a different continuation object. Strict gateway
+DTOs preserve legacy INTX symbol identity plus raw order/trade IDs, state,
+amount, filled amount, and contract-unit fields. Account balance, equity,
+available funds, withdrawal funds, initial margin, and maintenance margin are
+explicitly named as USDC because the requests select `currency: USDC`. Position
 `size_currency` is explicitly base coin and `size` remains explicitly the
 gateway's published USD/quote size. Gateway margin and PnL fields stay
 gateway-labelled instead of being silently asserted as safe-cex quote values.
@@ -143,7 +147,10 @@ Authenticated notification classification and live snapshot/delta
 reconciliation therefore remain deferred; do not infer Deribit envelopes from
 channel names. The pure read-state holder validates a complete result before
 replacement, so malformed or duplicate REST snapshots preserve the
-last-known-good account, positions, orders, or trade page.
+last-known-good account, positions, open orders, ID-addressed order state,
+order history, or trade page. Order-state results must echo the requested
+canonical `order_id`, and instrument-history rows must all match the requested
+Starbase instrument.
 
 ## File Structure
 
@@ -159,7 +166,7 @@ last-known-good account, positions, orders, or trade page.
 | `coinbase.products.json`   | Sample product data for reference/testing.                                                                                                                              |
 | `coinbase.starbase.ts`     | Inert Starbase JSON-RPC, auth-refresh, endpoint, HTTP transport, and heartbeat primitives. Not wired to active Coinbase traffic.                                        |
 | `coinbase.starbase-public.ts` | Inert Starbase instrument/public-data normalization, public request/subscription contracts, saved-symbol compatibility, and sequenced-book recovery. Not routed.        |
-| `coinbase.starbase-private.ts` | Inert Starbase read-only account/position/order/trade request contracts, strict gateway DTOs, last-known-good snapshot holder, and typed safe-cex parity gates. Not routed. |
+| `coinbase.starbase-private.ts` | Inert Starbase read-only account/position/order-state/order-history/trade request contracts, strict gateway DTOs, last-known-good snapshot holder, and typed safe-cex parity gates. Not routed. |
 | `coinbase.starbase-orders.ts` | Inert Starbase order-write builders, strict result decoders, canonical-ID lifecycle links, and typed amount-unit parity gates. No transport and not routed. |
 
 ## Authentication
