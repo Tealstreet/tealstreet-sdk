@@ -151,6 +151,36 @@ rendering, where IEEE-754 drift is invisible. See `../exchanges/CLAUDE.md`
 → "Public WebSocket Hot-Path Patterns" for the broader rule on
 when `safe-math` is and isn't load-bearing.
 
+## Sequenced delta orderbook foundation
+
+`sequencedDeltaOrderBook.ts` is the transport-agnostic state machine for a
+venue whose official book contract is an authoritative snapshot followed by
+deltas carrying both `sequence` and `previousSequence`.
+
+- A snapshot is the only operation that initializes or recovers the book.
+- Sequences are compared as arbitrary-precision nonnegative integers. A
+  JavaScript `number` is accepted only when it is a safe integer; prefer the
+  upstream string when the wire uses 64-bit IDs.
+- A delta is accepted only when it moves forward and its predecessor equals
+  the last accepted sequence. Duplicate and stale frames are ignored without
+  mutating the book.
+- A missing snapshot, malformed frame, or gap clears the book and returns one
+  `{ status: 'recover' }` signal. The caller owns the venue-specific
+  unsubscribe/resubscribe operation; further deltas are suppressed until a
+  valid snapshot arrives.
+- Snapshot and delta levels are validated before mutation. Sorted upsert and
+  zero-amount deletion delegate to `updateOrderBookByPrice`.
+- The helper deliberately does not calculate cumulative totals or invoke UI
+  callbacks. Do post-processing only after an `applied` result.
+
+Do not migrate an exchange merely because its payload has fields named
+`seqId`/`prevSeqId`. First verify the current official contract for snapshot
+action, predecessor semantics, duplicate/replay behavior, reset behavior, and
+numeric width. Also prove that a refcount-safe resubscribe produces a new
+snapshot, reset the helper on close/final unsubscribe, and lock those behaviors
+in a fresh audit regression. Existing bespoke OKX and BloFin recovery stays in
+place until those adoption gates are reviewed venue by venue.
+
 ## `virtualClock` time-source order — don't lead with direct `api.bybit.com`
 
 `virtualClock.ts` syncs a client↔server clock offset (applied only when
@@ -180,6 +210,7 @@ drift measurement.
 
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
+- `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals
 - `orderbook.ts` — `sortOrderBook` (full sort, snapshot-only) + `calcOrderBookTotal` (cumulative, hot-path safe)
 - `safe-math.ts` — Decimal-aware arithmetic; for placement/display only — see `../exchanges/CLAUDE.md` for hot-path rules
   Scientific notation precision includes both mantissa decimals and the signed

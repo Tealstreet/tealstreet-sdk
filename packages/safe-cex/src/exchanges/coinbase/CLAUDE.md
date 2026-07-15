@@ -36,6 +36,21 @@ different newly provisioned Deribit-key flow and must not be conflated with
 this adapter. The implementation plan and cutover gates are tracked in
 `docs/safe_cex_audit_july/exchanges/coinbase-starbase-migration.md`.
 
+The first follow-on foundation is implemented in `coinbase.starbase.ts`. It
+contains the published HTTP/WS endpoint constants, typed JSON-RPC request and
+response handling, monotonic request IDs, an injected HTTP POST transport, CDP
+token exchange/refresh policy, and unified WebSocket heartbeat primitives.
+Official-schema fixtures and tests are under
+`src/__tests__/audit-regressions/coinbase.starbase-*`.
+
+This foundation is intentionally inert: no current exchange, WebSocket, API
+factory, metadata, or shared-routing file imports it. Do not wire it into the
+active adapter until the markets/public-data and read-only private-state phases
+have their mapping and reconciliation tests. Coinbase has not yet published
+the inbound `heartbeat`/`test_request` notification envelope in its Starbase
+OpenAPI or AsyncAPI schema, so the controller accepts an already-classified
+signal and must not grow a guessed wire-frame parser.
+
 ## File Structure
 
 | File                       | Description                                                                                                                                                             |
@@ -48,6 +63,7 @@ this adapter. The implementation plan and cutover gates are tracked in
 | `coinbase.ws-public.ts`    | Public WebSocket: handles `candles`, `market_trades`, `l2_data`, and `heartbeats` channels. Manages order book snapshots/updates and OHLCV streaming.                   |
 | `coinbase.ws-private.ts`   | Private WebSocket: handles `user` channel for real-time order updates (snapshot + incremental) and `heartbeats`. Emits fill events on order completion.                 |
 | `coinbase.products.json`   | Sample product data for reference/testing.                                                                                                                              |
+| `coinbase.starbase.ts`     | Inert Starbase JSON-RPC, auth-refresh, endpoint, HTTP transport, and heartbeat primitives. Not wired to active Coinbase traffic.                                        |
 
 ## Authentication
 

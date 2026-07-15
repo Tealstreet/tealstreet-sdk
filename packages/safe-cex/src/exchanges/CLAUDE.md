@@ -385,6 +385,24 @@ allocates inside the function on insertion. Bybit linear/inverse/spot
 already migrated; other exchanges can move incrementally — both
 forms are kept for backward compatibility.
 
+### Sequenced delta books — verify the venue contract before adoption
+
+`packages/safe-cex/src/utils/sequencedDeltaOrderBook.ts` centralizes the safe
+state machine for snapshot-initialized feeds with explicit
+sequence/predecessor fields. It returns a transport-agnostic `recover` result
+on a gap; the WebSocket adapter must translate that into the venue's
+refcount-safe unsubscribe/resubscribe flow and wait for a fresh snapshot.
+
+Adoption is intentionally gated. Verify current official documentation for
+snapshot vs delta actions, exact predecessor semantics, duplicate/replay and
+sequence-reset behavior, and sequence numeric width. Confirm resubscription
+actually yields a snapshot, reset state on close and final unsubscribe, parse
+all levels into finite positive prices/nonnegative amounts, and add a fresh
+venue regression before replacing working code. Never infer compatibility
+from `seqId`/`prevSeqId` field names alone. OKX and BloFin keep their audited
+venue-specific implementations until this review is done; BitMEX's current
+price-keyed Aggregated feed has no verified compatible predecessor contract.
+
 ### Reconnect-banner stats are append-only — never walk the full map
 
 `base.ws.ts → recordMessageHandlerStats(topic)` is called on every
