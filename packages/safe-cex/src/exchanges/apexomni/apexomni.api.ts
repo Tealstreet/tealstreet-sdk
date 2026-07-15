@@ -5,7 +5,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './apexomni.types';
@@ -135,7 +135,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   if (options.tealstreetTunnel) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   xhr.interceptors.response.use(async (response) => {

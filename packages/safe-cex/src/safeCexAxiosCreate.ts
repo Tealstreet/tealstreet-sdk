@@ -156,6 +156,9 @@ export const getProxyForAxios = (
 const lastLogReq: { [key: string]: number } = {};
 const lastLogRes: { [key: string]: number } = {};
 
+export const isNodeOrBunRuntime = (): boolean =>
+  typeof process !== 'undefined' && (Boolean(process.versions?.node) || Boolean((process as any).isBun));
+
 export const LAST_LOG_PERIODICY = 30 * 1_000;
 
 export const safeCexAxiosCreateNoProxy = (
@@ -256,7 +259,7 @@ export const safeCexAxiosCreate = (
 
       // Add browser-like headers for CLI requests to proxy
       // Cloudflare Worker requires these headers for CORS validation
-      if (typeof window === 'undefined') {
+      if (isNodeOrBunRuntime()) {
         config.headers.Origin = 'https://trade.tealstreet.io';
         config.headers.Referer = 'https://trade.tealstreet.io/';
         config.headers['User-Agent'] =

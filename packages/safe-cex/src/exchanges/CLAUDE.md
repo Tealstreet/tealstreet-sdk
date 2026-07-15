@@ -11,6 +11,12 @@ the `CLAUDE.md` inside each exchange's directory.
 For proxy/tunnel architecture (CORS proxy, HTTP-over-WebSocket adapter), see
 `packages/safe-cex/CLAUDE.md`.
 
+API factories that select HOW or another Axios transport must call
+`setInnerAdapterForRemoteSigning`; direct `defaults.adapter` assignment
+silently removes hosted browser-delegated signing. This applies to public and
+private client factories because exchange-server may construct either with a
+remote signer.
+
 ## Directory Layout
 
 ```

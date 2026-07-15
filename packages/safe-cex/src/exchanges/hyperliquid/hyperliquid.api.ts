@@ -4,7 +4,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { BASE_URLS } from './hyperliquid.types';
 
@@ -66,7 +66,7 @@ export const createExchangeAPI = (options: ExchangeOptions, exchange: BaseExchan
 
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
   if (!options.publicDataOnly) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
   addResponseInterceptor(xhr, exchange);
 
@@ -94,7 +94,7 @@ export const createInfoAPI = (options: ExchangeOptions, exchange: BaseExchange) 
 
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
   if (!options.publicDataOnly) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
   addResponseInterceptor(xhr, exchange);
 

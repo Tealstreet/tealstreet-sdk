@@ -140,7 +140,7 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
 
   // Set up HTTP over WebSocket adapter if tunnel is enabled
   if (exchange?.options?.tealstreetTunnel) {
-    api.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(api, axiosHttpOverWebsocketAdapter);
   }
 
   // Add retry logic for network errors

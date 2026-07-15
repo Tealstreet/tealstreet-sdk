@@ -6,7 +6,7 @@ import qs from 'qs';
 
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -28,7 +28,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (!options.publicDataOnly) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   xhr.interceptors.request.use((config) => {

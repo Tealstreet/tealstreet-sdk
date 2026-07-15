@@ -9,6 +9,8 @@ src/
 ├── HOWWebSocket.ts                       # Core WebSocket protocol (reconnecting, auth, message routing)
 ├── axiosHttpOverWebsocketAdapter.ts      # Axios adapter for transparently tunneling HTTP via WS
 ├── egressRegion.ts                       # Single source: Tokyo-vs-Singapore egress list + isTokyoEgress()
+├── tradeTunnelBinaryFrame.ts             # Validates and decodes TSB1 binary gzip envelopes
+├── tradeTunnelBinaryFrame.test.ts        # Binary-envelope compatibility and validation regressions
 ├── types.ts                              # HOWConfig, HOWWebSocketAuthState, LatencyEntry
 ├── config.ts                             # Configuration (getProxyToken, isTokenExpired, etc.)
 └── index.ts                              # Main exports
@@ -72,6 +74,15 @@ yarn test           # Vitest
   let CLI, `yarn keys`, and exchange-server use HoW outside a browser.
 - Latency checking uses 1-second tick with 10-second stale threshold
 - `configureHOW()` must be called before any functionality is used
+- The Axios adapter's connection/authentication pre-send phase is a real async
+  function. Keep the nested `new Promise` limited to the response event bridge;
+  async Promise executors swallow thrown authentication failures and leave the
+  caller pending.
+- Axios `config.timeout` is one deadline for the complete tunnel request, not
+  only the post-send response wait. Token retrieval, socket/time sync,
+  authentication, simulation, and response handling all consume the same
+  budget. When it expires, the adapter rejects with
+  `TradeTunnelTimeoutError` and must not transmit the now-stale request.
 - Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
   constructor path that accepts headers.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`

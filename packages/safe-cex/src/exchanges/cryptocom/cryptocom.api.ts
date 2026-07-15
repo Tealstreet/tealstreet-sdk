@@ -4,7 +4,7 @@ import type { CryptocomApiResponse } from './cryptocom.types';
 import retry, { isNetworkError } from 'axios-retry';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { generateAuthenticatedRequest } from './cryptocom.signing';
 import { BASE_URLS, PUBLIC_ENDPOINTS } from './cryptocom.types';
@@ -29,7 +29,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   // Only use HTTP-over-WebSocket adapter when tealstreetTunnel is enabled (browser/production)
   if (options.tealstreetTunnel) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   // Request interceptor to handle authentication and request formatting

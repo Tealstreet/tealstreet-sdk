@@ -6,7 +6,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
 import { BASE_URL, RECV_WINDOW } from './paradex.types';
@@ -77,7 +77,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   if (!options.publicDataOnly) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   // Request interceptor for authentication

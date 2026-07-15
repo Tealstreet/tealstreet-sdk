@@ -5,7 +5,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { getProxyForAxios, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { getProxyForAxios, safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { replaceUrlParams } from '../../utils/replaceUrlParams';
 import { BaseExchange } from '../base';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './coinbase.types';
@@ -74,7 +74,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   if (options.tealstreetTunnel) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   return xhr;

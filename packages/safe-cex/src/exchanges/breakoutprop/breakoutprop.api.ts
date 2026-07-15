@@ -2,7 +2,7 @@ import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import type { ExchangeOptions } from '../../types';
 import { replaceUrlParams } from '../../utils/replaceUrlParams';
 import type { BreakoutpropExchange } from './breakoutprop.exchange';
@@ -43,7 +43,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BreakoutpropExchan
   });
 
   if (options.tealstreetTunnel) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   xhr.interceptors.request.use((config) => {

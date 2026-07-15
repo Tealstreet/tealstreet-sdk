@@ -72,6 +72,18 @@ that account, then persist/test/pass it to `createExchangeFromAccount()`.
 Do not reimplement `tealstreetProxy` / `proxyRegion` account defaults in app
 code.
 
+Exchange API factories must install HOW and other transport adapters through
+`setInnerAdapterForRemoteSigning(instance, adapter)`, never by assigning
+`instance.defaults.adapter` directly. Hosted exchange-server instances keep the
+remote-signing adapter as the outer layer and execute the exchange-selected
+transport only after the browser returns a signed request. A trusted audit
+regression scans every `*.api.ts` factory for direct replacement.
+
+Private-proxy REST header injection is Node/Bun-only. Browser workers also lack
+`window`, so use `isNodeOrBunRuntime()` rather than `typeof window` when deciding
+whether code may set browser-forbidden `Origin`, `Referer`, `User-Agent`, or
+`sec-fetch-*` headers.
+
 Before changing proxy/tunnel routing, the typed source of truth is the
 `routing/` table + resolver, locked by `routing/__tests__/routing.equivalence.test.ts`
 and its golden-master snapshot (the always-current, machine-checked per-exchange
@@ -243,6 +255,9 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
   routing helper used by `createPublicExchange()` and exchange-server shared
   public exchanges. Keep those paths aligned through this helper.
 - `src/safeCexAxiosCreate.ts` — Axios instance creation, HOW adapter setup
+- `src/httpOverWebsocket/` — Thin safe-cex compatibility re-exports and
+  `configureHOW` wiring; the adapter implementation lives in
+  `@tealstreet/http-over-websocket`
 - `src/routing/resolveExchangeRouting.ts` + `src/utils/transportResolution.ts` — CORS proxy URL / transport resolver used by safe-cex REST clients (the old `src/utils/getPrivateProxy.ts` no longer exists)
 - `src/types.ts` — Shared types (`ExchangeOptions`, `ExchangeAccountConfig`, etc.)
 - `src/exchanges/*/` — Per-exchange implementations

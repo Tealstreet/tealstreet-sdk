@@ -8,7 +8,7 @@
 // built-in axios adapter does and what we have to reproduce here.
 
 import Emitter from 'tiny-emitter';
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
@@ -59,6 +59,10 @@ import {
 } from './axiosHttpOverWebsocketAdapter';
 
 const mockWs = howWebSocketSG as unknown as {
+  authState: string;
+  isOpen: boolean;
+  isTimeSynced: boolean;
+  isTokenSent: boolean;
   emitter: Emitter.TinyEmitter;
   sentMessages: any[];
   replyTo: (sent: any) => void;
@@ -70,14 +74,15 @@ const mockWsJA = howWebSocketJA as unknown as {
 };
 
 describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     configureHOW({
       getProxyToken: async () => 'fake-token',
       isTokenExpired: () => false,
     });
-  });
-
-  beforeEach(() => {
+    mockWs.isTokenSent = true;
+    mockWs.isOpen = true;
+    mockWs.isTimeSynced = true;
+    mockWs.authState = 'Good';
     mockWs.replyTo = () => {};
     mockWs.sentMessages.length = 0;
     mockWsJA.replyTo = () => {};
@@ -302,6 +307,64 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       name: 'TradeTunnelError',
       config: callerConfig,
     });
+  });
+
+  it('rejects when asynchronous pre-send authentication fails', async () => {
+    configureHOW({
+      getProxyToken: async () => {
+        throw new Error('proxy token unavailable');
+      },
+      isTokenExpired: () => false,
+    });
+    mockWs.isTokenSent = false;
+
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const callerConfig: any = {
+      url: '/api/path',
+      method: 'POST',
+      baseURL: 'https://example.com',
+      headers: {},
+    };
+
+    await expect(adapter(callerConfig)).rejects.toThrow('proxy token unavailable');
+  });
+
+  it('applies the caller timeout to the pre-send connection wait', async () => {
+    mockWs.isOpen = false;
+
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const callerConfig: any = {
+      url: '/api/path',
+      method: 'POST',
+      baseURL: 'https://example.com',
+      headers: {},
+      timeout: 10,
+    };
+
+    await expect(adapter(callerConfig)).rejects.toMatchObject({
+      name: 'TradeTunnelTimeoutError',
+      config: callerConfig,
+      method: 'POST',
+      url: 'https://example.com/api/path',
+    });
+    expect(mockWs.sentMessages).toHaveLength(0);
+  });
+
+  it('applies the remaining caller timeout to the response wait', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const callerConfig: any = {
+      url: '/api/path',
+      method: 'GET',
+      baseURL: 'https://example.com',
+      headers: {},
+      timeout: 10,
+    };
+
+    await expect(adapter(callerConfig)).rejects.toMatchObject({
+      name: 'TradeTunnelTimeoutError',
+      config: callerConfig,
+    });
+    expect(mockWs.sentMessages).toHaveLength(1);
   });
 
   it('preserves object-shaped tunnel error messages', async () => {

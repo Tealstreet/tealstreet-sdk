@@ -51,7 +51,7 @@ export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange
   });
 
   if (options.tealstreetTunnel) {
-    xhr.defaults.adapter = bigIntAxiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, bigIntAxiosHttpOverWebsocketAdapter);
   }
 
   return xhr;

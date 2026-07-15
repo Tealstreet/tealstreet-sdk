@@ -3,7 +3,7 @@ import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import type { ExchangeOptions } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -68,7 +68,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (options.tealstreetTunnel) {
-    xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;
+    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
   xhr.interceptors.request.use((config) => {
