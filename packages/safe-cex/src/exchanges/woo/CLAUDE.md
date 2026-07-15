@@ -35,12 +35,40 @@ equally inert and accepts no transport, credentials, or mutable store.
 `woo.v3.algo-writes.ts` adds the matching inert algo descriptors for partial STOP-market,
 explicitly vendor-native trailing-stop, positional TP/SL, zero-fill STOP trigger-amend, cancel-by-ID,
 and all-symbol pending cancellation.
+`woo.v3.websocket.ts` adds the matching inert WebSocket channel/topic inventory, listen-key and
+subscription descriptors, strict public/private wire decoders, latency-only heartbeat
+classification, and pure sequence/reconnect/resubscribe primitives.
 None of these files is imported by
 `woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
 review requiring the corresponding parity/demo evidence. Concrete endpoint pages and the official
 migration table use `/v3/trade/*`; do not follow the introduction page's inconsistent `/trading`
 label.
+
+The V3 WebSocket foundation does not own a socket, credentials, timers, or stores. It covers the two
+documented `/v3/public` and `/v3/private?key=<listenKey>` channels, all 12 public topic kinds, and the
+five private topic names. The private listen key comes from the normal signed V3 REST descriptor;
+creating a new key immediately expires the old one, and WOO does not publish a safe overlap/rotation
+sequence. PING/PONG is an optional latency probe, not a keepalive requirement, and the current docs
+do not publish server-initiated PING. Command pages use an untyped request-ID placeholder but a
+string response example; inert builders emit that documented string subset, while a typed blocker
+preserves the unresolved request-ID type instead of declaring numeric IDs invalid.
+Commands are channel-bound transport descriptors: their exact JSON wire body is nested separately
+from the `public`/`private` URL identity. Mixed-channel subscription plans and acknowledgements fail
+closed, and every acknowledgement topic is parsed through the same official topic inventory.
+
+Incremental books must buffer, join a V3 REST snapshot where the first `prevTs` equals the snapshot
+timestamp, and then require each next `prevTs` to equal the previous update's `ts`; any mismatch or
+reconnect requires a fresh snapshot. Private frames decode only to gateway wire models. Do not
+replace store state from them until credentialed evidence proves whether account/balance/position
+arrays are snapshots or patches, the exhaustive ordinary/algo execution lifecycle, command failure
+envelopes, and listen-key rotation behavior. These are typed blockers, so neither WebSocket parity
+gate is satisfied by the inert fixture layer.
+
+Public decimal sign/zero validation is lexical, never `Number`-based. This preserves WOO's
+decimal-string precision for values smaller than JavaScript can represent. Prices and executable
+sizes must contain a nonzero digit; incremental-book quantities allow zero only for documented level
+deletion, while signed funding/PnL/holdings remain signed wire values.
 
 The V3 futures REST row is deliberately mapped to `WooV3FuturesStats`, not the safe-cex `Ticker`.
 The official response has index/mark/funding/open-interest and rolling 24-hour fields, but no
@@ -116,6 +144,7 @@ None of this satisfies `algoWriteDemoLifecycle`.
 - `woo.v3.regular-writes.ts` - Inert strict regular-order request/response contracts and amend blockers
 - `woo.v3.algo-writes.ts` - Inert strict algo-order request/response contracts and lifecycle blockers
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
+- `woo.v3.websocket.ts` - Inert V3 WS URLs/topics, strict decoders, blockers, and recovery primitives
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)
 - `woo.ws-public.ts` - Public WebSocket (tickers, BBOs, mark prices, funding rates, klines, orderbook)
