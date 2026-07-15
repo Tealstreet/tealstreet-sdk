@@ -336,7 +336,7 @@ const canonicalV3TickerStats = (stats: WooV3FuturesStats) => ({
   mark: stats.mark,
   percentage: stats.percentage24h,
   openInterest: stats.openInterest,
-  fundingRate: stats.lastFundingRate,
+  fundingRate: stats.estimatedFundingRate,
   fundingTime: stats.fundingTime,
   volume: stats.volume24h,
   quoteVolume: stats.quoteVolume24h,
@@ -382,9 +382,9 @@ const tickerFields: readonly FieldComparison<Ticker, WooV3FuturesStats>[] = [
   [
     'fundingRate',
     (ticker: Ticker) => ticker.fundingRate,
-    (stats: WooV3FuturesStats) => stats.lastFundingRate,
-    'v1 last_funding_rate',
-    'V3 lastFundingRate',
+    (stats: WooV3FuturesStats) => stats.estimatedFundingRate,
+    'legacy safe-cex fundingRate from estfundingrate stream',
+    'V3 estFundingRate',
   ],
   [
     'fundingTime',

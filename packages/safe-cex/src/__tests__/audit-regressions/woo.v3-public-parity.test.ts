@@ -47,7 +47,7 @@ const ticker = (symbol: string, overrides: Partial<Ticker> = {}): Ticker => {
     mark: 101.3,
     percentage: 2.5,
     openInterest: 50,
-    fundingRate: 0.0001,
+    fundingRate: 0.0002,
     fundingTime: 1_725_001_200_000,
     volume: 250,
     quoteVolume: 25_000,
@@ -148,7 +148,11 @@ describe('WOO V3 endpoint-specific public read parity', () => {
     const observed = [futuresStats('BTCUSDT')];
     const comparison = compareWooV3TickerStats(legacy, observed);
 
+    expect(observed[0]!.estimatedFundingRate).not.toBe(observed[0]!.lastFundingRate);
     expect(canonicalizeWooLegacyTickerStats(legacy)).toBe(canonicalizeWooV3TickerStats(observed));
+    expect(canonicalizeWooV3TickerStats(observed)).toBe(
+      canonicalizeWooV3TickerStats([futuresStats('BTCUSDT', { lastFundingRate: 0.9876 })]),
+    );
     expect(comparison).toMatchObject({
       status: 'blocked',
       mismatches: [],
@@ -166,6 +170,21 @@ describe('WOO V3 endpoint-specific public read parity', () => {
     expect(changed.status).toBe('blocked');
     expect(changed.mismatches).toContainEqual(
       expect.objectContaining({ path: 'tickers[BTCUSDT].mark', legacyValue: 101.3, v3Value: 101.300000001 }),
+    );
+
+    const changedEstimate = compareWooV3TickerStats(legacy, [
+      futuresStats('BTCUSDT', { estimatedFundingRate: 0.0003, lastFundingRate: 0.0002 }),
+    ]);
+    expect(changedEstimate.mismatches).toContainEqual(
+      expect.objectContaining({
+        path: 'tickers[BTCUSDT].fundingRate',
+        legacyValue: 0.0002,
+        v3Value: 0.0003,
+        provenance: {
+          legacy: 'legacy safe-cex fundingRate from estfundingrate stream',
+          v3: 'V3 estFundingRate',
+        },
+      }),
     );
   });
 

@@ -125,6 +125,9 @@ strictly decoded `PERP_BASE_QUOTE` futures row, BBO event, and Trade event with 
 identity. It takes bid/ask only from BBO and last only from Trade `px`, never from `24hClose`, and
 rejects non-finite, non-positive, overflowed, or underflowed numeric prices. REST mark/index/funding/
 open-interest and 24-hour statistics remain authoritative and are retained in typed provenance.
+safe-cex `fundingRate` uses V3 `estFundingRate`, matching the active legacy `estfundingrate` stream's
+predicted-funding semantics; the distinct `lastFundingRate` remains available only in
+`info.futuresStats` provenance and is never a fallback for a missing or malformed estimate.
 This is composition evidence only: runtime subscription/coherence and both public gates remain
 false. The V3 orderbook page
 documents both sides as descending, so the inert mapper sorts into safe-cex's required bid-descending

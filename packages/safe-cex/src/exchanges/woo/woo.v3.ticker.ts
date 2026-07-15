@@ -59,7 +59,7 @@ export const composeWooV3AuthoritativeTicker = (
     index: futuresStats.index,
     percentage: futuresStats.percentage24h,
     openInterest: futuresStats.openInterest,
-    fundingRate: futuresStats.lastFundingRate,
+    fundingRate: futuresStats.estimatedFundingRate,
     fundingTime: futuresStats.fundingTime,
     volume: futuresStats.volume24h,
     quoteVolume: futuresStats.quoteVolume24h,

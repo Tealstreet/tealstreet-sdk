@@ -162,7 +162,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     expect(stats[0]).not.toHaveProperty('last');
   });
 
-  it('composes authoritative bid/ask from BBO and last from an actual matching Trade event', () => {
+  it('composes live quotes and selects estimated funding while retaining the last settled rate as provenance', () => {
     const market = mapWooV3Markets(decodeWooV3Instruments(instrumentFixture))[0];
     const futuresRow = decodeWooV3Futures(futuresFixture)[0];
     const bbo = decodeWooV3WsDataFrame(
@@ -199,7 +199,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
       mark: 62011.2,
       percentage: 3,
       openInterest: 120.5,
-      fundingRate: 0.0002,
+      fundingRate: -0.0001,
       fundingTime: 1_725_001_200_000,
       volume: 250.25,
       quoteVolume: 15200000.5,
@@ -215,6 +215,15 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     });
     expect(ticker.info.bbo).toBe(bbo);
     expect(ticker.info.trade).toBe(trade);
+
+    const zeroEstimatedRow = decodeWooV3Futures(
+      envelope({
+        rows: [{ ...futuresFixture.data.rows[0], estFundingRate: '0', lastFundingRate: '0.0002' }],
+      }),
+    )[0];
+    const zeroEstimatedTicker = composeWooV3AuthoritativeTicker(zeroEstimatedRow, bbo, trade, market);
+    expect(zeroEstimatedTicker.fundingRate).toBe(0);
+    expect(zeroEstimatedTicker.info.futuresStats.lastFundingRate).toBe(0.0002);
   });
 
   it('rejects mismatched product/symbol identities instead of cross-composing sources', () => {
@@ -346,6 +355,21 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     expect(() =>
       decodeWooV3Futures(envelope({ rows: [{ ...(futuresFixture.data.rows[0] as object), markPrice: 62011.2 }] })),
     ).toThrow('markPrice must be a finite decimal string');
+    expect(() =>
+      decodeWooV3Futures(
+        envelope({ rows: [{ ...(futuresFixture.data.rows[0] as object), estFundingRate: 'not-a-rate' }] }),
+      ),
+    ).toThrow('estFundingRate must be a finite decimal string');
+    expect(() =>
+      decodeWooV3Futures(
+        envelope({ rows: [{ ...(futuresFixture.data.rows[0] as object), estFundingRate: undefined }] }),
+      ),
+    ).toThrow('estFundingRate must be a finite decimal string');
+    expect(() =>
+      decodeWooV3Futures(
+        envelope({ rows: [{ ...(futuresFixture.data.rows[0] as object), lastFundingRate: 'not-a-rate' }] }),
+      ),
+    ).toThrow('lastFundingRate must be a finite decimal string');
     expect(() => decodeWooV3OrderBook(envelope({ asks: [], bids: [{ price: '62000', quantity: 'NaN' }] }))).toThrow(
       'quantity must be a finite decimal string',
     );
