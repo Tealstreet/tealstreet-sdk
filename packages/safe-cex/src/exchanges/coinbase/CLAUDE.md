@@ -121,13 +121,24 @@ blocked until Coinbase resolves the response amount-unit conflict. This module
 is not imported by the active exchange, WebSockets, API factory, routing, or
 metadata.
 
+The fifth follow-on is implemented in `coinbase.starbase-session.ts`. It is an
+inert, transport-free Cancel on Disconnect contract layer for
+`private/enable_cancel_on_disconnect`,
+`private/disable_cancel_on_disconnect`, and
+`private/get_cancel_on_disconnect`. The only published optional parameter is
+`scope: connection | account`; omission preserves the gateway's default
+connection scope. Enable and disable are explicitly recorded as WebSocket-only
+and accept only the exact `"ok"` result. The getter strictly accepts the exact
+`{ enabled: boolean, scope }` result object. No active runtime imports this
+module, and it does not enable Cancel on Disconnect by itself.
+
 `private/get_user_trades_by_order` is also deferred: its published response
 example contains a trade array, but `PrivateGetUserTradesByOrderResponse`
 defines no `result` property. The inert reader uses the coherent
 `private/get_user_trades_by_currency*` response family until Coinbase publishes
 an exact by-order result schema.
 
-All four modules are intentionally inert: no current exchange, WebSocket, API
+All five modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
 and all normalization blockers are resolved. The public mapper supports only schema-enumerated BTC/ETH
@@ -168,6 +179,7 @@ Starbase instrument.
 | `coinbase.starbase-public.ts` | Inert Starbase instrument/public-data normalization, public request/subscription contracts, saved-symbol compatibility, and sequenced-book recovery. Not routed.        |
 | `coinbase.starbase-private.ts` | Inert Starbase read-only account/position/order-state/order-history/trade request contracts, strict gateway DTOs, last-known-good snapshot holder, and typed safe-cex parity gates. Not routed. |
 | `coinbase.starbase-orders.ts` | Inert Starbase order-write builders, strict result decoders, canonical-ID lifecycle links, and typed amount-unit parity gates. No transport and not routed. |
+| `coinbase.starbase-session.ts` | Inert Starbase Cancel on Disconnect request/response contracts, including explicit WebSocket-only mutation metadata. No transport and not routed. |
 
 ## Authentication
 
