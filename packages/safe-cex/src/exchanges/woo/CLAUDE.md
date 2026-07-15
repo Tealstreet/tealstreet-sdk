@@ -73,6 +73,19 @@ in shadow mode so it can never be double-called. The comparator never passes the
 legacy snapshot to callbacks: callers provide an already-built canonical string, and the only
 callback decodes and canonicalizes V3. It returns the original snapshot by identity on matches,
 mismatches, and decode/map/canonicalization failures.
+`woo.v3.public-parity.ts` supplies the endpoint-specific canonical strings and structured mismatch
+diagnostics for the five public GET routes. Markets compare only normalized safe-cex fields and
+ignore source-only `info`; books require identical legacy/V3 request symbols before comparing
+normalized level order, price, amount, and cumulative total. Both kline routes require exact
+legacy/V3 request symbols and normalized intervals, then validate every decoded V3 row's `symbol`,
+`type`, and exclusive `endTimestamp = startTimestamp + fixed interval` before comparing exact OHLCV.
+`1mon`/`1y` remain blocked because their variable calendar boundaries are not safely expressible as
+a fixed duration. All comparisons are exact and retain the legacy object by identity. The ticker
+comparator diagnoses the REST statistics shared by
+both generations but always returns a typed blocker: legacy REST initializes bid/ask/last from
+`24h_close`, while V3 REST publishes no live quote fields. BBO+Trade coherence remains required.
+Separate snapshot request timing can naturally produce book/statistic mismatches, so these results
+are observation evidence, not proof that a gate may be enabled.
 None of these files is imported by
 `woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
@@ -209,6 +222,7 @@ None of this satisfies `cancelAllAfterDemoLifecycle`.
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.v3.websocket.ts` - Inert V3 WS URLs/topics, strict decoders, blockers, and recovery primitives
 - `woo.v3.runtime-selector.ts` - Inert REST generation selector and legacy-authoritative shadow-read comparator
+- `woo.v3.public-parity.ts` - Exact public-read canonical strings, mismatch provenance, and ticker blocker
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)
 - `woo.ws-public.ts` - Public WebSocket (tickers, BBOs, mark prices, funding rates, klines, orderbook)
