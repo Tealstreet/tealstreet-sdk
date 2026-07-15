@@ -4,18 +4,10 @@
 
 ### 1. Get Your Signer Address
 
-Run the helper script to find your Ethereum signer address:
-
-```bash
-cd packages/safe-cex
-npx tsx src/exchanges/grvt/get-signer-address.ts
-```
-
-This will output something like:
-
-```
-Signer Address: 0x8B7537a4f6D63C861dcbB7559C724fc17Fe6De51
-```
+Use trusted wallet tooling outside this repository to derive the public
+Ethereum address for the private key that will sign GRVT orders. Never paste or
+upload the private key to an address-derivation website, and do not add a
+credential-reading helper under `src/exchanges/**`.
 
 **IMPORTANT:** Copy this address - you'll need it in the next step.
 
@@ -89,7 +81,7 @@ If you see a **403 Forbidden** error with code **1001**, it means the signer add
 **Cause**: The signer address in the request doesn't match the tagged address.
 
 **Solution**:
-1. Run `npx tsx src/exchanges/grvt/get-signer-address.ts` to get your current signer address
+1. Re-derive the current public signer address with trusted wallet tooling outside this repository
 2. Verify it matches the address tagged in the GRVT UI
 3. If different, update the tagged address in the GRVT UI
 
@@ -115,7 +107,6 @@ If you want to test without risking real funds:
 
 - **GRVT Documentation**: https://api-docs.grvt.io/
 - **Local Documentation**: See `CLAUDE.md` in this directory
-- **Helper Script**: `npx tsx src/exchanges/grvt/get-signer-address.ts`
 
 ## Architecture Overview
 

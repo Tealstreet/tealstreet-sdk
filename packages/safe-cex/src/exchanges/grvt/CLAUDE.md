@@ -51,18 +51,15 @@ for current protocol behavior before making an integration change):
 | `grvt.ws-public.ts`  | Public WebSocket: ticker (delta), orderbook (snapshot), candles. JSON-RPC 2.0 protocol                                                                                                                                                                                                            |
 | `grvt.ws-private.ts` | Private WebSocket: orders, positions, fills. Connects through Tealstreet proxy with session cookie authentication                                                                                                                                                                                 |
 
-### Helper Scripts
-
-| File                      | Purpose                                                      |
-| ------------------------- | ------------------------------------------------------------ |
-| `get-signer-address.ts`   | Derive Ethereum address from private key for API key tagging |
-| `check-signer-address.ts` | Verify signer address matches tagged address                 |
-| `fetch-instrument.ts`     | Fetch instrument details for debugging                       |
-
 ### Other
 
 - `docs/` - Local API documentation reference (cached from GitHub)
 - `SETUP.md` - Additional setup instructions
+
+`src/exchanges/**` is production runtime code only. Keep credential utilities,
+manual probes, and debugging scripts out of this directory. Derive and verify a
+signer address with trusted wallet tooling outside the repository; never add a
+package-local script that reads `.apikey.json`.
 
 ## Authentication
 
@@ -736,10 +733,10 @@ File: `.apikey.json` in the exchange directory.
 3. Call `getFundingAccountSummary()` to verify session
 4. Return empty string on success, error message on failure
 
-### Helper Scripts
-
-- `get-signer-address.ts`: Derives Ethereum address from private key in `.apikey.json`
-- `check-signer-address.ts`: Verifies address matches API key tagged address
+Signer-address derivation and verification are not package-local test helpers.
+Use trusted wallet tooling outside the repository and compare only the public
+address with the address tagged in the GRVT UI. Never expose the private key or
+add a credential-reading script under `src/exchanges/**`.
 
 ## External References
 
