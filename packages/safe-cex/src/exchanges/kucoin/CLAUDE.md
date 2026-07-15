@@ -91,6 +91,38 @@ and account availability helpers.
 
 The existing `kucoin.*` files target KuCoin Futures (linear perpetual) trading API.
 
+## Account mode and UTA boundary
+
+Both active integrations are **Classic-only**. KuCoin's UTA API introduction
+currently says the API is unreleased and must not be used in production or live
+trading. KuCoin has not published a shutdown deadline for the separate Classic
+API; its June 2026 maintenance-mode statement applies to Classic compatibility
+inside the UTA/Pro API and explicitly permits continuing to use the Classic API
+for Classic accounts.
+
+`kucoin.uta-account-mode.ts` is an inert, transport-free future migration
+contract. It records the official private `GET /api/ua/v1/account/mode` route
+and decodes only exact `CLASSIC` / `UNIFIED` `selfAccountMode` values in a
+successful `200000` envelope. The published data schema also requires both
+`unifiedSubAccount` and `classicSubAccount`: each is a dense plain array of
+positive safe-integer IDs. The decoder returns frozen copies as provenance.
+Only positively identified `CLASSIC` is eligible for the existing runtime;
+Unified, unknown, and malformed results fail closed with explicit reasons. The
+envelope and data require exact own enumerable data keys on plain or
+null-prototype objects; inherited, extra string/symbol/non-enumerable,
+accessor-backed, and exotic-prototype shapes are malformed. Arrays likewise
+reject holes, accessors, extra properties, and invalid IDs. Its UTA runtime
+gate is literal `false`, and no active API factory, validation path, startup,
+or WebSocket imports the module. Do not wire the detection request or UTA
+routes until KuCoin permits production use and the full UTA integration has
+credentialed lifecycle evidence.
+
+The June 2026 `depth=increment@10ms`, top-500, and expected July 15 deprecation
+notice is for the UTA `obu` WebSocket. KuCoin said a separate announcement
+would provide exact deprecation timing, so July 15 is not a confirmed completed
+shutdown. The same announcement explicitly says Classic is unchanged, so it
+does not apply to the active Classic `/contractMarket/level2` consumer.
+
 ## Exchange Information
 
 | Property                                         | Value                    |
@@ -120,6 +152,9 @@ The existing `kucoin.*` files target KuCoin Futures (linear perpetual) trading A
 
 - **Official API Documentation**: https://www.kucoin.com/docs-new
 - **Futures API Documentation**: https://www.kucoin.com/docs-new/rest/futures-trading/introduction
+- **UTA production prohibition**: https://www.kucoin.com/docs-new/rest/ua/introduction
+- **Account-mode schema**: https://www.kucoin.com/docs-new/rest/ua/get-account-mode
+- **UTA-only 500-level depth announcement**: https://www.kucoin.com/announcement/en-api-upgrade-announcement-500-level-depth-feed-api-rate-limit
 
 ## File Structure
 
