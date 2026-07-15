@@ -38,6 +38,19 @@ import { ENDPOINTS } from './kraken.types';
 import { KrakenPrivateWebsocket } from './kraken.ws-private';
 import { KrakenPublicWebsocket } from './kraken.ws-public';
 
+const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined => {
+  switch (String(value || '').toLowerCase()) {
+    case 'mark':
+      return OrderStopTriggerType.MarkPrice;
+    case 'index':
+      return OrderStopTriggerType.IndexPrice;
+    case 'last':
+      return OrderStopTriggerType.LastPrice;
+    default:
+      return undefined;
+  }
+};
+
 export class KrakenExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -463,6 +476,11 @@ export class KrakenExchange extends BaseExchange {
         // Cancel the existing order
         await this.cancelOrders([order]);
 
+        const originalTriggerType =
+          order.type === OrderType.StopLoss
+            ? order.slTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal'))
+            : order.tpTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal'));
+
         // Create new order with updated parameters
         const newOrderOpts: PlaceOrderOpts = {
           symbol: order.symbol,
@@ -471,10 +489,19 @@ export class KrakenExchange extends BaseExchange {
           amount: (update as any).amount !== undefined ? (update as any).amount : order.amount,
           price: (update as any).price !== undefined ? (update as any).price : order.price,
           reduceOnly: order.reduceOnly,
+          ...(order.type === OrderType.StopLoss
+            ? { slTriggerType: originalTriggerType }
+            : { tpTriggerType: originalTriggerType }),
         };
 
-        // Place the new order
-        return await this.placeOrder(newOrderOpts);
+        try {
+          return await this.placeOrder(newOrderOpts);
+        } catch (error: any) {
+          throw new Error(
+            `Kraken canceled the original ${order.type} order but failed to place its replacement: ${error?.message || error}`,
+            { cause: error },
+          );
+        }
       }
 
       // For regular limit orders, use the edit endpoint
@@ -545,6 +572,11 @@ export class KrakenExchange extends BaseExchange {
       // Map actual positions from API
       const actualPositions = openPositions.map((p) => {
         const symbol = String(p.symbol || '');
+        const side = String(p.side || 'long').toLowerCase() === 'long' ? PositionSide.Long : PositionSide.Short;
+        const positionId = `${symbol}:${side}`;
+        const existingPosition = this.store.positions.find((position) => position.id === positionId);
+        const contracts = parseFloat(p.size ?? 0);
+        const markPrice = this.store.tickers.find((ticker) => ticker.symbol === symbol)?.mark;
 
         // Detect margin mode based on cached preference first, then API response
         // Priority: 1) User's cached preference, 2) API maxFixedLeverage field
@@ -583,15 +615,18 @@ export class KrakenExchange extends BaseExchange {
         }
 
         return {
-          id: `${p.symbol}:${p.side}`,
+          id: positionId,
           symbol,
-          side: String(p.side || 'long').toLowerCase() === 'long' ? PositionSide.Long : PositionSide.Short,
+          side,
           entryPrice: parseFloat(p.price ?? 0),
-          notional: parseFloat(p.pv ?? 0), // position value
+          // `/v3/openpositions` does not publish position value or liquidation
+          // price. Preserve the richer WS values when present, and only derive
+          // notional from the current mark when no WS snapshot exists yet.
+          notional: existingPosition?.notional ?? (markPrice ? Math.abs(contracts * markPrice) : 0),
           leverage,
-          unrealizedPnl: parseFloat(p.pnl ?? 0),
-          contracts: parseFloat(p.size ?? 0),
-          liquidationPrice: parseFloat(p.liqPrice ?? 0),
+          unrealizedPnl: parseFloat(p.unrealizedPnl ?? 0),
+          contracts,
+          liquidationPrice: existingPosition?.liquidationPrice ?? 0,
           marginType,
           positionMode: PositionMode.OneWay, // Kraken only supports one-way mode
           info: p,

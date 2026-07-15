@@ -19,6 +19,17 @@ const sort = function alphabeticalSort(a: string, b: string) {
   return a.localeCompare(b);
 };
 
+const createKrakenApiError = (message: string, response?: unknown, cause?: unknown) => {
+  const error = new Error(message, cause === undefined ? undefined : { cause });
+  if (response !== undefined) {
+    // Exchange consumers inspect HTTP status/body to distinguish invalid
+    // credentials, permissions, and rate limits. Preserve axios' response
+    // object when adding a Kraken-specific message.
+    (error as Error & { response?: unknown }).response = response;
+  }
+  return error;
+};
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // Counter to ensure unique nonces even when requests are sent at the same millisecond
   let nonceCounter = 0;
@@ -129,13 +140,13 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
             errorMessage = 'Invalid signature. Please verify your API secret is correct.';
           }
 
-          throw new Error(errorMessage);
+          throw createKrakenApiError(errorMessage, response);
         }
 
         // Also check for other error formats
         if (error && !result) {
           const errorMessage = `Kraken API Error: ${error}`;
-          throw new Error(errorMessage);
+          throw createKrakenApiError(errorMessage, response);
         }
       }
       return response;
@@ -158,7 +169,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
           errorMessage = `Kraken API Error: ${data.error}`;
         }
 
-        throw new Error(errorMessage);
+        throw createKrakenApiError(errorMessage, error.response, error);
       }
 
       throw error;

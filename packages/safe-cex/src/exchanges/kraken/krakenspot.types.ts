@@ -66,7 +66,7 @@ export const INTERVAL: Record<Timeframe, number> = {
   '2h': 60, // Not supported, use 1h
   '4h': 240,
   '6h': 240, // Not supported, use 4h
-  '12h': 720, // Not supported, use closest
+  '12h': 240, // Not supported; use the nearest valid Kraken interval (4h)
   '1d': 1440,
   '1w': 10080,
 };

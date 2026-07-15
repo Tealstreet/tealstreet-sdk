@@ -223,14 +223,24 @@ export class KrakenSpotExchange extends BaseExchange {
       const openOrders = data?.result?.open || {};
       const orders: Order[] = [];
 
+      // OpenOrders describes pairs with the AssetPairs `altname` (for
+      // example XBTUSD), while our canonical market symbol is the WebSocket
+      // `wsname` (XBT/USD). Index every documented identity once so XBT pairs
+      // reconcile to the same market as public data.
+      const marketsByPairIdentity = new Map<string, Market>();
+      for (const market of this.store.markets) {
+        const identities = [market.symbol, market.info?.pairName, market.info?.altname, market.prettySymbol];
+        for (const identity of identities) {
+          if (identity) marketsByPairIdentity.set(String(identity), market);
+        }
+      }
+
       for (const [txid, orderData] of Object.entries(openOrders)) {
         const o = orderData as any;
         const descr = o.descr || {};
 
         // Find market by pair description
-        const market = this.store.markets.find(
-          (m) => m.symbol === descr.pair || m.info?.pairName === descr.pair || m.prettySymbol === descr.pair,
-        );
+        const market = marketsByPairIdentity.get(descr.pair);
 
         const orderType = ORDER_TYPE[descr.ordertype] || OrderType.Limit;
         const side = descr.type === 'buy' ? OrderSide.Buy : OrderSide.Sell;

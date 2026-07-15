@@ -40,15 +40,18 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
 
   onOpen = async () => {
     if (!this.isDisposed) {
-      // Fetch WS token if not already set
-      if (!this.wsToken) {
-        try {
-          const token = await this.parent.fetchWsToken();
-          this.wsToken = token;
-        } catch {
-          this.parent.log('Failed to fetch WebSocket token', LogSeverity.Error);
-          return;
-        }
+      // Tokens must be used within 15 minutes of creation. A token cached by a
+      // long-lived socket can therefore be stale when that socket reconnects;
+      // fetch a new one for every connection before subscribing.
+      this.authenticated = false;
+      this.wsToken = undefined;
+      try {
+        const token = await this.parent.fetchWsToken();
+        if (this.isDisposed) return;
+        this.wsToken = token;
+      } catch {
+        this.parent.log('Failed to fetch WebSocket token', LogSeverity.Error);
+        return;
       }
 
       if (!this.wsToken) {
