@@ -123,6 +123,9 @@ export class DydxPrivateWebSocket extends BaseWebSocket<DydxExchange> {
         // Handle subscription responses
         if (messageType === 'subscribed') {
           this.parent.log(`Private subscription confirmed for ${channel}`, LogSeverity.Info);
+          if (channel === WS_CHANNELS.SUBACCOUNT && json.contents) {
+            this.handleSubaccountUpdate(json.contents as DydxWsSubaccountUpdate);
+          }
           return;
         }
 
@@ -162,6 +165,8 @@ export class DydxPrivateWebSocket extends BaseWebSocket<DydxExchange> {
    * Updates orders, positions, and fills
    */
   private handleSubaccountUpdate = (data: DydxWsSubaccountUpdate) => {
+    this.parent.handleSubaccountUpdate(data);
+
     // Emit the raw subaccount update for the exchange to process
     this.parent.emitter.emit('subaccount-update', data);
 

@@ -3,12 +3,14 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, OrderSide, Ticker, Writable } from '../../types';
 import { calcOrderBookTotal } from '../../utils/orderbook';
+import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
 import { DydxExchange } from './dydx.exchange';
 import {
   CandleResolution,
   DydxCandle,
-  DydxOrderbookLevel,
+  DydxOrderbookDeltaLevel,
+  DydxOrderbookSnapshotLevel,
   DydxWsCandlesUpdate,
   DydxWsChannelBatchData,
   DydxWsChannelData,
@@ -26,6 +28,11 @@ type MessageHandlers = {
 
 type SubscribedTopics = {
   [id: string]: number;
+};
+
+type DydxOrderbookMessage = {
+  data: DydxWsOrderbookUpdate;
+  isSnapshot: boolean;
 };
 
 /**
@@ -59,6 +66,7 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
       this.trackLastReceived();
       this.subscriptions.clear();
       this.subscribe();
+      this.resubscribeActiveTopics();
       this.emitWsReconnected();
     }
   };
@@ -67,6 +75,29 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
     // Subscribe to public channels only
     this.subscribeToMarkets();
     this.subscribeToBlockHeight();
+    for (const market of this.parent.store.markets) {
+      this.subscribeToTrades(market.id);
+    }
+  };
+
+  private resubscribeActiveTopics = () => {
+    for (const [topic, listeners] of Object.entries(this.topics)) {
+      if (listeners <= 0) continue;
+
+      const orderbookPrefix = `${WS_CHANNELS.ORDERBOOK}.`;
+      if (topic.startsWith(orderbookPrefix)) {
+        this.subscribeToOrderbook(topic.slice(orderbookPrefix.length));
+        continue;
+      }
+
+      const candlesPrefix = `${WS_CHANNELS.CANDLES}.`;
+      if (topic.startsWith(candlesPrefix)) {
+        const [market, resolution] = topic.slice(candlesPrefix.length).split('.');
+        if (market && resolution) {
+          this.subscribeToCandles(market, resolution as CandleResolution);
+        }
+      }
+    }
   };
 
   /**
@@ -268,6 +299,9 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
         // Handle subscription responses
         if (messageType === 'subscribed') {
           this.parent.log(`Subscription confirmed for ${channel}`, LogSeverity.Info);
+          if (channel === WS_CHANNELS.ORDERBOOK && json.id && json.contents) {
+            this.handleOrderbookUpdate(json.id, json.contents as DydxWsOrderbookUpdate, true);
+          }
           return;
         }
 
@@ -331,10 +365,10 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
           this.handleMarketsUpdate(item as DydxWsMarketsUpdate);
           break;
         case WS_CHANNELS.TRADES:
-          this.handleTradesUpdate(item as DydxWsTradesUpdate);
+          this.handleTradesUpdate(id || '', item as DydxWsTradesUpdate);
           break;
         case WS_CHANNELS.ORDERBOOK:
-          this.handleOrderbookUpdate(id || '', item as DydxWsOrderbookUpdate);
+          this.handleOrderbookUpdate(id || '', item as DydxWsOrderbookUpdate, false);
           break;
         case WS_CHANNELS.CANDLES:
           this.handleCandlesUpdate(item as DydxWsCandlesUpdate);
@@ -391,21 +425,28 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
   /**
    * Handle trades channel updates
    */
-  private handleTradesUpdate = (data: DydxWsTradesUpdate) => {
-    if (!data.trades || !Array.isArray(data.trades)) return;
+  private handleTradesUpdate = (marketId: string, data: DydxWsTradesUpdate) => {
+    if (!marketId || !data.trades || !Array.isArray(data.trades)) return;
 
-    // O(1) hashmap lookup on the trades hot path.
-    const marketsById = this.parent.store.marketsById;
+    const market = this.parent.store.marketsById[marketId];
+    const ticker = this.parent.store.tickersById[marketId];
+    if (!market) return;
+
     for (const trade of data.trades) {
-      const market = marketsById[trade.id];
-      if (!market) continue;
+      const price = parseFloat(trade.price);
+      const amount = parseFloat(trade.size);
+      if (!Number.isFinite(price) || !Number.isFinite(amount)) continue;
+
+      if (ticker) {
+        this.parent.store.updateTicker(ticker, { last: price });
+      }
 
       this.parent.emitter.emit('fill', {
         id: trade.id,
         side: trade.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
         symbol: market.symbol,
-        price: parseFloat(trade.price),
-        amount: parseFloat(trade.size),
+        price,
+        amount,
       });
     }
   };
@@ -413,12 +454,12 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
   /**
    * Handle orderbook channel updates
    */
-  private handleOrderbookUpdate = (marketId: string, data: DydxWsOrderbookUpdate) => {
+  private handleOrderbookUpdate = (marketId: string, data: DydxWsOrderbookUpdate, isSnapshot: boolean) => {
     const handlerKey = `${WS_CHANNELS.ORDERBOOK}.${marketId}`;
 
     if (this.messageHandlers[handlerKey]) {
       for (const fn of this.messageHandlers[handlerKey]) {
-        fn(data);
+        fn({ data, isSnapshot } satisfies DydxOrderbookMessage);
       }
     }
   };
@@ -493,6 +534,7 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
     return () => {
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
       this.topics[topic]--;
+      if (this.topics[topic] <= 0) delete this.topics[topic];
 
       if (this.isConnected && !this.messageHandlers[handler]?.length) {
         this.cleanupMessageHandlerStats(handler);
@@ -523,42 +565,49 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
       };
     }
 
-    const parser = (data: DydxWsOrderbookUpdate) => {
+    const orderBook: OrderBook = { bids: [], asks: [] };
+
+    const parseSnapshotLevel = (level: DydxOrderbookSnapshotLevel) => {
+      if (!level || typeof level.price !== 'string' || typeof level.size !== 'string') return undefined;
+      const price = Number(level.price);
+      const amount = Number(level.size);
+      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount <= 0) return undefined;
+      return { price, amount, total: 0 };
+    };
+
+    const applyDelta = (side: 'bids' | 'asks', level: DydxOrderbookDeltaLevel) => {
+      if (!Array.isArray(level) || level.length !== 2) return;
+      const [rawPrice, rawAmount] = level;
+      if (typeof rawPrice !== 'string' || typeof rawAmount !== 'string') return;
+      const price = Number(rawPrice);
+      const amount = Number(rawAmount);
+      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) return;
+      updateOrderBookByPrice(orderBook, side, price, amount);
+    };
+
+    const parser = ({ data, isSnapshot }: DydxOrderbookMessage) => {
       if (!data || (!data.bids && !data.asks)) return;
 
-      const orderBook: OrderBook = {
-        bids: [],
-        asks: [],
-      };
-
-      if (data.bids && Array.isArray(data.bids)) {
-        orderBook.bids = data.bids
-          .map((level: DydxOrderbookLevel) => ({
-            price: parseFloat(level.price),
-            amount: parseFloat(level.size),
-            total: 0,
-          }))
-          .filter((level) => level.amount > 0);
+      if (isSnapshot) {
+        orderBook.bids = (data.bids || [])
+          .map((level) => parseSnapshotLevel(level as DydxOrderbookSnapshotLevel))
+          .filter((level): level is OrderBook['bids'][number] => level !== undefined);
+        orderBook.asks = (data.asks || [])
+          .map((level) => parseSnapshotLevel(level as DydxOrderbookSnapshotLevel))
+          .filter((level): level is OrderBook['asks'][number] => level !== undefined);
+        this.orderBookInnerState[innerId].isSnapshotLoaded = true;
+      } else {
+        if (!this.orderBookInnerState[innerId].isSnapshotLoaded) return;
+        for (const level of data.bids || []) applyDelta('bids', level as DydxOrderbookDeltaLevel);
+        for (const level of data.asks || []) applyDelta('asks', level as DydxOrderbookDeltaLevel);
       }
 
-      if (data.asks && Array.isArray(data.asks)) {
-        orderBook.asks = data.asks
-          .map((level: DydxOrderbookLevel) => ({
-            price: parseFloat(level.price),
-            amount: parseFloat(level.size),
-            total: 0,
-          }))
-          .filter((level) => level.amount > 0);
-      }
-
-      this.orderBookInnerState[innerId].isSnapshotLoaded = true;
-
-      // dYdX v4 indexer delivers orderbook levels pre-sorted (bids DESC,
-      // asks ASC). The arrays are .map'd from the source array preserving
-      // order, so the trailing sortOrderBook is redundant.
       if (orderBook.asks.length !== 0 || orderBook.bids.length !== 0) {
         calcOrderBookTotal(orderBook);
-        callback(orderBook);
+        callback({
+          bids: orderBook.bids.map((level) => ({ ...level })),
+          asks: orderBook.asks.map((level) => ({ ...level })),
+        });
       }
     };
 
@@ -578,6 +627,7 @@ export class DydxPublicWebSocket extends BaseWebSocket<DydxExchange> {
       delete this.orderBookInnerState[innerId];
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
       this.topics[topic]--;
+      if (this.topics[topic] <= 0) delete this.topics[topic];
 
       if (this.isConnected && !this.messageHandlers[handler]?.length) {
         this.cleanupMessageHandlerStats(handler);

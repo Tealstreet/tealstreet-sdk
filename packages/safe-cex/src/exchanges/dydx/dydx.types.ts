@@ -20,6 +20,11 @@ export const CHAIN_IDS = {
   TESTNET: 'dydx-testnet-4',
 };
 
+// Stateful orders may remain open for at most 90 days on dYdX Chain.
+export const DYDX_STATEFUL_ORDER_DURATION_SECONDS = 90 * 24 * 60 * 60;
+export const DYDX_SHORT_TERM_ORDER_BLOCKS = 20;
+export const DYDX_SHORT_TERM_CANCEL_BLOCKS = 10;
+
 // REST API Endpoints
 export const ENDPOINTS = {
   // Markets
@@ -123,13 +128,6 @@ export enum DydxPositionSide {
   NONE = 'NONE',
 }
 
-// Asset Types
-export const ASSET_TYPES = {
-  USDC: 'ibc/8E27BA2D5493AF5636760E354E46004562C46AB7EC0CC4C1CA14E9E20E2545B5',
-  NATIVE_TOKEN_MAINNET: 'adydx',
-  NATIVE_TOKEN_TESTNET: 'adv4tnt',
-};
-
 // API Response Types
 
 export interface DydxMarket {
@@ -166,14 +164,16 @@ export interface DydxTicker {
   size: string;
 }
 
-export interface DydxOrderbookLevel {
+export interface DydxOrderbookSnapshotLevel {
   price: string;
   size: string;
 }
 
+export type DydxOrderbookDeltaLevel = [price: string, size: string];
+
 export interface DydxOrderbook {
-  bids: DydxOrderbookLevel[];
-  asks: DydxOrderbookLevel[];
+  bids: DydxOrderbookSnapshotLevel[];
+  asks: DydxOrderbookSnapshotLevel[];
 }
 
 export interface DydxTrade {
@@ -259,6 +259,7 @@ export interface DydxOrder {
   createdAtHeight: string;
   clientMetadata: string;
   triggerPrice?: string;
+  createdAt?: string;
   updatedAt?: string;
   updatedAtHeight?: string;
 }
@@ -362,8 +363,8 @@ export interface DydxWsTradesUpdate {
 }
 
 export interface DydxWsOrderbookUpdate {
-  bids: DydxOrderbookLevel[];
-  asks: DydxOrderbookLevel[];
+  bids?: Array<DydxOrderbookSnapshotLevel | DydxOrderbookDeltaLevel>;
+  asks?: Array<DydxOrderbookSnapshotLevel | DydxOrderbookDeltaLevel>;
 }
 
 export interface DydxWsCandlesUpdate {

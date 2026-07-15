@@ -34,17 +34,23 @@ import { BaseExchange } from '../base';
 import { createAPI } from './dydx.api';
 import { initializeDydxSDK } from './dydx.sdk';
 import {
-  ASSET_TYPES,
   CandleResolution,
   DydxCandle,
-  DydxMarket,
+  DydxFill,
   DydxMarketsResponse,
+  DydxOrder,
   DydxOrderFlags,
   DydxOrderSide,
   DydxOrderStatus,
   DydxOrderType,
+  DydxPerpetualPosition,
   DydxPositionSide,
+  DydxSubaccount,
   DydxTimeInForce,
+  DydxWsSubaccountUpdate,
+  DYDX_SHORT_TERM_CANCEL_BLOCKS,
+  DYDX_SHORT_TERM_ORDER_BLOCKS,
+  DYDX_STATEFUL_ORDER_DURATION_SECONDS,
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
@@ -62,8 +68,10 @@ export class DydxExchange extends BaseExchange {
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
   // Market data cache
-  private marketsCache: Map<string, DydxMarket> = new Map();
+  private marketSymbolsByClobPairId: Map<string, string> = new Map();
   private lastClientId: number = 0;
+  private makerFee = 0.00002;
+  private takerFee = 0.0005;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -171,6 +179,18 @@ export class DydxExchange extends BaseExchange {
     return mapping[tif] || DydxTimeInForce.GTT;
   }
 
+  private dydxTimeInForceToSafeCex(timeInForce: DydxTimeInForce, postOnly: boolean): OrderTimeInForce {
+    if (postOnly) return OrderTimeInForce.PostOnly;
+
+    const mapping: Record<DydxTimeInForce, OrderTimeInForce> = {
+      [DydxTimeInForce.GTT]: OrderTimeInForce.GoodTillCancel,
+      [DydxTimeInForce.IOC]: OrderTimeInForce.ImmediateOrCancel,
+      [DydxTimeInForce.FOK]: OrderTimeInForce.FillOrKill,
+    };
+
+    return mapping[timeInForce] || OrderTimeInForce.GoodTillCancel;
+  }
+
   /**
    * Convert dYdX OrderStatus to safe-cex OrderStatus
    */
@@ -187,6 +207,116 @@ export class DydxExchange extends BaseExchange {
     return mapping[status] || OrderStatus.Open;
   }
 
+  private mapOrder = (dydxOrder: DydxOrder): Order | undefined => {
+    const symbol = this.marketSymbolsByClobPairId.get(String(dydxOrder.clobPairId));
+    if (!symbol) {
+      this.log(`Skipping order ${dydxOrder.id}: unknown CLOB pair ${dydxOrder.clobPairId}`, LogSeverity.Warning);
+      return undefined;
+    }
+
+    const filled = Number(dydxOrder.totalFilled || '0');
+    const amount = Number(dydxOrder.size);
+    const lastUpdate = Date.parse(dydxOrder.updatedAt || dydxOrder.createdAt || '');
+
+    return {
+      id: dydxOrder.id,
+      symbol,
+      side: this.dydxOrderSideToSafeCex(dydxOrder.side),
+      type: this.dydxOrderTypeToSafeCex(dydxOrder.type),
+      status: this.dydxOrderStatusToSafeCex(dydxOrder.status as DydxOrderStatus),
+      price: Number(dydxOrder.price),
+      amount,
+      filled,
+      remaining: amount - filled,
+      reduceOnly: dydxOrder.reduceOnly,
+      timeInForce: this.dydxTimeInForceToSafeCex(dydxOrder.timeInForce, dydxOrder.postOnly),
+      lastUpdate: Number.isFinite(lastUpdate) ? lastUpdate : 0,
+      info: {
+        ...dydxOrder,
+        clientId: dydxOrder.clientId,
+        orderFlags: Number(dydxOrder.orderFlags),
+      },
+    };
+  };
+
+  private mapPosition = (dydxPos: DydxPerpetualPosition): Position => {
+    const side =
+      dydxPos.side === DydxPositionSide.LONG
+        ? PositionSide.Long
+        : dydxPos.side === DydxPositionSide.SHORT
+          ? PositionSide.Short
+          : PositionSide.Long;
+    const contracts = Math.abs(Number(dydxPos.size));
+    const entryPrice = Number(dydxPos.entryPrice);
+
+    return {
+      id: createPositionId(dydxPos.market, side, PositionMode.OneWay),
+      symbol: dydxPos.market,
+      side,
+      contracts,
+      entryPrice,
+      notional: contracts * entryPrice,
+      leverage: 10,
+      unrealizedPnl: Number(dydxPos.unrealizedPnl || '0'),
+      realizedPnl: Number(dydxPos.realizedPnl || '0'),
+      liquidationPrice: 0,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.OneWay,
+      lastUpdate: Date.parse(dydxPos.createdAt),
+      info: dydxPos,
+    };
+  };
+
+  private mapSubaccountBalance = (subaccount: Partial<DydxSubaccount>): Balance | undefined => {
+    const total = Number(subaccount.equity);
+    const free = Number(subaccount.freeCollateral);
+    if (!Number.isFinite(total) || !Number.isFinite(free)) return undefined;
+
+    return {
+      total,
+      free,
+      used: Math.max(total - free, 0),
+      upnl: sumBy(this.store.positions, 'unrealizedPnl'),
+    };
+  };
+
+  handleSubaccountUpdate = (data: DydxWsSubaccountUpdate) => {
+    if (Array.isArray(data.orders)) {
+      const orders = data.orders.map(this.mapOrder).filter((order): order is Order => order !== undefined);
+      this.store.addOrUpdateOrders(orders);
+    }
+
+    if (Array.isArray(data.positions)) {
+      this.store.addOrUpdatePositions(data.positions.map(this.mapPosition));
+    }
+
+    if (data.subaccount) {
+      const balance = this.mapSubaccountBalance(data.subaccount);
+      if (balance) {
+        this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+      }
+    }
+
+    if (Array.isArray(data.fills)) {
+      for (const fill of data.fills) this.emitPrivateFill(fill);
+    }
+  };
+
+  private emitPrivateFill = (fill: DydxFill) => {
+    const market = this.store.marketsById[fill.market];
+    const price = Number(fill.price);
+    const amount = Number(fill.size);
+    if (!market || !Number.isFinite(price) || !Number.isFinite(amount)) return;
+
+    this.emitter.emit('fill', {
+      id: fill.id,
+      symbol: market.symbol,
+      side: this.dydxOrderSideToSafeCex(fill.side),
+      price,
+      amount,
+    });
+  };
+
   /**
    * Get current block height from SDK
    */
@@ -198,9 +328,10 @@ export class DydxExchange extends BaseExchange {
     try {
       return await this.sdkClient.getCurrentBlockHeight();
     } catch (err) {
-      this.log(`Error getting block height: ${err}`, LogSeverity.Error);
-      // Return a safe default (current time-based estimate)
-      return Math.floor(Date.now() / 1000);
+      this.log(`Error getting dYdX block height: ${err}`, LogSeverity.Error);
+      throw new Error('Unable to get the current dYdX block height; short-term order was not submitted', {
+        cause: err,
+      });
     }
   }
 
@@ -238,6 +369,19 @@ export class DydxExchange extends BaseExchange {
         }
       }
 
+      try {
+        const feeTier = await this.sdkClient.getUserFeeTier(address);
+        if (feeTier?.tier) {
+          this.makerFee = feeTier.tier.makerFeePpm / 1_000_000;
+          this.takerFee = feeTier.tier.takerFeePpm / 1_000_000;
+          for (const market of this.store.markets) {
+            this.store.updateMarket(market, { makerFee: this.makerFee, takerFee: this.takerFee });
+          }
+        }
+      } catch (feeErr) {
+        this.log(`Could not load the account fee tier; keeping display-only defaults: ${feeErr}`, LogSeverity.Warning);
+      }
+
       this.log(
         `dYdX account validated successfully${!hasSubaccount ? ' (empty account - no deposits yet)' : ''}`,
         LogSeverity.Info,
@@ -254,11 +398,6 @@ export class DydxExchange extends BaseExchange {
       this.log('Starting dYdX exchange...', LogSeverity.Info);
 
       const useExternalPublicData = await this.initExternalPublicData();
-
-      // Ensure SDK is initialized
-      if (!this.sdkClient) {
-        await this.validateAccount();
-      }
 
       if (!useExternalPublicData) {
         // Fetch markets and tickers
@@ -287,8 +426,18 @@ export class DydxExchange extends BaseExchange {
         this.publicWebsocket.connectAndSubscribe();
       }
 
+      if (this.isPublicDataOnly) {
+        await this._startPublicDataOnly();
+        return;
+      }
+
+      if (!this.sdkClient) {
+        const validation = await this.validateAccount();
+        if (validation.error) throw new Error(validation.error);
+      }
+
       // Connect private WebSocket and subscribe to subaccount
-      if (!this.isPublicDataOnly && this.options.key) {
+      if (this.options.key) {
         this.log('Connecting to private WebSocket...', LogSeverity.Debug);
         const address = this.getTradingAddress();
         const subaccount = this.options.dydxSubaccountNumber || 0;
@@ -306,6 +455,18 @@ export class DydxExchange extends BaseExchange {
       this.log(`Error starting dYdX exchange: ${error}`, LogSeverity.Error);
       throw error;
     }
+  };
+
+  _startPublicDataOnly = async () => {
+    if (this.isDisposed) return;
+
+    this.store.update({
+      orders: [],
+      positions: [],
+      balance: { total: 0, free: 0, used: 0, upnl: 0 },
+      loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
+    });
+    this.log('Ready to watch public data on dYdX', LogSeverity.Info);
   };
 
   tick = async (count = 0) => {
@@ -372,7 +533,7 @@ export class DydxExchange extends BaseExchange {
 
       for (const [ticker, sourceMarket] of Object.entries(data.markets)) {
         // Cache market data
-        this.marketsCache.set(ticker, sourceMarket);
+        this.marketSymbolsByClobPairId.set(String(sourceMarket.clobPairId), ticker);
 
         // Calculate precision from tickSize and stepSize
         const tickSize = parseFloat(sourceMarket.tickSize);
@@ -399,8 +560,10 @@ export class DydxExchange extends BaseExchange {
             leverage: { min: 1, max: 20 }, // dYdX default max leverage
           },
           contractSize: 1,
-          takerFee: 0.0005, // 0.05% taker fee
-          makerFee: 0.00002, // 0.002% maker fee
+          // Public-only mode uses display fallbacks. Private startup replaces
+          // them with the wallet's governance-controlled fee tier.
+          takerFee: this.takerFee,
+          makerFee: this.makerFee,
           info: sourceMarket,
         });
       }
@@ -463,74 +626,21 @@ export class DydxExchange extends BaseExchange {
 
       const address = this.getTradingAddress();
       const subaccount = this.options.dydxSubaccountNumber || 0;
-
-      // Find USDC asset position
-      let total = 0;
-      let used = 0;
-      let unrealizedPnl = 0;
-
-      // Fetch asset positions (handle 404 for empty accounts)
       try {
-        this.log(`Fetching asset positions for ${address} subaccount ${subaccount}...`, LogSeverity.Debug);
-        const assetPositions = await this.sdkClient.getAssetPositions(address, subaccount);
-
-        if (assetPositions && assetPositions.positions) {
-          for (const position of assetPositions.positions) {
-            // Check for USDC asset
-            if (position.assetId === ASSET_TYPES.USDC) {
-              total = parseFloat(position.size || '0');
-              this.log(`Found USDC balance: ${total}`, LogSeverity.Info);
-              break;
-            }
-          }
-        }
-
-        if (total === 0) {
-          this.log('No USDC balance found in asset positions', LogSeverity.Info);
-        }
-      } catch (assetErr: any) {
-        // 404 means account has no subaccounts yet (never deposited/traded)
-        if (assetErr?.response?.status === 404 || assetErr?.message?.includes('404')) {
+        const response = await this.sdkClient.getSubaccount(address, subaccount);
+        const balance = this.mapSubaccountBalance(response?.subaccount || {});
+        if (!balance) throw new Error('dYdX subaccount response omitted equity or freeCollateral');
+        return balance;
+      } catch (err: any) {
+        if (err?.response?.status === 404 || err?.message?.includes('404')) {
           this.log(
             `No subaccount found for ${address}/${subaccount}. This account has never deposited USDC or traded on dYdX. Balance is zero.`,
             LogSeverity.Info,
           );
-        } else {
-          throw assetErr;
+          return { total: 0, free: 0, used: 0, upnl: 0 };
         }
+        throw err;
       }
-
-      // Calculate used margin from perpetual positions (handle 404 for empty accounts)
-      try {
-        const perpPositions = await this.sdkClient.getPerpetualPositions(address, subaccount);
-
-        if (perpPositions && perpPositions.positions) {
-          for (const position of perpPositions.positions) {
-            unrealizedPnl += parseFloat(position.unrealizedPnl || '0');
-            // Estimate used margin (simplified)
-            const positionValue = Math.abs(parseFloat(position.size) * parseFloat(position.entryPrice));
-            used += positionValue / 10; // Assume ~10x leverage average
-          }
-        }
-      } catch (perpErr: any) {
-        // 404 means account has no perpetual positions (empty account)
-        if (perpErr?.response?.status === 404 || perpErr?.message?.includes('404')) {
-          this.log('No perpetual positions found (empty account)', LogSeverity.Debug);
-        } else {
-          throw perpErr;
-        }
-      }
-
-      const free = total - used;
-
-      this.log(`Balance: total=${total}, free=${free}, used=${used}, upnl=${unrealizedPnl}`, LogSeverity.Debug);
-
-      return {
-        total,
-        free: Math.max(free, 0),
-        used: Math.max(used, 0),
-        upnl: unrealizedPnl,
-      };
     } catch (err) {
       this.log(`Error fetching balance: ${err}`, LogSeverity.Error);
       throw err;
@@ -573,39 +683,14 @@ export class DydxExchange extends BaseExchange {
           continue;
         }
 
-        // Determine position side
-        const side =
-          dydxPos.side === DydxPositionSide.LONG
-            ? PositionSide.Long
-            : dydxPos.side === DydxPositionSide.SHORT
-              ? PositionSide.Short
-              : PositionSide.Long; // Default to Long for NONE
-
-        const contracts = Math.abs(parseFloat(dydxPos.size));
-        const entryPrice = parseFloat(dydxPos.entryPrice);
-        const unrealizedPnl = parseFloat(dydxPos.unrealizedPnl || '0');
+        const position = this.mapPosition(dydxPos);
 
         // Skip positions with 0 contracts
-        if (contracts === 0) {
+        if (position.contracts === 0) {
           continue;
         }
 
-        positions.push({
-          id: createPositionId(dydxPos.market, side, PositionMode.OneWay),
-          symbol: dydxPos.market,
-          side,
-          contracts,
-          entryPrice,
-          notional: contracts * entryPrice,
-          leverage: 10, // Default leverage (dYdX doesn't provide this directly)
-          unrealizedPnl,
-          realizedPnl: parseFloat(dydxPos.realizedPnl || '0'),
-          liquidationPrice: 0, // Not directly provided
-          marginType: MarginType.Cross, // dYdX uses cross margin
-          positionMode: PositionMode.OneWay,
-          lastUpdate: new Date(dydxPos.createdAt).getTime(),
-          info: dydxPos,
-        });
+        positions.push(position);
       }
 
       this.log(`Fetched ${positions.length} dYdX positions`, LogSeverity.Debug);
@@ -656,27 +741,8 @@ export class DydxExchange extends BaseExchange {
           continue;
         }
 
-        const side = this.dydxOrderSideToSafeCex(dydxOrder.side);
-        const type = this.dydxOrderTypeToSafeCex(dydxOrder.type);
-        const status = this.dydxOrderStatusToSafeCex(dydxOrder.status as DydxOrderStatus);
-        const filled = parseFloat(dydxOrder.totalFilled || '0');
-        const amount = parseFloat(dydxOrder.size);
-
-        orders.push({
-          id: dydxOrder.id,
-          symbol: dydxOrder.clobPairId, // Map to market symbol
-          side,
-          type,
-          status,
-          price: parseFloat(dydxOrder.price),
-          amount,
-          filled,
-          remaining: amount - filled,
-          reduceOnly: dydxOrder.reduceOnly,
-          timeInForce: undefined, // Not directly mapped
-          lastUpdate: new Date(dydxOrder.createdAtHeight).getTime(),
-          info: { ...dydxOrder, clientId: dydxOrder.clientId }, // Store clientId in info
-        });
+        const order = this.mapOrder(dydxOrder);
+        if (order) orders.push(order);
       }
 
       this.log(`Fetched ${orders.length} open dYdX orders`, LogSeverity.Debug);
@@ -773,11 +839,19 @@ export class DydxExchange extends BaseExchange {
       const timeInForce = this.safeCexTimeInForceToDydx(opts.timeInForce);
       const postOnly = opts.timeInForce === OrderTimeInForce.PostOnly;
 
-      // For short-term orders, calculate goodTilBlock
+      const isConditional = [
+        DydxOrderType.STOP_LIMIT,
+        DydxOrderType.STOP_MARKET,
+        DydxOrderType.TAKE_PROFIT_LIMIT,
+        DydxOrderType.TAKE_PROFIT_MARKET,
+      ].includes(type);
+      const isShortTerm = type === DydxOrderType.MARKET || timeInForce !== DydxTimeInForce.GTT;
+
+      let currentHeight: number | undefined;
       let goodTilBlock: number | undefined;
-      if (type === DydxOrderType.LIMIT || type === DydxOrderType.MARKET) {
-        const currentHeight = await this.getCurrentBlockHeight();
-        goodTilBlock = currentHeight + 20; // Expire in 20 blocks (~20 seconds)
+      if (isShortTerm) {
+        currentHeight = await this.getCurrentBlockHeight();
+        goodTilBlock = currentHeight + DYDX_SHORT_TERM_ORDER_BLOCKS;
       }
 
       this.log(
@@ -787,8 +861,9 @@ export class DydxExchange extends BaseExchange {
 
       // Use appropriate order placement method based on type
       let tx;
-      if (type === DydxOrderType.LIMIT && goodTilBlock) {
-        // Short-term limit order - use SDK method directly
+      if (type === DydxOrderType.LIMIT && isShortTerm && goodTilBlock) {
+        // IOC/FOK limits are short-term orders. Resting GTT limits use the
+        // stateful path below so they are not silently pruned after 20 blocks.
         tx = await this.sdkClient.placeShortTermOrder({
           market: opts.symbol,
           side: side as any, // SDK expects its own OrderSide type
@@ -812,6 +887,11 @@ export class DydxExchange extends BaseExchange {
           postOnly,
           reduceOnly: opts.reduceOnly || false,
           triggerPrice: opts.triggerPrice,
+          goodTilTimeInSeconds:
+            isConditional || (type === DydxOrderType.LIMIT && timeInForce === DydxTimeInForce.GTT)
+              ? DYDX_STATEFUL_ORDER_DURATION_SECONDS
+              : undefined,
+          currentHeight,
           goodTilBlock,
         });
       }
@@ -876,25 +956,27 @@ export class DydxExchange extends BaseExchange {
 
       // Extract order information
       const clientId = parseInt((order.info as any)?.clientId || order.id);
-      const orderFlags = DydxOrderFlags.SHORT_TERM; // Default to short-term
+      const orderFlags = Number((order.info as any)?.orderFlags ?? DydxOrderFlags.SHORT_TERM);
       const market = this.store.marketsBySymbol[order.symbol];
 
       if (!market) {
         throw new Error(`Market ${order.symbol} not found`);
       }
 
-      const marketInfo = this.marketsCache.get(order.symbol);
-      const clobPairId = marketInfo?.clobPairId || order.symbol;
-
       this.log(`Cancelling order ${order.id} (clientId: ${clientId})`, LogSeverity.Debug);
 
-      const currentHeight = await this.getCurrentBlockHeight();
+      const isStateful =
+        orderFlags === DydxOrderFlags.LONG_TERM || orderFlags === DydxOrderFlags.CONDITIONAL;
+      const goodTilBlock = isStateful
+        ? 0
+        : (await this.getCurrentBlockHeight()) + DYDX_SHORT_TERM_CANCEL_BLOCKS;
 
       await this.sdkClient.cancelOrder({
         clientId,
         orderFlags,
-        clobPairId,
-        goodTilBlock: currentHeight + 10,
+        marketId: market.id,
+        goodTilBlock,
+        goodTilTimeInSeconds: isStateful ? DYDX_STATEFUL_ORDER_DURATION_SECONDS : undefined,
       });
 
       this.log(`Order ${order.id} cancelled successfully`, LogSeverity.Info);

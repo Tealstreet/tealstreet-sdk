@@ -40,14 +40,14 @@ dYdX v4 is a decentralized perpetual futures exchange built on the dYdX Chain (C
 
 dYdX v4 uses **mnemonic-based wallet authentication** via the Cosmos SDK:
 
-### Credential Detection (`dydx.sdk.ts:294-326`)
+### Credential Detection (`initializeDydxSDK`)
 
 The `initializeDydxSDK()` function auto-detects the credential format:
 
 - If `secret` contains 12+ whitespace-separated words, treated as a **mnemonic** and uses `LocalWallet.fromMnemonic()`
 - Otherwise, treated as a **private key** (hex, with or without `0x` prefix) and uses `LocalWallet.fromPrivateKey()`
 
-### Wallet Address Validation (`dydx.sdk.ts:60-64`)
+### Wallet Address Validation (`DydxSDKClient.initialize`)
 
 After wallet creation, the derived address is compared against the configured address (`options.key`). A mismatch throws an error immediately.
 
@@ -55,14 +55,14 @@ After wallet creation, the derived address is compared against the configured ad
 
 - **`key`** (API Key field): dYdX wallet address in bech32 format (e.g., `dydx1...`)
 - **`secret`** (Secret field): Either a 12-word mnemonic phrase or a hex private key
-- **`dydxAddress`** (optional): Separate trading address. If set, used for balance/position queries instead of `key` (`dydx.exchange.ts:88-90`)
+- **`dydxAddress`** (optional): Separate trading address. If set, used for balance/position queries instead of `key`
 - **`dydxSubaccountNumber`** (optional): Subaccount number, defaults to `0`
 
 ### Subaccounts
 
 Each wallet can have subaccounts 0-127. The subaccount number is passed via `options.dydxSubaccountNumber` and defaults to `0`. Isolated margin is achieved by using different subaccounts.
 
-### SDK Components (`dydx.sdk.ts:29-81`)
+### SDK Components
 
 - **`CompositeClient`**: High-level client combining Node and Indexer clients. Primary interface for placing and cancelling orders.
 - **`IndexerClient`**: Queries blockchain data (markets, orders, positions, balances) via REST
@@ -71,21 +71,23 @@ Each wallet can have subaccounts 0-127. The subaccount number is passed via `opt
 
 ## Startup Sequence
 
-Defined in `start()` at `dydx.exchange.ts:248-301`:
+Defined by `DydxExchange.start()`:
 
 ```
-1. validateAccount() [if SDK not initialized]
+1. fetchMarkets() - GET /v4/perpetualMarkets (sequential)
+   -> store.update({ markets, loaded.markets: true })
+2. fetchTickers() - GET /v4/perpetualMarkets again (sequential, same endpoint)
+   -> store.update({ tickers, loaded.tickers: true })
+3. publicWebsocket.connectAndSubscribe()
+4. public-data-only: set empty orders/positions/balance loaded and return (no SDK, private WS, or tick loop)
+5. private mode: validateAccount() if SDK is not initialized
    a. initializeDydxSDK() - creates wallet, CompositeClient, IndexerClient, ValidatorClient
    b. getSubaccount() - verifies subaccount exists (404 = empty account, treated as success)
-2. fetchMarkets() - GET /v4/perpetualMarkets (sequential)
-   -> store.update({ markets, loaded.markets: true })
-3. fetchTickers() - GET /v4/perpetualMarkets again (sequential, same endpoint)
-   -> store.update({ tickers, loaded.tickers: true })
-4. publicWebsocket.connectAndSubscribe() - connects WS, subscribes to markets + block_height
-5. privateWebsocket.connectAndSubscribe() [if !publicDataOnly && key exists]
+   c. getUserFeeTier() - replaces display-only market fee defaults when available
+6. privateWebsocket.connectAndSubscribe()
    a. setCredentials(address, subaccount)
    b. Subscribes to v4_subaccounts channel
-6. tick() - initial private data fetch (sequential)
+7. tick() - initial private data fetch (sequential)
    a. fetchPositions() -> store.update({ positions })
    b. fetchBalance() -> store.update({ balance })
    c. fetchOpenOrders() [on first tick, count=0, since count%4===0]
@@ -96,7 +98,7 @@ Each step checks `this.isDisposed` before proceeding.
 
 ## REST API Endpoints
 
-All endpoints are defined in `dydx.types.ts:24-46`.
+All endpoints are defined in `dydx.types.ts`.
 
 ### Markets
 
@@ -124,7 +126,7 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 - `GET /v4/height` - Get current block height
 - `GET /v4/screen` - Compliance screening
 
-### Grafana Monitoring (`dydx.types.ts:49-55`)
+### Grafana Monitoring
 
 - **Periodic endpoints**: `PERPETUAL_MARKETS`, `PERPETUAL_POSITIONS`, `ASSET_POSITIONS`, `ORDERS`
 - **Every-tick endpoints**: None defined
@@ -135,12 +137,13 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 
 **Connection**: Uses `BaseWebSocket.createWebsocket()` to connect to `wss://indexer.dydx.trade/v4/ws` (or testnet equivalent).
 
-**On Open** (`dydx.ws-public.ts:64-70`):
+**On Open** (`DydxPublicWebSocket.onOpen`):
 
 1. Tracks last received timestamp
-2. Clears subscription set (in case of reconnect)
-3. Calls `subscribe()` which subscribes to `v4_markets` and `v4_block_height`
-4. Emits WS reconnected event
+2. Clears the connection-local subscription set
+3. Subscribes to `v4_markets`, `v4_block_height`, and per-market trades
+4. Replays active orderbook/candle listener topics from `topics`
+5. Emits WS reconnected event
 
 **Subscription Tracking**: Uses a `Set<string>` to track active subscriptions by key (e.g., `v4_orderbook:BTC-USD`). Prevents duplicate subscriptions.
 
@@ -153,21 +156,32 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 
 **Handler Registration**: The `messageHandlers` map uses topic keys like `v4_orderbook.BTC-USD` or `v4_candles.BTC-USD.1MIN`. Multiple handlers can register for the same topic.
 
-**Orderbook**: Subscribes with `batched: true`. Updates are delivered as `channel_batch_data` and dispatched to registered handlers via `handleOrderbookUpdate()`. The `listenOrderBook()` method creates per-listener state tracking via `orderBookInnerState[innerId]` with snapshot loading.
+**Orderbook**: Subscribes with `batched: true`. The `subscribed` frame carries
+the initial `{price,size}` object snapshot; subsequent `channel_batch_data`
+frames carry `[price,size]` tuple deltas. Each listener holds an isolated local
+book and applies tuple deltas through `updateOrderBookByPrice`; size `"0"`
+removes a level.
 
 **Candles**: Subscribe format uses `{market}/{resolution}` as ID (e.g., `BTC-USD/1MIN`). The `listenOHLCV()` method polls until connected, then subscribes and registers a handler.
 
-**Ping**: No-op (`dydx.ws-public.ts:608-610`). dYdX maintains connections automatically.
+**Ping**: No-op. dYdX maintains connections automatically.
 
-**Reconnection**: Handled by `BaseWebSocket`. On close, `onClose()` triggers reconnection logic. On reconnect, `onOpen()` re-subscribes to `v4_markets` and `v4_block_height`, but per-market subscriptions (orderbook, candles) are re-established by the `waitForConnectedAndSubscribe` polling in `listenOHLCV` and `listenOrderBook`.
+**Reconnection**: Handled by `BaseWebSocket`. On reconnect, `onOpen()` restores
+the base channels, all per-market trade channels, and every active orderbook or
+candle topic recorded in `topics`. The initial listener polling only establishes
+the first subscription; reconnect replay is owned by `onOpen()`.
+
+**Trades / last price**: trade frames are keyed by the WebSocket message `id`
+(the market ticker), not the trade UUID. The handler emits the public fill and
+updates `ticker.last` from each finite trade price.
 
 ### Private WebSocket (`dydx.ws-private.ts`)
 
 **Connection**: Same WSS URL as public. No separate authentication required -- dYdX subaccount channel is public (anyone can subscribe to any address's subaccount data).
 
-**Credentials**: Set via `setCredentials(address, subaccountNumber)` before connecting (`dydx.ws-private.ts:29-32`).
+**Credentials**: Set via `setCredentials(address, subaccountNumber)` before connecting.
 
-**On Open** (`dydx.ws-private.ts:47-59`):
+**On Open** (`DydxPrivateWebSocket.onOpen`):
 
 1. Tracks last received
 2. Clears subscription set
@@ -176,13 +190,13 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 
 **Message Format**: Subaccount uses `channel_data` (NOT `channel_batch_data`).
 
-**Subaccount Updates** (`dydx.ws-private.ts:164-193`):
+**Subaccount Updates** (`DydxPrivateWebSocket.handleSubaccountUpdate`):
 
-- Emits raw `subaccount-update` event
-- Iterates `data.orders` -> emits `order-update` for each
-- Iterates `data.fills` -> emits `fill-update` for each
-- Iterates `data.positions` -> emits `position-update` for each
-- If `data.subaccount` present -> emits `balance-update`
+- Maps orders and positions into the store immediately
+- Maps `subaccount.equity/freeCollateral` into exact balance state
+- Emits normalized public `fill` events for fills
+- Retains the raw compatibility events (`subaccount-update`, `order-update`,
+  `fill-update`, `position-update`, `balance-update`)
 
 **Ping**: No-op, same as public.
 
@@ -200,17 +214,18 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 
 ## Order Types and Mappings
 
-### safe-cex to dYdX Mapping (`dydx.exchange.ts:126-136`)
+### safe-cex to dYdX Mapping
 
 | safe-cex `OrderType` | dYdX `DydxOrderType` |
 | -------------------- | -------------------- |
 | `Market`             | `MARKET`             |
 | `Limit`              | `LIMIT`              |
+| `Conditional`        | `STOP_MARKET`        |
 | `StopLoss`           | `STOP_MARKET`        |
 | `TakeProfit`         | `TAKE_PROFIT_MARKET` |
 | `TrailingStopLoss`   | `STOP_MARKET`        |
 
-### dYdX to safe-cex Mapping (`dydx.exchange.ts:141-152`)
+### dYdX to safe-cex Mapping
 
 | dYdX `DydxOrderType` | safe-cex `OrderType` |
 | -------------------- | -------------------- |
@@ -221,7 +236,7 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 | `TAKE_PROFIT_MARKET` | `TakeProfit`         |
 | `TAKE_PROFIT_LIMIT`  | `TakeProfit`         |
 
-### Time In Force Mapping (`dydx.exchange.ts:157-168`)
+### Time In Force Mapping
 
 | safe-cex            | dYdX                                         |
 | ------------------- | -------------------------------------------- |
@@ -230,7 +245,7 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 | `FillOrKill`        | `FOK`                                        |
 | `PostOnly`          | `GTT` (POST_ONLY handled via execution flag) |
 
-### Order Flags (`dydx.types.ts:103-107`)
+### Order Flags
 
 | Flag          | Value | Meaning                                                   |
 | ------------- | ----- | --------------------------------------------------------- |
@@ -238,7 +253,7 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 | `LONG_TERM`   | 64    | Stateful orders stored on blockchain                      |
 | `CONDITIONAL` | 32    | Conditional/trigger orders                                |
 
-### Order Status Mapping (`dydx.exchange.ts:173-184`)
+### Order Status Mapping
 
 | dYdX Status            | safe-cex Status |
 | ---------------------- | --------------- |
@@ -251,26 +266,30 @@ All endpoints are defined in `dydx.types.ts:24-46`.
 
 ## Order Lifecycle
 
-### Order Placement (`dydx.exchange.ts:746-815`)
+### Order Placement (`DydxExchange.placeOrder`)
 
 1. Validate SDK is initialized and market exists
-2. Generate unique `clientId` via `generateClientId()` -- timestamp-based with counter (`dydx.exchange.ts:77-82`)
+2. Generate unique `clientId` via `generateClientId()` -- timestamp-based with counter
 3. Convert order parameters (side, type, timeInForce)
-4. For LIMIT/MARKET orders: fetch current block height, set `goodTilBlock = currentHeight + 20`
-5. Branch on order type:
-   - **Short-term LIMIT** with `goodTilBlock`: calls `sdkClient.placeShortTermOrder()`
-   - **All other types**: calls `sdkClient.placeOrder()` with full parameters
+4. Short-term MARKET and IOC/FOK LIMIT orders fetch current block height and set
+   `goodTilBlock = currentHeight + 20`
+5. Resting GTT LIMIT and CONDITIONAL orders use the stateful SDK path with a
+   90-day `goodTilTimeInSeconds`; IOC/FOK LIMIT orders use the short-term wrapper
+   and all other orders use the general wrapper. Conditional market orders use
+   the SDK's required IOC/FOK execution enum rather than unsupported `DEFAULT`.
 6. Returns `[clientId.toString()]` as the order ID
 
-### Order Cancellation (`dydx.exchange.ts:858-892`)
+### Order Cancellation (`DydxExchange.cancelOrder`)
 
 1. Extract `clientId` from `order.info.clientId` or `order.id`
-2. Look up `clobPairId` from `marketsCache`
-3. Fetch current block height
-4. Call `sdkClient.cancelOrder()` with `goodTilBlock: currentHeight + 10`
-5. **Note**: Always uses `DydxOrderFlags.SHORT_TERM` (value 0) for cancellation
+2. Use the market ticker restored from the Indexer's `clobPairId` when the order
+   was mapped
+3. Read the original `orderFlags` preserved in `order.info`
+4. Stateful cancels use a zero `goodTilBlock` plus the 90-day duration; short-term
+   cancels use the current block height plus 10 blocks
+5. Pass the ticker as the SDK `marketId`; the SDK resolves it to `clobPairId`
 
-### Order Update (`dydx.exchange.ts:817-856`)
+### Order Update (`DydxExchange.updateOrder`)
 
 dYdX does **not** support native order modification. Implemented as cancel-and-replace:
 
@@ -285,7 +304,7 @@ dYdX does **not** support native order modification. Implemented as cancel-and-r
 - `cancelSymbolOrders()`: Fetches open orders for symbol, then cancels sequentially.
 - `placeOrders()`: Uses `forEachSeries` (sequential). Each failure is logged but does not stop the batch.
 
-### Client ID Generation (`dydx.exchange.ts:77-82`)
+### Client ID Generation (`DydxExchange.generateClientId`)
 
 ```typescript
 private generateClientId(): number {
@@ -306,7 +325,7 @@ dYdX uses `BASE-QUOTE` format: `BTC-USD`, `ETH-USD`, `SOL-USD`.
 
 ## Data Precision & Conversion
 
-### Market Precision (`dydx.exchange.ts:366-372`)
+### Market Precision (`DydxExchange.fetchMarkets`)
 
 Precision is derived from `tickSize` and `stepSize` fields in the market data:
 
@@ -322,26 +341,26 @@ dYdX uses **quantums** (smallest unit) and **subticks** for on-chain order repre
 - The SDK's `CompositeClient` handles conversion to/from human-readable values automatically
 - Market metadata fields: `atomicResolution`, `stepBaseQuantums`, `quantumConversionExponent`, `subticksPerTick`
 
-### Balance Calculation (`dydx.exchange.ts:448-528`)
+### Balance Calculation (`DydxExchange.fetchBalance`)
 
-- USDC balance found by matching `assetId === ASSET_TYPES.USDC` (IBC token address)
-- Used margin estimated as `positionValue / 10` (assumes ~10x leverage average)
-- Free balance = total - used, clamped to `Math.max(0)`
-- Unrealized PnL calculated from positions and added in `tick()` (`dydx.exchange.ts:317-318`)
+- `total` comes from the Indexer subaccount's exact `equity`
+- `free` comes from exact `freeCollateral` and is not clamped
+- `used` is the non-negative difference between equity and free collateral
+- Unrealized PnL is reconciled from mapped positions
 
 ### Leverage
 
-Default max leverage is hardcoded to 20 (`dydx.exchange.ts:389`). `setLeverage()` is a no-op with a warning -- dYdX manages leverage through position sizing, not per-market API settings.
+Default max leverage is hardcoded to 20. `setLeverage()` is a no-op with a warning -- dYdX manages leverage through position sizing, not per-market API settings.
 
 ## Rate Limiting
 
-### Axios Rate Limit (`dydx.exchange.ts:68`)
+### Axios Rate Limit
 
 ```typescript
 this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 10 });
 ```
 
-### REST API Retry (`dydx.api.ts:35`)
+### REST API Retry
 
 ```typescript
 retry(xhr, { retries: 3, retryCondition: isNetworkError });
@@ -357,11 +376,11 @@ Retries only on network errors (connection failures, timeouts), not HTTP errors.
 
 ### Tick Interval
 
-`tick()` runs every 10 seconds (`dydx.exchange.ts:336`). Orders are only refreshed every 4th tick (~40 seconds, `count % 4 === 0`).
+`tick()` runs every 10 seconds. Orders are refreshed every 4th tick (~40 seconds, `count % 4 === 0`).
 
 ## State Reconciliation
 
-### REST Polling (`dydx.exchange.ts:303-338`)
+### REST Polling (`DydxExchange.tick`)
 
 The `tick()` loop runs every 10 seconds:
 
@@ -371,27 +390,35 @@ The `tick()` loop runs every 10 seconds:
 
 ### WebSocket Updates
 
-Private WS emits events (`order-update`, `fill-update`, `position-update`, `balance-update`) which are consumed by the exchange class. However, the current implementation does not have explicit listeners on these emitter events in the exchange class -- reconciliation relies on the `tick()` polling loop.
+The initial `subscribed` snapshot and subsequent `channel_data` subaccount
+updates are mapped immediately into `addOrUpdateOrders`,
+`addOrUpdatePositions`, and exact balance state. Fill updates emit normalized
+`fill` events. The REST tick remains the reconciliation safety net.
 
 ### Private Snapshot on Reconnect
 
-When the private WebSocket reconnects (`dydx.ws-private.ts:58`), it calls `this.parent.fetchAndSetPrivateSnapshot(10)` to immediately refresh private data from REST, preventing stale state after a disconnection.
+When the private WebSocket reconnects, it calls
+`this.parent.fetchAndSetPrivateSnapshot(10)` to immediately refresh private
+data from REST, preventing stale state after a disconnection.
 
 ### Empty Account Handling
 
-All fetch methods (balance, positions, orders) handle HTTP 404 as "empty account" rather than error. This allows new/unfunded accounts to connect without errors (`dydx.exchange.ts:223-230`, `481-488`, `544-549`, `623-628`).
+All private fetch methods handle HTTP 404 as "empty account" rather than an
+error. This allows new or unfunded accounts to connect without errors.
 
 ## Exchange Metadata
 
 - **Exchange Name**: Used as provided by `ExchangeName` parameter
 - **Position Mode**: One-way only (`getPositionMode()` returns `PositionMode.OneWay`)
 - **Margin Type**: Cross-margin by default; isolated via subaccounts
-- **Contract Size**: Always 1 (`dydx.exchange.ts:391`)
-- **Fees**: Hardcoded taker=0.05%, maker=0.002% (`dydx.exchange.ts:392-393`)
+- **Contract Size**: Always 1
+- **Fees**: Public-only markets expose clearly documented display defaults.
+  Private startup queries `ValidatorClient.get.getUserFeeTier()` and replaces
+  every market with the wallet's current maker/taker PPM values.
 
 ## Testnet / Demo
 
-### URL Differences (`dydx.types.ts:3-21`)
+### URL Differences
 
 | Component      | Production                               | Testnet                                       |
 | -------------- | ---------------------------------------- | --------------------------------------------- |
@@ -425,27 +452,37 @@ Stored in `.apikey.json`:
 
 1. **Tickers and Markets share an endpoint**: Both `fetchMarkets()` and `fetchTickers()` call the same `GET /v4/perpetualMarkets` endpoint. Tickers have many fields set to 0 (bid, ask, last, mark, index) because the markets endpoint does not provide live prices -- these are populated by WebSocket updates.
 
-2. **Block height fallback is completely broken** (`dydx.exchange.ts:202`): If `sdkClient.getCurrentBlockHeight()` throws, the catch block returns `Math.floor(Date.now() / 1000)` as a "safe default". This is NOT a rough approximation — it's an entirely wrong value. `Date.now() / 1000` is seconds since 1970 (~1.75 billion in 2026), while dYdX block heights are in the ~60 million range. The fallback returns a number ~30× larger than any real block height. Every order placed while the fallback is active will compute `goodTilBlock = currentHeight + 20 ≈ 1.75e9`, which dYdX's validator rejects as out-of-window for short-term orders. Treat this fallback as "orders fail" rather than "orders might misbehave" — the only reason it hasn't burned users is that `getCurrentBlockHeight()` rarely throws in practice.
+2. **Block height errors fail closed**: if the Validator client cannot return the
+   current height, short-term placement/cancellation throws a clear error and does
+   not manufacture a timestamp-shaped height.
 
-3. **Cancel always uses SHORT_TERM flag**: `cancelOrder()` hardcodes `DydxOrderFlags.SHORT_TERM` regardless of the original order's flags (`dydx.exchange.ts:866`). This means cancelling long-term or conditional orders may not work correctly.
+3. **Cancellation is flag-aware**: Indexer order flags are preserved in
+   `order.info`, so short-term, long-term, and conditional cancellations use their
+   required expiry representation.
 
-4. **Order symbol uses clobPairId**: In `fetchOpenOrders()`, the order's `symbol` is set to `dydxOrder.clobPairId` rather than the market ticker (`dydx.exchange.ts:657`). This may cause symbol mismatch issues.
+4. **Order symbols are restored from CLOB pair IDs**: the markets response seeds a
+   reverse map from `clobPairId` to ticker; unknown pair IDs are skipped instead of
+   creating uncancellable orders.
 
 5. **Leverage is not configurable**: `setLeverage()` is a no-op that logs a warning. Leverage is managed through position sizing.
 
-6. **Used margin is estimated**: Balance calculation estimates used margin as `positionValue / 10` (assuming ~10x average leverage), not from actual margin data (`dydx.exchange.ts:502`).
+6. **Balance uses Indexer collateral fields**: `equity` and `freeCollateral`
+   are the source of truth; the old position-value/10 estimate is retired.
 
-7. **Markets cache**: Raw market data is cached in `marketsCache` Map for `clobPairId` lookup during order cancellation (`dydx.exchange.ts:62`, `365`, `873`).
+7. **CLOB-pair reverse map**: the markets response builds the ticker lookup
+   needed to map Indexer orders before cancellation.
 
-8. **HTTP-over-WebSocket adapter commented out**: The tunnel adapter in `dydx.api.ts:37-39` is commented out.
+8. **HTTP-over-WebSocket adapter commented out**: The tunnel adapter in
+   `dydx.api.ts` is commented out.
 
 9. **Public vs private WS use same URL**: Both WebSocket classes connect to the same Indexer WebSocket URL. dYdX does not require authentication for private subaccount data -- anyone can subscribe if they know the address.
 
-10. **POST_ONLY handling**: When `PostOnly` time-in-force is requested, it maps to `GTT` for the TimeInForce enum, and the actual POST_ONLY behavior is set via the `execution` flag in the SDK (`dydx.sdk.ts:116`).
+10. **POST_ONLY handling**: `PostOnly` maps to `GTT`; the SDK `execution` flag
+    carries the actual post-only instruction.
 
 ## Error Handling
 
-### REST API Errors (`dydx.api.ts:43-67`)
+### REST API Errors
 
 **Response interceptor handles two error formats:**
 
@@ -460,18 +497,19 @@ Most SDK operations throw on failure. The exchange class wraps all SDK calls in 
 
 All private data fetches (balance, positions, orders) treat HTTP 404 as "empty account" -- not an error. This pattern appears in:
 
-- `validateAccount()` (`dydx.exchange.ts:223-231`)
-- `fetchBalance()` (`dydx.exchange.ts:481-488`, `505-510`)
-- `fetchPositions()` (`dydx.exchange.ts:544-549`)
-- `fetchOpenOrders()` (`dydx.exchange.ts:623-628`)
+- `validateAccount()`
+- `fetchBalance()`
+- `fetchPositions()`
+- `fetchOpenOrders()`
 
 ### Tick Error Resilience
 
-The `tick()` loop catches all errors silently and always schedules the next tick (`dydx.exchange.ts:332-336`). Individual failures do not break the polling cycle.
+The `tick()` loop logs errors and always schedules the next tick. Individual
+failures do not break the polling cycle.
 
 ### Retry Strategy
 
-Network errors on REST calls are retried 3 times via `axios-retry` (`dydx.api.ts:35`).
+Network errors on REST calls are retried 3 times via `axios-retry`.
 
 ## Testing / Validation
 
@@ -481,7 +519,7 @@ network-dependent test scripts beside exchange runtime code.
 
 ### Validation Flow
 
-`validateAccount()` (`dydx.exchange.ts:203-246`):
+`validateAccount()`:
 
 1. Initializes SDK client
 2. Attempts to fetch subaccount data
@@ -490,7 +528,7 @@ network-dependent test scripts beside exchange runtime code.
 
 ## SDK Package
 
-**Package**: `@dydxprotocol/v4-client-js` (v3.4.0)
+**Package**: `@dydxprotocol/v4-client-js` (v3.6.0)
 
 The SDK is wrapped in `dydx.sdk.ts` which provides:
 
@@ -508,7 +546,12 @@ The SDK is wrapped in `dydx.sdk.ts` which provides:
 
 ## Implementation Status
 
-### Completed Features
+The adapter remains disabled in exchange metadata. The July 2026 audit repairs
+are covered by fresh deterministic regressions, but enabling dYdX is a separate
+product decision and requires credentialed testnet/live acceptance before any
+user-facing rollout.
+
+### Regression-covered surfaces
 
 - [x] REST API client with wallet-based authentication
 - [x] Market data fetching (markets, tickers, orderbook, trades, candles)
@@ -526,5 +569,3 @@ The SDK is wrapped in `dydx.sdk.ts` which provides:
 - [ ] Historical PnL tracking
 - [ ] Vault operations (MegaVault deposits/withdrawals)
 - [ ] Multi-subaccount support for isolated margin
-- [ ] Fix order symbol to use market ticker instead of clobPairId
-- [ ] Support LONG_TERM and CONDITIONAL order flags in cancellation

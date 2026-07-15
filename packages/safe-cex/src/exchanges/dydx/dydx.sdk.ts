@@ -90,6 +90,14 @@ export class DydxSDKClient {
     return await this.validatorClient.get.latestBlockHeight();
   }
 
+  /** Get the wallet's current governance-controlled perpetual fee tier. */
+  async getUserFeeTier(address: string) {
+    if (!this.validatorClient) {
+      throw new Error('Validator client not initialized');
+    }
+    return await this.validatorClient.get.getUserFeeTier(address);
+  }
+
   /**
    * Place an order using the CompositeClient
    */
@@ -104,17 +112,38 @@ export class DydxSDKClient {
     postOnly: boolean;
     reduceOnly: boolean;
     triggerPrice?: number;
+    goodTilTimeInSeconds?: number;
+    currentHeight?: number;
     goodTilBlock?: number;
   }) {
     if (!this.compositeClient || !this.subaccount) {
       throw new Error('SDK client not initialized');
     }
 
-    const { market, type, side, price, size, clientId, timeInForce, postOnly, reduceOnly, triggerPrice, goodTilBlock } =
-      params;
+    const {
+      market,
+      type,
+      side,
+      price,
+      size,
+      clientId,
+      timeInForce,
+      postOnly,
+      reduceOnly,
+      triggerPrice,
+      goodTilTimeInSeconds,
+      currentHeight,
+      goodTilBlock,
+    } = params;
 
-    const execution = postOnly ? OrderExecution.POST_ONLY : OrderExecution.DEFAULT;
-    const gtb = goodTilBlock || 0;
+    const isConditionalMarket = type === OrderType.STOP_MARKET || type === OrderType.TAKE_PROFIT_MARKET;
+    const execution = postOnly
+      ? OrderExecution.POST_ONLY
+      : isConditionalMarket
+        ? timeInForce === OrderTimeInForce.FOK
+          ? OrderExecution.FOK
+          : OrderExecution.IOC
+        : OrderExecution.DEFAULT;
 
     const tx = await this.compositeClient.placeOrder(
       this.subaccount,
@@ -125,11 +154,14 @@ export class DydxSDKClient {
       size,
       clientId,
       timeInForce,
-      gtb,
+      goodTilTimeInSeconds,
       execution,
       postOnly,
       reduceOnly,
       triggerPrice,
+      undefined,
+      currentHeight,
+      goodTilBlock,
     );
 
     return tx;
@@ -154,16 +186,23 @@ export class DydxSDKClient {
 
     const { market, side, price, size, clientId, goodTilBlock, timeInForce, reduceOnly } = params;
 
-    const tx = await this.compositeClient.placeShortTermOrder(
-      this.subaccount as any,
+    const tx = await this.compositeClient.placeOrder(
+      this.subaccount,
       market,
+      OrderType.LIMIT,
       side,
       price,
       size,
       clientId,
-      goodTilBlock,
-      timeInForce as any, // SDK expects Order_TimeInForce type
+      timeInForce,
+      undefined,
+      OrderExecution.DEFAULT,
+      false,
       reduceOnly,
+      undefined,
+      undefined,
+      undefined,
+      goodTilBlock,
     );
 
     return tx;
@@ -175,22 +214,23 @@ export class DydxSDKClient {
   async cancelOrder(params: {
     clientId: number;
     orderFlags: number;
-    clobPairId: string;
+    marketId: string;
     goodTilBlock?: number;
-    goodTilBlockTime?: number;
+    goodTilTimeInSeconds?: number;
   }) {
     if (!this.compositeClient || !this.subaccount) {
       throw new Error('SDK client not initialized');
     }
 
-    const { clientId, orderFlags, clobPairId, goodTilBlock } = params;
+    const { clientId, orderFlags, marketId, goodTilBlock, goodTilTimeInSeconds } = params;
 
     const tx = await this.compositeClient.cancelOrder(
       this.subaccount as any,
       clientId,
       orderFlags,
-      clobPairId,
-      goodTilBlock || 0,
+      marketId,
+      goodTilBlock,
+      goodTilTimeInSeconds,
     );
 
     return tx;
@@ -252,17 +292,6 @@ export class DydxSDKClient {
     }
 
     return await this.indexerClient.account.getSubaccountPerpetualPositions(address, subaccountNumber);
-  }
-
-  /**
-   * Get asset positions (USDC balance)
-   */
-  async getAssetPositions(address: string, subaccountNumber: number) {
-    if (!this.indexerClient) {
-      throw new Error('Indexer client not initialized');
-    }
-
-    return await this.indexerClient.account.getSubaccountAssetPositions(address, subaccountNumber);
   }
 
   /**
