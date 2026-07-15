@@ -57,6 +57,7 @@ import {
   ORDER_SIDE,
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
+  PLACE_ALGO_ORDER_RESPONSE,
   PLACE_ORDER_RESPONSE,
 } from './woo.types';
 import { normalizeSymbol, reverseSymbol } from './woo.utils';
@@ -589,7 +590,13 @@ export class WOOXExchange extends BaseExchange {
       return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return { error: err?.response?.data?.msg || err?.message || 'Invalid API key or secret' };
+      return {
+        error:
+          err?.response?.data?.message ||
+          err?.response?.data?.msg ||
+          err?.message ||
+          'Invalid API key or secret',
+      };
     }
   };
 
@@ -1420,14 +1427,14 @@ export class WOOXExchange extends BaseExchange {
     }
   };
 
-  cancelAlgoOrder = async (order: Order) => {
+  cancelAlgoOrder = async (order: Order, recreateSibling = true) => {
     try {
       const sibling = this.store.orders.find((o) => o.parentId === order.parentId && o.id !== order.id);
 
       const id = order.parentId || order.id;
       await this.xhr.delete(`${ENDPOINTS.ALGO_ORDER}/${id}`);
 
-      if (sibling) {
+      if (sibling && recreateSibling) {
         const priceKey = sibling.type === OrderType.StopLoss ? 'stopLoss' : 'takeProfit';
         const triggerKey = sibling.type === OrderType.StopLoss ? 'slTriggerType' : 'tpTriggerType';
 
@@ -1571,11 +1578,10 @@ export class WOOXExchange extends BaseExchange {
       params.takeProfit = opts.price;
     }
 
-    // TODO: race condition with bulk cancel stops where we recreate sibling stop after cancel all still
     if (sibling) {
       if (sibling.type === OrderType.StopLoss) params.stopLoss = sibling.price;
       if (sibling.type === OrderType.TakeProfit) params.takeProfit = sibling.price;
-      await this.cancelAlgoOrder(sibling);
+      await this.cancelAlgoOrder(sibling, false);
     }
 
     return await this.placePositionalAlgoOrder(params);
@@ -1629,11 +1635,13 @@ export class WOOXExchange extends BaseExchange {
 
     try {
       const orderIds = await mapSeries(payloads, async (payload) => {
-        const { data } = await this.xhr.post<PLACE_ORDER_RESPONSE>(ENDPOINTS.ALGO_ORDER, payload);
+        const {
+          data: { data },
+        } = await this.xhr.post<PLACE_ALGO_ORDER_RESPONSE>(ENDPOINTS.ALGO_ORDER, payload);
 
-        return String(data.order_id);
+        return data.rows.map((row) => String(row.orderId));
       });
-      return orderIds;
+      return orderIds.flat();
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.message || err?.message);
       throw err;
@@ -1685,7 +1693,7 @@ export class WOOXExchange extends BaseExchange {
         data: { rows: Array<Record<string, any>> };
       }>(ENDPOINTS.ALGO_ORDER, payload);
 
-      return data?.rows?.map((r) => String(r.order_id)) || [];
+      return data?.rows?.map((r) => String(r.orderId)) || [];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return [];

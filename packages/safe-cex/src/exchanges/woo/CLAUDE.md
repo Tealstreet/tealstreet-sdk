@@ -13,7 +13,16 @@ This directory contains the WooX perpetual futures exchange integration for Teal
 ## API Documentation
 
 - **Current API documentation**: https://developer.woox.io/api-reference/introduction
+- **Official migration map**: https://developer.woox.io/api-reference/migration_guide
 - **Legacy API documentation** (for migration work): https://docs.woox.io/#restful-api
+
+## Legacy API lifecycle
+
+WooX scheduled both the legacy REST and WebSocket surfaces used here for deprecation on December 31,
+2025 and describes them as no longer actively maintained. Do not add new legacy dependencies. The
+phased endpoint inventory, parity gates, rollback strategy, and monitoring requirements live in
+`docs/safe_cex_audit_july/woo-v3-migration-plan.md`. Preview and prod are both production lanes, so
+write-path migration requires fixture coverage and a credentialed WooX demo lifecycle smoke first.
 
 ## CCXT Reference Implementation
 
@@ -33,16 +42,16 @@ This directory contains the WooX perpetual futures exchange integration for Teal
 
 WooX uses **two different HMAC-SHA256 signature methods** depending on API version.
 
-### V1 Signature (for `/v1/` endpoints, `woo.api.ts:13`)
+### V1 Signature (`signV1` in `woo.api.ts`)
 
 1. Serialize params alphabetically with `qs.stringify` (sorted via `localeCompare`)
 2. Concatenate: `serialized_params|timestamp` (pipe separator)
 3. Sign: `HMAC-SHA256(concatenated_string, secret) -> hex`
 4. For POST/DELETE/PUT: data is moved to query string, body is set to empty string `''`
 5. Content-Type for mutations: `application/x-www-form-urlencoded`
-6. **Exception**: `POSITION_MODE` endpoint body is NOT cleared (conditional at `woo.api.ts:48`)
+6. **Exception**: `POSITION_MODE` endpoint body is NOT cleared
 
-### V3 Signature (for `/v3/` endpoints, `woo.api.ts:57`)
+### V3 Signature (`signV3` in `woo.api.ts`)
 
 1. Concatenate: `timestamp + METHOD + url + json_body` (no separators)
 2. If params exist, they are serialized into the URL before signing (then `delete nextConfig.params`)
@@ -56,7 +65,7 @@ WooX uses **two different HMAC-SHA256 signature methods** depending on API versi
 - `x-api-signature`: HMAC-SHA256 hex signature
 - `cache-control`: `'no-cache'`
 
-### Route Selection (`woo.api.ts:142-147`)
+### Route Selection (`createAPI` request interceptor)
 
 The interceptor automatically selects the signing method based on URL:
 
@@ -73,7 +82,7 @@ WooX supports primary and secondary API keys via `createApiWithSecondaryKey`:
 - `xhr` - Auto-switching between primary and secondary
 - `_proxyEnforcedXhr` - Separate instance with proxy enforcement for specific endpoints (kline history)
 
-### Broker ID Injection (`woo.api.ts:127-134`)
+### Broker ID Injection (`createAPI` request interceptor)
 
 - On `PLACE_ORDER` POST: injects `broker_id` field
 - On `ALGO_ORDER` POST: injects `brokerId` field (different key name)
@@ -81,7 +90,7 @@ WooX supports primary and secondary API keys via `createApiWithSecondaryKey`:
 - Testnet broker ID: `e708a644-9ce5-46c6-b50c-74b15f62d8ca`
 - Injection is wrapped in try/catch to avoid breaking retry logic
 
-### Private WebSocket Authentication (`woo.ws-private.ts:27-41`)
+### Private WebSocket Authentication (`WooPrivateWebscoket.onOpen`)
 
 On connection open, sends auth event with HMAC signature:
 
@@ -96,11 +105,11 @@ On connection open, sends auth event with HMAC signature:
 }
 ```
 
-Note: The sign string is `|<timestamp>` (pipe + timestamp), signed with the secret. Subscriptions are sent only after receiving `{ "event": "auth", "success": true }`.
+Note: The sign string is `|<timestamp>` (pipe + timestamp), signed with the secret. Subscriptions are sent only after receiving `{ "event": "auth", "success": true }`; an auth failure emits the server's `message`/`error` and leaves the socket unsubscribed.
 
 ## Startup Sequence
 
-The `start()` method (`woo.exchange.ts:163`) orchestrates initialization:
+The `start()` method orchestrates initialization:
 
 1. **Parallel fetch** (`Promise.all`):
    - `fetchMarkets()` -> on completion, stores markets, sets `loaded.markets = true`, then immediately calls `publicWebsocket.connectAndSubscribe()` (public WS starts as soon as markets are loaded)
@@ -119,7 +128,7 @@ The `start()` method (`woo.exchange.ts:163`) orchestrates initialization:
 
 **Key difference from many other exchanges**: WooX fetches orders via REST on startup (not just WS snapshot).
 
-### Tick Loop (`woo.exchange.ts:223`)
+### Tick Loop (`tick`)
 
 - Runs on configurable interval via `options.extra.tickInterval`
 - Counter-based selective fetching:
@@ -139,15 +148,18 @@ The `start()` method (`woo.exchange.ts:163`) orchestrates initialization:
 | `/v3/order/{orderId}`                   | v3      | PUT         | Update limit order              |
 | `/v3/algo/orders`                       | v3      | GET         | Algo orders (paginated)         |
 | `/v3/algo/order/{id}`                   | v3      | PUT/DELETE  | Update / cancel algo order      |
+| `/v3/trade/transactionHistory`          | v3      | GET         | Execution history               |
 | `/v3/orders/pending`                    | v3      | DELETE      | Cancel all pending orders       |
 | `/v3/algo/orders/pending`               | v3      | DELETE      | Cancel all pending algo orders  |
 | `/v1/public/info`                       | v1      | GET         | Markets/symbol info             |
 | `/v1/public/futures`                    | v1      | GET         | Futures tickers                 |
 | `/v1/public/orderbook/{symbol}`         | v1      | GET         | Order book snapshot             |
 | `/v1/orders`                            | v1      | GET/DELETE  | Limit orders / cancel by symbol |
+| `/v1/client/trades`                     | v1      | GET         | Recent historical trades        |
+| `/v1/client/hist_trades`                | v1      | GET         | Archived historical trades      |
 | `/v1/order`                             | v1      | POST/DELETE | Place / cancel single order     |
 | `/v1/kline`                             | v1      | GET         | Kline data (recent)             |
-| `https://api-pub.woo.org/v1/hist/kline` | v1      | GET         | Historical kline data           |
+| `https://api-pub.woox.io/v1/hist/kline` | v1      | GET         | Historical kline data           |
 | `/v1/client/leverage`                   | v1      | POST        | Set account leverage            |
 | `/v1/client/futures_leverage`           | v1      | GET/POST    | Get/set per-symbol leverage     |
 | `/v1/client/position_mode`              | v1      | POST        | Change position mode            |
@@ -174,7 +186,7 @@ Both public and private WS URLs are appended with `options.applicationId`.
 
 Then re-subscribes to any previously active on-demand topics (klines, orderbooks) and resets orderbook state.
 
-**Ping/pong**: Sends `{ "event": "ping" }`. Responds to server-initiated pings with `{ "event": "pong" }` (`handlePingEvent`, `woo.ws-public.ts:96-98`). Pong receipt triggers `handlePongEvent()` from `BaseWebSocket` which schedules next ping after 5 seconds.
+**Ping/pong**: Sends `{ "event": "ping" }`. Responds to server-initiated pings with `{ "event": "pong" }` in `handlePingEvent`. Pong receipt triggers `handlePongEvent()` from `BaseWebSocket`, which schedules the next ping after 5 seconds.
 
 **Reconnection**: On reconnect, emits `emitWsReconnected()` if `ENABLE_RECONNECTING_WEBSOCKET` is enabled.
 
@@ -187,7 +199,7 @@ Then re-subscribes to any previously active on-demand topics (klines, orderbooks
 - `markprices`: Updates `mark`
 - `estfundingrate`: Updates `fundingRate`, `fundingTime`
 
-**OHLCV streaming** (`listenOHLCV`, `woo.ws-public.ts:164`):
+**OHLCV streaming** (`WooPublicWebsocket.listenOHLCV`):
 
 - Primary topic: `<PERP_SYMBOL>@kline_<interval>` (e.g., `PERP_BTC_USDT@kline_1m`)
 - Secondary topic: `<PERP_SYMBOL>@trades` (subscribed only if not `publicDataOnly`)
@@ -195,7 +207,7 @@ Then re-subscribes to any previously active on-demand topics (klines, orderbooks
 - Secondary parser: Constructs candles from trade data using `getCandleStartTime()`. Especially important for sub-second intervals (`opts.interval.endsWith('s')`) where kline WS doesn't fire frequently enough.
 - Cleanup: Unsubscribes from both primary and secondary topics when listener is removed
 
-**Orderbook management** (`listenOrderBook`, `woo.ws-public.ts:310`):
+**Orderbook management** (`WooPublicWebsocket.listenOrderBook`):
 
 1. Subscribe to `<PERP_SYMBOL>@orderbookupdate`
 2. On first WS message, trigger REST snapshot fetch via `/v1/public/orderbook/<symbol>`
@@ -217,7 +229,7 @@ Class name: `WooPrivateWebscoket` (note: typo in original -- "Webscoket")
 
 **Ping/pong**: Sends `{ "event": "ping" }`. Responds to server pings with `{ "event": "pong" }`. Handles both directions.
 
-**Execution Reports** (`handleExecutionReport`, `woo.ws-private.ts:101`):
+**Execution Reports** (`WooPrivateWebscoket.handleExecutionReport`):
 
 - Maps order data using `parent.mapLimitOrder()` (shared with REST order mapping)
 - Status handling:
@@ -225,7 +237,7 @@ Class name: `WooPrivateWebscoket` (note: typo in original -- "Webscoket")
   - `CANCELLED`, `FILLED`: Update order status to Canceled/Closed
   - `FILLED`, `PARTIALLY_FILLED`: Emit fill event with `executedPrice` and `executedQuantity`
 
-**Algo Execution Reports** (`handleAlgoExecutionReport`, `woo.ws-private.ts:133`):
+**Algo Execution Reports** (`WooPrivateWebscoket.handleAlgoExecutionReport`):
 
 - Receives array of algo order updates
 - Maps using `parent.mapAlgoOrder()` which returns an array (handles child orders)
@@ -261,7 +273,7 @@ Note: WooX uses `MARKET_PRICE` (not `LAST_PRICE`) to refer to the last/contract 
 
 ## Order Lifecycle
 
-### Regular Order Placement (`placeOrder`, `woo.exchange.ts:847`)
+### Regular Order Placement (`placeOrder`)
 
 1. If algo order type (StopLoss, TakeProfit, TrailingStopLoss), delegates to `placeAlgoOrder()`
 2. For limit/market orders:
@@ -277,7 +289,7 @@ metadata — the shared `downSizeReduceOrder` web-layer util clamps the
 amount before it reaches `placeOrder`. `placeOrder` itself does not clamp.
 See `../CLAUDE.md` → "Reduce-only order downsizing".
 
-### Algo Order Placement (`placeAlgoOrder`, `woo.exchange.ts:911`)
+### Algo Order Placement (`placeAlgoOrder`)
 
 Three distinct paths based on order type and amount:
 
@@ -285,7 +297,7 @@ Three distinct paths based on order type and amount:
 2. **TP/SL with specific amount** (partial) -> `placeStopMarket()` using `algoType: 'STOP'`, `type: 'MARKET'`
 3. **TP/SL without amount** (full position) -> `placePositionalAlgoOrder()` using `algoType: 'POSITIONAL_TP_SL'` with `childOrders` array
 
-### Positional TP/SL Orders (`placePositionalAlgoOrder`, `woo.exchange.ts:1069`)
+### Positional TP/SL Orders (`placePositionalAlgoOrder`)
 
 - Uses `algoType: 'POSITIONAL_TP_SL'` with `childOrders` array
 - Each child has `type: 'CLOSE_POSITION'` and `algoType: 'STOP_LOSS'` or `'TAKE_PROFIT'`
@@ -296,17 +308,17 @@ Three distinct paths based on order type and amount:
 
 When placing a new TP or SL, the code checks for an existing sibling (the other type):
 
-1. Find existing sibling order in store (`woo.exchange.ts:933-938`)
-2. If sibling exists: Cancel the sibling's parent order, then re-place both TP and SL together
-3. **TODO comment** (`woo.exchange.ts:948`): Race condition exists with bulk cancel stops where a sibling stop may be recreated after a cancel-all
+1. Find the existing opposite-type sibling in the store.
+2. If a sibling exists, cancel the shared parent through `cancelAlgoOrder(sibling, false)` so the old sibling is not recreated.
+3. Place one combined positional TP/SL parent with the retained sibling price and the new price.
 
-When cancelling one side of a TP/SL pair (`cancelAlgoOrder`, `woo.exchange.ts:797`):
+When directly cancelling one side of a TP/SL pair (`cancelAlgoOrder`):
 
 1. Cancel the parent algo order
 2. If a sibling exists, automatically re-create just the sibling via `placePositionalAlgoOrder()`
 3. If the cancel response says "already canceled", silently update order status instead of throwing
 
-### Order Update (`updateOrder`, `woo.exchange.ts:597`)
+### Order Update (`updateOrder`)
 
 Three paths based on order type:
 
@@ -322,9 +334,9 @@ Three paths based on order type:
 - **Single algo order**: DELETE `/v3/algo/order/{parentId}`
 - **All orders**: DELETE `/v3/orders/pending`
 - **Symbol orders**: DELETE `/v1/orders` with `symbol` param
-- **Parent ID deduplication**: `cancelOrders()` filters out orders sharing the same `parentId` to avoid cancelling the same algo parent multiple times (`woo.exchange.ts:769`)
+- **Parent ID deduplication**: `cancelOrders()` filters out orders sharing the same `parentId` to avoid cancelling the same algo parent multiple times
 
-### Trailing Stop Loss (`placeTrailingStopLossOrder`, `woo.exchange.ts:1017`)
+### Trailing Stop Loss (`placeTrailingStopLossOrder`)
 
 - Resolves position for the symbol and opposite side
 - Calculates `priceDistance` as absolute difference between `ticker.last` and `opts.price`
@@ -344,8 +356,8 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 
 - WooX uses `PERP_BTC_USDT` format (underscore-separated with `PERP_` prefix)
 - Internal format: `BTCUSDT` (concatenated)
-- **`normalizeSymbol`** (`woo.utils.ts:3`): `PERP_BTC_USDT` -> split on `_` -> take [1] and [2] -> `BTCUSDT`
-- **`reverseSymbol`** (`woo.utils.ts:8`): `BTCUSDT` -> strip `USDT` -> `PERP_<base>_USDT`
+- **`normalizeSymbol`**: `PERP_BTC_USDT` -> split on `_` -> take [1] and [2] -> `BTCUSDT`
+- **`reverseSymbol`**: `BTCUSDT` -> strip `USDT` -> `PERP_<base>_USDT`
 - Both functions are memoized with lodash `memoize`
 - Market `id` field: `<base>/<quote>:USDT` (e.g., `BTC/USDT:USDT`)
 - **Limitation**: `reverseSymbol` always assumes USDT quote -- it strips `USDT` and prepends `PERP_`. This means non-USDT pairs would not work correctly.
@@ -365,14 +377,14 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 - All API values are native decimals (no scaling/conversion needed)
 - Balance values rounded to 2 decimal places: `Math.round(value * 100) / 100`
 
-### uPNL Calculation (`woo.exchange.ts:503-510`)
+### uPNL Calculation (`fetchOpenPositions`)
 
 - Computed client-side from entry price and mark price (WooX API does not provide uPNL in account endpoint)
 - `priceDiff = max(entryPrice, markPrice) - min(entryPrice, markPrice)`
 - Direction: `isLoss` if (Long and mark < entry) or (Short and mark > entry)
 - `upnl = priceDiff * contracts * (isLoss ? -1 : 1)`, rounded to 2 decimal places
 
-### Balance Calculation (`woo.exchange.ts:251-270`)
+### Balance Calculation (`fetchBalance`)
 
 - `free = freeCollateral` (rounded to cents)
 - `total = totalAccountValue` (rounded to cents)
@@ -391,13 +403,30 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 
 ## State Reconciliation
 
+### Executions and trade history
+
+- `fetchExecutions` reads `/v3/trade/transactionHistory`, normalizes both current camelCase and
+  legacy snake_case fields, applies symbol/order/time filters, sorts ascending, and caps the result.
+- `fetchHistoricalTrades` queries `/v1/client/trades` and then `/v1/client/hist_trades` when needed,
+  deduplicating normalized fills across the two legacy windows.
+- These routes are read-only reconciliation paths; the V3 migration target for both legacy trade
+  lists is `/v3/trade/transactionHistory`.
+
+### Fill-driven optimistic position sync
+
+The constructor attaches `handleFillForPositionSync` to the exchange `fill` event. For one-way
+positions, `applyOptimisticOneWayPositionFromFill` immediately adjusts the local position so the UI
+does not wait for polling. `scheduleFillPositionRefresh` then performs bounded, signature-aware REST
+reconciliation with retry delays. `dispose` removes the fill listener and clears every pending timer,
+in-flight marker, and expected signature. Preserve this lifecycle when changing fill or position code.
+
 ### Orders
 
 - **Initial state**: Fetched via REST on startup (both limit orders from `/v1/orders` and algo orders from `/v3/algo/orders`)
 - **Paginated fetching**: `fetchOrdersRecursively()` handles pagination, fetching with `status: 'INCOMPLETE'` and recursively loading additional pages when `total > records_per_page * page`
 - **WebSocket updates**: Execution reports and algo execution reports incrementally update/add/remove orders
 - **Periodic refresh**: Orders refetched every 10th tick via REST, completely replacing the store
-- **Algo order nesting**: REST response may have `data` wrapper that needs unwrapping (`data = (data as any).data || data` at `woo.exchange.ts:660`)
+- **Algo order nesting**: REST responses may have a second `data` wrapper that `fetchAlgoOrders` unwraps before mapping rows
 
 ### Positions
 
@@ -422,21 +451,21 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 
 ### Implementation Capabilities
 
-#### Leverage (`setLeverage`, `woo.exchange.ts:1155`)
+#### Leverage (`setLeverage`)
 
 - Per-symbol leverage via POST to `/v1/client/futures_leverage`
 - Always sends `position_side: 'BOTH'` and `margin_mode: 'CROSS'` regardless of actual mode
-- Comment notes: "WOO seems to actually ignore this and always sets both" (`woo.exchange.ts:1167`)
+- The implementation notes that WooX ignores per-side selection and applies both sides
 - No per-side leverage support (commented out hedge mode per-side logic)
 
-#### Position Mode (`changePositionMode`, `woo.exchange.ts:1184`)
+#### Position Mode (`changePositionMode`)
 
 - POST to `/v1/client/position_mode` with `position_mode: 'HEDGE_MODE' | 'ONE_WAY'`
 - Updates cached `_accountPositionMode`
 - Refetches positions after change
 - Known error: `error_code: 111000` -- "Position mode cannot be altered while there are pending orders"
 
-#### Position Metadata (`fetchPositionMetadata`, `woo.exchange.ts:392`)
+#### Position Metadata (`fetchPositionMetadata`)
 
 - For symbols without open positions, creates fake position entries with leverage info
 - Queries `/v1/client/futures_leverage` per symbol
@@ -456,18 +485,18 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 - **Private WS**: `wss://wss.staging.woox.io/v2/ws/private/stream/<applicationId>`
 - **Testnet broker ID**: `e708a644-9ce5-46c6-b50c-74b15f62d8ca` (labeled "safe-cex" in code)
 - URLs selected via `options.testnet` boolean
-- Kline history endpoint is NOT testnet-specific (always uses `https://api-pub.woo.org`)
+- Kline history endpoint is NOT testnet-specific (always uses `https://api-pub.woox.io`)
 
 ## Known Quirks / Implementation Notes
 
-1. **Dual signature methods**: V1 endpoints use `params|timestamp` format, V3 endpoints use `timestamp+METHOD+url+body` format. The interceptor auto-selects based on URL (`woo.api.ts:142-147`).
+1. **Dual signature methods**: V1 endpoints use `params|timestamp` format, V3 endpoints use `timestamp+METHOD+url+body` format. The request interceptor auto-selects based on URL.
 2. **POST_ONLY as order type**: WooX treats `POST_ONLY` as a separate order type rather than a time-in-force value. Code maps PostOnly TIF to `type: 'POST_ONLY'` when placing orders, and maps `POST_ONLY` type back to `OrderTimeInForce.PostOnly` when reading.
-3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are moved to the query string and body is set to empty string `''`, except for the `POSITION_MODE` endpoint (`woo.api.ts:48`).
+3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are moved to the query string and body is set to empty string `''`, except for the `POSITION_MODE` endpoint.
 4. **No uPNL in account endpoint**: WooX does not provide unrealized PnL in the account endpoint. uPNL is computed from positions polling and added to balance. This causes a timing issue where `fetchBalance()` alone returns stale `upnl`.
-5. **Historical kline from separate domain**: Historical kline data uses `https://api-pub.woo.org` via `_proxyEnforcedXhr`, while recent kline data uses the main API. Selection is based on distance from current candle (threshold: 100 candles, `woo.exchange.ts:553`).
-6. **Kline secondary trades topic**: For sub-minute/sub-second candle intervals, subscribes to both `@kline` and `@trades` topics. Trade data is used to construct candles in real-time when the kline WS topic doesn't fire frequently enough. Only subscribed if NOT in `publicDataOnly` mode (`woo.ws-public.ts:271`).
+5. **Historical kline from separate domain**: Historical legacy kline data uses `https://api-pub.woox.io` via `_proxyEnforcedXhr`, while recent kline data uses the main API. `fetchOHLCV` selects it when the requested candle is more than 100 intervals old.
+6. **Kline secondary trades topic**: For sub-minute/sub-second candle intervals, `listenOHLCV` subscribes to both `@kline` and `@trades`. Trade data constructs real-time candles when the kline topic is too sparse. The trades topic is used only outside `publicDataOnly` mode.
 7. **Positional TP/SL**: TP/SL are placed as `POSITIONAL_TP_SL` algo orders with `childOrders` array containing `STOP_LOSS` and/or `TAKE_PROFIT` children with `type: 'CLOSE_POSITION'`.
-8. **Sibling order management**: When placing new TP or SL, checks for existing sibling. If found, cancels parent and re-places both together. When cancelling one side, automatically re-creates the sibling. **TODO**: Race condition exists with bulk cancel stops where sibling stop may be recreated after cancel-all (`woo.exchange.ts:948`).
+8. **Sibling order management**: Directly cancelling one side re-creates the retained sibling. Replacing a TP or SL calls the cancel-only variant and then places one combined bracket, preventing a stale duplicate sibling.
 9. **Partial TP/SL (STOP type)**: When a TP/SL order has a specific amount (not full position), it uses `algoType: 'STOP'` with `type: 'MARKET'` instead of `POSITIONAL_TP_SL`.
 10. **Trailing stop**: Uses `callbackValue` (price distance from last to stop) and uses the full position size. Uses cancel-and-replace for updates.
 11. **Paginated order fetching**: `fetchOrdersRecursively` handles pagination for both limit and algo orders, recursively fetching until all pages are loaded.
@@ -476,8 +505,8 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 14. **Public data only mode**: If `publicDataOnly` is true or no API keys, skips private WS and sets all private data as loaded.
 15. **Typo in class name**: Private WebSocket class is named `WooPrivateWebscoket` (missing 'k' in "Socket").
 16. **Leverage always sends BOTH/CROSS**: Regardless of actual position mode, leverage requests always use `position_side: 'BOTH'` and `margin_mode: 'CROSS'` due to WooX API behavior.
-17. **Algo order response nesting**: Algo order fetch responses may have double-nested `data` field requiring unwrapping (`woo.exchange.ts:660`).
-18. **Cancel already-canceled handling**: `cancelAlgoOrder()` silently succeeds when the error message includes "already canceled" (`woo.exchange.ts:816`).
+17. **Algo order response nesting**: Algo order fetch and placement responses carry nested `data`; placement IDs come from `data.rows[].orderId`.
+18. **Cancel already-canceled handling**: `cancelAlgoOrder()` silently succeeds when the error message includes "already canceled".
 19. **Proxy for non-base URLs**: Both V1 and V3 sign functions handle proxy URL injection for URLs starting with `http` (non-base URL, like kline history) via `getProxyForAxios()`.
 
 ## Error Handling
@@ -491,15 +520,15 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 
 ### Specific Error Patterns
 
-- **Account mode check** (`woo.exchange.ts:258`): Throws `"WOO X account is in ${mode} mode, only FUTURES mode is supported"` if not in FUTURES mode
-- **Isolated margin warning** (`woo.exchange.ts:527`): Emits error when isolated margin position detected
-- **Position mode change** (`woo.exchange.ts:1192-1198`): Error code `111000` / code `-1005` -- "Position mode cannot be altered while there are pending orders"
-- **Cancel already-canceled** (`woo.exchange.ts:816`): Silently handles "already canceled" error by updating store status instead of throwing
-- **Failed positions fetch** (`woo.exchange.ts:485`): Checks `(data as any)?.success` and throws with `data.message` if false
+- **Account mode check** (`fetchBalance`): Throws `"WOO X account is in ${mode} mode, only FUTURES mode is supported"` if not in FUTURES mode
+- **Isolated margin warning** (`fetchOpenPositions`): Emits an error when an isolated-margin position is detected
+- **Position mode change** (`changePositionMode`): Error code `111000` / code `-1005` means "Position mode cannot be altered while there are pending orders"
+- **Cancel already-canceled** (`cancelAlgoOrder`): Silently handles "already canceled" by updating store status instead of throwing
+- **Failed positions fetch** (`fetchOpenPositions`): Checks `success` and throws with `data.message` if false
 
 ### Validation
 
-- `validateAccount()` - Tests both primary and secondary API keys (if configured) by calling `/v3/accountinfo`. Returns empty string on success, error message on failure.
+- `validateAccount()` - Tests both primary and secondary API keys (if configured) by calling `/v3/accountinfo`. On failure it prefers WooX's `message` response field, then the legacy `msg` and generic error fallbacks.
 - `getAccount()` - Returns `applicationId` and `referrerID` from account info.
 
 ## Testing / Validation

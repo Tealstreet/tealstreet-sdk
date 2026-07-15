@@ -40,7 +40,7 @@ export const ENDPOINTS = {
   HIST_TRADES: '/v1/client/hist_trades',
   ORDERS: '/v1/orders',
   KLINE: '/v1/kline',
-  KLINE_HISTORY: 'https://api-pub.woo.org/v1/hist/kline',
+  KLINE_HISTORY: 'https://api-pub.woox.io/v1/hist/kline',
   CANCEL_ORDER: '/v1/order',
   PLACE_ORDER: '/v1/order',
   LEVERAGE: '/v1/client/leverage',
@@ -126,6 +126,14 @@ export type PLACE_ORDER_RESPONSE = {
   order_quantity: number;
   order_amount: number;
   client_order_id: number;
+};
+
+export type PLACE_ALGO_ORDER_RESPONSE = {
+  success: boolean;
+  timestamp: number;
+  data: {
+    rows: Array<{ orderId: number | string }>;
+  };
 };
 
 // {

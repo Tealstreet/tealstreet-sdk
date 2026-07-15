@@ -130,8 +130,14 @@ export class WooPrivateWebscoket extends BaseWebSocket<WOOXExchange> {
         return;
       }
 
-      if (json?.event === 'auth' && json?.success) {
-        this.subscribe();
+      if (json?.event === 'auth') {
+        if (json?.success) {
+          this.subscribe();
+        } else {
+          this.emitAndLogError(
+            json?.message || json?.error || 'WOO X private websocket authentication failed',
+          );
+        }
         return;
       }
 
