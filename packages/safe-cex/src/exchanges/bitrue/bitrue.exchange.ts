@@ -753,7 +753,10 @@ export class BitrueExchange extends BaseExchange {
 
   fetchOrdersForSymbol = async (symbol: string) => {
     try {
-      const { data } = await this.unlimitedXHR.get<FETCH_ORDERS_RESPONSE>(ENDPOINTS.ORDERS, {
+      // Open-order reconciliation is an authenticated read. Keep it on the
+      // helper-wired client so secondary read keys and the package rate limit
+      // apply; `unlimitedXHR` is reserved for urgent writes and public markets.
+      const { data } = await this.xhr.get<FETCH_ORDERS_RESPONSE>(ENDPOINTS.ORDERS, {
         params: {
           contractName: symbol,
         },
@@ -828,7 +831,11 @@ export class BitrueExchange extends BaseExchange {
       return orders;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return this.store.orders;
+      // A per-symbol reconciliation must never leak another symbol's orders
+      // into the result. `fetchOrders(symbols)` flattens these arrays, so the
+      // old account-wide fallback duplicated unrelated orders on every failed
+      // symbol request.
+      return this.store.orders.filter((order) => order.symbol === symbol);
     }
   };
 
@@ -959,7 +966,9 @@ export class BitrueExchange extends BaseExchange {
           },
           leverage: {
             min: 1,
-            // TODO: where to fetch this?
+            // Bitrue's documented venue ceiling is 125x, but the actual cap is
+            // contract-specific. Keep the conservative startup value until
+            // fetchSymbolMaxLeverage() reads /fapi/v2/leverageBracket.
             max: 100,
           },
         },

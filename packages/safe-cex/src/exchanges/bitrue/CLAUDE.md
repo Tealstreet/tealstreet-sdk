@@ -297,9 +297,10 @@ No native order amendment. Updates implemented as:
 3. Execute each chunk in `Promise.all()` (parallel within chunk)
 4. **Critical**: After cancellation, calls `callMethodInWorker('removeOrders', orderIds)` because Bitrue WebSocket does **not** reliably send cancel updates
 
-### Order Fetching (`fetchOrdersForSymbol`, `bitrue.exchange.ts:505-585`)
+### Order Fetching (`fetchOrdersForSymbol`)
 
-- Fetches per-symbol via `GET /fapi/v2/openOrders?contractName={symbol}` using `unlimitedXHR`
+- Fetches per-symbol via `GET /fapi/v2/openOrders?contractName={symbol}` using the helper-wired, rate-limited `xhr` read client so secondary read keys apply
+- On a transient failure, returns only the requested symbol's current stored orders; never returns or duplicates the account-wide order list
 - Type determination logic for orders without `type` field: uses `triggerType` (1=SL, 2=TP), fallback to `Market`
 - Status mapping: `INIT` or `action === 'OPEN'` -> Open, otherwise Closed
 - For TP/SL orders: `amount` comes from `executedQty`, `filled` is always 0 (assumed untriggered)
@@ -345,7 +346,7 @@ Market orders (`type === OrderType.Market`) are silently ignored in WS handler (
 - `precision.price`: `1 / 10 ** market.pricePrecision` (e.g., pricePrecision=2 -> 0.01)
 - `limits.amount.min`: `market.minOrderVolume * multiplier`
 - `limits.amount.max`: `market.maxMarketVolume * multiplier`
-- `limits.leverage.max`: Hardcoded to `100` (TODO comment: "where to fetch this?")
+- `limits.leverage.max`: conservative startup value `100`; Bitrue's venue ceiling is 125x, while the contract-specific value is corrected lazily from `/fapi/v2/leverageBracket`
 
 ### Price Rounding
 
@@ -376,7 +377,7 @@ Uses ticker's last price from store.
 ## Rate Limiting
 
 - **Rate-limited client** (`xhr`): `maxRPS: 5` (5 requests per second via `axios-rate-limit`, `bitrue.exchange.ts:81`)
-- **Unlimited client** (`unlimitedXHR`): No rate limit, used for order placement and market fetching (`bitrue.exchange.ts` constructor)
+- **Unlimited client** (`unlimitedXHR`): No rate limit, used for urgent order writes and public market fetching; authenticated open-order reads use `xhr`
 - **Request timeout**: Configurable via `recvWindow` (default 20,000ms, `bitrue.types.ts:3`)
 - **Axios retry**: 3 retries on network errors OR `error sign!` responses (`bitrue.api.ts:12-17,46-49`)
 - **Order batch placement**: Chunks of 5 orders placed in parallel (`bitrue.exchange.ts:942-964`)
@@ -388,7 +389,7 @@ Uses ticker's last price from store.
 
 ### Orders
 
-- REST fetches per-symbol via `fetchOrdersForSymbol()`, returns full set for that symbol
+- REST fetches per-symbol via `fetchOrdersForSymbol()`, returns the full set for that symbol, and preserves only that symbol's stored snapshot if the request fails
 - WS `handleOrderTradeUpdate()` calls `store.addOrUpdateOrder()` for incremental updates
 - WS does NOT reliably send cancel updates -- after `cancelOrders()`, manual `callMethodInWorker('removeOrders')` is required
 - TP/SL orders return bad IDs from placement API -- `placeOrder()` returns `[]` and triggers `fetchAndSetOrders()` to get correct IDs
@@ -567,7 +568,7 @@ Only 7 timeframes supported (no 3m, 2h, 3h, 4h, 6h, 12h, 1M).
 
 ## Testing / Validation
 
-No dedicated test files exist for the Bitrue exchange integration.
+Fresh deterministic Bitrue regressions live under `src/__tests__/audit-regressions/`. They cover attached TP/SL payloads, read-only leverage metadata, futures-only WebSocket transport, per-symbol order-fetch failure isolation, and conservative startup leverage limits.
 
 ## Grafana Monitoring
 
