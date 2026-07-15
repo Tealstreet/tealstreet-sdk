@@ -1,32 +1,61 @@
 import type { BinanceSpotExchange } from './binancespot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import createHmac from 'create-hmac';
 import { ENABLE_PWS_LOG } from '../../config/config';
 import { OrderStatus, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TYPE_SPOT } from './binancespot.types';
+import { BASE_WS_URL, ORDER_SIDE, ORDER_TYPE_SPOT, USER_DATA_RECV_WINDOW } from './binancespot.types';
+
+export const BINANCE_SPOT_USER_DATA_REQUEST_ID = 'tealstreet-user-data';
+export const BINANCE_SPOT_HEARTBEAT_REQUEST_ID = 42;
+
+export const buildBinanceSpotUserDataSignaturePayload = (
+  apiKey: string,
+  timestamp: number,
+  recvWindow = USER_DATA_RECV_WINDOW,
+) => `apiKey=${apiKey}&recvWindow=${recvWindow}&timestamp=${timestamp}`;
 
 export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> {
+  private subscriptionAttempt = 0;
+
   connectAndSubscribe = async () => {
-    if (!this.isDisposed) {
-      const listenKey = await this.fetchListenKey();
+    if (this.isDisposed) return;
 
-      const key = this.parent.options.testnet ? 'testnet' : 'livenet';
-      const base = BASE_WS_URL.private[key];
-
-      const url = `${base}/${listenKey}`;
-
-      this.ws = this.createWebsocket(url);
-      this.ws.addEventListener('message', this.onMessage);
-      this.ws.addEventListener('close', this.onClose);
-      this.ws.addEventListener('open', this.onOpen);
+    const { key: apiKey, secret, remoteSigner } = this.parent.options;
+    if (!apiKey || (!secret && !remoteSigner)) {
+      this.emitAndLogError('Binance Spot private WebSocket requires an API key and signing secret');
+      return;
     }
+
+    const environment = this.parent.options.testnet ? 'testnet' : 'livenet';
+    this.ws = this.createWebsocket(BASE_WS_URL.private[environment]);
+    this.ws.addEventListener('message', this.onMessage);
+    this.ws.addEventListener('close', this.onClose);
+    this.ws.addEventListener('open', this.onOpen);
   };
 
-  onOpen = () => {
-    if (!this.isDisposed) {
-      this.ping();
+  onOpen = async () => {
+    if (this.isDisposed) return;
+    const attempt = ++this.subscriptionAttempt;
+
+    try {
+      const params = await this.buildUserDataSubscriptionParams();
+      // A hosted signer may resolve after the transport has already reopened.
+      // Never let that stale signature subscribe the newer connection twice.
+      if (this.isDisposed || attempt !== this.subscriptionAttempt) return;
+
+      this.sendWithLog(
+        JSON.stringify({
+          id: BINANCE_SPOT_USER_DATA_REQUEST_ID,
+          method: 'userDataStream.subscribe.signature',
+          params,
+        }),
+      );
+    } catch (err: any) {
+      this.emitAndLogError(err?.message || 'Binance Spot user-data subscription signing failed');
+      this.forceClose();
     }
   };
 
@@ -38,18 +67,41 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
       }
 
       const json = jsonParse(data);
+      if (!json) return;
 
-      if (json?.e === 'outboundAccountPosition') {
+      if (json.id === BINANCE_SPOT_USER_DATA_REQUEST_ID) {
+        if (json.status !== 200 || typeof json.result?.subscriptionId !== 'number') {
+          const reason = json.error?.msg || `subscription rejected with status ${json.status ?? 'unknown'}`;
+          this.emitAndLogError(`Binance Spot user-data subscription failed: ${reason}`);
+          this.forceClose();
+          return;
+        }
+
+        this.ping();
+        return;
+      }
+
+      // WebSocket API user-data events are wrapped as
+      // `{ subscriptionId, event: { e: ... } }`, unlike retired listen-key
+      // streams which delivered the event object directly.
+      const event = json.event || json;
+
+      if (event.e === 'outboundAccountPosition') {
         this.recordMessageHandlerStats('position');
-        this.handleAccountEvents([json]);
+        this.handleAccountEvents([event]);
       }
-      if (json?.e === 'executionReport') {
+      if (event.e === 'executionReport') {
         this.recordMessageHandlerStats('order');
-        this.handleOrderEvents([json]);
+        this.handleOrderEvents([event]);
       }
 
-      if (json?.id === 42) {
-        this.handlePongEvent();
+      if (json.id === BINANCE_SPOT_HEARTBEAT_REQUEST_ID) {
+        if (json.status === 200 && json.result?.userDataStream === true) {
+          this.handlePongEvent();
+        } else {
+          this.emitAndLogError('Binance Spot user-data subscription is no longer active; reconnecting');
+          void this.reconnect();
+        }
       }
     }
   };
@@ -57,8 +109,37 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
   ping = () => {
     if (!this.isDisposed) {
       this.pingAt = performance.now();
-      this.sendWithLog(JSON.stringify({ id: 42, method: 'LIST_SUBSCRIPTIONS' }));
+      this.sendWithLog(JSON.stringify({ id: BINANCE_SPOT_HEARTBEAT_REQUEST_ID, method: 'session.status' }));
     }
+  };
+
+  private buildUserDataSubscriptionParams = async () => {
+    const apiKey = this.parent.options.key;
+    const timestamp = virtualClock.getCurrentTimeMs();
+    const payload = buildBinanceSpotUserDataSignaturePayload(apiKey, timestamp);
+
+    if (this.parent.options.remoteSigner) {
+      const result = await this.parent.options.remoteSigner.sign({
+        id: BINANCE_SPOT_USER_DATA_REQUEST_ID,
+        type: 'ws-auth',
+        exchangeName: 'binancespot',
+        accountName: this.parent.options.remoteSigner.accountName,
+        wsAuth: {
+          toSign: payload,
+          outputFormat: 'hex',
+          extraData: { apiKey, recvWindow: USER_DATA_RECV_WINDOW, timestamp },
+        },
+      });
+
+      if (result.error || !result.wsAuthSignature) {
+        throw new Error(result.error || 'Remote signer returned no Binance Spot WebSocket signature');
+      }
+
+      return { apiKey, recvWindow: USER_DATA_RECV_WINDOW, timestamp, signature: result.wsAuthSignature };
+    }
+
+    const signature = createHmac('sha256', this.parent.options.secret).update(payload).digest('hex');
+    return { apiKey, recvWindow: USER_DATA_RECV_WINDOW, timestamp, signature };
   };
 
   handleOrderEvents = (events: Array<Record<string, any>>) => {
@@ -152,18 +233,5 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
         balance: { free, used, total, upnl: 0, currencies, coins, info: event },
       });
     });
-  };
-
-  private fetchListenKey = async () => {
-    const { data } = await this.parent.xhr.post(ENDPOINTS.LISTEN_KEY);
-    setTimeout(() => this.updateListenKey(), 30 * 60 * 1000);
-    return data.listenKey;
-  };
-
-  private updateListenKey = async () => {
-    if (!this.isDisposed) {
-      await this.parent.xhr.put(ENDPOINTS.LISTEN_KEY);
-      setTimeout(() => this.updateListenKey(), 30 * 60 * 1000);
-    }
   };
 }

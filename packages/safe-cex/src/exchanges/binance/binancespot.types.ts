@@ -12,10 +12,15 @@ export const BASE_WS_URL = {
     testnet: 'wss://testnet.binance.vision/ws',
   },
   private: {
-    livenet: 'wss://stream.binance.com:9443/ws',
-    testnet: 'wss://testnet.binance.vision/ws',
+    livenet: 'wss://ws-api.binance.com:443/ws-api/v3',
+    testnet: 'wss://ws-api.testnet.binance.vision/ws-api/v3',
   },
 };
+
+// Binance removed the Spot listen-key REST endpoints on 2026-02-20. Private
+// events now use a signed WebSocket API subscription. Keep this window small,
+// matching Binance's recommendation for signed WebSocket API requests.
+export const USER_DATA_RECV_WINDOW = 5_000;
 
 export const ENDPOINTS = {
   ACCOUNT: '/api/v3/account',
@@ -25,7 +30,6 @@ export const ENDPOINTS = {
   CANCEL_SYMBOL_ORDERS: '/api/v3/openOrders',
   OPEN_ORDERS: '/api/v3/openOrders',
   KLINE: '/api/v3/klines',
-  LISTEN_KEY: '/api/v3/userDataStream',
   ORDERBOOK: '/api/v3/depth',
 };
 

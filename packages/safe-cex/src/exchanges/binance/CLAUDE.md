@@ -167,7 +167,10 @@ All three variants follow the same high-level pattern, with variant-specific dif
 | `/api/v3/openOrders`     | GET         | Fetch all currently open orders          |
 | `/api/v3/klines`         | GET         | OHLCV candle data                        |
 | `/api/v3/depth`          | GET         | Orderbook snapshot                       |
-| `/api/v3/userDataStream` | POST/PUT    | Create or keepalive a listen key         |
+
+Spot private events do not have a REST listen-key endpoint. Binance removed
+`POST`/`PUT`/`DELETE /api/v3/userDataStream` on 2026-02-20; private subscription
+is performed on the WebSocket API as described below.
 
 ### Portfolio Margin (`papi.binance.com` + `fapi.binance.com` for public data)
 
@@ -192,7 +195,7 @@ All three variants follow the same high-level pattern, with variant-specific dif
 
 ### Base URLs
 
-As of **2026-04-23**, Binance retired the legacy `wss://fstream.binance.com/ws` endpoint for USDⓈ-M futures and split it into three category-specific base URLs (`/public/ws`, `/market/ws`, `/private/ws`). Spot and PM private (`/pm/ws/`) endpoints are unchanged. See: [Important WebSocket Change Notice](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Important-WebSocket-Change-Notice).
+As of **2026-04-23**, Binance retired the legacy `wss://fstream.binance.com/ws` endpoint for USDⓈ-M futures and split it into three category-specific base URLs (`/public/ws`, `/market/ws`, `/private/ws`). PM private remains on `/pm/ws/`. Spot public streams remain on `stream.binance.com`, while Spot private events use the separately authenticated WebSocket API after Binance removed listen keys on 2026-02-20. See the [USD-M WebSocket change notice](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Important-WebSocket-Change-Notice) and [Spot WebSocket API](https://developers.binance.com/docs/binance-spot-api-docs/websocket-api/general-api-information).
 
 | Variant             | Public (high-frequency)                    | Market (regular market data)               | Private (user data)                                     |
 | ------------------- | ------------------------------------------ | ------------------------------------------ | ------------------------------------------------------- |
@@ -200,8 +203,8 @@ As of **2026-04-23**, Binance retired the legacy `wss://fstream.binance.com/ws` 
 | **Futures** testnet | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/private/ws?listenKey=…` |
 | **PM** livenet      | `wss://fstream.binance.com/public/ws`      | `wss://fstream.binance.com/market/ws`      | `wss://fstream.binance.com/pm/ws/{listenKey}`           |
 | **PM** testnet      | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/pm/ws/{listenKey}`      |
-| **Spot** livenet    | `wss://stream.binance.com:9443/ws`         | (same as public — unaffected by split)     | `wss://stream.binance.com:9443/ws/{listenKey}`          |
-| **Spot** testnet    | `wss://testnet.binance.vision/ws`          | (same as public — unaffected by split)     | `wss://testnet.binance.vision/ws/{listenKey}`           |
+| **Spot** livenet    | `wss://stream.binance.com:9443/ws`         | (same as public — unaffected by split)     | `wss://ws-api.binance.com:443/ws-api/v3`                |
+| **Spot** testnet    | `wss://testnet.binance.vision/ws`          | (same as public — unaffected by split)     | `wss://ws-api.testnet.binance.vision/ws-api/v3`         |
 
 **Stream → endpoint routing (futures + PM):**
 
@@ -255,7 +258,8 @@ Subscribed on connect via `SUBSCRIBE` method:
 
 ### Private WebSocket Channels
 
-Connection uses listenKey-based authentication (no WebSocket-level auth required).
+Futures and PM use listenKey-based authentication. Spot uses a signed WebSocket
+API subscription and never calls the retired Spot listen-key REST endpoints.
 
 #### Futures (`BinancePrivateWebsocket`)
 
@@ -315,7 +319,17 @@ and WebSocket account/order updates continue while reconciliation is paused.
 | `outboundAccountPosition` | Balance changes per asset |
 | `executionReport`         | Order lifecycle events    |
 
-**Spot-specific**: Uses `data.c` (clientOrderId) as order ID (not `data.i` like futures). Order events use the same nested `o` object pattern as futures (`events.forEach(({ o: data })`).
+**Spot-specific**: Uses `data.c` (clientOrderId) as order ID (not `data.i` like futures).
+
+On every socket open (including reconnect), Spot sends
+`userDataStream.subscribe.signature`. Its params are `apiKey`, a 5-second
+`recvWindow`, `timestamp`, and the lowercase hex HMAC-SHA256 of those first
+three params sorted alphabetically. HMAC keys and hosted `remoteSigner` accounts
+use the same canonical payload. A non-200/malformed subscription response fails
+closed. There is no listen-key fallback because Binance removed those endpoints
+on 2026-02-20. If an asynchronous hosted signature resolves after a newer socket
+open, its attempt token is stale and the frame is dropped so the new connection
+cannot receive duplicate subscriptions.
 
 **Spot order-type mapping.** Spot `executionReport` reports the order type in the `o` field (values `LIMIT`/`MARKET`/`STOP_LOSS`/`STOP_LOSS_LIMIT`/`TAKE_PROFIT`/`TAKE_PROFIT_LIMIT`/`LIMIT_MAKER`) — **not** the futures `ot` field or futures values. `handleOrderEvents` maps via `ORDER_TYPE_SPOT` (in `binancespot.types.ts`); `LIMIT_MAKER` → `OrderType.Limit`, both `STOP_LOSS*` → `StopLoss`, both `TAKE_PROFIT*` → `TakeProfit`. Spot has no `reduceOnly` (kept `false`).
 
@@ -325,10 +339,11 @@ take-profit use the spot market-trigger types. The shared trailing-stop option
 is rejected because it supplies a futures callback-rate shape, while Binance
 Spot requires `trailingDelta` on a stop order.
 
-Spot private-stream fields are top-level: `executionReport` is handled directly
-and `outboundAccountPosition.B` carries changed balances. Do not wrap spot
-fixtures in the futures-only nested `o`/`a` envelopes. Balance events merge the
-changed assets into the existing currency snapshot and recompute USD totals.
+WebSocket API events arrive as `{ subscriptionId, event }`; the inner Spot event
+has top-level `executionReport` fields, and `outboundAccountPosition.B` carries
+changed balances. Do not wrap fixtures in the futures-only nested `o`/`a`
+envelopes. Balance events merge the changed assets into the existing currency
+snapshot and recompute USD totals.
 
 **Spot execution-type vs order-status.** In `executionReport`, `x` is the **execution type** (`NEW`/`TRADE`/`CANCELED`/…) and `X` is the **order status** (`NEW`/`PARTIALLY_FILLED`/`FILLED`/`CANCELED`/…). Fills arrive with `x === 'TRADE'` (the handler previously checked `X === 'TRADE'`, which never matched). On a `TRADE` the handler emits `fill` **and** mirrors the cumulative fill onto the store row (`filled = z`, `remaining = q - z`), transitioning to `Closed` when `X === 'FILLED'` / `z === q`. Without the store update a filled spot order stayed `Open` until the next REST `fetchOrders` — same class of bug the futures `PARTIALLY_FILLED` note describes.
 
@@ -346,20 +361,25 @@ non-negative, matching the futures REST/WS contract. One-way mode is indicated
 by `p.ps === 'BOTH'`. PM does NOT have the `throttledFetchOrders` debounce that
 futures has.
 
-### ListenKey Management
+### ListenKey and Spot Subscription Management
 
-All variants use the same pattern:
+Futures and PM retain listen keys:
 
 1. **Create**: `POST /listenKey` returns `{ listenKey: "..." }`
 2. **Keepalive**: `PUT /listenKey` every 30 minutes via `setTimeout`
 3. ListenKey expires after 60 minutes if not renewed
 4. Keepalive is self-rescheduling: each successful `PUT` schedules the next keepalive
 
+Spot has no listen-key lifecycle. The WebSocket API subscription is connection
+scoped and is re-signed on each open. A `session.status` heartbeat must report
+`userDataStream: true`; if it does not, the socket reconnects and subscribes
+again.
+
 ### Ping/Pong
 
 WebSocket health is monitored by two independent mechanisms:
 
-1. **Ping/Pong via `LIST_SUBSCRIPTIONS`**: A `LIST_SUBSCRIPTIONS` command (`{ id: 42, method: 'LIST_SUBSCRIPTIONS' }`) is sent as a ping. Response with `id: 42` is treated as pong. On pong, `handlePongEvent()` schedules the next ping in 5 seconds and sets a pong miss timeout at `1.5 * 5000 = 7,500ms`. If pong is not received within 7.5 seconds, the WebSocket triggers a reconnection.
+1. **Application heartbeat**: Futures and PM use `LIST_SUBSCRIPTIONS`. Spot uses WebSocket API `session.status` and accepts it as a pong only when the response is successful and reports `userDataStream: true`. On pong, `handlePongEvent()` schedules the next ping in 5 seconds and sets a pong miss timeout at `1.5 * 5000 = 7,500ms`. If pong is not received within 7.5 seconds, the WebSocket triggers a reconnection.
 2. **Last received check via `checkLastReceived()`**: `trackLastReceived()` is called on every incoming message. A polling loop (every 1 second) calls `checkLastReceived()`, which triggers reconnection if no message of any kind has been received within `WS_RECONNECT_THRESHOLD_MS` (20 seconds).
 
 ### Reconnection Logic
@@ -672,11 +692,14 @@ supportsTradesHistory: true
 | Variant | Livenet WS (public + market)                                                  | Testnet WS (public + market)                                                            |
 | ------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Futures | `wss://fstream.binance.com/public/ws` + `wss://fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/public/ws` + `wss://demo-fstream.binance.com/market/ws` |
-| Spot    | `wss://stream.binance.com:9443/ws`                                            | `wss://testnet.binance.vision/ws`                                                       |
+| Spot public | `wss://stream.binance.com:9443/ws`                                        | `wss://testnet.binance.vision/ws`                                                       |
+| Spot private | `wss://ws-api.binance.com:443/ws-api/v3`                                | `wss://ws-api.testnet.binance.vision/ws-api/v3`                                        |
 
 ### Behavioral Differences
 
-- **Listen key signing**: On livenet, listen key POST/PUT requests are NOT signed. On testnet, they ARE signed (the `!options.testnet` check in the interceptor skips the bypass; `binance.api.ts:83`).
+- **Spot private auth**: Both environments use the same signed WebSocket API
+  request contract; only the socket host differs. There is no Spot listen-key
+  signing exception.
 - **Symbol availability**: Testnet typically has a much smaller set of symbols.
 - **PM testnet**: Both papi and fapi use Binance's documented USD-M demo host.
   Binance does not document a separate Portfolio Margin sandbox, so PM-specific
@@ -761,7 +784,9 @@ Calling `changeMarginType()` on PM always throws an error with "Portfolio margin
 
 ### Spot Precision Calculation
 
-Spot computes precision differently from futures: `1 / parseFloat(v(m, 'baseAssetPrecision'))` where `baseAssetPrecision` is an integer like 8, resulting in a step size of `0.00000001` (`binancespot.exchange.ts:202-203`). This is inverted from futures which reads `stepSize` directly from filters.
+Spot reads tradable amount and price increments from `LOT_SIZE.stepSize` and
+`PRICE_FILTER.tickSize`. Only malformed/absent filters fall back to
+`10 ** -baseAssetPrecision` and `10 ** -quoteAssetPrecision`.
 
 ### Tealstreet Tunnel Support
 
@@ -856,7 +881,7 @@ For batch order placement via `/fapi/v1/batchOrders`, each item in the response 
 | Fake positions          | No                                                    | Yes (for all markets)                                                    | No                                           |
 | Balance fetch           | Aggregated per-asset                                  | Per-asset (USDT/USDC/FDUSD)                                              | Top-level fields                             |
 | Private WS events       | `ACCOUNT_UPDATE`, `ORDER_TRADE_UPDATE`, `ALGO_UPDATE` | `ACCOUNT_UPDATE`, `ORDER_TRADE_UPDATE`, `CONDITIONAL_ORDER_TRADE_UPDATE` | `outboundAccountPosition`, `executionReport` |
-| Private WS path         | `/ws/{listenKey}`                                     | `/pm/ws/{listenKey}`                                                     | `/ws/{listenKey}`                            |
+| Private WS path         | `/private/ws?listenKey=…`                             | `/pm/ws/{listenKey}`                                                     | `/ws-api/v3` + signed subscription           |
 | Mark price stream       | Yes                                                   | Yes                                                                      | No (uses last price)                         |
 | Secondary key           | Supported                                             | Supported (validates both)                                               | Not supported                                |
 | Income history          | Supported                                             | Not implemented                                                          | Not implemented                              |

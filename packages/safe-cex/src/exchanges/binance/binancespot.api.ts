@@ -9,7 +9,7 @@ import qs from 'qs';
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancespot.types';
+import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancespot.types';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
@@ -34,11 +34,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   xhr.interceptors.request.use((config) => {
-    // on livenet, don't sign listen key requests (they don't need it)
-    if (config.url === ENDPOINTS.LISTEN_KEY && !options.testnet) {
-      return config;
-    }
-
     const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);
     if (isPublicEndPoint) {
       return {
