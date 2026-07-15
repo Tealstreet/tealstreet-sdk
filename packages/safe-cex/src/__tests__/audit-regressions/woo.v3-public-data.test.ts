@@ -329,9 +329,13 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
   });
 
   it('normalizes the documented descending snapshot into safe-cex side order and cumulative totals', () => {
-    const orderBook = mapWooV3OrderBook(decodeWooV3OrderBook(orderBookFixture));
+    const snapshot = decodeWooV3OrderBook(orderBookFixture);
+    const orderBook = mapWooV3OrderBook(snapshot);
+
+    expect(snapshot.timestamp).toBe(1_725_000_000_000);
 
     expect(orderBook).toEqual({
+      timestamp: 1_725_000_000_000,
       bids: [
         { price: 62001, amount: 1, total: 1 },
         { price: 62000, amount: 3, total: 4 },
@@ -373,8 +377,22 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     expect(() => decodeWooV3OrderBook(envelope({ asks: [], bids: [{ price: '62000', quantity: 'NaN' }] }))).toThrow(
       'quantity must be a finite decimal string',
     );
-    expect(() => mapWooV3OrderBook({ asks: [], bids: [{ price: '62000', quantity: '-1' }] })).toThrow(
-      'quantity must be at least',
+    expect(() =>
+      mapWooV3OrderBook({ timestamp: 1_725_000_000_000, asks: [], bids: [{ price: '62000', quantity: '-1' }] }),
+    ).toThrow('quantity must be at least');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['string', '1725000000000'],
+    ['zero', 0],
+    ['negative', -1],
+    ['fractional', 1_725_000_000_000.5],
+    ['not finite', Number.POSITIVE_INFINITY],
+    ['unsafe', Number.MAX_SAFE_INTEGER + 1],
+  ])('rejects a %s top-level orderbook timestamp', (_name, timestamp) => {
+    expect(() => decodeWooV3OrderBook({ ...orderBookFixture, timestamp })).toThrow(
+      'orderbook.timestamp must be a positive safe integer millisecond timestamp',
     );
   });
 

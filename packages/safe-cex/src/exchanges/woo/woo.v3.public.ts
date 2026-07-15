@@ -33,9 +33,15 @@ export type WooV3OrderBookLevel = Readonly<{
 }>;
 
 export type WooV3OrderBookSnapshot = Readonly<{
+  timestamp: number;
   asks: readonly WooV3OrderBookLevel[];
   bids: readonly WooV3OrderBookLevel[];
 }>;
+
+export type WooV3MappedOrderBookSnapshot = OrderBook &
+  Readonly<{
+    timestamp: number;
+  }>;
 
 export type WooV3KlineRow = Readonly<{
   open: WooV3Decimal;
@@ -104,6 +110,13 @@ const requireInteger = (value: unknown, path: string): number => {
   return value as number;
 };
 
+const requireTimestamp = (value: unknown, path: string): number => {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new Error(`${path} must be a positive safe integer millisecond timestamp`);
+  }
+  return value as number;
+};
+
 const requireBoolean = (value: unknown, path: string): boolean => {
   if (typeof value !== 'boolean') throw new Error(`${path} must be a boolean`);
   return value;
@@ -132,14 +145,23 @@ const requireFiniteNumber = (value: WooV3Decimal | number, path: string, minimum
   return result;
 };
 
-const decodeEnvelope = (input: unknown, name: string): UnknownRecord => {
+const decodeEnvelopeWithTimestamp = (
+  input: unknown,
+  name: string,
+  timestampDecoder: (value: unknown, path: string) => number,
+): Readonly<{ data: UnknownRecord; timestamp: number }> => {
   const response = requireRecord(input, `WOO V3 ${name} response`);
   if (requireBoolean(response.success, `WOO V3 ${name}.success`) !== true) {
     throw new Error(`WOO V3 ${name} response reports success=false`);
   }
-  requireInteger(response.timestamp, `WOO V3 ${name}.timestamp`);
-  return requireRecord(response.data, `WOO V3 ${name}.data`);
+  return Object.freeze({
+    data: requireRecord(response.data, `WOO V3 ${name}.data`),
+    timestamp: timestampDecoder(response.timestamp, `WOO V3 ${name}.timestamp`),
+  });
 };
+
+const decodeEnvelope = (input: unknown, name: string): UnknownRecord =>
+  decodeEnvelopeWithTimestamp(input, name, requireInteger).data;
 
 const decodeRows = <T>(input: unknown, name: string, decoder: (row: unknown, path: string) => T): readonly T[] => {
   const data = decodeEnvelope(input, name);
@@ -224,8 +246,9 @@ export const decodeWooV3Futures = (input: unknown): readonly WooV3FuturesRow[] =
   decodeRows(input, 'futures', decodeFuturesRow);
 
 export const decodeWooV3OrderBook = (input: unknown): WooV3OrderBookSnapshot => {
-  const data = decodeEnvelope(input, 'orderbook');
+  const { data, timestamp } = decodeEnvelopeWithTimestamp(input, 'orderbook', requireTimestamp);
   return Object.freeze({
+    timestamp,
     asks: requireArray(data.asks, 'WOO V3 orderbook.data.asks').map((level, index) =>
       decodeOrderBookLevel(level, `WOO V3 orderbook.data.asks[${index}]`),
     ),
@@ -301,7 +324,7 @@ export const mapWooV3FuturesStats = (
     ];
   });
 
-export const mapWooV3OrderBook = (snapshot: WooV3OrderBookSnapshot): OrderBook => {
+export const mapWooV3OrderBook = (snapshot: WooV3OrderBookSnapshot): WooV3MappedOrderBookSnapshot => {
   const mapSide = (levels: readonly WooV3OrderBookLevel[], side: string) =>
     levels.map((level, index) => ({
       price: requireFiniteNumber(level.price, `WOO V3 orderbook.${side}[${index}].price`, Number.MIN_VALUE),
@@ -309,7 +332,8 @@ export const mapWooV3OrderBook = (snapshot: WooV3OrderBookSnapshot): OrderBook =
       total: 0,
     }));
 
-  const orderBook: OrderBook = {
+  const orderBook: WooV3MappedOrderBookSnapshot = {
+    timestamp: requireTimestamp(snapshot.timestamp, 'WOO V3 orderbook.timestamp'),
     bids: mapSide(snapshot.bids, 'bids'),
     asks: mapSide(snapshot.asks, 'asks'),
   };

@@ -109,7 +109,12 @@ closed, and every acknowledgement topic is parsed through the same official topi
 
 Incremental books must buffer, join a V3 REST snapshot where the first `prevTs` equals the snapshot
 timestamp, and then require each next `prevTs` to equal the previous update's `ts`; any mismatch or
-reconnect requires a fresh snapshot. Private frames decode only to gateway wire models. Do not
+reconnect requires a fresh snapshot. The inert REST decoder requires the top-level snapshot timestamp
+to be a positive JavaScript-safe integer in milliseconds and preserves it through the V3-specific
+mapped book and parity observation. Value-parity canonicalization intentionally excludes timestamp
+because legacy and V3 snapshots are separate requests, but the typed V3 result retains it for that
+future `prevTs` join. No socket, buffering/recovery coordinator, or runtime activation implements the
+join yet, and every V3 migration gate remains false. Private frames decode only to gateway wire models. Do not
 replace store state from them until credentialed evidence proves whether account/balance/position
 arrays are snapshots or patches, the exhaustive ordinary/algo execution lifecycle, command failure
 envelopes, and listen-key rotation behavior. These are typed blockers, so neither WebSocket parity

@@ -1,4 +1,8 @@
-import type { WooV3FuturesStats, WooV3KlineRow } from '../../exchanges/woo/woo.v3.public';
+import type {
+  WooV3FuturesStats,
+  WooV3KlineRow,
+  WooV3MappedOrderBookSnapshot,
+} from '../../exchanges/woo/woo.v3.public';
 import type { Candle, Market, OrderBook, Ticker } from '../../types';
 
 import { readFileSync } from 'node:fs';
@@ -86,6 +90,11 @@ const orderBook = (): OrderBook => ({
     { price: 102, amount: 1, total: 1 },
     { price: 103, amount: 4, total: 5 },
   ],
+});
+
+const v3OrderBook = (timestamp = 1_725_000_000_000): WooV3MappedOrderBookSnapshot => ({
+  ...orderBook(),
+  timestamp,
 });
 
 const candles: Candle[] = [
@@ -190,7 +199,7 @@ describe('WOO V3 endpoint-specific public read parity', () => {
 
   it('compares normalized orderbook level order and cumulative totals exactly', () => {
     const legacy = orderBook();
-    const observed = orderBook();
+    const observed = v3OrderBook();
     const request = { symbol: 'PERP_BTC_USDT' };
     const match = compareWooV3OrderBook({
       legacyRequest: request,
@@ -200,7 +209,11 @@ describe('WOO V3 endpoint-specific public read parity', () => {
     });
     expect(match).toMatchObject({ status: 'match', mismatches: [] });
     expect(match.authoritative).toBe(legacy);
-    expect(canonicalizeWooV3OrderBook(request, legacy)).toBe(canonicalizeWooV3OrderBook(request, observed));
+    expect(match.observed).toBe(observed);
+    expect(match.observed.timestamp).toBe(1_725_000_000_000);
+    expect(canonicalizeWooV3OrderBook(request, observed)).toBe(
+      canonicalizeWooV3OrderBook(request, v3OrderBook(1_725_000_000_001)),
+    );
 
     observed.asks[1]!.total = 5.000000001;
     const changed = compareWooV3OrderBook({
@@ -223,7 +236,7 @@ describe('WOO V3 endpoint-specific public read parity', () => {
       legacyRequest: request,
       v3Request: { symbol: 'PERP_ETH_USDT' },
       legacyOrderBook: legacy,
-      v3OrderBook: orderBook(),
+      v3OrderBook: v3OrderBook(),
     });
     expect(wrongTarget).toMatchObject({
       status: 'blocked',

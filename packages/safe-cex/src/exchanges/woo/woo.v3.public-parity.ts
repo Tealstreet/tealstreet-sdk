@@ -1,5 +1,5 @@
 import type { Candle, Market, OrderBook, OrderBookOrders, Ticker } from '../../types';
-import type { WooV3FuturesStats, WooV3KlineRow } from './woo.v3.public';
+import type { WooV3FuturesStats, WooV3KlineRow, WooV3MappedOrderBookSnapshot } from './woo.v3.public';
 
 import { mapWooV3Candles } from './woo.v3.public';
 
@@ -450,13 +450,23 @@ const canonicalOrderBookLevel = (level: OrderBookOrders) => ({
   total: level.total,
 });
 
-export const canonicalizeWooV3OrderBook = (request: WooV3PublicRequestContext, orderBook: OrderBook): string => {
+const canonicalizeOrderBookValues = (request: WooV3PublicRequestContext, orderBook: OrderBook): string => {
   if (!request.symbol) throw new Error('WOO orderbook request symbol must be non-empty');
   return canonicalString({
     symbol: request.symbol,
     bids: orderBook.bids.map(canonicalOrderBookLevel),
     asks: orderBook.asks.map(canonicalOrderBookLevel),
   });
+};
+
+export const canonicalizeWooV3OrderBook = (
+  request: WooV3PublicRequestContext,
+  snapshot: WooV3MappedOrderBookSnapshot,
+): string => {
+  // REST snapshots are fetched independently, so their response timestamps
+  // are recovery provenance rather than value-parity fields. The typed V3
+  // boundary still carries the timestamp for a future WS prevTs join.
+  return canonicalizeOrderBookValues(request, snapshot);
 };
 
 const compareOrderBookSide = (
@@ -506,9 +516,9 @@ export const compareWooV3OrderBook = (
     legacyRequest: WooV3PublicRequestContext;
     v3Request: WooV3PublicRequestContext;
     legacyOrderBook: OrderBook;
-    v3OrderBook: OrderBook;
+    v3OrderBook: WooV3MappedOrderBookSnapshot;
   }>,
-): WooV3PublicParityResult<OrderBook, OrderBook> => {
+): WooV3PublicParityResult<OrderBook, WooV3MappedOrderBookSnapshot> => {
   const blockers: WooV3PublicParityBlocker[] = [];
   if (!input.legacyRequest.symbol || !input.v3Request.symbol) {
     blockers.push(
@@ -533,7 +543,7 @@ export const compareWooV3OrderBook = (
     authoritative: input.legacyOrderBook,
     observed: input.v3OrderBook,
     legacyCanonical: input.legacyRequest.symbol
-      ? canonicalizeWooV3OrderBook(input.legacyRequest, input.legacyOrderBook)
+      ? canonicalizeOrderBookValues(input.legacyRequest, input.legacyOrderBook)
       : canonicalString({ request: input.legacyRequest }),
     v3Canonical: input.v3Request.symbol
       ? canonicalizeWooV3OrderBook(input.v3Request, input.v3OrderBook)
