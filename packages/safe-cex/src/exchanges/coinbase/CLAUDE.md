@@ -43,13 +43,32 @@ token exchange/refresh policy, and unified WebSocket heartbeat primitives.
 Official-schema fixtures and tests are under
 `src/__tests__/audit-regressions/coinbase.starbase-*`.
 
-This foundation is intentionally inert: no current exchange, WebSocket, API
-factory, metadata, or shared-routing file imports it. Do not wire it into the
-active adapter until the markets/public-data and read-only private-state phases
-have their mapping and reconciliation tests. Coinbase has not yet published
-the inbound `heartbeat`/`test_request` notification envelope in its Starbase
+The second follow-on is implemented in `coinbase.starbase-public.ts`. It is an
+inert markets/public-data layer based on Coinbase's published Starbase OpenAPI
+and AsyncAPI schemas: strict linear-USDC-perpetual instrument normalization,
+legacy `{BASE}-PERP-INTX` saved-symbol compatibility, ticker/book/candle
+mappers, exact public request/channel builders, desired-subscription replay,
+and order-book gap/reconnect recovery. The published sequenced book amount is
+USD notional for perpetuals, so that mapper divides each amount by its price
+before producing the safe-cex base-amount order book. Ticker best-size fields
+do not publish an equally explicit unit in the schema and therefore remain
+unconverted and explicitly named `bidGatewayAmount`/`askGatewayAmount`.
+Raw-book `new`, `change`, and `delete` actions mean add, update, and remove a
+price level. Contradictions are validated before a frame is applied; they clear
+the book and require a new snapshot instead of silently becoming upserts.
+
+Both modules are intentionally inert: no current exchange, WebSocket, API
+factory, metadata, or shared-routing file imports them. Do not wire them into
+the active adapter until read-only private state has mapping and authoritative
+reconciliation tests. The public mapper supports only schema-enumerated BTC/ETH
+linear USDC perpetuals; expanded product bases and an exact amount increment
+remain gated because the current schema enumerates only BTC/ETH and publishes a
+minimum trade amount, not an amount step. Coinbase has not yet published the
+inbound `heartbeat`/`test_request` notification envelope in its Starbase
 OpenAPI or AsyncAPI schema, so the controller accepts an already-classified
-signal and must not grow a guessed wire-frame parser.
+signal and must not grow a guessed wire-frame parser. Public stream mappers
+likewise start at the AsyncAPI channel payload's published `{ data }` shape,
+not a guessed outer notification envelope.
 
 ## File Structure
 
@@ -64,6 +83,7 @@ signal and must not grow a guessed wire-frame parser.
 | `coinbase.ws-private.ts`   | Private WebSocket: handles `user` channel for real-time order updates (snapshot + incremental) and `heartbeats`. Emits fill events on order completion.                 |
 | `coinbase.products.json`   | Sample product data for reference/testing.                                                                                                                              |
 | `coinbase.starbase.ts`     | Inert Starbase JSON-RPC, auth-refresh, endpoint, HTTP transport, and heartbeat primitives. Not wired to active Coinbase traffic.                                        |
+| `coinbase.starbase-public.ts` | Inert Starbase instrument/public-data normalization, public request/subscription contracts, saved-symbol compatibility, and sequenced-book recovery. Not routed.        |
 
 ## Authentication
 
