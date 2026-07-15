@@ -57,10 +57,22 @@ acceptance only, so authoritative readback remains mandatory.
 strict success decoder accepts exact response/data keys and nonnegative safe-integer server
 timestamps. The endpoint cancels both ordinary and algo orders, so it has its own hard-false
 `cancelAllAfterDemoLifecycle` gate rather than inheriting either order-family gate. It has no
-transport owner, runtime import, selector, or activation.
+transport owner, runtime import, or activation; the general REST selector always rejects this route
+until an owner is separately designed and validated.
 `woo.v3.websocket.ts` adds the matching inert WebSocket channel/topic inventory, listen-key and
 subscription descriptors, strict public/private wire decoders, latency-only heartbeat
 classification, and pure sequence/reconnect/resubscribe primitives.
+`woo.v3.runtime-selector.ts` adds the first inert runtime boundary: an explicit legacy/shadow-v3/v3
+REST route selector plus a pure shadow-read comparator. It emits no requests and owns no store.
+Legacy remains authoritative in both legacy and shadow modes, shadow plans are limited to GET-to-GET
+migrations, every mutation is rejected in shadow mode, and V3 authority is rejected while the
+corresponding hard gate is false. Unknown runtime modes fail closed. Routes without active owners
+(`balances`, algo pending-order bulk cancellation, and Cancel-All-After) are rejected in every mode.
+The already-active `/v3/trade/transactionHistory` route is a no-op in legacy/V3 mode and is rejected
+in shadow mode so it can never be double-called. The comparator never passes the authoritative
+legacy snapshot to callbacks: callers provide an already-built canonical string, and the only
+callback decodes and canonicalizes V3. It returns the original snapshot by identity on matches,
+mismatches, and decode/map/canonicalization failures.
 None of these files is imported by
 `woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
@@ -196,6 +208,7 @@ None of this satisfies `cancelAllAfterDemoLifecycle`.
 - `woo.v3.cancel-all-after.ts` - Inert strict VIP dead-man-switch descriptor and response decoder
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.v3.websocket.ts` - Inert V3 WS URLs/topics, strict decoders, blockers, and recovery primitives
+- `woo.v3.runtime-selector.ts` - Inert REST generation selector and legacy-authoritative shadow-read comparator
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)
 - `woo.ws-public.ts` - Public WebSocket (tickers, BBOs, mark prices, funding rates, klines, orderbook)
@@ -308,7 +321,7 @@ The `start()` method orchestrates initialization:
 | Endpoint                                | Version | Method      | Description                     |
 | --------------------------------------- | ------- | ----------- | ------------------------------- |
 | `/v3/accountinfo`                       | v3      | GET         | Account info, balance, mode     |
-| `/v3/balances`                          | v3      | GET         | Detailed balances               |
+| `/v3/balances`                          | v3      | GET         | No request owner; metadata only |
 | `/v3/positions`                         | v3      | GET         | Open positions                  |
 | `/v3/position/{symbol}`                 | v3      | GET         | Single position                 |
 | `/v3/order/{orderId}`                   | v3      | PUT         | Update limit order              |
@@ -316,7 +329,7 @@ The `start()` method orchestrates initialization:
 | `/v3/algo/order/{id}`                   | v3      | PUT/DELETE  | Update / cancel algo order      |
 | `/v3/trade/transactionHistory`          | v3      | GET         | Execution history               |
 | `/v3/orders/pending`                    | v3      | DELETE      | Cancel all pending orders       |
-| `/v3/algo/orders/pending`               | v3      | DELETE      | Cancel all pending algo orders  |
+| `/v3/algo/orders/pending`               | v3      | DELETE      | No request owner; metadata only |
 | `/v1/public/info`                       | v1      | GET         | Markets/symbol info             |
 | `/v1/public/futures`                    | v1      | GET         | Futures tickers                 |
 | `/v1/public/orderbook/{symbol}`         | v1      | GET         | Order book snapshot             |

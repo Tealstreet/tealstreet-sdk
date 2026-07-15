@@ -34,6 +34,7 @@ describe('WooX V3 inert Cancel-All-After contract', () => {
       v3Path: '/v3/trade/cancelAllAfter',
       gate: 'cancelAllAfterDemoLifecycle',
       consumer: 'dead-man-switch (not currently owned by safe-cex runtime)',
+      runtimeLifecycle: 'ownerless',
     });
     expect(WOO_V3_MIGRATION_GATES.cancelAllAfterDemoLifecycle).toBe(false);
     expect(WOO_V3_CANCEL_ALL_AFTER_PARITY).toEqual({

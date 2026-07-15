@@ -95,6 +95,8 @@ export type WooV3MigrationRoute = Readonly<{
   v3Path: WooV3Endpoint;
   gate: WooV3MigrationGate;
   consumer: string;
+  /** Omitted routes are real legacy-to-V3 migrations with an active owner. */
+  runtimeLifecycle?: 'already-v3' | 'ownerless';
 }>;
 
 /**
@@ -245,7 +247,8 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Method: 'DELETE',
     v3Path: WOO_V3_ENDPOINTS.TRADE_ALGO_ORDERS,
     gate: 'algoWriteDemoLifecycle',
-    consumer: 'cancelAllOrders',
+    consumer: 'no active safe-cex runtime owner',
+    runtimeLifecycle: 'ownerless',
   },
   {
     id: 'cancel-all-after',
@@ -255,6 +258,7 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Path: WOO_V3_ENDPOINTS.TRADE_CANCEL_ALL_AFTER,
     gate: 'cancelAllAfterDemoLifecycle',
     consumer: 'dead-man-switch (not currently owned by safe-cex runtime)',
+    runtimeLifecycle: 'ownerless',
   },
   {
     id: 'recent-trades',
@@ -282,6 +286,7 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Path: WOO_V3_ENDPOINTS.TRANSACTION_HISTORY,
     gate: 'privateReadParity',
     consumer: 'fetchExecutions',
+    runtimeLifecycle: 'already-v3',
   },
   {
     id: 'account-info',
@@ -299,7 +304,8 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Method: 'GET',
     v3Path: WOO_V3_ENDPOINTS.ASSET_BALANCES,
     gate: 'privateReadParity',
-    consumer: 'fetchBalance',
+    consumer: 'no active safe-cex runtime owner; fetchBalance uses account-info',
+    runtimeLifecycle: 'ownerless',
   },
   {
     id: 'positions',
