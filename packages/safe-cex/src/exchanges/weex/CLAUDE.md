@@ -81,6 +81,7 @@ immediately with `{ "method": "PONG", "id": n }`. Public pings instead use
 - [Contract V3 introduction](https://www.weex.com/api-doc/contract/intro)
 - [Contract V3 changelog](https://www.weex.com/api-doc/contract/changelog)
 - [Contract V3 signature](https://www.weex.com/api-doc/contract/QuickStart/Signature)
+- [Modify TP/SL conditional order](https://www.weex.com/api-doc/contract/Transaction_API/ModifyTpSlOrder)
 - [CCXT WEEX reference](https://github.com/ccxt/ccxt/wiki/weex)
 
 ## File Structure
@@ -95,9 +96,12 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
   are implemented and covered with fresh deterministic regressions.
 - Normal order amend is not documented in Contract V3. Use cancel-and-replace
   for `updateOrder`, preserving TP/SL fields when present.
-- TP/SL trigger-price edits use `POST /capi/v3/modifyTpSlOrder`; virtual
-  `__tp`/`__sl` rows send the parent order ID and never cancel that parent.
-  The V3 modify endpoint has no quantity field, so TP/SL size edits fail closed.
+- Direct TP/SL trigger-price edits use `POST /capi/v3/modifyTpSlOrder` with
+  the actual protective conditional-order ID. Synthetic `__tp`/`__sl` rows
+  retain only the opening parent ID, which the endpoint does not document as
+  an amend selector, so their edits fail closed without sending or canceling.
+  The V3 modify endpoint has no quantity field, so TP/SL size edits also fail
+  closed.
 - Opening `OrderType.Conditional` orders use `POST /capi/v3/algoOrder` and
   require `triggerPrice`; an execution `price` selects STOP (limit), while its
   absence selects STOP_MARKET. They are read back as opening conditionals and

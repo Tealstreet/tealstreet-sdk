@@ -65,8 +65,9 @@ describe('audit regression: WEEX TP/SL amendment lifecycle', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it('amends a virtual child through its parent ID without canceling the parent', async () => {
+  it('fails a virtual child edit closed when only the parent order ID is available', async () => {
     const { exchange, post, remove } = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
     const virtualTakeProfit = order({
       id: 'parent-algo-1__tp',
       parentId: 'parent-algo-1',
@@ -77,14 +78,14 @@ describe('audit regression: WEEX TP/SL amendment lifecycle', () => {
       info: { tpPrice: '62100' },
     });
 
-    await exchange.updateOrder({ order: virtualTakeProfit, update: { price: 62_500 } });
+    await expect(exchange.updateOrder({ order: virtualTakeProfit, update: { price: 62_500 } })).rejects.toThrow(
+      'WEEX virtual TP/SL amendment requires the protective order ID',
+    );
 
-    expect(post).toHaveBeenCalledWith(ENDPOINTS.MODIFY_TP_SL_ORDER, {
-      orderId: 'parent-algo-1',
-      triggerPrice: '62500',
-      executePrice: '62100',
-      triggerPriceType: 'CONTRACT_PRICE',
-    });
+    expect(emitAndLogError).toHaveBeenCalledWith(
+      'WEEX virtual TP/SL amendment requires the protective order ID',
+    );
+    expect(post).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
   });
 

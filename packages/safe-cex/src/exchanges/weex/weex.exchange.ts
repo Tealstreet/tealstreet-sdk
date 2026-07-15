@@ -583,6 +583,12 @@ export class WeexExchange extends BaseExchange {
         throw new Error(message);
       }
 
+      if (order.id.includes('__')) {
+        const message = 'WEEX virtual TP/SL amendment requires the protective order ID';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
       const market = this.store.marketsBySymbol[order.symbol];
       if (!market) {
         const message = `Market ${order.symbol} not found`;
@@ -590,17 +596,10 @@ export class WeexExchange extends BaseExchange {
         throw new Error(message);
       }
 
-      const isVirtual = order.id.includes('__');
-      const parentOrderId = order.id.split('__')[0];
-      const rawExecutePrice = isVirtual
-        ? order.type === OrderType.TakeProfit
-          ? order.info?.tpPrice
-          : order.info?.slPrice
-        : order.info?.executePrice;
       const payload = {
-        orderId: parentOrderId,
+        orderId: order.id,
         triggerPrice: `${adjust(update.price, market.precision.price)}`,
-        executePrice: `${toNumber(rawExecutePrice, 0)}`,
+        executePrice: `${toNumber(order.info?.executePrice, 0)}`,
         triggerPriceType:
           REVERSE_ORDER_TRIGGER_TYPE[
             order.type === OrderType.TakeProfit
