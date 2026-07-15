@@ -132,13 +132,30 @@ and accept only the exact `"ok"` result. The getter strictly accepts the exact
 `{ enabled: boolean, scope }` result object. No active runtime imports this
 module, and it does not enable Cancel on Disconnect by itself.
 
+The sixth follow-on is implemented in `coinbase.starbase-ws-session.ts`. It is
+an inert lifecycle controller for a future unified WebSocket. A connection is
+not ready for subscription replay until it has used a fresh connection-local
+`public/auth`, enabled the published heartbeat, and—when an explicit Cancel on
+Disconnect policy is supplied—mutated and read back that exact policy. It also
+drives the existing 49-minute WebSocket re-auth policy and answers only an
+already-classified heartbeat signal. A classified rate-limit disconnect enters
+an explicit backoff gate; a future credit-aware transport must acknowledge its
+own backoff decision before activation can run again, because Coinbase does not
+publish a close code or universal retry delay that this layer could safely
+guess.
+
+This controller owns no socket, timer, reconnect loop, subscription method, or
+raw-frame parser. Subscription replay is an injected callback so it does not
+choose between the conflicting private-subscription examples/contracts in the
+current schema. No active runtime imports the controller.
+
 `private/get_user_trades_by_order` is also deferred: its published response
 example contains a trade array, but `PrivateGetUserTradesByOrderResponse`
 defines no `result` property. The inert reader uses the coherent
 `private/get_user_trades_by_currency*` response family until Coinbase publishes
 an exact by-order result schema.
 
-All five modules are intentionally inert: no current exchange, WebSocket, API
+All six modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
 and all normalization blockers are resolved. The public mapper supports only
@@ -185,6 +202,7 @@ resolve the unlabelled PnL-unit blocker.
 | `coinbase.starbase-private.ts` | Inert Starbase read-only account/position/order-state/order-history/trade request contracts, strict gateway DTOs, last-known-good snapshot holder, and typed safe-cex parity gates. Not routed. |
 | `coinbase.starbase-orders.ts` | Inert Starbase order-write builders, strict result decoders, canonical-ID lifecycle links, and typed amount-unit parity gates. No transport and not routed. |
 | `coinbase.starbase-session.ts` | Inert Starbase Cancel on Disconnect request/response contracts, including explicit WebSocket-only mutation metadata. No transport and not routed. |
+| `coinbase.starbase-ws-session.ts` | Inert unified-WebSocket activation, re-auth, heartbeat, Cancel on Disconnect proof, subscription-replay ordering, and rate-limit backoff gate. No socket, classifier, routing, or active import. |
 
 ## Authentication
 
