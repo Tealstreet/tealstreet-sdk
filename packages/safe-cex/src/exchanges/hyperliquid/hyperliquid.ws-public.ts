@@ -6,6 +6,7 @@ import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, Writable } from '
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { BaseWebSocket } from '../base.ws';
 import { HyperliquidExchange } from './hyperliquid.exchange';
+import { decodeHyperliquidFastAssetCtxs } from './hyperliquid.fast-asset-ctxs';
 import { AllMids, HyperliquidCandle, WsBbo, WsBook, WSS_URLS } from './hyperliquid.types';
 
 type Data = Record<string, any>;
@@ -81,12 +82,21 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
   };
 
   subscribePublicTopics = () => {
-    // Subscribe to allMids (public market data)
+    // Keep allMids as the stable full-snapshot fallback, and overlay the
+    // compressed snapshot+diff fastAssetCtxs stream for fresh mark/mid prices.
     this.send(
       JSON.stringify({
         method: 'subscribe',
         subscription: {
           type: 'allMids',
+        },
+      }),
+    );
+    this.send(
+      JSON.stringify({
+        method: 'subscribe',
+        subscription: {
+          type: 'fastAssetCtxs',
         },
       }),
     );
@@ -188,6 +198,9 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
           case 'allMids':
             this.handleAllMids(json?.data?.mids || {});
             break;
+          case 'fastAssetCtxs':
+            this.handleFastAssetCtxs(json?.data);
+            break;
           case 'candle': {
             // Hyperliquid candle subscriptions are per (coin, interval) and a
             // single frame is always for one (coin, interval) — sample the
@@ -280,6 +293,51 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       updateBuf.midPrice = last;
       this.parent.store.updateTicker(ticker, updateBuf);
       if (updatedSymbols) updatedSymbols.add(ticker.symbol);
+    }
+
+    if (updatedSymbols && updatedSymbols.size > 0) {
+      this.parent.syncBalanceFromLivePositions(updatedSymbols);
+    }
+  };
+
+  private _fastMarkUpdateBuf: Partial<Writable<Ticker>> = { mark: 0 };
+  private _fastMidUpdateBuf: Partial<Writable<Ticker>> = { last: 0, midPrice: 0 };
+  private _fastMarkAndMidUpdateBuf: Partial<Writable<Ticker>> = { mark: 0, last: 0, midPrice: 0 };
+
+  handleFastAssetCtxs = (payload: string) => {
+    const data = decodeHyperliquidFastAssetCtxs(payload);
+    const tickersById = this.parent.store.tickersById;
+    const hasPositions = this.parent.store.positions.length > 0;
+    const updatedSymbols: Set<string> | undefined = hasPositions ? new Set<string>() : undefined;
+
+    for (const coin in data) {
+      const ticker = tickersById[coin];
+      if (!ticker) continue;
+
+      const context = data[coin];
+      const mark = Number(context?.markPx);
+      const mid = Number(context?.midPx);
+      const hasMark = Number.isFinite(mark) && mark > 0;
+      const hasMid = Number.isFinite(mid) && mid > 0;
+
+      if (hasMark && hasMid) {
+        const update = this._fastMarkAndMidUpdateBuf;
+        update.mark = mark;
+        update.last = mid;
+        update.midPrice = mid;
+        this.parent.store.updateTicker(ticker, update);
+        if (updatedSymbols) updatedSymbols.add(ticker.symbol);
+      } else if (hasMark) {
+        const update = this._fastMarkUpdateBuf;
+        update.mark = mark;
+        this.parent.store.updateTicker(ticker, update);
+      } else if (hasMid) {
+        const update = this._fastMidUpdateBuf;
+        update.last = mid;
+        update.midPrice = mid;
+        this.parent.store.updateTicker(ticker, update);
+        if (updatedSymbols) updatedSymbols.add(ticker.symbol);
+      }
     }
 
     if (updatedSymbols && updatedSymbols.size > 0) {

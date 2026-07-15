@@ -4,9 +4,24 @@ Last updated: 2026-07-15
 
 ## Current Status
 
-HIP-3 positions, fills, order lifecycle, and mid prices use dedicated WebSocket feeds. REST remains required for startup metadata, full order metadata, and bounded reconciliation.
+HIP-3 positions, fills, and order lifecycle use dedicated WebSocket feeds. Mid and mark prices use `fastAssetCtxs` with `allMids` retained as a full-snapshot fallback. REST remains required for startup metadata, full order metadata, and bounded reconciliation.
 
 `webData2` is rejected by the upstream server and has no subscription or handler. `webData3` was probed on mainnet and testnet on 2026-07-15; it returned only `userState` and `perpDexStates`, so it does not replace any trading-state feed and is deliberately not subscribed.
+
+## Strategic Feed Evaluation (2026-07-15)
+
+Credential-free mainnet and testnet probes established these current contracts:
+
+| Feed | Evidence and decision |
+| --- | --- |
+| `fastAssetCtxs` | Accepted on both networks. It sends base64 raw-DEFLATE JSON: an initial coin-keyed snapshot followed by partial `markPx` / `midPx` diffs. Adopted on the perp public socket because `ticker.mark` directly prices market and TP/SL slippage caps; `allMids` remains the fallback. |
+| `allDexsAssetCtxs` | Accepted, but live `ctxs` is an array of `[dex, AssetCtx[]]` tuples (10 mainnet / 240 testnet during the probe), not the record shape in the published TypeScript contract. It contains no universe metadata, so it cannot replace per-DEX `metaAndAssetCtxs` and is not adopted. |
+| `allDexsClearinghouseState` | Accepted with the same tuple-array contract mismatch and full all-DEX snapshots. Existing dex-scoped streams already provide authoritative closure semantics, while the aggregate testnet frame includes hundreds of unloaded DEXes; not adopted. |
+| `webData3` | Contains `userState` plus `perpDexStates`, with no positions, orders, or asset contexts. There is no trading-state consumer; not adopted. |
+
+On the production `api-ui.hyperliquid.xyz` socket, a six-frame probe measured an 11.7 KB compressed initial snapshot (1,267 coins, 55.6 KB inflated) decoded by pako in 2.97 ms. Five steady-state diffs arrived about once per second after the immediate post-snapshot diff; they were 0.6–1.13 KB compressed and decoded in 0.19–0.33 ms. This keeps synchronous decode below the existing JSON/store-update work and avoids asynchronous frame reordering.
+
+The standard-depth `l2Book` plus `bbo` overlay and unified/portfolio `spotState` path are independent and unchanged by this evaluation.
 
 ## WebSocket Subscriptions per HIP-3 DEX
 
@@ -63,7 +78,8 @@ Official IP limits are 1200 weight/minute; `metaAndAssetCtxs` costs 20 and `user
 Core positions: clearinghouseState WS + authoritative REST bootstrap/reconnect
 
 HIP-3 per DEX:
-  allMids ----------------> ticker last/mid
+  fastAssetCtxs ----------> ticker mark + last/mid (coin-keyed snapshot/diffs)
+  allMids ----------------> ticker last/mid fallback
   clearinghouseState ----> dex-scoped positions
   userFills -------------> fill events + realized PnL
   orderUpdates ----------> live order state
@@ -96,7 +112,7 @@ HIP-3 order metadata:
 | Area                    | Gap                                                                      | Mitigation                                    |
 | ----------------------- | ------------------------------------------------------------------------ | --------------------------------------------- |
 | HIP-3 order metadata    | Live updates omit type/trigger fields                                    | Caches + optimistic order + bounded REST      |
-| HIP-3 ticker contexts   | `allMids` supplies mid only; mark/index/funding seed from startup REST    | Evaluate a documented asset-context feed      |
+| HIP-3 ticker contexts   | Fast feed supplies mark/mid; index/funding seed from startup REST         | Keep ordinal aggregate feeds gated on stable contract |
 | HIP-3 leverage defaults | No per-market `activeAssetData` subscription due subscription headroom  | Position payload when open; defaults when flat |
 | Position safety net     | Per-DEX REST reconciliation every 120 seconds                            | Retained for disconnect/missed-frame recovery |
 
