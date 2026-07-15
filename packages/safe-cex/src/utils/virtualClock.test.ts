@@ -254,6 +254,17 @@ describe('virtualClock', () => {
       expect(axios.get).toHaveBeenCalledWith('https://time.tealstreet.io/v1/time', { timeout: 5000 });
       delete (global as any).window;
     });
+
+    it('falls back to the local clock after the two maintained sources fail', async () => {
+      (global as any).window = {};
+      vi.mocked(axios.get).mockRejectedValue(new Error('offline'));
+
+      await virtualClock.syncClientServerTime();
+
+      expect(axios.get).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(axios.get).mock.calls.some(([url]) => String(url).includes('worldtimeapi.org'))).toBe(false);
+      delete (global as any).window;
+    });
   });
 
   describe('private getBaseUrl', () => {

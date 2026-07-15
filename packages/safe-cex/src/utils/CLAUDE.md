@@ -46,7 +46,9 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 - **bitgetusdc** uses `BTCPERP` format (NOT `BTCUSDC`) — confirmed via API
 - **Arkham** perps are `BTC_USDT_PERP` (NOT `BTC_PERP`) — confirmed via API and `__testdata__/market-samples.json`.
 - **KuCoin** symbols have `M` suffix (`XBTUSDTM`) and use XBT for BTC — code does `split('_')[0]` which is a noop since no underscore exists
-- **KuCoin** code has a bug: uses `m.rootSymbol` for base which returns `USDT` (the margin coin), not the base asset. `baseCurrency` field has the correct value (`XBT`)
+- **KuCoin** prefers `m.baseCurrency` for the base asset and only falls back to
+  `m.rootSymbol`; do not reverse that order because `rootSymbol` can be the
+  margin coin (`USDT`).
 - **Coinbase** perps use `-PERP-INTX` suffix, NOT `-USD` — very different from coinbasespot
 - **Lighter** has no separator or quote in many symbols — just the base asset
 - **Hyperliquid** has vendor-prefixed symbols: `XYZ|NFLX-PERP`, `FLX|USA500-PERP`
@@ -160,9 +162,10 @@ the chain falls through, so sync still works — but the browser logs a
 **failed request + console error on every page load** for those users, and
 it inflates the e2e load-gate's diagnostic counters.
 
-- `fetchServerTime` (generic) leads with same-origin **`${origin}/api/time`**
-  (no CORS, no geo-block, always reachable), then the JP proxy, then
-  worldtimeapi.
+- `fetchServerTime` (generic) leads with the configured public time service or
+  same-origin **`${origin}/api/time`** (no CORS, no geo-block), then the public
+  CORS proxy. If both fail it uses the local UTC clock; do not add an
+  unmaintained third-party time dependency to this signing path.
 - `fetchBybitTime` (bybit-specific, wants Bybit's real clock) leads with the
   **public CORS proxy** (`read-fleet-jp.tealstreet.io/...` — the Vultr read fleet,
   Bybit's real time via non-blocked egress), then `/api/time`.
@@ -170,7 +173,7 @@ it inflates the e2e load-gate's diagnostic counters.
 If you "simplify" either chain back to a direct Bybit lead, you reintroduce
 the 403 noise for every geo-blocked user. The offset only needs ~1s
 accuracy, so the edge `/api/time` clock is plenty. Generic clock sync starts
-immediately, then runs every 120 seconds; do not shorten it without a new
+immediately, then runs every 300 seconds; do not shorten it without a new
 drift measurement.
 
 ## Files
@@ -179,5 +182,8 @@ drift measurement.
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `orderbook.ts` — `sortOrderBook` (full sort, snapshot-only) + `calcOrderBookTotal` (cumulative, hot-path safe)
 - `safe-math.ts` — Decimal-aware arithmetic; for placement/display only — see `../exchanges/CLAUDE.md` for hot-path rules
+  Scientific notation precision includes both mantissa decimals and the signed
+  exponent (`2.5e-7` has eight decimal places); do not reduce it to the
+  exponent's absolute value.
 - `transportResolution.ts` — Proxy pool hosts + public CORS-proxy resolver (`PRIVATE_PROXY_JP` / `PRIVATE_PROXY_ASIA` / `PRIVATE_PROXY_GRVT_TINY`, `READ_FLEET_JP`/`_SG`, `getPublicCorsProxy`); consumed by the routing resolver (`../routing/resolveExchangeRouting.ts`)
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges

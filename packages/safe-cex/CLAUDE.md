@@ -224,6 +224,9 @@ Is requiresCors true?
   module token path. Do not replace this with module-global `setProxyToken` in
   multi-user hosts.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
+- **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
+  names outside the exhaustive registry. Never restore a venue-shaped fallback;
+  it can apply the wrong transport and capability flags to corrupt saved data.
 - **Non-browser tradetunnel callers must use the shared header-capable
   transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
   `fsjnpy143pbz.{jp,asia}.tealstreet.io` can reject WebSocket upgrades before
@@ -260,6 +263,9 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
   `@tealstreet/http-over-websocket`
 - `src/routing/resolveExchangeRouting.ts` + `src/utils/transportResolution.ts` — CORS proxy URL / transport resolver used by safe-cex REST clients (the old `src/utils/getPrivateProxy.ts` no longer exists)
 - `src/types.ts` — Shared types (`ExchangeOptions`, `ExchangeAccountConfig`, etc.)
+- `src/health/errorPatterns.ts` — Fuzzy health classification. Critical auth
+  expiry requires key/token/session/signature context; never add bare lifecycle
+  words such as `expired`, `timestamp`, or `clock` as global patterns.
 - `src/exchanges/*/` — Per-exchange implementations
 
 ## Debugging exchange REST traffic

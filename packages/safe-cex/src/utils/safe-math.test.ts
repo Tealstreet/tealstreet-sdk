@@ -29,6 +29,10 @@ describe('safe-math', () => {
       expect(afterDecimal(1e-5)).toBe(5);
       expect(afterDecimal(1e-10)).toBe(10);
       expect(afterDecimal('1e-3')).toBe(3);
+      expect(afterDecimal(2.5e-7)).toBe(8);
+      expect(afterDecimal(1.25e-7)).toBe(9);
+      expect(afterDecimal('2.5E-7')).toBe(8);
+      expect(afterDecimal('2.5e+3')).toBe(0);
     });
 
     it('should return 2 for null/undefined-like values', () => {

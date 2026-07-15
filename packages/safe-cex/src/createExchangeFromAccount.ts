@@ -36,7 +36,7 @@ export function accountToExchangeOptions(
   const { tealstreetProxy, tealstreetTunnel, proxyRegion } = resolveAccountTransport(account, metadata);
 
   // When a secondary (read-only) key is configured, route its reads through the
-  // cheap read fleet. Undefined until the fleet is wired, so this is a no-op today.
+  // live regional read fleet selected by the account's resolved proxy region.
   const secondaryProxyUrl = account.secondary_apiKey ? getReadFleetProxyUrl(account.exchange, proxyRegion) : undefined;
 
   const options: ExchangeOptions = {

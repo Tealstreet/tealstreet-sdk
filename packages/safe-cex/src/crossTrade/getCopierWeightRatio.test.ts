@@ -20,8 +20,9 @@ vi.mock('../utils/getTotalBalanceFromBalance', () => ({
 
 vi.mock('../utils/sizing', () => ({
   getMarginCurrency: vi.fn((market: Market) => market?.quote || 'USDT'),
-  convertFromMarginToQuote: vi.fn((margin: number, _market: Market, lastPrice?: number, _btcPrice?: number) => {
+  convertFromMarginToQuote: vi.fn((margin: number, market: Market, lastPrice?: number, _btcPrice?: number) => {
     // Simple mock: if lastPrice provided, multiply
+    if (market.isInverse && !lastPrice) return 0;
     return lastPrice ? margin * lastPrice : margin;
   }),
 }));
@@ -233,6 +234,26 @@ describe('getCopierWeightRatio', () => {
   });
 
   describe('edge cases', () => {
+    it('returns zero instead of an infinite ratio when the converted master balance is unavailable', () => {
+      const config = createMockConfig();
+      const copier = createMockCopier({ weightMode: 'Balance' });
+      const masterExchange = createMockExchange(createMockBalance(10000));
+      const copierExchange = createMockExchange(createMockBalance(5000));
+      const masterMarket = createMockMarket({ isInverse: true, quote: 'USD' });
+      const copierMarket = createMockMarket({ quote: 'USDT' });
+
+      expect(getCopierWeightRatio(config, copier, masterExchange, copierExchange, masterMarket, copierMarket)).toBe(0);
+    });
+
+    it('returns zero for non-finite configured weights', () => {
+      const config = createMockConfig();
+      const copier = createMockCopier({ weight: Number.POSITIVE_INFINITY });
+      const exchange = createMockExchange(createMockBalance(10000));
+      const market = createMockMarket();
+
+      expect(getCopierWeightRatio(config, copier, exchange, exchange, market, market)).toBe(0);
+    });
+
     it('should return absolute value (never negative)', () => {
       const config = createMockConfig({ masterWeight: 1 });
       const copier = createMockCopier({ weight: -2, weightMode: 'Absolute' });

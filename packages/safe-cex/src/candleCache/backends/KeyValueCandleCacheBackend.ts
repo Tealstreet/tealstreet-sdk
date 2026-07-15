@@ -58,15 +58,23 @@ export class KeyValueCandleCacheBackend implements CandleCacheBackend {
         }
 
         const sparseArray = new Array<Candle | undefined>(options.chunkSize);
+        let hasMatchingCandle = false;
 
         for (const candle of record.candles) {
           const timeInSeconds = candle.timestamp / 1000;
           const candleIndex = Math.floor(timeInSeconds / options.intervalSeconds);
+          const recomputedChunkKey = Math.floor(candleIndex / options.chunkSize);
+          if (recomputedChunkKey !== chunkKey) {
+            continue;
+          }
           const offset = candleIndex % options.chunkSize;
           sparseArray[offset] = candle;
+          hasMatchingCandle = true;
         }
 
-        result.set(chunkKey, sparseArray);
+        if (hasMatchingCandle) {
+          result.set(chunkKey, sparseArray);
+        }
       }),
     );
 

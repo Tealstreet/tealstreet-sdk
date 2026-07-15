@@ -25,9 +25,11 @@ export const afterDecimal = (num: number | string) => {
   if (!str) return 2;
 
   // Handle scientific notation
-  const eIndex = str.indexOf('e');
-  if (eIndex !== -1) {
-    return Math.abs(Number(str.slice(eIndex + 1)));
+  const scientificParts = str.split(/[eE]/);
+  if (scientificParts.length === 2) {
+    const mantissaDecimals = scientificParts[0].split('.')[1]?.length ?? 0;
+    const exponent = Number(scientificParts[1]);
+    return Number.isFinite(exponent) ? Math.max(0, mantissaDecimals - exponent) : 2;
   }
 
   // Find decimal point and count digits after

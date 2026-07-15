@@ -72,13 +72,15 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
     category: 'auth_expired',
     severity: 'critical',
     patterns: [
-      'expired',
       'token expired',
       'session expired',
       'key expired',
       'signature expired',
       /expired.*key/i,
       /key.*expired/i,
+      /token.*expired/i,
+      /session.*expired/i,
+      /signature.*expired/i,
     ],
   },
   // Authentication - Permission issues
@@ -156,12 +158,11 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
     patterns: [
       'recv window',
       'recvwindow',
-      'timestamp',
       'time sync',
-      'clock',
       'out of sync',
-      /timestamp.*ahead/i,
-      /timestamp.*behind/i,
+      /timestamp.*(?:ahead|behind|recv[ _-]?window|server time|outside)/i,
+      /(?:ahead|behind|recv[ _-]?window|server time|outside).*timestamp/i,
+      /clock.*(?:sync|skew|drift|ahead|behind)/i,
     ],
   },
 ];

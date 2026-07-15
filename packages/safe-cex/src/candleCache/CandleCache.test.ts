@@ -308,6 +308,64 @@ describe('CandleCache', () => {
     vi.useRealTimers();
   });
 
+  it('does not let a timed-out hydration overwrite freshly fetched candles', async () => {
+    const interval: Timeframe = '5m';
+    const intervalSeconds = 5 * 60;
+    const baseTime = alignTimestamp(1700000000000, interval);
+    const cacheKey = getCandleCacheKey('binance', 'BTCUSDT', interval);
+    const chunkSize = 100;
+    const candleIndex = Math.floor(baseTime / 1000 / intervalSeconds);
+    const chunkKey = Math.floor(candleIndex / chunkSize);
+    const offset = candleIndex % chunkSize;
+    const staleCandle = { ...createCandle(baseTime), close: 101 };
+    const freshCandle = { ...createCandle(baseTime), close: 109 };
+    const staleChunk = new Array(chunkSize);
+    staleChunk[offset] = staleCandle;
+
+    let resolveHydration!: (chunks: Map<number, any>) => void;
+    const hydration = new Promise<Map<number, any>>((resolve) => {
+      resolveHydration = resolve;
+    });
+    const cache = new CandleCache({
+      chunkSize,
+      hydrationTimeoutMs: 1,
+      backend: {
+        loadAllChunks: vi.fn().mockReturnValue(hydration),
+        persistChunks: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    const fetcher = vi.fn().mockResolvedValue([freshCandle]);
+
+    await expect(
+      cache.fetch({
+        cacheKey,
+        interval,
+        fromMs: baseTime,
+        toMs: baseTime,
+        limit: 1,
+        fetcher,
+        nowMs: baseTime + intervalSeconds * 1000,
+      }),
+    ).resolves.toEqual([freshCandle]);
+
+    resolveHydration(new Map([[chunkKey, staleChunk]]));
+    await hydration;
+    await Promise.resolve();
+
+    const cached = await cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: baseTime,
+      toMs: baseTime,
+      limit: 1,
+      fetcher,
+      nowMs: baseTime + intervalSeconds * 1000,
+    });
+
+    expect(cached).toEqual([freshCandle]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to direct exchange fetch when worker routing is disabled', async () => {
     const fetchOHLCV = vi.fn().mockResolvedValue([createCandle(1700000000000)]);
 

@@ -69,6 +69,24 @@ describe('ExchangeHealthMonitor', () => {
       expect(category).toBe('time_sync');
     });
 
+    it('does not classify routine order expiry as expired authentication', () => {
+      expect(monitor.processMessage('Order expired before it could be filled')).toBeNull();
+      expect(monitor.processMessage('This request has expired - `expires` is in the past.')).toBeNull();
+      expect(monitor.processMessage('good_til_time order expired normally')).toBeNull();
+    });
+
+    it('requires authentication context for expiry errors', () => {
+      expect(monitor.processMessage('API key has expired')).toBe('auth_expired');
+      expect(monitor.processMessage('session credential expired')).toBe('auth_expired');
+      expect(monitor.processMessage('request signature has expired')).toBe('auth_expired');
+    });
+
+    it('requires synchronization context around timestamp and clock errors', () => {
+      expect(monitor.processMessage('order timestamp expired')).toBeNull();
+      expect(monitor.processMessage('timestamp for this request is ahead of server time')).toBe('time_sync');
+      expect(monitor.processMessage('local clock drift exceeds tolerance')).toBe('time_sync');
+    });
+
     it('should detect exchange_down errors', () => {
       const category = monitor.processMessage('service unavailable');
       expect(category).toBe('exchange_down');

@@ -49,5 +49,5 @@ export const getCopierWeightRatio = (
       copierWeightRatio *= copierBalanceInQuote / masterBalanceInQuote;
     }
   }
-  return Math.abs(copierWeightRatio);
+  return Number.isFinite(copierWeightRatio) ? Math.abs(copierWeightRatio) : 0;
 };

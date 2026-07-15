@@ -2353,7 +2353,11 @@ export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string,
   if (exchange === 'bybit') {
     return opts.isUnified ? BybitUnifiedMetadata : BybitMetadata;
   }
-  return exchangeMetadata[exchange] || BybitMetadata;
+  const metadata = exchangeMetadata[exchange];
+  if (!metadata) {
+    throw new Error(`Unknown exchange metadata: ${exchange}`);
+  }
+  return metadata;
 };
 
 export const exchangePrettyNames: { [key in ExchangeName]: string } = Object.keys(exchangeMetadata).reduce(

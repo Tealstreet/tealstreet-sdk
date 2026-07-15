@@ -75,11 +75,10 @@ describe('exchangeMetadata', () => {
       expect(metadata.exchangeName).toBe('binance');
     });
 
-    it('should return default metadata for unknown exchange', () => {
-      const metadata = getExchangeMetadata('unknown-exchange' as ExchangeName);
-      expect(metadata).toBeDefined();
-      // Falls back to BybitMetadata
-      expect(metadata.exchangeName).toBe('bybit');
+    it('should reject an unknown exchange instead of applying Bybit metadata', () => {
+      expect(() => getExchangeMetadata('unknown-exchange' as ExchangeName)).toThrow(
+        'Unknown exchange metadata: unknown-exchange',
+      );
     });
 
     it('should return unified metadata for bybit when isUnified is true', () => {

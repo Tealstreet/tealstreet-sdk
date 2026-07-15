@@ -324,7 +324,11 @@ export class CandleCache {
     return chunkKeys;
   }
 
-  private mergeChunks(cacheKey: string, chunks: Map<number, CandleCacheSparseChunk>) {
+  private mergeChunks(
+    cacheKey: string,
+    chunks: Map<number, CandleCacheSparseChunk>,
+    options: { existingCandlesWin?: boolean } = {},
+  ) {
     if (chunks.size === 0) {
       return;
     }
@@ -336,7 +340,17 @@ export class CandleCache {
     }
 
     for (const [chunkKey, chunk] of chunks) {
-      existing.set(chunkKey, chunk);
+      const existingChunk = existing.get(chunkKey);
+      if (!options.existingCandlesWin || !existingChunk) {
+        existing.set(chunkKey, chunk);
+        continue;
+      }
+
+      for (let offset = 0; offset < chunk.length; offset += 1) {
+        if (existingChunk[offset] === undefined && chunk[offset] !== undefined) {
+          existingChunk[offset] = chunk[offset];
+        }
+      }
     }
   }
 
@@ -398,7 +412,9 @@ export class CandleCache {
     });
 
     if (chunks.size > 0) {
-      this.chunkedCandleCache.set(cacheKey, chunks);
+      // A timed-out hydration can finish after fetch() has populated this cache key.
+      // Preserve those newer in-memory candles while filling any remaining gaps.
+      this.mergeChunks(cacheKey, chunks, { existingCandlesWin: true });
     }
 
     this.hydratedCacheKeys.add(cacheKey);

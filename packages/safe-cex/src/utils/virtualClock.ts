@@ -181,13 +181,6 @@ class VirtualClock {
       // ignore
     }
 
-    try {
-      const { data } = await axios.get('https://worldtimeapi.org/api/timezone/etc/utc', { timeout: 500 });
-      return dayjs(data.utc_datetime);
-    } catch {
-      // ignore
-    }
-
     return dayjs.utc();
   };
 
@@ -205,7 +198,7 @@ class VirtualClock {
     this.server = time ? dayjs(time) : await this.fetchBybitTime();
     this.client = dayjs.utc();
 
-    // if the difference is less than 5 seconds
+    // if the difference is less than 1 second
     // assume the time is correct
     if (Math.abs(this.server.diff(this.client, 'milliseconds')) < 1000) {
       this.server = null;
