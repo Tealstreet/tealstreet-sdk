@@ -24,6 +24,15 @@ phased endpoint inventory, parity gates, rollback strategy, and monitoring requi
 `docs/safe_cex_audit_july/woo-v3-migration-plan.md`. Preview and prod are both production lanes, so
 write-path migration requires fixture coverage and a credentialed WooX demo lifecycle smoke first.
 
+The V3 foundation is deliberately non-routable: `woo.v3.contracts.ts` holds the typed route map,
+response/request contracts, and seven hard-false migration gates, while `woo.v3.request.ts` only
+prepares deterministic transport-neutral request descriptors. Neither file is imported by
+`woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and neither owns an Axios,
+fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
+review requiring the corresponding parity/demo evidence. Concrete endpoint pages and the official
+migration table use `/v3/trade/*`; do not follow the introduction page's inconsistent `/trading`
+label.
+
 ## CCXT Reference Implementation
 
 - **REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/woo.ts
@@ -34,6 +43,8 @@ write-path migration requires fixture coverage and a credentialed WooX demo life
 - `woo.api.ts` - REST API client with dual V1/V3 HMAC-SHA256 signature methods
 - `woo.exchange.ts` - Main exchange class (`WOOXExchange`) extending `BaseExchange`
 - `woo.types.ts` - TypeScript type definitions, endpoint constants, type maps
+- `woo.v3.contracts.ts` - Non-routable namespaced V3 endpoints, contracts, migration map, and gates
+- `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)
 - `woo.ws-public.ts` - Public WebSocket (tickers, BBOs, mark prices, funding rates, klines, orderbook)
@@ -72,6 +83,10 @@ The interceptor automatically selects the signing method based on URL:
 - URLs containing `v1` use `signV1`
 - All other URLs use `signV3`
 - URLs containing `'/public/'` skip authentication entirely
+
+This selection applies only to the existing legacy client. The namespaced V3 foundation does not
+participate in `createAPI`; its signing fixtures lock the official
+`timestamp + METHOD + pathWithQuery + exactJsonBody` contract for a later migration.
 
 ### Dual API Keys
 
