@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
 import { ENDPOINTS } from '../../exchanges/apexomni/apexomni.types';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
+import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 
 const market = (id: string, symbol = id) => ({
@@ -143,5 +143,89 @@ describe('ApeX Omni remaining audit regressions', () => {
 
     expect(addOrUpdateOrders).toHaveBeenCalledOnce();
     expect(addOrUpdateOrders).toHaveBeenCalledWith([mappedOrder]);
+  });
+
+  it('preserves the sibling protective leg when updating a virtual bracket child', async () => {
+    const store = new DefaultStore();
+    const baseOrder = {
+      id: 'parent',
+      symbol: 'BTC-USDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      price: 100,
+      amount: 2,
+      reduceOnly: false,
+      info: { id: 'parent' },
+    } as any;
+    const stopLoss = {
+      ...baseOrder,
+      id: 'parent__stop_loss',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 90,
+      slTriggerType: OrderStopTriggerType.IndexPrice,
+    } as any;
+    const takeProfit = {
+      ...baseOrder,
+      id: 'parent__take_profit',
+      type: OrderType.TakeProfit,
+      side: OrderSide.Sell,
+      price: 110,
+      tpTriggerType: OrderStopTriggerType.LastPrice,
+    } as any;
+    store.update({ orders: [baseOrder, stopLoss, takeProfit] });
+    const exchange = createExchange(store);
+    const cancel = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
+    const place = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['replacement']);
+
+    await expect(
+      exchange.updateOrder({ order: takeProfit, update: { price: 115 } }),
+    ).resolves.toEqual(['replacement']);
+
+    expect(cancel).toHaveBeenCalledWith([baseOrder]);
+    expect(place).toHaveBeenCalledWith({
+      symbol: 'BTC-USDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      price: 100,
+      amount: 2,
+      reduceOnly: false,
+      stopLoss: 90,
+      slTriggerType: OrderStopTriggerType.IndexPrice,
+      takeProfit: 115,
+      tpTriggerType: OrderStopTriggerType.LastPrice,
+    });
+  });
+
+  it('rejects a virtual bracket update when replacement fails after cancellation', async () => {
+    const store = new DefaultStore();
+    const baseOrder = {
+      id: 'parent',
+      symbol: 'BTC-USDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      price: 100,
+      amount: 2,
+      reduceOnly: false,
+      info: { id: 'parent' },
+    } as any;
+    const stopLoss = {
+      ...baseOrder,
+      id: 'parent__stop_loss',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 90,
+      slTriggerType: OrderStopTriggerType.IndexPrice,
+    } as any;
+    store.update({ orders: [baseOrder, stopLoss] });
+    const exchange = createExchange(store);
+    const cancel = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
+    const replacementError = new Error('replacement failed');
+    vi.spyOn(exchange, 'placeOrder').mockRejectedValue(replacementError);
+
+    await expect(
+      exchange.updateOrder({ order: stopLoss, update: { price: 92 } }),
+    ).rejects.toBe(replacementError);
+    expect(cancel).toHaveBeenCalledWith([baseOrder]);
   });
 });

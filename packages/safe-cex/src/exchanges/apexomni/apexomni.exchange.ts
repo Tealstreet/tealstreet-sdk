@@ -1199,11 +1199,6 @@ export class ApexOmniExchange extends BaseExchange {
       throw new Error(`Market ${opts.symbol} not found`);
     }
 
-    await initSdk();
-
-    const signer = sdk.newRpcSignerWithProvider({});
-    await signer.initZklinkSigner(this.options.omniKeySeed);
-
     const maxSize = market.limits.amount.max;
     const pPrice = market.precision.price;
     const pAmount = market.precision.amount;
@@ -1213,6 +1208,18 @@ export class ApexOmniExchange extends BaseExchange {
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
     const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
+
+    if (amount > maxSize && (stopLoss || takeProfit)) {
+      const message = 'ApeX Omni does not support attached TP/SL on split orders';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    await initSdk();
+
+    const signer = sdk.newRpcSignerWithProvider({});
+    await signer.initZklinkSigner(this.options.omniKeySeed);
+
     const timeInForce = inverseObj(ORDER_TIME_IN_FORCE)[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
     const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
     const ticker = this.store.tickersBySymbol[opts.symbol]!;
@@ -1474,11 +1481,14 @@ export class ApexOmniExchange extends BaseExchange {
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
     if (order.id.includes('__take_profit') || order.id.includes('__stop_loss')) {
-      const baseOrder = this.store.orders.find((o) => o?.info?.id === order.id.split('__')[0]);
+      const baseOrderId = order.id.split('__')[0];
+      const baseOrder = this.store.orders.find((o) => o?.info?.id === baseOrderId);
 
       if (!baseOrder) {
-        throw new Error(`Base order ${order.id.split('__')[0]} not found`);
+        throw new Error(`Base order ${baseOrderId} not found`);
       }
+      const stopLossOrder = this.store.orders.find((o) => o.id === `${baseOrderId}__stop_loss`);
+      const takeProfitOrder = this.store.orders.find((o) => o.id === `${baseOrderId}__take_profit`);
       const newOrder: Writable<PlaceOrderOpts> = {
         symbol: baseOrder.symbol,
         type: baseOrder.type,
@@ -1486,10 +1496,15 @@ export class ApexOmniExchange extends BaseExchange {
         price: baseOrder.price,
         amount: baseOrder.amount,
         reduceOnly: baseOrder.reduceOnly || false,
+        ...(stopLossOrder && {
+          stopLoss: stopLossOrder.price,
+          slTriggerType: stopLossOrder.slTriggerType,
+        }),
+        ...(takeProfitOrder && {
+          takeProfit: takeProfitOrder.price,
+          tpTriggerType: takeProfitOrder.tpTriggerType,
+        }),
       };
-
-      if ('tpTriggerType' in order) newOrder.tpTriggerType = baseOrder.tpTriggerType;
-      if ('slTriggerType' in order) newOrder.slTriggerType = baseOrder.slTriggerType;
 
       if ('price' in update) {
         if (order.id.includes('__take_profit')) {

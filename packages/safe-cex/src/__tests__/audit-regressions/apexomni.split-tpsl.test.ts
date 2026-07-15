@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import qs from 'qs';
-
 import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
@@ -62,7 +60,7 @@ describe('Apex Omni split-order TP/SL regression', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.1);
   });
 
-  it('attaches one lot-sized, signed bracket to a split order', async () => {
+  it('rejects a split order with attached TP/SL before any write', async () => {
     const store = new DefaultStore();
     store.update({
       markets: [
@@ -111,6 +109,8 @@ describe('Apex Omni split-order TP/SL regression', () => {
     const exchange = new ApexOmniExchange('apexomni' as any, { omniKeySeed: 'seed' } as any, store);
     vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
 
+    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
+
     await expect(
       exchange.placeOrder({
         symbol: 'BTC-USDT',
@@ -121,43 +121,13 @@ describe('Apex Omni split-order TP/SL regression', () => {
         takeProfit: 110,
         stopLoss: 90,
       }),
-    ).resolves.toEqual(['order-1', 'order-2', 'order-3', 'order-4']);
+    ).rejects.toThrow('ApeX Omni does not support attached TP/SL on split orders');
 
-    const [firstRequest, ...remainingRequests] = post.mock.calls.map(([, body]) => qs.parse(body));
-    const signedSizes = signContractMock.mock.calls.map(([, payload]) => payload.size);
-
-    expect(initSdkMock).toHaveBeenCalledOnce();
-    expect(signer.initZklinkSigner).toHaveBeenCalledWith('seed');
-    expect(post).toHaveBeenCalledTimes(4);
-    expect(signedSizes).toEqual([
-      '6000000000000000000',
-      '6000000000000000000',
-      '6000000000000000000',
-      '6000000000000000000',
-      '6000000000000000000',
-      '2000000000000000000',
-    ]);
-
-    expect(firstRequest).toMatchObject({
-      size: '6',
-      isOpenTpslOrder: 'true',
-      isSetOpenTp: 'true',
-      tpSize: '6',
-      tpSignature: 'signature-6000000000000000000',
-      isSetOpenSl: 'true',
-      slSize: '6',
-      slSignature: 'signature-6000000000000000000',
-    });
-    expect(remainingRequests.map((request) => request.size)).toEqual(['6', '6', '2']);
-    for (const request of remainingRequests) {
-      expect(request).not.toHaveProperty('isOpenTpslOrder');
-      expect(request).not.toHaveProperty('isSetOpenTp');
-      expect(request).not.toHaveProperty('tpSize');
-      expect(request).not.toHaveProperty('tpSignature');
-      expect(request).not.toHaveProperty('isSetOpenSl');
-      expect(request).not.toHaveProperty('slSize');
-      expect(request).not.toHaveProperty('slSignature');
-    }
-    expect(exchange.privateWebsocket.throttleFetchOrders).toHaveBeenCalledOnce();
+    expect(emitError).toHaveBeenCalledWith('ApeX Omni does not support attached TP/SL on split orders');
+    expect(initSdkMock).not.toHaveBeenCalled();
+    expect(signer.initZklinkSigner).not.toHaveBeenCalled();
+    expect(signContractMock).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    expect(exchange.privateWebsocket.throttleFetchOrders).not.toHaveBeenCalled();
   });
 });

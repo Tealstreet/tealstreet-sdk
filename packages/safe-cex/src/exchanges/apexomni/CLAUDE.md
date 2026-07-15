@@ -559,7 +559,18 @@ Private WebSocket uses direct ApeX endpoints by default and switches to Tealstre
 
 ### Order Splitting
 
-Large orders exceeding `maxOrderSize` are automatically split into multiple lots. Only lot zero carries TP/SL parameters; its `tpSize` and `slSize` must equal that lot's `size`, because each attached TP/SL has an independent zkLink signature over its exact size. Later lots submit only their parent order.
+Large orders exceeding `maxOrderSize` are automatically split into multiple lots only when they do
+not carry attached TP/SL. A split order with `stopLoss` or `takeProfit` fails before SDK setup or any
+REST write: attaching one lot-sized bracket would leave the remaining lots unprotected, while
+attaching a bracket to every lot has not been verified as an atomic whole-request strategy. Single-lot
+orders keep attached TP/SL, with `tpSize` and `slSize` matching the exact signed parent size.
+
+### Virtual bracket updates
+
+Updating a virtual `__take_profit` or `__stop_loss` child cancels and replaces the parent order. The
+replacement copies both stored virtual siblings before applying the edited price, so changing one leg
+does not silently remove the other. Any cancellation or replacement failure rejects the update; once
+the old parent has been cancelled, callers must never interpret an empty result as success.
 
 ### OHLCV Kline Auth Exception
 
