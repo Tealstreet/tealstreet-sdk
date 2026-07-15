@@ -1785,6 +1785,7 @@ const CoinbaseMetadata: ExchangeMetadata = {
   stopOrderPendingUpdateDelay: 1000,
   supportsPartialStops: true,
   supportsInfinityStops: false,
+  autoDownSizeReduceOrders: true,
   positionModes: [PositionMode.OneWay],
   marginTypes: [MarginType.Cross],
   leverageSliderDisabled: true,

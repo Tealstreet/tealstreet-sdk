@@ -143,9 +143,11 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
         }
         for (let [symbol, candles] of Object.entries(updatesBySymbol)) {
           symbol = symbol.replace('USDC', 'USD'); // coinbase USDC book is fake and is really USD
-          symbols.add(symbol);
           const handler = `candles.${symbol}`;
-          for (const callback of this.messageHandlers[handler]) {
+          const callbacks = this.messageHandlers[handler];
+          if (!callbacks?.length) continue;
+          symbols.add(symbol);
+          for (const callback of callbacks) {
             for (const candle of candles) {
               callback(candle);
             }
@@ -319,8 +321,8 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
-      this.cleanupMessageHandlerStats(`candles.${opts.symbol}`);
-      this.cleanupMessageHandlerStats(`market_trades.${opts.symbol}`);
+      this.cleanupMessageHandlerStats(`candles.${symbol}`);
+      this.cleanupMessageHandlerStats(`market_trades.${symbol}`);
 
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
       this.messageHandlers[secondaryHandler] = [

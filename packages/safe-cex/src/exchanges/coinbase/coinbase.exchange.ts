@@ -87,11 +87,11 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   getAccount = async () => {
-    const {
-      data: [{ accountAlias }],
-    } = await this.xhr.get(ENDPOINTS.BALANCE);
+    if (!this.selectedPortfolio) {
+      this.selectedPortfolio = await this.findSelectedPortfolio();
+    }
 
-    return { userId: accountAlias };
+    return { userId: this.selectedPortfolio.uuid };
   };
 
   validateAccount = async () => {
@@ -1119,13 +1119,18 @@ export class CoinbaseExchange extends BaseExchange {
       const { data } = await this.xhr.post<PLACE_ORDER_RESPONSE>(ENDPOINTS.ORDER, payload);
 
       if (!data.success) {
-        if (data.error_response?.preview_failure_reason) {
-          throw new Error(data.error_response.preview_failure_reason);
-        } else {
-          throw new Error(data.failure_reason || 'Unknown error');
-        }
+        throw new Error(
+          data.error_response?.new_order_failure_reason ||
+            data.error_response?.preview_failure_reason ||
+            data.failure_reason ||
+            'Unknown error',
+        );
       }
-      return [data.order_id];
+      const orderId = data.success_response?.order_id ?? data.order_id;
+      if (!orderId) {
+        throw new Error('Coinbase create-order response did not include an order ID');
+      }
+      return [orderId];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       throw new Error(err?.response?.data?.message || err?.message);

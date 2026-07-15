@@ -529,15 +529,19 @@ export type PLACE_ORDER_REQUEST = {
 
 export type PLACE_ORDER_RESPONSE = {
   success: boolean;
-  failure_reason: string;
-  order_id: string;
-  error_response: {
-    error: string;
-    message: string;
-    error_details: string;
-    preview_failure_reason: string;
+  success_response?: {
+    order_id: string;
   };
-  order_configuration: ORDER_REQUEST_CONFIG;
+  failure_reason?: string;
+  order_id?: string;
+  error_response?: {
+    error?: string;
+    message?: string;
+    error_details?: string;
+    preview_failure_reason?: string;
+    new_order_failure_reason?: string;
+  };
+  order_configuration?: ORDER_REQUEST_CONFIG;
 };
 
 // {
