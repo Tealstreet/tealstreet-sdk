@@ -81,6 +81,7 @@ immediately with `{ "method": "PONG", "id": n }`. Public pings instead use
 - [Contract V3 introduction](https://www.weex.com/api-doc/contract/intro)
 - [Contract V3 changelog](https://www.weex.com/api-doc/contract/changelog)
 - [Contract V3 signature](https://www.weex.com/api-doc/contract/QuickStart/Signature)
+- [Place orders in batch](https://www.weex.com/api-doc/contract/Transaction_API/PlaceOrdersBatch)
 - [Modify TP/SL conditional order](https://www.weex.com/api-doc/contract/Transaction_API/ModifyTpSlOrder)
 - [CCXT WEEX reference](https://github.com/ccxt/ccxt/wiki/weex)
 
@@ -91,9 +92,14 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
 
 ## Implementation Notes
 
-- WEEX launched `POST /capi/v3/batchOrders` on 2026-05-28. The adapter still
-  calls `placeOrder` serially until batch response and partial-failure behavior
-  are implemented and covered with fresh deterministic regressions.
+- WEEX launched `POST /capi/v3/batchOrders` on 2026-05-28 with at most five
+  orders per request. `placeOrders` uses it only for contiguous ordinary
+  `LIMIT`/`MARKET` rows, correlates the raw response array by the required
+  echoed `clientOrderId`, and returns IDs in input order. Count, identity,
+  success-flag, and successful-order-ID ambiguity fail closed; successful
+  PostOnly rows retain their store provenance even when a sibling row is
+  rejected. Conditional/algo, direct or attached TP/SL, close, reduce-only,
+  and otherwise exceptional shapes retain their dedicated single-order paths.
 - Normal order amend is not documented in Contract V3. Use cancel-and-replace
   for `updateOrder`, preserving TP/SL fields when present.
 - Direct TP/SL trigger-price edits use `POST /capi/v3/modifyTpSlOrder` with
@@ -134,6 +140,7 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
 - Open orders: `GET /capi/v3/openOrders`
 - Open algo orders: `GET /capi/v3/openAlgoOrders`
 - Place order: `POST /capi/v3/order`
+- Place regular batch (maximum 5): `POST /capi/v3/batchOrders`
 - Place conditional: `POST /capi/v3/algoOrder`
 - Place TP/SL: `POST /capi/v3/placeTpSlOrder`
 - Cancel orders: `DELETE /capi/v3/batchOrders`

@@ -569,9 +569,26 @@ export class WeexExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     const ids: string[] = [];
+    let regularBatch: PlaceOrderOpts[] = [];
+
+    const flushRegularBatch = async () => {
+      if (!regularBatch.length) return;
+      ids.push(...(await this.placeRegularOrderBatch(regularBatch)));
+      regularBatch = [];
+    };
+
     for (const order of orders) {
-      ids.push(...(await this.placeOrder(order)));
+      if (!this.isBatchableRegularOrder(order)) {
+        await flushRegularBatch();
+        ids.push(...(await this.placeOrder(order)));
+        continue;
+      }
+
+      regularBatch.push(order);
+      if (regularBatch.length === 5) await flushRegularBatch();
     }
+
+    await flushRegularBatch();
     return ids;
   };
 
@@ -865,6 +882,116 @@ export class WeexExchange extends BaseExchange {
     }
     const id = toIntegerString(result?.orderId || result?.clientOrderId || fallbackId || uuid());
     return id;
+  };
+
+  private isBatchableRegularOrder = (opts: PlaceOrderOpts): boolean =>
+    (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+    opts.triggerPrice === undefined &&
+    opts.stopLoss === undefined &&
+    opts.takeProfit === undefined &&
+    opts.reduceOnly !== true &&
+    opts.close !== true &&
+    opts.tpTriggerType === undefined &&
+    opts.slTriggerType === undefined;
+
+  private placeRegularOrderBatch = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    const payloads = orders.map((order) => this.formatOrderPayload(order));
+    const clientOrderIds: string[] = payloads.map((payload) => payload.newClientOrderId);
+
+    if (
+      clientOrderIds.some((clientOrderId) => typeof clientOrderId !== 'string' || !clientOrderId) ||
+      new Set(clientOrderIds).size !== clientOrderIds.length
+    ) {
+      const message = 'WEEX batch order request has missing or duplicate client order IDs';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    let data: unknown;
+    try {
+      ({ data } = await this.xhr.post(ENDPOINTS.BATCH_ORDERS, { batchOrders: payloads }));
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.errorMessage ||
+        err?.response?.data?.msg ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'WEEX batch order placement failed';
+      this.emitAndLogError(message);
+      throw err;
+    }
+
+    const malformed = (reason: string): never => {
+      const message = `WEEX batch order response malformed: ${reason}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
+
+    const responseRows = Array.isArray(data) ? data : malformed('expected an array');
+    if (responseRows.length !== payloads.length) {
+      malformed(`expected ${payloads.length} rows, received ${responseRows.length}`);
+    }
+
+    const resultsByClientOrderId = new Map<string, WeexOrderResult>();
+    for (const result of responseRows) {
+      if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        malformed('each row must be an object');
+      }
+
+      const row = result as WeexOrderResult;
+      const clientOrderId =
+        typeof row.clientOrderId === 'string' && row.clientOrderId
+          ? row.clientOrderId
+          : malformed('each row must echo a clientOrderId');
+      if (!clientOrderIds.includes(clientOrderId)) {
+        malformed(`unknown clientOrderId ${clientOrderId}`);
+      }
+      if (resultsByClientOrderId.has(clientOrderId)) {
+        malformed(`duplicate clientOrderId ${clientOrderId}`);
+      }
+      if (typeof row.success !== 'boolean') {
+        malformed(`missing success flag for ${clientOrderId}`);
+      }
+      if (row.errorCode !== undefined && typeof row.errorCode !== 'string') {
+        malformed(`invalid errorCode for ${clientOrderId}`);
+      }
+      if (row.errorMessage !== undefined && typeof row.errorMessage !== 'string') {
+        malformed(`invalid errorMessage for ${clientOrderId}`);
+      }
+      if (row.success && (typeof row.orderId !== 'string' || !/^[1-9]\d*$/.test(row.orderId))) {
+        malformed(`invalid orderId for ${clientOrderId}`);
+      }
+
+      resultsByClientOrderId.set(clientOrderId, row);
+    }
+
+    const orderedResults = clientOrderIds.map((clientOrderId) => {
+      const result = resultsByClientOrderId.get(clientOrderId);
+      return result || malformed(`missing clientOrderId ${clientOrderId}`);
+    });
+
+    orderedResults.forEach((result, index) => {
+      if (result.success && orders[index].timeInForce === OrderTimeInForce.PostOnly) {
+        this.store.updateOrder(
+          { id: result.orderId as string },
+          { timeInForce: OrderTimeInForce.PostOnly },
+        );
+      }
+    });
+
+    const rejectedResults = orderedResults.filter((result) => !result.success);
+    if (rejectedResults.length) {
+      const message = rejectedResults
+        .map(
+          (result) =>
+            `${result.clientOrderId}: ${result.errorMessage || result.errorCode || 'WEEX order rejected'}`,
+        )
+        .join('; ');
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return orderedResults.map((result) => result.orderId as string);
   };
 
   private isAlgoOrder = (order: Order) =>
