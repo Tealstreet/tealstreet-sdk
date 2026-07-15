@@ -10,6 +10,7 @@ export class ChaserOrderPostprocessor extends ExchangeDependentPostprocessor {
     for (let i = 0; i < instances.length; i++) {
       const instance = instances[i];
       if (instance.exchange !== this._exchange) continue;
+      if (instance.state.isStopped) continue;
 
       activeChasers.push({
         id: instance.id,

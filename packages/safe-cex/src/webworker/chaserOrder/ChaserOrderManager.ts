@@ -1,4 +1,5 @@
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import type { Exchange } from '../../exchanges/base';
 import {
   Order,
   OrderFillEvent,
@@ -16,6 +17,7 @@ import { adjust } from '../../utils/safe-math';
 import { ChaserOrderInstance } from './ChaserOrderInstance';
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
+const CHASER_MISSING_ORDER_CONFIRMATIONS = 2;
 
 // After observing a partial fill on the tracked order, freeze the
 // cancel+replace path for this long. The order is at the touch and
@@ -39,7 +41,18 @@ export class ChaserOrderManager {
 
   add(instance: ChaserOrderInstance) {
     this._chaserOrderInstances.push(instance);
-    this.processInstance(instance);
+    void this.processInstance(instance).catch((error) => this.handleSupervisorError(instance, error, 'startup'));
+  }
+
+  private async handleSupervisorError(instance: ChaserOrderInstance, error: unknown, phase: string) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const message = `Chaser supervisor failed during ${phase} for ${instance.options.symbol}: ${detail}`;
+    this.log(message, instance);
+    if (!instance.isStopped) {
+      instance.markComplete(`Chaser ${phase} failed`);
+    }
+    instance.exchange.emitter.emit('error', message);
+    await this.cleanupInstance(instance);
   }
 
   private getCurrentOrders(instance: ChaserOrderInstance) {
@@ -195,6 +208,7 @@ export class ChaserOrderManager {
       const useFillBasedTracking = exchange.name === 'hyperliquid' || exchange.name === 'grvt';
       this.log(`monitoring started, useFillBasedTracking=${useFillBasedTracking}`, instance);
       let priceCheckTimeout: ReturnType<typeof setTimeout> | undefined;
+      let queuedOrdersTimeout: ReturnType<typeof setTimeout> | undefined;
       let isCleanedUp = false;
       let onUpdate: ((data: StoreData) => void | Promise<void>) | undefined;
       let onFill: ((fill: OrderFillEvent) => void) | undefined;
@@ -202,8 +216,10 @@ export class ChaserOrderManager {
       // is intentionally reset after each replace, because new order IDs can
       // arrive in the private store after placeOrder returns.
       let hasSeenOrders = false;
+      let consecutiveMissingOrderUpdates = 0;
       let queuedOrdersCheck = false;
-      let runPriceCheck: ((orders: Order[]) => Promise<void>) | undefined;
+      let runPriceCheck: ((orders: Order[], confirmMissingOrders?: boolean) => Promise<void>) | undefined;
+      let scheduleQueuedOrdersCheck: (() => void) | undefined;
 
       // Helper to cleanup all event subscriptions
       const cleanup = () => {
@@ -215,6 +231,10 @@ export class ChaserOrderManager {
         if (priceCheckTimeout) {
           clearTimeout(priceCheckTimeout);
           priceCheckTimeout = undefined;
+        }
+        if (queuedOrdersTimeout) {
+          clearTimeout(queuedOrdersTimeout);
+          queuedOrdersTimeout = undefined;
         }
 
         if (onUpdate) {
@@ -231,7 +251,7 @@ export class ChaserOrderManager {
       // keeps it idempotent if a queued event also calls it.
       instance.registerDisposer(cleanup);
 
-      const applyOrderFillState = (orders: Order[]) => {
+      const applyOrderFillState = async (orders: Order[]) => {
         for (const order of orders) {
           if (order.status === OrderStatus.Canceled && order.extra?.rejectReason === OrderRejectReason.PostOnly) {
             continue;
@@ -245,11 +265,13 @@ export class ChaserOrderManager {
           this.log('all orders are closed (executed) - marking ourselves completed', instance);
           instance.markComplete();
           cleanup();
+          await this.cleanupInstance(instance);
           return true;
         }
 
         if (instance.isStopped) {
           cleanup();
+          await this.cleanupInstance(instance);
           return true;
         }
 
@@ -259,7 +281,7 @@ export class ChaserOrderManager {
       const updateOrders = async (orders: Order[]) => {
         if (instance.pendingOrdersUpdate) {
           queuedOrdersCheck = true;
-          applyOrderFillState(orders);
+          await applyOrderFillState(orders);
           return;
         }
 
@@ -282,11 +304,12 @@ export class ChaserOrderManager {
             ) {
               instance.markComplete();
               cleanup();
+              await this.cleanupInstance(instance);
               return;
             }
           }
 
-          const isFilledOrStopped = applyOrderFillState(orders);
+          const isFilledOrStopped = await applyOrderFillState(orders);
 
           if (instance.freshOrder) {
             instance.freshOrder = false;
@@ -387,9 +410,9 @@ export class ChaserOrderManager {
           }
         } finally {
           instance.pendingOrdersUpdate = false;
-          if (queuedOrdersCheck && !isCleanedUp && !instance.isStopped && runPriceCheck) {
+          if (queuedOrdersCheck && !isCleanedUp && !instance.isStopped) {
             queuedOrdersCheck = false;
-            await runPriceCheck(this.getCurrentOrders(instance));
+            scheduleQueuedOrdersCheck?.();
           }
         }
       };
@@ -397,25 +420,35 @@ export class ChaserOrderManager {
       let lastOrdersUpdateId = -1;
       let lastPriceCheckAt = 0;
 
-      const handleTrackedOrders = async (orders: Order[]) => {
+      const handleTrackedOrders = async (orders: Order[], confirmMissingOrders: boolean) => {
         if (orders.length > 0) {
           hasSeenOrders = true;
+          consecutiveMissingOrderUpdates = 0;
           await updateOrders(orders);
         }
 
-        // Only unsub if we've previously seen our orders and now they're gone
-        // This prevents race condition where orders haven't appeared in store yet
-        if (!orders.length && !instance.pendingOrdersUpdate && hasSeenOrders) {
-          this.log('unsubbing, orders no longer in store', instance);
-          instance.markComplete();
+        // A wholesale REST snapshot can have been fetched before the chaser's
+        // WS order frame and applied after it, making a live resting order
+        // disappear for one updateId. Require two distinct order mutations to
+        // agree that the order is gone; ticker-only notifies do not count.
+        if (!orders.length && !instance.pendingOrdersUpdate && hasSeenOrders && confirmMissingOrders) {
+          consecutiveMissingOrderUpdates += 1;
+          if (consecutiveMissingOrderUpdates < CHASER_MISSING_ORDER_CONFIRMATIONS) {
+            this.log('tracked orders missing once; waiting for confirmation', instance);
+            return;
+          }
+
+          this.log('tracked orders absent across confirmed order updates; stopping safely', instance);
+          instance.markComplete('Tracked orders disappeared from store');
           cleanup();
+          await this.cleanupInstance(instance);
         }
       };
 
       const filterCurrentOrders = (orders: Order[]) =>
         orders.filter((order) => instance.currentOrderIds.includes(order.id));
 
-      runPriceCheck = async (orders: Order[]) => {
+      runPriceCheck = async (orders: Order[], confirmMissingOrders = false) => {
         lastPriceCheckAt = Date.now();
 
         // `chase ... to <length>` termination — evaluate before any
@@ -439,7 +472,24 @@ export class ChaserOrderManager {
           }
         }
 
-        await handleTrackedOrders(orders);
+        await handleTrackedOrders(orders, confirmMissingOrders);
+      };
+
+      // Updates that arrive while a cancel/reprice pass is awaiting network I/O
+      // still apply fill state immediately, but their follow-up reprice is one
+      // bounded trailing check. Calling runPriceCheck recursively from finally
+      // allowed an order-update storm to chain cancel/replace passes forever.
+      scheduleQueuedOrdersCheck = () => {
+        if (isCleanedUp || queuedOrdersTimeout) return;
+        queuedOrdersTimeout = setTimeout(async () => {
+          queuedOrdersTimeout = undefined;
+          if (isCleanedUp || instance.isStopped) return;
+          try {
+            await runPriceCheck!(this.getCurrentOrders(instance));
+          } catch (error) {
+            await this.handleSupervisorError(instance, error, 'queued order update');
+          }
+        }, CHASER_PRICE_CHECK_MIN_INTERVAL_MS);
       };
 
       const scheduleTickerPriceCheck = () => {
@@ -450,70 +500,88 @@ export class ChaserOrderManager {
         const wait = Math.max(CHASER_PRICE_CHECK_MIN_INTERVAL_MS - (Date.now() - lastPriceCheckAt), 0);
         priceCheckTimeout = setTimeout(async () => {
           priceCheckTimeout = undefined;
+          try {
+            if (instance.isStopped) {
+              this.log('instance is stopped from outside, stopping queued price check', instance);
+              instance.markComplete();
+              cleanup();
+              await this.cleanupInstance(instance);
+              return;
+            }
 
-          if (instance.isStopped) {
-            this.log('instance is stopped from outside, stopping queued price check', instance);
-            instance.markComplete();
-            cleanup();
-            return;
+            await runPriceCheck(this.getCurrentOrders(instance));
+          } catch (error) {
+            await this.handleSupervisorError(instance, error, 'queued price update');
           }
-
-          await runPriceCheck(this.getCurrentOrders(instance));
         }, wait);
       };
 
       onUpdate = async (data: StoreData) => {
-        if (instance.isStopped) {
-          this.log('instance is stopped from outside, unsubbing', instance);
-          instance.markComplete();
-          cleanup();
-          return;
-        }
-
-        const ordersUpdateId = data.updateIds?.orders;
-        const hasOrderUpdate = ordersUpdateId === undefined || ordersUpdateId !== lastOrdersUpdateId;
-        if (ordersUpdateId !== undefined) {
-          lastOrdersUpdateId = ordersUpdateId;
-        }
-
-        if (hasOrderUpdate) {
-          if (priceCheckTimeout) {
-            clearTimeout(priceCheckTimeout);
-            priceCheckTimeout = undefined;
+        try {
+          if (instance.isStopped) {
+            this.log('instance is stopped from outside, unsubbing', instance);
+            instance.markComplete();
+            cleanup();
+            await this.cleanupInstance(instance);
+            return;
           }
-          await runPriceCheck(filterCurrentOrders(data.orders));
-          return;
-        }
 
-        if (Date.now() - lastPriceCheckAt >= CHASER_PRICE_CHECK_MIN_INTERVAL_MS) {
-          await runPriceCheck(filterCurrentOrders(data.orders));
-          return;
-        }
+          const ordersUpdateId = data.updateIds?.orders;
+          const hasOrderUpdate = ordersUpdateId === undefined || ordersUpdateId !== lastOrdersUpdateId;
+          if (ordersUpdateId !== undefined) {
+            lastOrdersUpdateId = ordersUpdateId;
+          }
 
-        scheduleTickerPriceCheck();
+          if (hasOrderUpdate) {
+            if (priceCheckTimeout) {
+              clearTimeout(priceCheckTimeout);
+              priceCheckTimeout = undefined;
+            }
+            if (queuedOrdersTimeout) {
+              clearTimeout(queuedOrdersTimeout);
+              queuedOrdersTimeout = undefined;
+            }
+            await runPriceCheck(filterCurrentOrders(data.orders), true);
+            return;
+          }
+
+          if (Date.now() - lastPriceCheckAt >= CHASER_PRICE_CHECK_MIN_INTERVAL_MS) {
+            await runPriceCheck(filterCurrentOrders(data.orders));
+            return;
+          }
+
+          scheduleTickerPriceCheck();
+        } catch (error) {
+          await this.handleSupervisorError(instance, error, 'store update');
+        }
       };
 
       // Fill event handler - provides faster fill detection than order status updates
       onFill = (fill: OrderFillEvent) => {
-        // Check if this fill belongs to one of our chaser orders
-        if (!fill.orderId || !instance.currentOrderIds.includes(fill.orderId)) {
-          return;
-        }
+        try {
+          // Check if this fill belongs to one of our chaser orders
+          if (!fill.orderId || !instance.currentOrderIds.includes(fill.orderId)) {
+            return;
+          }
 
-        // Also verify it's for the correct symbol
-        if (fill.symbol !== instance.options.symbol) {
-          return;
-        }
+          // Also verify it's for the correct symbol
+          if (fill.symbol !== instance.options.symbol) {
+            return;
+          }
 
-        this.log(`fill event received: orderId=${fill.orderId}, amount=${fill.amount}`, instance);
+          this.log(`fill event received: orderId=${fill.orderId}, amount=${fill.amount}`, instance);
 
-        // Track the fill amount
-        instance.addFillAmount(fill.orderId, fill.amount);
+          // Track the fill amount
+          instance.addFillAmount(fill.orderId, fill.amount);
 
-        // Check if fully filled via fill events
-        if (instance.isStopped) {
-          this.log('fully filled via fill events - marking ourselves completed', instance);
-          cleanup();
+          // Check if fully filled via fill events
+          if (instance.isStopped) {
+            this.log('fully filled via fill events - marking ourselves completed', instance);
+            cleanup();
+            void this.cleanupInstance(instance);
+          }
+        } catch (error) {
+          void this.handleSupervisorError(instance, error, 'fill update');
         }
       };
 
@@ -569,6 +637,14 @@ export class ChaserOrderManager {
     // this, but detaching here is the cheaper belt-and-braces fix.
     instance.dispose();
 
+    // Stop exposing and retaining the instance before any remote cancellation
+    // await. A slow or hung exchange request must not keep a disposed account
+    // reachable through the module singleton.
+    const index = this._chaserOrderInstances.indexOf(instance);
+    if (index > -1) {
+      this._chaserOrderInstances.splice(index, 1);
+    }
+
     if (instance.currentOrderIds?.length) {
       // Snapshot the IDs and clear synchronously so an in-flight
       // `updateOrders` that reassigns `currentOrderIds` after our
@@ -594,10 +670,21 @@ export class ChaserOrderManager {
         // never trip the splice below on a cancel-loop error
       }
     }
-    // Remove instance from array to prevent memory leak
-    const index = this._chaserOrderInstances.indexOf(instance);
-    if (index > -1) {
-      this._chaserOrderInstances.splice(index, 1);
+  }
+
+  cleanupExchange(exchange: Exchange, reason = 'Exchange disposed while chase was active') {
+    const instances = this._chaserOrderInstances.filter((instance) => instance.exchange === exchange);
+    for (const instance of instances) {
+      if (!instance.isStopped) {
+        instance.markComplete(reason);
+        exchange.emitter.emit(
+          'warning',
+          `Chaser for ${instance.options.symbol} was stopped because the exchange connection was disposed`,
+        );
+      }
+      // cleanupInstance detaches and splices synchronously before its first
+      // cancellation await, so callers can dispose the exchange immediately.
+      void this.cleanupInstance(instance);
     }
   }
 

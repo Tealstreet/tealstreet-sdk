@@ -46,12 +46,19 @@ name, and don't assume `accountName` is globally unique here. See
   instantiates `ExchangeWorker`.
 - `StoreWorkerPayload.ts` — the wire-format union of every `op`
   the bridge speaks in either direction.
-- `WorkerShim.ts` — main-thread fallback that runs the same
-  pipeline in a synchronous shim when Workers are disabled.
-- `handlers/`, `chaserOrder/`, `postProcessors/` —
-  per-subsystem detail; each has its own `CLAUDE.md` where the
-  bar is met. The `exec` worker command is handled by
-  `handlers/CommandHandler.ts` (there is no `commands/` directory).
+- `commandExecutor.ts` — parses and dispatches worker CLI commands;
+  `handlers/CommandHandler.ts` owns the `exec` wire operation.
+- `TelgramWorker.ts` — legacy Telegram worker bridge (filename spelling is
+  load-bearing).
+- `handlers/` — worker-operation handlers; there is no directory-local
+  `CLAUDE.md` and no `commands/` directory.
+- `chaserOrder/`, `postProcessors/` — documented subsystems with their own
+  `CLAUDE.md` files.
+- `twap/` — TWAP instance and manager lifecycle.
+
+The main-thread worker fallback is
+`apps/web/src/utils/shim/worker/WorkerShim.ts`; it is not part of this
+directory.
 
 ## Worker → main thread bridge: structured-clone race
 
@@ -138,6 +145,14 @@ fix at `_sanitizeForPostMessage` restores the invariant.
 
 ## Other notes
 
+- `dispose()` tears down every chaser owned by the current exchange before it
+  disposes the exchange itself. This synchronously detaches listeners and
+  removes singleton references, starts best-effort cancellation for live IDs,
+  and emits a user-visible warning for each interrupted active chase.
+- Both deactivate paths cancel the trailing store throttle and clear handlers,
+  independent postprocessors, and exchange-dependent postprocessors. This
+  prevents a queued throttle firing from processing a disposed exchange or
+  posting an unstamped stale store payload after `deactivate-status`.
 - `_throttledStoreUpdate` uses lodash `throttle(fn, 250ms,
 { trailing: true })` — leading edge fires immediately when
   the throttle window is open; subsequent calls within the window

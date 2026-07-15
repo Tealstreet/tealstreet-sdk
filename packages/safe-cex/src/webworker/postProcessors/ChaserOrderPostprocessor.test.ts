@@ -92,8 +92,8 @@ describe('ChaserOrderPostprocessor', () => {
       chaser.options.maxAttempts = 15;
       chaser.options.reduceOnly = true;
       chaser.state.attempts = 5;
-      chaser.state.isStopped = true;
-      chaser.state.stopReason = 'User cancelled';
+      chaser.state.isStopped = false;
+      chaser.state.stopReason = '';
       chaser.currentOrderIds = ['order-x', 'order-y', 'order-z'];
       chaser.options.origin = 'webhook';
 
@@ -111,10 +111,20 @@ describe('ChaserOrderPostprocessor', () => {
       expect(activeChaser.maxAttempts).toBe(15);
       expect(activeChaser.reduceOnly).toBe(true);
       expect(activeChaser.attempts).toBe(5);
-      expect(activeChaser.isStopped).toBe(true);
-      expect(activeChaser.stopReason).toBe('User cancelled');
+      expect(activeChaser.isStopped).toBe(false);
+      expect(activeChaser.stopReason).toBe('');
       expect(activeChaser.currentOrderIds).toEqual(['order-x', 'order-y', 'order-z']);
       expect(activeChaser.origin).toBe('webhook');
+    });
+
+    it('excludes stopped instances while asynchronous cleanup finishes', () => {
+      const chaser = createMockChaserInstance('chaser-1', mockExchange);
+      chaser.state.isStopped = true;
+      (chaserOrderManagerInstance as any).instances = [chaser];
+
+      processor.process(mockStore);
+
+      expect(mockStore.activeChasers).toEqual([]);
     });
 
     it('should handle multiple chasers for the same exchange', () => {

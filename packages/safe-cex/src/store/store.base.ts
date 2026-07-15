@@ -135,6 +135,11 @@ export class DefaultStore implements Store {
       tickers: [...this.tickers],
       positions: [...this.positions],
       displayedPositions: [...this.displayedPositions],
+      displayedMargin: {
+        longExposure: this.displayedMargin?.longExposure ?? 0,
+        shortExposure: this.displayedMargin?.shortExposure ?? 0,
+        totalNotional: this.displayedMargin?.totalNotional ?? 0,
+      },
       ordersRisk: { ...this.ordersRisk },
       activeChasers: [...this.activeChasers],
       activeTWAPs: [...this.activeTWAPs],
@@ -600,9 +605,9 @@ export class DefaultStore implements Store {
 
   removeOrder = (order: Pick<Order, 'id'>) => {
     const idx = this.state.orders.findIndex((o) => o.id === order.id);
-    this.state.updateIds.orders += 1;
     if (idx > -1) {
       this.state.orders.splice(idx, 1);
+      this.state.updateIds.orders += 1;
       this.notify();
     }
   };
@@ -677,9 +682,9 @@ export class DefaultStore implements Store {
 
   updatePosition = (position: Pick<Position, 'id'>, changes: Partial<Position>) => {
     const idx = this.state.positions.findIndex((p) => p.id === position.id);
-    this.state.updateIds.positions += 1;
     if (idx > -1) {
       this.updateInArray('positions', idx, changes);
+      this.state.updateIds.positions += 1;
       this.notify();
     }
   };
@@ -840,9 +845,9 @@ export class DefaultStore implements Store {
     // per ticker frame.
     //
     // `pendingTickerDeltas` is deliberately NOT populated here. Delta
-    // patching lives downstream (VirtualWorkerContext /
-    // ExchangeRelayWorkerShim) — see the comment in
-    // `webworker/ExchangeWorker.ts → _storeUpdate`.
+    // transport is produced directly by ExchangeWorker from its last-sent
+    // ticker baseline; this legacy queue remains only for the public
+    // consume/apply compatibility surface and deterministic store tests.
     let didChange = false;
     for (const k in normalizedChanges) {
       didChange = true;

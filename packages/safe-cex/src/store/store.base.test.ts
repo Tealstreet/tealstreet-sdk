@@ -241,7 +241,9 @@ describe('DefaultStore', () => {
       });
 
       it('should not fail if order not found', () => {
+        const initialId = store.updateIds.orders;
         expect(() => store.removeOrder({ id: 'non-existent' })).not.toThrow();
+        expect(store.updateIds.orders).toBe(initialId);
       });
     });
 
@@ -352,6 +354,12 @@ describe('DefaultStore', () => {
         store.addOrUpdatePosition(createPosition());
         store.updatePosition({ id: 'position-1' }, { unrealizedPnl: 1000 });
         expect(store.positions[0].unrealizedPnl).toBe(1000);
+      });
+
+      it('does not advance the update id when the position is missing', () => {
+        const initialId = store.updateIds.positions;
+        store.updatePosition({ id: 'non-existent' }, { unrealizedPnl: 1000 });
+        expect(store.updateIds.positions).toBe(initialId);
       });
     });
 
@@ -703,9 +711,14 @@ describe('DefaultStore', () => {
     });
 
     it('should return copies not references', () => {
-      store.update({ tickers: [createTicker()] });
+      store.update({
+        tickers: [createTicker()],
+        displayedMargin: { longExposure: 10, shortExposure: 20, totalNotional: 30 },
+      });
       const serialized = store.serialize();
       expect(serialized.tickers).not.toBe(store.tickers);
+      expect(serialized.displayedMargin).toEqual(store.displayedMargin);
+      expect(serialized.displayedMargin).not.toBe(store.displayedMargin);
     });
   });
 });

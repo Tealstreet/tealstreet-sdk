@@ -162,7 +162,7 @@ describe('DisplayedPositionsPostprocessor', () => {
     expect(store.displayedPositions[0].unrealizedPnl).toBe(36);
   });
 
-  it('adds fake chaser positions only when no matching real position exists', () => {
+  it('does not let a zero-contract placeholder suppress a fake chaser position', () => {
     const store = createStore({
       positions: [createPosition({ id: 'flat-position', contracts: 0 })],
       activeChasers: [
@@ -175,8 +175,14 @@ describe('DisplayedPositionsPostprocessor', () => {
 
     createProcessor().process(store);
 
-    expect(store.displayedPositions).toHaveLength(1);
-    expect(store.displayedPositions[0]).toMatchObject({
+    expect(store.displayedPositions).toHaveLength(2);
+    expect(store.displayedPositions.find((position) => position.id === 'fake-chaser-btc-chaser')).toMatchObject({
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      isFakePosition: true,
+      chaserSize: 4,
+    });
+    expect(store.displayedPositions.find((position) => position.id === 'fake-chaser-eth-chaser')).toMatchObject({
       id: 'fake-chaser-eth-chaser',
       symbol: 'ETHUSDT',
       side: PositionSide.Short,
@@ -264,5 +270,20 @@ describe('DisplayedPositionsPostprocessor', () => {
     createProcessor().process(store);
 
     expect(store.displayedPositions[0].hasFullStop).toBe(false);
+  });
+
+  it('evicts rolling pnl queues after a position closes', () => {
+    const processor = createProcessor();
+    const store = createStore({ positions: [createPosition()] });
+
+    processor.process(store);
+    expect((processor as any)._lastMinutePnl.size).toBe(1);
+    expect((processor as any)._lastFiveMinutesPnl.size).toBe(1);
+
+    store.positions = [createPosition({ contracts: 0 })];
+    processor.process(store);
+
+    expect((processor as any)._lastMinutePnl.size).toBe(0);
+    expect((processor as any)._lastFiveMinutesPnl.size).toBe(0);
   });
 });

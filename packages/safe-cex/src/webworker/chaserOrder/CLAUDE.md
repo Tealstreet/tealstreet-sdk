@@ -5,6 +5,18 @@ that follow a target price (typically chasing the bid/ask). One
 `ChaserOrderInstance` per active chase; lifecycle managed by
 `chaserOrderManagerInstance` (singleton).
 
+Completed chasers are not history rows. Every internal completion path routes
+through `cleanupInstance`, which detaches listeners, cancels remaining IDs, and
+splices the instance from the singleton. The postprocessor also excludes a
+stopped instance during the asynchronous cancellation window, so completed
+chasers cannot pin full orders payloads or grow worker memory without bound.
+
+Exchange disposal owns chaser teardown too. `ExchangeWorker.dispose` calls the
+manager before disposing the exchange; matching instances are stopped, their
+listeners and singleton references are removed synchronously, cancellation is
+started for known IDs, and a bridged warning tells the user the chase was
+interrupted. Do not defer this cleanup to a future store update.
+
 ## Hot-path: order updates are immediate; ticker-only checks are rate-limited
 
 `ChaserOrderManager.processInstance` registers an `onUpdate`
@@ -24,6 +36,13 @@ price checks with one trailing `setTimeout` at a time
 (`CHASER_PRICE_CHECK_MIN_INTERVAL_MS`). Order updates bypass that
 rate limit and are processed immediately; do not delay fills,
 cancels, rejects, or order removal behind the ticker throttle.
+
+If an order update arrives while a cancel/reprice pass is awaiting network
+I/O, its fill state is applied immediately but the follow-up price evaluation
+is coalesced into one trailing 50 ms check. A fresh direct order update cancels
+that queued check and runs immediately. Do not restore recursive
+`runPriceCheck` calls from the pending pass's `finally`; they can chain
+cancel/replace work without a bound during update storms.
 
 ```ts
 const onUpdate = async (data: StoreData) => {
@@ -48,6 +67,24 @@ updateId-backed store bridge and other raw-order consumers, but
 this manager's price-chasing path must not use that counter as an
 early-return condition. See `../../store/CLAUDE.md` → "updateIds
 bump on bulk replacement".
+
+## Missing-order snapshots require confirmation
+
+Once a tracked order has appeared, a single wholesale snapshot that omits it
+does not complete the chase. REST snapshots can be fetched before placement and
+applied after the private WS frame. The manager requires two consecutive,
+distinct order-updateId changes with the tracked IDs absent; ticker-only
+notifications do not count, and seeing the order again resets the confirmation.
+On confirmed loss it uses `cleanupInstance`, so the last known IDs are cancelled
+instead of leaving a resting order without a supervisor.
+
+## Supervisor failures are contained locally
+
+`processInstance`, store-update handlers, queued ticker checks, and fill
+handlers route thrown errors through the manager's failure path. That path
+preserves an already-specific stop reason, otherwise marks the chase failed,
+emits an actionable exchange error, and runs `cleanupInstance`. Do not rely on
+the worker-global `unhandledrejection` listener for chaser lifecycle cleanup.
 
 ## Why the chaser subscribes to `'update'` and not direct WS events
 

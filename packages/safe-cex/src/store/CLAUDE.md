@@ -4,6 +4,11 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
+`serialize()` carries every derived display bridge field, including
+`displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
+must not depend on postprocessors happening to reconstruct a field after
+serialization.
+
 For exchange WS dispatch and per-frame patterns that interact with
 this store, see `../exchanges/CLAUDE.md` → "Public WebSocket
 Hot-Path Patterns". This doc covers the **store contracts** —
@@ -66,6 +71,11 @@ bumps from `update()`, a wholesale refresh can be pruned as
 unchanged. If you add a new bulk-replacement helper, bump the
 relevant `updateIds.*`.
 
+An attempted mutation of a missing row is a no-op: `removeOrder` and
+`updatePosition` must not advance an updateId unless they find and mutate the
+target. Advancing the counter without notifying makes the next unrelated store
+notification resend an unchanged collection.
+
 ### Tickers / markets are mutated in place
 
 `updateInArray` writes fields directly onto the existing ticker /
@@ -86,11 +96,11 @@ replacement, ticker added/removed).
 
 `updateTicker` deliberately does not populate `pendingTickerDeltas`.
 The `applyTickerDeltas` / `applyPackedTickerDeltas` /
-`consumeTickerDeltas` API stays for the virtual-worker / relay-shim
-delta-patching layer (see `webworker/ExchangeWorker.ts →
-_storeUpdate` comment) but that producer side moved out of the
-store long ago. Per-frame `Map.get` + `Object.assign`/spread for a
-queue nothing reads is wasted work; don't reintroduce it.
+`consumeTickerDeltas` API stays as a legacy compatibility surface and for
+deterministic store tests. Live worker delta transport is produced directly by
+`ExchangeWorker._packTickerDeltasSinceBaseline`; no runtime producer writes
+this store queue. Per-frame `Map.get` + `Object.assign`/spread for a queue
+nothing reads is wasted work; don't reintroduce it.
 
 ## Hot-path internals (don't undo these)
 
@@ -174,7 +184,6 @@ than skipped so the chaser can still move closer to the touch.
   update) and per-postprocessor optimizations:
   `../webworker/postProcessors/`.
 - The throttled worker → main bridge: `../webworker/ExchangeWorker.ts`.
-- `applyTickerDeltas` / `applyPackedTickerDeltas` consumers (the
-  delta-patching layer): outside this package; see
-  `_storeUpdate` comment in `ExchangeWorker.ts` for the design
-  pointer.
+- Live packed-ticker production:
+  `ExchangeWorker._packTickerDeltasSinceBaseline`; the store's apply/consume
+  methods are compatibility and test scaffolding, not an active producer path.

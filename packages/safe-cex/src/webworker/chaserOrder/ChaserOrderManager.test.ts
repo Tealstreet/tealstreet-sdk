@@ -205,6 +205,7 @@ describe('ChaserOrderManager', () => {
 
     expect(instance.isStopped).toBe(true);
     expect(instance.state.stopReason).toBe('Completed');
+    expect(manager.instances).not.toContain(instance);
   });
 
   it('does not miss an order fill that arrives while a reprice is pending', async () => {
@@ -248,6 +249,57 @@ describe('ChaserOrderManager', () => {
     expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
   });
 
+  it('rate-limits the follow-up check queued during an in-flight order update', async () => {
+    const { emit, exchange, store } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+    let resolveCancel!: () => void;
+    (exchange.cancelOrders as any).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveCancel = resolve;
+      }),
+    );
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    await emit('update', store);
+
+    (store.tickersBySymbol.BTCUSDT as any).bid = 101;
+    (store.tickersBySymbol.BTCUSDT as any).ask = 102;
+    store.updateIds.orders += 1;
+    const inFlightUpdate = emit('update', store);
+    await Promise.resolve();
+    expect(exchange.cancelOrders).toHaveBeenCalledTimes(1);
+
+    // A second order edge arrives while cancel is still pending. It must not
+    // recurse immediately when the first pass finishes.
+    store.updateIds.orders += 1;
+    await emit('update', store);
+    resolveCancel();
+    await vi.advanceTimersByTimeAsync(1000);
+    await inFlightUpdate;
+
+    const replacement = createOrder('order-2', 101);
+    (store as any).orders = [replacement];
+    (exchange.placeOrder as any).mockResolvedValueOnce(['order-3']);
+    (store.tickersBySymbol.BTCUSDT as any).bid = 102;
+    (store.tickersBySymbol.BTCUSDT as any).ask = 103;
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(exchange.cancelOrders).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exchange.cancelOrders).toHaveBeenCalledTimes(2);
+    expect(exchange.cancelOrders).toHaveBeenLastCalledWith([replacement]);
+  });
+
   it('never replaces after cancellation when fill reconciliation fails', async () => {
     // This regression intentionally lives with the chaser, not GRVT: any
     // fill-based exchange must fail closed once cancellation may have won.
@@ -279,6 +331,64 @@ describe('ChaserOrderManager', () => {
     expect(instance.state.stopReason).toBe('Failed to reconcile fills after cancellation');
     expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringMatching(/stopped before replacement/i));
     expect(manager.instances).not.toContain(instance);
+  });
+
+  it('contains startup failures and removes the failed instance', async () => {
+    const { exchange, store } = createMockExchange();
+    (store as any).markets = [];
+    (store as any).tickers = [];
+    store.marketsBySymbol = {};
+    store.tickersBySymbol = {};
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(instance.isStopped).toBe(true);
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith(
+      'error',
+      expect.stringMatching(/supervisor failed during startup/i),
+    );
+  });
+
+  it('contains store-update failures instead of leaking an unhandled rejection', async () => {
+    const { emit, exchange, store } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    await emit('update', store);
+
+    (store.tickersBySymbol.BTCUSDT as any).bid = 101;
+    (store.tickersBySymbol.BTCUSDT as any).ask = 102;
+    store.updateIds.orders += 1;
+    (exchange.cancelOrders as any).mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(emit('update', store)).resolves.toBeUndefined();
+
+    expect(instance.state.stopReason).toBe('Failed to cancel orders');
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith(
+      'error',
+      expect.stringMatching(/supervisor failed during store update/i),
+    );
   });
 
   it('stops reduce-only chasers when the reducing position is gone on a store update', async () => {
@@ -317,6 +427,50 @@ describe('ChaserOrderManager', () => {
 
     expect(instance.isStopped).toBe(true);
     expect(instance.state.stopReason).toBe('Completed');
+    expect(manager.instances).not.toContain(instance);
+  });
+
+  it('requires two order updates before treating a missing tracked order as final', async () => {
+    const { emit, exchange, order, store } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    await emit('update', store);
+
+    (store as any).orders = [];
+    store.updateIds.orders += 1;
+    await emit('update', store);
+
+    expect(instance.isStopped).toBe(false);
+    expect(manager.instances).toContain(instance);
+    expect(exchange.cancelOrders).not.toHaveBeenCalled();
+
+    // A correcting snapshot resets the debounce.
+    (store as any).orders = [order];
+    store.updateIds.orders += 1;
+    await emit('update', store);
+    (store as any).orders = [];
+    store.updateIds.orders += 1;
+    await emit('update', store);
+    expect(instance.isStopped).toBe(false);
+
+    store.updateIds.orders += 1;
+    await emit('update', store);
+
+    expect(instance.state.stopReason).toBe('Tracked orders disappeared from store');
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
+    ]);
   });
 
   it('cancels orders placed during the user-cancel window so STOP fully clears the book', async () => {
@@ -401,5 +555,34 @@ describe('ChaserOrderManager', () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect((exchange.placeOrder as any).mock.calls.length).toBe(placeCallsBefore);
+  });
+
+  it('tears down and warns for active chasers when their exchange is disposed', async () => {
+    const { exchange } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    manager.cleanupExchange(exchange);
+
+    expect(instance.isStopped).toBe(true);
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.off).toHaveBeenCalledWith('update', expect.any(Function));
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
+    ]);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith(
+      'warning',
+      expect.stringMatching(/stopped because the exchange connection was disposed/i),
+    );
   });
 });

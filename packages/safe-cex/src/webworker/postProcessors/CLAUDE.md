@@ -78,12 +78,14 @@ firing:
    message-handler-stats).
 2. `_postprocessors[*].process(processedData)` — classes that
    only need account/options/store data (displayed-positions,
-   chaser-order-enrichment, orders-risk, snapshot).
-3. `_sanitizeForPostMessage(processedData)` — strips circular
+   displayed-margin, chaser-order-enrichment, orders-risk, snapshot).
+3. `_prepareStorePayload(processedData)` — applies updateId-gated
+   order/position omission, packed ticker deltas, and market-version gating.
+4. `_sanitizeForPostMessage(processedData)` (inside preparation) — strips circular
    `info` fields off orders / positions / displayedPositions
    **only when at least one item carries `info`** (one-pass scan
    gates the `.map()` allocation).
-4. `postMessage({ op: 'store', data: sanitizedData })`.
+5. `postMessage({ op: 'store', data: preparedData })`.
 
 The receiver structuredClones at the boundary, so any deep clone
 inside the post-processors is **redundant** with that work — see
@@ -149,11 +151,19 @@ When `activeChasers` and `activeTWAPs` are empty, don't build
 `activeChaserKeys`, `activeTwapKeys`, or the real-position key map.
 Fake positions are only a chaser feature, so `realPositionKeys` is
 intentionally allocated only when chasers exist (not merely when TWAPs
-exist). The per-position `activeKey` string is built when
+exist). Only positive-contract rows are registered as real positions: full
+snapshot refreshes retain zero-contract placeholders, and those must not hide
+the pending-entry fake position for an active chaser. The per-position
+`activeKey` string is built when
 `needsPositionKey` **or** there is stop/TP coverage to look up
 (`hasStopTpCoverage`) — it's reused for the chaser/TWAP flags and the
 `hasFullStop` / `hasFullTP` lookup, so it stays a single allocation per
 position even though it now serves two features.
+
+Rolling 1-minute and 5-minute PnL queues are retained only for positions (real
+or fake) emitted by the current pass. When a full snapshot leaves a zeroed row
+or removes a symbol, both queue maps evict that account/position key so symbol
+rotation cannot grow worker memory for the lifetime of the tab.
 
 ### `DisplayedMarginPostprocessor` derives `store.displayedMargin`
 

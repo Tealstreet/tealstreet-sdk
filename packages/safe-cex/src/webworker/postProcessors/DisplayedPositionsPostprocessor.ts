@@ -129,8 +129,8 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
   private _cachedMarketMap: Record<string, Market> = {};
   private _cachedTickerSource: Ticker[] | undefined;
   private _cachedMarketSource: Market[] | undefined;
-  private trackPositionPnl(position: Writable<DisplayedPosition>): void {
-    if (!position.ticker?.last) return;
+  private trackPositionPnl(position: Writable<DisplayedPosition>): string | undefined {
+    if (!position.ticker?.last) return undefined;
 
     const id = `${position.account}:${position.id}`;
 
@@ -151,6 +151,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
     }
     lastMinutePnl.enqueue({ upnl: position.unrealizedPnl });
     position.oneMinUpnl = lastMinutePnl.peek()?.upnl || 0;
+    return id;
   }
 
   process(store: Writable<StoreData>): void {
@@ -206,16 +207,18 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
     }
     const displayedPositions: Writable<DisplayedPosition[]> = [];
     const positions = store.positions || [];
+    const activePnlKeys: Record<string, true> | undefined =
+      this._lastMinutePnl.size > 0 || this._lastFiveMinutesPnl.size > 0 ? Object.create(null) : undefined;
 
     for (let i = 0; i < positions.length; i++) {
       const position = positions[i];
       const activeKey = needsPositionKey || hasStopTpCoverage ? positionKey(position.symbol, position.side) : undefined;
+      const contracts = Math.abs(position.contracts);
+      if (contracts <= 0) continue;
+
       if (realPositionKeys && activeKey) {
         realPositionKeys[activeKey] = true;
       }
-
-      const contracts = Math.abs(position.contracts);
-      if (contracts <= 0) continue;
 
       const ticker = tickerMap[position.symbol];
       const coverage = activeKey ? stopTpCoverage[activeKey] : undefined;
@@ -234,12 +237,29 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
         hasFullStop: coverage ? coverage.hasFullStop || coverage.stopAmount >= contracts : false,
         hasFullTP: coverage ? coverage.hasFullTP || coverage.tpAmount >= contracts : false,
       } as Writable<DisplayedPosition> & { key: string };
-      this.trackPositionPnl(displayedPosition);
+      const pnlKey = this.trackPositionPnl(displayedPosition);
+      if (activePnlKeys && pnlKey) activePnlKeys[pnlKey] = true;
       displayedPositions.push(displayedPosition);
     }
 
     if (realPositionKeys) {
-      this.appendFakePositionsFromChasers(store, tickerMap, marketMap, realPositionKeys, displayedPositions);
+      this.appendFakePositionsFromChasers(
+        store,
+        tickerMap,
+        marketMap,
+        realPositionKeys,
+        displayedPositions,
+        activePnlKeys,
+      );
+    }
+
+    if (activePnlKeys) {
+      for (const key of this._lastMinutePnl.keys()) {
+        if (!activePnlKeys[key]) this._lastMinutePnl.delete(key);
+      }
+      for (const key of this._lastFiveMinutesPnl.keys()) {
+        if (!activePnlKeys[key]) this._lastFiveMinutesPnl.delete(key);
+      }
     }
 
     store.displayedPositions = displayedPositions;
@@ -251,6 +271,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
     marketMap: Record<string, Market>,
     realPositionKeys: Record<string, true>,
     displayedPositions: Writable<DisplayedPosition[]>,
+    activePnlKeys?: Record<string, true>,
   ): void {
     // Check for active chasers that haven't filled any orders yet (first buy-in)
     for (const chaser of store.activeChasers) {
@@ -298,7 +319,8 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
             hasFullTP: false,
           };
 
-          this.trackPositionPnl(fakePosition);
+          const pnlKey = this.trackPositionPnl(fakePosition);
+          if (activePnlKeys && pnlKey) activePnlKeys[pnlKey] = true;
           displayedPositions.push(fakePosition);
         }
       }

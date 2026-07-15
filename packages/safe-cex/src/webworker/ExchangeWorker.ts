@@ -11,6 +11,7 @@ import { isNonPrivateDataAccount } from '../utils/isNonPrivateDataAccount';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
+import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { BaseHandler } from './handlers/BaseHandler';
 import { CallMethodHandler } from './handlers/CallMethodHandler';
 import { ChaserOrderHandler } from './handlers/ChaserOrderHandler';
@@ -561,7 +562,18 @@ export class ExchangeWorker {
     this._startupToken++;
     this._cancelStartup?.();
     this._cancelStartup = null;
+    if (this._exchange) {
+      chaserOrderManagerInstance.cleanupExchange(this._exchange);
+    }
     this._exchange?.dispose();
+  }
+
+  private _clearRuntimePipeline() {
+    this._throttledStoreUpdate.cancel();
+    this._handlers.forEach((handler) => handler.dispose());
+    this._handlers = [];
+    this._postprocessors = [];
+    this._exchangeDependentPostprocessors = [];
   }
 
   handlePayload = (payload: StoreWorkerPayload) => {
@@ -617,10 +629,7 @@ export class ExchangeWorker {
         this.log('info', `Deactivating exchange: ${this._exchangeName}`);
         this.dispose();
         this._exchange = null;
-        // Dispose all handlers and postprocessors
-        this._handlers.forEach((handler) => handler.dispose());
-        this._handlers = [];
-        this._postprocessors = [];
+        this._clearRuntimePipeline();
         this._ctx.postMessage({ op: 'deactivate-status', data: true });
         break;
       case 'sayHi':
@@ -706,10 +715,7 @@ export class ExchangeWorker {
       // Dispose through the worker so any in-flight start() gets cancelled.
       this.dispose();
       this._exchange = null;
-      // Dispose all handlers and postprocessors
-      this._handlers.forEach((handler) => handler.dispose());
-      this._handlers = [];
-      this._postprocessors = [];
+      this._clearRuntimePipeline();
       // Notify main thread of deactivation
       this._ctx.postMessage({ op: 'deactivate-status', data: true });
     });

@@ -12,6 +12,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
+import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from './ExchangeWorker';
 
 const createMarket = (overrides?: Partial<Market>): Market =>
@@ -121,6 +122,38 @@ const emitStoreUpdate = (worker: ExchangeWorker) => {
 };
 
 describe('ExchangeWorker store payloads', () => {
+  it('cleans up exchange-owned chasers before disposing the exchange', () => {
+    const { worker } = createWorker();
+    const exchange = { dispose: vi.fn() } as any;
+    (worker as any)._exchange = exchange;
+    const cleanupSpy = vi.spyOn(chaserOrderManagerInstance, 'cleanupExchange');
+
+    worker.dispose();
+
+    expect(cleanupSpy).toHaveBeenCalledWith(exchange);
+    expect(cleanupSpy.mock.invocationCallOrder[0]).toBeLessThan(exchange.dispose.mock.invocationCallOrder[0]);
+    cleanupSpy.mockRestore();
+  });
+
+  it('cancels trailing store work and clears both processor pipelines on deactivate', () => {
+    const { worker, messages } = createWorker();
+    const handler = { dispose: vi.fn() };
+    const cancel = vi.spyOn((worker as any)._throttledStoreUpdate, 'cancel');
+    (worker as any)._exchange = { dispose: vi.fn() };
+    (worker as any)._handlers = [handler];
+    (worker as any)._postprocessors = [{ process: vi.fn() }];
+    (worker as any)._exchangeDependentPostprocessors = [{ process: vi.fn() }];
+
+    worker.handlePayload({ op: 'deactivate' } as any);
+
+    expect(cancel).toHaveBeenCalled();
+    expect(handler.dispose).toHaveBeenCalled();
+    expect((worker as any)._handlers).toEqual([]);
+    expect((worker as any)._postprocessors).toEqual([]);
+    expect((worker as any)._exchangeDependentPostprocessors).toEqual([]);
+    expect(messages.at(-1)).toEqual({ op: 'deactivate-status', data: true });
+  });
+
   it('omits unchanged markets from repeated live store payloads', () => {
     const { worker, messages } = createWorker();
     worker.store.update({ markets: [createMarket()] });
