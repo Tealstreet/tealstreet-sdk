@@ -57,10 +57,38 @@ Raw-book `new`, `change`, and `delete` actions mean add, update, and remove a
 price level. Contradictions are validated before a frame is applied; they clear
 the book and require a new snapshot instead of silently becoming upserts.
 
-Both modules are intentionally inert: no current exchange, WebSocket, API
+The third follow-on is implemented in `coinbase.starbase-private.ts`. It is an
+inert, read-only private-state layer with exact USDC/future request builders for
+account summary, positions, open orders, and user trades. Strict gateway DTOs
+preserve legacy INTX symbol identity plus raw order/trade IDs, state, amount,
+filled amount, and contract-unit fields. Account balance, equity, available
+funds, withdrawal funds, initial margin, and maintenance margin are explicitly
+named as USDC because the requests select `currency: USDC`. Position
+`size_currency` is explicitly base coin and `size` remains explicitly the
+gateway's published USD/quote size. Gateway margin and PnL fields stay
+gateway-labelled instead of being silently asserted as safe-cex quote values.
+
+Coinbase's migration guide says Starbase `amount` is base coin, but inherited
+OpenAPI descriptions still say perpetual `amount` and `filled_amount` can be
+USD. The private DTO therefore remains decodable for partial orders and trades,
+while the safe-cex order mapper only emits an unfilled order and returns a
+typed parity blocker for non-zero fills; historical-trade normalization stays
+blocked entirely. The OpenAPI also describes `matching_id` as always null while
+typing it as a string, so the decoder follows the published response example
+and fails closed on non-null values. These upstream contradictions must be
+resolved by a Coinbase schema correction or approved account capture before
+write-path or reconciliation cutover.
+
+`private/get_user_trades_by_order` is also deferred: its published response
+example contains a trade array, but `PrivateGetUserTradesByOrderResponse`
+defines no `result` property. The inert reader uses the coherent
+`private/get_user_trades_by_currency*` response family until Coinbase publishes
+an exact by-order result schema.
+
+All three modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
-the active adapter until read-only private state has mapping and authoritative
-reconciliation tests. The public mapper supports only schema-enumerated BTC/ETH
+the active adapter until read-only private state passes source-of-truth parity
+and all normalization blockers are resolved. The public mapper supports only schema-enumerated BTC/ETH
 linear USDC perpetuals; expanded product bases and an exact amount increment
 remain gated because the current schema enumerates only BTC/ETH and publishes a
 minimum trade amount, not an amount step. Coinbase has not yet published the
@@ -69,6 +97,15 @@ OpenAPI or AsyncAPI schema, so the controller accepts an already-classified
 signal and must not grow a guessed wire-frame parser. Public stream mappers
 likewise start at the AsyncAPI channel payload's published `{ data }` shape,
 not a guessed outer notification envelope.
+
+The private read layer currently consumes only JSON-RPC method results.
+Although AsyncAPI lists private portfolio/order/position channels, Coinbase has
+not published the unified socket's outer inbound notification envelope.
+Authenticated notification classification and live snapshot/delta
+reconciliation therefore remain deferred; do not infer Deribit envelopes from
+channel names. The pure read-state holder validates a complete result before
+replacement, so malformed or duplicate REST snapshots preserve the
+last-known-good account, positions, orders, or trade page.
 
 ## File Structure
 
@@ -84,6 +121,7 @@ not a guessed outer notification envelope.
 | `coinbase.products.json`   | Sample product data for reference/testing.                                                                                                                              |
 | `coinbase.starbase.ts`     | Inert Starbase JSON-RPC, auth-refresh, endpoint, HTTP transport, and heartbeat primitives. Not wired to active Coinbase traffic.                                        |
 | `coinbase.starbase-public.ts` | Inert Starbase instrument/public-data normalization, public request/subscription contracts, saved-symbol compatibility, and sequenced-book recovery. Not routed.        |
+| `coinbase.starbase-private.ts` | Inert Starbase read-only account/position/order/trade request contracts, strict gateway DTOs, last-known-good snapshot holder, and typed safe-cex parity gates. Not routed. |
 
 ## Authentication
 
