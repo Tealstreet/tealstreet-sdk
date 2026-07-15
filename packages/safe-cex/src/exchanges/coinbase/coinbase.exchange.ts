@@ -3,6 +3,7 @@ import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 
 import rateLimit from 'axios-rate-limit';
+import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
 import { forEachSeries } from 'p-iteration';
@@ -40,6 +41,8 @@ import {
   BALANCE_RESPONSE,
   BALANCE_RESPONSE_CFM,
   CANDLES_RESPONSE,
+  EDIT_ORDER_REQUEST,
+  EDIT_ORDER_RESPONSE,
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
@@ -48,6 +51,7 @@ import {
   LIST_POSITIONS_CFM_RESPONSE,
   LIST_POSITIONS_INTX_RESPONSE,
   MARKET_RESPONSE,
+  ORDER_EVENT,
   PLACE_ORDER_REQUEST,
   PLACE_ORDER_RESPONSE,
   PORTFOLIO_BREAKDOWN_RESPONSE,
@@ -55,6 +59,15 @@ import {
 import { normalizeCfmContractSize } from './coinbase.utils';
 import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
 import { CoinbasePublicWebsocket } from './coinbase.ws-public';
+
+const COINBASE_UNSIGNED_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const COINBASE_ZERO_DECIMAL = /^0(?:\.0+)?$/;
+
+const isCoinbaseUnsignedDecimal = (value: unknown): value is string =>
+  typeof value === 'string' && COINBASE_UNSIGNED_DECIMAL.test(value);
+
+const isCoinbaseZeroDecimal = (value: unknown): value is string =>
+  typeof value === 'string' && COINBASE_ZERO_DECIMAL.test(value);
 
 export class CoinbaseExchange extends BaseExchange {
   xhr: Axios;
@@ -1097,20 +1110,157 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    const newOrder = {
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      price: order.price,
-      amount: order.amount,
-      reduceOnly: order.reduceOnly || false,
+    // INTX remains on the legacy lifecycle until the Starbase cutover. Do not
+    // broaden this branch: non-INTX orders are native-edit-or-fail-closed.
+    if (this.selectedPortfolio?.type === 'INTX') {
+      const newOrder = {
+        symbol: order.symbol,
+        type: order.type,
+        side: order.side,
+        price: order.price,
+        amount: order.amount,
+        reduceOnly: order.reduceOnly || false,
+      };
+
+      if ('price' in update) newOrder.price = update.price;
+      if ('amount' in update) newOrder.amount = update.amount;
+
+      await this.cancelOrders([order]);
+      return await this.placeOrder(newOrder);
+    }
+
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
     };
+    const canonicalOrder = this.store.orders.find(({ id }) => id === order.id);
+    if (!canonicalOrder || canonicalOrder.symbol !== order.symbol) {
+      return rejectPreflight(`Coinbase cannot safely edit ${order.id}: canonical open order is not reconciled`);
+    }
 
-    if ('price' in update) newOrder.price = update.price;
-    if ('amount' in update) newOrder.amount = update.amount;
+    const market = this.store.marketsBySymbol[canonicalOrder.symbol];
+    if (!market) {
+      return rejectPreflight(`Coinbase cannot safely edit ${order.id}: market ${canonicalOrder.symbol} is not reconciled`);
+    }
+    const marketInfo = market.info as Partial<MARKET_RESPONSE['products'][number]> | undefined;
+    const isProvenSpot =
+      market.isSpot === true &&
+      market.isExpiring !== true &&
+      market.contractSize === 1 &&
+      marketInfo?.product_type === 'SPOT' &&
+      marketInfo.future_product_details === undefined;
+    if (!isProvenSpot) {
+      const unit = market.isExpiring || marketInfo?.product_type === 'FUTURE' ? 'CFM contract' : 'unknown';
+      return rejectPreflight(
+        `Coinbase cannot safely edit ${order.id}: ${unit} size units are not proven for native edit`,
+      );
+    }
 
-    await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    const raw = canonicalOrder.info as Partial<ORDER_EVENT['orders'][number]> | undefined;
+    const rawOrderId = raw?.order_id;
+    const rawProductId = raw?.product_id;
+    const rawStatus = raw?.status;
+    const rawType = raw?.order_type;
+    const rawSide = raw?.order_side;
+    const expectedSide = canonicalOrder.side === OrderSide.Buy ? 'BUY' : 'SELL';
+    const rawStopPrice = raw?.stop_price;
+    const hasNoTrigger =
+      typeof rawStopPrice === 'string' && (rawStopPrice === '' || isCoinbaseZeroDecimal(rawStopPrice));
+    if (
+      canonicalOrder.status !== OrderStatus.Open ||
+      canonicalOrder.type !== OrderType.Limit ||
+      typeof rawOrderId !== 'string' ||
+      rawOrderId !== canonicalOrder.id ||
+      typeof rawProductId !== 'string' ||
+      rawProductId !== market.id ||
+      typeof rawStatus !== 'string' ||
+      rawStatus !== 'OPEN' ||
+      typeof rawType !== 'string' ||
+      rawType !== 'Limit' ||
+      typeof rawSide !== 'string' ||
+      rawSide !== expectedSide ||
+      !hasNoTrigger ||
+      canonicalOrder.takeProfit !== undefined ||
+      canonicalOrder.stopLoss !== undefined ||
+      canonicalOrder.close === true ||
+      canonicalOrder.reduceOnly
+    ) {
+      return rejectPreflight(
+        'Coinbase native edit supports only exactly reconciled OPEN zero-fill ordinary spot LIMIT orders',
+      );
+    }
+
+    const rawFilled = raw?.cumulative_quantity;
+    const rawRemaining = raw?.leaves_quantity;
+    const rawPrice = raw?.limit_price;
+    const currentAmount = adjust(canonicalOrder.amount, market.precision.amount);
+    const currentRemaining = adjust(canonicalOrder.remaining, market.precision.amount);
+    const currentPrice = adjust(canonicalOrder.price, market.precision.price);
+    if (
+      !isCoinbaseZeroDecimal(rawFilled) ||
+      !isCoinbaseUnsignedDecimal(rawRemaining) ||
+      !new BigNumber(rawRemaining).isGreaterThan(0) ||
+      !isCoinbaseUnsignedDecimal(rawPrice) ||
+      !new BigNumber(rawPrice).isGreaterThan(0) ||
+      canonicalOrder.filled !== 0 ||
+      currentAmount !== canonicalOrder.amount ||
+      currentRemaining !== canonicalOrder.remaining ||
+      currentPrice !== canonicalOrder.price ||
+      !new BigNumber(rawRemaining).isEqualTo(String(currentAmount)) ||
+      currentRemaining !== currentAmount ||
+      !new BigNumber(rawPrice).isEqualTo(String(currentPrice))
+    ) {
+      return rejectPreflight(
+        `Coinbase cannot safely edit ${order.id}: full current spot price and zero-fill base size are not reconciled`,
+      );
+    }
+
+    const hasAmountUpdate = 'amount' in update;
+    const hasPriceUpdate = 'price' in update;
+    if (hasAmountUpdate === hasPriceUpdate) {
+      return rejectPreflight('Coinbase native edit requires exactly one amount or price update');
+    }
+    const amendedAmount = adjust(hasAmountUpdate ? update.amount : currentAmount, market.precision.amount);
+    const amendedPrice = adjust(hasPriceUpdate ? update.price : currentPrice, market.precision.price);
+    if (
+      !Number.isFinite(amendedAmount) ||
+      amendedAmount <= 0 ||
+      amendedAmount < market.limits.amount.min ||
+      amendedAmount > market.limits.amount.max
+    ) {
+      return rejectPreflight('Coinbase amended spot size is outside the reconciled market limits');
+    }
+    if (!Number.isFinite(amendedPrice) || amendedPrice <= 0) {
+      return rejectPreflight('Coinbase amended spot price must be greater than zero');
+    }
+    if (amendedAmount === currentAmount && amendedPrice === currentPrice) {
+      return rejectPreflight('Coinbase native edit must change price or size after market-precision normalization');
+    }
+
+    const payload: EDIT_ORDER_REQUEST = {
+      order_id: canonicalOrder.id,
+      price: String(amendedPrice),
+      size: String(amendedAmount),
+    };
+    try {
+      const { data } = await this.xhr.post<EDIT_ORDER_RESPONSE>(ENDPOINTS.EDIT_ORDER, payload);
+      const errors = Array.isArray(data?.errors) ? data.errors : undefined;
+      if (data?.success !== true || errors === undefined || errors.length > 0) {
+        const reasons = (errors || []).flatMap(({ edit_failure_reason, preview_failure_reason }) =>
+          [edit_failure_reason, preview_failure_reason].filter((reason): reason is string => Boolean(reason)),
+        );
+        throw new Error(
+          reasons.join(', ') ||
+            (errors === undefined
+              ? 'Coinbase edit-order response did not include the documented errors array'
+              : 'Coinbase edit order failed'),
+        );
+      }
+      return [canonicalOrder.id];
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message || String(err));
+      throw err;
+    }
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {

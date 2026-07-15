@@ -30,6 +30,7 @@ export const ENDPOINTS = {
   BALANCE_CFM: '/api/v3/brokerage/cfm/balance_summary',
   PORTFOLIO_BREAKDOWN: '/api/v3/brokerage/portfolios/{portfolio_uuid}',
   ORDER: '/api/v3/brokerage/orders',
+  EDIT_ORDER: '/api/v3/brokerage/orders/edit',
   CANCEL_ORDER_BATCH: '/api/v3/brokerage/orders/batch_cancel',
 
   // TODO: remove copied binance endpoints
@@ -49,6 +50,7 @@ export const ENDPOINTS = {
 
 export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.ORDER,
+  ENDPOINTS.EDIT_ORDER,
   ENDPOINTS.CANCEL_ORDER_BATCH,
 ];
 
@@ -542,6 +544,20 @@ export type PLACE_ORDER_RESPONSE = {
     new_order_failure_reason?: string;
   };
   order_configuration?: ORDER_REQUEST_CONFIG;
+};
+
+export type EDIT_ORDER_REQUEST = {
+  order_id: string;
+  price: string;
+  size: string;
+};
+
+export type EDIT_ORDER_RESPONSE = {
+  success: boolean;
+  errors?: {
+    edit_failure_reason?: string;
+    preview_failure_reason?: string;
+  }[];
 };
 
 // {

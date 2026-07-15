@@ -249,6 +249,7 @@ All endpoints are defined in `ENDPOINTS` constant in `coinbase.types.ts`:
 | `LIST_POSITIONS_CFM`  | `/api/v3/brokerage/cfm/positions`                            | CFM futures positions                                                                                       |
 | `KLINE`               | `/api/v3/brokerage/products/{product_id}/candles`            | Historical candlestick data                                                                                 |
 | `ORDER`               | `/api/v3/brokerage/orders`                                   | Place orders (POST)                                                                                         |
+| `EDIT_ORDER`          | `/api/v3/brokerage/orders/edit`                              | Native stable-ID edit for a strictly reconciled spot LIMIT subset                                          |
 | `CANCEL_ORDER_BATCH`  | `/api/v3/brokerage/orders/batch_cancel`                      | Batch cancel orders (POST, max 100 per batch)                                                               |
 | `INTX_INSTRUMENTS`    | `https://api.international.coinbase.com/api/v1/instruments/` | INTX instruments with live quotes (external URL, treated as public endpoint)                                |
 | `LIST_ACCOUNTS`       | `/api/v3/brokerage/accounts`                                 | List accounts (type defined but currently unused)                                                           |
@@ -455,12 +456,26 @@ it never calls a parameterized INTX endpoint without a portfolio UUID.
   - `limit_price` is calculated as 1% offset from stop price: `stopPrice * 1.01` (buy stops) or `stopPrice * 0.99` (sell stops)
   - Both `limit_price` and `stop_price` are rounded to the market's price precision
 
-### Order Update (Cancel + Replace) (`coinbase.exchange.ts`)
+### Order Update (`coinbase.exchange.ts`)
 
-There is no native amend/edit order API used. Updates are performed as:
+Non-INTX updates are native-edit-or-fail-closed. `updateOrder()` calls
+`EDIT_ORDER` only for a canonical private-WebSocket row whose market metadata
+proves spot/base units and whose raw order proves the same stable ID, product,
+side, `OPEN` + ordinary `Limit` shape, no trigger/protection, zero fill, and
+the exact full current price and size. Raw numeric provenance uses strict
+unsigned-decimal strings, lexical zero checks, and exact decimal equality; it
+does not coerce exchange strings through JavaScript `Number` for safety gates.
 
-1. Cancel the existing order via `cancelOrders([order])`
-2. Place a new order with updated price/amount via `placeOrder()`
+Coinbase requires `order_id`, `price`, and `size` together, so both full values
+are sent even for a one-field update. Success requires `success: true` and an
+empty documented `errors` array, and the canonical order ID is returned
+unchanged. Response errors are surfaced; there is no cancel/recreate fallback.
+Partial fills, triggers, non-canonical rows, CFM contract sizes, and unknown
+unit provenance all fail before an exchange write.
+
+INTX alone retains the existing cancel-then-place lifecycle until its Starbase
+migration. This exception is selected by the authenticated INTX portfolio and
+must not be widened to other non-ready shapes.
 
 ### Batch Cancel (`coinbase.exchange.ts`)
 
@@ -725,7 +740,7 @@ safe-cex Vitest configuration.
 
 Validation endpoints are tracked via Grafana:
 
-- **Every call**: `ORDER`, `CANCEL_ORDER_BATCH`
+- **Every call**: `ORDER`, `EDIT_ORDER`, `CANCEL_ORDER_BATCH`
 - **Periodic**: `LIST_PORTFOLIOS`, `LIST_POSITIONS_INTX`, `LIST_POSITIONS_CFM`, `BALANCE`, `BALANCE_CFM`, `PORTFOLIO_BREAKDOWN`
 
 ## Portfolio System
