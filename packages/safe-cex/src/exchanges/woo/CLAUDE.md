@@ -114,9 +114,23 @@ reconnect requires a fresh snapshot. The inert REST decoder requires the top-lev
 to be a positive JavaScript-safe integer in milliseconds and preserves it through the V3-specific
 mapped book and parity observation. Value-parity canonicalization intentionally excludes timestamp
 because legacy and V3 snapshots are separate requests, but the typed V3 result retains it for that
-future `prevTs` join, including through the generic shadow comparator. No socket,
-buffering/recovery coordinator, or runtime activation implements the
-join yet, and every V3 migration gate remains false. Private frames decode only to gateway wire models. Do not
+`prevTs` join, including through the generic shadow comparator.
+`woo.v3.orderbook-recovery.ts` now implements that join as a pure, disconnected coordinator around
+the shared `SequencedDeltaOrderBook`: it buffers strictly validated deltas before the mapped REST
+snapshot, discards only updates whose `ts` is not newer than the snapshot, publishes nothing until
+the first remaining `prevTs` exactly equals the preserved snapshot timestamp, and then enforces the
+exact predecessor chain. Exact duplicates and already-applied stale frames cannot mutate or publish;
+conflicting duplicates, out-of-order pre-join frames, missing joins, sequence gaps, invalid levels,
+and reconnects clear all local state and require a fresh snapshot. Every REST request must first take
+a strictly increasing token from `beginSnapshotRequest()`; a newer request invalidates the prior one,
+the matching response consumes its token exactly once, and reset invalidates any outstanding token.
+This prevents duplicate or pre-reconnect responses from seeding the coordinator. Each delta frame
+and mapped REST snapshot side is capped at its configured official depth (`50`, `200`, or `500`)
+before it may seed or mutate the sequencer. The pre-snapshot queue is capped at 500
+updates: WOO publishes no timing/cadence bound, so the largest documented book depth is reused as a
+conservative finite scale rather than inventing a time window or allowing unbounded growth. Overflow
+clears the buffer/book, invalidates the snapshot token, and requires recovery. No socket, fetch, store, or active
+runtime imports the coordinator, and every V3 migration gate remains false. Private frames decode only to gateway wire models. Do not
 replace store state from them until credentialed evidence proves whether account/balance/position
 arrays are snapshots or patches, the exhaustive ordinary/algo execution lifecycle, command failure
 envelopes, and listen-key rotation behavior. These are typed blockers, so neither WebSocket parity
