@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
 import {
+  assessCoinbaseStarbaseMarketParity,
   buildCoinbaseStarbaseBookChannel,
   buildCoinbaseStarbaseChartChannel,
   buildCoinbaseStarbaseChartData,
@@ -43,7 +44,8 @@ describe('Coinbase Starbase inert markets and public data', () => {
   });
 
   it('normalizes only published linear USDC perpetual fields and preserves base sizing metadata', () => {
-    expect(normalizeCoinbaseStarbaseInstrument(STARBASE_PUBLIC_INSTRUMENT_FIXTURE)).toEqual({
+    const instrument = normalizeCoinbaseStarbaseInstrument(STARBASE_PUBLIC_INSTRUMENT_FIXTURE);
+    expect(instrument).toEqual({
       base: 'BTC',
       contractSize: 1,
       createdAtMs: 1_536_569_522_277,
@@ -61,6 +63,11 @@ describe('Coinbase Starbase inert markets and public data', () => {
       quote: 'USDC',
       settlementPeriod: 'perpetual',
       state: 'open',
+    });
+    expect(assessCoinbaseStarbaseMarketParity(instrument)).toEqual({
+      status: 'blocked',
+      gateway: instrument,
+      blockers: ['amount-increment-unpublished', 'maximum-base-amount-unpublished'],
     });
   });
 

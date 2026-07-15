@@ -70,6 +70,10 @@ export type CoinbaseStarbaseAccountSummary = {
   initialMarginUsdc: number;
   maintenanceMarginUsdc: number;
   marginBalanceUsdc?: number;
+  totalEquityUsd?: number;
+  totalInitialMarginUsd?: number;
+  totalMaintenanceMarginUsd?: number;
+  totalMarginBalanceUsd?: number;
   crossCollateralEnabled?: boolean;
   portfolioMarginingEnabled?: boolean;
   marginModel?: CoinbaseStarbaseMarginModel;
@@ -434,6 +438,33 @@ export const decodeCoinbaseStarbaseAccountSummary = (value: unknown): CoinbaseSt
     ...(raw.margin_balance === undefined
       ? {}
       : { marginBalanceUsdc: requireFinite(raw.margin_balance, 'Starbase account margin_balance') }),
+    ...(raw.total_equity_usd === undefined
+      ? {}
+      : { totalEquityUsd: requireFinite(raw.total_equity_usd, 'Starbase account total_equity_usd') }),
+    ...(raw.total_initial_margin_usd === undefined
+      ? {}
+      : {
+          totalInitialMarginUsd: requireNonNegative(
+            raw.total_initial_margin_usd,
+            'Starbase account total_initial_margin_usd',
+          ),
+        }),
+    ...(raw.total_maintenance_margin_usd === undefined
+      ? {}
+      : {
+          totalMaintenanceMarginUsd: requireNonNegative(
+            raw.total_maintenance_margin_usd,
+            'Starbase account total_maintenance_margin_usd',
+          ),
+        }),
+    ...(raw.total_margin_balance_usd === undefined
+      ? {}
+      : {
+          totalMarginBalanceUsd: requireFinite(
+            raw.total_margin_balance_usd,
+            'Starbase account total_margin_balance_usd',
+          ),
+        }),
     ...(raw.cross_collateral_enabled === undefined
       ? {}
       : {

@@ -165,6 +165,29 @@ describe('Coinbase Starbase inert read-only private state', () => {
     ).toThrow('available_funds');
   });
 
+  it('preserves only explicitly USD-labelled cross-collateral totals', () => {
+    const account = decodeCoinbaseStarbaseAccountSummary({
+      ...STARBASE_ACCOUNT_SUMMARY_FIXTURE,
+      cross_collateral_enabled: true,
+      total_equity_usd: 51.25,
+      total_initial_margin_usd: 12.68,
+      total_maintenance_margin_usd: 8.1,
+      total_margin_balance_usd: 51.25,
+    });
+    expect(account).toMatchObject({
+      totalEquityUsd: 51.25,
+      totalInitialMarginUsd: 12.68,
+      totalMaintenanceMarginUsd: 8.1,
+      totalMarginBalanceUsd: 51.25,
+    });
+    expect(() =>
+      decodeCoinbaseStarbaseAccountSummary({
+        ...STARBASE_ACCOUNT_SUMMARY_FIXTURE,
+        total_initial_margin_usd: -1,
+      }),
+    ).toThrow('total_initial_margin_usd');
+  });
+
   it('preserves legacy symbol identity and separately proves base and USD position sizes', () => {
     const position = decodeCoinbaseStarbasePosition(STARBASE_POSITION_FIXTURE);
     expect(position).toEqual({

@@ -56,6 +56,16 @@ export type CoinbaseStarbasePublicInstrument = {
   priceIndex: string;
 };
 
+export type CoinbaseStarbaseMarketParityBlocker =
+  | 'amount-increment-unpublished'
+  | 'maximum-base-amount-unpublished';
+
+export type CoinbaseStarbaseMarketParityResult = {
+  status: 'blocked';
+  gateway: CoinbaseStarbasePublicInstrument;
+  blockers: CoinbaseStarbaseMarketParityBlocker[];
+};
+
 export type CoinbaseStarbasePublicTicker = {
   instrumentName: string;
   legacySavedSymbol: string;
@@ -235,6 +245,20 @@ export const normalizeCoinbaseStarbaseInstruments = (value: unknown): CoinbaseSt
   }
   return instruments;
 };
+
+/**
+ * Starbase publishes a minimum base amount for linear futures and a price
+ * tick, but not the amount step or maximum base amount required by safe-cex's
+ * Market contract. Keep the normalized gateway instrument useful for parity
+ * checks without inventing either precision field.
+ */
+export const assessCoinbaseStarbaseMarketParity = (
+  gateway: CoinbaseStarbasePublicInstrument,
+): CoinbaseStarbaseMarketParityResult => ({
+  status: 'blocked',
+  gateway,
+  blockers: ['amount-increment-unpublished', 'maximum-base-amount-unpublished'],
+});
 
 const quoteNotionalToBase = (notional: unknown, price: number, context: string): number =>
   requireFinite(notional, context) / price;

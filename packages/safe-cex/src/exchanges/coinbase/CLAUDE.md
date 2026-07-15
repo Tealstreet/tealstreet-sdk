@@ -141,13 +141,16 @@ an exact by-order result schema.
 All five modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
-and all normalization blockers are resolved. The public mapper supports only schema-enumerated BTC/ETH
-linear USDC perpetuals; expanded product bases and an exact amount increment
-remain gated because the current schema enumerates only BTC/ETH and publishes a
-minimum trade amount, not an amount step. Coinbase has not yet published the
-inbound `heartbeat`/`test_request` notification envelope in its Starbase
-OpenAPI or AsyncAPI schema, so the controller accepts an already-classified
-signal and must not grow a guessed wire-frame parser. Public stream mappers
+and all normalization blockers are resolved. The public mapper supports only
+schema-enumerated BTC/ETH linear USDC perpetuals; expanded product bases and an
+exact amount increment remain gated because the current schema enumerates only
+BTC/ETH and publishes a minimum trade amount, not an amount step or maximum
+base amount. The inert market-parity assessment returns typed blockers for both
+fields instead of manufacturing a safe-cex `Market`. Coinbase has not yet
+published the inbound `heartbeat`/`test_request` notification envelope in its
+Starbase OpenAPI or AsyncAPI schema, so the controller accepts an
+already-classified signal and must not grow a guessed wire-frame parser. Public
+stream mappers
 likewise start at the AsyncAPI channel payload's published `{ data }` shape,
 not a guessed outer notification envelope.
 
@@ -161,7 +164,9 @@ replacement, so malformed or duplicate REST snapshots preserve the
 last-known-good account, positions, open orders, ID-addressed order state,
 order history, or trade page. Order-state results must echo the requested
 canonical `order_id`, and instrument-history rows must all match the requested
-Starbase instrument.
+Starbase instrument. Account decoding also preserves Coinbase's optional
+`total_*_usd` cross-collateral fields under explicit USD names; that does not
+resolve the unlabelled PnL-unit blocker.
 
 ## File Structure
 
