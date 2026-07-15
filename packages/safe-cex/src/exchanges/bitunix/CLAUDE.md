@@ -119,6 +119,7 @@ Defined by `BitunixExchange.tick()`:
 | `OPEN_ORDERS`          | `/api/v1/futures/trade/get_pending_orders`         | Fetch open regular orders                                                                                                                                                                                                                      |
 | `OPEN_TPSL_ORDERS`     | `/api/v1/futures/tpsl/get_pending_orders`          | Fetch open TP/SL orders                                                                                                                                                                                                                        |
 | `ORDER`                | `/api/v1/futures/trade/place_order`                | Place single order                                                                                                                                                                                                                             |
+| `MODIFY_ORDER`         | `/api/v1/futures/trade/modify_order`               | Amend an exactly reconciled pending limit order by stable `orderId`; private-WS state remains authoritative                                                                                                                                    |
 | `BATCH_ORDERS`         | `/api/v1/futures/trade/batch_order`                | Place batch orders (**hard cap 5 per request** — rejects whole batch with `"batch order max size:5"` if exceeded). Response: `{code, data: {successList:[{orderId, clientId}], failureList:[{errorMsg, errorCode}]}, msg}` — NOT a flat array. |
 | `CANCEL_ORDER`         | `/api/v1/futures/trade/cancel_orders`              | Cancel regular orders                                                                                                                                                                                                                          |
 | `CANCEL_ORDER_TP_SL`   | `/api/v1/futures/tpsl/cancel_order`                | Cancel TP/SL orders                                                                                                                                                                                                                            |
@@ -312,12 +313,31 @@ All TP/SL orders use `unlimitedXHR` (no rate limit). Checks `data.code !== 0` fo
 
 ### Order Update (`updateOrder`)
 
-The current implementation still uses **cancel-and-replace**:
+`updateOrder` uses the native
+[`/api/v1/futures/trade/modify_order`](https://www.bitunix.com/api-docs/futures/trade/modify_order.html)
+endpoint only when identity and immutable attributes are exactly reconciled:
 
-- **Virtual TP/SL orders** (`__tp`/`__sl` suffix): Extracts parent order ID, cancels parent, reconstructs with updated TP/SL values, places new order.
-- **Regular orders**: Cancels the order, places a new one with updated parameters.
+- The order must be a pending `LIMIT` with `info.orderId === order.id`, an
+  upstream `LIMIT` type, and a raw boolean `reduceOnly` value matching the
+  normalized order. The endpoint does not accept side, trade side, TIF, or
+  reduce-only fields, so those attributes remain attached to the same order.
+- Quantity is the requested total base-asset quantity, including after partial
+  fills, rounded to market precision. It must remain above the already-filled
+  quantity.
+- Attached virtual `__tp` / `__sl` price edits amend the stable parent
+  `orderId`. The request carries both reconciled protection legs, trigger
+  types, execution types, and any required limit execution prices so editing
+  one leg cannot drop its sibling. A virtual-leg quantity edit is rejected.
+- A successful HTTP response must have `code: 0` and echo the same `orderId`.
+  Bitunix explicitly says HTTP acknowledgement is not authoritative; the
+  existing private order-channel refresh owns final state reconciliation.
 
-Bitunix now documents `/api/v1/futures/trade/modify_order` and a position-TP/SL amend API. Cancel-and-replace is therefore an implementation choice, not an upstream limitation; migration to native amendment remains separate lifecycle work because successful HTTP acknowledgement is not authoritative and must be reconciled through WebSocket state.
+There is no cancel/recreate fallback. Market orders, standalone/position
+TP/SL rows, missing or inconsistent raw order metadata, and malformed prices or
+quantities reject before any exchange write. Although Bitunix documents both
+`/tpsl/modify_order` and `/tpsl/position/modify_order`, the pending REST row
+does not reliably identify which creation route owns a TP/SL order, so choosing
+between those endpoints would be ambiguous.
 
 ### Virtual Order ID Generation
 

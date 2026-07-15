@@ -46,6 +46,7 @@ export const ENDPOINTS = {
   OPEN_ORDERS: '/api/v1/futures/trade/get_pending_orders',
   OPEN_TPSL_ORDERS: '/api/v1/futures/tpsl/get_pending_orders',
   ORDER: '/api/v1/futures/trade/place_order',
+  MODIFY_ORDER: '/api/v1/futures/trade/modify_order',
   TP_SL_ORDER: '/api/v1/futures/tpsl/place_order',
   POSITION_TP_SL_ORDER: '/api/v1/futures/tpsl/position/place_order',
   BATCH_ORDERS: '/api/v1/futures/trade/batch_order',

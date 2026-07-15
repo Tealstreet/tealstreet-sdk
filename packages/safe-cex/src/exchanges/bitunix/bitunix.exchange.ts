@@ -1275,87 +1275,137 @@ export class BitunixExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    // Check if this is a virtual TP/SL order from a parent limit order
-    const isVirtualTpSl = order.id.includes('__tp') || order.id.includes('__sl');
-
-    if (isVirtualTpSl) {
-      // Extract the parent order ID
-      const parentOrderId = order.id.split('__')[0];
-      const isTP = order.id.includes('__tp');
-
-      // Find the parent order and all related virtual orders
-      const parentOrder = this.store.orders.find((o) => o.id === parentOrderId);
-      const relatedOrders = this.store.orders.filter(
-        (o) => o.id === parentOrderId || o.id.startsWith(`${parentOrderId}__`),
-      );
-
-      if (!parentOrder) {
-        throw new Error(`Parent order ${parentOrderId} not found`);
-      }
-
-      // Create new order with the parent's properties but update TP/SL params
-      const newOrder: Writable<PlaceOrderOpts> = {
-        symbol: parentOrder.symbol,
-        type: parentOrder.type,
-        side: parentOrder.side,
-        price: parentOrder.price,
-        amount: parentOrder.amount,
-        reduceOnly: parentOrder.reduceOnly || false,
-      };
-
-      // Set TP/SL parameters based on which virtual order is being updated
-      if (isTP) {
-        newOrder.takeProfit = 'price' in update ? update.price : order.price;
-        newOrder.tpTriggerType = order.tpTriggerType;
-
-        // Keep existing SL if there's a related SL order
-        const slOrder = relatedOrders.find((o) => o.id.includes('__sl'));
-        if (slOrder) {
-          newOrder.stopLoss = slOrder.price;
-          newOrder.slTriggerType = slOrder.slTriggerType;
-        }
-      } else {
-        newOrder.stopLoss = 'price' in update ? update.price : order.price;
-        newOrder.slTriggerType = order.slTriggerType;
-
-        // Keep existing TP if there's a related TP order
-        const tpOrder = relatedOrders.find((o) => o.id.includes('__tp'));
-        if (tpOrder) {
-          newOrder.takeProfit = tpOrder.price;
-          newOrder.tpTriggerType = tpOrder.tpTriggerType;
-        }
-      }
-
-      // Cancel the parent order (which will also remove virtual orders from API)
-      await this.cancelOrders([parentOrder]);
-
-      // Remove all related virtual orders from store immediately
-      this.store.updateOrdersStatus(
-        relatedOrders.filter((o) => o.id !== parentOrderId).map((o) => ({ id: o.id })),
-        OrderStatus.Canceled,
-      );
-
-      return await this.placeOrder(newOrder);
-    }
-
-    // Handle regular orders (non-virtual)
-    const newOrder: Writable<PlaceOrderOpts> = {
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      price: order.price,
-      amount: order.amount,
-      reduceOnly: order.reduceOnly || false,
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
     };
 
-    if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
-    if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;
+    const isVirtualTp = order.id.endsWith('__tp');
+    const isVirtualSl = order.id.endsWith('__sl');
+    const isVirtualTpSl = isVirtualTp || isVirtualSl;
+    const parentOrderId = isVirtualTpSl ? order.id.slice(0, order.id.lastIndexOf('__')) : order.id;
+    const targetOrder = isVirtualTpSl ? this.store.orders.find((candidate) => candidate.id === parentOrderId) : order;
 
-    if ('price' in update) newOrder.price = update.price;
-    if ('amount' in update) newOrder.amount = update.amount;
+    if (!targetOrder) {
+      return rejectPreflight(`Bitunix cannot safely amend ${order.id}: reconciled parent order not found`);
+    }
 
-    await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    if (isVirtualTpSl && 'amount' in update) {
+      return rejectPreflight('Bitunix attached TP/SL quantity cannot be amended independently of its parent order');
+    }
+
+    if (isVirtualTpSl && !('price' in update)) {
+      return rejectPreflight('Bitunix attached TP/SL amendment requires a trigger price');
+    }
+
+    if (targetOrder.type !== OrderType.Limit) {
+      return rejectPreflight(
+        `Bitunix native amendment supports only reconciled pending LIMIT orders; ${order.type} requires an ambiguous TP/SL or order-type route`,
+      );
+    }
+
+    const market = this.store.marketsBySymbol[targetOrder.symbol];
+    if (!market) {
+      return rejectPreflight(`Market ${targetOrder.symbol} not found`);
+    }
+
+    const info = targetOrder.info;
+    const reconciledOrderId = info?.orderId === undefined || info?.orderId === null ? '' : String(info.orderId);
+    const reconciledOrderType = String(info?.orderType || info?.type || '').toUpperCase();
+    if (reconciledOrderId !== targetOrder.id || reconciledOrderType !== 'LIMIT') {
+      return rejectPreflight(
+        `Bitunix cannot safely amend ${targetOrder.id}: exact pending LIMIT order identity is not reconciled`,
+      );
+    }
+
+    if (typeof info?.reduceOnly !== 'boolean' || info.reduceOnly !== targetOrder.reduceOnly) {
+      return rejectPreflight(`Bitunix cannot safely amend ${targetOrder.id}: reduce-only state is not reconciled`);
+    }
+
+    const adjustedQty = adjust('amount' in update ? update.amount : targetOrder.amount, market.precision.amount);
+    const adjustedPrice = adjust(
+      'price' in update && !isVirtualTpSl ? update.price : targetOrder.price,
+      market.precision.price,
+    );
+    if (!Number.isFinite(adjustedQty) || adjustedQty <= 0) {
+      return rejectPreflight('Bitunix amended order quantity must be greater than zero');
+    }
+    if (!Number.isFinite(adjustedPrice) || adjustedPrice <= 0) {
+      return rejectPreflight('Bitunix amended LIMIT price must be greater than zero');
+    }
+    if (targetOrder.filled > 0 && adjustedQty <= targetOrder.filled) {
+      return rejectPreflight('Bitunix amended order quantity must exceed the already-filled quantity');
+    }
+
+    const payload: Record<string, string> = {
+      orderId: targetOrder.id,
+      qty: `${adjustedQty}`,
+      price: `${adjustedPrice}`,
+    };
+
+    const appendProtection = (prefix: 'tp' | 'sl', triggerPrice: unknown) => {
+      if (triggerPrice === undefined || triggerPrice === null || triggerPrice === '') {
+        return;
+      }
+
+      const adjustedTrigger = adjust(Number(triggerPrice), market.precision.price);
+      if (!Number.isFinite(adjustedTrigger) || adjustedTrigger <= 0) {
+        return rejectPreflight(`Bitunix ${prefix.toUpperCase()} trigger price is not reconciled`);
+      }
+
+      const stopTypeKey = `${prefix}StopType`;
+      const orderTypeKey = `${prefix}OrderType`;
+      const orderPriceKey = `${prefix}OrderPrice`;
+      const stopType = String(info?.[stopTypeKey] || 'MARK_PRICE').toUpperCase();
+      // The modify-order schema documents MARKET as the default when the
+      // attached protection's execution type is omitted.
+      const protectionOrderType = String(info?.[orderTypeKey] || 'MARKET').toUpperCase();
+
+      if (stopType !== 'MARK_PRICE' && stopType !== 'LAST_PRICE') {
+        return rejectPreflight(`Bitunix ${prefix.toUpperCase()} trigger type is not reconciled`);
+      }
+      if (protectionOrderType !== 'MARKET' && protectionOrderType !== 'LIMIT') {
+        return rejectPreflight(`Bitunix ${prefix.toUpperCase()} execution type is not reconciled`);
+      }
+
+      payload[`${prefix}Price`] = `${adjustedTrigger}`;
+      payload[stopTypeKey] = stopType;
+      payload[orderTypeKey] = protectionOrderType;
+
+      if (protectionOrderType === 'LIMIT') {
+        const adjustedOrderPrice = adjust(Number(info?.[orderPriceKey]), market.precision.price);
+        if (!Number.isFinite(adjustedOrderPrice) || adjustedOrderPrice <= 0) {
+          return rejectPreflight(`Bitunix ${prefix.toUpperCase()} LIMIT execution price is not reconciled`);
+        }
+        payload[orderPriceKey] = `${adjustedOrderPrice}`;
+      }
+    };
+
+    const requestedPrice = 'price' in update ? update.price : undefined;
+    appendProtection('tp', isVirtualTp ? requestedPrice : info?.tpPrice);
+    appendProtection('sl', isVirtualSl ? requestedPrice : info?.slPrice);
+
+    try {
+      const response = await this.unlimitedXHR.post(ENDPOINTS.MODIFY_ORDER, payload);
+      const code = Number(response?.data?.code);
+      if (code !== 0) {
+        throw new Error(response?.data?.msg || `Bitunix modify order failed with code ${response?.data?.code}`);
+      }
+
+      const responseOrderId = response?.data?.data?.orderId;
+      if (responseOrderId === undefined || responseOrderId === null || String(responseOrderId) !== targetOrder.id) {
+        throw new Error(`Bitunix modify order response did not confirm order ${targetOrder.id}`);
+      }
+
+      // Bitunix documents the private WebSocket update as authoritative.
+      // Keep the stable id and let the existing order-channel reconciliation
+      // apply the accepted state instead of mutating the store optimistically.
+      return [targetOrder.id];
+    } catch (err: any) {
+      const message = err?.response?.data?.msg || err?.message || 'Bitunix modify order failed';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
