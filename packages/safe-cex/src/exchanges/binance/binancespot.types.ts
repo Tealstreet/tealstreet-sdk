@@ -18,12 +18,12 @@ export const BASE_WS_URL = {
 };
 
 export const ENDPOINTS = {
-  ACCOUNT: '/fapi/v2/account',
+  ACCOUNT: '/api/v3/account',
   MARKETS: '/api/v3/exchangeInfo',
   TICKERS_24H: '/api/v3/ticker/24hr',
   ORDER: '/api/v3/order',
   CANCEL_SYMBOL_ORDERS: '/api/v3/openOrders',
-  OPEN_ORDERS: '/api/v3/allOrders',
+  OPEN_ORDERS: '/api/v3/openOrders',
   KLINE: '/api/v3/klines',
   LISTEN_KEY: '/api/v3/userDataStream',
   ORDERBOOK: '/api/v3/depth',

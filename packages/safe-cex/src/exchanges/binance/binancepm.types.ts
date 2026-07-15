@@ -3,12 +3,12 @@ import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionS
 export const RECV_WINDOW = 20_000;
 export const BASE_PAPI_URL = {
   livenet: 'https://papi.binance.com',
-  testnet: 'https://testnet.binancefuture.com',
+  testnet: 'https://demo-fapi.binance.com',
 };
 
 export const BASE_FAPI_URL = {
   livenet: 'https://fapi.binance.com',
-  testnet: 'https://testnet.binancefuture.com',
+  testnet: 'https://demo-fapi.binance.com',
 };
 
 // Binance Portfolio Margin WebSocket URLs.
@@ -22,15 +22,15 @@ export const BASE_FAPI_URL = {
 export const BASE_WS_URL = {
   public: {
     livenet: 'wss://fstream.binance.com/public/ws',
-    testnet: 'wss://stream.binancefuture.com/public/ws',
+    testnet: 'wss://demo-fstream.binance.com/public/ws',
   },
   market: {
     livenet: 'wss://fstream.binance.com/market/ws',
-    testnet: 'wss://stream.binancefuture.com/market/ws',
+    testnet: 'wss://demo-fstream.binance.com/market/ws',
   },
   private: {
     livenet: 'wss://fstream.binance.com/pm/ws',
-    testnet: 'wss://stream.binancefuture.com/pm/ws',
+    testnet: 'wss://demo-fstream.binance.com/pm/ws',
   },
 };
 

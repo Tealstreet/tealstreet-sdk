@@ -395,7 +395,7 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
 
         if (position) {
           const entryPrice = parseFloat(p.ep);
-          const contracts = parseFloat(p.pa);
+          const contracts = Math.abs(parseFloat(p.pa));
           const upnl = parseFloat(p.up);
 
           this.store.updatePosition(position, {

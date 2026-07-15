@@ -107,7 +107,10 @@ All three variants follow the same high-level pattern, with variant-specific dif
 2. **`fetchPositionMode()`** -- `GET /fapi/v1/positionSide/dual`. Sets `isHedged` store setting based on `dualSidePosition`.
 3. **`tick()`** -- The first tick immediately fetches both `/positionRisk` and `/account`. A 3s health loop then reconciles `/account` every 25s while the private WS is connected, or every 3s while it is disconnected. `/positionRisk` is refreshed every 75s in addition to event-triggered repairs.
 4. **`fetchOrders()`** -- Two parallel calls: `GET /fapi/v1/openOrders` + `GET /fapi/v1/openAlgoOrders?algoType=CONDITIONAL`. Merges regular + algo orders. A failed pair returns the current order-store snapshot, rather than an authoritative empty list, so startup/reconnect refreshes preserve live order state until Binance answers successfully.
-5. **`fetchPositions()`** -- Background call (no await), kicks off a detailed `GET /fapi/v2/positionRisk` fetch.
+5. **`fetchPositions()`** -- Reconciles detailed positions from
+   `GET /fapi/v3/positionRisk` joined with `GET /fapi/v1/symbolConfig` for
+   leverage and margin type. V3 only returns symbols with a position or open
+   order, so zero-position rows are synthesized for the rest of the market set.
 
 ### Portfolio Margin Startup Differences
 
@@ -128,8 +131,9 @@ All three variants follow the same high-level pattern, with variant-specific dif
 | Endpoint                     | Method      | Description                                                                          |
 | ---------------------------- | ----------- | ------------------------------------------------------------------------------------ |
 | `/fapi/v1/exchangeInfo`      | GET         | Fetch markets (symbols, filters, contract types)                                     |
-| `/fapi/v2/balance`           | GET         | Fetch account balances per asset                                                     |
-| `/fapi/v2/account`           | GET         | Fetch account info with positions and balances                                       |
+| `/fapi/v3/balance`           | GET         | Fetch account balances per asset                                                     |
+| `/fapi/v3/account`           | GET         | Fetch compact account info and balances                                              |
+| `/fapi/v1/symbolConfig`      | GET         | Fetch current leverage and margin type per symbol                                    |
 | `/fapi/v1/leverageBracket`   | GET         | Fetch leverage brackets per symbol                                                   |
 | `/fapi/v1/ticker/24hr`       | GET         | 24h ticker statistics                                                                |
 | `/fapi/v1/ticker/bookTicker` | GET         | Best bid/ask prices                                                                  |
@@ -143,7 +147,7 @@ All three variants follow the same high-level pattern, with variant-specific dif
 | `/fapi/v1/positionSide/dual` | GET/POST    | Get or set hedge mode (dual position side)                                           |
 | `/fapi/v1/leverage`          | POST        | Set leverage for a symbol                                                            |
 | `/fapi/v1/marginType`        | POST        | Set margin type (ISOLATED or CROSSED)                                                |
-| `/fapi/v2/positionRisk`      | GET         | Fetch detailed position risk info                                                    |
+| `/fapi/v3/positionRisk`      | GET         | Fetch detailed active position risk info                                             |
 | `/fapi/v1/klines`            | GET         | OHLCV candle data                                                                    |
 | `/fapi/v1/depth`             | GET         | Orderbook snapshot (limit up to 1000)                                                |
 | `/fapi/v1/trades`            | GET         | Recent public trades (max 1000)                                                      |
@@ -156,10 +160,11 @@ All three variants follow the same high-level pattern, with variant-specific dif
 | Endpoint                 | Method      | Description                              |
 | ------------------------ | ----------- | ---------------------------------------- |
 | `/api/v3/exchangeInfo`   | GET         | Fetch spot markets                       |
+| `/api/v3/account`        | GET         | Fetch spot balances                      |
 | `/api/v3/ticker/24hr`    | GET         | 24h ticker statistics (includes bid/ask) |
 | `/api/v3/order`          | POST/DELETE | Place or cancel a single order           |
 | `/api/v3/openOrders`     | DELETE      | Cancel all open orders for a symbol      |
-| `/api/v3/allOrders`      | GET         | Fetch open orders                        |
+| `/api/v3/openOrders`     | GET         | Fetch all currently open orders          |
 | `/api/v3/klines`         | GET         | OHLCV candle data                        |
 | `/api/v3/depth`          | GET         | Orderbook snapshot                       |
 | `/api/v3/userDataStream` | POST/PUT    | Create or keepalive a listen key         |
@@ -192,9 +197,9 @@ As of **2026-04-23**, Binance retired the legacy `wss://fstream.binance.com/ws` 
 | Variant             | Public (high-frequency)                    | Market (regular market data)               | Private (user data)                                     |
 | ------------------- | ------------------------------------------ | ------------------------------------------ | ------------------------------------------------------- |
 | **Futures** livenet | `wss://fstream.binance.com/public/ws`      | `wss://fstream.binance.com/market/ws`      | `wss://fstream.binance.com/private/ws?listenKey=…`      |
-| **Futures** testnet | `wss://stream.binancefuture.com/public/ws` | `wss://stream.binancefuture.com/market/ws` | `wss://stream.binancefuture.com/private/ws?listenKey=…` |
+| **Futures** testnet | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/private/ws?listenKey=…` |
 | **PM** livenet      | `wss://fstream.binance.com/public/ws`      | `wss://fstream.binance.com/market/ws`      | `wss://fstream.binance.com/pm/ws/{listenKey}`           |
-| **PM** testnet      | `wss://stream.binancefuture.com/public/ws` | `wss://stream.binancefuture.com/market/ws` | `wss://stream.binancefuture.com/pm/ws/{listenKey}`      |
+| **PM** testnet      | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/pm/ws/{listenKey}`      |
 | **Spot** livenet    | `wss://stream.binance.com:9443/ws`         | (same as public — unaffected by split)     | `wss://stream.binance.com:9443/ws/{listenKey}`          |
 | **Spot** testnet    | `wss://testnet.binance.vision/ws`          | (same as public — unaffected by split)     | `wss://testnet.binance.vision/ws/{listenKey}`           |
 
@@ -211,6 +216,10 @@ For futures and PM, channels are split between two underlying connections owned 
 - The class itself connects to `/public/ws` and handles `!bookTicker` + `{symbol}@depth`.
 - A sibling `BinanceMarketWebsocket` / `BinancePMMarketWebsocket` connects to `/market/ws` and handles `!ticker@arr`, `!markPrice@arr@1s`, and `{symbol}@kline_{interval}`.
 - Callers continue to use the single `publicWebsocket` reference; `listenOHLCV` is forwarded to the sibling market socket while `listenOrderBook` stays on the public socket.
+- On-demand depth topics are ref-counted. The final unsubscribe deletes the
+  topic key, unsubscribe-before-connect is a no-op for the refcount, and
+  reconnect replay skips non-positive legacy entries so phantom depth streams
+  cannot accumulate.
 
 Subscribed on connect via `SUBSCRIBE` method:
 
@@ -310,6 +319,17 @@ and WebSocket account/order updates continue while reconciliation is paused.
 
 **Spot order-type mapping.** Spot `executionReport` reports the order type in the `o` field (values `LIMIT`/`MARKET`/`STOP_LOSS`/`STOP_LOSS_LIMIT`/`TAKE_PROFIT`/`TAKE_PROFIT_LIMIT`/`LIMIT_MAKER`) — **not** the futures `ot` field or futures values. `handleOrderEvents` maps via `ORDER_TYPE_SPOT` (in `binancespot.types.ts`); `LIMIT_MAKER` → `OrderType.Limit`, both `STOP_LOSS*` → `StopLoss`, both `TAKE_PROFIT*` → `TakeProfit`. Spot has no `reduceOnly` (kept `false`).
 
+Spot order requests never send futures-only `positionSide`, `closePosition`, or
+`reduceOnly`. Regular post-only limits use `LIMIT_MAKER`; stop-loss and
+take-profit use the spot market-trigger types. The shared trailing-stop option
+is rejected because it supplies a futures callback-rate shape, while Binance
+Spot requires `trailingDelta` on a stop order.
+
+Spot private-stream fields are top-level: `executionReport` is handled directly
+and `outboundAccountPosition.B` carries changed balances. Do not wrap spot
+fixtures in the futures-only nested `o`/`a` envelopes. Balance events merge the
+changed assets into the existing currency snapshot and recompute USD totals.
+
 **Spot execution-type vs order-status.** In `executionReport`, `x` is the **execution type** (`NEW`/`TRADE`/`CANCELED`/…) and `X` is the **order status** (`NEW`/`PARTIALLY_FILLED`/`FILLED`/`CANCELED`/…). Fills arrive with `x === 'TRADE'` (the handler previously checked `X === 'TRADE'`, which never matched). On a `TRADE` the handler emits `fill` **and** mirrors the cumulative fill onto the store row (`filled = z`, `remaining = q - z`), transitioning to `Closed` when `X === 'FILLED'` / `z === q`. Without the store update a filled spot order stayed `Open` until the next REST `fetchOrders` — same class of bug the futures `PARTIALLY_FILLED` note describes.
 
 #### Portfolio Margin (`BinancePMPrivateWebsocket`)
@@ -320,7 +340,11 @@ and WebSocket account/order updates continue while reconciliation is paused.
 | `ORDER_TRADE_UPDATE`             | Regular order events (uses `clientOrderId` via `data.c`, not `orderId`)                                                  |
 | `CONDITIONAL_ORDER_TRADE_UPDATE` | Conditional order events (nested in `so` object, uses `data.c` as ID, `data.st` for strategy type, `data.os` for status) |
 
-**PM-specific**: Position side in `ACCOUNT_UPDATE` is determined by `p.pa > 0` (long) vs `p.pa <= 0` (short), with a `p.ps === 'BOTH'` check for one-way mode (`binancepm.ws-private.ts:362-364`). PM does NOT have the `throttledFetchOrders` debounce that futures has.
+**PM-specific**: Position side in `ACCOUNT_UPDATE` is determined by the signed
+`p.pa` value, while stored contracts and notional are always absolute and
+non-negative, matching the futures REST/WS contract. One-way mode is indicated
+by `p.ps === 'BOTH'`. PM does NOT have the `throttledFetchOrders` debounce that
+futures has.
 
 ### ListenKey Management
 
@@ -490,7 +514,10 @@ All variants use cancel-and-recreate pattern (no native edit endpoint used). The
   - `LOT_SIZE.stepSize` -> `market.precision.amount` (e.g., `0.001`)
   - Minimum amount is `max(LOT_SIZE.minQty, MARKET_LOT_SIZE.minQty)`
   - Maximum amount is `min(LOT_SIZE.maxQty, MARKET_LOT_SIZE.maxQty)`
-- **Spot**: Uses `baseAssetPrecision` and `quoteAssetPrecision` from exchangeInfo, converted to step size via `1 / precision` (e.g., precision 8 -> step `0.00000001`). Limits are hardcoded to min=0, max=999_999_999.
+- **Spot**: Uses `LOT_SIZE.stepSize` and `PRICE_FILTER.tickSize` from
+  exchangeInfo. If a filter is absent, the compatibility fallback is
+  `10 ** -baseAssetPrecision` / `10 ** -quoteAssetPrecision`. Amount limits
+  likewise use `LOT_SIZE.minQty` and `maxQty` when present.
 
 ### Rounding
 
@@ -530,7 +557,11 @@ The `recvWindow` parameter defaults to `20_000` ms (20 seconds) for all variants
 
 ### Income History Rate Limit
 
-The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with max 1000 records per request and 7-day time window per request. The `fetchIncomeHistoryRange` method (`binance.exchange.ts:845-900`) handles chunking across longer ranges and pagination within 7-day windows. A 100ms delay between chunks helps respect rate limits.
+The `/fapi/v1/income` endpoint currently carries IP request weight 30, returns
+at most 1000 records, and accepts at most a 7-day time window per request.
+`fetchIncomeHistoryRange` handles longer ranges and pagination within a window;
+separate seven-day chunks are paced two seconds apart so long journal backfills
+do not burst this high-weight endpoint.
 
 ## State Reconciliation
 
@@ -540,10 +571,12 @@ The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with ma
 
 **REST full snapshots**: Two REST endpoints provide position data at different detail levels:
 
-1. **`/fapi/v2/account`** (every 25s while the private WS is connected; every 3s while disconnected): Returns positions with entry price, contracts, unrealized PnL, leverage, isolated flag. Does NOT include liquidation price or adlQuantile.
-2. **`/fapi/v2/positionRisk`** (every 75s and after WS account-update throttled refreshes): Returns full position risk data including liquidation price, margin type, max notional, and adlQuantile.
+1. **`/fapi/v3/account`** (every 25s while the private WS is connected; every 3s while disconnected): refreshes balances. Its compact position rows deliberately do not replace the rich position snapshot.
+2. **`/fapi/v3/positionRisk` + `/fapi/v1/symbolConfig`** (every 75s and after WS account-update throttled refreshes): joins price/risk fields with current leverage and margin type. Because V3 only returns symbols with positions or open orders, the mapper synthesizes zero rows for omitted markets.
 
-**Merge strategy** (`binance.exchange.ts:574-607`): When processing `/fapi/v2/account`, the code finds the existing position in the store by ID and spreads it (`...foundPosition`) before overwriting with fresh data. This preserves fields from `/positionRisk` (like liquidation price) that are not present in `/account` responses.
+**Merge strategy**: WebSocket events apply fast quantity/PnL changes. The V3
+position-risk reconciliation is authoritative for position detail; account V3
+is authoritative only for balances and preserves the current position array.
 
 **Stale snapshot guard**: Every WS position event advances a shared position-state version. Both event-triggered `/positionRisk` repairs and periodic `/account`/`positionRisk` snapshots capture that version before requesting; if a newer WS event arrives before the response, its position rows are discarded. `/account` balance data and loaded flags still commit because they are independent of the stale position rows.
 
@@ -559,7 +592,7 @@ The `/fapi/v1/income` endpoint is rate-limited to 30 requests per minute with ma
 
 ### Balance Reconciliation
 
-**Futures** (`binance.exchange.ts:412-563`): Aggregates per-asset balances from `/fapi/v2/account`:
+**Futures**: Aggregates per-asset balances from `/fapi/v3/account`:
 
 - **Stablecoins** (USDT, USDC, BUSD, FDUSD, BFUSD, LDUSDT, BNFCR): 1:1 USD value.
 - **Non-stablecoins**: Converted to USD using market tickers (direct pair lookup, or BTC routing).
@@ -631,21 +664,23 @@ supportsTradesHistory: true
 
 | Variant   | Livenet REST               | Testnet REST                        |
 | --------- | -------------------------- | ----------------------------------- |
-| Futures   | `https://fapi.binance.com` | `https://testnet.binancefuture.com` |
-| PM (papi) | `https://papi.binance.com` | `https://testnet.binancefuture.com` |
-| PM (fapi) | `https://fapi.binance.com` | `https://testnet.binancefuture.com` |
+| Futures   | `https://fapi.binance.com` | `https://demo-fapi.binance.com` |
+| PM (papi) | `https://papi.binance.com` | `https://demo-fapi.binance.com` |
+| PM (fapi) | `https://fapi.binance.com` | `https://demo-fapi.binance.com` |
 | Spot      | `https://api.binance.com`  | `https://testnet.binance.vision`    |
 
 | Variant | Livenet WS (public + market)                                                  | Testnet WS (public + market)                                                            |
 | ------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Futures | `wss://fstream.binance.com/public/ws` + `wss://fstream.binance.com/market/ws` | `wss://stream.binancefuture.com/public/ws` + `wss://stream.binancefuture.com/market/ws` |
+| Futures | `wss://fstream.binance.com/public/ws` + `wss://fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/public/ws` + `wss://demo-fstream.binance.com/market/ws` |
 | Spot    | `wss://stream.binance.com:9443/ws`                                            | `wss://testnet.binance.vision/ws`                                                       |
 
 ### Behavioral Differences
 
 - **Listen key signing**: On livenet, listen key POST/PUT requests are NOT signed. On testnet, they ARE signed (the `!options.testnet` check in the interceptor skips the bypass; `binance.api.ts:83`).
 - **Symbol availability**: Testnet typically has a much smaller set of symbols.
-- **PM testnet**: Both papi and fapi use the same testnet base URL (`testnet.binancefuture.com`), so the PM-specific papi endpoints may not be fully supported on testnet.
+- **PM testnet**: Both papi and fapi use Binance's documented USD-M demo host.
+  Binance does not document a separate Portfolio Margin sandbox, so PM-specific
+  papi endpoint availability still needs to be treated as best effort.
 
 ## Known Quirks / Implementation Notes
 
@@ -718,7 +753,8 @@ Calling `changeMarginType()` on PM always throws an error with "Portfolio margin
 - No hedge mode or margin type management
 - No position risk or leverage endpoints
 - Production disabled (`enabled: false`), only available in dev
-- Uses `fapi/v2/account` endpoint for balance/positions (may not be correct for spot; `binancespot.types.ts:21`)
+- Uses `/api/v3/account`; spot balances map into `balance.currencies`/`coins`
+  and spot returns no derivative positions.
 - Account event handler (`outboundAccountPosition`) treats all positions as Long side (`binancespot.ws-private.ts:104`)
 - No batch order support -- places orders one at a time in a loop (`binancespot.exchange.ts:604-613`)
 - No `bigIntAsStringJsonParse` in API layer

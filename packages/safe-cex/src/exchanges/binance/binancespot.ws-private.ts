@@ -2,7 +2,7 @@ import type { BinanceSpotExchange } from './binancespot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG } from '../../config/config';
-import { OrderStatus, OrderType, PositionSide } from '../../types';
+import { OrderStatus, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TYPE_SPOT } from './binancespot.types';
@@ -62,7 +62,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
   };
 
   handleOrderEvents = (events: Array<Record<string, any>>) => {
-    events.forEach(({ o: data }) => {
+    events.forEach((data) => {
       // Spot `executionReport`: `x` is the execution type (NEW/TRADE/CANCELED/…),
       // `X` is the order status (NEW/PARTIALLY_FILLED/FILLED/CANCELED/…). Fills
       // arrive with `x === 'TRADE'`.
@@ -123,29 +123,35 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
   };
 
   handleAccountEvents = (events: Array<Record<string, any>>) => {
-    events.forEach((event) =>
-      event.a.B.forEach((p: Record<string, any>) => {
-        const symbol = p.a;
-        const side = PositionSide.Long;
+    events.forEach((event) => {
+      const currencies = { ...(this.store.balance.currencies || {}) };
+      const coins = { ...(this.store.balance.coins || {}) };
 
-        const position = this.parent.store.positions.find((p2) => p2.symbol === symbol && p2.side === side);
+      for (const assetBalance of event.B || []) {
+        const asset = assetBalance.a;
+        const free = parseFloat(assetBalance.f || '0');
+        const used = parseFloat(assetBalance.l || '0');
+        const total = free + used;
+        const price = this.parent.getAssetUsdPrice(asset);
 
-        if (position) {
-          //const entryPrice = parseFloat(p.ep);
-          const contracts = parseFloat(p.f);
-          //const upnl = parseFloat(p.up);
+        currencies[asset] = { free, used, total, upnl: 0, info: assetBalance };
+        coins[asset] = { base: asset, amount: total, notional: total * price };
+      }
 
-          this.store.updatePosition(position, {
-            //entryPrice,
-            contracts,
-            //notional: contracts * entryPrice + upnl,
-            notional: (this.parent.store.tickers.find((t) => t.symbol === symbol)?.last || 0) * contracts,
-            unrealizedPnl: 0,
-            info: position,
-          });
-        }
-      }),
-    );
+      let free = 0;
+      let used = 0;
+      let total = 0;
+      for (const [asset, balance] of Object.entries(currencies)) {
+        const price = this.parent.getAssetUsdPrice(asset);
+        free += balance.free * price;
+        used += balance.used * price;
+        total += balance.total * price;
+      }
+
+      this.store.update({
+        balance: { free, used, total, upnl: 0, currencies, coins, info: event },
+      });
+    });
   };
 
   private fetchListenKey = async () => {

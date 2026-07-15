@@ -3,7 +3,7 @@ import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionS
 export const RECV_WINDOW = 20_000;
 export const BASE_URL = {
   livenet: 'https://fapi.binance.com',
-  testnet: 'https://testnet.binancefuture.com',
+  testnet: 'https://demo-fapi.binance.com',
 };
 
 // Binance USDⓈ-M Futures WebSocket URLs.
@@ -16,22 +16,23 @@ export const BASE_URL = {
 export const BASE_WS_URL = {
   public: {
     livenet: 'wss://fstream.binance.com/public/ws',
-    testnet: 'wss://stream.binancefuture.com/public/ws',
+    testnet: 'wss://demo-fstream.binance.com/public/ws',
   },
   market: {
     livenet: 'wss://fstream.binance.com/market/ws',
-    testnet: 'wss://stream.binancefuture.com/market/ws',
+    testnet: 'wss://demo-fstream.binance.com/market/ws',
   },
   private: {
     livenet: 'wss://fstream.binance.com/private/ws',
-    testnet: 'wss://stream.binancefuture.com/private/ws',
+    testnet: 'wss://demo-fstream.binance.com/private/ws',
   },
 };
 
 export const ENDPOINTS = {
-  BALANCE: '/fapi/v2/balance',
+  BALANCE: '/fapi/v3/balance',
   MARKETS: '/fapi/v1/exchangeInfo',
-  ACCOUNT: '/fapi/v2/account',
+  ACCOUNT: '/fapi/v3/account',
+  SYMBOL_CONFIG: '/fapi/v1/symbolConfig',
   LEVERAGE_BRACKET: '/fapi/v1/leverageBracket',
   TICKERS_24H: '/fapi/v1/ticker/24hr',
   TICKERS_BOOK: '/fapi/v1/ticker/bookTicker',
@@ -47,8 +48,7 @@ export const ENDPOINTS = {
   ORDERBOOK: '/fapi/v1/depth',
   USER_TRADES: '/fapi/v1/userTrades',
   SET_MARGIN_TYPE: '/fapi/v1/marginType',
-  // migrating to v3 requires fake positions as in portfolio margin implementation
-  POSITION_RISK: '/fapi/v2/positionRisk',
+  POSITION_RISK: '/fapi/v3/positionRisk',
   TRADES: '/fapi/v1/trades',
   // Algo Order endpoints (for STOP_MARKET, TAKE_PROFIT_MARKET, etc. as of 2025-12-09)
   ALGO_ORDER: '/fapi/v1/algoOrder',
@@ -79,6 +79,7 @@ export const GRAFANA_ENDPOINTS_EVERY = [
 export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.BALANCE,
   ENDPOINTS.ACCOUNT,
+  ENDPOINTS.SYMBOL_CONFIG,
   ENDPOINTS.LEVERAGE_BRACKET,
   ENDPOINTS.OPEN_ORDERS,
   ENDPOINTS.POSITION_RISK,
@@ -162,17 +163,21 @@ export type GET_POSITION_RISK_RESPONSE = {
   markPrice: string;
   unRealizedProfit: string;
   liquidationPrice: string;
-  leverage: string;
-  maxNotionalValue: string;
-  marginType: string;
+  leverage?: string;
+  maxNotionalValue?: string;
+  marginType?: string;
   isolatedMargin: string;
-  isAutoAddMargin: string;
+  isAutoAddMargin?: string;
   positionSide: string;
   notional: string;
   isolatedWallet: string;
   updateTime: number;
-  isolated: boolean;
-  adlQuantile: number;
+  isolated?: boolean;
+  adl?: number;
+  adlQuantile?: number;
+  initialMargin?: string;
+  positionInitialMargin?: string;
+  openOrderInitialMargin?: string;
 }[];
 
 // Income types returned by /fapi/v1/income endpoint

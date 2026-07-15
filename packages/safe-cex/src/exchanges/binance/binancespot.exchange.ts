@@ -23,8 +23,6 @@ import {
   OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
-  Position,
-  PositionSide,
   Ticker,
   UpdateOrderOpts,
 } from '../../types';
@@ -42,8 +40,7 @@ import {
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   ORDER_SIDE,
-  ORDER_TYPE,
-  POSITION_SIDE,
+  ORDER_TYPE_SPOT,
   TIME_IN_FORCE,
 } from './binancespot.types';
 import { BinancePrivateWebsocket } from './binancespot.ws-private';
@@ -203,6 +200,10 @@ export class BinanceSpotExchange extends BaseExchange {
       const markets: Market[] = symbols.map((m) => {
         const baseAsset = v(m, 'baseAsset');
         const quoteAsset = v(m, 'quoteAsset');
+        const lotSize = m.filters?.find((filter: Record<string, any>) => filter.filterType === 'LOT_SIZE');
+        const priceFilter = m.filters?.find((filter: Record<string, any>) => filter.filterType === 'PRICE_FILTER');
+        const amountStep = parseFloat(lotSize?.stepSize);
+        const priceStep = parseFloat(priceFilter?.tickSize);
 
         return {
           id: `${baseAsset}/${quoteAsset}`,
@@ -212,13 +213,13 @@ export class BinanceSpotExchange extends BaseExchange {
           active: m.status === 'TRADING',
           isSpot: true,
           precision: {
-            amount: 1 / parseFloat(v(m, 'baseAssetPrecision')),
-            price: 1 / parseFloat(v(m, 'quoteAssetPrecision')),
+            amount: amountStep > 0 ? amountStep : 10 ** -parseFloat(v(m, 'baseAssetPrecision')),
+            price: priceStep > 0 ? priceStep : 10 ** -parseFloat(v(m, 'quoteAssetPrecision')),
           },
           limits: {
             amount: {
-              min: 0,
-              max: 999_999_999,
+              min: parseFloat(lotSize?.minQty) || 0,
+              max: parseFloat(lotSize?.maxQty) || 999_999_999,
             },
             leverage: {
               min: 1,
@@ -275,51 +276,52 @@ export class BinanceSpotExchange extends BaseExchange {
 
   fetchPositionsAndBalance = async () => {
     try {
-      const { data } = await this.xhr.get<Record<string, any>>(ENDPOINTS.ACCOUNT);
+      const { data } = await this.xhr.get<{ balances?: Array<Record<string, any>> }>(ENDPOINTS.ACCOUNT);
+      const currencies: Record<string, any> = {};
+      const coins: Record<string, any> = {};
+      let free = 0;
+      let used = 0;
+      let total = 0;
 
-      const total = parseFloat(data.totalWalletBalance);
-      const free = parseFloat(data.availableBalance);
-      const upnl = parseFloat(data.totalUnrealizedProfit);
-      const used = parseFloat(data.totalInitialMargin);
+      for (const assetBalance of data.balances || []) {
+        const asset = assetBalance.asset;
+        const assetFree = parseFloat(assetBalance.free || '0');
+        const assetUsed = parseFloat(assetBalance.locked || '0');
+        const assetTotal = assetFree + assetUsed;
+        const price = this.getAssetUsdPrice(asset);
 
-      const balance = { total, free, used, upnl };
-
-      // We need to filter out positions that corresponds to
-      // markets that are not supported by safe-cex
-
-      const supportedPositions = data.positions.filter((p: any) =>
-        this.store.markets.some((m) => m.symbol === p.symbol),
-      );
-
-      const positions: Position[] = supportedPositions.map((p: any) => {
-        const entryPrice = parseFloat(v(p, 'entryPrice'));
-        const contracts = parseFloat(v(p, 'positionAmt'));
-        const upnl = parseFloat(v(p, 'unrealizedProfit'));
-        const pSide = v(p, 'positionSide');
-
-        // If account is not on hedge mode,
-        // we need to define the side of the position with the contracts amount
-        const side =
-          (pSide in POSITION_SIDE && POSITION_SIDE[pSide]) || (contracts > 0 ? PositionSide.Long : PositionSide.Short);
-
-        return {
-          symbol: p.symbol,
-          side,
-          entryPrice,
-          notional: Math.abs(contracts) * entryPrice + upnl,
-          leverage: parseFloat(p.leverage),
-          unrealizedPnl: upnl,
-          contracts: Math.abs(contracts),
-          liquidationPrice: parseFloat(v(p, 'liquidationPrice')),
-          info: p,
+        currencies[asset] = {
+          free: assetFree,
+          used: assetUsed,
+          total: assetTotal,
+          upnl: 0,
+          info: assetBalance,
         };
-      });
+        coins[asset] = { base: asset, amount: assetTotal, notional: assetTotal * price };
+        free += assetFree * price;
+        used += assetUsed * price;
+        total += assetTotal * price;
+      }
 
-      return { balance, positions };
+      return {
+        balance: { total, free, used, upnl: 0, currencies, coins, info: data },
+        positions: [],
+      };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return { balance: this.store.balance, positions: this.store.positions };
     }
+  };
+
+  getAssetUsdPrice = (asset: string): number => {
+    if (asset === 'USD' || asset === 'USDT' || asset === 'USDC') return 1;
+
+    return (
+      this.store.tickersBySymbol[`${asset}USDT`]?.last ||
+      this.store.tickersBySymbol[`${asset}USDC`]?.last ||
+      this.store.tickersBySymbol[`${asset}USD`]?.last ||
+      0
+    );
   };
 
   fetchOrders = async () => {
@@ -330,7 +332,7 @@ export class BinanceSpotExchange extends BaseExchange {
         id: v(o, 'clientOrderId'),
         status: OrderStatus.Open,
         symbol: o.symbol,
-        type: ORDER_TYPE[o.type],
+        type: ORDER_TYPE_SPOT[o.type],
         side: ORDER_SIDE[o.side],
         price: parseFloat(o.price) || parseFloat(v(o, 'stopPrice')),
         amount: parseFloat(v(o, 'origQty')),
@@ -463,7 +465,7 @@ export class BinanceSpotExchange extends BaseExchange {
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
     if (opts.type === OrderType.TrailingStopLoss) {
-      return this.formatCreateTrailingStopLossOrder(opts);
+      throw new Error('Binance Spot trailing-stop placement requires trailingDelta and is not supported');
     }
 
     const market = this.store.marketsBySymbol[opts.symbol];
@@ -473,8 +475,6 @@ export class BinanceSpotExchange extends BaseExchange {
     }
 
     const isStopOrTP = opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit;
-
-    const pSide = this.getOrderPositionSide(opts);
 
     const maxSize = market.limits.amount.max;
     const pPrice = market.precision.price;
@@ -489,21 +489,32 @@ export class BinanceSpotExchange extends BaseExchange {
     // Binance stopPrice only for SL or TP orders
     const priceField = isStopOrTP ? 'stopPrice' : 'price';
 
-    const reduceOnly = !this.store.options.isHedged && opts.reduceOnly;
     const timeInForce = opts.timeInForce
       ? inverseObj(TIME_IN_FORCE)[opts.timeInForce]
       : inverseObj(TIME_IN_FORCE)[OrderTimeInForce.GoodTillCancel];
+    const type =
+      opts.type === OrderType.Limit
+        ? opts.timeInForce === OrderTimeInForce.PostOnly
+          ? 'LIMIT_MAKER'
+          : 'LIMIT'
+        : opts.type === OrderType.Market
+          ? 'MARKET'
+          : opts.type === OrderType.StopLoss
+            ? 'STOP_LOSS'
+            : opts.type === OrderType.TakeProfit
+              ? 'TAKE_PROFIT'
+              : undefined;
+
+    if (!type) throw new Error(`Binance Spot does not support ${opts.type} orders`);
 
     const req = omitUndefined({
       symbol: opts.symbol,
-      positionSide: pSide,
       side: inverseObj(ORDER_SIDE)[opts.side],
-      type: inverseObj(ORDER_TYPE)[opts.type],
+      type,
       quantity: amount ? `${amount}` : undefined,
       [priceField]: price ? `${price}` : undefined,
-      timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
-      closePosition: isStopOrTP ? 'true' : undefined,
-      reduceOnly: reduceOnly && !isStopOrTP ? 'true' : undefined,
+      timeInForce:
+        opts.type === OrderType.Limit && opts.timeInForce !== OrderTimeInForce.PostOnly ? timeInForce : undefined,
     });
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
@@ -524,10 +535,8 @@ export class BinanceSpotExchange extends BaseExchange {
       payloads.push({
         ...omit(req, 'price'),
         side: inverseObj(ORDER_SIDE)[opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy],
-        type: inverseObj(ORDER_TYPE)[OrderType.StopLoss],
+        type: 'STOP_LOSS',
         stopPrice: `${adjust(opts.stopLoss, pPrice)}`,
-        timeInForce: 'GTC',
-        closePosition: 'true',
       });
     }
 
@@ -535,10 +544,8 @@ export class BinanceSpotExchange extends BaseExchange {
       payloads.push({
         ...omit(req, 'price'),
         side: inverseObj(ORDER_SIDE)[opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy],
-        type: inverseObj(ORDER_TYPE)[OrderType.TakeProfit],
+        type: 'TAKE_PROFIT',
         stopPrice: `${adjust(opts.takeProfit, pPrice)}`,
-        timeInForce: 'GTC',
-        closePosition: 'true',
       });
     }
 
@@ -550,63 +557,6 @@ export class BinanceSpotExchange extends BaseExchange {
     }
 
     return payloads;
-  };
-
-  private formatCreateTrailingStopLossOrder = (opts: PlaceOrderOpts) => {
-    const market = this.store.marketsBySymbol[opts.symbol];
-    const ticker = this.store.tickersBySymbol[opts.symbol];
-
-    const pSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
-
-    const position = this.store.positions.find((p) => p.symbol === opts.symbol && p.side === pSide);
-
-    if (!market) throw new Error(`Market ${opts.symbol} not found`);
-    if (!ticker) throw new Error(`Ticker ${opts.symbol} not found`);
-
-    if (!position) {
-      throw new Error(`Position ${opts.symbol} and side ${pSide} not found`);
-    }
-
-    const priceDistance = adjust(
-      Math.max(ticker.last, opts.price!) - Math.min(ticker.last, opts.price!),
-      market.precision.price,
-    );
-
-    const distancePercentage = Math.round(((priceDistance * 100) / ticker.last) * 10) / 10;
-
-    const payload = {
-      symbol: opts.symbol,
-      positionSide: this.getOrderPositionSide(opts),
-      side: inverseObj(ORDER_SIDE)[opts.side],
-      type: inverseObj(ORDER_TYPE)[OrderType.TrailingStopLoss],
-      quantity: `${position.contracts}`,
-      callbackRate: `${distancePercentage}`,
-      priceProtect: 'true',
-      newClientOrderId: uuid(),
-    };
-
-    return [payload];
-  };
-
-  private getOrderPositionSide = (opts: PlaceOrderOpts) => {
-    let positionSide = 'BOTH';
-
-    // We need to specify side of the position to interract with
-    // if we are in hedged mode on the binance account
-    if (this.store.options.isHedged) {
-      positionSide = opts.side === OrderSide.Buy ? 'LONG' : 'SHORT';
-
-      if (
-        opts.type === OrderType.StopLoss ||
-        opts.type === OrderType.TakeProfit ||
-        opts.type === OrderType.TrailingStopLoss ||
-        opts.reduceOnly
-      ) {
-        positionSide = positionSide === 'LONG' ? 'SHORT' : 'LONG';
-      }
-    }
-
-    return positionSide;
   };
 
   private placeOrderBatch = async (payloads: any[]) => {

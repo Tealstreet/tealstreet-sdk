@@ -7,6 +7,7 @@ import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
 import groupBy from 'lodash/groupBy';
 import times from 'lodash/times';
+import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
@@ -69,6 +70,7 @@ const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
 const ACCOUNT_RECONCILIATION_INTERVAL_MS = 25_000;
 const DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS = 3_000;
 const POSITION_RISK_RECONCILIATION_INTERVAL_MS = 75_000;
+const INCOME_HISTORY_CHUNK_DELAY_MS = 2_000;
 const REQUEST_WEIGHT_LIMIT_PER_MINUTE = 2_400;
 const REQUEST_WEIGHT_BACKOFF_THRESHOLD = REQUEST_WEIGHT_LIMIT_PER_MINUTE * 0.8;
 const REQUEST_WEIGHT_BACKOFF_MS = 60_000;
@@ -197,7 +199,7 @@ export class BinanceExchange extends BaseExchange {
     let balance: Balance | undefined;
     try {
       const { data } = await this._primaryXhr.get(ENDPOINTS.ACCOUNT);
-      // /fapi/v2/account reports USD totals at the top level. Good enough for the
+      // /fapi/v3/account reports USD totals at the top level. Good enough for the
       // new-account balance gate; full per-asset aggregation needs live tickers.
       const total = parseFloat(data?.totalWalletBalance);
       if (Number.isFinite(total)) {
@@ -457,19 +459,21 @@ export class BinanceExchange extends BaseExchange {
     // const { positions } = await this.fetchPositionsAndBalance();
     // return positions;
     try {
-      const { data } = await this.xhr.get<GET_POSITION_RISK_RESPONSE>(ENDPOINTS.POSITION_RISK);
+      const [{ data }, { data: symbolConfigs }] = await Promise.all([
+        this.xhr.get<GET_POSITION_RISK_RESPONSE>(ENDPOINTS.POSITION_RISK),
+        this.xhr.get<Array<Record<string, any>>>(ENDPOINTS.SYMBOL_CONFIG),
+      ]);
+      const configBySymbol = Object.fromEntries(symbolConfigs.map((config) => [config.symbol, config]));
       const formattedPositions = data.map((p) => {
-        // const foundPosition = this.store.positions.find((pos) => pos.symbol === p.symbol);
         const pSide = p.positionSide;
         const contracts = parseFloat(p.positionAmt);
         const side =
           (pSide in POSITION_SIDE && POSITION_SIDE[pSide]) || (contracts > 0 ? PositionSide.Long : PositionSide.Short);
         const positionMode = p.positionSide === 'BOTH' ? PositionMode.OneWay : PositionMode.Hedged;
-        const marginType = p.marginType === 'cross' ? MarginType.Cross : MarginType.Isolated;
-        // const positionMode = p.positionSide === 'BOTH' ? PositionMode.OneWay : PositionMode.Hedged;
-        // const marginType = p.marginType === 'isolated' ? MarginType.Isolated : MarginType.Cross;
-        const notional = parseFloat(p.notional);
-        const leverage = parseFloat(p.leverage);
+        const config = configBySymbol[p.symbol];
+        const marginType = config?.marginType === 'ISOLATED' ? MarginType.Isolated : MarginType.Cross;
+        const notional = Math.abs(parseFloat(p.notional));
+        const leverage = parseFloat(config?.leverage || '0');
         const isolatedMargin = parseFloat(v(p, 'isolatedMargin') || '0');
         const marginSize =
           isolatedMargin > 0 ? isolatedMargin : leverage > 0 ? Math.abs(notional) / leverage : undefined;
@@ -490,7 +494,31 @@ export class BinanceExchange extends BaseExchange {
         };
         return res;
       });
-      return formattedPositions;
+
+      const mode = this.store.options.isHedged ? PositionMode.Hedged : PositionMode.OneWay;
+      const fakePositions = this.store.markets.flatMap((market): Position[] =>
+        [PositionSide.Long, PositionSide.Short].map((side) => {
+          const config = configBySymbol[market.symbol];
+          const leverage = parseFloat(config?.leverage || '0');
+          return {
+            id: createPositionId(market.symbol, side, mode),
+            symbol: market.symbol,
+            side,
+            entryPrice: 0,
+            notional: 0,
+            leverage,
+            unrealizedPnl: 0,
+            contracts: 0,
+            liquidationPrice: 0,
+            marginSize: 0,
+            marginType: config?.marginType === 'ISOLATED' ? MarginType.Isolated : MarginType.Cross,
+            positionMode: mode,
+            info: { synthetic: true, symbolConfig: config },
+          };
+        }),
+      );
+
+      return uniqBy([...formattedPositions, ...fakePositions], 'id');
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return this.store.positions;
@@ -678,57 +706,11 @@ export class BinanceExchange extends BaseExchange {
       const { positions: _positions, ...rest } = data;
       const balance = { total, free, used, upnl, info: rest };
 
-      // We need to filter out positions that corresponds to
-      // markets that are not supported by safe-cex
-
-      const supportedPositions =
-        data.positions?.filter((p: any) => this.store.markets.some((m) => m.symbol === p.symbol)) || [];
-
-      const positions: Position[] = supportedPositions.map((p: any): Position => {
-        const entryPrice = parseFloat(v(p, 'entryPrice'));
-        const contracts = parseFloat(v(p, 'positionAmt'));
-        const upnl = parseFloat(v(p, 'unrealizedProfit'));
-        const pSide = v(p, 'positionSide');
-
-        // If account is not on hedge mode,
-        // we need to define the side of the position with the contracts amount
-        const side =
-          (pSide in POSITION_SIDE && POSITION_SIDE[pSide]) || (contracts > 0 ? PositionSide.Long : PositionSide.Short);
-        const positionMode = p.positionSide === 'BOTH' ? PositionMode.OneWay : PositionMode.Hedged;
-        const marginType = p.isolated ? MarginType.Isolated : MarginType.Cross;
-        const id = createPositionId(p.symbol, side, positionMode);
-        const foundPosition = this.store.positions.find((pos) => pos.id === id);
-        const notional = Math.abs(contracts * entryPrice + upnl);
-        const leverage = parseFloat(p.leverage);
-        // /fapi/v2/account returns positionInitialMargin (and initialMargin including
-        // open-order margin). For isolated positions we can also use isolatedWallet.
-        // Fall back to notional / leverage so cross positions still get a meaningful
-        // value when the API returns 0.
-        const apiMargin = parseFloat(v(p, 'positionInitialMargin') || v(p, 'initialMargin') || '0');
-        const marginSize = apiMargin > 0 ? apiMargin : leverage > 0 ? notional / leverage : undefined;
-
-        return {
-          liquidationPrice: parseFloat(v(p, 'liquidationPrice') || '0'),
-          ...foundPosition,
-          id,
-          symbol: p.symbol,
-          side,
-          entryPrice,
-          notional, // this fixes wrong calculation for shorts notional
-          leverage,
-          unrealizedPnl: upnl,
-          contracts: Math.abs(contracts),
-          marginSize,
-          marginType,
-          positionMode,
-          info: {
-            ...foundPosition?.info,
-            ...p,
-          },
-        };
-      });
-
-      return { balance, positions };
+      // Account V3's compact position rows omit entry price, leverage,
+      // liquidation price, and margin type. The dedicated V3 position-risk +
+      // symbol-config reconciliation owns positions; account reconciliation
+      // only refreshes the balance and preserves that richer snapshot.
+      return { balance, positions: this.store.positions };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return { balance: this.store.balance, positions: this.store.positions };
@@ -1015,8 +997,9 @@ export class BinanceExchange extends BaseExchange {
 
       currentStart = currentEnd;
 
-      // Add a small delay to respect rate limits (30 req/min = 2 sec between requests)
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (currentStart < endTime) {
+        await new Promise((resolve) => setTimeout(resolve, INCOME_HISTORY_CHUNK_DELAY_MS));
+      }
     }
 
     return allRecords;

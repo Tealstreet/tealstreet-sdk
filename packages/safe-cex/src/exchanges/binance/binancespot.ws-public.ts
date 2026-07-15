@@ -56,6 +56,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<BinanceSpotExchange> {
   subscribe = () => {
     let id = 10;
     for (const topic of Object.keys(this.topics)) {
+      if (!Number.isFinite(this.topics[topic]) || this.topics[topic] <= 0) continue;
       this.send(JSON.stringify({ method: 'SUBSCRIBE', params: [topic], id: id++ }));
     }
   };
@@ -134,7 +135,11 @@ export class BinancePublicWebsocket extends BaseWebSocket<BinanceSpotExchange> {
     return () => {
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
 
-      this.topics[topic]--;
+      const refCount = this.topics[topic];
+      if (refCount !== undefined) {
+        if (refCount <= 1) delete this.topics[topic];
+        else this.topics[topic] = refCount - 1;
+      }
 
       if (this.isConnected && !this.messageHandlers[handler].length) {
         const payload = { method: 'UNSUBSCRIBE', params: [topic], id: 2 };
@@ -268,7 +273,11 @@ export class BinancePublicWebsocket extends BaseWebSocket<BinanceSpotExchange> {
         timeoutId = null;
       }
 
-      this.topics[topic]--;
+      const refCount = this.topics[topic];
+      if (refCount !== undefined) {
+        if (refCount <= 1) delete this.topics[topic];
+        else this.topics[topic] = refCount - 1;
+      }
 
       if (this.isConnected && !this.messageHandlers[handler].length) {
         const payload = { method: 'UNSUBSCRIBE', params: [topic], id: 3 };
