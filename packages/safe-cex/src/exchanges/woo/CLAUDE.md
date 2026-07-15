@@ -26,12 +26,23 @@ write-path migration requires fixture coverage and a credentialed WooX demo life
 
 The V3 foundation is deliberately non-routable: `woo.v3.contracts.ts` holds the typed route map,
 response/request contracts, and seven hard-false migration gates, while `woo.v3.request.ts` only
-prepares deterministic transport-neutral request descriptors. Neither file is imported by
-`woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and neither owns an Axios,
+prepares deterministic transport-neutral request descriptors. `woo.v3.public.ts` adds strict
+unknown-input decoders and pure mappers for the five public REST reads, but it is equally inert.
+None of these files is imported by
+`woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
 review requiring the corresponding parity/demo evidence. Concrete endpoint pages and the official
 migration table use `/v3/trade/*`; do not follow the introduction page's inconsistent `/trading`
 label.
+
+The V3 futures REST row is deliberately mapped to `WooV3FuturesStats`, not the safe-cex `Ticker`.
+The official response has index/mark/funding/open-interest and rolling 24-hour fields, but no
+authoritative best bid, best ask, or last-trade field. Do not fill `Ticker.bid`/`ask`/`last` from
+`24hClose`; full ticker parity needs a separately verified live quote source. The V3 orderbook page
+documents both sides as descending, so the inert mapper sorts into safe-cex's required bid-descending
+/ ask-ascending order before calculating cumulative totals. The instruments page has drifted on
+whether `status` is present in its example, so the strict decoder treats only that field as optional;
+an absent status does not make a documented perpetual inactive.
 
 ## CCXT Reference Implementation
 
@@ -44,6 +55,7 @@ label.
 - `woo.exchange.ts` - Main exchange class (`WOOXExchange`) extending `BaseExchange`
 - `woo.types.ts` - TypeScript type definitions, endpoint constants, type maps
 - `woo.v3.contracts.ts` - Non-routable namespaced V3 endpoints, contracts, migration map, and gates
+- `woo.v3.public.ts` - Inert strict public-REST decoders and pure market/stat/book/candle mappers
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)

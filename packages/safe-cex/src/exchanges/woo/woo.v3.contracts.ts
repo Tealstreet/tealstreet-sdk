@@ -348,14 +348,16 @@ export type WooV3Rows<T> = Readonly<{
 
 export type WooV3Instrument = Readonly<{
   symbol: string;
-  status: string;
+  status?: string;
   baseAsset: string;
   quoteAsset: string;
+  baseAssetMultiplier?: WooV3Decimal | number;
   baseMin: WooV3Decimal | number;
   baseMax: WooV3Decimal | number;
   baseTick: WooV3Decimal | number;
   quoteTick: WooV3Decimal | number;
   minNotional: WooV3Decimal | number;
+  baseIMR: WooV3Decimal | number;
   fundingIntervalHours?: number;
   isAllowedRpi?: boolean;
 }>;
