@@ -134,11 +134,9 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
       // { channel: 'positions', instType: 'SWAP' },
       // { channel: 'orders', instType: 'SWAP' },
       // { channel: 'orders-algo', instType: 'SWAP' },
-      // { channel: 'algo-advance', instType: 'SWAP' },
       { channel: 'positions' },
       { channel: 'orders' },
       { channel: 'orders-algo' },
-      { channel: 'algo-advance' },
     ];
 
     for (const arg of args) {
@@ -176,8 +174,7 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
 
       if (
         data.includes('"channel":"orders"') ||
-        data.includes('"channel":"orders-algo"') ||
-        data.includes('"channel":"algo-advance"')
+        data.includes('"channel":"orders-algo"')
       ) {
         const json = jsonParse(data);
         if (json) this.handleOrderTopic(json);
@@ -200,12 +197,19 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   handleOrderTopic = ({ data: blofinOrders }: Record<string, any>) => {
     for (const o of blofinOrders) {
       const orders = this.parent.mapOrders([o]);
+      const orderId = String(o.orderId || o.ordId || orders[0]?.id || '');
 
       if (orders.length) {
         if (o.state === 'filled') {
           this.store.updateOrdersStatus(orders, OrderStatus.Closed);
         }
         if (o.state === 'canceled') {
+          this.store.updateOrdersStatus(orders, OrderStatus.Canceled);
+        }
+        if (o.state === 'effective') {
+          this.store.updateOrdersStatus(orders, OrderStatus.Closed);
+        }
+        if (o.state === 'order_failed') {
           this.store.updateOrdersStatus(orders, OrderStatus.Canceled);
         }
 
@@ -217,7 +221,6 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           // Use O(1) hashmap lookup instead of O(n) find
           const market = this.store.marketsById[o.instId];
           const contractSize = market?.contractSize || parseFloat(market?.info?.contractValue || '1');
-          const orderId = String(o.orderId || o.ordId || orders[0]?.id || '');
           const filledSizeNative = parseFloat(o.filledSize || '0');
           const previousFilledSizeNative = orderId ? this.lastFilledSizeByOrderId.get(orderId) || 0 : 0;
           const fillDeltaNative = Math.max(filledSizeNative - previousFilledSizeNative, 0);
@@ -243,6 +246,10 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
             }
           }
         }
+      }
+
+      if (orderId && (o.state === 'filled' || o.state === 'canceled')) {
+        this.lastFilledSizeByOrderId.delete(orderId);
       }
     }
 

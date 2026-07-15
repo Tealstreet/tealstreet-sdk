@@ -78,17 +78,13 @@ export class KucoinExchange extends BaseExchange {
     this.privateWebsocket = new KucoinPrivateWebsocket(this);
   }
 
-  get apiProductType() {
-    return this.options.testnet ? 'sumcbl' : 'umcbl';
-  }
-
   get apiMarginCoin() {
     return this.options.testnet ? 'SUSDT' : 'USDT';
   }
 
   toKucoinSymbol = (symbol?: string) => {
     if (!symbol) return '';
-    return symbol.includes('_') ? symbol.split('_')[0] : symbol;
+    return symbol;
   };
 
   toInternalSymbol = (symbol?: string) => {
@@ -539,82 +535,6 @@ export class KucoinExchange extends BaseExchange {
 
     return markets.filter((m) => m.quote === this.apiMarginCoin && !m.isExpiring);
   };
-
-  // fetchCurrentLeverage = async () => {
-  //   // 1. fetch all existing positions with v1 endpoint
-  //   // this will tell us the current leverage for symbols where we had a position
-  //   const {
-  //     data: { data: allPositions },
-  //   } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS, {
-  //     params: {
-  //       productType: this.apiProductType,
-  //       marginCoin: this.apiMarginCoin,
-  //     },
-  //   });
-  //
-  //   const symbolLeverage = uniqBy(
-  //     allPositions.map((d) => ({ symbol: d.symbol, leverage: d.leverage })),
-  //     'symbol',
-  //   );
-  //
-  //   symbolLeverage.forEach((d) => {
-  //     this.leverageHash[d.symbol] = d.leverage;
-  //   });
-  //
-  //   // use allPositions opportunity to set if we are in hedge mode
-  //   if (allPositions.length > 0) {
-  //     const isHedged = allPositions.some((p) => p.holdMode === 'double_hold');
-  //     this.store.setSetting('isHedged', isHedged);
-  //   }
-  //
-  //   // 2. fetch all the remaining markets on account endpoint
-  //   // this will tell us the current leverage for symbols where we never had a position
-  //   const remainingMarkets = this.store.markets.filter((m) => !symbolLeverage.find((d) => d.symbol === m.symbol));
-  //
-  //   for (const market of remainingMarkets) {
-  //     if (!this.isDisposed) {
-  //       try {
-  //         const {
-  //           data: { data },
-  //         } = await this.xhr.get(ENDPOINTS.ACCOUNT, {
-  //           params: {
-  //             symbol: market.id,
-  //             marginCoin: this.apiMarginCoin,
-  //           },
-  //         });
-  //
-  //         this.leverageHash[market.id] = data.crossMarginLeverage;
-  //       } catch (err: any) {
-  //         this.emitAndLogError(err?.response?.data?.msg || err?.message);
-  //       }
-  //     }
-  //   }
-  // };
-  //
-  // fetchLeverageBrackets = async () => {
-  //   for (const market of this.store.markets) {
-  //     if (!this.isDisposed) {
-  //       try {
-  //         const {
-  //           data: { data },
-  //         } = await this.xhr.get(ENDPOINTS.SYMBOL_LEVERAGE, {
-  //           params: { symbol: market.id },
-  //         });
-  //         this.store.updateMarket(market, {
-  //           limits: {
-  //             ...market.limits,
-  //             leverage: {
-  //               min: parseInt(data.minLeverage, 10),
-  //               max: parseInt(data.maxLeverage, 10),
-  //             },
-  //           },
-  //         });
-  //       } catch (err: any) {
-  //         this.emitAndLogError(err?.response?.data?.msg || err?.message);
-  //       }
-  //     }
-  //   }
-  // };
 
   fetchTickers = async () => {
     const { data } = await this.xhr.get(ENDPOINTS.TICKERS);
@@ -1145,24 +1065,20 @@ export class KucoinExchange extends BaseExchange {
         takeProfitPrice = update.price;
       }
 
-      // Create and place the new order
-      const { data } = await this.unlimitedXHR.post(ENDPOINTS.PLACE_ORDER, {
-        symbol: market.id,
-        side: parentOrder.side === OrderSide.Buy ? 'buy' : 'sell',
-        type: parentOrder.type === OrderType.Market ? 'market' : 'limit',
-        price: price.toString(),
-        size: amount.toString(),
-        timeInForce: 'GTC', // Default to GTC
-        stopLoss: stopLossPrice?.toString(),
-        takeProfit: takeProfitPrice?.toString(),
-        clientOid: uuid(),
+      // Attached TP/SL belongs to KuCoin's st-orders family. Rebuild through
+      // the same formatter and endpoint used for initial attached placement.
+      const payloads = await this.formatCreateOrder({
+        symbol: parentOrder.symbol,
+        side: parentOrder.side,
+        type: parentOrder.type,
+        price,
+        amount,
+        timeInForce: parentOrder.timeInForce,
+        reduceOnly: parentOrder.reduceOnly,
+        stopLoss: stopLossPrice,
+        takeProfit: takeProfitPrice,
       });
-
-      if (data.code !== '200000' || !data.data) {
-        throw new Error(data.msg || 'Failed to place order with updated TP/SL');
-      }
-
-      return [data.data.orderId];
+      return await this.placeOrderBatch(payloads, ENDPOINTS.PLACE_ALGO_ORDER);
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
       throw err;
@@ -1410,25 +1326,31 @@ export class KucoinExchange extends BaseExchange {
 
     let orders = [order];
 
-    // Handle attached stop loss/take profit
-    if (o.stopLoss) {
+    // Attached st-orders use triggerStopUpPrice/triggerStopDownPrice. Map them
+    // by parent side; retain legacy field fallbacks for already-cached rows.
+    const attachedStopLoss =
+      o.stopLoss || (order.side === OrderSide.Buy ? o.triggerStopDownPrice : o.triggerStopUpPrice);
+    const attachedTakeProfit =
+      o.takeProfit || (order.side === OrderSide.Buy ? o.triggerStopUpPrice : o.triggerStopDownPrice);
+
+    if (attachedStopLoss) {
       orders.push({
         ...order,
         id: `${order.id}__stop_loss`,
         side: order.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy,
         type: OrderType.StopLoss,
-        price: parseFloat(o.stopLoss),
+        price: parseFloat(attachedStopLoss),
         reduceOnly: true,
       });
     }
 
-    if (o.takeProfit) {
+    if (attachedTakeProfit) {
       orders.push({
         ...order,
         id: `${order.id}__take_profit`,
         side: order.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy,
         type: OrderType.TakeProfit,
-        price: parseFloat(o.takeProfit),
+        price: parseFloat(attachedTakeProfit),
         reduceOnly: true,
       });
     }

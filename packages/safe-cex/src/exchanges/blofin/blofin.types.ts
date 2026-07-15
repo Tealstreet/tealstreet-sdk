@@ -5,15 +5,18 @@ export const RECV_WINDOW = 20_000;
 export const BROKER_ID = 'b3cdedc0a20880ba'; // tealstreet
 export const USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY = false;
 
-export const BASE_URL = 'https://openapi.blofin.com';
+export const BASE_URL = {
+  livenet: 'https://openapi.blofin.com',
+  testnet: 'https://demo-trading-openapi.blofin.com',
+};
 export const BASE_WS_URL = {
   public: {
     livenet: 'wss://openapi.blofin.com/ws/public',
-    testnet: 'wss://openapi.blofin.com/ws/public?brokerId=9999',
+    testnet: 'wss://demo-trading-openapi.blofin.com/ws/public',
   },
   private: {
     livenet: 'wss://openapi.blofin.com/ws/private',
-    testnet: 'wss://openapi.blofin.com/ws/private?brokerId=9999',
+    testnet: 'wss://demo-trading-openapi.blofin.com/ws/private',
   },
 };
 
@@ -27,6 +30,7 @@ export const ENDPOINTS = {
   ORDERS_HISTORY: '/api/v1/trade/orders-history',
   UNFILLED_ORDERS: '/api/v1/trade/orders-pending',
   UNFILLED_ALGO_ORDERS: '/api/v1/trade/orders-tpsl-pending',
+  UNFILLED_TRIGGER_ORDERS: '/api/v1/trade/orders-algo-pending',
   CANCEL_ORDERS: '/api/v1/trade/cancel-batch-orders',
   CANCEL_ALGO_ORDER: '/api/v1/trade/cancel-tpsl',
   PLACE_ORDERS: '/api/v1/trade/order',
@@ -59,6 +63,7 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.POSITIONS,
   ENDPOINTS.UNFILLED_ORDERS,
   ENDPOINTS.UNFILLED_ALGO_ORDERS,
+  ENDPOINTS.UNFILLED_TRIGGER_ORDERS,
 ];
 
 export const INTERVAL: Record<Timeframe, string> = {

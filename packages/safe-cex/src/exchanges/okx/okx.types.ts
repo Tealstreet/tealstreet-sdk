@@ -1,4 +1,5 @@
 import type { Timeframe } from '../../types';
+
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 
 export const RECV_WINDOW = 20_000;
@@ -56,6 +57,7 @@ export const ENDPOINTS = {
   BALANCE: '/api/v5/account/account-position-risk',
   POSITIONS: '/api/v5/account/positions',
   KLINE: '/api/v5/market/candles',
+  KLINE_HISTORY: '/api/v5/market/history-candles',
   FILLS: '/api/v5/trade/fills',
   FILLS_HISTORY: '/api/v5/trade/fills-history',
   UNFILLED_ORDERS: '/api/v5/trade/orders-pending',

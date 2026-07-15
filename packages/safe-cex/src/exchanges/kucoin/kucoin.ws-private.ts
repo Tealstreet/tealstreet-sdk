@@ -10,6 +10,7 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
   token: string | null = null;
   socketEndpoint: string | null = null;
   private subscribed = false;
+  private snapshotRefreshTimer?: ReturnType<typeof setTimeout>;
 
   connectAndSubscribe = async () => {
     if (!this.isDisposed) {
@@ -108,9 +109,39 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
         json.topic === '/contract/crossLeverage'
       ) {
         this.recordMessageHandlerStats('account');
-        void this.parent.fetchAndSetPrivateSnapshot();
+        this.refreshSnapshotSoon();
       }
     }
+  };
+
+  private refreshSnapshotSoon = () => {
+    if (this.snapshotRefreshTimer) clearTimeout(this.snapshotRefreshTimer);
+    this.snapshotRefreshTimer = setTimeout(() => {
+      this.snapshotRefreshTimer = undefined;
+      if (!this.isDisposed) void this.parent.fetchAndSetPrivateSnapshot();
+    }, 500);
+  };
+
+  reconnect = async () => {
+    if (this.isDisposed) return;
+    const previousSocket = this.ws;
+    previousSocket?.removeEventListener?.('open', this.onOpen);
+    previousSocket?.removeEventListener?.('message', this.onMessage);
+    previousSocket?.removeEventListener?.('close', this.onClose);
+    this.ws = undefined;
+    previousSocket?.close?.();
+    this.token = null;
+    this.socketEndpoint = null;
+    this.subscribed = false;
+    await this.connectAndSubscribe();
+  };
+
+  dispose = () => {
+    if (this.snapshotRefreshTimer) {
+      clearTimeout(this.snapshotRefreshTimer);
+      this.snapshotRefreshTimer = undefined;
+    }
+    super.dispose();
   };
 
   handleOrderTopic = (data: Record<string, any>) => {

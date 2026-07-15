@@ -21,6 +21,42 @@ type SubscribedTopics = {
   [id: string]: Array<{ channel: string; instId: string }>;
 };
 
+type SubscriptionTopic = { channel: string; instId: string };
+
+export const BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES = 4096;
+
+export const buildBlofinSubscribeFrames = (
+  topics: SubscriptionTopic[],
+  maxBytes = BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES,
+) => {
+  const frames: string[] = [];
+  let batch: SubscriptionTopic[] = [];
+
+  for (const topic of topics) {
+    const singleTopicFrame = JSON.stringify({ op: 'subscribe', args: [topic] });
+    if (new TextEncoder().encode(singleTopicFrame).byteLength > maxBytes) {
+      throw new Error('BloFin subscription topic exceeds the maximum WebSocket frame size');
+    }
+
+    const candidate = [...batch, topic];
+    const serialized = JSON.stringify({ op: 'subscribe', args: candidate });
+
+    if (batch.length > 0 && new TextEncoder().encode(serialized).byteLength > maxBytes) {
+      frames.push(JSON.stringify({ op: 'subscribe', args: batch }));
+      batch = [topic];
+      continue;
+    }
+
+    batch = candidate;
+  }
+
+  if (batch.length > 0) {
+    frames.push(JSON.stringify({ op: 'subscribe', args: batch }));
+  }
+
+  return frames;
+};
+
 export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
   private static readonly CONNECTION_FAILURE_NOTICE_DELAY_MS = 20_000;
   private static readonly CONNECTION_FAILURE_NOTICE =
@@ -98,8 +134,7 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
     this.topics.tickers = [...(this.topics.tickers || []), ...newTickerTopics];
     this.topics['funding-rate'] = [...(this.topics['funding-rate'] || []), ...newFundingTopics];
 
-    const allNewTopics = [...newTickerTopics, ...newFundingTopics];
-    this.send(JSON.stringify({ op: 'subscribe', args: allNewTopics }));
+    this.sendSubscriptionTopics([...newTickerTopics, ...newFundingTopics]);
   };
 
   ping = () => {
@@ -111,8 +146,13 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
 
   subscribe = () => {
     const topics = flatten(Object.values(this.topics));
-    const payload = { op: 'subscribe', args: topics };
-    this.send(JSON.stringify(payload));
+    this.sendSubscriptionTopics(topics);
+  };
+
+  private sendSubscriptionTopics = (topics: SubscriptionTopic[]) => {
+    for (const frame of buildBlofinSubscribeFrames(topics)) {
+      this.send(frame);
+    }
   };
 
   onMessage = ({ data }: MessageEvent) => {
@@ -459,6 +499,8 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
     type BooksSnapshot = {
       bids: Array<[string, string]>;
       asks: Array<[string, string]>;
+      prevSeqId?: string | number;
+      seqId?: string | number;
     };
     const parseBookSnapshot = (data: Data): BooksSnapshot | null => {
       const payload = data?.data;
@@ -474,11 +516,30 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
       }
       return null;
     };
+    let lastBookSeqId: string | undefined;
+    let hasBookSnapshot = false;
+    let bookResubscribePending = false;
+
+    const requestFreshBookSnapshot = () => {
+      if (!bookResubscribePending && this.isConnected && !this.isDisposed) {
+        this.send(JSON.stringify({ op: 'unsubscribe', args: [topic] }));
+        this.send(JSON.stringify({ op: 'subscribe', args: [topic] }));
+      }
+      bookResubscribePending = true;
+      hasBookSnapshot = false;
+      lastBookSeqId = undefined;
+      orderBook.bids = [];
+      orderBook.asks = [];
+    };
 
     const parser = (data: Data) => {
       if (data.action === 'snapshot') {
         const snapshot = parseBookSnapshot(data);
         if (!snapshot) return;
+
+        lastBookSeqId = snapshot.seqId === undefined ? undefined : String(snapshot.seqId);
+        hasBookSnapshot = true;
+        bookResubscribePending = false;
 
         // Linear push into a fresh array for each side. The prior reduce
         // pattern was quadratic — `[...acc, x]` allocated and copied on
@@ -514,6 +575,13 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
         const update = parseBookSnapshot(data);
         if (!update) return;
 
+        const prevSeqId = update.prevSeqId === undefined ? undefined : String(update.prevSeqId);
+        const seqId = update.seqId === undefined ? undefined : String(update.seqId);
+        if (!hasBookSnapshot || !lastBookSeqId || !prevSeqId || !seqId || prevSeqId !== lastBookSeqId) {
+          requestFreshBookSnapshot();
+          return;
+        }
+
         const uBids = update.bids;
         for (let i = 0; i < uBids.length; i++) {
           const [rPrice, rAmount] = uBids[i];
@@ -532,6 +600,7 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
             total: 0,
           });
         }
+        lastBookSeqId = seqId;
       }
 
       // Use O(1) hashmap lookup instead of O(n) find

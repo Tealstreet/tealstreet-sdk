@@ -118,8 +118,8 @@ The existing `kucoin.*` files target KuCoin Futures (linear perpetual) trading A
 
 ## API Documentation
 
-- **Official API Documentation**: https://docs.kucoin.com/
-- **Futures API Documentation**: https://docs.kucoin.com/futures/
+- **Official API Documentation**: https://www.kucoin.com/docs-new
+- **Futures API Documentation**: https://www.kucoin.com/docs-new/rest/futures-trading/introduction
 
 ## File Structure
 
@@ -204,6 +204,7 @@ Defined in `ENDPOINTS` object in `kucoin.types.ts`:
 | `PLACE_ORDER`                | `/api/v1/orders`                      | POST   | Place order                 |
 | `CANCEL_ORDERS`              | `/api/v1/orders`                      | DELETE | Cancel single order (/{id}) |
 | `CANCEL_ALL_ORDERS`          | `/api/v3/orders`                      | DELETE | Cancel all orders           |
+| `CANCEL_SYMBOL_ORDERS`       | `/api/v3/orders`                      | DELETE | Cancel normal orders by symbol |
 | `BATCH_ORDERS`               | `/api/v1/orders/multi`                | POST   | Batch order placement       |
 | `ALGO_ORDERS`                | `/api/v1/stopOrders`                  | GET    | Fetch algo/stop orders      |
 | `CANCEL_ALGO_ORDER`          | `/api/v1/stopOrders/{orderId}`        | DELETE | Cancel algo order           |
@@ -242,9 +243,9 @@ After a pong, the next ping is scheduled in 5 seconds (via `BaseWebSocket.handle
 
 ### Reconnection Logic
 
-Reconnection is handled by `BaseWebSocket`:
+KuCoin reconnects require a new bullet token because both tokens and connections expire after 24 hours:
 
-- Uses `ReconnectingWebSocket` when `ENABLE_RECONNECTING_WEBSOCKET` is enabled
+- Explicit reconnects detach and close the old wrapper, then call `connectAndSubscribe()` to fetch a new token and server URL
 - On reconnect, public WS calls `emitWsReconnected()`
 - On reconnect, private WS calls `parent.fetchAndSetPrivateSnapshot()` to resync state (`kucoin.ws-private.ts:57-58`)
 
@@ -392,10 +393,7 @@ KuCoin uses descriptive side names that encode position direction:
 
 **Normal orders** are placed individually despite the batch endpoint existing (`kucoin.exchange.ts:949-972`). Uses `unlimitedXHR` (no rate limit) for order placement.
 
-**Algo orders** select endpoint based on presence of `rangeRate` field:
-
-- With `rangeRate`: `PLACE_TRAILING_STOP_ORDER` (`/api/v1/stop-order`)
-- Without: `PLACE_ALGO_ORDER` (`/api/v1/st-orders`)
+Orders with attached TP/SL are posted to `PLACE_ALGO_ORDER` (`/api/v1/st-orders`) with `triggerStopUpPrice` / `triggerStopDownPrice`. Standalone TP/SL uses the regular stop-flagged order path. Trailing stops fail closed because the current adapter does not support them.
 
 ### Order Fetch — two books, partial-failure preservation
 
@@ -436,16 +434,16 @@ the native amount from `order.extra.remainingNative`, falling back to
 `order.remaining / contractSize` for older callers. An explicit `update.amount`
 is already native and must not be divided again.
 
-`updateVirtualTpSlOrder` (`kucoin.exchange.ts:997-1053`):
+`updateVirtualTpSlOrder`:
 
 1. Find parent, SL, and TP orders
 2. Cancel the parent order
 3. Reconstruct with updated price/amount/TP/SL
-4. Place as new order
+4. Rebuild through `formatCreateOrder` and place via `/api/v1/st-orders`, preserving the documented trigger fields
 
 ### Virtual TP/SL Order IDs
 
-Limit orders with attached `stopLoss`/`takeProfit` create compound order IDs in `mapOrder` (`kucoin.exchange.ts:1253-1312`):
+`st-orders` rows with `triggerStopUpPrice` / `triggerStopDownPrice` create compound order IDs in `mapOrder` (the parent side determines which trigger is TP versus SL):
 
 - `<orderId>__stop_loss` for the stop loss leg
 - `<orderId>__take_profit` for the take profit leg
@@ -510,7 +508,7 @@ defensive 404→`/api/v1/stopOrders/{id}` fallback for anything KuCoin ever file
 on the stop-order book. (The dedicated `cancelAlgoOrders` method was removed.)
 
 - Virtual TP/SL legs are resolved to their parent id before cancellation.
-- `cancelSymbolOrders`: `DELETE /api/v1/orders` with symbol param.
+- `cancelSymbolOrders`: `DELETE /api/v3/orders` with symbol param.
 - `cancelAllOrders`: `DELETE /api/v1/orders` (CANCEL_ALL_ORDERS) **and** `DELETE
 /api/v1/stopOrders` (CANCEL_ALL_STOP_ORDERS) — **wipes the user's pos-level
   TP/SL too**; never call it as a test-cleanup shortcut.
@@ -523,21 +521,12 @@ on the stop-order book. (The dedicated `cancelAlgoOrders` method was removed.)
 - TP/SL orders: Side is inverted (Buy->short, Sell->long, representing the hold side)
 - Trailing stops: Uses `close_short`/`close_long` format
 
-### Trailing Stop Distance Calculation
-
-`formatAlgoOrder` for trailing stops (`kucoin.exchange.ts:918-936`):
-
-1. Calculates absolute price distance between current ticker `last` and trigger price
-2. Converts to percentage: `Math.round(((priceDistance * 100) / ticker.last) * 10) / 10`
-3. Sets as `rangeRate` on the payload
-
 ## Symbol Format
 
-- **KuCoin Format**: `BTCUSDTM` or `BTCUSDT_UMCBL` (suffixed)
+- **KuCoin Format**: futures contract ids such as `XBTUSDTM`
 - **Internal Format**: `BTCUSDT` (concatenated, no suffix)
-- **Conversion**: `symbol.split('_')[0]` strips the `_UMCBL` suffix
+- **Conversion**: `toBinance(..., 'kucoin')` normalizes KuCoin's contract id; Bitget `_UMCBL` suffix logic is not part of this integration
 - Market `id` field stores the KuCoin format, `symbol` stores normalized
-- **Testnet**: Uses `SUSDT` margin coin and `sumcbl` product type (via `apiMarginCoin` and `apiProductType` getters)
 - **Market filtering**: Only markets where `quote === apiMarginCoin` are included (`kucoin.exchange.ts:446`)
 
 ## Data Precision & Conversion
@@ -656,7 +645,7 @@ parseFloat(matchSize)`, base = `× contractSize`). A fill arrives as a `match`
   a stale REST row, while accepting a smaller REST-derived remainder after a
   later fill. Do not carry it across ids: KuCoin cancel-replace creates a new
   id, whose REST remainder is its own source of truth.
-- **No debounced re-fetch**: Unlike BloFin, KuCoin does NOT trigger a throttled full order re-fetch after WS events. State relies on WS events + periodic tick fetches.
+- **Debounced account-frame re-fetch**: position/wallet/margin/leverage frames share one 500 ms reconciliation timer, preventing bursts from stacking full private snapshots on top of the tick loop.
 - **Reconnection**: On private WS reconnect, `fetchAndSetPrivateSnapshot()` is called
 
 ### Fake Positions
@@ -680,12 +669,7 @@ parseFloat(matchSize)`, base = `× contractSize`). A fill arrives as a `match`
 
 Testnet is **disabled** in exchange metadata (`supportsTestnet: false`).
 
-When testnet would be enabled:
-
-- `apiMarginCoin` returns `'SUSDT'` instead of `'USDT'` (`kucoin.exchange.ts:80`)
-- `apiProductType` returns `'sumcbl'` instead of `'umcbl'` (`kucoin.exchange.ts:76`)
-- Market filtering uses `SUSDT` quote currency
-- Private WS uses the same token-authenticated account topics as livenet
+No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT` / `sumcbl` product concepts when adding testnet support.
 
 ## Known Quirks / Implementation Notes
 
@@ -693,20 +677,20 @@ When testnet would be enabled:
 2. **No batch order support used**: Despite `BATCH_ORDERS` endpoint existing (`/api/v1/orders/multi`), orders are placed individually in a loop (`kucoin.exchange.ts:949-972`).
 3. **Update order not supported**: KuCoin has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one (cancel-and-replace pattern).
 4. **Full-position TP/SL uses `closeOrder`, not `planType`**: stops post to `/api/v1/orders` (no `planType`). `amount === 0` → `closeOrder: true` with no `size` (KuCoin rejects `size:"0"`); `amount > 0` → `size` in native contracts. See "Full-position vs partial TP/SL" above. The `planType` helper is dead code.
-5. **Virtual TP/SL orders**: Limit orders with attached `stopLoss`/`takeProfit` create compound order IDs: `<orderId>__stop_loss` and `<orderId>__take_profit`.
+5. **Virtual TP/SL orders**: Attached `/api/v1/st-orders` trigger fields create compound order IDs: `<orderId>__stop_loss` and `<orderId>__take_profit`; updates re-place through the same st-orders family.
 6. **Success code**: API success is indicated by `data.code === '200000'` (string, not number).
 7. **Encrypted passphrase for REST only**: Passphrase must be HMAC-SHA256 encrypted for REST API headers. Private WS uses the `bullet-private` token and does not send the passphrase.
 8. **Kline timestamps**: Futures REST kline `from`/`to` params and returned candle timestamps are in **milliseconds**. WS candle timestamps are seconds.
 9. **Leverage per-side in isolated**: In isolated margin mode, long and short sides can have different leverage values. Code warns if they differ in one-way mode (`kucoin.exchange.ts:286-289`).
 10. **Orders cancelled individually**: Both normal and algo orders are cancelled one by one (no batch cancellation).
 11. **HTTP-over-WebSocket adapter**: Authenticated/private REST API uses `axiosHttpOverWebsocketAdapter` as the default adapter, tunneling HTTP requests through WebSocket (`kucoin.api.ts:43`). Public-data-only REST is not tunneled.
-12. **Trailing stop disabled in metadata**: `supportsTrailingStopLoss: false` in exchange metadata, but the code has implementation for it.
+12. **Trailing stop disabled in metadata**: `supportsTrailingStopLoss: false`; the placement formatter rejects it explicitly.
 13. **Welcome triggers guarded subscribe**: On private WS, receiving a `welcome` message calls `subscribe()` again, but duplicate subscriptions are guarded.
 14. **Position mode change blocked with open positions**: `changePositionMode` explicitly checks for open positions and throws if any exist (`kucoin.exchange.ts:1195-1223`).
 15. **Margin mode requires symbol**: `changeMarginType` throws if no symbol is provided, unlike exchanges with global margin mode (`kucoin.exchange.ts:1165-1193`).
 16. **Fetch missing-position metadata**: Position metadata for zero-size/fake positions is fetched from `/api/v2/position/getMarginMode`, `/api/v2/position/getPositionMode`, and cross leverage from `/api/v2/getCrossUserLeverage`.
 17. **Ticker percentage from WS**: WS ticker `priceChangePercent` is multiplied by 100 to convert from decimal to percentage (`kucoin.ws-public.ts:174`).
-18. **Commented-out leverage fetch**: The `fetchCurrentLeverage` and `fetchLeverageBrackets` methods are fully commented out (`kucoin.exchange.ts:466-540`), suggesting a previous implementation that was replaced.
+18. **No Bitget product artifacts**: KuCoin code uses KuCoin response shapes and contract ids only; the old `00000`, `_UMCBL`, `umcbl`/`sumcbl`, and commented leverage-port remnants were removed.
 19. **Order fetch is two books with preserve-on-failure**: `fetchOrders` = `/api/v1/orders` (normal) + `/api/v1/stopOrders` (TP/SL + trailing). A failed book preserves the existing store orders of that category so the tick's full-replace can't wipe TP/SL lines — see "Order Fetch — two books, partial-failure preservation". (The old duplicate `fetchTrailingStopOrders`, which re-hit `/api/v1/stopOrders`, was removed.)
 20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book.
 21. **Broker ID**: `X-CHANNEL-API-CODE: '3zexp'` sent as a default REST header.
@@ -755,7 +739,7 @@ All KuCoin API responses follow this structure:
 
 - `placeOrderBatch`: Emits error event and throws on failure (`kucoin.exchange.ts:963-968`)
 - `cancelNormalOrders`: Emit error and re-throw (also handles TP/SL; 404→stopOrders fallback)
-- `updateOrder` / `updateAlgoOrder`: Emit error and re-throw (`kucoin.exchange.ts:1087-1090`, `kucoin.exchange.ts:1114-1116`)
+- `updateOrder`: emits and rethrows. `updateAlgoOrder`: emits and returns `[]` after a failed cancel-replace so callers receive no replacement id.
 
 ## Kline Interval Mapping
 

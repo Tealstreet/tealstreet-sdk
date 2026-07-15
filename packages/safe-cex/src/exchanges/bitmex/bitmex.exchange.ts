@@ -101,11 +101,20 @@ export class BitmexExchange extends BaseExchange {
   };
 
   getAccount = async () => {
-    const {
-      data: [{ accountAlias }],
-    } = await this.xhr.get(ENDPOINTS.BALANCE);
+    const { data } = await this.xhr.get<Array<{ account?: number | string }> | { account?: number | string }>(
+      ENDPOINTS.ACCOUNT,
+      { params: { currency: 'all' } },
+    );
+    const rows = Array.isArray(data) ? data : [data];
+    const account = rows.find((row) => row?.account !== undefined && row?.account !== null)?.account;
 
-    return { userId: accountAlias };
+    if (account === undefined || account === null) {
+      const msg = 'BitMEX margin response did not include an account id';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    return { userId: String(account) };
   };
 
   validateAccount = async () => {
@@ -939,7 +948,10 @@ export class BitmexExchange extends BaseExchange {
     let timeInForce = TIME_IN_FORCE[o.timeInForce] || OrderTimeInForce.GoodTillCancel;
     let reduceOnly = false;
     const execInst = v(o, 'execInst') || '';
-    if (execInst.includes('ParticipateDoNotInitiate')) {
+    const isPostOnly = ['ParticipateDoNotInitiate', 'PostOnly', 'PostOnlyReprice'].some((value) =>
+      execInst.includes(value),
+    );
+    if (isPostOnly) {
       timeInForce = OrderTimeInForce.PostOnly;
     }
     if (execInst.includes('ReduceOnly') || execInst.includes('Close')) {
@@ -947,7 +959,12 @@ export class BitmexExchange extends BaseExchange {
     }
 
     let rejectReason: OrderRejectReason | undefined = undefined;
-    if (o.ordStatus === 'Canceled' && o.text.includes('Canceled: Order had execInst of ParticipateDoNotInitiate')) {
+    if (
+      o.ordStatus === 'Canceled' &&
+      ['ParticipateDoNotInitiate', 'PostOnly', 'PostOnlyReprice'].some((value) =>
+        o.text.includes(`Canceled: Order had execInst of ${value}`),
+      )
+    ) {
       rejectReason = OrderRejectReason.PostOnly;
     } else if (
       o.ordStatus === 'Canceled' &&

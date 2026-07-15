@@ -275,8 +275,8 @@ describe('KuCoin cancel-replace contract sizing', () => {
     const { exchange, store, deleteRequest, postRequest } = createExchange();
     const orders = mapOrder(exchange, {
       id: 'compound-order-id',
-      stopLoss: '49000',
-      takeProfit: '52000',
+      triggerStopDownPrice: '49000',
+      triggerStopUpPrice: '52000',
     });
     const stopLossOrder = orders.find((order) => order.id.endsWith('__stop_loss'))!;
     store.update({ orders });
@@ -289,8 +289,13 @@ describe('KuCoin cancel-replace contract sizing', () => {
       params: { symbol: 'XBTUSDTM' },
     });
     expect(postRequest).toHaveBeenCalledWith(
-      '/api/v1/orders',
-      expect.objectContaining({ symbol: 'XBTUSDTM', size: '5', stopLoss: '48500', takeProfit: '52000' }),
+      '/api/v1/st-orders',
+      expect.objectContaining({
+        symbol: 'XBTUSDTM',
+        size: '5',
+        triggerStopDownPrice: '48500',
+        triggerStopUpPrice: '52000',
+      }),
     );
   });
 });

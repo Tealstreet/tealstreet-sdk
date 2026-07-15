@@ -764,7 +764,7 @@ export class OKXExchange extends BaseExchange {
     const limit = Math.min(opts.limit || 300, 300);
     const [, amount, unit] = opts.interval.split(/(\d+)/);
 
-    const end = opts.to ? dayjs(opts.to) : dayjs();
+    const end = opts.to ? dayjs(opts.to) : dayjs(virtualClock.getCurrentTimeMs());
     const start =
       !opts.limit && opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
 
@@ -772,17 +772,32 @@ export class OKXExchange extends BaseExchange {
 
     if (market) {
       try {
-        const {
-          data: { data },
-        } = await this.xhr.get(ENDPOINTS.KLINE, {
-          params: {
-            instId: market.id,
-            bar: INTERVAL[opts.interval],
-            limit,
-            before: start.valueOf(),
-            after: end.valueOf(),
-          },
-        });
+        const fetchCandles = async (endpoint: string, requestLimit: number) => {
+          const {
+            data: { data },
+          } = await this.xhr.get<{ data: string[][] }>(endpoint, {
+            params: {
+              instId: market.id,
+              bar: INTERVAL[opts.interval],
+              limit: requestLimit,
+              before: start.valueOf(),
+              after: end.valueOf(),
+            },
+          });
+
+          return data;
+        };
+
+        const recentRows = await fetchCandles(ENDPOINTS.KLINE, limit);
+        const recentWindowStart = dayjs(virtualClock.getCurrentTimeMs()).subtract(
+          parseFloat(amount) * 1_440,
+          unit as ManipulateType,
+        );
+        const needsHistoricalEndpoint = Boolean(opts.to && end.isBefore(recentWindowStart));
+        const data =
+          needsHistoricalEndpoint || recentRows.length === 0
+            ? await fetchCandles(ENDPOINTS.KLINE_HISTORY, Math.min(limit, 100))
+            : recentRows;
 
         const candles: Candle[] = data.map((c: string[]) => {
           return {
@@ -1072,7 +1087,7 @@ export class OKXExchange extends BaseExchange {
     return finiteUsdAmount;
   };
 
-  private contractsToBase = (contractsNative: number, market: Market, referencePrice?: number) => {
+  contractsToBase = (contractsNative: number, market: Market, referencePrice?: number) => {
     const contractSize = market.contractSize || 1;
     const ctValCcy = this.getCtValCcy(market);
 

@@ -143,7 +143,10 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
     let timeoutId: NodeJS.Timeout | null = null;
 
-    const topic = `orderBookL2:${symbol.toLowerCase()}`;
+    // BitMEX public clients default to Aggregated today, but making the pool
+    // explicit keeps the local price-keyed book on one coherent liquidity
+    // view if account/persona defaults change upstream.
+    const topic = `orderBookL2:${symbol.toLowerCase()}:Aggregated`;
     const handler = topic;
     const orderBook: OrderBook = { bids: [], asks: [] };
 
@@ -151,7 +154,9 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
 
     const parser = ([rawData]: Data) => {
       // incorrect symbol, we don't take account
-      const relevantData = rawData.data?.filter((e: any) => e.symbol === symbol);
+      const relevantData = rawData.data?.filter(
+        (e: any) => e.symbol === symbol && (e.pool === undefined || e.pool === 'Aggregated'),
+      );
 
       if (!relevantData?.length) {
         return;
@@ -213,12 +218,21 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
         timeoutId = null;
       }
 
-      this.topics[topic]--;
+      this.topics[topic] = Math.max((this.topics[topic] || 1) - 1, 0);
 
-      if (this.isConnected && !this.messageHandlers[handler].length) {
-        const payload = { op: 'unsubscribe', params: [topic] };
+      if (!this.messageHandlers[handler].length) {
         this.cleanupMessageHandlerStats(handler);
-        this.send(JSON.stringify(payload));
+        if (this.isConnected) {
+          const payload = { op: 'unsubscribe', args: [topic] };
+          this.send(JSON.stringify(payload));
+        }
+      }
+
+      if (this.topics[topic] === 0) {
+        delete this.topics[topic];
+      }
+      if (!this.messageHandlers[handler].length) {
+        delete this.messageHandlers[handler];
       }
     };
   };

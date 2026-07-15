@@ -1353,7 +1353,8 @@ describe('KucoinExchange current futures docs compatibility', () => {
     expect(payloads).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'login' })]));
   });
 
-  it('refreshes private snapshots for current account websocket topics', () => {
+  it('debounces private snapshot refreshes for current account websocket topics', async () => {
+    vi.useFakeTimers();
     const { exchange } = makeExchange();
     const ws = exchange.privateWebsocket;
     const refresh = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot').mockResolvedValue(undefined);
@@ -1387,7 +1388,13 @@ describe('KucoinExchange current futures docs compatibility', () => {
       }),
     } as MessageEvent);
 
-    expect(refresh).toHaveBeenCalledTimes(4);
+    expect(refresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(refresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('handles current futures private order event types', () => {

@@ -26,7 +26,7 @@ export const ENDPOINTS = {
   CANCEL_ORDERS: '/api/v1/orders',
   CANCEL_ALL_ORDERS: '/api/v3/orders',
   CANCEL_ALL_STOP_ORDERS: '/api/v1/stopOrders',
-  CANCEL_SYMBOL_ORDERS: '/api/v1/orders',
+  CANCEL_SYMBOL_ORDERS: '/api/v3/orders',
   PLACE_ORDER: '/api/v1/orders',
   BATCH_ORDERS: '/api/v1/orders/multi',
   ALGO_ORDERS: '/api/v1/stopOrders',
@@ -169,114 +169,4 @@ export const TIME_IN_FORCE: Record<string, OrderTimeInForce> = {
   ioc: OrderTimeInForce.ImmediateOrCancel,
   IOC: OrderTimeInForce.ImmediateOrCancel,
   FOK: OrderTimeInForce.FillOrKill,
-};
-
-// {
-//   "code": "00000",
-//   "data": {
-//   "marginCoin": "USDT",
-//     "locked": "0",
-//     "available": "13168.86110692",
-//     "crossedMaxAvailable": "13168.86110692",
-//     "isolatedMaxAvailable": "13168.86110692",
-//     "maxTransferOut": "13168.86110692",
-//     "accountEquity": "13178.86110692",
-//     "usdtEquity": "13178.861106922",
-//     "btcEquity": "0.344746495477",
-//     "crossedRiskRate": "0",
-//     "crossedMarginLeverage": "20",
-//     "isolatedLongLever": "20",
-//     "isolatedShortLever": "20",
-//     "marginMode": "crossed",
-//     "posMode": "hedge_mode",
-//     "unrealizedPL": "",
-//     "coupon": "0"
-// },
-//   "msg": "success",
-//   "requestTime": "1627292199523"
-// }
-
-export type FETCH_SINGLE_ACCOUNT_RESPONSE = {
-  code: string;
-  data: {
-    marginCoin: string;
-    locked: string;
-    available: string;
-    crossedMaxAvailable: string;
-    isolatedMaxAvailable: string;
-    maxTransferOut: string;
-    accountEquity: string;
-    usdtEquity: string;
-    btcEquity: string;
-    crossedRiskRate: string;
-    crossMarginLeverage: string;
-    fixedLongLeverage: string;
-    fixedShortLeverage: string;
-    marginMode: string;
-    holdMode: string;
-    unrealizedPL: string;
-    coupon: string;
-  };
-  msg: string;
-  requestTime: string;
-};
-
-// {
-//   "code": "00000",
-//   "msg": "success",
-//   "requestTime": 1714810266272,
-//   "data": [
-//   {
-//     "marginCoin": "USDT",
-//     "symbol": "BTCUSDT_UMCBL",
-//     "holdSide": "long",
-//     "openDelegateCount": "0",
-//     "margin": "2.0153312",
-//     "available": "0.004",
-//     "locked": "0",
-//     "total": "0.004",
-//     "leverage": 125,
-//     "achievedProfits": "0",
-//     "averageOpenPrice": "62979.1",
-//     "marginMode": "fixed",
-//     "holdMode": "double_hold",
-//     "unrealizedPL": "0.0084",
-//     "liquidationPrice": "62763.981514968857",
-//     "keepMarginRate": "0.004",
-//     "marketPrice": "62981.2",
-//     "marginRatio": "0.572632412843",
-//     "autoMargin": "off",
-//     "cTime": "1714810218825",
-//     "uTime": "1714810218825"
-//   }
-// ]
-// }
-
-export type FETCH_POSITIONS_V2_RESPONSE = {
-  code: string;
-  msg: string;
-  requestTime: number;
-  data: {
-    marginCoin: string;
-    symbol: string;
-    holdSide: string;
-    openDelegateCount: string;
-    margin: string;
-    available: string;
-    locked: string;
-    total: string;
-    leverage: number;
-    achievedProfits: string;
-    averageOpenPrice: string;
-    marginMode: string;
-    holdMode: string;
-    unrealizedPL: string;
-    liquidationPrice: string;
-    keepMarginRate: string;
-    marketPrice: string;
-    marginRatio: string;
-    autoMargin: string;
-    cTime: string;
-    uTime: string;
-  }[];
 };

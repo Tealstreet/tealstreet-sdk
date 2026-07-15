@@ -146,6 +146,8 @@ describe('Blofin contract scaling regression', () => {
         {
           bids: [['76701.2', '1632']],
           asks: [['76701.3', '12550']],
+          prevSeqId: '0',
+          seqId: '10',
         },
       ],
     });
@@ -160,6 +162,8 @@ describe('Blofin contract scaling regression', () => {
       data: {
         bids: [['76701.2', '2000']],
         asks: [['76701.3', '12000']],
+        prevSeqId: '10',
+        seqId: '11',
       },
     });
 

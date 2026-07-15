@@ -1,14 +1,14 @@
 # OKX Exchange Integration
 
-This directory contains the OKX exchange integration for Tealstreet. It focuses exclusively on **linear perpetual futures** (USDT-margined swaps). Spot and inverse contracts are filtered out.
+This directory contains the OKX exchange integration for Tealstreet. It supports **linear and inverse perpetual swaps**. Spot instruments are not requested.
 
 ## Exchange Information
 
 - **Exchange**: OKX (formerly OKEx)
 - **Type**: Centralized Exchange (CEX)
-- **Supported products**: Linear perpetual swaps only (`ctType === 'linear'`)
+- **Supported products**: Linear and inverse perpetual swaps (`ctType === 'linear' || ctType === 'inverse'`)
 - **API version**: v5
-- **Base URL**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`)
+- **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported.
 - **Latency domain**: `www.okx.com` (`okxeu`: `eea.okx.com`)
 
 ## API Documentation
@@ -37,13 +37,13 @@ When working with OKX exchange integration, consult the official API documentati
 
 ## Authentication
 
-OKX requires three credentials: **API key**, **API secret**, and **passphrase**. The passphrase is mandatory and validated at API client creation time (`okx.api.ts:15` -- throws `'OKX requires a passphrase'` if missing).
+OKX requires three credentials: **API key**, **API secret**, and **passphrase**. The passphrase is mandatory and validated at API client creation time; `createAPI` throws `'OKX requires a passphrase'` if missing.
 
-### REST API Signing (`okx.api.ts:33-58`)
+### REST API Signing
 
 Signing is performed in an axios request interceptor:
 
-1. **Public endpoint bypass**: Requests to URLs containing `'public'` skip signing entirely (`okx.api.ts:34`)
+1. **Public endpoint bypass**: Requests to URLs containing `'public'` skip signing entirely
 2. **Timestamp**: ISO 8601 format from `virtualClock.getCurrentTime().toISOString()` (e.g., `2024-01-15T12:30:00.000Z`)
 3. **String to sign**: Concatenation of `timestamp + METHOD + url + body`
    - `url` includes query parameters (decoded via `qs.stringify`)
@@ -54,11 +54,11 @@ Signing is performed in an axios request interceptor:
    - `OK-ACCESS-SIGN`: Base64 HMAC-SHA256 signature
    - `OK-ACCESS-TIMESTAMP`: ISO 8601 timestamp
    - `OK-ACCESS-PASSPHRASE`: Passphrase
-6. **Testnet header**: When `options.testnet` is true, adds `x-simulated-trading: 1` (`okx.api.ts:25`)
+6. **Testnet header**: When `options.testnet` is true, adds `x-simulated-trading: 1`
 
 ### WebSocket Authentication (Private + Business)
 
-Both private and business WebSockets authenticate after connecting via a `login` operation (`okx.ws-private.ts:48-67`, `okx.ws-business.ts:51-69`):
+Both private and business WebSockets authenticate after connecting via a `login` operation:
 
 1. **Timestamp**: Unix epoch seconds from `virtualClock.getCurrentTime().unix()`
 2. **String to sign**: `timestamp + 'GET' + '/users/self/verify'`
@@ -70,7 +70,7 @@ Both private and business WebSockets authenticate after connecting via a `login`
      "args": [{ "apiKey": "...", "passphrase": "...", "timestamp": 1234567890, "sign": "base64sig" }]
    }
    ```
-5. On successful login (response `code === 0`), the `subscribe()` method is called (`okx.ws-private.ts:101-103`, `okx.ws-business.ts:107-109`)
+5. On successful login (response `code === 0`), the `subscribe()` method is called
 
 ### Time Sync
 
@@ -80,9 +80,11 @@ The `virtualClock` is used for both REST and WebSocket authentication timestamps
 
 Regular OKX validates credentials by fetching `ENDPOINTS.BALANCE` (`/api/v5/account/account-position-risk`). OKX EU overrides `validateAccount()` to fetch `ENDPOINTS.ACCOUNT_CONFIG` (`/api/v5/account/config`) instead, because the OKX EU host can return HTTP 503 on `account-position-risk` during the new-account validation gate even when the key, secret, and passphrase are otherwise valid. Startup still fetches balance and positions through the normal SWAP-scoped balance path after account config has loaded.
 
+Both variants return the current validation contract `{ error, balance? }`; they do not return a bare error string.
+
 ## Startup Sequence
 
-Defined in `start()` (`okx.exchange.ts:106-164`):
+Defined in `OKXExchange.start()`:
 
 ### Phase 1: Market Data (parallel)
 
@@ -93,7 +95,7 @@ Promise.all([
 ])
 ```
 
-- **Markets** (`/api/v5/public/instruments?instType=SWAP`): Fetches all SWAP instruments, filters to `ctType === 'linear'`, and stores
+- **Markets** (`/api/v5/public/instruments?instType=SWAP`): Fetches SWAP instruments, keeps linear and inverse contracts, and stores them
 - **Tickers** (`/api/v5/market/tickers?instType=SWAP`): Fetched in parallel with markets
 
 ### Phase 2: Parse & Connect Public WS (sequential)
@@ -144,6 +146,7 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | `BALANCE`              | `/api/v5/account/account-position-risk` | GET    | Account balance and position risk (`instType=SWAP`)                           |
 | `POSITIONS`            | `/api/v5/account/positions`             | GET    | Fetch open positions (`instType=SWAP`)                                        |
 | `KLINE`                | `/api/v5/market/candles`                | GET    | Fetch OHLCV candlestick data                                                  |
+| `KLINE_HISTORY`        | `/api/v5/market/history-candles`        | GET    | Fetch older OHLCV data when recent candles cannot cover the request           |
 | `UNFILLED_ORDERS`      | `/api/v5/trade/orders-pending`          | GET    | Fetch unfilled regular orders (paginated, 100 per page)                       |
 | `UNFILLED_ALGO_ORDERS` | `/api/v5/trade/orders-algo-pending`     | GET    | Fetch unfilled algo orders (paginated, 100 per page)                          |
 | `FILLS`                | `/api/v5/trade/fills`                   | GET    | Recent fills (primary for `fetchExecutions`)                                  |
@@ -162,6 +165,7 @@ Execution-history behavior (`fetchExecutions`):
 - Fetches `/trade/fills` first, then `/trade/fills-history` if needed
 - Converts contract-size amounts to base qty using `contractsToBase(...)`
 - Normalizes fill timestamps to Unix seconds and resolves symbol from `instId`
+- The corresponding metadata capability is `supportsExecutionsHistory: true`; `supportsTradesHistory` remains false.
 
 ## WebSocket Implementation
 
@@ -169,11 +173,17 @@ OKX uses **three separate WebSocket connections**, all on port 8443.
 
 ### URLs
 
-| Type     | Livenet                                | Testnet                                              |
+| Type     | Production                             | Dormant code constant                                |
 | -------- | -------------------------------------- | ---------------------------------------------------- |
 | Public   | `wss://ws.okx.com:8443/ws/v5/public`   | `wss://ws.okx.com:8443/ws/v5/public?brokerId=9999`   |
 | Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://ws.okx.com:8443/ws/v5/private?brokerId=9999`  |
 | Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://ws.okx.com:8443/ws/v5/business?brokerId=9999` |
+
+The right-hand constants are not valid OKX Global demo endpoints. Official demo
+WebSockets use `wss://wspap.okx.com:8443/ws/v5/{public|private|business}`.
+Metadata keeps `supportsTestnet: false`, so these constants are unreachable.
+Before enabling demo trading, replace them with the correct region-specific demo
+hosts and add deterministic endpoint coverage.
 
 Private and business WebSockets support Tealstreet proxy routing. Both
 `connectAndSubscribe` methods resolve their host from the shared routing
@@ -193,8 +203,8 @@ where OKX private/business traffic egresses, edit the table.
 
 All three WebSocket types send `'ping'` as a text frame. The server responds with `'pong'` (text frame, not a WebSocket pong frame).
 
-- **Ping interval**: 5 seconds after receiving pong (`base.ws.ts:118`)
-- **Pong miss timeout**: 7.5 seconds (1.5x ping interval) -- triggers reconnection (`base.ws.ts:125-128`)
+- **Ping interval**: 5 seconds after receiving pong
+- **Pong miss timeout**: 7.5 seconds (1.5x ping interval) -- triggers reconnection
 - **Stale message detection**: `trackLastReceived()` runs a 1-second check loop:
   - If no message for >6 seconds (`WS_PING_THRESHOLD_MS`): sends a ping
   - If no message for >20 seconds (`WS_RECONNECT_THRESHOLD_MS`): triggers reconnection
@@ -205,7 +215,7 @@ Reconnection is handled by `BaseWebSocket` (`base.ws.ts`):
 
 - **ReconnectingWebSocket mode** (`ENABLE_RECONNECTING_WEBSOCKET = false` by default): Currently disabled; uses native WebSocket with manual reconnection
 - **Native WebSocket reconnection**: On close, waits `WS_MIN_RECONNECTION_DELAY` (1-3 seconds, randomized), then calls `connectAndSubscribe()`
-- **Max reconnect count**: 100 attempts before giving up (`base.ws.ts:398-401`, `base.ws.ts:495-498`)
+- **Max reconnect count**: 100 attempts before giving up
 - **Private WS reconnect**: On reconnection, calls `fetchAndSetPrivateSnapshot()` which re-fetches all orders from REST to reconcile state
 - **Public WS reconnect**: Emits `wsReconnected` event to notify the application
 
@@ -222,7 +232,7 @@ Subscribed per-instrument for all loaded markets on `onOpen`:
 | `funding-rate`  | `handleFundingRateEvents`  | Funding rate and next funding time                                                     |
 | `books`         | Order book listener        | Snapshot + incremental updates (subscribed on-demand per symbol via `listenOrderBook`) |
 
-**Message routing** (`okx.ws-public.ts:99-114`): Uses string `includes()` checks on the raw data for fast channel detection before JSON parsing. This avoids parsing every message.
+**Message routing**: Uses string `includes()` checks on the raw data for channel detection before JSON parsing.
 
 ### Private WebSocket Channels (`okx.ws-private.ts`)
 
@@ -234,7 +244,7 @@ Subscribed after successful login:
 | `positions` (instType: SWAP) | `handlePositionTopic` | Position updates including entry price, leverage, margin, PnL           |
 | `orders` (instType: SWAP)    | `handleOrderTopic`    | Regular order status changes (live, partially_filled, filled, canceled) |
 
-**Error event handling** (`okx.ws-private.ts:108-118`): Messages containing `"event":"error"` are parsed and the error message is emitted via `emitAndLogError`.
+**Error event handling**: Messages containing `"event":"error"` are parsed and the error message is emitted via `emitAndLogError`.
 
 ### Business WebSocket Channels (`okx.ws-business.ts`)
 
@@ -246,7 +256,7 @@ Extends `OKXPrivateWebsocket` class. Subscribed after successful login:
 | `algo-advance` (instType: SWAP) | `handleOrderTopic` (inherited) | Advanced algo order updates                                          |
 | `candle{interval}`              | OHLCV listener                 | Candlestick data (subscribed on-demand per symbol via `listenOHLCV`) |
 
-### Order Book Subscription Pattern (`okx.ws-public.ts:155-269`)
+### Order Book Subscription Pattern
 
 Order book is subscribed on-demand (not at startup):
 
@@ -255,12 +265,15 @@ Order book is subscribed on-demand (not at startup):
 3. Subscribes to `books` channel for the specific `instId`
 4. **Snapshot** (`action === 'snapshot'`): Replaces entire order book, filtering zero-amount entries
 5. **Delta updates** (`action === 'update'`): Applies incremental updates via `updateOrderBook()`
-6. **Post-processing**: Filters out invalid prices (bids > last price, asks < last price), sorts, and calculates totals
-7. Stores topic for re-subscription on reconnect
-8. The cleanup function filters out its parser; when the last parser is
+6. Every snapshot records `seqId`; every delta must have `prevSeqId` equal to
+   the last accepted sequence. A discontinuity is ignored and triggers one
+   unsubscribe/subscribe cycle; deltas remain suppressed until a fresh snapshot.
+7. **Post-processing**: Filters out invalid prices (bids > last price, asks < last price), sorts, and calculates totals
+8. Stores topic for re-subscription on reconnect; reconnect clears the old sequence state
+9. The cleanup function filters out its parser; when the last parser is
    removed, it deletes the reconnect topic and sends the channel unsubscribe
 
-### OHLCV Subscription Pattern (`okx.ws-business.ts:143-218`)
+### OHLCV Subscription Pattern
 
 Similar on-demand pattern:
 
@@ -289,7 +302,7 @@ Similar on-demand pattern:
 
 ### Fetched Algo Order Types
 
-When fetching orders, three algo types are queried separately (`okx.exchange.ts:497-503`):
+When fetching orders, three algo types are queried separately:
 
 - `oco` -- One-cancels-other orders
 - `conditional` -- Stop loss / take profit orders
@@ -311,7 +324,7 @@ Supported trigger types for TP/SL (defined in metadata `supportedTPSLTriggerType
 
 OKX API trigger type values: `'last'`, `'mark'`, `'index'`.
 
-**Trigger type mapping** (`okx.exchange.ts:1035-1051`):
+**Trigger type mapping**:
 
 - SL defaults to `'mark'` when no trigger type specified
 - TP defaults to `'last'` when no trigger type specified
@@ -381,7 +394,7 @@ Note: Minutes use lowercase (e.g., `1m`), hours and days use uppercase (e.g., `1
 
 ## Order Lifecycle
 
-### Order Placement (`okx.exchange.ts:777-797`)
+### Order Placement
 
 1. `placeOrders()` ensures position mode is loaded via `getOrFetchPositionMode()`
 2. Orders are partitioned into algo and normal orders using `isAlgoOrder()`
@@ -392,28 +405,28 @@ Note: Minutes use lowercase (e.g., `1m`), hours and days use uppercase (e.g., `1
 
 ### Order ID Generation
 
-- **Regular orders**: `clOrdId` = `{BROKER_ID}{uuid}` truncated to 32 chars, plus `tag: BROKER_ID` (`okx.exchange.ts:1082-1083`)
-- **Algo orders**: `algoClOrdId` = `{BROKER_ID}{uuid}` truncated to 32 chars, plus `tag: BROKER_ID` (`okx.exchange.ts:1015-1016`)
-- **Broker ID**: `e847386590ce4dBC` (`okx.types.ts:5`)
+- **Regular orders**: `clOrdId` = `{BROKER_ID}{uuid}` truncated to 32 chars, plus `tag: BROKER_ID`
+- **Algo orders**: `algoClOrdId` = `{BROKER_ID}{uuid}` truncated to 32 chars, plus `tag: BROKER_ID`
+- **Broker ID**: `e847386590ce4dBC` in `okx.types.ts`
 
 ### Algo Order ID Suffixes
 
-Algo orders use composite IDs with suffixes (`okx.exchange.ts:816,848,897`):
+Algo orders use composite IDs with suffixes:
 
 - Stop loss: `{algoId}_sl`
 - Take profit: `{algoId}_tp`
 - Trailing stop loss: `{algoId}_tsl`
 
-When cancelling algo orders, the suffix is stripped to get the base `algoId` (`okx.exchange.ts:1179`): `o.id.replace(/_[a-zA-Z]+$/, '')`
+When cancelling algo orders, the suffix is stripped to get the base `algoId`: `o.id.replace(/_[a-zA-Z]+$/, '')`
 
-### OCO/Conditional Order Mapping (`okx.exchange.ts:806-868`)
+### OCO/Conditional Order Mapping
 
 A single OKX `oco` or `conditional` order can produce **two** internal orders:
 
 - If `slTriggerPx` is set: creates a StopLoss order with `_sl` suffix
 - If `tpTriggerPx` is set: creates a TakeProfit order with `_tp` suffix
 
-### Order Update (Amend) (`okx.exchange.ts:606-659`)
+### Order Update (Amend)
 
 - **Limit orders**: Amended in-place via `ENDPOINTS.UPDATE_ORDER` with `newPx` and/or `newSz`
 - **Algo orders**: Cannot be amended in-place. The `updateAlgoOrder()` method:
@@ -440,19 +453,19 @@ automatically split by `formatCreateOrder`:
 
 ### Batch Processing
 
-- **Regular orders**: Placed in batches of up to 20 via `PLACE_ORDERS`, processed sequentially between batches (`mapSeries`) (`okx.exchange.ts:1107-1128`)
-- **Algo orders**: Placed sequentially one at a time via `PLACE_ALGO_ORDER` (`okx.exchange.ts:1130-1151`)
-- **Cancel normal**: Batched in groups of 20, processed sequentially (`okx.exchange.ts:1153-1171`)
-- **Cancel algo**: Batched in groups of 20, processed sequentially; suffix stripped from ID (`okx.exchange.ts:1173-1191`)
+- **Regular orders**: Placed in batches of up to 20 via `PLACE_ORDERS`, processed sequentially between batches (`mapSeries`)
+- **Algo orders**: Placed sequentially one at a time via `PLACE_ALGO_ORDER`
+- **Cancel normal**: Batched in groups of 20, processed sequentially
+- **Cancel algo**: Batched in groups of 20, processed sequentially; suffix stripped from ID
 
 ### Algo Order Special Handling
 
-- **SL/TP with zero amount**: Uses `closeFraction: '1'` instead of `sz` (close entire position) (`okx.exchange.ts:1025-1027`)
-- **SL/TP execution**: Always uses market price (`slOrdPx: '-1'` or `tpOrdPx: '-1'`) (`okx.exchange.ts:1033-1034, 1044-1045`)
-- **SL/TP are always `reduceOnly: true`** (`okx.exchange.ts:1029`)
-- **Trailing stop loss**: Uses `callbackSpread` for distance, `closeFraction: '1'`, empty `activePx` and `callbackRatio` (`okx.exchange.ts:1054-1060`)
+- **SL/TP with zero amount**: Uses `closeFraction: '1'` instead of `sz` (close entire position)
+- **SL/TP execution**: Always uses market price (`slOrdPx: '-1'` or `tpOrdPx: '-1'`)
+- **SL/TP are always `reduceOnly: true`**
+- **Trailing stop loss**: Uses `callbackSpread` for distance, `closeFraction: '1'`, empty `activePx` and `callbackRatio`
 
-### Position Side Logic (`getPositionSide`, `okx.exchange.ts:1199-1217`)
+### Position Side Logic (`getPositionSide`)
 
 - In **one-way mode** (`PositionMode.OneWay`): Returns `undefined` (omitted from payload)
 - In **hedged mode**: Buy = `'long'`, Sell = `'short'`
@@ -461,10 +474,10 @@ automatically split by `formatCreateOrder`:
 ## Symbol Format
 
 - **OKX instrument ID (`instId`)**: `BTC-USDT-SWAP`, `ETH-USDT-SWAP`
-- **Internal symbol**: `BTCUSDT`, `ETHUSDT` (derived by stripping `-SWAP` and removing all `-` from instId, `okx.exchange.ts:198`)
-- **Market filter**: Only linear contracts (`ctType === 'linear'`) are included (`okx.exchange.ts:185`)
-- **Index ticker subscription**: Uses instId without `-SWAP` suffix (e.g., `BTC-USDT`) (`okx.ws-public.ts:49`)
-- **Index ticker response mapping**: Re-appends `-SWAP` to match stored ticker IDs (`okx.ws-public.ts:141`)
+- **Internal symbol**: `BTCUSDT`, `ETHUSDT` (derived by stripping `-SWAP` and removing all `-` from `instId`)
+- **Market filter**: Linear and inverse SWAP contracts are included; spot is not requested
+- **Index ticker subscription**: Uses `instId` without `-SWAP` suffix (e.g., `BTC-USDT`)
+- **Index ticker response mapping**: Re-appends `-SWAP` to match stored ticker IDs
 
 ## Data Precision & Conversion
 
@@ -479,12 +492,12 @@ automatically split by `formatCreateOrder`:
 - **Contract size** (`contractSize`): `ctVal` from instrument data (e.g., `0.01` BTC per contract)
 - **Order amounts**: Specified in **contracts** (native units), not base currency
 - **Display conversion**: `contracts * contractSize` converts to base currency amount
-- **Minimum amount**: `BigNumber(minSz).multipliedBy(ctVal)` (`okx.exchange.ts:208-209`)
-- **Position notional**: `contractsNative * markPrice * contractSize` (`okx.exchange.ts:968`)
+- **Minimum amount**: `BigNumber(minSz).multipliedBy(ctVal)`
+- **Position notional**: Linear contracts use `contractsNative * markPrice * contractSize`; inverse contracts use their quote-denominated contract value
 
 ### BigNumber Usage
 
-- `BigNumber` (from `bignumber.js`) is used for minimum amount calculation to avoid floating point errors (`okx.exchange.ts:208`)
+- `BigNumber` (from `bignumber.js`) is used for minimum amount calculation to avoid floating point errors
 - The `multiply`, `subtract`, `add`, `adjust` functions from `safe-math` are used throughout for safe arithmetic
 
 ### Balance Amounts
@@ -493,64 +506,70 @@ All balance/position monetary values use `roundUSD()` for display rounding.
 
 ### Candle Timestamps
 
-OKX candle timestamps are in **milliseconds**. They are divided by 1000 for internal storage in seconds (`okx.exchange.ts:582`, `okx.ws-business.ts:172`).
+OKX candle timestamps are in **milliseconds**. They are divided by 1000 for internal storage in seconds.
 
 ### OHLCV Data
 
-- REST candle data: Array format `[timestamp, open, high, low, close, ?, ?, volume]` -- index 7 is volume (`okx.exchange.ts:582`)
-- WebSocket candle data: Same array format, index 7 is volume (`okx.ws-business.ts:177`)
-- REST results are sorted ascending by timestamp after fetching (`okx.exchange.ts:585`)
+- REST candle data: Array format `[timestamp, open, high, low, close, ?, ?, volume]` -- index 7 is volume
+- WebSocket candle data: Same array format, index 7 is volume
+- REST results are sorted ascending by timestamp after fetching
+- `fetchOHLCV` requests `/market/candles` first. When the requested `to` lies
+  beyond the recent 1,440-bar window, or the recent endpoint returns no rows,
+  it retries through `/market/history-candles`. The history request respects
+  OKX's 100-row per-request cap.
 
 ## Rate Limiting
 
 ### REST API
 
-- **Retry policy**: 3 retries on network errors via `axios-retry` (`okx.api.ts:31`)
+- **Retry policy**: 3 retries on network errors via `axios-retry`
 - **Receive window (timeout)**: `RECV_WINDOW = 20_000` ms (20 seconds), overridable via `options.extra.recvWindow`
 
 ### Leverage Fetch Batching
 
-- Leverage info supports comma-separated `instId` values, batched in groups of 20 (`okx.exchange.ts:471`)
-- **250ms sleep** between batches to avoid rate limiting (`okx.exchange.ts:475`)
+- Leverage info supports comma-separated `instId` values, batched in groups of 20
+- **250ms sleep** between batches to avoid rate limiting
 
 ### Order Batch Limits
 
-- Regular orders: Up to 20 per batch (`okx.exchange.ts:1108`)
-- Algo orders: One at a time, processed sequentially (`okx.exchange.ts:1131`)
-- Cancel normal orders: Up to 20 per batch (`okx.exchange.ts:1162`)
-- Cancel algo orders: Up to 20 per batch (`okx.exchange.ts:1182`)
+- Regular orders: Up to 20 per batch
+- Algo orders: One at a time, processed sequentially
+- Cancel normal orders: Up to 20 per batch
+- Cancel algo orders: Up to 20 per batch
 
 ## State Reconciliation
 
-### WebSocket Order Updates (`okx.ws-private.ts:139-168`)
+### WebSocket Order Updates
 
 Orders received via WebSocket are processed individually:
 
 1. Mapped through `mapOrders()` to convert to internal format
 2. **`filled` or `canceled`**: Updates order status via `store.updateOrdersStatus()` (removes from active orders)
 3. **`live` or `partially_filled`**: Adds or updates via `store.addOrUpdateOrders()`
-4. **Fill events**: `filled` and `partially_filled` emit a `'fill'` event with fill price and amount
+4. **Fill events**: `filled` and `partially_filled` emit a `'fill'` event with
+   fill price and base-asset amount converted by `contractsToBase`; `lotSz`
+   (`market.precision.amount`) is not a contract-value conversion.
 
-### WebSocket Position Updates (`okx.ws-private.ts:249-280`)
+### WebSocket Position Updates
 
 1. Positions are mapped through `mapPositions()`
 2. Updated in store via `store.addOrUpdatePositions()`
 3. Balance `used` (from `mmr` sum) and `upnl` are recalculated from the position data
 
-### WebSocket Account Updates (`okx.ws-private.ts:282-292`)
+### WebSocket Account Updates
 
 1. `totalEq` from account data is summed for total collateral
 2. Balance `free` and `total` are recalculated using current `used` and `upnl` from store
 
 ### REST Snapshot on Reconnection
 
-When a private WebSocket reconnects (`base.ws.ts:462-468`):
+When a private WebSocket reconnects:
 
 1. `fetchAndSetPrivateSnapshot()` is called (from base class)
 2. This re-fetches all orders from REST API to reconcile any missed WebSocket events
 3. Called with up to 10 retry attempts
 
-### Tick Loop Reconciliation (`okx.exchange.ts:166-176`)
+### Tick Loop Reconciliation
 
 - Runs every 2 seconds (`tickInterval: 2_000`)
 - Recalculates balance using stored balance info, current positions, and current orders
@@ -558,7 +577,7 @@ When a private WebSocket reconnects (`base.ws.ts:462-468`):
 
 ### Recursive Pagination for Order Fetching
 
-Both normal and algo order fetches use recursive pagination (`okx.exchange.ts:506-524, 528-548`):
+Both normal and algo order fetches use recursive pagination:
 
 - Page size: 100 results
 - If exactly 100 results returned, fetches next page using `after` cursor (last order's `ordId` or `algoId`)
@@ -579,6 +598,7 @@ Key metadata values from `exchangeMetadata.ts`:
 | `unifiedMargin`                   | `false`                                                               |
 | `supportsTestnet`                 | `false`                                                               |
 | `supportsTradesHistory`           | `false`                                                               |
+| `supportsExecutionsHistory`       | `true`                                                                |
 | `supportsChaser`                  | `true`                                                                |
 | `supportsTrailingStopLoss`        | `false` (disabled at metadata level despite code support)             |
 | `hasEmptyPositions`               | `false`                                                               |
@@ -615,37 +635,37 @@ Fetched from `/api/v5/account/config` (`posMode` field):
 | `long_short_mode` | `PositionMode.Hedged` | Separate long and short positions |
 | `net_mode`        | `PositionMode.OneWay` | Net position (single direction)   |
 
-**Position mode is global** (`positionModeIsGlobal: true`). Switching modes requires **all positions to be closed first** (`okx.exchange.ts:743`).
+**Position mode is global** (`positionModeIsGlobal: true`). Switching modes requires **all positions to be closed first**.
 
 ### Margin Type
 
-OKX in this implementation **only supports cross margin** (`marginTypes: [MarginType.Cross]`). Calling `changeMarginType()` emits the error: `"Only cross mode is supported"` (`okx.exchange.ts:738-739`). All order and leverage payloads hardcode `mgnMode: 'cross'` or `tdMode: 'cross'`.
+OKX in this implementation **only supports cross margin** (`marginTypes: [MarginType.Cross]`). Calling `changeMarginType()` emits the error: `"Only cross mode is supported"`. All order and leverage payloads hardcode `mgnMode: 'cross'` or `tdMode: 'cross'`.
 
 ### Leverage
 
-- **Setting leverage**: POST to `/api/v5/account/set-leverage` with `instId`, `lever` (string), `mgnMode: 'cross'` (`okx.exchange.ts:684-688`)
-- **Fetching leverage**: GET to `/api/v5/account/leverage-info` with comma-separated `instId` values (batched in groups of 20 with 250ms sleep between batches) (`okx.exchange.ts:468-495`)
-- Leverage is clamped to `[market.limits.leverage.min, market.limits.leverage.max]` (`okx.exchange.ts:681`)
-- After setting leverage, positions are re-fetched from the API (`okx.exchange.ts:690-691`)
-- On error, positions are still re-fetched and error is re-thrown (`okx.exchange.ts:694-698`)
+- **Setting leverage**: POST to `/api/v5/account/set-leverage` with `instId`, `lever` (string), `mgnMode: 'cross'`
+- **Fetching leverage**: GET to `/api/v5/account/leverage-info` with comma-separated `instId` values (batched in groups of 20 with 250ms sleep between batches)
+- Leverage is clamped to `[market.limits.leverage.min, market.limits.leverage.max]`
+- After setting leverage, positions are re-fetched from the API
+- On error, positions are still re-fetched and error is re-thrown
 
-### Balance Calculation (`formatBalanceUsedAvail`, `okx.exchange.ts:379-456`)
+### Balance Calculation (`formatBalanceUsedAvail`)
 
 1. **Total collateral**: Sum of `eq * markPrice` across all balance currencies (mark price from tickers for non-stablecoin assets; stablecoins use multiplier of 1)
 2. **Used (positions)**: Sum of `imr` (initial margin requirement) across positions
-3. **Used (orders)**: Sum of `(remaining * price / leverage) * 1.1` for open limit, non-reduce-only orders (the 1.1 is a "hand wavy" multiplier, `okx.exchange.ts:399`)
+3. **Used (orders)**: Sum of `(remaining * price / leverage) * 1.1` for open limit, non-reduce-only orders (the 1.1 is a hand-wavy multiplier)
 4. **Unrealized PnL**: Sum of `upl` across positions
 5. **Free**: `totalCollateral - usedPositions - usedOrders`
 6. **Total**: `totalCollateral - upnl`
 7. **Per-currency breakdown** (Futures mode only, `accLevel === 2`): For each currency, tracks used margin and upnl separately
 
-### Position Mapping (`mapPositions`, `okx.exchange.ts:943-996`)
+### Position Mapping (`mapPositions`)
 
 - **Contracts**: `pos` field, absolute value
 - **Side**: Determined from `posSide` (`long`/`short`), or from sign of `pos` in net mode (negative = short)
 - **Entry price**: `avgPx` (zero when no contracts)
 - **Notional**: `contractsNative * markPrice * contractSize`
-- **Leverage**: From position `lever` field, falls back to existing stored position's leverage (`okx.exchange.ts:982`)
+- **Leverage**: From position `lever` field, falls back to existing stored position's leverage
 - **Liquidation price**: `liqPx` field (defaults to 0 if missing)
 - **Margin type**: From `mgnMode` field (`cross` or `isolated`)
 - **Position mode**: Derived from `posSide` (`net` = OneWay, otherwise Hedged)
@@ -654,27 +674,29 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 ## Testnet / Demo
 
 - **`supportsTestnet`**: `false` in metadata -- testnet is not officially supported
-- **REST URL**: Same base URL (`https://www.okx.com`) with added header `x-simulated-trading: 1` (`okx.api.ts:25`)
-- **WebSocket URLs**: Append `?brokerId=9999` query parameter for testnet (`okx.types.ts:10-20`)
-- **Limitations**: No specific feature differences documented in code; testnet behavior relies on OKX's simulated trading mode
+- **REST behavior in dormant code**: Adds the `x-simulated-trading: 1` header
+- **WebSocket discrepancy**: The dormant constants still point at production
+  `ws.okx.com` plus `brokerId=9999`; official Global demo trading uses
+  `wspap.okx.com`. Do not enable the metadata flag until the constants and
+  region-specific demo behavior are corrected and covered.
 
 ## Known Quirks / Implementation Notes
 
 - **Trailing stop loss**: Code exists but is disabled at the metadata level (`supportsTrailingStopLoss: false`). The `formatAlgoOrder` and `mapOrders` methods fully implement it.
 - **Margin type**: Hardcoded to cross only; attempting to change emits an error.
-- **Position mode change**: Requires all positions to be closed first; checked client-side before API call (`okx.exchange.ts:743`).
+- **Position mode change**: Requires all positions to be closed first; checked client-side before API call.
 - **Account config caching**: Position mode and account level are cached in `_accountPositionMode` and `_accountLevel`; use `force = true` parameter to re-fetch. Both are fetched from a single endpoint call (`getOrFetchPositionModeAndAccLevel`).
 - **Algo order updates**: Cannot amend algo orders in-place; they are cancelled and re-created.
-- **Order book filtering**: Bids above last price and asks below last price are filtered out after each update (`okx.ws-public.ts:221-222`).
+- **Order book filtering**: Bids above last price and asks below last price are filtered out after each update.
 - **Recursive order fetching**: Both regular and algo order fetches use recursive pagination (when exactly 100 results are returned, fetch next page using `after` cursor).
 - **Business WebSocket inheritance**: `OKXBusinessWebsocket` extends `OKXPrivateWebsocket` to reuse `auth()` and `handleOrderTopic()` methods. However, it overrides `connectAndSubscribe`, `onOpen`, `onMessage`, `ping`, `auth`, and `subscribe` -- meaning most of the parent's methods are replaced.
 - **Contract sizes**: Order amounts are in contracts (native size), which are multiplied by `contractSize` (`ctVal`) for display. The `precision.amount` is `lotSz` and `precision.price` is `tickSz`.
-- **Position mode in one-way mode**: `fetchPositionMetadata` creates two virtual positions (Long + Short) for each symbol in one-way mode so that both sides are represented in the store (`okx.exchange.ts:291-307`).
-- **Balance info passthrough**: `formatBalanceUsedAvail` stores the raw `bal` array in `balance.info` so it can be reused in the tick loop without re-fetching (`okx.exchange.ts:168-173`).
+- **Position mode in one-way mode**: `fetchPositionMetadata` creates two virtual positions (Long + Short) for each symbol in one-way mode so that both sides are represented in the store.
+- **Balance info passthrough**: `formatBalanceUsedAvail` stores the raw `bal` array in `balance.info` so it can be reused in the tick loop without re-fetching.
 - **Partner check**: The `PARTNER` endpoint (`/api/v5/users/partner/if-rebate`) is defined but not called in any code path within this directory.
-- **Stablecoin mark price fallback**: When calculating balance equity notional, if no ticker is found for a currency (e.g., USDT), the mark price defaults to 1 (`okx.exchange.ts:392`).
-- **Trailing stop price calculation**: For trailing stop loss orders, the displayed price is calculated relative to the position entry price and last price, with special handling when a position exists (`okx.exchange.ts:871-891`).
-- **`afterMethodCalledInWorker`**: When `changePositionMode` is called in a WebWorker, the local `_accountPositionMode` cache is updated to match (`okx.exchange.ts:767-775`).
+- **Stablecoin mark price fallback**: When calculating balance equity notional, if no ticker is found for a currency (e.g., USDT), the mark price defaults to 1.
+- **Trailing stop price calculation**: For trailing stop loss orders, the displayed price is calculated relative to the position entry price and last price, with special handling when a position exists.
+- **`afterMethodCalledInWorker`**: When `changePositionMode` is called in a WebWorker, the local `_accountPositionMode` cache is updated to match.
 - **Grafana logging**: `ENABLE_PWS_LOG` is enabled by default. All private and business WebSocket messages are emitted to `grafana-pws` for monitoring. Subscription messages are emitted to `grafana-pws-sub`.
 - **Potential follow-up (not confirmed bug)**: Inverse close sizing in the web layer currently prefers `Math.max(extra.contractsNative, notional/contractSize)` in [`getPositionNativeSize.ts`](mdc:apps/web/src/utils/position/getPositionNativeSize.ts) to avoid partial closes. This can theoretically oversize if notional is briefly inflated or stale. Re-evaluate if oversize-close reports appear; consider freshness/tolerance-based bounds instead of raw max/min switching.
 
@@ -691,28 +713,28 @@ Most methods follow the same error handling pattern:
 
 ### Specific Error Handling
 
-| Context                                                         | Error Pattern                                       | Behavior                                               |
-| --------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
-| `validateAccount` (`okx.exchange.ts:89-97`)                     | Any error from `GET /account/account-position-risk` | Returns error message string; does not throw           |
-| `fetchMarkets` (`okx.exchange.ts:220-223`)                      | Any fetch error                                     | Emits error, returns current `store.markets`           |
-| `fetchTickersRaw` (`okx.exchange.ts:242-245`)                   | Any fetch error                                     | Emits error, returns empty array                       |
-| `parseTickers` (`okx.exchange.ts:279-282`)                      | Any parse error                                     | Emits error, returns current `store.tickers`           |
-| `fetchBalanceAndOpenPositions` (`okx.exchange.ts:370-376`)      | Any fetch error                                     | Emits error, returns current store balance + positions |
-| `formatBalanceUsedAvail` (`okx.exchange.ts:452-455`)            | Any calculation error                               | Emits error, returns current `store.balance`           |
-| `placeOrderBatch` (`okx.exchange.ts:1121-1124`)                 | Batch response with `sMsg`                          | Throws error with the message                          |
-| `placeAlgoOrderBatch` (`okx.exchange.ts:1144-1147`)             | Response without `algoId`                           | Throws error with `sMsg`                               |
-| `cancelNormalOrders` (`okx.exchange.ts:1167-1169`)              | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)   |
-| `cancelAlgoOrders` (`okx.exchange.ts:1186-1188`)                | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)   |
-| `setLeverage` (`okx.exchange.ts:693-698`)                       | Any error                                           | Emits error, re-fetches positions, re-throws           |
-| `changePositionMode` (`okx.exchange.ts:758-764`)                | Any error                                           | Emits error, re-fetches positions, re-throws           |
-| `getOrFetchPositionModeAndAccLevel` (`okx.exchange.ts:722-725`) | Any fetch error                                     | Emits error, re-throws                                 |
-| WebSocket error event (`okx.ws-private.ts:108-118`)             | `"event":"error"` message                           | Emits error from `json.msg`                            |
+| Context                             | Error Pattern                                       | Behavior                                                       |
+| ----------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| `validateAccount`                   | Any error from `GET /account/account-position-risk` | Returns `{ error }`; success returns `{ error: '', balance? }` |
+| `fetchMarkets`                      | Any fetch error                                     | Emits error, returns current `store.markets`                   |
+| `fetchTickersRaw`                   | Any fetch error                                     | Emits error, returns empty array                               |
+| `parseTickers`                      | Any parse error                                     | Emits error, returns current `store.tickers`                   |
+| `fetchBalanceAndOpenPositions`      | Any fetch error                                     | Emits error, returns current store balance + positions         |
+| `formatBalanceUsedAvail`            | Any calculation error                               | Emits error, returns current `store.balance`                   |
+| `placeOrderBatch`                   | Batch response with `sMsg`                          | Throws error with the message                                  |
+| `placeAlgoOrderBatch`               | Response without `algoId`                           | Throws error with `sMsg`                                       |
+| `cancelNormalOrders`                | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
+| `cancelAlgoOrders`                  | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
+| `setLeverage`                       | Any error                                           | Emits error, re-fetches positions, re-throws                   |
+| `changePositionMode`                | Any error                                           | Emits error, re-fetches positions, re-throws                   |
+| `getOrFetchPositionModeAndAccLevel` | Any fetch error                                     | Emits error, re-throws                                         |
+| WebSocket error event               | `"event":"error"` message                           | Emits error from `json.msg`                                    |
 
 ### Retry Strategy
 
-- **REST**: 3 automatic retries on network errors via `axios-retry` (`okx.api.ts:31`)
+- **REST**: 3 automatic retries on network errors via `axios-retry`
 - **WebSocket reconnection**: Up to 100 reconnect attempts with randomized delay (1-3 seconds)
-- **`fetchAndSetPrivateSnapshot`**: Up to 10 retry attempts on WS reconnect (configured in `base.ws.ts:463`)
+- **`fetchAndSetPrivateSnapshot`**: Up to 10 retry attempts on WS reconnect
 
 ### No "Order Not Found" Success Pattern
 
@@ -720,7 +742,7 @@ Unlike some exchanges, OKX does **not** treat "order not found" on cancel as suc
 
 ## HTTP-over-WebSocket
 
-When `options.tealstreetTunnel` is enabled, the axios adapter is replaced with `bigIntAxiosHttpOverWebsocketAdapter` which routes HTTP requests over a WebSocket tunnel (supports BigInt serialization) (`okx.api.ts:61-63`).
+When `options.tealstreetTunnel` is enabled, the axios adapter is replaced with `bigIntAxiosHttpOverWebsocketAdapter` which routes HTTP requests over a WebSocket tunnel (supports BigInt serialization).
 
 ## Grafana Monitoring
 
@@ -731,6 +753,8 @@ Endpoints are split into two monitoring groups:
 
 ## Testing / Validation
 
-- `validateAccount()` (`okx.exchange.ts:89-97`): Tests API connectivity by fetching balance endpoint. Returns empty string on success, error message on failure.
-- No exchange-specific test files exist in this directory.
-- Use the shared test infrastructure: `yarn test` from the `safe-cex` package root.
+- `validateAccount()`: Tests API connectivity by fetching the balance endpoint
+  and returns `{ error, balance? }`.
+- `src/exchanges/okx/` is production runtime only. Do not add tests or fixtures here.
+- Fresh deterministic regressions belong in `src/__tests__/audit-regressions/`.
+- Use `yarn test-ci` from the `safe-cex` package root for the full deterministic suite.

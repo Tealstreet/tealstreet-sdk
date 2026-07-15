@@ -9,7 +9,7 @@ import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/conf
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { OrderStatus } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
-import { multiply, subtract } from '../../utils/safe-math';
+import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URLS } from './okx.types';
@@ -212,7 +212,7 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
               side: orders[0].side,
               symbol: orders[0].symbol,
               price: fillPrice,
-              amount: multiply(fillAmount, market.precision.amount),
+              amount: this.parent.contractsToBase(fillAmount, market, fillPrice),
             });
           }
         }

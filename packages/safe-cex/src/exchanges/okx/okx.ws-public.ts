@@ -3,7 +3,7 @@ import type { OKXExchange } from './okx.exchange';
 
 import flatten from 'lodash/flatten';
 
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { roundUSD } from '../../utils/roundUSD';
@@ -21,6 +21,10 @@ type SubscribedTopics = {
 };
 
 export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
+  private orderBookSequenceByHandler = new Map<string, string>();
+
+  private recoveringOrderBooks = new Set<string>();
+
   topics: SubscribedTopics = {};
   messageHandlers: MessageHandlers = {
     tickers: [(d: Data) => this.handleTickerEvents(d)],
@@ -69,6 +73,8 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
 
   onOpen = () => {
     if (!this.isDisposed) {
+      this.orderBookSequenceByHandler.clear();
+      this.recoveringOrderBooks.clear();
       this.subscribe();
       this.ping();
 
@@ -149,13 +155,53 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
           (!instId || data.includes(`instId":"${instId}`)) &&
           !data.includes('event":"subscribe"')
         ) {
-          const json = jsonParse(data);
+          const json = bigIntAsStringJsonParse(data);
+          if (leftmost === 'books' && json && !this.acceptOrderBookSequence(channel, json)) {
+            continue;
+          }
           for (const cb of handler) {
             if (json) cb(json);
           }
         }
       }
     }
+  };
+
+  private acceptOrderBookSequence = (handler: string, data: Data) => {
+    const update = data.data?.[0];
+    const seqId = update?.seqId == null ? '' : String(update.seqId);
+
+    if (data.action === 'snapshot' && seqId) {
+      this.orderBookSequenceByHandler.set(handler, seqId);
+      this.recoveringOrderBooks.delete(handler);
+      return true;
+    }
+
+    if (this.recoveringOrderBooks.has(handler)) {
+      return false;
+    }
+
+    const previousSeqId = update?.prevSeqId == null ? '' : String(update.prevSeqId);
+    const expectedPreviousSeqId = this.orderBookSequenceByHandler.get(handler);
+
+    if (!seqId || !previousSeqId || !expectedPreviousSeqId || previousSeqId !== expectedPreviousSeqId) {
+      this.recoverOrderBook(handler);
+      return false;
+    }
+
+    this.orderBookSequenceByHandler.set(handler, seqId);
+    return true;
+  };
+
+  private recoverOrderBook = (handler: string) => {
+    this.orderBookSequenceByHandler.delete(handler);
+    this.recoveringOrderBooks.add(handler);
+
+    const topic = this.topics[handler]?.[0];
+    if (!topic || !this.isConnected || this.isDisposed) return;
+
+    this.send(JSON.stringify({ op: 'unsubscribe', args: [topic] }));
+    this.send(JSON.stringify({ op: 'subscribe', args: [topic] }));
   };
 
   handleTickerEvents = ({ data: [update] }: Data) => {
@@ -292,6 +338,8 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
 
       if (!this.messageHandlers[handler].length) {
         delete this.topics[handler];
+        this.orderBookSequenceByHandler.delete(handler);
+        this.recoveringOrderBooks.delete(handler);
         this.cleanupMessageHandlerStats(handler);
       }
 

@@ -18,14 +18,13 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     throw new Error('Blofin requires a passphrase');
   }
 
-  const baseURL = BASE_URL;
+  const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
 
   const xhr = safeCexAxiosCreate(
     {
       baseURL,
       //timeout: options?.extra?.recvWindow ?? RECV_WINDOW,
       timeout: 20_000, // otherwise can't use leverage batch
-      headers: options.testnet ? { 'x-simulated-trading': 1 } : {},
     },
     options,
     exchange,

@@ -588,10 +588,14 @@ export class BlofinExchange extends BaseExchange {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const [orders, algoOrders] = await Promise.all([this.fetchNormalOrders(), this.fetchAlgoOrders()]);
-        const allOrders = this.addInlineTpSlFallbackOrders([...orders, ...algoOrders]);
+        const [orders, algoOrders, triggerOrders] = await Promise.all([
+          this.fetchNormalOrders(),
+          this.fetchAlgoOrders(),
+          this.fetchTriggerOrders(),
+        ]);
+        const allOrders = this.addInlineTpSlFallbackOrders([...orders, ...algoOrders, ...triggerOrders]);
 
-        // If both fetches returned empty but we had orders before, something might be wrong
+        // If all fetches returned empty but we had orders before, something might be wrong
         // Log a warning but still return the result (empty is valid if user has no orders)
         if (allOrders.length === 0 && this.store.orders.length > 0) {
           this.log(
@@ -710,6 +714,44 @@ export class BlofinExchange extends BaseExchange {
 
     const blofinOrders = await recursiveFetch();
     return this.mapOrders(blofinOrders);
+  };
+
+  fetchTriggerOrders = async () => {
+    const recursiveFetch = async (
+      orders: Array<Record<string, any>> = [],
+      page = 0,
+    ): Promise<Array<Record<string, any>>> => {
+      try {
+        const cursor = orders.length ? orders[orders.length - 1].algoId : undefined;
+        const { data } = await this.xhr.get<ORDERS_RESPONSE>(ENDPOINTS.UNFILLED_TRIGGER_ORDERS, {
+          params: {
+            after: cursor,
+            limit: BLOFIN_ACTIVE_ORDERS_PAGE_SIZE,
+            orderType: 'trigger',
+          },
+        });
+
+        if (!data.data) {
+          this.emitAndLogError(data.msg || 'No trigger-order data found');
+          return orders;
+        }
+        if (data.data.length === 0) return orders;
+
+        const nextCursor = (data.data[data.data.length - 1] as Record<string, any>).algoId;
+        if (cursor !== undefined && nextCursor === cursor) return orders;
+
+        const merged = [...orders, ...data.data];
+        if (nextCursor && page + 1 < BLOFIN_MAX_ORDER_PAGES) {
+          return recursiveFetch(merged, page + 1);
+        }
+        return merged;
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        return orders;
+      }
+    };
+
+    return this.mapOrders(await recursiveFetch());
   };
 
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
@@ -980,6 +1022,12 @@ export class BlofinExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    if (order.type === OrderType.Conditional) {
+      const message = 'BloFin trigger orders are read-only in Tealstreet; update this order on BloFin';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     const realId = order.id.split('__')[0];
     const relativeOrders = this.store.orders.filter((o) => o.id.startsWith(realId));
     const orderAmountNative = order.extra?.remainingNative ?? order.amount;
@@ -1045,6 +1093,12 @@ export class BlofinExchange extends BaseExchange {
   };
 
   cancelOrders = async (_orders: Order[]) => {
+    if (_orders.some((order) => order.type === OrderType.Conditional)) {
+      const message = 'BloFin trigger orders are read-only in Tealstreet; cancel them on BloFin';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     // Check if we're canceling a single TP/SL order with amount=0
     let orderToPreserve: Order | undefined;
     if (_orders.length === 1 && _orders[0].id.includes('__') && (!_orders[0].amount || _orders[0].amount === 0)) {
@@ -1196,6 +1250,12 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    if (opts.type === OrderType.Conditional) {
+      const message = 'Opening trigger-order placement is not implemented for BloFin';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     if (this.isAlgoOrder(opts.type)) {
       const payload = await this.formatAlgoOrder(opts);
       return await this.placeAlgoOrderBatch([payload]);
@@ -1212,6 +1272,12 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
+    if (opts.some((order) => order.type === OrderType.Conditional)) {
+      const message = 'Opening trigger-order placement is not implemented for BloFin';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     const [algoOrders, normalOrders] = partition(opts, (o) => this.isAlgoOrder(o.type));
 
     // force fetch here before map
@@ -1247,7 +1313,15 @@ export class BlofinExchange extends BaseExchange {
       // Algo records are the authoritative source — they carry the tpslId
       // needed to cancel, and they map 1:1 with the trigger order BloFin
       // actually placed. Only emit from algo records.
-      const isAlgoRecord = !!o.tpslId;
+      const triggerPrice = parseFloat(o.triggerPrice || '0');
+      const isReduceOnlyTrigger = o.reduceOnly === true || o.reduceOnly === 'true';
+      const isOpeningTriggerRecord =
+        o.orderType === 'trigger' &&
+        !!o.algoId &&
+        !isReduceOnlyTrigger &&
+        Number.isFinite(triggerPrice) &&
+        triggerPrice > 0;
+      const isAlgoRecord = !!o.tpslId && !isOpeningTriggerRecord;
 
       const orderSide = ORDER_SIDE[o.side];
       const inverseSide = orderSide === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
@@ -1255,6 +1329,29 @@ export class BlofinExchange extends BaseExchange {
       const contractValue = market.contractSize || parseFloat(market.info.contractValue) || 1;
       const amountNative = parseFloat(o.size || '0');
       const amount = multiply(amountNative, contractValue);
+
+      if (isOpeningTriggerRecord) {
+        tmpOrders.push({
+          id: String(o.algoId),
+          status:
+            o.state === 'canceled' || o.state === 'order_failed'
+              ? OrderStatus.Canceled
+              : o.state === 'effective'
+                ? OrderStatus.Closed
+                : OrderStatus.Open,
+          symbol: market.symbol,
+          type: OrderType.Conditional,
+          side: orderSide,
+          price: triggerPrice,
+          amount,
+          filled: 0,
+          remaining: amount,
+          extra: { remainingNative: amountNative },
+          reduceOnly: false,
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+          info: o,
+        });
+      }
 
       if (isAlgoRecord && o.tpTriggerPrice) {
         tmpOrders.push({
@@ -1478,6 +1575,12 @@ export class BlofinExchange extends BaseExchange {
     const { data } = await this.xhr.post(ENDPOINTS.SET_MARGIN_MODE, {
       marginMode: isolated ? 'isolated' : 'cross',
     });
+
+    if (data.code !== '0') {
+      this.emitAndLogError(data.msg);
+      throw new Error(data.msg);
+    }
+
     await this.getOrFetchMarginType(undefined, true);
     if (symbol) {
       const positions = await this.fetchPositions([symbol]);
@@ -1492,10 +1595,6 @@ export class BlofinExchange extends BaseExchange {
     // }
     // }
 
-    if (data.code !== '0') {
-      this.emitAndLogError(data.msg);
-      throw new Error(data.msg);
-    }
   };
 
   afterMethodCalledInWorker = <M extends CallableMethodsInWorker>(

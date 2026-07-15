@@ -144,6 +144,7 @@ All endpoints are prefixed with `/api/v1/`. Defined in `ENDPOINTS` object in `bl
 | `CANCEL_ALGO_ORDER`    | `/api/v1/trade/cancel-tpsl`         | POST   | Cancel TP/SL orders (max 10)                        |
 | `UNFILLED_ORDERS`      | `/api/v1/trade/orders-pending`      | GET    | Get pending normal orders                           |
 | `UNFILLED_ALGO_ORDERS` | `/api/v1/trade/orders-tpsl-pending` | GET    | Get pending TP/SL orders                            |
+| `UNFILLED_TRIGGER_ORDERS` | `/api/v1/trade/orders-algo-pending` | GET | Read externally placed opening triggers             |
 | `FILLS`                | `/api/v1/trade/fills-history`       | GET    | User fill history (primary for `fetchExecutions`)   |
 | `ORDERS_HISTORY`       | `/api/v1/trade/orders-history`      | GET    | Filled order history fallback for `fetchExecutions` |
 
@@ -166,10 +167,10 @@ Execution-history behavior (`fetchExecutions`):
 
 ### Connection URLs
 
-| Type    | Livenet                               | Testnet                                             |
-| ------- | ------------------------------------- | --------------------------------------------------- |
-| Public  | `wss://openapi.blofin.com/ws/public`  | `wss://openapi.blofin.com/ws/public?brokerId=9999`  |
-| Private | `wss://openapi.blofin.com/ws/private` | `wss://openapi.blofin.com/ws/private?brokerId=9999` |
+| Type    | Livenet                               | Demo trading                                             |
+| ------- | ------------------------------------- | -------------------------------------------------------- |
+| Public  | `wss://openapi.blofin.com/ws/public`  | `wss://demo-trading-openapi.blofin.com/ws/public`  |
+| Private | `wss://openapi.blofin.com/ws/private` | `wss://demo-trading-openapi.blofin.com/ws/private` |
 
 ### Keepalive / Ping-Pong
 
@@ -200,19 +201,30 @@ Reconnection is handled by `BaseWebSocket`:
 | `books`            | Full order book with incremental updates (snapshot + update actions)   | Per instrument (on demand)   |
 | `books5`           | Top-5 order book snapshots (used for mid-market price in candle chart) | Per instrument (on demand)   |
 
+Initial all-market ticker/funding subscriptions and incremental
+`markets:changed` additions are serialized into UTF-8-size-aware batches. Every
+complete subscribe frame, including its JSON envelope, stays at or below
+BloFin's documented 4,096-byte multi-channel limit.
+
 **Message routing** (see `blofin.ws-public.ts onMessage`): The handler extracts `channel` and `instId` once via targeted `indexOf` against the raw frame, then dispatches via direct Map lookup — broadcast handlers keyed by channel alone (`tickers`, `funding-rate`) and per-instrument handlers keyed by `${channel}.${instId}` (`candle*`, `books`, `books5`). The slice-to-quote extraction naturally disambiguates `books` from `books5` (no trailing-quote workaround needed) and yields the exact channel name for interval-specific `candle*` keys. Subscribe-ack frames are short-circuited by a single `'"event":"subscribe"'` indexOf before any handler runs. See `../CLAUDE.md` → "Public WebSocket Hot-Path Patterns" for the cross-cutting rationale.
 
 **Orderbook parser hot-path conventions**: the primary parser uses indexed for-loops over `snapshot.bids` / `snapshot.asks` — never `.reduce` with `[...acc, x]` (quadratic) or `sides.forEach`. The `secondaryParser` (books5 top-N) writes new levels in place over the existing `orderBook.bids` / `orderBook.asks` arrays via index assignment, only `push`ing past the current length. **No trailing `sortOrderBook`** — `updateOrderBook` does sorted insertion via binary search and BloFin snapshots arrive pre-sorted (the post-filter cross-level cleanup `asks.filter(a => a.price >= lastPrice)` preserves order).
 
+The primary `books` parser also enforces BloFin's per-instrument sequence
+contract: a snapshot establishes `seqId`, and every delta's `prevSeqId` must
+match it. Missing or discontinuous sequence values cause the delta to be
+dropped, the local book to be cleared, and one `books` unsubscribe/subscribe
+cycle to request a fresh snapshot. Further deltas are ignored until that
+snapshot arrives.
+
 ### Private Channels
 
-| Channel        | Description                                          |
-| -------------- | ---------------------------------------------------- |
-| `account`      | Account balance updates (`totalEquity`)              |
-| `positions`    | Position changes (all instruments)                   |
-| `orders`       | Normal order status updates (live, filled, canceled) |
-| `orders-algo`  | Algo (TP/SL) order updates                           |
-| `algo-advance` | Advanced algo order updates                          |
+| Channel       | Description                                                    |
+| ------------- | -------------------------------------------------------------- |
+| `account`     | Account balance updates (`totalEquity`)                        |
+| `positions`   | Position changes (all instruments)                             |
+| `orders`      | Normal order status updates (live, filled, canceled)           |
+| `orders-algo` | TP/SL and opening-trigger updates from the documented channel  |
 
 Private channels subscribe without `instType` parameter (receives all instruments). Channels are subscribed individually (one `subscribe` message per channel) rather than batched (see `blofin.ws-private.ts subscribe`).
 
@@ -242,7 +254,22 @@ Additional BloFin order types mapped to internal types:
 
 - `OrderType.StopLoss` -> BloFin `trigger` type, uses `slTriggerPrice` and `slOrderPrice=-1` (market execution)
 - `OrderType.TakeProfit` -> BloFin `trigger` type, uses `tpTriggerPrice` and `tpOrderPrice=-1` (market execution)
-- `OrderType.TrailingStopLoss` -> BloFin `move_order_stop` type
+- The legacy reverse-map entry for `OrderType.TrailingStopLoss` is dormant:
+  metadata advertises no trailing-stop support, no formatter builds a trailing
+  payload, and the `move_order_stop` value has not been validated against
+  BloFin's schema. Do not treat it as an implemented order type.
+
+### Opening Trigger Orders (read-only)
+
+`fetchOrders` includes BloFin's documented
+`GET /api/v1/trade/orders-algo-pending?orderType=trigger` family, paginated by
+`algoId`. These externally placed orders map to `OrderType.Conditional` using
+their `triggerPrice`, so protection or entries created on BloFin are visible in
+Tealstreet. The metadata capability remains disabled and the write lifecycle is
+intentionally fail-closed: placement, cancel, and update reject with an
+actionable message instead of routing a trigger to the normal-order or TP/SL
+endpoint. Users must mutate these orders on BloFin until placement, amend, and
+cancel are implemented and tested as one complete lifecycle.
 
 ### Algo Order Batching
 
@@ -366,6 +393,10 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 - **Algo cancel batches**: Max 10 per request, with 1-second sleep between batches (see `cancelAlgoOrders`)
 - **Leverage fetch batches**: Max 20 symbols per request, processed serially via `mapSeries`
 - **No explicit rate limiter**: Unlike some exchanges, no `axios-rate-limit` is applied
+- **Upstream limits**: BloFin documents 500 REST requests/minute per IP, 30
+  trade requests/10 seconds per user ID, one new WebSocket connection/second
+  per IP, and at most 4,096 bytes of channels per subscription request. Public
+  all-market subscriptions are chunked below that frame limit.
 
 ## State Reconciliation
 
@@ -398,17 +429,13 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 
 ## Testnet/Demo
 
-Testnet is supported at the API level but **disabled in exchange metadata** (`supportsTestnet: false`).
-
-When testnet is enabled:
-
-- **REST**: Adds `x-simulated-trading: 1` header on all REST requests (see `blofin.api.ts`)
-- **WebSocket**: Appends `?brokerId=9999` query param to WebSocket URLs
-
-| Type    | Livenet                               | Testnet                                             |
-| ------- | ------------------------------------- | --------------------------------------------------- |
-| Public  | `wss://openapi.blofin.com/ws/public`  | `wss://openapi.blofin.com/ws/public?brokerId=9999`  |
-| Private | `wss://openapi.blofin.com/ws/private` | `wss://openapi.blofin.com/ws/private?brokerId=9999` |
+Demo trading is wired at the API level but **disabled in exchange metadata** (`supportsTestnet: false`).
+BloFin documents a separate demo environment, so dormant testnet routing selects
+`https://demo-trading-openapi.blofin.com` for REST and that host's `/ws/public`
+and `/ws/private` sockets. It does not add the obsolete
+`x-simulated-trading` header or append a `brokerId=9999` query parameter to
+production hosts. Do not enable the metadata flag without validating the full
+account and order lifecycle against demo trading.
 
 ## Known Quirks / Implementation Notes
 
@@ -416,7 +443,7 @@ When testnet is enabled:
 2. **No batch algo orders**: Unlike normal orders which support batch (up to 20), algo (TP/SL) orders must be placed individually.
 3. **Algo cancel delay**: After canceling algo orders in batches of 10, there is a 1-second sleep between batches (see `cancelAlgoOrders`).
 4. **Order fetch retry**: `fetchOrders` has built-in retry logic (3 attempts with exponential backoff `sleep(1000 * attempt)`). On complete failure, returns existing store orders to prevent data loss (see `fetchOrdersWithRetry`).
-5. **Recursive order pagination (cursor-until-empty)**: Both `fetchNormalOrders` and `fetchAlgoOrders` page via the `after` cursor (last `orderId` / `tpslId`) until an **empty page** comes back — _not_ until a page smaller than the requested `limit`. BloFin's `orders-pending` / `orders-tpsl-pending` cap the response at **~20 rows per page regardless of the requested `limit` (we request 100)**, so the old "stop when `length !== PAGE_SIZE`" check terminated after the first page and silently dropped every order past the first ~20 (reported: "only 20 of 50 spread orders visible"). Loop is bounded by `BLOFIN_MAX_ORDER_PAGES` (50) and stops early if the cursor fails to advance (defensive, in case `after` is ever ignored).
+5. **Recursive order pagination (cursor-until-empty)**: `fetchNormalOrders`, `fetchAlgoOrders`, and read-only `fetchTriggerOrders` page via the `after` cursor (last `orderId`, `tpslId`, or `algoId`) until an **empty page** comes back — _not_ until a page smaller than the requested `limit`. BloFin's pending-order endpoints default to small pages even when a larger limit is requested, so the old "stop when `length !== PAGE_SIZE`" check could silently drop later orders. Loops are bounded by `BLOFIN_MAX_ORDER_PAGES` (50) and stop early if the cursor fails to advance.
 6. **TP/SL as combined orders**: When placing a TP or SL on a position with no amount (full position), the code checks for existing opposite algo orders, cancels them, and combines both into a single TP/SL order.
 7. **Position conflict detection**: `mapPositions` detects when isolated and cross positions exist simultaneously for the same symbol and warns the user.
 8. **Throttled order sync**: Private WebSocket order events trigger a debounced (2-second) full order re-fetch to ensure state synchronization.
@@ -429,6 +456,10 @@ When testnet is enabled:
 15. **afterMethodCalledInWorker**: Updates local `_accountPositionMode` and `_accountMarginType` cache when `changePositionMode` or `changeMarginType` is called from the worker thread.
 16. **Normal-order TP/SL fallback modeling**: BloFin may echo TP/SL only on `orders` channel records (without `tpslId`). `addInlineTpSlFallbackOrders` (run inside `fetchOrdersWithRetry`) synthesizes virtual protective legs from normal-order trigger fields unless a linked algo leg already exists. `mapOrders` itself does NOT synthesize protective legs from normal records — see the transient WS-only window note under "Attached TP/SL Representation".
 17. **Batch placement for attached TP/SL**: Inline TP/SL on normal orders stays on `/trade/batch-orders` for speed; only reduce-only compatibility mode can force `/trade/order`.
+18. **Bounded fill-delta tracking**: Private order events retain the last
+    cumulative `filledSize` only while an order is active. Filled and canceled
+    terminal events delete the order ID after processing, preventing stale
+    entries from accumulating for the life of the socket.
 
 ## Error Handling
 
@@ -476,16 +507,20 @@ BloFin API success payloads are not perfectly uniform, but generally follow:
 ## Broker ID
 
 - **Value**: `b3cdedc0a20880ba`
-- Applied to `brokerId` field and as prefix for `clientOrderId` (truncated to 32 chars)
-- Only sent in production or when `tealstreetProxy` is enabled
+- Applied to the payload `brokerId` field and as the unconditional prefix for
+  generated `clientOrderId` values (truncated to 32 chars)
+- Only the payload `brokerId` field is gated to production or
+  `tealstreetProxy`; the client-order-ID prefix is always applied
 - Format: `clientOrderId = "${BROKER_ID}${uuid}".slice(0, 32)`
 
 ## Tealstreet Proxy
 
 When `tealstreetProxy` is enabled:
 
-- **Private WS** connects through `wss://fsjnpy143pbz.asia.tealstreet.io/blofin/private` (see `blofin.ws-private.ts`).
-- **REST** is routed through Tealstreet CORS proxy URLs via `safeCexAxiosCreate` + `getPrivateProxy` (see `blofin.api.ts` and `safeCexAxiosCreate.ts`).
+- **Private WS** resolves its tunnelled or direct host through
+  `src/routing/resolveExchangeRouting.ts`.
+- **REST** resolves the configured CORS proxy through the routing table and
+  `src/utils/transportResolution.ts` inside `safeCexAxiosCreate`.
 
 Blofin does **not** use the HTTP-over-WebSocket adapter for REST requests. In proxy/tunnel option mapping, Blofin is handled as proxy-first routing (`supportsTunnel: false` at metadata level).
 
@@ -505,6 +540,9 @@ Blofin does **not** use the HTTP-over-WebSocket adapter for REST requests. In pr
 - Margin type is **global** (applies to all symbols)
 - Changed via `POST /api/v1/account/set-margin-mode`
 - Warning: Changing margin type with open positions may cause unexpected behavior
+- A non-zero response code is checked immediately after the POST. Margin-mode
+  and symbol-position refetches run only after BloFin confirms success, so a
+  rejected change cannot spend extra reads or mutate the store.
 
 ### Leverage
 
@@ -625,5 +663,8 @@ For implementation inspiration and reference, consult the CCXT library's BloFin 
 Notable cross-references for leverage handling:
 
 - `blofin.ts → setLeverage`: single POST with no position prerequisite — our lean `setLeverage` mirrors this shape.
-- `blofin.ts → fetchLeverage` / `fetchLeverages`: REST-only; uses the same `account/leverage-info` / `account/batch-leverage-info` endpoints.
+- `blofin.ts → fetchLeverage` / `fetchLeverages`: REST-only reference. BloFin's
+  official docs now mark single-instrument `account/leverage-info` deprecated;
+  this integration uses only `account/batch-leverage-info`, including for a
+  single symbol.
 - `pro/blofin.ts → handlePositions` / `parsePosition`: confirms there is no separate WS leverage stream; leverage is read from the `leverage` field of the `positions` channel payload, identical to our private WS handler.

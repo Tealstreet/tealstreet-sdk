@@ -82,6 +82,19 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     }
   };
 
+  reconnect = async () => {
+    if (this.isDisposed) return;
+    const previousSocket = this.ws;
+    previousSocket?.removeEventListener?.('open', this.onOpen);
+    previousSocket?.removeEventListener?.('message', this.onMessage);
+    previousSocket?.removeEventListener?.('close', this.onClose);
+    this.ws = undefined;
+    previousSocket?.close?.();
+    this.token = null;
+    this.socketEndpoint = null;
+    await this.connectAndSubscribe();
+  };
+
   onOpen = () => {
     if (!this.isDisposed) {
       this.subscribe();
