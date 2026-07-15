@@ -14,6 +14,7 @@ import { SequencedDeltaOrderBook } from '../../utils/sequencedDeltaOrderBook';
 import { CoinbaseStarbaseProtocolError } from './coinbase.starbase';
 
 const STARBASE_BASE_CURRENCIES = ['BTC', 'ETH'] as const;
+const STARBASE_SUPPORTED_INSTRUMENT_NAMES = ['BTC_USDC-PERPETUAL', 'ETH_USDC-PERPETUAL'] as const;
 const STARBASE_BOOK_STATES = ['open', 'settlement', 'delivered', 'inactive', 'locked', 'halted', 'archivized'] as const;
 const STARBASE_BOOK_INTERVALS = ['100ms', 'agg2'] as const;
 export const COINBASE_STARBASE_CHART_RESOLUTIONS = [
@@ -41,6 +42,8 @@ export type CoinbaseStarbasePublicInstrument = {
   legacySavedSymbol: string;
   base: CoinbaseStarbaseBaseCurrency;
   quote: 'USDC';
+  counter: 'USDC';
+  settlement: 'USDC';
   kind: 'future';
   instrumentType: 'linear';
   settlementPeriod: 'perpetual';
@@ -56,9 +59,7 @@ export type CoinbaseStarbasePublicInstrument = {
   priceIndex: string;
 };
 
-export type CoinbaseStarbaseMarketParityBlocker =
-  | 'amount-increment-unpublished'
-  | 'maximum-base-amount-unpublished';
+export type CoinbaseStarbaseMarketParityBlocker = 'amount-increment-unpublished' | 'maximum-base-amount-unpublished';
 
 export type CoinbaseStarbaseMarketParityResult = {
   status: 'blocked';
@@ -72,9 +73,9 @@ export type CoinbaseStarbasePublicTicker = {
   timestampMs: number;
   state: CoinbaseStarbaseBookState;
   bid: number;
-  bidGatewayAmount: number;
+  bidBaseAmount: number;
   ask: number;
-  askGatewayAmount: number;
+  askBaseAmount: number;
   last: number;
   mark: number;
   index: number;
@@ -83,7 +84,7 @@ export type CoinbaseStarbasePublicTicker = {
   fundingRate8h?: number;
   volumeBase: number;
   volumeUsd?: number;
-  openInterestUsd: number;
+  openInterestBase: number;
 };
 
 export type CoinbaseStarbasePublicRequest<Method extends string, Params extends Record<string, unknown>> = {
@@ -196,11 +197,17 @@ export const normalizeCoinbaseStarbaseInstrument = (value: unknown): CoinbaseSta
   const raw = requireRecord(value, 'Starbase instrument');
   if (raw.kind !== 'future') protocolError('Unsupported Starbase instrument kind');
   if (raw.instrument_type !== 'linear') protocolError('Unsupported or missing Starbase instrument_type');
-  if (raw.settlement_period !== 'perpetual') protocolError('Unsupported Starbase settlement_period');
-  if (raw.quote_currency !== 'USD') protocolError('Unsupported Starbase quote_currency');
-  if (raw.counter_currency !== undefined && raw.counter_currency !== 'USDC') {
-    protocolError('Unsupported Starbase counter_currency');
+  if (raw.future_type !== undefined && raw.future_type !== 'linear') {
+    protocolError('Unsupported Starbase future_type');
   }
+  if (raw.underlying_type !== 'crypto') protocolError('Unsupported or missing Starbase underlying_type');
+  if (Object.getOwnPropertyDescriptor(raw, 'option_type') !== undefined) {
+    protocolError('Unsupported Starbase option_type');
+  }
+  if (raw.settlement_period !== 'perpetual') protocolError('Unsupported Starbase settlement_period');
+  if (raw.quote_currency !== 'USDC') protocolError('Unsupported Starbase quote_currency');
+  if (raw.counter_currency !== 'USDC') protocolError('Unsupported Starbase counter_currency');
+  if (raw.settlement_currency !== 'USDC') protocolError('Unsupported Starbase settlement_currency');
   if (typeof raw.is_active !== 'boolean') protocolError('Invalid Starbase instrument is_active');
 
   const base = parseBaseCurrency(raw.base_currency, 'Starbase instrument base_currency');
@@ -219,13 +226,15 @@ export const normalizeCoinbaseStarbaseInstrument = (value: unknown): CoinbaseSta
     legacySavedSymbol: toCoinbaseLegacyIntxSymbol(instrumentName),
     base,
     quote: 'USDC',
+    counter: 'USDC',
+    settlement: 'USDC',
     kind: 'future',
     instrumentType: 'linear',
     settlementPeriod: 'perpetual',
     isActive: raw.is_active as boolean,
     ...(raw.state === undefined ? {} : { state: parseBookState(raw.state, 'Starbase instrument state') }),
     minimumBaseAmount: requirePositive(raw.min_trade_amount, 'Starbase instrument min_trade_amount'),
-    contractSize: requirePositiveInteger(raw.contract_size, 'Starbase instrument contract_size'),
+    contractSize: requirePositive(raw.contract_size, 'Starbase instrument contract_size'),
     priceIncrement: requirePositive(raw.tick_size, 'Starbase instrument tick_size'),
     priceIncrementSteps: parseTickSizeSteps(raw.tick_size_steps),
     ...(maximumLeverage === undefined ? {} : { maximumLeverage }),
@@ -237,11 +246,23 @@ export const normalizeCoinbaseStarbaseInstrument = (value: unknown): CoinbaseSta
 
 export const normalizeCoinbaseStarbaseInstruments = (value: unknown): CoinbaseStarbasePublicInstrument[] => {
   if (!Array.isArray(value)) protocolError('Invalid public/get_instruments result');
-  const instruments = (value as unknown[]).map(normalizeCoinbaseStarbaseInstrument);
+  const rawInstruments = (value as unknown[]).map((entry, index) =>
+    requireRecord(entry, `public/get_instruments result[${index}]`),
+  );
+  const instruments = rawInstruments
+    .filter((instrument) =>
+      STARBASE_SUPPORTED_INSTRUMENT_NAMES.includes(
+        instrument.instrument_name as (typeof STARBASE_SUPPORTED_INSTRUMENT_NAMES)[number],
+      ),
+    )
+    .map(normalizeCoinbaseStarbaseInstrument);
   const names = new Set<string>();
   for (const instrument of instruments) {
     if (names.has(instrument.instrumentName)) protocolError('Duplicate Starbase instrument_name');
     names.add(instrument.instrumentName);
+  }
+  if (STARBASE_SUPPORTED_INSTRUMENT_NAMES.some((name) => !names.has(name))) {
+    protocolError('Missing supported Starbase perpetual instrument');
   }
   return instruments;
 };
@@ -259,9 +280,6 @@ export const assessCoinbaseStarbaseMarketParity = (
   gateway,
   blockers: ['amount-increment-unpublished', 'maximum-base-amount-unpublished'],
 });
-
-const quoteNotionalToBase = (notional: unknown, price: number, context: string): number =>
-  requireFinite(notional, context) / price;
 
 export const normalizeCoinbaseStarbaseTicker = (value: unknown): CoinbaseStarbasePublicTicker => {
   const raw = requireRecord(value, 'Starbase ticker');
@@ -290,9 +308,9 @@ export const normalizeCoinbaseStarbaseTicker = (value: unknown): CoinbaseStarbas
     timestampMs: requireTimestamp(raw.timestamp, 'Starbase ticker timestamp'),
     state: parseBookState(raw.state, 'Starbase ticker state'),
     bid,
-    bidGatewayAmount: requireFinite(raw.best_bid_amount, 'Starbase ticker best_bid_amount'),
+    bidBaseAmount: requireFinite(raw.best_bid_amount, 'Starbase ticker best_bid_amount'),
     ask,
-    askGatewayAmount: requireFinite(raw.best_ask_amount, 'Starbase ticker best_ask_amount'),
+    askBaseAmount: requireFinite(raw.best_ask_amount, 'Starbase ticker best_ask_amount'),
     last: requirePositive(raw.last_price, 'Starbase ticker last_price'),
     mark: requirePositive(raw.mark_price, 'Starbase ticker mark_price'),
     index: requirePositive(raw.index_price, 'Starbase ticker index_price'),
@@ -301,7 +319,7 @@ export const normalizeCoinbaseStarbaseTicker = (value: unknown): CoinbaseStarbas
     ...(fundingRate8h === undefined ? {} : { fundingRate8h }),
     volumeBase: requireFinite(stats.volume, 'Starbase ticker stats.volume'),
     ...(volumeUsd === undefined ? {} : { volumeUsd }),
-    openInterestUsd: requireFinite(raw.open_interest, 'Starbase ticker open_interest'),
+    openInterestBase: requireFinite(raw.open_interest, 'Starbase ticker open_interest'),
   };
 };
 
@@ -318,7 +336,7 @@ const parseRestBookLevels = (value: unknown, context: string): OrderBook['bids']
     const price = requirePositive(level[0], `${context}[${index}].price`);
     return {
       price,
-      amount: quoteNotionalToBase(level[1], price, `${context}[${index}].amount`),
+      amount: requireFinite(level[1], `${context}[${index}].amount`),
       total: 0,
     };
   });
@@ -355,12 +373,12 @@ const parseDeltaLevels = (
     if (!['new', 'change', 'delete'].includes(action)) protocolError(`Invalid ${context}[${index}] action`);
     if (frameType === 'snapshot' && action !== 'new') protocolError(`Invalid ${context}[${index}] snapshot action`);
     const price = requirePositive(level[1], `${context}[${index}].price`);
-    const notional = requireFinite(level[2], `${context}[${index}].amount`);
-    if (action === 'delete' && notional !== 0) protocolError(`Invalid ${context}[${index}] delete amount`);
-    if (action !== 'delete' && notional === 0) protocolError(`Invalid ${context}[${index}] ${action} amount`);
+    const amount = requireFinite(level[2], `${context}[${index}].amount`);
+    if (action === 'delete' && amount !== 0) protocolError(`Invalid ${context}[${index}] delete amount`);
+    if (action !== 'delete' && amount === 0) protocolError(`Invalid ${context}[${index}] ${action} amount`);
     return {
       action,
-      amount: quoteNotionalToBase(notional, price, `${context}[${index}].amount`),
+      amount,
       price,
     };
   });
@@ -522,10 +540,10 @@ const resolveChartResolution = (timeframe: Timeframe): CoinbaseStarbaseChartReso
 
 export const buildCoinbaseStarbaseGetInstruments = (): CoinbaseStarbasePublicRequest<
   'public/get_instruments',
-  { currency: 'any'; expired: false; kind: 'future' }
+  { currency: 'USDC'; expired: false; kind: 'future' }
 > => ({
   method: 'public/get_instruments',
-  params: { currency: 'any', expired: false, kind: 'future' },
+  params: { currency: 'USDC', expired: false, kind: 'future' },
 });
 
 export const buildCoinbaseStarbaseTicker = (

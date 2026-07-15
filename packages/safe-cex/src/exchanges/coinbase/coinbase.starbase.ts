@@ -44,8 +44,7 @@ export type CoinbaseStarbaseJsonRpcErrorResponse = {
 };
 
 export type CoinbaseStarbaseJsonRpcResponse<Result> =
-  | CoinbaseStarbaseJsonRpcSuccess<Result>
-  | CoinbaseStarbaseJsonRpcErrorResponse;
+  CoinbaseStarbaseJsonRpcSuccess<Result> | CoinbaseStarbaseJsonRpcErrorResponse;
 
 export type CoinbaseStarbaseTransportContext = {
   endpoint: string;
@@ -67,14 +66,22 @@ export type CoinbaseStarbaseHttpRequest = {
 
 export type CoinbaseStarbaseHttpSender = (request: CoinbaseStarbaseHttpRequest) => Promise<unknown>;
 
-export const createCoinbaseStarbaseHttpTransport = (
-  send: CoinbaseStarbaseHttpSender,
-): CoinbaseStarbaseTransport => {
+const COINBASE_STARBASE_METHOD_PATTERN = /^(public|private)\/[a-z][a-z0-9_]*$/;
+
+export const requireCoinbaseStarbaseMethod = (method: unknown): string => {
+  if (typeof method !== 'string' || !COINBASE_STARBASE_METHOD_PATTERN.test(method)) {
+    throw new CoinbaseStarbaseProtocolError('Invalid Starbase JSON-RPC method');
+  }
+  return method;
+};
+
+export const createCoinbaseStarbaseHttpTransport = (send: CoinbaseStarbaseHttpSender): CoinbaseStarbaseTransport => {
   return async (request, context) => {
     if (context.kind !== 'http') {
       throw new CoinbaseStarbaseProtocolError('HTTP transport cannot send a WebSocket request');
     }
 
+    const method = requireCoinbaseStarbaseMethod(request.method);
     return send({
       body: request,
       headers: {
@@ -82,7 +89,7 @@ export const createCoinbaseStarbaseHttpTransport = (
         ...(context.authorization ? { Authorization: context.authorization } : {}),
       },
       method: 'POST',
-      url: context.endpoint,
+      url: `${context.endpoint.replace(/\/+$/, '')}/${method}`,
     });
   };
 };
@@ -157,9 +164,7 @@ export class CoinbaseStarbaseJsonRpcClient {
     method: string,
     params: Params,
   ): CoinbaseStarbaseJsonRpcRequest<Params> {
-    if (!method) {
-      throw new CoinbaseStarbaseProtocolError('JSON-RPC method must not be empty');
-    }
+    const validatedMethod = requireCoinbaseStarbaseMethod(method);
     if (!isRecord(params)) {
       throw new CoinbaseStarbaseProtocolError('JSON-RPC params must be an object');
     }
@@ -170,7 +175,7 @@ export class CoinbaseStarbaseJsonRpcClient {
     const request: CoinbaseStarbaseJsonRpcRequest<Params> = {
       jsonrpc: '2.0',
       id: this.nextRequestId,
-      method,
+      method: validatedMethod,
       params,
     };
     this.nextRequestId += 1;

@@ -28,6 +28,8 @@ import {
   STARBASE_BOOK_SNAPSHOT_PAYLOAD,
   STARBASE_CHART_DATA_FIXTURE,
   STARBASE_CHART_PAYLOAD_FIXTURE,
+  STARBASE_PUBLIC_ETH_INSTRUMENT_FIXTURE,
+  STARBASE_PUBLIC_INSTRUMENT_DISCOVERY_FIXTURE,
   STARBASE_PUBLIC_INSTRUMENT_FIXTURE,
   STARBASE_PUBLIC_ORDER_BOOK_FIXTURE,
   STARBASE_PUBLIC_TICKER_FIXTURE,
@@ -47,20 +49,22 @@ describe('Coinbase Starbase inert markets and public data', () => {
     const instrument = normalizeCoinbaseStarbaseInstrument(STARBASE_PUBLIC_INSTRUMENT_FIXTURE);
     expect(instrument).toEqual({
       base: 'BTC',
-      contractSize: 1,
-      createdAtMs: 1_536_569_522_277,
-      expiresAtMs: 4_102_444_800_000,
+      contractSize: 0.0001,
+      counter: 'USDC',
+      createdAtMs: 1_646_824_342_000,
+      expiresAtMs: 32_503_708_800_000,
       instrumentName: 'BTC_USDC-PERPETUAL',
       instrumentType: 'linear',
       isActive: true,
       kind: 'future',
       legacySavedSymbol: 'BTC-PERP-INTX',
       maximumLeverage: 50,
-      minimumBaseAmount: 0.001,
+      minimumBaseAmount: 0.0001,
       priceIncrement: 0.5,
-      priceIncrementSteps: [{ abovePrice: 100_000, priceIncrement: 1 }],
+      priceIncrementSteps: [],
       priceIndex: 'btc_usdc',
       quote: 'USDC',
+      settlement: 'USDC',
       settlementPeriod: 'perpetual',
       state: 'open',
     });
@@ -71,7 +75,17 @@ describe('Coinbase Starbase inert markets and public data', () => {
     });
   });
 
-  it('fails closed on unknown instrument enums, missing sizing mode, and duplicate names', () => {
+  it('filters raw discovery before strict decoding and requires both supported perpetuals', () => {
+    expect(normalizeCoinbaseStarbaseInstruments(STARBASE_PUBLIC_INSTRUMENT_DISCOVERY_FIXTURE)).toEqual([
+      normalizeCoinbaseStarbaseInstrument(STARBASE_PUBLIC_INSTRUMENT_FIXTURE),
+      normalizeCoinbaseStarbaseInstrument(STARBASE_PUBLIC_ETH_INSTRUMENT_FIXTURE),
+    ]);
+    expect(() => normalizeCoinbaseStarbaseInstruments([STARBASE_PUBLIC_INSTRUMENT_FIXTURE])).toThrow(
+      'Missing supported',
+    );
+  });
+
+  it('fails closed on product discriminators, live settlement fields, sizing, and duplicate names', () => {
     expect(() =>
       normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, kind: 'option' }),
     ).toThrow('Unsupported Starbase instrument kind');
@@ -82,33 +96,78 @@ describe('Coinbase Starbase inert markets and public data', () => {
       normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, instrument_type: undefined }),
     ).toThrow('instrument_type');
     expect(() =>
-      normalizeCoinbaseStarbaseInstruments([STARBASE_PUBLIC_INSTRUMENT_FIXTURE, STARBASE_PUBLIC_INSTRUMENT_FIXTURE]),
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, future_type: 'reversed' }),
+    ).toThrow('future_type');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, underlying_type: 'fiat' }),
+    ).toThrow('underlying_type');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, option_type: 'call' }),
+    ).toThrow('option_type');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, option_type: null }),
+    ).toThrow('option_type');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, option_type: undefined }),
+    ).toThrow('option_type');
+
+    const accessorInstrument = { ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE };
+    Object.defineProperty(accessorInstrument, 'option_type', {
+      enumerable: true,
+      get: () => {
+        throw new Error('option_type accessor must not run');
+      },
+    });
+    expect(() => normalizeCoinbaseStarbaseInstrument(accessorInstrument)).toThrow('Unsupported Starbase option_type');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, quote_currency: 'USD' }),
+    ).toThrow('quote_currency');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, counter_currency: 'USD' }),
+    ).toThrow('counter_currency');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, settlement_currency: 'USD' }),
+    ).toThrow('settlement_currency');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstrument({ ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE, contract_size: 0 }),
+    ).toThrow('contract_size');
+    expect(() =>
+      normalizeCoinbaseStarbaseInstruments([
+        STARBASE_PUBLIC_INSTRUMENT_FIXTURE,
+        STARBASE_PUBLIC_INSTRUMENT_FIXTURE,
+        STARBASE_PUBLIC_ETH_INSTRUMENT_FIXTURE,
+      ]),
     ).toThrow('Duplicate Starbase instrument_name');
+
+    expect(
+      normalizeCoinbaseStarbaseInstrument({
+        ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE,
+        unrelated_additive_gateway_field: { safely: 'ignored' },
+      }),
+    ).toEqual(normalizeCoinbaseStarbaseInstrument(STARBASE_PUBLIC_INSTRUMENT_FIXTURE));
   });
 
-  it('preserves ticker amount units while naming published base/USD statistics explicitly', () => {
+  it('preserves ticker amounts while naming live base/USD statistics explicitly', () => {
     expect(normalizeCoinbaseStarbaseTicker(STARBASE_PUBLIC_TICKER_FIXTURE)).toEqual({
-      ask: 50_010,
-      askGatewayAmount: 100_020,
-      bid: 50_000,
-      bidGatewayAmount: 150_000,
-      fundingRate: 0.000_001,
-      fundingRate8h: 0.000_008,
-      index: 50_004,
+      ask: 65_017,
+      askBaseAmount: 0.0914,
+      bid: 65_016.5,
+      bidBaseAmount: 0.0046,
+      fundingRate: 0.00001483,
+      fundingRate8h: 0.00002502,
+      index: 64_984.48,
       instrumentName: 'BTC_USDC-PERPETUAL',
-      last: 50_005,
+      last: 64_985.5,
       legacySavedSymbol: 'BTC-PERP-INTX',
-      mark: 50_003,
-      openInterestUsd: 25_000_000,
-      percentage: 2.5,
+      mark: 65_001.69,
+      openInterestBase: 430.2811,
+      percentage: 0.748,
       state: 'open',
-      timestampMs: 1_800_000_000_000,
-      volumeBase: 1_200,
-      volumeUsd: 60_000_000,
+      timestampMs: 1_784_139_975_074,
+      volumeBase: 216.8374,
+      volumeUsd: 14_079_674.28,
     });
-    expect(normalizeCoinbaseStarbaseTickerPayload({ data: STARBASE_PUBLIC_TICKER_FIXTURE }).bidGatewayAmount).toBe(
-      150_000,
-    );
+    expect(normalizeCoinbaseStarbaseTickerPayload({ data: STARBASE_PUBLIC_TICKER_FIXTURE }).bidBaseAmount).toBe(0.0046);
   });
 
   it('rejects malformed ticker numbers and unknown book states', () => {
@@ -120,15 +179,15 @@ describe('Coinbase Starbase inert markets and public data', () => {
     );
   });
 
-  it('maps REST order-book USD notional levels to sorted base amounts and cumulative totals', () => {
+  it('preserves REST order-book base amounts and computes sorted cumulative totals', () => {
     expect(normalizeCoinbaseStarbaseOrderBookSnapshot(STARBASE_PUBLIC_ORDER_BOOK_FIXTURE)).toEqual({
       asks: [
-        { amount: 2, price: 50_010, total: 2 },
-        { amount: 1, price: 50_020, total: 3 },
+        { amount: 0.0002, price: 65_015, total: 0.0002 },
+        { amount: 0.01, price: 65_018.5, total: 0.0102 },
       ],
       bids: [
-        { amount: 2, price: 50_000, total: 2 },
-        { amount: 1, price: 49_990, total: 3 },
+        { amount: 0.01, price: 65_013.5, total: 0.01 },
+        { amount: 0.2222, price: 65_005, total: 0.23220000000000002 },
       ],
     });
   });
@@ -138,28 +197,40 @@ describe('Coinbase Starbase inert markets and public data', () => {
 
     expect(book.applyPayload(STARBASE_BOOK_SNAPSHOT_PAYLOAD)).toEqual({
       frame: 'snapshot',
-      sequence: '297217',
+      sequence: '167744732271',
       status: 'applied',
     });
     expect(book.orderBook).toEqual({
-      asks: [{ amount: 2, price: 50_010, total: 2 }],
-      bids: [{ amount: 2, price: 50_000, total: 2 }],
+      asks: [
+        { amount: 0.0149, price: 65_087, total: 0.0149 },
+        { amount: 0.0498, price: 65_087.5, total: 0.0647 },
+        { amount: 0.0011, price: 97_577.5, total: 0.0658 },
+      ],
+      bids: [],
     });
 
     expect(book.applyPayload(STARBASE_BOOK_CHANGE_PAYLOAD)).toEqual({
       frame: 'delta',
-      sequence: '297218',
+      sequence: '167744733629',
       status: 'applied',
     });
-    expect(book.orderBook).toEqual({ asks: [{ amount: 1, price: 50_010, total: 1 }], bids: [] });
+    expect(book.orderBook).toEqual({
+      asks: [
+        { amount: 0.0149, price: 65_073, total: 0.0149 },
+        { amount: 0.0498, price: 65_073.5, total: 0.0647 },
+        { amount: 0.0012, price: 97_577.5, total: 0.0659 },
+      ],
+      bids: [{ amount: 2.8663, price: 64_809.5, total: 2.8663 }],
+    });
 
     expect(
       book.applyPayload({
         data: {
           ...STARBASE_BOOK_CHANGE_PAYLOAD.data,
+          asks: [],
           bids: [],
-          change_id: 297_220,
-          prev_change_id: 297_219,
+          change_id: 167_744_733_631,
+          prev_change_id: 167_744_733_630,
         },
       }),
     ).toEqual({ reason: 'sequence-gap', status: 'recover' });
@@ -176,12 +247,12 @@ describe('Coinbase Starbase inert markets and public data', () => {
     const book = new CoinbaseStarbaseSequencedOrderBook();
     expect(() =>
       book.applyPayload({
-        data: { ...STARBASE_BOOK_SNAPSHOT_PAYLOAD.data, asks: [['replace', 50_010, 100_020]] },
+        data: { ...STARBASE_BOOK_SNAPSHOT_PAYLOAD.data, asks: [['replace', 65_087, 0.0149]] },
       }),
     ).toThrow('action');
     expect(() =>
       book.applyPayload({
-        data: { ...STARBASE_BOOK_CHANGE_PAYLOAD.data, bids: [['delete', 50_000, 1]] },
+        data: { ...STARBASE_BOOK_CHANGE_PAYLOAD.data, bids: [['delete', 65_087, 1]] },
       }),
     ).toThrow('delete amount');
   });
@@ -195,8 +266,8 @@ describe('Coinbase Starbase inert markets and public data', () => {
         data: {
           ...STARBASE_BOOK_CHANGE_PAYLOAD.data,
           asks: [
-            ['change', 50_010, 50_010],
-            ['change', 50_020, 50_020],
+            ['change', 65_087, 0.02],
+            ['change', 65_020, 0.01],
           ],
           bids: [],
         },
@@ -211,7 +282,7 @@ describe('Coinbase Starbase inert markets and public data', () => {
     expect(book.applyPayload(STARBASE_BOOK_SNAPSHOT_PAYLOAD).status).toBe('applied');
     expect(
       book.applyPayload({
-        data: { ...STARBASE_BOOK_CHANGE_PAYLOAD.data, asks: [['new', 50_010, 50_010]], bids: [] },
+        data: { ...STARBASE_BOOK_CHANGE_PAYLOAD.data, asks: [['new', 65_087, 0.02]], bids: [] },
       }),
     ).toEqual({ reason: 'invalid-level', status: 'recover' });
   });
@@ -238,7 +309,7 @@ describe('Coinbase Starbase inert markets and public data', () => {
   it('builds exact published request params and channel names from compatibility symbols', () => {
     expect(buildCoinbaseStarbaseGetInstruments()).toEqual({
       method: 'public/get_instruments',
-      params: { currency: 'any', expired: false, kind: 'future' },
+      params: { currency: 'USDC', expired: false, kind: 'future' },
     });
     expect(buildCoinbaseStarbaseTicker('BTC-PERP-INTX')).toEqual({
       method: 'public/ticker',

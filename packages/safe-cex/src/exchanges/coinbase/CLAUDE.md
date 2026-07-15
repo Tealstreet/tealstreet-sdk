@@ -38,21 +38,27 @@ this adapter. The implementation plan and cutover gates are tracked in
 
 The first follow-on foundation is implemented in `coinbase.starbase.ts`. It
 contains the published HTTP/WS endpoint constants, typed JSON-RPC request and
-response handling, monotonic request IDs, an injected HTTP POST transport, CDP
-token exchange/refresh policy, and unified WebSocket heartbeat primitives.
-Official-schema fixtures and tests are under
+response handling, monotonic request IDs, an injected HTTP POST transport that
+validates exact public/private method grammar before appending `/{method}` to
+the HTTP base URL, CDP token exchange/refresh policy,
+and unified WebSocket heartbeat primitives. Sanitized live-public and
+official-schema fixtures and tests are under
 `src/__tests__/audit-regressions/coinbase.starbase-*`.
 
 The second follow-on is implemented in `coinbase.starbase-public.ts`. It is an
-inert markets/public-data layer based on Coinbase's published Starbase OpenAPI
-and AsyncAPI schemas: strict linear-USDC-perpetual instrument normalization,
+inert markets/public-data layer bounded by Coinbase's live public gateway and
+published Starbase schemas: exact BTC/ETH linear-crypto-USDC-perpetual instrument
+normalization with inverse/fiat/option rejection,
 legacy `{BASE}-PERP-INTX` saved-symbol compatibility, ticker/book/candle
 mappers, exact public request/channel builders, desired-subscription replay,
-and order-book gap/reconnect recovery. The published sequenced book amount is
-USD notional for perpetuals, so that mapper divides each amount by its price
-before producing the safe-cex base-amount order book. Ticker best-size fields
-do not publish an equally explicit unit in the schema and therefore remain
-unconverted and explicitly named `bidGatewayAmount`/`askGatewayAmount`.
+and order-book gap/reconnect recovery. Committed sanitized 2026-07-15 public
+instrument/book/ticker/trade/WS evidence has exact byte hashes locked in tests.
+Public trades corroborate `amount = contracts * contract_size` for BTC and ETH, book
+and ticker sizes share that base-amount boundary, and the schema defines open
+interest for the captured linear futures in underlying base coin. Mappers
+therefore preserve these values directly as `bidBaseAmount`, `askBaseAmount`,
+and `openInterestBase` while retaining the upstream schema contradiction in the
+migration doc.
 Raw-book `new`, `change`, and `delete` actions mean add, update, and remove a
 price level. Contradictions are validated before a frame is applied; they clear
 the book and require a new snapshot instead of silently becoming upserts.
@@ -212,12 +218,15 @@ an exact by-order result schema.
 All eight modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
-and all normalization blockers are resolved. The public mapper supports only
-schema-enumerated BTC/ETH linear USDC perpetuals; expanded product bases and an
-exact amount increment remain gated because the current schema enumerates only
-BTC/ETH and publishes a minimum trade amount, not an amount step or maximum
-base amount. The inert market-parity assessment returns typed blockers for both
-fields instead of manufacturing a safe-cex `Market`. Coinbase has not published
+and all normalization blockers are resolved. The public mapper intentionally
+supports only BTC/ETH linear USDC perpetuals; discovery requests USDC futures
+and filters those exact names before strict decoding because the live result
+includes additional perpetuals and dated futures. Expanded product support,
+an exact amount increment, and maximum base amount remain gated; live
+`contract_size` and `min_trade_amount` are positive decimals but neither is
+treated as an unpublished amount step. The inert market-parity assessment
+returns typed blockers for both missing market fields instead of manufacturing
+a safe-cex `Market`. Coinbase has not published
 the inbound notification envelope in its Starbase OpenAPI or AsyncAPI schema.
 The inert public classifier is therefore bounded to the pinned 2026-07-15 live
 public captures; the controller still accepts an already-classified signal

@@ -1,0 +1,33 @@
+{
+  "captured_at": "2026-07-15",
+  "method": "public/ticker",
+  "result": {
+    "timestamp": 1784139975074,
+    "state": "open",
+    "stats": {
+      "high": 65529.0,
+      "low": 64407.5,
+      "price_change": 0.748,
+      "volume": 216.8374,
+      "volume_usd": 14079674.28,
+      "volume_notional": 14082490.77755
+    },
+    "instrument_name": "BTC_USDC-PERPETUAL",
+    "index_price": 64984.48,
+    "last_price": 64985.5,
+    "settlement_price": 64535.82,
+    "min_price": 64026.5,
+    "max_price": 65977.0,
+    "open_interest": 430.2811,
+    "mark_price": 65001.69,
+    "interest_value": 64800427.905089244,
+    "best_ask_price": 65017.0,
+    "best_bid_price": 65016.5,
+    "estimated_delivery_price": 64984.48,
+    "best_ask_amount": 0.0914,
+    "best_bid_amount": 0.0046,
+    "current_funding": 0.00001483,
+    "funding_8h": 0.00002502
+  },
+  "sanitization": "Removed JSON-RPC request/timing metadata only; retained public result values."
+}

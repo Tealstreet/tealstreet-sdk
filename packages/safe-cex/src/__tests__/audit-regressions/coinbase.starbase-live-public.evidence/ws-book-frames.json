@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-07-15",
+  "channel": "book.BTC_USDC-PERPETUAL.100ms",
+  "frames": [
+    {
+      "data": {
+        "type": "snapshot",
+        "instrument_name": "BTC_USDC-PERPETUAL",
+        "change_id": 167744732271,
+        "bids": [],
+        "asks": [
+          ["new", 65087.0, 0.0149],
+          ["new", 65087.5, 0.0498],
+          ["new", 97577.5, 0.0011]
+        ]
+      }
+    },
+    {
+      "data": {
+        "type": "change",
+        "instrument_name": "BTC_USDC-PERPETUAL",
+        "change_id": 167744733629,
+        "prev_change_id": 167744732271,
+        "bids": [["new", 64809.5, 2.8663]],
+        "asks": [
+          ["new", 65073.0, 0.0149],
+          ["new", 65073.5, 0.0498],
+          ["delete", 65087.0, 0.0],
+          ["delete", 65087.5, 0.0],
+          ["change", 97577.5, 0.0012]
+        ]
+      }
+    }
+  ],
+  "sanitization": "Removed the outer JSON-RPC subscription envelope and gateway timing metadata only; retained the acknowledged public channel separately and exact book payload values."
+}

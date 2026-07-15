@@ -1,0 +1,69 @@
+{
+  "captured_at": "2026-07-15",
+  "method": "public/get_last_trades_by_instrument",
+  "results": {
+    "BTC_USDC-PERPETUAL": {
+      "contract_size": 0.0001,
+      "trades": [
+        {
+          "timestamp": 1784139439338,
+          "price": 65052.5,
+          "amount": 0.0776,
+          "instrument_name": "BTC_USDC-PERPETUAL",
+          "direction": "buy",
+          "index_price": 65034.69,
+          "trade_seq": 8957117,
+          "mark_price": 65050.18,
+          "tick_direction": 1,
+          "contracts": 776.0,
+          "trade_id": "USDC-51683880"
+        },
+        {
+          "timestamp": 1784139392547,
+          "price": 65034.5,
+          "amount": 0.0002,
+          "instrument_name": "BTC_USDC-PERPETUAL",
+          "direction": "buy",
+          "index_price": 65018.66,
+          "trade_seq": 8957114,
+          "mark_price": 65031.07,
+          "tick_direction": 2,
+          "contracts": 2.0,
+          "trade_id": "USDC-51683866"
+        }
+      ]
+    },
+    "ETH_USDC-PERPETUAL": {
+      "contract_size": 0.001,
+      "trades": [
+        {
+          "timestamp": 1784139552336,
+          "price": 1931.2,
+          "amount": 0.024,
+          "instrument_name": "ETH_USDC-PERPETUAL",
+          "direction": "buy",
+          "index_price": 1930.28,
+          "trade_seq": 13094366,
+          "mark_price": 1931.09,
+          "tick_direction": 1,
+          "contracts": 24.0,
+          "trade_id": "USDC-51683939"
+        },
+        {
+          "timestamp": 1784139532575,
+          "price": 1930.65,
+          "amount": 0.002,
+          "instrument_name": "ETH_USDC-PERPETUAL",
+          "direction": "buy",
+          "index_price": 1929.95,
+          "trade_seq": 13094363,
+          "mark_price": 1930.74,
+          "tick_direction": 0,
+          "contracts": 2.0,
+          "trade_id": "USDC-51683932"
+        }
+      ]
+    }
+  },
+  "sanitization": "Removed JSON-RPC request/timing metadata and retained public trade rows plus the paired captured instrument contract_size. No account, order, credential, or user fields are present."
+}

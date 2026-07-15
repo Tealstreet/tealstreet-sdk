@@ -19,6 +19,18 @@ import {
   STARBASE_SET_HEARTBEAT_REQUEST,
 } from './coinbase.starbase.fixtures';
 
+const INVALID_STARBASE_METHODS = [
+  '',
+  '/public/test',
+  'public//test',
+  'public/test/extra',
+  'public/../private/test',
+  'public/test?x=1',
+  'public/test#fragment',
+  'PUBLIC/test',
+  'public/Test',
+] as const;
+
 describe('Coinbase Starbase inert protocol foundation', () => {
   it('pins the official HTTP and unified WebSocket endpoints without changing active routing', () => {
     expect(COINBASE_STARBASE_ENDPOINTS).toEqual({
@@ -39,7 +51,18 @@ describe('Coinbase Starbase inert protocol foundation', () => {
     });
   });
 
-  it('routes HTTP JSON-RPC through POST and adds bearer auth only when supplied', async () => {
+  it('accepts only one exact public/private method path segment during request construction', () => {
+    const client = new CoinbaseStarbaseJsonRpcClient(vi.fn(), { kind: 'http' });
+    expect(client.buildRequest('private/get_account_summary', {})).toMatchObject({
+      method: 'private/get_account_summary',
+    });
+
+    for (const method of INVALID_STARBASE_METHODS) {
+      expect(() => client.buildRequest(method, {})).toThrow('Invalid Starbase JSON-RPC method');
+    }
+  });
+
+  it('routes HTTP JSON-RPC through the exact method path and adds bearer auth only when supplied', async () => {
     const send = vi.fn().mockResolvedValue(STARBASE_AUTH_RESPONSE);
     const transport = createCoinbaseStarbaseHttpTransport(send);
     const client = new CoinbaseStarbaseJsonRpcClient(transport, { kind: 'http' });
@@ -55,8 +78,35 @@ describe('Coinbase Starbase inert protocol foundation', () => {
         'Content-Type': 'application/json',
       },
       method: 'POST',
-      url: 'https://drb.coinbase.com/api/v2',
+      url: 'https://drb.coinbase.com/api/v2/public/auth',
     });
+  });
+
+  it('normalizes a trailing endpoint slash before appending the method path', async () => {
+    const send = vi.fn().mockResolvedValue(STARBASE_PUBLIC_TEST_RESPONSE);
+    const transport = createCoinbaseStarbaseHttpTransport(send);
+
+    await transport(
+      { jsonrpc: '2.0', id: 1, method: 'public/test', params: {} },
+      { endpoint: 'https://drb.coinbase.com/api/v2/', kind: 'http' },
+    );
+
+    expect(send.mock.calls[0]?.[0].url).toBe('https://drb.coinbase.com/api/v2/public/test');
+  });
+
+  it('rejects an invalid method before the HTTP sender can construct a URL', async () => {
+    const send = vi.fn();
+    const transport = createCoinbaseStarbaseHttpTransport(send);
+
+    for (const method of INVALID_STARBASE_METHODS) {
+      await expect(
+        transport(
+          { jsonrpc: '2.0', id: 1, method, params: {} },
+          { endpoint: 'https://drb.coinbase.com/api/v2', kind: 'http' },
+        ),
+      ).rejects.toThrow('Invalid Starbase JSON-RPC method');
+    }
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('accepts additive gateway metadata while returning the typed result', async () => {

@@ -1,85 +1,111 @@
 /**
- * Deterministic fixtures derived from Coinbase's published Starbase
- * adv-starbase-openapi.json and adv-starbase-asyncapi.json schemas.
+ * Sanitized deterministic fixtures derived from read-only Coinbase Starbase
+ * public gateway captures. Chart fixtures remain schema-derived because they
+ * are unrelated to the live contract corrections covered here.
  */
 
 export const STARBASE_PUBLIC_INSTRUMENT_FIXTURE = {
   base_currency: 'BTC',
-  contract_size: 1,
+  contract_size: 0.0001,
   counter_currency: 'USDC',
-  creation_timestamp: 1_536_569_522_277,
-  expiration_timestamp: 4_102_444_800_000,
-  instrument_id: 42,
+  creation_timestamp: 1_646_824_342_000,
+  expiration_timestamp: 32_503_708_800_000,
+  future_type: 'linear',
   instrument_name: 'BTC_USDC-PERPETUAL',
   instrument_type: 'linear',
   is_active: true,
   kind: 'future',
   max_leverage: 50,
-  min_trade_amount: 0.001,
+  min_trade_amount: 0.0001,
   price_index: 'btc_usdc',
-  quote_currency: 'USD',
+  quote_currency: 'USDC',
+  settlement_currency: 'USDC',
   settlement_period: 'perpetual',
   state: 'open',
   tick_size: 0.5,
-  tick_size_steps: [{ above_price: 100_000, tick_size: 1 }],
+  tick_size_steps: [],
+  underlying_type: 'crypto',
 } as const;
 
+export const STARBASE_PUBLIC_ETH_INSTRUMENT_FIXTURE = {
+  ...STARBASE_PUBLIC_INSTRUMENT_FIXTURE,
+  base_currency: 'ETH',
+  contract_size: 0.001,
+  creation_timestamp: 1_647_262_800_000,
+  instrument_name: 'ETH_USDC-PERPETUAL',
+  min_trade_amount: 0.001,
+  price_index: 'eth_usdc',
+  tick_size: 0.05,
+} as const;
+
+export const STARBASE_PUBLIC_INSTRUMENT_DISCOVERY_FIXTURE = [
+  { instrument_name: 'SOL_USDC-PERPETUAL' },
+  STARBASE_PUBLIC_INSTRUMENT_FIXTURE,
+  STARBASE_PUBLIC_ETH_INSTRUMENT_FIXTURE,
+] as const;
+
 export const STARBASE_PUBLIC_TICKER_FIXTURE = {
-  best_ask_amount: 100_020,
-  best_ask_price: 50_010,
-  best_bid_amount: 150_000,
-  best_bid_price: 50_000,
-  current_funding: 0.000_001,
-  estimated_delivery_price: 50_004,
-  funding_8h: 0.000_008,
-  index_price: 50_004,
+  best_ask_amount: 0.0914,
+  best_ask_price: 65_017,
+  best_bid_amount: 0.0046,
+  best_bid_price: 65_016.5,
+  current_funding: 0.00001483,
+  funding_8h: 0.00002502,
+  index_price: 64_984.48,
   instrument_name: 'BTC_USDC-PERPETUAL',
-  last_price: 50_005,
-  mark_price: 50_003,
-  max_price: 55_000,
-  min_price: 45_000,
-  open_interest: 25_000_000,
+  last_price: 64_985.5,
+  mark_price: 65_001.69,
+  open_interest: 430.2811,
   state: 'open',
   stats: {
-    high: 51_000,
-    low: 49_000,
-    price_change: 2.5,
-    volume: 1_200,
-    volume_usd: 60_000_000,
+    high: 65_529,
+    low: 64_407.5,
+    price_change: 0.748,
+    volume: 216.8374,
+    volume_notional: 14_082_490.77755,
+    volume_usd: 14_079_674.28,
   },
-  timestamp: 1_800_000_000_000,
+  timestamp: 1_784_139_975_074,
 } as const;
 
 export const STARBASE_PUBLIC_ORDER_BOOK_FIXTURE = {
   asks: [
-    [50_010, 100_020],
-    [50_020, 50_020],
+    [65_015, 0.0002],
+    [65_018.5, 0.01],
   ],
   bids: [
-    [50_000, 100_000],
-    [49_990, 49_990],
+    [65_013.5, 0.01],
+    [65_005, 0.2222],
   ],
 } as const;
 
 export const STARBASE_BOOK_SNAPSHOT_PAYLOAD = {
   data: {
-    asks: [['new', 50_010, 100_020]],
-    bids: [['new', 50_000, 100_000]],
-    change_id: 297_217,
+    asks: [
+      ['new', 65_087, 0.0149],
+      ['new', 65_087.5, 0.0498],
+      ['new', 97_577.5, 0.0011],
+    ],
+    bids: [],
+    change_id: 167_744_732_271,
     instrument_name: 'BTC_USDC-PERPETUAL',
-    timestamp: 1_800_000_000_000,
     type: 'snapshot',
   },
 } as const;
 
 export const STARBASE_BOOK_CHANGE_PAYLOAD = {
   data: {
-    asks: [['change', 50_010, 50_010]],
-    bids: [['delete', 50_000, 0]],
-    change_id: 297_218,
+    asks: [
+      ['new', 65_073, 0.0149],
+      ['new', 65_073.5, 0.0498],
+      ['delete', 65_087, 0],
+      ['delete', 65_087.5, 0],
+      ['change', 97_577.5, 0.0012],
+    ],
+    bids: [['new', 64_809.5, 2.8663]],
+    change_id: 167_744_733_629,
     instrument_name: 'BTC_USDC-PERPETUAL',
-    prev_change_id: 297_217,
-    timestamp: 1_800_000_000_100,
+    prev_change_id: 167_744_732_271,
     type: 'change',
   },
 } as const;
