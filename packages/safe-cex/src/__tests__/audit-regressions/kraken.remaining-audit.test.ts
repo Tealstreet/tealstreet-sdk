@@ -162,6 +162,94 @@ describe('Kraken remaining July audit regressions', () => {
     );
   });
 
+  it('round-trips Kraken spot trigger provenance through the internal index trigger type', async () => {
+    const { exchange } = createFuturesExchange();
+    const cancelOrders = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue();
+    const placeOrder = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['replacement-id']);
+    const order = {
+      id: 'spot-trigger-stop-id',
+      status: OrderStatus.Open,
+      symbol: 'PF_XBTUSD',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 45_000,
+      amount: 2,
+      filled: 0,
+      remaining: 2,
+      reduceOnly: true,
+      lastUpdate: 1,
+      info: { triggerSignal: 'spot' },
+    };
+
+    await expect(exchange.updateOrder({ order, update: { price: 44_000 } })).resolves.toEqual(['replacement-id']);
+
+    expect(cancelOrders).toHaveBeenCalledWith([order]);
+    expect(placeOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: OrderType.StopLoss,
+        price: 44_000,
+        slTriggerType: OrderStopTriggerType.IndexPrice,
+      }),
+    );
+  });
+
+  it('sends the exact documented spot trigger signal on futures protective orders', async () => {
+    const { exchange } = createFuturesExchange();
+    const post = vi.fn().mockResolvedValue({
+      data: { result: 'success', sendStatus: { status: 'placed', order_id: 'spot-trigger-id' } },
+    });
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'PF_XBTUSD',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 44_000,
+        amount: 2,
+        slTriggerType: OrderStopTriggerType.IndexPrice,
+      }),
+    ).resolves.toEqual(['spot-trigger-id']);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.ORDER,
+      expect.objectContaining({
+        orderType: 'stp',
+        triggerSignal: 'spot',
+      }),
+    );
+  });
+
+  it.each([undefined, 'unknown'])('rejects %s trigger provenance before canceling a futures stop', async (signal) => {
+    const { exchange } = createFuturesExchange();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const cancelOrders = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue();
+    const placeOrder = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['replacement-id']);
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'ambiguous-trigger-stop-id',
+          status: OrderStatus.Open,
+          symbol: 'PF_XBTUSD',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 45_000,
+          amount: 2,
+          filled: 0,
+          remaining: 2,
+          reduceOnly: true,
+          lastUpdate: 1,
+          info: signal === undefined ? {} : { triggerSignal: signal },
+        },
+        update: { price: 44_000 },
+      }),
+    ).rejects.toThrow('triggerSignal provenance is missing or unsupported');
+
+    expect(cancelOrders).not.toHaveBeenCalled();
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
   it('surfaces that a protective order was canceled when replacement fails', async () => {
     const { exchange } = createFuturesExchange();
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
@@ -182,7 +270,7 @@ describe('Kraken remaining July audit regressions', () => {
           remaining: 2,
           reduceOnly: true,
           lastUpdate: 1,
-          info: { trigger_signal: 'index' },
+          info: { triggerSignal: 'spot' },
         },
         update: { price: 56_000 },
       }),

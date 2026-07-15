@@ -11,6 +11,7 @@ import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
 
 const liveInstances: BaseExchange[] = [];
+const REGISTRY_CONSTRUCTION_TIMEOUT_MS = 15_000;
 
 const createImplementation = async (
   exchangeName: ExchangeName,
@@ -50,14 +51,18 @@ afterEach(() => {
 });
 
 describe('exchange metadata runtime non-fallback invariants', () => {
-  it('loads and constructs every registered exchange without starting I/O', async () => {
-    for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
-      await expect(
-        createImplementation(name, exchangeMetadata[name].supportsPublicOnly),
-        `${name}: registry loader or constructor failed`,
-      ).resolves.toBeInstanceOf(BaseExchange);
-    }
-  });
+  it(
+    'loads and constructs every registered exchange without starting I/O',
+    async () => {
+      for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
+        await expect(
+          createImplementation(name, exchangeMetadata[name].supportsPublicOnly),
+          `${name}: registry loader or constructor failed`,
+        ).resolves.toBeInstanceOf(BaseExchange);
+      }
+    },
+    REGISTRY_CONSTRUCTION_TIMEOUT_MS,
+  );
 
   it('advertised trade history has a non-fallback executions or historical-trades path', async () => {
     const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(

@@ -42,7 +42,10 @@ const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined =>
   switch (String(value || '').toLowerCase()) {
     case 'mark':
       return OrderStopTriggerType.MarkPrice;
-    case 'index':
+    // Kraken calls its external spot/index reference `spot` in both the
+    // Futures REST and WebSocket contracts. Internally IndexPrice is the
+    // closest matching trigger type, but the wire value must remain `spot`.
+    case 'spot':
       return OrderStopTriggerType.IndexPrice;
     case 'last':
       return OrderStopTriggerType.LastPrice;
@@ -388,7 +391,7 @@ export class KrakenExchange extends BaseExchange {
 
       // Handle stop/take-profit orders
       const toSignal = (t?: OrderStopTriggerType) =>
-        t === OrderStopTriggerType.MarkPrice ? 'mark' : t === OrderStopTriggerType.IndexPrice ? 'index' : 'last';
+        t === OrderStopTriggerType.MarkPrice ? 'mark' : t === OrderStopTriggerType.IndexPrice ? 'spot' : 'last';
 
       if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
         // Stop and take profit orders must have stopPrice and are always reduceOnly
@@ -473,13 +476,24 @@ export class KrakenExchange extends BaseExchange {
 
       // For stop loss and take profit orders, cancel and recreate
       if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
-        // Cancel the existing order
-        await this.cancelOrders([order]);
-
         const originalTriggerType =
           order.type === OrderType.StopLoss
             ? order.slTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal'))
             : order.tpTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal'));
+
+        // Kraken publishes triggerSignal for every open stop/take-profit
+        // order. If it is absent or a newly introduced enum value, changing
+        // the order without it would silently fall back to another trigger.
+        // Prove the original semantics before canceling the protective order.
+        if (!originalTriggerType) {
+          throw new Error(
+            `Cannot safely update Kraken ${order.type} order ${order.id}: triggerSignal provenance is missing or unsupported`,
+          );
+        }
+
+        // The Futures edit endpoint cannot change protective orders, so only
+        // cancel after all replacement attributes have been reconciled.
+        await this.cancelOrders([order]);
 
         // Create new order with updated parameters
         const newOrderOpts: PlaceOrderOpts = {

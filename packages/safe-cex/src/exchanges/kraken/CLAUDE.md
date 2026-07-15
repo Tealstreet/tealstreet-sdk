@@ -395,7 +395,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 
 5. **Alphabetical parameter sorting**: Query string parameters MUST be sorted alphabetically for signature validation (`kraken.api.ts`, `sort` function).
 
-6. **Cancel-and-recreate for TP/SL**: The `editorder` endpoint does not reliably work for stop and take-profit orders. The implementation always cancels and recreates them, preserving the original `triggerSignal` from normalized order state or the raw REST/WS payload. If replacement placement fails after cancellation, the thrown error explicitly warns that the original protective order is already gone.
+6. **Cancel-and-recreate for TP/SL**: The `editorder` endpoint does not reliably work for stop and take-profit orders. The implementation always cancels and recreates them, preserving the original `triggerSignal` from normalized order state or the raw REST/WS payload. Kraken's exact wire values are `last`, `mark`, and `spot`; the internal `IndexPrice` enum represents Kraken's `spot` reference and must serialize back to `spot`, never `index`. Missing and newly introduced trigger values fail before cancellation so a protective order cannot silently change trigger semantics. If replacement placement fails after cancellation, the thrown error explicitly warns that the original protective order is already gone.
 
 7. **Margin type detection via `maxFixedLeverage`**: If the `maxFixedLeverage` field exists on a position, it is Isolated margin. If undefined, it is Cross margin. This is cached in `marginTypePreferences` Map.
 
