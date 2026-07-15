@@ -7,6 +7,7 @@ Orderly Network is an omnichain orderbook DEX infrastructure that supports white
 ## API Documentation
 
 - **Official API Documentation**: https://orderly.network/docs/build-on-omnichain/evm-api/introduction
+- **Edit Order Contract**: https://orderly.network/docs/build-on-omnichain/restful-api/private/edit-order
 - **Mainnet host note**: Current docs advertise `https://api.orderly.org`, while this integration intentionally remains on the still-live `https://api-evm.orderly.org` EVM host. Treat a host migration as a separately verified routing change, not a documentation-only cleanup.
 
 ## File Structure
@@ -226,7 +227,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 
 1. **Place**: `POST /v1/order` with `order_type`, `order_quantity`, `order_price` (limit only), `side`, `reduce_only`, `order_tag`, `broker_id`
 2. **Large order splitting** (`OrderlyExchange.placeOrder`): If `amount > market.limits.amount.max`, the order is split into equal lots plus a remainder lot. Uses `mapSeries` for sequential placement.
-3. **Update** (`OrderlyExchange.updateOrder`): Uses a **cancel-and-replace** pattern. Commented-out PUT endpoint code exists but is not used.
+3. **Update** (`OrderlyExchange.updateOrder`): Uses the documented native `PUT /v1/order` edit route for exactly reconciled, REST-proven, pending zero-fill ordinary GTC LIMIT rows. The request carries required `order_id`/`symbol`/`order_type`/`side` identity plus only the changed `order_price` or `order_quantity`, requires `success: true` with `data.status: 'EDIT_SENT'`, and returns the unchanged ID. Any missing or ambiguous ID, fill, precision, visibility, reduce-only, time-in-force, trigger, or CROSS-margin provenance fails before a write; there is no cancel-and-replace fallback.
 4. **Cancel**: `DELETE /v1/order?order_id=<id>&symbol=<symbol>` - parameters sent as query string
 
 ### Algo Orders (TP/SL)
@@ -323,7 +324,7 @@ Testnet selection is via `options.testnet` boolean.
 4. **Sibling order management**: When placing a new TP or SL, the code checks for existing sibling orders. If found, it cancels the parent algo order and re-places both together. This prevents orphaned TP/SL orders.
 5. **Cancel algo order re-creates sibling**: `OrderlyExchange.cancelAlgoOrder` automatically re-creates the sibling when cancelling one side of a TP/SL pair.
 6. **Bulk cancellation is direct and complete**: `cancelAllOrders` and `cancelSymbolOrders` sequentially await both normal (`DELETE /v1/orders`) and algo (`DELETE /v1/algo/orders`) paths. They must not call `cancelAlgoOrder`, because that helper re-creates a TP/SL sibling; each path is attempted even if the other fails.
-7. **Update order uses cancel-and-replace**: `OrderlyExchange.updateOrder` cancels and replaces limit orders; algo orders use `PUT /v1/algo/order` directly.
+7. **Regular updates are strict stable-ID native edits**: `OrderlyExchange.updateOrder` sends `PUT /v1/order` only for an exactly reconciled REST `NEW` zero-fill ordinary GTC LIMIT row with safe canonical ID, raw symbol/type/side parity, explicit boolean `reduce_only`, full visibility, aligned price/quantity precision, and `margin_mode: 'CROSS'`. It sends required identity plus only the changed price or quantity and accepts only `success: true` + `EDIT_SENT`. Unsupported, partial, no-op, malformed, WS-only, isolated, or ambiguous regular rows fail before any write and never cancel/recreate. The established algo child update remains a separate `PUT /v1/algo/order` path.
 8. **White-label `order_tag`**: Each white-label variant uses a different `order_tag` determined by `this.orderlyExchangeName` in `placeOrder()`.
 9. **Large order splitting**: Orders exceeding `market.limits.amount.max` are automatically split into `Math.ceil(amount / maxSize)` lots plus a remainder.
 10. **Algo order already cancelled**: If algo cancel fails with an "already canceled" message, `cancelAlgoOrder` updates the local status to Canceled without throwing.
@@ -344,6 +345,7 @@ Testnet selection is via `options.testnet` boolean.
 - **Fetch fallbacks**: Most fetch methods (tickers, positions, limit orders, algo orders) catch errors and return the existing store state or empty array rather than throwing.
 - **Startup leverage fetch**: The intentionally fire-and-forget account-leverage request has an explicit rejection handler that emits the failure while startup continues.
 - **PlaceOrder errors**: `OrderlyExchange.placeOrder` logs errors via `emitAndLogError` and rethrows them to the caller.
+- **Native regular amend errors**: Every regular-order preflight failure emits and throws before a write. Signing/network errors and non-`EDIT_SENT` responses are emitted and rethrown; they never fall back to cancel/recreate.
 
 ## Tick Loop
 
@@ -354,7 +356,7 @@ Testnet selection is via `options.testnet` boolean.
 
 ## Testing / Validation
 
-Fresh deterministic Orderly regressions live under `src/__tests__/audit-regressions/`. They cover bulk algo cancellation, private-WS cumulative fills, per-symbol leverage caps, the 100x account clamp and metadata, orderbook snapshot retry, startup leverage error observation, and fail-closed trailing-stop placement. They do not make network calls or place live orders.
+Fresh deterministic Orderly regressions live under `src/__tests__/audit-regressions/`. They cover bulk algo cancellation, private-WS cumulative fills, per-symbol leverage caps, the 100x account clamp and metadata, orderbook snapshot retry, startup leverage error observation, fail-closed trailing-stop placement, and the stable-ID regular LIMIT amend boundary (exact price/quantity payloads, response handling, no cancel/recreate, explicit-false mapping, and strict prewrite rejections). They do not make network calls or place live orders.
 
 ## CCXT Reference
 

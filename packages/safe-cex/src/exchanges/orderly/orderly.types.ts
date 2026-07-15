@@ -121,3 +121,22 @@ export type PLACE_ORDER_RESPONSE = {
     client_order_id: number;
   };
 };
+
+export type EDIT_ORDER_REQUEST = {
+  order_id: string;
+  symbol: string;
+  order_type: 'LIMIT';
+  side: 'BUY' | 'SELL';
+  order_price?: number;
+  order_quantity?: number;
+};
+
+export type EDIT_ORDER_RESPONSE = {
+  success: boolean;
+  timestamp?: number;
+  code?: number;
+  message?: string;
+  data?: {
+    status?: string;
+  };
+};

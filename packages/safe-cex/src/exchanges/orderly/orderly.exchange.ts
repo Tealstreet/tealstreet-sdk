@@ -19,6 +19,7 @@ import {
   OrderBook,
   OrderSide,
   OrderStatus,
+  OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
   Position,
@@ -26,7 +27,6 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
-  Writable,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
@@ -44,6 +44,8 @@ import {
   GRAFANA_ENDPOINTS_PERIODIC,
   ORDER_SIDE,
   ORDER_TYPE,
+  EDIT_ORDER_REQUEST,
+  EDIT_ORDER_RESPONSE,
   PLACE_ORDER_RESPONSE,
 } from './orderly.types';
 import { normalizeSymbol, reverseSymbol } from './orderly.utils';
@@ -569,39 +571,176 @@ export class OrderlyExchange extends BaseExchange {
       return this.updateAlgoOrder({ order, update });
     }
 
-    const newOrder: Writable<PlaceOrderOpts> = {
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      price: order.price,
-      amount: order.amount,
-      reduceOnly: order.reduceOnly || false,
+    const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+    const fail = (reason: string): never => {
+      const err = new Error(`Orderly native amend ${reason}`);
+      this.emitAndLogError(err);
+      throw err;
     };
 
-    if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
-    if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;
+    const updateKeys = Object.keys(update);
+    if (updateKeys.length !== 1 || (updateKeys[0] !== 'price' && updateKeys[0] !== 'amount')) {
+      fail('requires exactly one price or quantity change');
+    }
 
-    if ('price' in update) newOrder.price = update.price;
-    if ('amount' in update) newOrder.amount = update.amount;
+    const current =
+      this.store.orders.find((candidate) => candidate.id === order.id && candidate.symbol === order.symbol) ??
+      fail('requires an exactly reconciled store order');
 
-    await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    const stableFields: ReadonlyArray<keyof Pick<
+      Order,
+      'status' | 'symbol' | 'type' | 'side' | 'price' | 'amount' | 'filled' | 'remaining' | 'reduceOnly'
+    >> = ['status', 'symbol', 'type', 'side', 'price', 'amount', 'filled', 'remaining', 'reduceOnly'];
+    if (stableFields.some((field) => !Object.is(current[field], order[field]))) {
+      fail('requires the submitted order to match the reconciled store row');
+    }
 
-    // const payload: Record<string, any> = { order_id: +order.id };
-    // if ('price' in update && +update.price !== +order.price) payload.order_price = `${update.price}`;
-    // if ('amount' in update && +update.amount !== +order.amount) payload.order_quantity = `${update.amount}`;
-    // payload.side = order.side === OrderSide.Buy ? 'BUY' : 'SELL';
-    // payload.order_type = 'LIMIT';
-    // payload.symbol = reverseSymbol(order.symbol);
-    // // payload.reduce_only = Boolean(order.reduceOnly);
+    if (
+      current.status !== OrderStatus.Open ||
+      current.type !== OrderType.Limit ||
+      current.parentId != null ||
+      current.close === true ||
+      current.takeProfit != null ||
+      current.stopLoss != null ||
+      (current.timeInForce != null && current.timeInForce !== OrderTimeInForce.GoodTillCancel)
+    ) {
+      fail('supports only ordinary open GTC LIMIT orders');
+    }
 
-    // try {
-    //   await this.xhr.put(`${ENDPOINTS.UPDATE_ORDER}`, payload);
-    //   return [order.id];
-    // } catch (err: any) {
-    //   this.emitAndLogError(err?.response?.data?.message || err?.message);
-    //   return [];
-    // }
+    const market = this.store.marketsBySymbol[current.symbol];
+    if (!market) fail('requires reconciled market precision');
+    if (
+      !Number.isFinite(market.precision.price) ||
+      market.precision.price <= 0 ||
+      !Number.isFinite(market.precision.amount) ||
+      market.precision.amount <= 0
+    ) {
+      fail('requires valid market precision');
+    }
+
+    const raw = current.info;
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+      fail('requires a complete REST order row');
+    }
+
+    const requiredRestFields = [
+      'order_id',
+      'symbol',
+      'type',
+      'side',
+      'status',
+      'price',
+      'quantity',
+      'total_executed_quantity',
+      'visible_quantity',
+      'reduce_only',
+      'margin_mode',
+    ];
+    if (requiredRestFields.some((field) => !own(raw, field))) {
+      fail('requires explicit REST identity, fill, visibility, reduce-only, and CROSS-margin provenance');
+    }
+
+    const rawOrderId = raw.order_id;
+    const canonicalRawOrderId =
+      typeof rawOrderId === 'number'
+        ? Number.isSafeInteger(rawOrderId) && rawOrderId > 0
+          ? String(rawOrderId)
+          : null
+        : typeof rawOrderId === 'string' && /^[1-9]\d*$/.test(rawOrderId)
+          ? rawOrderId
+          : null;
+
+    const expectedSide = current.side === OrderSide.Buy ? 'BUY' : current.side === OrderSide.Sell ? 'SELL' : null;
+    const stableOrderId = canonicalRawOrderId ?? fail('requires exact immutable order identity parity');
+    if (
+      stableOrderId !== current.id ||
+      current.id !== order.id ||
+      raw.symbol !== reverseSymbol(current.symbol) ||
+      raw.type !== 'LIMIT' ||
+      raw.side !== expectedSide
+    ) {
+      fail('requires exact immutable order identity parity');
+    }
+
+    if (raw.status !== 'NEW') fail('requires an unfilled pending REST order');
+    if (raw.reduce_only !== current.reduceOnly || typeof raw.reduce_only !== 'boolean') {
+      fail('requires explicit reduce-only parity');
+    }
+    if (raw.margin_mode !== 'CROSS') fail('supports only proven CROSS-margin orders');
+
+    const executionFields = [
+      raw.total_executed_quantity,
+      ...(own(raw, 'executed_quantity') ? [raw.executed_quantity] : []),
+      ...(own(raw, 'executed') ? [raw.executed] : []),
+    ];
+    if (
+      executionFields.some((value) => typeof value !== 'number' || !Object.is(value, 0)) ||
+      !Object.is(current.filled, 0) ||
+      current.remaining !== current.amount
+    ) {
+      fail('requires exact zero-fill state');
+    }
+
+    if (
+      typeof raw.price !== 'number' ||
+      !Number.isFinite(raw.price) ||
+      raw.price <= 0 ||
+      typeof raw.quantity !== 'number' ||
+      !Number.isFinite(raw.quantity) ||
+      raw.quantity <= 0 ||
+      typeof raw.visible_quantity !== 'number' ||
+      !Number.isFinite(raw.visible_quantity) ||
+      raw.visible_quantity !== raw.quantity ||
+      raw.price !== current.price ||
+      raw.quantity !== current.amount ||
+      adjust(raw.price, market.precision.price) !== raw.price ||
+      adjust(raw.quantity, market.precision.amount) !== raw.quantity
+    ) {
+      fail('requires exact ordinary LIMIT price, quantity, visibility, and precision parity');
+    }
+
+    if (
+      (own(raw, 'time_in_force') && raw.time_in_force !== 'GTC') ||
+      ['algo_order_id', 'root_algo_order_id', 'trigger_price', 'algo_type'].some(
+        (field) => own(raw, field) && raw[field] != null,
+      )
+    ) {
+      fail('cannot preserve an unsupported time-in-force or trigger shape');
+    }
+
+    const change = updateKeys[0] as 'price' | 'amount';
+    const requested = change === 'price' ? (update as { price: number }).price : (update as { amount: number }).amount;
+    const step = change === 'price' ? market.precision.price : market.precision.amount;
+    if (typeof requested !== 'number' || !Number.isFinite(requested) || requested <= 0) {
+      fail('requires a finite positive amended value');
+    }
+    const amended = adjust(requested, step);
+    if (amended <= 0 || amended !== requested) {
+      fail('requires an amended value aligned exactly to market precision');
+    }
+    if (change === 'amount' && (amended < market.limits.amount.min || amended > market.limits.amount.max)) {
+      fail('quantity is outside the reconciled market limits');
+    }
+    if (amended === current[change]) fail('requires a real change after market-precision validation');
+
+    const payload: EDIT_ORDER_REQUEST = {
+      order_id: stableOrderId,
+      symbol: raw.symbol,
+      order_type: raw.type,
+      side: raw.side,
+      ...(change === 'price' ? { order_price: amended } : { order_quantity: amended }),
+    };
+
+    try {
+      const { data } = await this.xhr.put<EDIT_ORDER_RESPONSE>(ENDPOINTS.UPDATE_ORDER, payload);
+      if (data?.success !== true || data.data?.status !== 'EDIT_SENT') {
+        throw new Error(data?.message || `Orderly native amend returned ${data?.data?.status || 'no status'}`);
+      }
+      return [current.id];
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      throw err;
+    }
   };
 
   updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
@@ -655,7 +794,7 @@ export class OrderlyExchange extends BaseExchange {
       side: ORDER_SIDE[o.side],
       price: o.price || o.order_price,
       amount: quantity,
-      reduceOnly: v(o, 'reduce_only') || v(o, 'reduceOnly'),
+      reduceOnly: o.reduce_only ?? o.reduceOnly,
       filled: executed,
       remaining: subtract(quantity, executed),
       lastUpdate: virtualClock.getCurrentTimeMs(),
