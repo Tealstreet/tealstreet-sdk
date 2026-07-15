@@ -13,6 +13,7 @@ This directory contains the BingX exchange integration for Tealstreet, targeting
 
 - **BingX API Docs v3 (Swap Market Data - Symbols)**: [https://bingx-api.github.io/docs-v3/#/en/Swap/Market%20Data/USDT-M%20Perp%20Futures%20symbols](https://bingx-api.github.io/docs-v3/#/en/Swap/Market%20Data/USDT-M%20Perp%20Futures%20symbols)
 - **BingX API Docs v3 (Swap Market Data - Recent Trades List)**: [https://bingx-api.github.io/docs-v3/#/en/Swap/Market%20Data/Recent%20Trades%20List](https://bingx-api.github.io/docs-v3/#/en/Swap/Market%20Data/Recent%20Trades%20List)
+- **BingX API Docs v3 (Modify Order)**: [https://bingx-api.github.io/docs-v3/#/en/swap/Trades%20Endpoints/Modify%20Order](https://bingx-api.github.io/docs-v3/#/en/swap/Trades%20Endpoints/Modify%20Order)
 - **BingX API Docs v3 (Changelog)**: [https://bingx-api.github.io/docs-v3/#/en/changes/logs](https://bingx-api.github.io/docs-v3/#/en/changes/logs)
 - **Legacy Swap V2 docs (still useful for parity checks)**: [https://bingx-api.github.io/docs/#/swapV2/introduce](https://bingx-api.github.io/docs/#/swapV2/introduce)
 - **Legacy authentication guide**: [https://bingx-api.github.io/docs/#/swapV2/authentication.html](https://bingx-api.github.io/docs/#/swapV2/authentication.html)
@@ -133,7 +134,7 @@ Each step checks `this.isDisposed` to allow early exit.
 | `MARGIN_MODE`          | `/openApi/swap/v2/trade/marginType`    | GET/POST    | Get/set margin type                |
 | `OPEN_ORDERS`          | `/openApi/swap/v2/trade/openOrders`    | GET         | Fetch open orders                  |
 | `ORDER`                | `/openApi/swap/v2/trade/order`         | POST/DELETE | Place/cancel single order          |
-| `CANCEL_REPLACE`       | `/openApi/swap/v1/trade/cancelReplace` | POST        | Atomic order replacement           |
+| `AMEND_ORDER`          | `/openApi/swap/v1/trade/amend`          | POST        | Stable-ID LIMIT quantity amendment |
 | `BATCH_ORDERS`         | `/openApi/swap/v2/trade/batchOrders`   | POST        | Batch order placement              |
 | `CANCEL_SYMBOL_ORDERS` | `/openApi/swap/v2/trade/allOpenOrders` | DELETE      | Cancel all orders for a symbol     |
 | `KLINE`                | `/openApi/swap/v3/quote/klines`        | GET         | Kline/candlestick data             |
@@ -322,13 +323,28 @@ Implementation behavior:
 
 **Note**: There is a legacy `placeOrderBatchOld()` method that used actual batch placement, but it is no longer in use.
 
-### Order Update (Atomic Cancel-Replace)
+### Order Update (Native Amend, Fail-Closed)
 
-All order updates use BingX's native atomic `cancelReplace` endpoint with `cancelReplaceMode: STOP_ON_FAILURE`:
+`updateOrder()` uses BingX's stable-ID `POST /openApi/swap/v1/trade/amend`
+only for amount changes to exactly reconciled, provably unfilled LIMIT rows:
 
-- The replacement is submitted only if cancellation succeeds, avoiding the prior unprotected cancel/place gap.
-- Full-position stop orders preserve `close: true` and omit quantity.
-- Multi-payload replacements fail before submission because one old order cannot atomically map to several new orders.
+- The raw pending row must reconcile order id, symbol, LIMIT type, side,
+  position side, reduce-only, TIF/post-only, original quantity, zero executed
+  quantity, and NEW/PENDING status.
+- Both the internal and raw row must prove `filled === 0` and
+  `amount === remaining`. BingX allows amendments after partial fills but does
+  not define whether `quantity` means the new total or the new remaining size,
+  so partially filled rows fail before a write.
+- BingX currently documents quantity-only amendment. Price edits, combined
+  price/quantity edits, trigger orders, close-position orders, attached TP/SL,
+  no-op normalized quantities, and incomplete rows fail before a write.
+- The response must confirm the same order id, symbol, and amended quantity.
+  Existing private-WS/REST reconciliation remains authoritative; no
+  optimistic local mutation is made.
+- There is deliberately no `cancelReplace` or cancel/recreate fallback.
+  `cancelReplace` returns a new identity and current readback cannot reconstruct
+  every immutable attribute safely; price editing remains gated until BingX
+  supports it in-place or the missing provenance becomes authoritative.
 
 ### Order Cancellation
 
@@ -505,7 +521,7 @@ Position mode (hedge/one-way) is cached in `_accountPositionMode` to avoid repea
 
 8. **`TRIGGER_MARKET` type**: Used instead of `STOP_MARKET`/`TAKE_PROFIT_MARKET` when no corresponding position exists (position isn't open yet).
 
-9. **Update order**: Native atomic `cancelReplace` with `STOP_ON_FAILURE`. Full-position stop replacements preserve amount `0`/`close: true`, so the replacement remains a close-all trigger without inventing a stale position quantity.
+9. **Update order**: Native stable-ID `amend` is restricted to exactly reconciled, unfilled LIMIT quantity changes. Partial-fill sizing and every price/trigger edit fail closed; no `cancelReplace` fallback is retained.
 
 10. **Trailing stop contract**: Resolves the internal symbol through `marketsBySymbol`, sends the exchange market id, and derives BingX's fractional `priceRate` (`0.05` means 5%). Missing market/ticker/position inputs fail before submission and emit an exchange error.
 

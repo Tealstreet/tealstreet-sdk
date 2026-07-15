@@ -36,7 +36,6 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
-  Writable,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
@@ -923,47 +922,142 @@ export class BingxExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    const isStopOrTP = order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit;
-    const isFullPositionStop = isStopOrTP && (order.close || !order.amount || order.amount < 0.0001);
-
-    const newOrder: Writable<PlaceOrderOpts> = {
-      ...order,
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      price: order.price,
-      amount: isFullPositionStop ? 0 : order.amount,
-      ...(isFullPositionStop ? { close: true } : {}),
-      ...(order.reduceOnly ? { reduceOnly: true } : {}),
-    };
-
-    if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
-    if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;
-
-    if ('price' in update) newOrder.price = update.price;
-    if ('amount' in update) {
-      newOrder.amount = update.amount;
-      newOrder.close = !update.amount;
-    }
-
-    const payloads = await this.formatCreateOrder(newOrder);
-    if (payloads.length !== 1) {
-      const message = 'BingX atomic order replacement requires exactly one replacement payload';
+    const rejectPreflight = (message: string): never => {
       this.emitAndLogError(message);
       throw new Error(message);
+    };
+
+    if (order.status !== OrderStatus.Open || order.type !== OrderType.Limit) {
+      return rejectPreflight('BingX native amendment supports only exactly reconciled open LIMIT orders');
+    }
+    if (!('amount' in update) || 'price' in update) {
+      return rejectPreflight(
+        'BingX native amendment cannot change price; cancelReplace would replace the stable order identity',
+      );
+    }
+    if (
+      order.timeInForce !== OrderTimeInForce.GoodTillCancel &&
+      order.timeInForce !== OrderTimeInForce.PostOnly
+    ) {
+      return rejectPreflight('BingX native amendment requires a reconciled GTC or PostOnly time in force');
+    }
+    if (order.close) {
+      return rejectPreflight('BingX native amendment does not support close-position orders');
+    }
+
+    const market = this.store.marketsBySymbol[order.symbol];
+    if (!market) {
+      return rejectPreflight(`Market ${order.symbol} not found`);
+    }
+
+    const info = order.info;
+    const rawOrderId = info?.orderId ?? info?.i;
+    const rawSymbol = info?.symbol ?? info?.s;
+    const rawType = String(info?.type ?? info?.o ?? '').toUpperCase();
+    const rawSide = String(info?.side ?? info?.S ?? '').toUpperCase();
+    const rawPositionSide = String(info?.positionSide ?? info?.ps ?? '').toUpperCase();
+    const rawStatus = String(info?.status ?? info?.X ?? '').toUpperCase();
+    const rawQuantity = Number(info?.origQty ?? info?.q);
+    const rawExecutedQuantity = Number(info?.executedQty ?? info?.z);
+    const rawReduceOnlyValue = info?.reduceOnly ?? info?.R;
+    const rawReduceOnly =
+      rawReduceOnlyValue === true || rawReduceOnlyValue === 'true'
+        ? true
+        : rawReduceOnlyValue === false || rawReduceOnlyValue === 'false'
+          ? false
+          : undefined;
+
+    if (
+      rawOrderId === undefined ||
+      String(rawOrderId) !== order.id ||
+      typeof rawSymbol !== 'string' ||
+      rawSymbol.replace(/-/g, '') !== order.symbol ||
+      rawType !== 'LIMIT' ||
+      ORDER_SIDE[rawSide] !== order.side ||
+      !['BOTH', 'LONG', 'SHORT'].includes(rawPositionSide)
+    ) {
+      return rejectPreflight(`BingX cannot safely amend ${order.id}: immutable order identity is not reconciled`);
+    }
+    if (rawReduceOnly === undefined || rawReduceOnly !== order.reduceOnly) {
+      return rejectPreflight(`BingX cannot safely amend ${order.id}: reduce-only state is not reconciled`);
+    }
+
+    const rawPostOnlyValue = info?.postOnly;
+    const rawPostOnly =
+      rawPostOnlyValue === true || rawPostOnlyValue === 'true'
+        ? true
+        : rawPostOnlyValue === false || rawPostOnlyValue === 'false'
+          ? false
+          : undefined;
+    const rawTimeInForceValue = String(info?.timeInForce ?? info?.f ?? '');
+    const parsedRawTimeInForce = TIME_IN_FORCE[rawTimeInForceValue];
+    const rawTimeInForce = rawPostOnly === true ? OrderTimeInForce.PostOnly : parsedRawTimeInForce;
+    if (
+      parsedRawTimeInForce === undefined ||
+      rawTimeInForce === undefined ||
+      rawTimeInForce !== order.timeInForce
+    ) {
+      return rejectPreflight(`BingX cannot safely amend ${order.id}: time in force is not reconciled`);
+    }
+
+    const adjustedOrderAmount = adjust(order.amount, market.precision.amount);
+    const adjustedRemaining = adjust(order.remaining, market.precision.amount);
+    const adjustedRawQuantity = adjust(rawQuantity, market.precision.amount);
+    if (
+      !['NEW', 'PENDING'].includes(rawStatus) ||
+      order.filled !== 0 ||
+      rawExecutedQuantity !== 0 ||
+      adjustedRemaining !== adjustedOrderAmount ||
+      adjustedRawQuantity !== adjustedOrderAmount
+    ) {
+      return rejectPreflight(
+        'BingX partially filled amendment is disabled until quantity is documented as total or remaining size',
+      );
+    }
+
+    const hasAttachedProtection = (value: unknown) => {
+      if (!value || typeof value !== 'object') return false;
+      const protection = value as Record<string, unknown>;
+      return Boolean(protection.type) || Number(protection.stopPrice) > 0 || Number(protection.quantity) > 0;
+    };
+    if (
+      order.takeProfit !== undefined ||
+      order.stopLoss !== undefined ||
+      hasAttachedProtection(info?.takeProfit) ||
+      hasAttachedProtection(info?.stopLoss)
+    ) {
+      return rejectPreflight('BingX native amendment cannot prove attached TP/SL quantity preservation');
+    }
+
+    const adjustedQuantity = adjust(update.amount, market.precision.amount);
+    if (!Number.isFinite(adjustedQuantity) || adjustedQuantity <= 0) {
+      return rejectPreflight('BingX amended order quantity must be greater than zero');
+    }
+    if (adjustedQuantity < market.limits.amount.min || adjustedQuantity > market.limits.amount.max) {
+      return rejectPreflight('BingX amended order quantity is outside the reconciled market limits');
+    }
+    if (adjustedQuantity === adjustedOrderAmount) {
+      return rejectPreflight('BingX amended order quantity must change after market-precision normalization');
     }
 
     try {
-      const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_REPLACE, {
-        ...payloads[0],
-        cancelOrderId: order.id,
-        cancelReplaceMode: 'STOP_ON_FAILURE',
+      const { data } = await this.xhr.post(ENDPOINTS.AMEND_ORDER, {
+        orderId: order.id,
+        quantity: adjustedQuantity,
+        symbol: market.id,
       });
-      if (data.code !== 0 || data?.data?.cancelResult !== 'SUCCESS' || data?.data?.newOrderResult !== 'SUCCESS') {
-        throw new Error(data.msg || 'BingX atomic cancel-and-replace failed');
+      if (data.code !== 0) {
+        throw new Error(data.msg || `BingX amend order failed with code ${data.code}`);
+      }
+      if (
+        String(data?.data?.orderId ?? '') !== order.id ||
+        String(data?.data?.symbol ?? '').replace(/-/g, '') !== order.symbol ||
+        adjust(Number(data?.data?.quantity), market.precision.amount) !== adjustedQuantity
+      ) {
+        throw new Error(`BingX amend response did not confirm order ${order.id}`);
       }
 
-      return [String(data.data.newOrderId)];
+      return [order.id];
     } catch (error: any) {
       const message = error?.response?.data?.msg || error?.message || String(error);
       this.emitAndLogError(message);

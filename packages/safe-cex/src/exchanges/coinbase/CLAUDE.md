@@ -79,13 +79,51 @@ and fails closed on non-null values. These upstream contradictions must be
 resolved by a Coinbase schema correction or approved account capture before
 write-path or reconciliation cutover.
 
+The fourth follow-on is implemented in `coinbase.starbase-orders.ts`. It is an
+inert, transport-free order-write contract layer for the published
+`private/buy`, `private/sell`, `private/edit`, `private/cancel`, and
+`private/close_position` methods. Exact builders use lower-case gateway order
+and time-in-force values and preserve `{BASE}-PERP-INTX` as the saved symbol
+while sending `{BASE}_USDC-PERPETUAL`. The technical migration guide takes
+precedence for new request construction and explicitly defines `amount` as
+base coin; every place-order builder therefore requires a typed total-base
+amount whose source is that guide. The inherited OpenAPI parameter prose still
+calls perpetual `amount` USD, so contract-unit conversion and all size edits
+remain typed blockers instead of inferring total-versus-remaining behavior for
+partially filled orders.
+
+The guide's OTOCO example also publishes a `take_limit` child with `price` and
+`trigger` but no `trigger_price`; that more specific migration example takes
+precedence over the inherited generic trigger prose for this exact child shape.
+Stop children and `take_market` still require the OpenAPI `trigger_price`.
+Top-level `take_limit` follows the generic OpenAPI request contract and still
+requires `trigger_price`; the omission is scoped only to that specific OTOCO
+child example.
+
+The request enum admits `market_limit`, but the published response `order_type`
+enum does not. The method parameter `valid_until` is an integer timestamp, but
+Coinbase publishes neither its unit nor a range. Both remain typed write gates;
+the layer does not claim a decodable market-limit lifecycle or emit a guessed
+milliseconds/seconds deadline.
+
+Starbase `order_id` is the only canonical write identity. Labels are decoded as
+non-canonical display/correlation metadata and the contract layer intentionally
+does not expose `edit_by_label` or `cancel_by_label`. A triggered stop-limit's
+published `trigger_order_id` is modeled as its pre-trigger predecessor;
+`oto_order_ids` are the primary OTOCO order's child IDs; and
+`primary_order_id` links a child back to its primary. No missing lifecycle IDs
+are manufactured. Filled write responses and returned trades remain parity
+blocked until Coinbase resolves the response amount-unit conflict. This module
+is not imported by the active exchange, WebSockets, API factory, routing, or
+metadata.
+
 `private/get_user_trades_by_order` is also deferred: its published response
 example contains a trade array, but `PrivateGetUserTradesByOrderResponse`
 defines no `result` property. The inert reader uses the coherent
 `private/get_user_trades_by_currency*` response family until Coinbase publishes
 an exact by-order result schema.
 
-All three modules are intentionally inert: no current exchange, WebSocket, API
+All four modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
 and all normalization blockers are resolved. The public mapper supports only schema-enumerated BTC/ETH
@@ -122,6 +160,7 @@ last-known-good account, positions, orders, or trade page.
 | `coinbase.starbase.ts`     | Inert Starbase JSON-RPC, auth-refresh, endpoint, HTTP transport, and heartbeat primitives. Not wired to active Coinbase traffic.                                        |
 | `coinbase.starbase-public.ts` | Inert Starbase instrument/public-data normalization, public request/subscription contracts, saved-symbol compatibility, and sequenced-book recovery. Not routed.        |
 | `coinbase.starbase-private.ts` | Inert Starbase read-only account/position/order/trade request contracts, strict gateway DTOs, last-known-good snapshot holder, and typed safe-cex parity gates. Not routed. |
+| `coinbase.starbase-orders.ts` | Inert Starbase order-write builders, strict result decoders, canonical-ID lifecycle links, and typed amount-unit parity gates. No transport and not routed. |
 
 ## Authentication
 
