@@ -149,13 +149,39 @@ raw-frame parser. Subscription replay is an injected callback so it does not
 choose between the conflicting private-subscription examples/contracts in the
 current schema. No active runtime imports the controller.
 
+The seventh follow-on is implemented in `coinbase.starbase-cutover.ts`. It is
+an inert, data-only cutover assessment. Its enforcement-facing selector accepts
+no arguments: callers cannot inject evidence or claim that an account is INTX.
+It consumes only repository-owned evidence and remains explicitly product-unbound
+until a future integration derives INTX identity from a trusted runtime
+portfolio. Therefore spot, CFM, and unclassified traffic all remain on the
+existing Coinbase paths; public reads, private reads, and writes stay legacy.
+
+The only synthetic evaluator is named `ForTestsOnly`. It can describe an atomic
+HTTP-only comparison plan for a test-classified INTX portfolio after the public
+and private HTTP response contracts, HTTP authentication contract, and
+credentialed HTTP authentication evidence are ready. That plan consumes only
+JSON-RPC method results and always disables writes. It contains no WebSocket
+session, subscriptions, or private notifications.
+
+WebSocket session activation and the unpublished private notification envelope
+are represented by separate, closed gates. Deterministic repository facts use
+`implemented | not-implemented`; credentialed/live facts use
+`verified | unverified`, so implemented code cannot be mistaken for live proof.
+The HTTP-shadow, WebSocket, and authoritative runtime activation flags are all
+literal `false`. Unit parity, credentialed HTTP read parity, credentialed
+WebSocket lifecycle, the notification envelope, write canary, and cutover
+runbook remain unresolved. Enabling anything requires trusted portfolio binding
+and a reviewed code change, not caller input or configuration. The assessment
+has no endpoint, transport, store, registry, metadata, or routing import.
+
 `private/get_user_trades_by_order` is also deferred: its published response
 example contains a trade array, but `PrivateGetUserTradesByOrderResponse`
 defines no `result` property. The inert reader uses the coherent
 `private/get_user_trades_by_currency*` response family until Coinbase publishes
 an exact by-order result schema.
 
-All six modules are intentionally inert: no current exchange, WebSocket, API
+All seven modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
 and all normalization blockers are resolved. The public mapper supports only
@@ -167,9 +193,8 @@ fields instead of manufacturing a safe-cex `Market`. Coinbase has not yet
 published the inbound `heartbeat`/`test_request` notification envelope in its
 Starbase OpenAPI or AsyncAPI schema, so the controller accepts an
 already-classified signal and must not grow a guessed wire-frame parser. Public
-stream mappers
-likewise start at the AsyncAPI channel payload's published `{ data }` shape,
-not a guessed outer notification envelope.
+stream mappers likewise start at the AsyncAPI channel payload's published
+`{ data }` shape, not a guessed outer notification envelope.
 
 The private read layer currently consumes only JSON-RPC method results.
 Although AsyncAPI lists private portfolio/order/position channels, Coinbase has
@@ -203,6 +228,7 @@ resolve the unlabelled PnL-unit blocker.
 | `coinbase.starbase-orders.ts` | Inert Starbase order-write builders, strict result decoders, canonical-ID lifecycle links, and typed amount-unit parity gates. No transport and not routed. |
 | `coinbase.starbase-session.ts` | Inert Starbase Cancel on Disconnect request/response contracts, including explicit WebSocket-only mutation metadata. No transport and not routed. |
 | `coinbase.starbase-ws-session.ts` | Inert unified-WebSocket activation, re-auth, heartbeat, Cancel on Disconnect proof, subscription-replay ordering, and rate-limit backoff gate. No socket, classifier, routing, or active import. |
+| `coinbase.starbase-cutover.ts` | Inert product-unbound cutover assessment: repository-owned evidence, test-only HTTP JSON-RPC shadow evaluation, separately closed WebSocket gates, legacy authority, and compile-time-disabled activation. No active import. |
 
 ## Authentication
 
