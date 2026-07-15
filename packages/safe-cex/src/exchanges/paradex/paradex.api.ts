@@ -89,7 +89,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     // Public endpoints that don't require authentication
     // NOTE: old /ohlcv/{market} requires auth, but new /markets/klines is public
-    const publicEndpoints = ['/trades', '/funding', '/summary', '/orderbook'];
+    const publicEndpoints = ['/trades', '/funding', '/summary', '/orderbook', '/tradingview'];
     const isPublic = publicEndpoints.some((endpoint) => url.includes(endpoint));
 
     // /markets is public when not accessing account-specific endpoints

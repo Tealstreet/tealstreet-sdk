@@ -139,8 +139,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       clearTimeout(this.pingInterval);
       this.pingInterval = undefined;
     }
-    // Call parent's dispose (safely handles if it doesn't exist)
-    this.ws?.close?.();
+    super.dispose();
   };
 
   private handleBBOUpdate = throttle(

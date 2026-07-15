@@ -2,6 +2,7 @@ import type { Axios } from 'axios';
 import type { Store } from '../../store/store.interface';
 import type {
   CryptocomBalanceSummary,
+  CryptocomAccountsResponse,
   CryptocomBook,
   CryptocomCandlestick,
   CryptocomInstrument,
@@ -29,6 +30,7 @@ import {
   OrderBook,
   OrderSide,
   OrderStatus,
+  OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
@@ -43,7 +45,7 @@ import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './cryptocom.api';
-import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC } from './cryptocom.types';
+import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, mapCandlestickInterval } from './cryptocom.types';
 import { CryptocomPrivateWebSocket } from './cryptocom.ws-private';
 import { CryptocomPublicWebSocket } from './cryptocom.ws-public';
 
@@ -78,15 +80,9 @@ export class CryptocomExchange extends BaseExchange {
   }
 
   getAccount = async () => {
-    // `private/get-account-summary` is broken on v1: it always returns
-    // 50001 ERR_INTERNAL regardless of params (probed with empty + currency
-    // + subaccount_id). Don't call it. The only user-scoped id v1 surfaces
-    // is `account_id` on position rows from `private/get-positions`, which
-    // is empty for accounts without open positions and not worth a separate
-    // request. Return a stable identifier derived from the API key prefix
-    // so the labelling code has something non-empty to render.
+    const { data } = await this.xhr.post<CryptocomAccountsResponse>(ENDPOINTS.ACCOUNTS, {});
     return {
-      userId: this.options.key ? `cdc-${this.options.key.slice(0, 8)}` : 'unknown',
+      userId: data.this_account.uuid,
       affiliateId: null,
     };
   };
@@ -297,7 +293,7 @@ export class CryptocomExchange extends BaseExchange {
     try {
       const params: any = {
         instrument_name: opts.symbol,
-        timeframe: opts.interval,
+        timeframe: mapCandlestickInterval(opts.interval),
       };
 
       if (opts.from) params.start_ts = opts.from;
@@ -354,8 +350,11 @@ export class CryptocomExchange extends BaseExchange {
   fetchOrders = async (): Promise<Order[]> => {
     try {
       // v1 returns `{ result: { data: [...] } }`; interceptor unwraps `result`.
-      const { data } = await this.xhr.post<{ data: CryptocomOrder[] }>(ENDPOINTS.OPEN_ORDERS, {});
-      return (data.data || []).map((o) => this.mapOrder(o));
+      const [{ data: regular }, { data: advanced }] = await Promise.all([
+        this.xhr.post<{ data: CryptocomOrder[] }>(ENDPOINTS.OPEN_ORDERS, {}),
+        this.xhr.post<{ data: CryptocomOrder[] }>(ENDPOINTS.ADVANCED_OPEN_ORDERS, {}),
+      ]);
+      return [...(regular.data || []), ...(advanced.data || [])].map((o) => this.mapOrder(o));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
       return [];
@@ -392,10 +391,15 @@ export class CryptocomExchange extends BaseExchange {
             side,
             entryPrice,
             notional: Math.abs(cost),
+            // The current REST get-positions schema does not expose leverage
+            // or liquidation price; live user.positions frames enrich these.
             leverage: 1,
             unrealizedPnl: parseFloat(p.open_position_pnl) || 0,
             contracts,
             liquidationPrice: 0,
+            marginType: p.isolation_type === 'ISOLATED_MARGIN' ? MarginType.Isolated : MarginType.Cross,
+            positionMode,
+            info: { isolationId: p.isolation_id },
             lastUpdate: p.update_timestamp_ms || virtualClock.getCurrentTimeMs(),
           };
         });
@@ -459,22 +463,34 @@ export class CryptocomExchange extends BaseExchange {
         side: opts.side === OrderSide.Buy ? 'BUY' : 'SELL',
         type: this.mapOrderType(opts.type),
       };
+      const isTrigger = opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit;
 
-      if (opts.type === OrderType.Market) {
-        // Market orders use notional for Crypto.com
-        orderRequest.notional = opts.amount * (opts.price || 0);
-      } else {
-        orderRequest.quantity = opts.amount;
-        if (opts.price) {
-          orderRequest.price = opts.price;
-        }
+      // Quantity is valid for both MARKET sides. `notional` is a MARKET BUY
+      // by-cost alternative only and cannot safely represent SELL/close flows.
+      orderRequest.quantity = opts.amount.toString();
+      if (!isTrigger && opts.type !== OrderType.Market && opts.price) {
+        orderRequest.price = opts.price.toString();
       }
+
+      if (isTrigger) {
+        const triggerPrice = opts.triggerPrice ?? opts.price;
+        if (!Number.isFinite(triggerPrice) || triggerPrice! <= 0) {
+          throw new Error(`A positive trigger price is required for ${opts.type}`);
+        }
+        orderRequest.ref_price = triggerPrice!.toString();
+        orderRequest.ref_price_type = this.mapStopTriggerType(
+          opts.type === OrderType.StopLoss ? opts.slTriggerType : opts.tpTriggerType,
+        );
+      }
+
+      if (opts.reduceOnly) orderRequest.exec_inst = ['REDUCE_ONLY'];
 
       if (opts.timeInForce) {
         orderRequest.time_in_force = this.mapTimeInForce(opts.timeInForce);
       }
 
-      const { data } = await this.xhr.post<{ order_id: string }>(ENDPOINTS.CREATE_ORDER, orderRequest);
+      const endpoint = isTrigger ? ENDPOINTS.ADVANCED_CREATE_ORDER : ENDPOINTS.CREATE_ORDER;
+      const { data } = await this.xhr.post<{ order_id: string }>(endpoint, orderRequest);
 
       return [data.order_id];
     } catch (err: any) {
@@ -485,10 +501,14 @@ export class CryptocomExchange extends BaseExchange {
 
   cancelOrder = async (order: Order): Promise<void> => {
     try {
-      await this.xhr.post(ENDPOINTS.CANCEL_ORDER, {
-        instrument_name: order.symbol,
-        order_id: order.id,
-      });
+      if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
+        await this.xhr.post(ENDPOINTS.ADVANCED_CANCEL_ORDER, { order_id: order.id });
+      } else {
+        await this.xhr.post(ENDPOINTS.CANCEL_ORDER, {
+          instrument_name: order.symbol,
+          order_id: order.id,
+        });
+      }
     } catch (err) {
       this.log(`Error canceling order: ${err}`, LogSeverity.Error);
       throw err;
@@ -518,20 +538,20 @@ export class CryptocomExchange extends BaseExchange {
 
   updateOrder = async (opts: UpdateOrderOpts): Promise<string[]> => {
     try {
-      const updateParams: any = {
+      const isTrigger = opts.order.type === OrderType.StopLoss || opts.order.type === OrderType.TakeProfit;
+      const updateParams = {
         order_id: opts.order.id,
-        instrument_name: opts.order.symbol,
+        new_quantity: ('amount' in opts.update ? opts.update.amount : opts.order.amount).toString(),
+        ...(isTrigger
+          ? { new_ref_price: ('price' in opts.update ? opts.update.price : opts.order.price).toString() }
+          : {
+              instrument_name: opts.order.symbol,
+              new_price: ('price' in opts.update ? opts.update.price : opts.order.price).toString(),
+            }),
       };
 
-      if ('amount' in opts.update) {
-        updateParams.quantity = opts.update.amount;
-      }
-
-      if ('price' in opts.update) {
-        updateParams.price = opts.update.price;
-      }
-
-      const { data } = await this.xhr.post<{ order_id: string }>(ENDPOINTS.AMEND_ORDER, updateParams);
+      const endpoint = isTrigger ? ENDPOINTS.ADVANCED_AMEND_ORDER : ENDPOINTS.AMEND_ORDER;
+      const { data } = await this.xhr.post<{ order_id: string }>(endpoint, updateParams);
 
       return [data.order_id];
     } catch (err: any) {
@@ -567,20 +587,9 @@ export class CryptocomExchange extends BaseExchange {
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string): Promise<void> => {
-    try {
-      if (!symbol) {
-        this.log('Symbol required for changing margin type', LogSeverity.Error);
-        return;
-      }
-
-      await this.xhr.post(ENDPOINTS.CHANGE_MARGIN_TYPE, {
-        instrument_name: symbol,
-        margin_type: isolated ? 'ISOLATED' : 'CROSS',
-      });
-    } catch (err) {
-      this.log(`Error changing margin type: ${err}`, LogSeverity.Error);
-      throw err;
-    }
+    throw new Error(
+      `Crypto.com does not support switching ${symbol ?? 'a position'} to ${isolated ? 'isolated' : 'cross'} margin through Exchange v1`,
+    );
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
@@ -652,7 +661,7 @@ export class CryptocomExchange extends BaseExchange {
     // so we read either.
     const quantity = parseFloat(o.quantity) || 0;
     const filled = o.cumulative_quantity ? parseFloat(o.cumulative_quantity) || 0 : 0;
-    const price = o.limit_price ? parseFloat(o.limit_price) || 0 : 0;
+    const price = parseFloat(o.ref_price ?? o.trigger_price ?? o.limit_price ?? '0') || 0;
     const status = o.status ?? o.order_status ?? 'ACTIVE';
     const updated = o.update_time ?? o.time_updated;
     const created = o.create_time ?? o.time_created;
@@ -667,7 +676,7 @@ export class CryptocomExchange extends BaseExchange {
       remaining: Math.max(0, quantity - filled),
       status: this.mapOrderStatus(status),
       lastUpdate: updated || created || virtualClock.getCurrentTimeMs(),
-      reduceOnly: false,
+      reduceOnly: o.exec_inst?.includes('REDUCE_ONLY') ?? false,
       timeInForce: this.mapCryptocomTimeInForce(o.time_in_force),
     };
   };
@@ -734,6 +743,17 @@ export class CryptocomExchange extends BaseExchange {
         return 'POST_ONLY';
       default:
         return 'GOOD_TILL_CANCEL';
+    }
+  };
+
+  mapStopTriggerType = (type?: OrderStopTriggerType): 'MARK_PRICE' | 'INDEX_PRICE' | 'LAST_PRICE' => {
+    switch (type) {
+      case OrderStopTriggerType.IndexPrice:
+        return 'INDEX_PRICE';
+      case OrderStopTriggerType.LastPrice:
+        return 'LAST_PRICE';
+      default:
+        return 'MARK_PRICE';
     }
   };
 

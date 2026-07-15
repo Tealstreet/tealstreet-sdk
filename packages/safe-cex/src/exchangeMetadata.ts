@@ -803,7 +803,9 @@ const CryptocomMetadata: ExchangeMetadata = {
   supportsFeeRates: false,
   supportsReadOnlyKey: false,
   alwaysCalculateUnrealizedPnlFromLastPrice: false,
-  hideMarginTypeSelector: false,
+  // Isolated positions require per-order isolation_id/ISOLATED_MARGIN wiring;
+  // the legacy change-margin-type endpoint no longer exists in Exchange v1.
+  hideMarginTypeSelector: true,
   hidePositionModeSelector: true,
   features: {
     kline: true,
@@ -987,9 +989,9 @@ const BreakoutpropMetadata: ExchangeMetadata = {
   marginTypeIsGlobal: false,
   hasIndependentHedgedLeverageInIsolatedMargin: true,
   hasIndependentHedgedLeverageInCrossMargin: true,
-  supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
+  supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
-  defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
+  defaultSLTriggerType: OrderStopTriggerType.LastPrice,
   supportsChaser: false,
   supportsPositionMargin: false,
   requiresCors: false,

@@ -6,13 +6,13 @@
 - **Exchange Name (internal)**: `cryptocom`
 - **Type**: Centralized exchange (CEX), perpetual futures only
 - **Position Mode**: Hedged only (`PositionMode.Hedged`) -- both long and short positions can coexist
-- **Margin Types**: Cross and Isolated
+- **Margin Types**: Cross and Isolated upstream; the selector is hidden until
+  per-order `ISOLATED_MARGIN` / `isolation_id` creation is implemented.
 - **Status**: Disabled in production (`enabled: false`), enabled in dev (`enabledInDev: true`)
 
 ## API Documentation
 
-- **Exchange API v1**: https://exchange-docs.crypto.com/exchange/v1/rest-ws/index.html
-- **Derivatives API**: https://exchange-docs.crypto.com/derivatives/index.html
+- **Exchange API v1**: https://exchange-developer.crypto.com/exchange/v1/
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/cryptocom.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/cryptocom.ts
 
@@ -33,10 +33,14 @@
 
 Algorithm: HMAC-SHA256
 
-1. Sort parameter keys alphabetically (`cryptocom.signing.ts:22`)
-2. Concatenate key-value pairs without separators: `key1value1key2value2` (`cryptocom.signing.ts:25`)
-3. Build signature payload: `method + id + apiKey + paramString + nonce` (`cryptocom.signing.ts:28`)
-4. HMAC-SHA256 sign with API secret, output as hex string (`cryptocom.signing.ts:31`)
+1. Recursively serialize parameters to a maximum depth of three: object keys
+   are sorted, array elements are concatenated without delimiters, and null is
+   serialized as `null`.
+2. Build signature payload: `method + id + apiKey + paramString + nonce`.
+3. HMAC-SHA256 sign with API secret, output as hex string.
+
+Request ids and nonces use `virtualClock.getCurrentTimeMs()` so exchange time
+synchronization also protects Crypto.com's ±60-second nonce window.
 
 ### REST API Authentication (`cryptocom.api.ts`)
 
@@ -65,7 +69,7 @@ Authenticated request body format:
 }
 ```
 
-### WebSocket Authentication (`cryptocom.signing.ts:71-91`, `cryptocom.ws-private.ts:52-63`)
+### WebSocket Authentication
 
 1. Generate auth message via `generateWsAuthMessage()` with method `'public/auth'` and empty params
 2. Send as first message after WebSocket open
@@ -76,11 +80,12 @@ Authenticated request body format:
 
 ### HTTP-over-WebSocket Adapter
 
-Only enabled when `options.tealstreetTunnel` is true (`cryptocom.api.ts:28-29`). Unlike many other exchanges, this is NOT unconditionally applied.
+Only enabled when `options.tealstreetTunnel` is true. Unlike many other
+exchanges, this is not unconditionally applied.
 
 ## Startup Sequence
 
-`start()` in `cryptocom.exchange.ts:106-153` executes **sequentially**:
+`start()` executes **sequentially**:
 
 1. `fetchMarkets()` -- GET `/public/get-instruments`, filter for `inst_type === 'PERPETUAL_SWAP' && tradable`
 2. Store update: `markets`, `loaded.markets = true`
@@ -88,22 +93,23 @@ Only enabled when `options.tealstreetTunnel` is true (`cryptocom.api.ts:28-29`).
 4. `fetchTickers()` -- GET `/public/get-tickers`, filter for `PERP` in ticker `i` field
 5. Store update: `tickers`, `loaded.tickers = true`
 6. Log market count
-7. Connect public WebSocket (`publicWebsocket.connectAndSubscribe()`)
-8. Connect private WebSocket (`privateWebsocket.connectAndSubscribe()`)
-9. **Wait 1 second** for WebSocket connections (`await new Promise(resolve => setTimeout(resolve, 1000))`)
-10. Subscribe to market data for each market: `subscribeToTicker`, `subscribeToOrderBook`, `subscribeToTrades`
-11. `await this.tick()` -- first tick fetches positions and balance
-12. Dispose check
-13. `fetchOrders()` -- separate from tick cycle for initial load
-14. Store update: `orders`, `loaded.orders = true`
+7. Connect the public WebSocket unless external public data is active.
+8. Return with private stores marked loaded when `publicDataOnly` is active.
+9. Connect the private WebSocket and enqueue `user.order`,
+   `user.advance.order`, `user.positions`, and `user.balance` before auth.
+10. Wait one second for the connection-rate window.
+11. Batch-subscribe ticker channels in chunks of 100; order books, trades, and
+    candles remain lazy per consumer.
+12. Run the first REST position/balance/order reconciliation.
 
-**Notable**: WebSocket subscriptions are sent per-market individually (not batched). The 1-second delay between WS connect and subscription is a hardcoded wait, not event-driven.
-
-**Notable**: Both public and private WebSockets are always connected (no `publicDataOnly` check like some exchanges).
+External public data mode does not open the market WebSocket. Public-only mode
+does not open the user WebSocket.
 
 ## REST API Endpoints
 
-All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
+Public endpoints are GET requests with query parameters. Private endpoints are
+signed POST requests with JSON bodies. Endpoint constants live in
+`cryptocom.types.ts`.
 
 ### Public Endpoints
 
@@ -124,6 +130,10 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 | Constant             | Method Path                        | Purpose                                 |
 | -------------------- | ---------------------------------- | --------------------------------------- |
 | `CREATE_ORDER`       | `/private/create-order`            | Place new order                         |
+| `ADVANCED_CREATE_ORDER` | `/private/advanced/create-order` | Place standalone TP/SL trigger order    |
+| `ADVANCED_AMEND_ORDER` | `/private/advanced/amend-order`   | Amend standalone TP/SL trigger order    |
+| `ADVANCED_CANCEL_ORDER` | `/private/advanced/cancel-order` | Cancel standalone TP/SL trigger order   |
+| `ADVANCED_OPEN_ORDERS` | `/private/advanced/get-open-orders` | Fetch open TP/SL trigger orders       |
 | `AMEND_ORDER`        | `/private/amend-order`             | Modify existing order                   |
 | `CANCEL_ORDER`       | `/private/cancel-order`            | Cancel specific order                   |
 | `CANCEL_ALL_ORDERS`  | `/private/cancel-all-orders`       | Cancel all (optional instrument filter) |
@@ -134,11 +144,11 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 | `TRADES_HISTORY`     | `/private/get-trades`              | Trade history                           |
 | `POSITIONS`          | `/private/get-positions`           | Open positions                          |
 | `CHANGE_LEVERAGE`    | `/private/change-account-leverage` | Set instrument leverage                 |
-| `CHANGE_MARGIN_TYPE` | `/private/change-margin-type`      | Switch cross/isolated                   |
 | `BALANCE`            | `/private/user-balance`            | Account balances                        |
-| `ACCOUNT_SUMMARY`    | `/private/get-account-summary`     | Detailed account info                   |
+| `ACCOUNTS`           | `/private/get-accounts`            | Current account identity                |
 
-**Response unwrapping**: The response interceptor in `cryptocom.api.ts:86-89` unwraps `data.result` so callers receive the inner result object directly, not the full API envelope.
+**Response unwrapping**: The response interceptor unwraps `data.result` so
+callers receive the inner result object directly, not the full API envelope.
 
 ## WebSocket Implementation
 
@@ -148,9 +158,15 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 
 **Connection**: Uses `BaseWebSocket.createWebsocket()`. Reconnection handled by `BaseWebSocket.onClose()`.
 
-**On Open** (`cryptocom.ws-public.ts:37-41`):
+Both market and user sockets immediately answer `public/heartbeat` with
+`public/respond-heartbeat` using the same request id. Crypto.com closes sockets
+that do not respond within five seconds. All subscription nonces use the
+synchronized virtual clock.
 
-- Calls `resubscribe()` to re-send all stored subscriptions from the `subscriptions` Set
+**On Open**:
+
+- Waits one second for Crypto.com's pro-rated connection rate limit to reset,
+  then calls `resubscribe()` for all stored subscriptions.
 
 **Subscription Management**:
 
@@ -165,41 +181,43 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 - Trades: `trade.<instrument_name>`
 - Candlestick: `candlestick.<interval>.<instrument_name>`
 
-**Message Routing** (`cryptocom.ws-public.ts:127-166`):
+**Message Routing**:
 
 - Messages with `code` field: response messages (subscription confirmations, errors). Non-zero `code` logged as error.
 - Messages with `result.channel`: data updates, routed by channel prefix:
-  - `ticker.*` -> `handleTickerUpdate()` (throttled to 1000ms)
-  - `trade.*` -> `handleTradeUpdate()` (no-op currently)
-  - `book.*` -> `handleBookUpdate()` (throttled to 100ms)
-  - `candlestick.*` -> `handleCandlestickUpdate()`
+  - `ticker` -> `handleTickerUpdate()` (throttled to 1000ms)
+  - `trade` -> `handleTradeUpdate()` (no-op currently)
+  - `book` / `book.update` -> `handleBookUpdate()` (throttled to 100ms)
+  - `candlestick` -> `handleCandlestickUpdate()`
 
-**Ticker Throttling** (`cryptocom.ws-public.ts:168-198`):
+**Ticker Throttling**:
 
 - Uses lodash `throttle` at 1000ms with `{ leading: true, trailing: true }`
-- Updates bid (`b`), ask (`k`), last (`c`), percentage (`c`), volume (`v`), quoteVolume (`vv`)
+- Updates bid (`b`), ask (`k`), last (`a`), percentage (`c * 100`), volume
+  (`v`), quote volume (`vv`), and open interest (`oi`).
 - Uses O(1) `marketsById` and `tickersBySymbol` hash lookups
 
-**Orderbook** (`cryptocom.ws-public.ts:200-432`):
+**Orderbook**:
 
-- Throttled to 100ms
-- Updates best bid/ask in ticker on each book update
-- Uses callback-based `messageHandlers` pattern (not direct store updates)
-- `listenOrderBook()` uses snapshot + incremental update pattern:
-  1. First WS update triggers a REST snapshot fetch (`/public/get-book` with `depth: 50`)
-  2. Incoming WS updates are queued in `orderBookInnerState[innerId].updates` while snapshot loads
-  3. After snapshot: queued updates are applied, then incremental mode begins
-  4. `processOrderBookUpdate()`: quantity `0` removes a level; non-zero updates or adds
-  5. After each update: `sortOrderBook()` and `calcOrderBookTotal()` are called
-  6. Each listener gets a unique `innerId` via `nanoid()` for independent state tracking
+- Throttled to 100ms.
+- Updates best bid/ask in the ticker on each book update.
+- Uses callback-based `messageHandlers` (not direct store updates).
+- `book.{instrument}.50` is left in the documented default `SNAPSHOT` mode.
+  Every frame replaces both sides wholesale before sorting and calculating
+  totals. Do not apply these frames as deltas: absent levels must disappear or
+  the book accumulates phantom liquidity.
 
-**OHLCV via WebSocket** (`cryptocom.ws-public.ts:243-287`):
+**OHLCV via WebSocket**:
 
 - Supported (unlike Kraken). Uses `candlestick.<interval>.<symbol>` channel
+- Safe-cex intervals are mapped to the case-sensitive exchange enum (`1d` →
+  `1D`, `1w` → `7D`); unsupported `3m` and `6h` requests fail before network
+  I/O. Dispatch uses the full `result.subscription`, not the generic
+  `result.channel` value.
 - Waits for connection if not yet connected (100ms retry loop)
 - Returns cleanup function that unsubscribes and cleans up message handlers
 
-**Unsubscribe** (`cryptocom.ws-public.ts:434-449`):
+**Unsubscribe**:
 
 - Sends `{ method: 'unsubscribe', params: { channels: [...] } }`
 - Removes channels from the `subscriptions` Set
@@ -208,51 +226,59 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 
 **URL**: `wss://stream.crypto.com/exchange/v1/user` (production) / `wss://uat-stream.3ona.co/exchange/v1/user` (testnet)
 
-**On Open** (`cryptocom.ws-private.ts:44-49`):
+**On Open**:
 
 1. Reset `isAuthenticated = false`
-2. Send auth message via `generateWsAuthMessage()`
+2. Wait one second for the pro-rated connection rate limit to reset.
+3. Send auth message via `generateWsAuthMessage()`.
 
-**Authentication Response** (`cryptocom.ws-private.ts:155-158`):
+**Authentication Response**:
 
 - `method === 'public/auth'` and `code === 0` -> set `isAuthenticated = true`, call `resubscribe()`
 - Non-zero `code` -> emit error
 
-**Channel Subscriptions** (available methods, `cryptocom.ws-private.ts:80-141`):
+**Channel Subscriptions**:
 
-- `user.order` -- order status updates
+- `user.order` -- regular order status updates
+- `user.advance.order` -- advanced TP/SL lifecycle updates
 - `user.positions` -- position updates
 - `user.balance` -- balance changes
 
-**Note**: These subscriptions are defined as public methods but are NOT automatically called during startup. They appear to be intended for manual subscription by consumers.
+All four channels are enqueued automatically during startup and flushed after
+the auth acknowledgement.
 
-**Message Routing** (`cryptocom.ws-private.ts:143-187`):
+**Message Routing**:
 
 - `code` field present -> response handling (auth result, errors)
 - `result.channel` present -> data routing:
   - `user.order*` -> `handleOrderUpdate()`: maps to internal `Order`, calls `addOrUpdateOrder()`
   - `user.positions` -> `handlePositionUpdate()`: maps to internal `Position`, handles zero-quantity closure
-  - `user.balance` -> `handleBalanceUpdate()`: currently a no-op
+  - `user.balance` -> `handleBalanceUpdate()`: applies the account summary and
+    collateral rows immediately
 
-**Order Update Handling** (`cryptocom.ws-private.ts:189-216`):
+**Order Update Handling**:
 
-- Processes single order from `data[0]`
+- Processes every order in a batched `data[]` frame with an indexed loop.
 - Maps `order_type`, `side`, `order_status`, `time_in_force` to internal types
 - Uses `store.addOrUpdateOrder()` for individual updates (not full replacement)
 
-**Position Update Handling** (`cryptocom.ws-private.ts:218-261`):
+**Position Update Handling**:
 
-- Processes single position from `data[0]`
+- Processes every position in a batched `data[]` frame with an indexed loop.
 - If `quantity === 0`: removes position from store by filtering it out
 - If non-zero: creates/updates position via `store.addOrUpdatePosition()`
 - Entry price calculated as `cost / contracts`
+- Live frames populate leverage, liquidation price, mark price, and isolated
+  margin identity. The current REST `private/get-positions` schema does not
+  carry leverage or liquidation price, so its recovery snapshot retains the
+  conservative `1` / `0` fallbacks until WebSocket enrichment arrives.
 - Position ID created with `createPositionId(symbol, side, positionMode)`
 
 **Reconnection**: On reconnect, `onOpen` resets `isAuthenticated` and re-authenticates. After successful auth, `resubscribe()` re-sends all stored subscriptions.
 
 ## Order Types and Mappings
 
-### Internal to Crypto.com (`mapOrderType`, `cryptocom.exchange.ts:666-681`)
+### Internal to Crypto.com (`mapOrderType`)
 
 | Internal               | Crypto.com      |
 | ---------------------- | --------------- |
@@ -262,7 +288,7 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 | `OrderType.TakeProfit` | `'TAKE_PROFIT'` |
 | _(default)_            | `'LIMIT'`       |
 
-### Crypto.com to Internal (`mapCryptocomOrderType`, `cryptocom.exchange.ts:683-698`)
+### Crypto.com to Internal (`mapCryptocomOrderType`)
 
 | Crypto.com                             | Internal               |
 | -------------------------------------- | ---------------------- |
@@ -294,32 +320,40 @@ All requests are POST with JSON body. Defined in `cryptocom.types.ts:19-56`.
 
 ## Order Lifecycle
 
-### Placing Orders (`cryptocom.exchange.ts:420-457`)
+### Placing Orders
 
 1. Look up market by symbol
 2. Build `CryptocomOrderRequest` with `instrument_name`, `side` (BUY/SELL), `type`
-3. **Market orders**: use `notional` (= `amount * price`) instead of `quantity`. This requires a price estimate.
-4. **Limit/other orders**: use `quantity` and `price`
-5. Add `time_in_force` if specified
-6. POST to `/private/create-order`
-7. Return `[data.order_id]`
+3. Send `quantity` for both MARKET sides; `notional` is not used because it is
+   only valid for MARKET BUY by cost.
+4. Send `price` for LIMIT orders.
+5. Add `REDUCE_ONLY` to `exec_inst` when requested.
+6. Add `time_in_force` if specified.
+7. POST to `/private/create-order` and return `[data.order_id]`.
 
-**No bracket/TP/SL attachment**: TP/SL orders are not derived from the main order. No `deriveAlgoOrdersFromNormalOrdersOpts` call.
+Standalone stop-loss and take-profit orders use
+`/private/advanced/create-order` with `ref_price` and `ref_price_type`; their
+lifecycle is reconciled through `user.advance.order` and the advanced open-order
+snapshot. Advanced orders are amended and canceled through the matching
+advanced endpoints. Parent-attached bracket derivation is not implemented.
 
-### Updating Orders (`cryptocom.exchange.ts:492-517`)
+### Updating Orders
 
 - Uses `/private/amend-order` endpoint (true amend, not cancel-replace)
-- Sends `order_id`, `instrument_name`, and updated `quantity`/`price`
+- Sends both mandatory `new_quantity` and `new_price`, backfilling the
+  unchanged field from the existing order.
 - Returns new `order_id` from response
 
 ### Canceling Orders
 
-- **Single**: POST `/private/cancel-order` with `instrument_name` and `order_id` (`cryptocom.exchange.ts:459-469`)
-- **Multiple**: Sequential cancellation via `forEachSeries` from `p-iteration`, continues on individual failures (`cryptocom.exchange.ts:471-479`)
-- **All for symbol**: POST `/private/cancel-all-orders` with `instrument_name` (`cryptocom.exchange.ts:481-490`)
-- **All globally**: POST `/private/cancel-all-orders` with empty params (`cryptocom.exchange.ts:535-542`)
+- **Regular**: POST `/private/cancel-order` with `instrument_name` and `order_id`.
+- **Advanced trigger**: POST `/private/advanced/cancel-order` with `order_id`.
+- **Multiple**: Sequential cancellation via `forEachSeries`; individual
+  failures do not stop remaining cancels.
+- **All for symbol**: POST `/private/cancel-all-orders` with `instrument_name`.
+- **All globally**: POST `/private/cancel-all-orders` with empty params.
 
-### Batch Order Placement (`cryptocom.exchange.ts:566-579`)
+### Batch Order Placement
 
 Not a true batch API call -- orders are placed sequentially in a `for` loop. Individual failures are caught and logged but do not stop remaining orders.
 
@@ -349,14 +383,18 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
 
 ### Entry Price Calculation
 
-- Calculated as `cost / Math.abs(quantity)` from position data (`cryptocom.exchange.ts:357`)
+- Calculated as `cost / Math.abs(quantity)` from position data.
 - **Not** directly from an API field
 
 ## Rate Limiting
 
-- REST API: Rate limited at **50 RPS** via `axios-rate-limit` (`cryptocom.exchange.ts:64`), conservative from API limit of 100 RPS
+- The client enforces a conservative aggregate **50 RPS** ceiling with
+  `axios-rate-limit`. Upstream public endpoints allow 100 requests/second per
+  method/IP, while private limits are per method/API key (create/cancel 15 per
+  100ms, most other private methods 3 per 100ms, and trade/order history 1 per
+  second).
 - Network error retry: 3 retries via `axios-retry` on network errors
-- Request timeout: `options.extra.recvWindow` or **30 seconds** default (`cryptocom.api.ts:15`)
+- Request timeout: `options.extra.recvWindow` or **30 seconds** default.
 - WebSocket ticker throttle: 1000ms
 - WebSocket orderbook throttle: 100ms
 
@@ -366,25 +404,30 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
 
 - **Initial load**: `fetchOrders()` called at end of `start()`, separate from tick cycle
 - **Tick cycle**: Re-fetched every 4th tick (~40 seconds)
-- **WebSocket**: `handleOrderUpdate()` processes individual order updates via `addOrUpdateOrder()`
+- **WebSocket**: `handleOrderUpdate()` processes every order in each batched
+  frame via `addOrUpdateOrder()`.
 - **No throttled REST sync**: Unlike Kraken, there is no throttled fetch after WS events
 
 ### Positions
 
 - **Tick cycle**: `fetchPositions()` runs every tick (~10 seconds)
-- **WebSocket**: `handlePositionUpdate()` processes individual updates
+- **WebSocket**: `handlePositionUpdate()` processes every entry in batched updates
   - Zero quantity -> removes position from store
   - Non-zero -> creates/updates position
-- **Fake positions**: Created for all active perpetual markets without real positions (both long and short), combined with actual positions and deduplicated via `uniqBy(id)` (`cryptocom.exchange.ts:413`)
+- **Fake positions**: Created for all active perpetual markets without real
+  positions (both long and short), combined with actual positions and
+  deduplicated via `uniqBy(id)`.
 
 ### Balances
 
 - **Tick cycle**: `fetchBalance()` runs every tick (~10 seconds)
-- **WebSocket**: `handleBalanceUpdate()` is a no-op (balance refresh not implemented via WS)
-- **uPnL**: Calculated from positions via `sumBy(positions, 'unrealizedPnl')` and injected into balance (`cryptocom.exchange.ts:166`)
-- **Balance detection**: Searches for first currency matching `'USD'`, `'USDT'`, or `'USDC'` in that priority order (`cryptocom.exchange.ts:598-599`)
+- **WebSocket**: `handleBalanceUpdate()` maps `data[0]` totals and
+  `position_balances[]` directly into the store for immediate updates.
+- **uPnL**: REST reconciliation calculates it from positions via
+  `sumBy(positions, 'unrealizedPnl')`; live balance frames use the exchange
+  summary value.
 
-### Tick Cycle (`cryptocom.exchange.ts:155-184`)
+### Tick Cycle
 
 - Runs every **10 seconds** via `setTimeout` (not `loop()`)
 - **Every tick**: fetch positions, fetch balance, calculate uPnL
@@ -420,6 +463,7 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
   tvMaxGetBarFetches: 10,
   tvIntraDayMultipliers: ['1', '5', '15', '30', '60', '240'],
   leverageMagnets: [1, 2, 5, 10, 20, 50, 100, 125, 150],
+  hideMarginTypeSelector: true,    // isolated creation is not implemented
   hidePositionModeSelector: true,  // Always hedged, no toggle
   positionModeIsGlobal: true,
   marginTypeIsGlobal: false,
@@ -453,76 +497,41 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
 
 ## Known Quirks / Implementation Notes
 
-1. **Market orders use `notional`, not `quantity`**: Market orders require `notional = amount * price`, meaning a price estimate is needed to determine order size in dollar terms (`cryptocom.exchange.ts:434-435`). This is different from most exchanges that accept a `quantity` for market orders.
-
-2. **Position mode is always Hedged**: `changePositionMode()` is a no-op that logs a warning. The `hidePositionModeSelector: true` metadata hides the toggle in UI (`cryptocom.exchange.ts:544-547`).
-
-3. **Leverage always defaults to 1**: All positions are initialized with `leverage: 1` because the API response does not include current leverage (`cryptocom.exchange.ts:360`, `cryptocom.exchange.ts:396`). Liquidation price is also hardcoded to `0` (`cryptocom.exchange.ts:368`).
-
-4. **Balance WebSocket is a no-op**: `handleBalanceUpdate()` in the private WebSocket does nothing (`cryptocom.ws-private.ts:263-266`). Balances are only refreshed via REST polling.
-
-   **REST balance response is `result.data[0]`, not `result.position_balances`.** The
-   v1 `private/user-balance` envelope is
-   `{ result: { data: [{ ...summary, position_balances: [...] }] } }`. After the
-   response interceptor unwraps `result`, callers see `{ data: [summary] }` —
-   one level deeper than the old shape. The summary carries
-   `total_margin_balance` / `total_available_balance` / `total_initial_margin`
-   / `total_session_unrealized_pnl` as **strings**; per-asset rows live in
-   `position_balances[]` keyed by `instrument_name` (not `currency`), with
-   `quantity` / `max_withdrawal_balance` / `market_value` etc. also as
-   strings. The previous code read `data.position_balances` at the top level
-   and silently returned a zeroed balance — see `fetchBalance` in
-   `cryptocom.exchange.ts` for the parser that digs into `data[0]`.
-
-5. **Private WS subscriptions auto-started in `start()`**: `start()` calls
-   `subscribeToOrderUpdates()`, `subscribeToPositionUpdates()`, and
-   `subscribeToBalanceUpdates()` right after `privateWebsocket.connectAndSubscribe()`.
-   The helpers enqueue the channel into the `subscriptions` Set immediately;
-   the `public/auth` ack handler calls `resubscribe()` which flushes them.
-   Don't move these calls below the 1s `setTimeout` — if you do, brief
-   auth-ack races leave the live tick on a 10s REST cadence (orders) /
-   10s tick (positions) until the next reconnect.
-
-6. **No price rounding on order placement**: Unlike many exchanges, `placeOrder()` does not call `adjust()` or any precision rounding on `amount` or `price` before sending to the API.
-
-7. **Sequential batch cancellation**: `cancelOrders()` uses `forEachSeries` (sequential iteration) from `p-iteration`, not parallel. Each order is canceled one at a time (`cryptocom.exchange.ts:471-479`).
-
-8. **Ticker data missing mark/index/funding**: The ticker response
-   (`i/h/l/a/v/vv/c/b/k/oi/t`) does not carry `mark`, `index`,
-   `fundingRate`, or `fundingTime`. These are hardcoded to `0` in
-   `fetchTickers` / `handleTickerUpdate`. v1 surfaces them only via
-   per-symbol `public/get-valuations?valuation_type=<mark_price|index_price|funding_rate|estimated_funding_rate|funding_hist>`,
-   which is one call per (symbol, type) — too expensive to fan out
-   across ~250 markets on every tick. **`openInterest` is now
-   populated** from the ticker `oi` field — the older "all hardcoded
-   to 0" comment was stale.
-
-8b. **`private/get-account-summary` is broken on v1.** Returns 400 /
-`50001 ERR_INTERNAL` regardless of params (probed with empty,
-`currency: 'USD'`, etc.). `getAccount()` no longer calls it and
-instead returns a stable `userId` derived from the API key prefix
-(`cdc-<first8chars>`). If you need the real `account_id`, it appears
-on each row from `private/get-positions` (empty for empty accounts).
-
-9. **Ticker `c` field used as both `last` and `percentage`** (confirmed bug): In the WS ticker handler at `cryptocom.ws-public.ts:185-186`, `data.c` is assigned to **both** `last` and `percentage`. These cannot both be correct. The candlestick handler in the same file uses `data.c` as `close` (line 256), which strongly suggests `c` is the latest trade price — so `last: data.c` is the correct assignment and `percentage: data.c` is the bug. The result is that Crypto.com tickers display the absolute price in the 24h % column (e.g. `"65123.4%"` for a BTC ticker). The real 24h change field needs to be looked up in the Crypto.com Exchange v1 API docs and substituted in — do NOT fix this from memory.
-
-10. **Orderbook snapshot via REST**: On first book subscription, the implementation fetches a full REST snapshot (`/public/get-book` with `depth: 50`) and queues incoming WS updates until the snapshot loads (`cryptocom.ws-public.ts:303-338`).
-
-11. **Crypto.com uses `instrument_name` everywhere**: Unlike many exchanges that have separate `id`/`symbol` fields, Crypto.com uses `instrument_name` as both `market.id` and `market.symbol`.
-
-12. **Response interceptor unwraps `result`**: The API response interceptor extracts `data.result` and replaces `response.data` with it (`cryptocom.api.ts:87-89`). Callers receive the unwrapped result, not the full `{ id, method, code, result }` envelope.
-
-13. **Grafana monitoring endpoints**: The exchange defines `GRAFANA_ENDPOINTS_EVERY` (order operations) and `GRAFANA_ENDPOINTS_PERIODIC` (data fetches) for monitoring integration (`cryptocom.types.ts:71-84`).
-
-14. **Leverage sent as string**: `setLeverage()` converts leverage to string before sending (`cryptocom.exchange.ts:527`).
-
-15. **HTTP-over-WebSocket adapter conditional**: Only applied when `tealstreetTunnel` is true (`cryptocom.api.ts:28-29`), unlike most exchanges where it is always applied.
-
-16. **Dispose pattern differs**: Both public and private WS have their own `dispose()` methods that clear subscriptions and close the WebSocket. The exchange `dispose()` calls both (`cryptocom.exchange.ts:70-74`).
+1. **Position mode is always hedged**: `changePositionMode()` is a no-op and
+   metadata hides the toggle.
+2. **REST position recovery is less detailed than WebSocket state**: current
+   `private/get-positions` rows omit leverage, liquidation price, and mark
+   price. REST snapshots use `1` / `0` fallbacks; `user.positions` enriches
+   these fields live.
+3. **REST and WebSocket balance shape**: the useful summary is `data[0]`, with
+   collateral rows nested under `position_balances[]`. All numeric values are
+   strings at the boundary.
+4. **Private subscriptions auto-start**: order, advanced-order, position, and
+   balance channels are queued before auth and flushed on the auth ack.
+5. **No precision adjustment in order writes**: callers must provide values at
+   market precision; `placeOrder()` does not call `adjust()`.
+6. **Sequential batch cancellation**: `cancelOrders()` intentionally continues
+   one order at a time after individual failures.
+7. **Ticker mark/index/funding remain unavailable in store state**: the ticker
+   channel carries bid/ask/last/change/volume/open-interest only. Dedicated
+   `mark.{instrument}`, `index.{instrument}`, `funding.{instrument}`, and
+   `estimatedfunding.{instrument}` channels exist, but are not subscribed; the
+   corresponding ticker fields remain zero. Do not replace this with a large
+   per-symbol REST valuation fanout.
+8. **Account identity**: `getAccount()` uses the current
+   `private/get-accounts` endpoint and returns `this_account.uuid`; the removed
+   `private/get-account-summary` path must not be restored.
+9. **Default orderbook mode is full snapshot**: every book frame replaces the
+   entire local top 50. Applying these frames as deltas creates stale levels.
+10. **Crypto.com uses `instrument_name` as both market id and symbol**.
+11. **Response interceptor unwraps `result`**: callers receive the result
+    object, not the full `{ id, method, code, result }` envelope.
+12. **HTTP-over-WebSocket is conditional**: only enabled when
+    `tealstreetTunnel` is true.
 
 ## Error Handling
 
-### REST API Response Interceptor (`cryptocom.api.ts:75-113`)
+### REST API Response Interceptor
 
 - **Success check**: `code === 0` in the response envelope
 - **Error handling**: Non-zero `code` -> logs via `emitAndLogError`, throws `Error` with pattern: `"Crypto.com API Error {code}: {message}"`
@@ -531,7 +540,7 @@ on each row from `private/get-positions` (empty for empty accounts).
 
 ### Network Retry
 
-- 3 retries on network errors via `axios-retry` (`cryptocom.api.ts:25`)
+- 3 retries on network errors via `axios-retry`.
 - 30-second timeout (or `recvWindow` from options)
 
 ### Exchange Method Error Handling
@@ -545,31 +554,28 @@ Each exchange method wraps its API call in try/catch:
 
 ### WebSocket Error Handling
 
-- **Public WS** (`cryptocom.ws-public.ts:139-142`): Non-zero `code` in response messages logged via `emitAndLogError`
-- **Private WS** (`cryptocom.ws-private.ts:162-166`): Same pattern for non-zero response codes
+- **Public WS**: Non-zero `code` in response messages logged via `emitAndLogError`
+- **Private WS**: Same pattern for non-zero response codes
 - **Auth failure**: Private WS does not explicitly retry auth on failure; relies on reconnection cycle
 - **Parse errors**: Caught and logged via `emitAndLogError` in both public and private WS
 
-### Account Validation (`cryptocom.exchange.ts:96-104`)
+### Account Validation
 
-Simple validation: POST to `/private/user-balance` with empty params. Returns empty string on success, error message on failure.
+Validation posts to `/private/user-balance` with empty params and returns the
+mapped balance on success or a narrow error string on failure.
 
 ## Testing / Validation
 
-- [ ] Authentication: REST API signing, WebSocket auth via `public/auth`
-- [ ] Market loading: only PERP instruments loaded
-- [ ] Ticker data: verify `mark`, `index`, `fundingRate` are populated (currently 0)
-- [ ] Order placement: limit orders with quantity, market orders with notional
-- [ ] Order amendment via `/private/amend-order`
-- [ ] Order cancellation: single, batch (sequential), all for symbol, all global
-- [ ] Position tracking: hedged mode, both long and short positions
-- [ ] Position closure via WebSocket (quantity = 0 handling)
-- [ ] Balance detection: USD/USDT/USDC priority
-- [ ] Leverage setting (string conversion)
-- [ ] Margin type switching (CROSS/ISOLATED)
-- [ ] Orderbook: REST snapshot + WS incremental updates, queue during snapshot load
-- [ ] OHLCV via WebSocket candlestick channel
-- [ ] Private WS order/position subscriptions (currently not auto-started)
-- [ ] Fake positions for all active markets
-- [ ] Testnet vs production URL switching
-- [ ] WebSocket reconnection and re-authentication
+Fresh audit regressions live in `src/__tests__/audit-regressions/` and cover:
+
+- recursive request signing and virtual-clock nonces;
+- MARKET quantity, REDUCE_ONLY, regular amend, and advanced TP/SL write paths;
+- mandatory heartbeat replies and one-second reconnect pacing;
+- full-snapshot orderbook replacement;
+- batched order/position frames, leverage/liquidation enrichment, and live balance;
+- REST and WebSocket candlestick interval mapping and dispatch;
+- hidden/fail-closed legacy margin switching and real account identity.
+
+Before enabling Crypto.com outside development, run UAT end to end with real
+credentials for create/amend/cancel (regular and advanced), reconnect recovery,
+position/balance state, and isolated-position behavior.

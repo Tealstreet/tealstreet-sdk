@@ -1,5 +1,27 @@
 import createHmac from 'create-hmac';
 
+import { virtualClock } from '../../utils/virtualClock';
+
+const MAX_PARAM_STRING_LEVEL = 3;
+
+const paramsToString = (value: unknown, level = 0): string => {
+  if (level >= MAX_PARAM_STRING_LEVEL) return String(value);
+  if (value === null) return 'null';
+
+  if (Array.isArray(value)) {
+    return value.map((item) => paramsToString(item, level + 1)).join('');
+  }
+
+  if (typeof value === 'object' && value !== undefined) {
+    return Object.keys(value)
+      .sort()
+      .map((key) => `${key}${paramsToString((value as Record<string, unknown>)[key], level + 1)}`)
+      .join('');
+  }
+
+  return String(value);
+};
+
 /**
  * Generate HMAC-SHA256 signature for Crypto.com API requests
  *
@@ -18,11 +40,7 @@ export function generateSignature(
   params: Record<string, unknown>,
   nonce: number,
 ): string {
-  // Sort parameters alphabetically by key
-  const sortedKeys = Object.keys(params).sort();
-
-  // Concatenate key-value pairs
-  const paramString = sortedKeys.map((key) => `${key}${params[key]}`).join('');
+  const paramString = paramsToString(params);
 
   // Build the signature payload
   const signPayload = `${method}${id}${apiKey}${paramString}${nonce}`;
@@ -50,8 +68,8 @@ export function generateAuthenticatedRequest(
   sig: string;
   nonce: number;
 } {
-  const id = Date.now();
-  const requestNonce = nonce || Date.now();
+  const id = virtualClock.getCurrentTimeMs();
+  const requestNonce = nonce ?? virtualClock.getCurrentTimeMs();
 
   const signature = generateSignature(method, id, apiKey, apiSecret, params, requestNonce);
 
@@ -78,8 +96,8 @@ export function generateWsAuthMessage(
   sig: string;
   nonce: number;
 } {
-  const id = Date.now();
-  const nonce = Date.now();
+  const id = virtualClock.getCurrentTimeMs();
+  const nonce = virtualClock.getCurrentTimeMs();
 
   // For auth method, params is empty
   const signature = generateSignature('public/auth', id, apiKey, apiSecret, {}, nonce);

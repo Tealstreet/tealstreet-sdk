@@ -1,23 +1,14 @@
 import { OrderSide, OrderStatus, OrderType, PositionSide, Timeframe } from '../../types';
 
 export const RECV_WINDOW = 20_000;
-export const BROKER_ID = 'Tealstreet';
-
 // export const BASE_URL = 'http://localhost:5050/breakoutprop';
 // export const BASE_URL = 'https://app.breakoutprop.com/dxsca-web';
 export const BASE_URL = 'https://breakout.prosp.devexperts.com/dxsca-web';
-
-export const BASE_WS_URL = {
-  public: 'ws://localhost:5050/breakoutws',
-  private: 'ws://localhost:5050/breakoutws',
-};
 
 export const ENDPOINTS = {
   LOGIN: '/login',
   USER: '/users/{username}',
   PORTFOLIO: 'accounts/{accountCode}/portfolio',
-  POSITIONS: 'accounts/{accountCode}/positions',
-  ORDERS: 'accounts/{accountCode}/orders',
   INSTRUMENTS: 'instruments/query',
   INSTRUMENT_DETAILS: 'accounts/{accountCode}/instruments/query',
   MARKET_DATA: 'marketdata',
@@ -33,8 +24,6 @@ export const GRAFANA_ENDPOINTS_EVERY = [
 
 export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.PORTFOLIO,
-  ENDPOINTS.POSITIONS,
-  ENDPOINTS.ORDERS,
 ];
 
 // string candleType
@@ -64,6 +53,8 @@ export const INTERVAL: { [key in Timeframe]?: string } = {
 
 export const ORDER_TYPE: Record<string, OrderType> = {
   LIMIT: OrderType.Limit,
+  MARKET: OrderType.Market,
+  STOP: OrderType.StopLoss,
 };
 
 export const ORDER_SIDE: Record<string, OrderSide> = {
@@ -460,128 +451,5 @@ export type CANDLE_RESPONSE = {
     low: number;
     volume: number;
     time: string;
-  }[];
-};
-
-// COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY // COPY
-
-export type FETCH_ACCOUNT_RESPONSE = {
-  code: string;
-  msg: string;
-  data: {
-    account: {
-      marginCoin: string;
-      coinPrecious: number;
-      exUsdtRate: number;
-      exBtcRate: number;
-      accountNormal: number;
-      accountLock: number;
-      partPositionNormal: number;
-      totalPositionNormal: number;
-      achievedAmount: number;
-      unrealizedAmount: number;
-      totalMarginRate: number;
-      totalEquity: number;
-      partEquity: number;
-      totalCost: number;
-      sumMarginRate: number;
-      sumOpenRealizedAmount: number;
-      canUseTrialFund: number;
-      sumMaintenanceMargin: number | null;
-      futureModel: string | null;
-      positionVos: any[];
-    }[];
-  };
-};
-
-export type FETCH_CONTRACTS_RESPONSE = {
-  // "E-ZRX-USDT"
-  symbol: string;
-  pricePrecision: number;
-  side: number;
-  maxMarketVolume: number;
-  multiplier: number;
-  minOrderVolume: number;
-  maxMarketMoney: number;
-  type: string;
-  maxLimitVolume: number;
-  maxValidOrder: number;
-  multiplierCoin: string;
-  minOrderMoney: number;
-  maxLimitMoney: number;
-  status: number;
-}[];
-
-export type FETCH_KLINE_RESPONSE = {
-  high: string;
-  vol: string;
-  last: string;
-  low: string;
-  rose: string;
-  time: number;
-}[];
-
-export type ORDER_BOOK_WS_UPDATE = {
-  asks: [number, number][];
-  buys: [number, number][];
-};
-
-// {
-//   "amount": "324107702.758137",
-//   "close": "0.016916",
-//   "data": [],
-//   "high": "0.017614",
-//   "low": "0.013704",
-//   "open": "0.015467",
-//   "rose": "0.0936833258",
-//   "vol": "20957595342"
-// }
-
-export type TICKER_WS_UPDATE = {
-  amount: string;
-  close: string;
-  data: any[];
-  high: string;
-  low: string;
-  open: string;
-  rose: string;
-  vol: string;
-};
-
-// {
-//   "code": "0",
-//   "msg": "Success",
-//   "data": [{
-//   "orderId": 1917641,
-//   "clientOrderId": "2488514315",
-//   "price": 100,
-//   "origQty": 10,
-//   "origAmount": 10,
-//   "executedQty": 1,
-//   "avgPrice": 12451,
-//   "status": "INIT",
-//   "type": "LIMIT",
-//   "side": "BUY",
-//   "action": "OPEN",
-//   "transactTime": 1686717303975
-// }
-// ]
-// }
-export type FETCH_ORDERS_RESPONSE = {
-  code: string;
-  msg: string;
-  data: {
-    orderId: number;
-    clientOrderId: string;
-    price: number;
-    origQty: number;
-    origAmount: number;
-    executedQty: number;
-    avgPrice: number;
-    status: string;
-    type: string;
-    side: string;
-    action: string;
-    transactTime: number;
   }[];
 };

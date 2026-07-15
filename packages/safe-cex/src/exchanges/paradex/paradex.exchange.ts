@@ -27,6 +27,7 @@ import {
   PositionMode,
   PositionSide,
   Ticker,
+  timeframeToSeconds,
   UpdateOrderOpts,
   Writable,
 } from '../../types';
@@ -594,6 +595,50 @@ export class ParadexExchange extends BaseExchange {
 
   fetchOHLCV = async (opts: OHLCVOptions): Promise<Candle[]> => {
     try {
+      const klineResolution: Partial<Record<OHLCVOptions['interval'], string>> = {
+        '1m': '1',
+        '3m': '3',
+        '5m': '5',
+        '15m': '15',
+        '30m': '30',
+        '1h': '60',
+      };
+      const documentedResolution = klineResolution[opts.interval];
+
+      // Prefer the published /markets/klines contract for every interval it supports.
+      // Keep TradingView only for wider intervals and as a temporary compatibility
+      // fallback while Paradex still serves that undocumented route.
+      if (documentedResolution) {
+        const endAt = opts.to ?? virtualClock.getCurrentTimeMs();
+        const intervalMs = timeframeToSeconds[opts.interval] * 1000;
+        const startAt = opts.from ?? endAt - intervalMs * 2000;
+
+        try {
+          const { data } = await this.xhr.get(ENDPOINTS.OHLCV, {
+            params: {
+              symbol: opts.symbol,
+              resolution: documentedResolution,
+              start_at: startAt,
+              end_at: endAt,
+              price_kind: 'last',
+            },
+          });
+          if (Array.isArray(data?.results)) {
+            return data.results.flatMap((row: unknown) => {
+              if (!Array.isArray(row) || row.length < 6) return [];
+              const [timestamp, open, high, low, close, volume] = row.map(Number);
+              if (![timestamp, open, high, low, close, volume].every(Number.isFinite)) return [];
+              return [{ timestamp, open, high, low, close, volume }];
+            });
+          }
+        } catch (err: any) {
+          this.log(
+            `Documented OHLCV endpoint failed for ${opts.symbol}; trying legacy TradingView: ${err?.message || err}`,
+            LogSeverity.Warning,
+          );
+        }
+      }
+
       // Paradex TradingView endpoint: /v1/tradingview/history
       // Supports more intervals than /markets/klines including 1D, 4H, etc.
       // Parameters:
@@ -847,7 +892,7 @@ export class ParadexExchange extends BaseExchange {
     };
 
     const fetchOrderFallbackRows = async () => {
-      const response = await this.xhr.get(ENDPOINTS.ORDERS, {
+      const response = await this.xhr.get(ENDPOINTS.ORDERS_HISTORY, {
         params: omitUndefined({
           market: market.symbol,
           limit: maxLimit,
@@ -1554,16 +1599,16 @@ export class ParadexExchange extends BaseExchange {
     try {
       this.log(`Setting account max slippage to ${maxSlippage}`, LogSeverity.Info);
 
-      // Paradex API: PATCH /account/max-slippage
+      // Paradex API: POST /account/profile/max_slippage
       // Body requires: max_slippage (string, decimal representation)
       const endpoint = ENDPOINTS.MAX_SLIPPAGE;
       const payload = {
         max_slippage: maxSlippage,
       };
 
-      this.log(`PATCH ${endpoint} with payload: ${JSON.stringify(payload)}`, LogSeverity.Debug);
+      this.log(`POST ${endpoint} with payload: ${JSON.stringify(payload)}`, LogSeverity.Debug);
 
-      const response = await this.xhr.patch(endpoint, payload);
+      const response = await this.xhr.post(endpoint, payload);
 
       this.log(`Response status: ${response.status}, data: ${JSON.stringify(response.data)}`, LogSeverity.Debug);
       this.log(`Successfully set account max slippage to ${maxSlippage}`, LogSeverity.Info);

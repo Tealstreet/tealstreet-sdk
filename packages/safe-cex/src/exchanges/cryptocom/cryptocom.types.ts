@@ -1,5 +1,28 @@
 // Crypto.com Exchange Type Definitions
 
+import type { Timeframe } from '../../types';
+
+type CryptocomCandlestickInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '12h' | '1D' | '7D';
+
+const CANDLESTICK_INTERVALS: Partial<Record<Timeframe, CryptocomCandlestickInterval>> = {
+  '1m': '1m',
+  '5m': '5m',
+  '15m': '15m',
+  '30m': '30m',
+  '1h': '1h',
+  '2h': '2h',
+  '4h': '4h',
+  '12h': '12h',
+  '1d': '1D',
+  '1w': '7D',
+};
+
+export const mapCandlestickInterval = (interval: Timeframe): CryptocomCandlestickInterval => {
+  const mapped = CANDLESTICK_INTERVALS[interval];
+  if (!mapped) throw new Error(`Unsupported Crypto.com candlestick interval: ${interval}`);
+  return mapped;
+};
+
 export const BASE_URLS = {
   PRODUCTION: 'https://api.crypto.com/exchange/v1',
   TESTNET: 'https://uat-api.3ona.co/exchange/v1',
@@ -29,8 +52,12 @@ export const ENDPOINTS = {
   INSURANCE: '/public/get-insurance',
 
   // Private endpoints
-  ACCOUNT_SUMMARY: '/private/get-account-summary',
+  ACCOUNTS: '/private/get-accounts',
   CREATE_ORDER: '/private/create-order',
+  ADVANCED_CREATE_ORDER: '/private/advanced/create-order',
+  ADVANCED_AMEND_ORDER: '/private/advanced/amend-order',
+  ADVANCED_CANCEL_ORDER: '/private/advanced/cancel-order',
+  ADVANCED_OPEN_ORDERS: '/private/advanced/get-open-orders',
   AMEND_ORDER: '/private/amend-order',
   CANCEL_ORDER: '/private/cancel-order',
   CANCEL_ALL_ORDERS: '/private/cancel-all-orders',
@@ -41,7 +68,6 @@ export const ENDPOINTS = {
   TRADES_HISTORY: '/private/get-trades',
   POSITIONS: '/private/get-positions',
   CHANGE_LEVERAGE: '/private/change-account-leverage',
-  CHANGE_MARGIN_TYPE: '/private/change-margin-type',
   BALANCE: '/private/user-balance',
   BALANCE_HISTORY: '/private/user-balance-history',
   POSITION_BALANCE: '/private/get-position-balance',
@@ -77,7 +103,7 @@ export const GRAFANA_ENDPOINTS_EVERY = [
 ];
 
 export const GRAFANA_ENDPOINTS_PERIODIC = [
-  ENDPOINTS.ACCOUNT_SUMMARY,
+  ENDPOINTS.ACCOUNTS,
   ENDPOINTS.BALANCE,
   ENDPOINTS.POSITIONS,
   ENDPOINTS.OPEN_ORDERS,
@@ -197,6 +223,7 @@ export interface CryptocomOrder {
   quantity: string;
   limit_price?: string;
   trigger_price?: string;
+  ref_price?: string;
   ref_price_type?: 'MARK_PRICE' | 'INDEX_PRICE' | 'LAST_PRICE';
   avg_price?: string;
   cumulative_quantity?: string;
@@ -218,10 +245,10 @@ export interface CryptocomOrderRequest {
   instrument_name: string;
   side: 'BUY' | 'SELL';
   type: 'LIMIT' | 'MARKET' | 'STOP_LOSS' | 'STOP_LIMIT' | 'TAKE_PROFIT' | 'TAKE_PROFIT_LIMIT';
-  quantity?: number;
-  notional?: number; // for market orders
-  price?: number;
-  trigger_price?: number;
+  quantity?: string;
+  notional?: string; // MARKET BUY by cost only
+  price?: string;
+  ref_price?: string;
   ref_price_type?: 'MARK_PRICE' | 'INDEX_PRICE' | 'LAST_PRICE';
   time_in_force?: 'GOOD_TILL_CANCEL' | 'FILL_OR_KILL' | 'IMMEDIATE_OR_CANCEL' | 'POST_ONLY';
   exec_inst?: string[];
@@ -245,6 +272,17 @@ export interface CryptocomPosition {
   update_timestamp_ms?: number;
   type: 'PERPETUAL_SWAP' | 'LONG_POSITION' | 'SHORT_POSITION';
   position_id?: string;
+  leverage?: string;
+  liquidation_price?: string;
+  mark_price?: string;
+  isolation_id?: string;
+  isolation_type?: 'ISOLATED_MARGIN';
+}
+
+export interface CryptocomAccountsResponse {
+  this_account: {
+    uuid: string;
+  };
 }
 
 export interface CryptocomAccountSummary {
@@ -394,6 +432,8 @@ export interface CryptocomWsOrderUpdate {
     quantity: string;
     limit_price?: string;
     trigger_price?: string;
+    ref_price?: string;
+    ref_price_type?: 'MARK_PRICE' | 'INDEX_PRICE' | 'LAST_PRICE';
     avg_price?: string;
     cumulative_quantity?: string;
     cumulative_value?: string;
@@ -429,6 +469,13 @@ export interface CryptocomWsPositionUpdate {
     open_pos_cost?: string;
     update_timestamp_ms?: number;
     type: 'PERPETUAL_SWAP' | 'LONG_POSITION' | 'SHORT_POSITION';
+    mark_price?: string;
+    target_leverage?: string;
+    leverage?: string;
+    liquidation_price?: string;
+    isolated_margin_balance?: string;
+    isolation_id?: string;
+    isolation_type?: 'ISOLATED_MARGIN';
   }>;
 }
 
@@ -438,17 +485,7 @@ export interface CryptocomWsPositionUpdate {
 export interface CryptocomWsBalanceUpdate {
   subscription: string;
   channel: string;
-  data: Array<{
-    instrument_name: string;
-    quantity?: string;
-    reserved_qty?: string;
-    collateral_amount?: string;
-    collateral_eligible?: boolean;
-    haircut?: string;
-    market_value?: string;
-    max_withdrawal_balance?: string;
-    hourly_interest_rate?: string;
-  }>;
+  data: CryptocomBalanceSummary[];
 }
 
 // Error types

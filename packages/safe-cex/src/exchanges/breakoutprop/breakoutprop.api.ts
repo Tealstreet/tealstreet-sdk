@@ -8,11 +8,9 @@ import { replaceUrlParams } from '../../utils/replaceUrlParams';
 import type { BreakoutpropExchange } from './breakoutprop.exchange';
 import { BASE_URL, RECV_WINDOW } from './breakoutprop.types';
 
-const isErrorSignature = (error: any) => {
-  const isNetwork = isNetworkError(error);
-  const isErrSign =
-    error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!');
-  return isNetwork || isErrSign;
+type SessionRetryConfig = {
+  url?: string;
+  __dxSessionRetried?: boolean;
 };
 
 export const createAPI = (options: ExchangeOptions, exchange: BreakoutpropExchange) => {
@@ -26,8 +24,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BreakoutpropExchan
         serialize: (params) => qs.stringify(params),
       },
       headers: {
-        // TODO: update referer
-        // 'X-Referer': BROKER_ID,
         'Content-Type': 'application/json',
       },
     },
@@ -35,11 +31,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BreakoutpropExchan
     exchange,
   );
 
-  // retry requests on network errors instead of throwing
-  // and some signature errors
+  // DXtrade session auth has no request signatures. Retry transport failures;
+  // the response interceptor below handles one explicit 401 re-login.
   retry(xhr, {
     retries: 3,
-    retryCondition: isErrorSignature,
+    retryCondition: isNetworkError,
   });
 
   if (options.tealstreetTunnel) {
@@ -64,6 +60,23 @@ export const createAPI = (options: ExchangeOptions, exchange: BreakoutpropExchan
     });
 
     return { ...nextConfig, headers };
+  });
+
+  xhr.interceptors.response.use(undefined, async (error) => {
+    const config = error?.config as SessionRetryConfig | undefined;
+    if (
+      error?.response?.status !== 401 ||
+      !config ||
+      config.url === '/login' ||
+      config.__dxSessionRetried
+    ) {
+      throw error;
+    }
+
+    config.__dxSessionRetried = true;
+    exchange.invalidateSession();
+    await exchange.getSessionToken();
+    return xhr.request(config);
   });
 
   return xhr;

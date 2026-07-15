@@ -16,10 +16,10 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 - **Official Documentation**: https://docs.paradex.trade/
 - **Getting Started**: https://docs.paradex.trade/api/general-information/api-quick-start
 - **Authentication**: https://docs.paradex.trade/api/general-information/authentication
-- **REST API Reference**: https://docs.paradex.trade/api/rest-api
-- **WebSocket API**: https://docs.paradex.trade/api/websocket-api
+- **REST API Reference**: https://docs.paradex.trade/api/prod/
+- **WebSocket API**: https://docs.paradex.trade/ws/general-information
 - **Rate Limits**: https://docs.paradex.trade/api/general-information/rate-limits
-- **Error Codes**: https://docs.paradex.trade/api/general-information/errors
+- **WebSocket Error Handling**: https://docs.paradex.trade/ws/general-information/error-handling
 - **CCXT REST**: https://github.com/ccxt/ccxt/blob/master/ts/src/paradex.ts
 - **CCXT WebSocket**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/paradex.ts
 
@@ -141,7 +141,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 4. **Connect public WebSocket**: Subscribe to `bbo.{symbol}` + `trades.{symbol}` for filtered perps and `markets_summary`; orderbook stays on-demand
 5. **Connect private WebSocket** (if `jwtManager` available): Auth + subscribe to orders/positions/balance
 6. **Fetch leverage settings**: `GET /account/margin` → populate `leverageSettings` map
-7. **Set max slippage**: `PATCH /account/max-slippage` to `0.1` (10%) (`paradex.exchange.ts:253`)
+7. **Set max slippage**: `POST /account/profile/max_slippage` to `0.1` (10%)
 8. **Initial tick**: Fetch positions → fetch balance → calculate uPnL from positions → store
 9. **Fetch orders**: `GET /orders` → filter open statuses → store
 10. **Start tick loop**: `tick()` → positions + balance + orders + leverage refresh → `loop(tick, 10_000)`
@@ -166,22 +166,18 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | Endpoint                   | Method | Description                                                            |
 | -------------------------- | ------ | ---------------------------------------------------------------------- |
 | `/account`                 | GET    | Account info (account_number, total_collateral, free_collateral, etc.) |
-| `/balances`                | GET    | Balance details                                                        |
 | `/onboarding`              | POST   | Account onboarding                                                     |
 | `/account/margin`          | GET    | Get all margin/leverage configs                                        |
 | `/account/margin/{market}` | POST   | Set leverage for a market                                              |
-| `/account/max-slippage`    | PATCH  | Set account max slippage tolerance                                     |
+| `/account/profile/max_slippage` | POST | Set account max slippage tolerance                                  |
 
 ### Markets
 
 | Endpoint                      | Method | Description                               |
 | ----------------------------- | ------ | ----------------------------------------- |
 | `/markets`                    | GET    | List all markets                          |
-| `/markets/{market}`           | GET    | Single market info                        |
 | `/markets/summary`            | GET    | Tickers (use `?market=ALL`)               |
-| `/markets/{market}/ticker`    | GET    | Single ticker                             |
 | `/orderbook/{market}`         | GET    | Orderbook (with `?depth=N`)               |
-| `/markets/{market}/trades`    | GET    | Recent trades                             |
 | `/markets/klines`             | GET    | OHLCV klines (public, limited intervals)  |
 | `/tradingview/history`        | GET    | TradingView OHLCV (supports 1D, 4H, etc.) |
 
@@ -190,6 +186,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | Endpoint                           | Method | Description                                    |
 | ---------------------------------- | ------ | ---------------------------------------------- |
 | `/orders`                          | GET    | List open orders                               |
+| `/orders-history`                  | GET    | List historical orders (execution fallback)   |
 | `/orders`                          | POST   | Place order (with signature)                   |
 | `/orders`                          | DELETE | Cancel all orders (optional `?market=` filter) |
 | `/orders/{id}`                     | DELETE | Cancel specific order                          |
@@ -203,16 +200,9 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/positions`          | GET    | Get all positions                |
 | `/positions/{market}` | GET    | Get position for specific market |
 
-### Funding
-
-| Endpoint                    | Method | Description             |
-| --------------------------- | ------ | ----------------------- |
-| `/markets/{market}/funding` | GET    | Funding rate for market |
-| `/funding-payments`         | GET    | Funding payment history |
-
 Execution-history behavior (`fetchExecutions`):
 - Uses authenticated `/fills` with cursor pagination for primary execution history
-- Falls back to `/orders` rows where filled size is positive (`size - remaining_size > 0`)
+- Falls back to `/orders-history` rows where filled size is positive (`size - remaining_size > 0`)
 - Normalizes symbol/side/timestamp and returns Unix-second execution timestamps
 
 ## WebSocket Implementation
@@ -289,7 +279,7 @@ Execution-history behavior (`fetchExecutions`):
 **OHLCV implementation** (`paradex.ws-public.ts:494-604`):
 
 - **Hybrid approach**: REST polling + trade-based real-time updates
-- Uses `fetchOHLCV()` endpoint via TradingView history (`/tradingview/history`)
+- Uses documented `/markets/klines` for 1m through 1h; wider intervals temporarily retain the public `/tradingview/history` compatibility route
 - Polls every 3 seconds (`paradex.ws-public.ts:578`)
 - Between polls, `updateOHLCVFromTrade()` constructs/updates candles from trade feed
 - Only emits callback when candle data actually changes
@@ -416,7 +406,7 @@ resting limit order.
 
 ### Order Update (`paradex.exchange.ts:1128-1174`)
 
-Cancel-and-replace pattern (Paradex does not support order modification):
+The integration still uses cancel-and-replace even though Paradex now supports native `PUT /orders/{order_id}` modification:
 
 1. Build new order from existing order properties
 2. Apply price/amount updates, preserve timeInForce
@@ -480,7 +470,7 @@ For order signatures, size and price are scaled by `1e8`:
 
 - **Global rate limit**: `maxRPS: 10` via `axios-rate-limit` (`paradex.exchange.ts:71`)
 - **Network retry**: 3 retries on network errors with linear backoff (1s, 2s, 3s) via `axios-retry` (`paradex.api.ts:73-77`)
-- **Official limits**: 100 req/s public, 50 req/s private
+- Current published REST limits vary by endpoint; keep the client-side 10 RPS ceiling unless the official rate-limit reference is re-verified during a deliberate tuning pass.
 
 ### WebSocket
 
@@ -577,11 +567,11 @@ For order signatures, size and price are scaled by `1e8`:
 - Chain ID differs between environments (fetched from SDK config)
 - SDK config endpoint differs: `SDK.Config.fetchConfig('testnet')` vs `SDK.Config.fetchConfig('prod')`
 - Testnet credentials at: https://testnet.paradex.trade/
-- Test credential file (gitignored): `.apikey.json`
+- `src/exchanges/paradex/` is runtime-only. Fresh deterministic regressions belong in `src/__tests__/audit-regressions/`; do not restore credentialed/manual exchange-tree tests.
 
 ## Known Quirks / Implementation Notes
 
-1. **Order update = cancel + replace**: Paradex does not support order modification. `updateOrder()` cancels the existing order and places a new one (`paradex.exchange.ts:1128`).
+1. **Order update currently uses cancel + replace**: Paradex supports native `PUT /orders/{order_id}`, but `updateOrder()` has not yet adopted it and still cancels the existing order before placing a replacement.
 
 2. **No infinite TP/SL**: Paradex requires explicit order size for TP/SL orders. Zero-sized "close entire position" TP/SL is not supported (`paradex.exchange.ts:978-985`).
 

@@ -6,7 +6,17 @@ import type {
 } from './cryptocom.types';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, Position, PositionSide } from '../../types';
+import {
+  Balance,
+  MarginType,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderTimeInForce,
+  OrderType,
+  Position,
+  PositionSide,
+} from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -18,6 +28,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
   private subscriptions: Set<string> = new Set();
   private messageId = 1;
   private isAuthenticated = false;
+  private reconnectAuthTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: CryptocomExchange) {
     super(parent);
@@ -34,11 +45,14 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
     }
   };
 
-  onOpen = async () => {
+  onOpen = () => {
     if (!this.isDisposed) {
       this.trackLastReceived();
       this.isAuthenticated = false;
-      await this.authenticate();
+      clearTimeout(this.reconnectAuthTimer);
+      this.reconnectAuthTimer = setTimeout(() => {
+        if (!this.isDisposed) void this.authenticate();
+      }, 1000);
     }
   };
 
@@ -61,30 +75,26 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           params: {
             channels: Array.from(this.subscriptions),
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
   };
 
   subscribeToOrderUpdates = () => {
-    const channel = 'user.order';
+    const channels = ['user.order', 'user.advance.order'];
+    const newChannels = channels.filter((channel) => !this.subscriptions.has(channel));
+    for (const channel of newChannels) this.subscriptions.add(channel);
 
-    if (!this.subscriptions.has(channel)) {
-      this.subscriptions.add(channel);
-
-      if (this.isAuthenticated) {
-        this.send(
-          JSON.stringify({
-            id: this.messageId++,
-            method: 'subscribe',
-            params: {
-              channels: [channel],
-            },
-            nonce: Date.now(),
-          }),
-        );
-      }
+    if (this.isAuthenticated && newChannels.length > 0) {
+      this.send(
+        JSON.stringify({
+          id: this.messageId++,
+          method: 'subscribe',
+          params: { channels: newChannels },
+          nonce: virtualClock.getCurrentTimeMs(),
+        }),
+      );
     }
   };
 
@@ -102,7 +112,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
             params: {
               channels: [channel],
             },
-            nonce: Date.now(),
+            nonce: virtualClock.getCurrentTimeMs(),
           }),
         );
       }
@@ -123,7 +133,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
             params: {
               channels: [channel],
             },
-            nonce: Date.now(),
+            nonce: virtualClock.getCurrentTimeMs(),
           }),
         );
       }
@@ -137,6 +147,11 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
       try {
         const json = jsonParse(data);
         if (!json) return;
+
+        if (json.method === 'public/heartbeat' && typeof json.id === 'number') {
+          this.send(JSON.stringify({ id: json.id, method: 'public/respond-heartbeat' }));
+          return;
+        }
 
         // Auth ack still uses `code` + `method` with no `result`. Handle it
         // first because both the auth ack and data frames carry `code: 0`.
@@ -155,7 +170,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
         // `'code' in json` (the previous shape) silently drops all updates.
         if (json.result && json.result.channel) {
           const channel = json.result.channel;
-          if (channel === 'user.order' || channel.startsWith('user.order')) {
+          if (channel.startsWith('user.order') || channel.startsWith('user.advance.order')) {
             this.handleOrderUpdate(json.result as CryptocomWsOrderUpdate);
           } else if (channel === 'user.positions') {
             this.handlePositionUpdate(json.result as CryptocomWsPositionUpdate);
@@ -182,38 +197,38 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
 
   private handleOrderUpdate = (update: CryptocomWsOrderUpdate) => {
     try {
-      const orderData = update.data[0];
-      if (!orderData) return;
+      for (let i = 0; i < update.data.length; i++) {
+        const orderData = update.data[i];
+        const market = this.store.marketsById[orderData.instrument_name];
+        if (!market) continue;
 
-      const market = this.store.markets.find((m) => m.id === orderData.instrument_name);
-      if (!market) return;
+        // v1 numerics are strings; status/timestamps use either the new
+        // (status / create_time / update_time) or legacy (order_status /
+        // time_created / time_updated) names depending on the WS channel.
+        const quantity = parseFloat(orderData.quantity) || 0;
+        const filled = orderData.cumulative_quantity ? parseFloat(orderData.cumulative_quantity) || 0 : 0;
+        const price = parseFloat(orderData.ref_price ?? orderData.trigger_price ?? orderData.limit_price ?? '0') || 0;
+        const status = orderData.status ?? orderData.order_status ?? 'ACTIVE';
+        const updated = orderData.update_time ?? orderData.time_updated;
+        const created = orderData.create_time ?? orderData.time_created;
 
-      // v1 numerics are strings; status/timestamps use either the new
-      // (status / create_time / update_time) or legacy (order_status /
-      // time_created / time_updated) names depending on the WS channel.
-      const quantity = parseFloat(orderData.quantity) || 0;
-      const filled = orderData.cumulative_quantity ? parseFloat(orderData.cumulative_quantity) || 0 : 0;
-      const price = orderData.limit_price ? parseFloat(orderData.limit_price) || 0 : 0;
-      const status = orderData.status ?? orderData.order_status ?? 'ACTIVE';
-      const updated = orderData.update_time ?? orderData.time_updated;
-      const created = orderData.create_time ?? orderData.time_created;
+        const order: Order = {
+          id: orderData.order_id,
+          symbol: market.symbol,
+          type: this.mapOrderType(orderData.order_type),
+          side: orderData.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
+          price,
+          amount: quantity,
+          filled,
+          remaining: Math.max(0, quantity - filled),
+          status: this.mapOrderStatus(status),
+          lastUpdate: updated || created || virtualClock.getCurrentTimeMs(),
+          reduceOnly: orderData.exec_inst?.includes('REDUCE_ONLY') ?? false,
+          timeInForce: this.mapTimeInForce(orderData.time_in_force),
+        };
 
-      const order: Order = {
-        id: orderData.order_id,
-        symbol: market.symbol,
-        type: this.mapOrderType(orderData.order_type),
-        side: orderData.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
-        price,
-        amount: quantity,
-        filled,
-        remaining: Math.max(0, quantity - filled),
-        status: this.mapOrderStatus(status),
-        lastUpdate: updated || created || virtualClock.getCurrentTimeMs(),
-        reduceOnly: false,
-        timeInForce: this.mapTimeInForce(orderData.time_in_force),
-      };
-
-      this.store.addOrUpdateOrder(order);
+        this.store.addOrUpdateOrder(order);
+      }
     } catch (error) {
       this.parent.emitAndLogError(`Error handling order update: ${error}`);
     }
@@ -221,63 +236,80 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
 
   private handlePositionUpdate = async (update: CryptocomWsPositionUpdate) => {
     try {
-      const positionData = update.data[0];
-      if (!positionData) return;
-
-      const market = this.store.markets.find((m) => m.id === positionData.instrument_name);
-      if (!market) return;
-
-      // v1 numerics are strings. Side is encoded in the sign of `quantity`
-      // (negative = short). Legacy frames still set `type` to
-      // LONG_POSITION/SHORT_POSITION, but quantity-sign is the source of truth
-      // — using the type field on v1 always produced `Short` because the
-      // field is now constant `PERPETUAL_SWAP`.
-      const quantity = parseFloat(positionData.quantity) || 0;
-      const cost = parseFloat(positionData.cost) || 0;
       const positionMode = await this.parent.getPositionMode();
+      for (let i = 0; i < update.data.length; i++) {
+        const positionData = update.data[i];
+        const market = this.store.marketsById[positionData.instrument_name];
+        if (!market) continue;
 
-      if (quantity === 0) {
-        // Position closed — drop *all* rows for this instrument. quantity === 0
-        // carries no side info (and the legacy type field is now constant
-        // `PERPETUAL_SWAP`), so we can't recover which side closed from this
-        // frame alone. Filtering by symbol is safe: a close means there is no
-        // open exposure on either side for that instrument anymore.
-        const before = this.store.positions.length;
-        const updatedPositions = this.store.positions.filter((p) => p.symbol !== market.symbol);
-        if (updatedPositions.length !== before) {
-          this.store.update({ positions: updatedPositions });
+        // Side is encoded in the sign of quantity (negative = short).
+        const quantity = parseFloat(positionData.quantity) || 0;
+        const cost = parseFloat(positionData.cost) || 0;
+
+        if (quantity === 0) {
+          const before = this.store.positions.length;
+          const updatedPositions = this.store.positions.filter((p) => p.symbol !== market.symbol);
+          if (updatedPositions.length !== before) this.store.update({ positions: updatedPositions });
+          continue;
         }
-        return;
+
+        const side = quantity > 0 ? PositionSide.Long : PositionSide.Short;
+        const contracts = Math.abs(quantity);
+        const entryPrice = cost / contracts || 0;
+        const leverage = parseFloat(positionData.leverage ?? positionData.target_leverage ?? '1') || 1;
+        const liquidationPrice = parseFloat(positionData.liquidation_price ?? '0') || 0;
+        const markPrice = parseFloat(positionData.mark_price ?? '0') || 0;
+
+        const position: Position = {
+          id: createPositionId(market.symbol, side, positionMode),
+          symbol: market.symbol,
+          side,
+          entryPrice,
+          notional: Math.abs(cost),
+          leverage,
+          marginType: positionData.isolation_type === 'ISOLATED_MARGIN' ? MarginType.Isolated : MarginType.Cross,
+          positionMode,
+          unrealizedPnl: parseFloat(positionData.open_position_pnl) || 0,
+          contracts,
+          liquidationPrice,
+          info: { markPrice, isolationId: positionData.isolation_id },
+          lastUpdate: positionData.update_timestamp_ms || virtualClock.getCurrentTimeMs(),
+        };
+
+        this.store.addOrUpdatePosition(position);
       }
-
-      const side = quantity > 0 ? PositionSide.Long : PositionSide.Short;
-      const positionId = createPositionId(market.symbol, side, positionMode);
-
-      const contracts = Math.abs(quantity);
-      const entryPrice = cost / contracts || 0;
-
-      const position: Position = {
-        id: positionId,
-        symbol: market.symbol,
-        side,
-        entryPrice,
-        notional: Math.abs(cost),
-        leverage: 1,
-        unrealizedPnl: parseFloat(positionData.open_position_pnl) || 0,
-        contracts,
-        liquidationPrice: 0,
-        lastUpdate: positionData.update_timestamp_ms || virtualClock.getCurrentTimeMs(),
-      };
-
-      this.store.addOrUpdatePosition(position);
     } catch (error) {
       this.parent.emitAndLogError(`Error handling position update: ${error}`);
     }
   };
 
-  private handleBalanceUpdate = (_update: CryptocomWsBalanceUpdate) => {
-    // Handle balance updates if needed
-    // This can trigger a balance refresh
+  private handleBalanceUpdate = (update: CryptocomWsBalanceUpdate) => {
+    const summary = update.data[0];
+    if (!summary) return;
+
+    const currencies: NonNullable<Balance['currencies']> = {};
+    for (let i = 0; i < (summary.position_balances || []).length; i++) {
+      const row = summary.position_balances[i];
+      const quantity = parseFloat(row.quantity) || 0;
+      const available = parseFloat(row.max_withdrawal_balance) || 0;
+      currencies[row.instrument_name] = {
+        total: quantity,
+        free: available,
+        used: Math.max(0, quantity - available),
+        upnl: 0,
+      };
+    }
+
+    this.store.update({
+      balance: {
+        total: parseFloat(summary.total_margin_balance) || 0,
+        free: parseFloat(summary.total_available_balance) || 0,
+        used: parseFloat(summary.total_initial_margin) || 0,
+        upnl: parseFloat(summary.total_session_unrealized_pnl) || 0,
+        currencies,
+      },
+      loaded: { ...this.store.loaded, balance: true },
+    });
   };
 
   private mapOrderType = (cryptocomType: string): OrderType => {
@@ -335,7 +367,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           params: {
             channels,
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
 
@@ -344,6 +376,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
   };
 
   dispose = () => {
+    clearTimeout(this.reconnectAuthTimer);
     this.subscriptions.clear();
     this.isAuthenticated = false;
     if (this.ws) {

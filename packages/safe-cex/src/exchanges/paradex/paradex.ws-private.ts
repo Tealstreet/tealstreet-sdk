@@ -474,8 +474,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       clearTimeout(this.ordersThrottleTimeout);
       this.ordersThrottleTimeout = undefined;
     }
-    // Call parent's dispose (safely handles if it doesn't exist)
-    this.ws?.close?.();
+    super.dispose();
   };
 
   private throttledFetchOrders = () => {

@@ -8,18 +8,18 @@ import type {
 } from './cryptocom.types';
 
 import throttle from 'lodash/throttle';
-import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
-import { updateOrderBook } from '../../utils/updateOrderBook';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { CryptocomExchange } from './cryptocom.exchange';
-import { ENDPOINTS, WSS_URLS } from './cryptocom.types';
+import { mapCandlestickInterval, WSS_URLS } from './cryptocom.types';
 
 export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
   private subscriptions: Set<string> = new Set();
   private messageId = 1;
+  private reconnectSubscriptionTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: CryptocomExchange) {
     super(parent);
@@ -39,7 +39,12 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
   onOpen = () => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      this.resubscribe();
+      clearTimeout(this.reconnectSubscriptionTimer);
+      if (this.subscriptions.size > 0) {
+        this.reconnectSubscriptionTimer = setTimeout(() => {
+          if (!this.isDisposed) this.resubscribe();
+        }, 1000);
+      }
     }
   };
 
@@ -52,7 +57,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           params: {
             channels: Array.from(this.subscriptions),
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
@@ -69,7 +74,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           params: {
             channels: [channel],
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
@@ -86,7 +91,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           params: {
             channels: [channel],
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
@@ -113,7 +118,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           id: this.messageId++,
           method: 'subscribe',
           params: { channels: chunk },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
@@ -130,7 +135,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           params: {
             channels: [channel],
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
@@ -147,7 +152,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           params: {
             channels: [channel],
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
@@ -160,6 +165,11 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
       try {
         const json = jsonParse(data);
         if (!json) return;
+
+        if (json.method === 'public/heartbeat' && typeof json.id === 'number') {
+          this.send(JSON.stringify({ id: json.id, method: 'public/respond-heartbeat' }));
+          return;
+        }
 
         // Data frames carry `result.channel` ("book", "ticker", "trade",
         // "candlestick"); the per-symbol sub name (e.g. "book.BTCUSD-PERP.50")
@@ -248,15 +258,15 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         if (!market) return;
 
         const data = update.data[0];
-        if (!data || data.bids.length === 0 || data.asks.length === 0) return;
+        if (!data) return;
 
         // Update best bid/ask in ticker
         // Use O(1) hashmap lookup instead of O(n) find
         const ticker = this.store.tickersBySymbol[market.symbol];
         if (ticker) {
           this.store.updateTicker(ticker, {
-            bid: parseFloat(data.bids[0][0]),
-            ask: parseFloat(data.asks[0][0]),
+            bid: data.bids[0] ? parseFloat(data.bids[0][0]) : 0,
+            ask: data.asks[0] ? parseFloat(data.asks[0][0]) : 0,
           });
         }
 
@@ -278,14 +288,15 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
 
   private handleCandlestickUpdate = (update: CryptocomWsCandlestickUpdate) => {
     // Trigger message handlers for candlestick updates
-    const handler = update.channel;
+    const handler = update.subscription;
     const callbacks = this.messageHandlers[handler] || [];
     callbacks.forEach((callback) => callback(update));
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const channel = `candlestick.${opts.interval}.${opts.symbol}`;
-    const handler = `candlestick.${opts.interval}.${opts.symbol}`;
+    const interval = mapCandlestickInterval(opts.interval);
+    const channel = `candlestick.${interval}.${opts.symbol}`;
+    const handler = channel;
 
     const parser = (update: CryptocomWsCandlestickUpdate) => {
       if (update.instrument_name === opts.symbol) {
@@ -308,7 +319,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
 
         // Subscribe to the candlestick channel
-        this.subscribeToCandlestick(opts.symbol, opts.interval);
+        this.subscribeToCandlestick(opts.symbol, interval);
       } else {
         setTimeout(() => waitForConnectedAndSubscribe(), 100);
       }
@@ -328,56 +339,9 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
   };
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
-    const innerId = nanoid();
-
-    if (!this.orderBookInnerState[innerId]) {
-      this.orderBookInnerState[innerId] = {
-        updates: [],
-        isSnapshotLoaded: false,
-      };
-    }
-
     const channel = `book.${symbol}.50`;
     const handler = `book.${symbol}`;
     const orderBook: OrderBook = { bids: [], asks: [] };
-
-    const fetchSnapshot = async () => {
-      const { data } = await this.parent.xhr.post(ENDPOINTS.BOOK, {
-        instrument_name: symbol,
-        depth: 50,
-      });
-
-      if (!this.isDisposed) {
-        // Save snapshot into orderBook object
-        const bookData = data.data?.[0];
-        if (bookData) {
-          orderBook.bids = bookData.bids.map(([price, quantity]: [string, string, string]) => ({
-            price: parseFloat(price),
-            amount: parseFloat(quantity),
-            total: 0,
-          }));
-
-          orderBook.asks = bookData.asks.map(([price, quantity]: [string, string, string]) => ({
-            price: parseFloat(price),
-            amount: parseFloat(quantity),
-            total: 0,
-          }));
-
-          // Apply any queued updates
-          this.orderBookInnerState[innerId].updates.forEach((update: any) => {
-            this.processOrderBookUpdate(orderBook, update);
-          });
-
-          sortOrderBook(orderBook);
-          calcOrderBookTotal(orderBook);
-
-          this.orderBookInnerState[innerId].isSnapshotLoaded = true;
-          this.orderBookInnerState[innerId].updates = [];
-
-          callback(orderBook);
-        }
-      }
-    };
 
     const parser = (update: CryptocomWsBookUpdate) => {
       if (update.instrument_name !== symbol) return;
@@ -385,20 +349,20 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
       const bookData = update.data[0];
       if (!bookData) return;
 
-      // First update, request snapshot
-      if (!this.orderBookInnerState[innerId].isSnapshotLoaded) {
-        this.orderBookInnerState[innerId].updates.push(bookData);
-
-        if (this.orderBookInnerState[innerId].updates.length === 1) {
-          fetchSnapshot();
-        }
-        return;
-      }
-
-      // Apply update — processOrderBookUpdate now uses updateOrderBook
-      // (binary-search sorted insertion), so the trailing sortOrderBook is
-      // redundant for the delta path.
-      this.processOrderBookUpdate(orderBook, bookData);
+      // The default channel mode is SNAPSHOT: every frame is the complete
+      // top-of-book. Replace both sides wholesale so levels that disappeared
+      // from the next snapshot cannot survive as phantom liquidity.
+      orderBook.bids = bookData.bids.map(([price, quantity]) => ({
+        price: parseFloat(price),
+        amount: parseFloat(quantity),
+        total: 0,
+      }));
+      orderBook.asks = bookData.asks.map(([price, quantity]) => ({
+        price: parseFloat(price),
+        amount: parseFloat(quantity),
+        total: 0,
+      }));
+      sortOrderBook(orderBook);
       calcOrderBookTotal(orderBook);
 
       callback(orderBook);
@@ -420,38 +384,12 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
     return () => {
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
 
-      delete this.orderBookInnerState[innerId];
-
       if (this.isConnected && !this.messageHandlers[handler].length) {
         this.unsubscribe([channel]);
         this.cleanupMessageHandlerStats(handler);
         delete this.messageHandlers[handler];
       }
     };
-  };
-
-  private processOrderBookUpdate = (
-    orderBook: OrderBook,
-    update: { bids: [string, string, string][]; asks: [string, string, string][] },
-  ) => {
-    // updateOrderBook does binary-search sorted insertion (O(log N) lookup),
-    // replacing the prior O(N) findIndex scan per level.
-    const bids = update.bids;
-    if (bids) {
-      for (let i = 0; i < bids.length; i++) {
-        const price = parseFloat(bids[i][0]);
-        const amount = parseFloat(bids[i][1]);
-        updateOrderBook(orderBook, 'bids', { price, amount, total: 0 });
-      }
-    }
-    const asks = update.asks;
-    if (asks) {
-      for (let i = 0; i < asks.length; i++) {
-        const price = parseFloat(asks[i][0]);
-        const amount = parseFloat(asks[i][1]);
-        updateOrderBook(orderBook, 'asks', { price, amount, total: 0 });
-      }
-    }
   };
 
   unsubscribe = (channels: string[]) => {
@@ -463,7 +401,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           params: {
             channels,
           },
-          nonce: Date.now(),
+          nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
 
@@ -472,6 +410,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
   };
 
   dispose = () => {
+    clearTimeout(this.reconnectSubscriptionTimer);
     this.subscriptions.clear();
     if (this.ws) {
       this.ws.close();

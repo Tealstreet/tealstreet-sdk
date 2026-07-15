@@ -515,7 +515,7 @@ describe('Targeted exchange fetchExecutions mapping', () => {
     const executions = await exchange.fetchExecutions({ symbol: 'BTC-USD-PERP', limit: 10 });
 
     expect(get.mock.calls[0][0]).toBe(PARADEX_ENDPOINTS.FILLS);
-    expect(get.mock.calls[1][0]).toBe(PARADEX_ENDPOINTS.ORDERS);
+    expect(get.mock.calls[1][0]).toBe(PARADEX_ENDPOINTS.ORDERS_HISTORY);
     expect(executions).toEqual([
       {
         timestamp: 1700000006,

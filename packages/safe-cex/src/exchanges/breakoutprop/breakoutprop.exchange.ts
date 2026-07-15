@@ -14,6 +14,7 @@ import {
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderType,
   OrderTimeInForce,
   PlaceOrderOpts,
   Position,
@@ -47,21 +48,39 @@ import {
   TICKER_RESPONSE,
   USER_RESPONSE,
 } from './breakoutprop.types';
-import { BitruePrivateWebsocket } from './breakoutprop.ws-private';
 import { BreakoutpropPublicWebsocket } from './breakoutprop.ws-public';
+
+export const parseDxSessionTimeoutMs = (timeout: string): number => {
+  const parts = timeout.split(':').map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    throw new Error(`Invalid DXtrade session timeout: ${timeout}`);
+  }
+  const [hours, minutes, seconds] = parts;
+  if (minutes >= 60 || seconds >= 60) {
+    throw new Error(`Invalid DXtrade session timeout: ${timeout}`);
+  }
+  return (hours * 3600 + minutes * 60 + seconds) * 1000;
+};
+
+const toDxOrderType = (type: OrderType): 'LIMIT' | 'MARKET' | 'STOP' => {
+  if (type === OrderType.Limit) return 'LIMIT';
+  if (type === OrderType.Market) return 'MARKET';
+  if (type === OrderType.StopLoss || type === OrderType.TakeProfit) return 'STOP';
+  throw new Error(`Breakout Prop does not support ${type} orders`);
+};
 
 export class BreakoutpropExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
 
   publicWebsocket: BreakoutpropPublicWebsocket;
-  privateWebsocket: BitruePrivateWebsocket;
 
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
   sessionToken: string | null = null;
   sessionTokenExpiresAt: number = 0;
+  sessionTokenRequest: Promise<string> | null = null;
   accountCode: string | null = null;
 
   recentWsRequests: Record<
@@ -79,13 +98,11 @@ export class BreakoutpropExchange extends BaseExchange {
     this.unlimitedXHR = createAPI(opts, this);
 
     this.publicWebsocket = new BreakoutpropPublicWebsocket(this);
-    this.privateWebsocket = new BitruePrivateWebsocket(this);
   }
 
   dispose = () => {
     super.dispose();
     this.publicWebsocket.dispose();
-    this.privateWebsocket.dispose();
   };
 
   validateAccount = async () => {
@@ -102,17 +119,34 @@ export class BreakoutpropExchange extends BaseExchange {
     if (this.sessionToken && Date.now() < this.sessionTokenExpiresAt) {
       return this.sessionToken;
     }
-    const { data } = await this.xhr.post<LOGIN_RESPONSE>(ENDPOINTS.LOGIN, {
-      domain: 'default',
-      username: this.options.key,
-      password: this.options.secret,
-    });
-    if (!data.sessionToken) {
-      throw new Error('No session token received');
+
+    if (!this.sessionTokenRequest) {
+      this.sessionTokenRequest = (async () => {
+        const { data } = await this.xhr.post<LOGIN_RESPONSE>(ENDPOINTS.LOGIN, {
+          domain: 'default',
+          username: this.options.key,
+          password: this.options.secret,
+        });
+        if (!data.sessionToken) {
+          throw new Error('No session token received');
+        }
+        const timeoutMs = parseDxSessionTimeoutMs(data.timeout);
+        this.sessionToken = data.sessionToken;
+        this.sessionTokenExpiresAt = Date.now() + timeoutMs;
+        return this.sessionToken;
+      })();
     }
-    this.sessionToken = data.sessionToken;
-    this.sessionTokenExpiresAt = Date.now() + 30 * 60 * 1000;
-    return this.sessionToken;
+
+    try {
+      return await this.sessionTokenRequest;
+    } finally {
+      this.sessionTokenRequest = null;
+    }
+  };
+
+  invalidateSession = () => {
+    this.sessionToken = null;
+    this.sessionTokenExpiresAt = 0;
   };
 
   getAccountCode = async (): Promise<string> => {
@@ -239,8 +273,8 @@ export class BreakoutpropExchange extends BaseExchange {
           quote,
           active: instrument.instrumentDetails.tradingStatus === 'FULL',
           precision: {
-            amount: instrument.instrumentDetails.minOrderSize,
-            price: -Math.log10(instrument.instrument.priceIncrement),
+            amount: instrument.instrumentDetails.minOrderSizeIncrement,
+            price: instrument.instrument.priceIncrement,
           },
           limits: {
             amount: {
@@ -335,12 +369,19 @@ export class BreakoutpropExchange extends BaseExchange {
 
   formatBalance = (data: PORTFOLIO_RESPONSE) => {
     try {
-      const usdBalance = data.portfolios[0]?.balances?.[0]?.value || 0;
+      const cashBalance = data.portfolios[0]?.balances?.find((balance) => balance.currency === 'USD')?.value || 0;
+      const positions = this.formatOpenPositions(data);
+      const used = positions.reduce(
+        (total, position) => total + (position.marginSize ?? Math.abs(position.notional) / Math.max(position.leverage, 1)),
+        0,
+      );
+      const upnl = positions.reduce((total, position) => total + position.unrealizedPnl, 0);
+      const total = cashBalance + upnl;
       const balance: Balance = {
-        total: usdBalance,
-        free: usdBalance,
-        upnl: 0,
-        used: 0,
+        total,
+        free: total - used,
+        upnl,
+        used,
         info: data,
       };
       return balance;
@@ -361,20 +402,29 @@ export class BreakoutpropExchange extends BaseExchange {
 
   formatOpenPositions = (data: PORTFOLIO_RESPONSE) => {
     try {
-      const positions: Position[] = data.portfolios[0]?.positions.map((position) => ({
-        symbol: position.symbol,
-        side: POSITION_SIDE[position.side],
-        entryPrice: position.openPrice,
-        notional: position.quantityNotional,
-        leverage: 1 / position.marginRate,
-        unrealizedPnl: 0,
-        contracts: position.quantity,
-        liquidationPrice: 0,
-        id: createPositionId(position.symbol),
-        positionMode: PositionMode.OneWay,
-        marginType: MarginType.Cross,
-        info: position,
-      }));
+      const positions: Position[] = data.portfolios[0]?.positions.map((position) => {
+        const side = POSITION_SIDE[position.side];
+        const ticker = this.store.tickersBySymbol[position.symbol];
+        const markPrice = ticker?.mark || ticker?.last || position.openPrice;
+        const direction = side === PositionSide.Long ? 1 : -1;
+        const notional = Math.abs(position.quantityNotional);
+        return {
+          symbol: position.symbol,
+          side,
+          entryPrice: position.openPrice,
+          notional,
+          leverage: 1 / position.marginRate,
+          unrealizedPnl: direction * (markPrice - position.openPrice) * position.quantity,
+          contracts: position.quantity,
+          liquidationPrice: 0,
+          marginSize: notional * position.marginRate,
+          id: createPositionId(position.symbol),
+          positionMode: PositionMode.OneWay,
+          marginType: MarginType.Cross,
+          lastUpdate: new Date(position.lastUpdateTime).getTime(),
+          info: position,
+        };
+      });
       return positions;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -424,51 +474,8 @@ export class BreakoutpropExchange extends BaseExchange {
   };
 
   fetchOrders = async () => {
-    const { data } = await this.xhr.get<Record<string, Record<string, Array<Record<string, any>>>>>(ENDPOINTS.ORDERS);
-
-    console.log(data);
-
-    return [];
-
-    // if (data.code) {
-    //   this.emitAndLogError(`${data.msg}`);
-    //   return this.store.orders;
-    // }
-    //
-    // const orders: Order[] = data.data.orders.map((o) => {
-    //   const order = {
-    //     id: v(o, 'orderId'),
-    //     status: OrderStatus.Open,
-    //     symbol: o.symbol.replace(/-/, ''),
-    //     type: ORDER_TYPE[o.type],
-    //     side: ORDER_SIDE[o.side],
-    //     price: parseFloat(o.price) || parseFloat(v(o, 'stopPrice')),
-    //     amount: parseFloat(v(o, 'origQty')),
-    //     reduceOnly: v(o, 'reduceOnly') || false,
-    //     timeInForce: v(o, 'postOnly') ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
-    //     filled: parseFloat(v(o, 'executedQty')),
-    //     lastUpdate: virtualClock.getCurrentTimeMs(),
-    //     remaining: subtract(v(o, 'origQty'), v(o, 'executedQty')),
-    //     info: o,
-    //     ...(ORDER_TYPE[o.type] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')] }),
-    //     ...(ORDER_TYPE[o.type] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')] }),
-    //   };
-    //   if (order.type === OrderType.StopLoss) {
-    //     const ticker = this.store.tickers.find((t) => t.symbol === order.symbol);
-    //     if (ticker) {
-    //       if (
-    //         (order.side === OrderSide.Buy && order.price < ticker.mark) ||
-    //         (order.side === OrderSide.Sell && order.price > ticker.mark)
-    //       ) {
-    //         order.type = OrderType.TakeProfit;
-    //         order.tpTriggerType = order.slTriggerType;
-    //       }
-    //     }
-    //   }
-    //   return order;
-    // });
-
-    // return orders;
+    const data = await this.fetchPortfolioRaw();
+    return data ? this.formatOrders(data) : this.store.orders;
   };
 
   formatOrders = (data: PORTFOLIO_RESPONSE) => {
@@ -507,10 +514,10 @@ export class BreakoutpropExchange extends BaseExchange {
         amount: order.legs[0].quantity,
         filled: order.legs[0].filledQuantity,
         remaining: order.legs[0].remainingQuantity,
-        reduceOnly: false,
+        reduceOnly: order.legs[0].positionEffect === 'CLOSE',
         info: order,
         timeInForce: OrderTimeInForce.GoodTillCancel,
-        lastUpdate: order.legs[0].price,
+        lastUpdate: new Date(order.transactionTime).getTime(),
       }));
       return orders;
     } catch (err: any) {
@@ -538,25 +545,9 @@ export class BreakoutpropExchange extends BaseExchange {
 
   cancelOrders = async (orders: Order[]) => {
     const lots = chunk(orders, 10);
-    const results = [];
-    let error = null;
     for (const lot of lots) {
-      const innerResults = await Promise.all(
-        lot.map((order) => {
-          try {
-            this.cancelOrder(order.id);
-          } catch (err: any) {
-            error = err;
-            return null;
-          }
-        }),
-      );
-      results.push(...innerResults);
+      await Promise.all(lot.map((order) => this.cancelOrder(order.id)));
     }
-    if (error) {
-      throw error;
-    }
-    return;
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
@@ -606,7 +597,17 @@ export class BreakoutpropExchange extends BaseExchange {
       const pAmount = market.precision.amount;
 
       const amount = adjust(opts.amount, pAmount);
-      const price = opts.price ? adjust(opts.price, pPrice) : null;
+      const dxOrderType = toDxOrderType(opts.type);
+      const price = opts.price === undefined ? undefined : adjust(opts.price, pPrice);
+      const rawStopPrice = opts.triggerPrice ?? (opts.type === OrderType.StopLoss ? opts.stopLoss : opts.takeProfit);
+      const stopPrice = rawStopPrice === undefined ? undefined : adjust(rawStopPrice, pPrice);
+
+      if (dxOrderType === 'LIMIT' && price === undefined) {
+        throw new Error('Breakout Prop limit orders require a price');
+      }
+      if (dxOrderType === 'STOP' && stopPrice === undefined) {
+        throw new Error('Breakout Prop stop orders require a trigger price');
+      }
 
       // orderCode	Unique order code that identifies the order on an account	String, required
       // type	Order type	String, required
@@ -623,15 +624,13 @@ export class BreakoutpropExchange extends BaseExchange {
       // expireDate	Order expiration date in UTC	Date, optional
       const req = omitUndefined({
         orderCode: `tealstreet-${uuid()}`,
-        type: inverseObj(ORDER_TYPE)[opts.type],
+        type: dxOrderType,
         instrument: opts.symbol,
         quantity: amount,
-        // positionEffect	The effect of this order on a position	String, optional
-        // positionCode	ID of a position that should be modified by this order	String, optional
         side: inverseObj(ORDER_SIDE)[opts.side],
-        limitPrice: price,
-        // stopPrice	Stop order price per unit of quantity. (use limitPrice for limit orders). Should be absent for Market and Limit orders	Number, optional
-        positionEffect: 'OPEN',
+        limitPrice: dxOrderType === 'LIMIT' ? price : undefined,
+        stopPrice: dxOrderType === 'STOP' ? stopPrice : undefined,
+        positionEffect: opts.reduceOnly ? 'CLOSE' : 'OPEN',
         // priceLink	Price link for protection orders	String, optional
         tif: 'GTC',
         // expireDate	Order expiration date in UTC	Date, optional
@@ -773,7 +772,7 @@ export class BreakoutpropExchange extends BaseExchange {
         account: accountCode,
       });
       const candles: Candle[] = data.events.map((rawCandle) => ({
-        timestamp: new Date(rawCandle.time).getTime(),
+        timestamp: new Date(rawCandle.time).getTime() / 1000,
         open: rawCandle.open,
         high: rawCandle.high,
         low: rawCandle.low,

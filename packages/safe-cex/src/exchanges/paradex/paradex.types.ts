@@ -24,18 +24,16 @@ export const ENDPOINTS = {
 
   // Account
   ACCOUNT: '/account',
-  BALANCES: '/balances',
   FILLS: '/fills',
   ONBOARDING: '/onboarding',
 
   // Markets
   MARKETS: '/markets',
-  MARKET: '/markets/{market}',
   TICKERS: '/markets/summary', // Requires ?market=ALL query param for all tickers
-  TICKER: '/markets/{market}/ticker',
 
   // Orders
   ORDERS: '/orders',
+  ORDERS_HISTORY: '/orders-history',
   ORDER: '/orders/{id}',
   CANCEL_ORDER: '/orders/{id}', // DELETE method
   CANCEL_ORDER_BY_CLIENT_ID: '/orders/by_client_id/{client_id}', // DELETE method
@@ -48,13 +46,8 @@ export const ENDPOINTS = {
 
   // Trading
   ORDERBOOK: '/orderbook/{market}',
-  TRADES: '/markets/{market}/trades',
   OHLCV: '/markets/klines', // Public endpoint, no auth required (limited to 1,3,5,15,30,60 minute intervals)
   TRADINGVIEW_HISTORY: '/tradingview/history', // TradingView-specific endpoint (supports 1D, 4H, etc.)
-
-  // Funding
-  FUNDING_RATE: '/markets/{market}/funding',
-  FUNDING_PAYMENTS: '/funding-payments',
 
   // Margin/Leverage settings
   MARGIN: '/account/margin/{market}',
@@ -62,7 +55,7 @@ export const ENDPOINTS = {
   SET_MARGIN: '/account/margin/{market}',
 
   // Max slippage settings
-  MAX_SLIPPAGE: '/account/max-slippage',
+  MAX_SLIPPAGE: '/account/profile/max_slippage',
 };
 
 export const ORDER_TYPE: Record<string, OrderType> = {
