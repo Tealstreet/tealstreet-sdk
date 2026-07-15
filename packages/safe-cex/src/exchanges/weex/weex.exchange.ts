@@ -536,11 +536,25 @@ export class WeexExchange extends BaseExchange {
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     const payload = this.formatOrderPayload(opts);
     const endpoint =
-      opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit
+      opts.type === OrderType.Conditional
+        ? ENDPOINTS.ALGO_ORDER
+        : opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit
         ? ENDPOINTS.PLACE_TP_SL_ORDER
         : ENDPOINTS.ORDER;
 
-    const { data } = await this.xhr.post<WeexOrderResult | WeexOrderResult[]>(endpoint, payload);
+    let data: WeexOrderResult | WeexOrderResult[];
+    try {
+      ({ data } = await this.xhr.post<WeexOrderResult | WeexOrderResult[]>(endpoint, payload));
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.errorMessage ||
+        err?.response?.data?.msg ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'WEEX order placement failed';
+      this.emitAndLogError(message);
+      throw err;
+    }
     const results = Array.isArray(data) ? data : [data];
     const ids = results.map((result) =>
       this.parseOrderResult(result, payload.newClientOrderId || payload.clientAlgoId),
@@ -562,12 +576,70 @@ export class WeexExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts): Promise<string[]> => {
+    if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
+      if (!('price' in update)) {
+        const message = 'WEEX TP/SL quantity amendment is not supported';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      const market = this.store.marketsBySymbol[order.symbol];
+      if (!market) {
+        const message = `Market ${order.symbol} not found`;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      const isVirtual = order.id.includes('__');
+      const parentOrderId = order.id.split('__')[0];
+      const rawExecutePrice = isVirtual
+        ? order.type === OrderType.TakeProfit
+          ? order.info?.tpPrice
+          : order.info?.slPrice
+        : order.info?.executePrice;
+      const payload = {
+        orderId: parentOrderId,
+        triggerPrice: `${adjust(update.price, market.precision.price)}`,
+        executePrice: `${toNumber(rawExecutePrice, 0)}`,
+        triggerPriceType:
+          REVERSE_ORDER_TRIGGER_TYPE[
+            order.type === OrderType.TakeProfit
+              ? order.tpTriggerType || OrderStopTriggerType.LastPrice
+              : order.slTriggerType || OrderStopTriggerType.MarkPrice
+          ],
+      };
+
+      try {
+        const { data } = await this.xhr.post<{ success?: boolean }>(ENDPOINTS.MODIFY_TP_SL_ORDER, payload);
+        if (data?.success === false) {
+          const message = 'WEEX TP/SL amendment rejected';
+          this.emitAndLogError(message);
+          throw new Error(message);
+        }
+      } catch (err: any) {
+        if (err?.message === 'WEEX TP/SL amendment rejected') throw err;
+        const message =
+          err?.response?.data?.errorMessage ||
+          err?.response?.data?.msg ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'WEEX TP/SL amendment failed';
+        this.emitAndLogError(message);
+        throw err;
+      }
+
+      this.store.updateOrder({ id: order.id }, { price: update.price });
+      return [order.id];
+    }
+
+    const isConditional = order.type === OrderType.Conditional;
     const nextOrder: Writable<PlaceOrderOpts> = {
       symbol: order.symbol,
       type: order.type,
       side: order.side,
       amount: 'amount' in update ? update.amount : order.amount,
-      price: 'price' in update ? update.price : order.price,
+      price: isConditional ? toNumber(order.info?.price, 0) || undefined : 'price' in update ? update.price : order.price,
+      triggerPrice: isConditional ? ('price' in update ? update.price : order.price) : undefined,
       reduceOnly: order.reduceOnly,
       timeInForce: order.timeInForce,
       tpTriggerType: order.tpTriggerType,
@@ -788,13 +860,16 @@ export class WeexExchange extends BaseExchange {
 
   private parseOrderResult = (result: WeexOrderResult, fallbackId?: string): string => {
     if (result?.success === false) {
-      throw new Error(result.errorMessage || result.errorCode || 'WEEX order rejected');
+      const message = result.errorMessage || result.errorCode || 'WEEX order rejected';
+      this.emitAndLogError(message);
+      throw new Error(message);
     }
     const id = toIntegerString(result?.orderId || result?.clientOrderId || fallbackId || uuid());
     return id;
   };
 
   private isAlgoOrder = (order: Order) =>
+    order.type === OrderType.Conditional ||
     order.type === OrderType.StopLoss ||
     order.type === OrderType.TakeProfit ||
     order.type === OrderType.TrailingStopLoss ||
@@ -810,16 +885,50 @@ export class WeexExchange extends BaseExchange {
   private formatOrderPayload = (opts: PlaceOrderOpts): Record<string, any> => {
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) {
-      throw new Error(`Market ${opts.symbol} not found`);
+      const message = `Market ${opts.symbol} not found`;
+      this.emitAndLogError(message);
+      throw new Error(message);
     }
 
     const amount = adjust(opts.amount, market.precision.amount);
     const price = opts.price ? adjust(opts.price, market.precision.price) : undefined;
     const positionSide = REVERSE_POSITION_SIDE[this.inferPositionSide(opts)];
 
+    if (opts.type === OrderType.Conditional) {
+      const triggerPrice = opts.triggerPrice;
+      if (typeof triggerPrice !== 'number' || !Number.isFinite(triggerPrice) || triggerPrice <= 0) {
+        const message = 'Trigger price is required for WEEX opening conditional orders';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      return omitUndefined({
+        symbol: opts.symbol,
+        side: REVERSE_ORDER_SIDE[opts.side],
+        positionSide: REVERSE_POSITION_SIDE[this.inferPositionSide({ side: opts.side, reduceOnly: false })],
+        type: opts.price ? 'STOP' : 'STOP_MARKET',
+        quantity: `${amount}`,
+        price: opts.price ? `${price}` : undefined,
+        triggerPrice: `${adjust(triggerPrice, market.precision.price)}`,
+        clientAlgoId: `ts${uuid()}`.slice(0, 36),
+        presetTakeProfitPrice: opts.takeProfit
+          ? `${adjust(opts.takeProfit, market.precision.price)}`
+          : undefined,
+        presetStopLossPrice: opts.stopLoss ? `${adjust(opts.stopLoss, market.precision.price)}` : undefined,
+        TpWorkingType: opts.takeProfit
+          ? REVERSE_ORDER_TRIGGER_TYPE[opts.tpTriggerType || OrderStopTriggerType.LastPrice]
+          : undefined,
+        SlWorkingType: opts.stopLoss
+          ? REVERSE_ORDER_TRIGGER_TYPE[opts.slTriggerType || OrderStopTriggerType.MarkPrice]
+          : undefined,
+      });
+    }
+
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
       if (!opts.price) {
-        throw new Error('Trigger price is required for WEEX TP/SL orders');
+        const message = 'Trigger price is required for WEEX TP/SL orders';
+        this.emitAndLogError(message);
+        throw new Error(message);
       }
 
       return omitUndefined({
@@ -840,7 +949,9 @@ export class WeexExchange extends BaseExchange {
     }
 
     if (opts.type === OrderType.TrailingStopLoss) {
-      throw new Error('WEEX trailing stop loss is not supported');
+      const message = 'WEEX trailing stop loss is not supported';
+      this.emitAndLogError(message);
+      throw new Error(message);
     }
 
     return omitUndefined({

@@ -109,6 +109,7 @@ export const INTERVAL: Record<Timeframe, string> = {
 };
 
 export const SUPPORTED_INTERVALS = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '12h', '1d', '1w']);
+export const SUPPORTED_WS_INTERVALS = new Set([...SUPPORTED_INTERVALS, '2h', '6h']);
 
 export const ORDER_SIDE: Record<string, OrderSide> = {
   BUY: OrderSide.Buy,
@@ -131,6 +132,7 @@ export const REVERSE_POSITION_SIDE: Record<PositionSide, string> = {
 };
 
 export const ORDER_TYPE: Record<string, OrderType> = {
+  CONDITIONAL: OrderType.Conditional,
   LIMIT: OrderType.Limit,
   MARKET: OrderType.Market,
   STOP: OrderType.StopLoss,

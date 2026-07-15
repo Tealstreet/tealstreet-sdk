@@ -1,7 +1,7 @@
 import throttle from 'lodash/throttle';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker } from '../../types';
 import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
 import { virtualClock } from '../../utils/virtualClock';
@@ -40,12 +40,21 @@ export class ArkhamPublicWebSocket extends BaseWebSocket<ArkhamExchange> {
   }
 
   connectAndSubscribe = () => {
+    if (!this.hasLegacyProxyCredentials()) {
+      this.parent.log(
+        'Arkham public WebSocket requires a legacy API key and secret; skipping the connection',
+        LogSeverity.Warning,
+      );
+      return;
+    }
+
     if (!this.isDisposed) {
       // Connect to the proxy WebSocket - auth happens after connection
       this.ws = this.createWebsocket(this.connectUrl);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
+      this.ws.addEventListener('close', this.handleClose);
       this.ws.addEventListener('close', this.onClose);
       this.ws.addEventListener('error', ((event: Event) => {
         this.parent.log(`WebSocket connection error: ${(event as any)?.message || 'Unknown error'}`, LogSeverity.Error);
@@ -99,47 +108,69 @@ export class ArkhamPublicWebSocket extends BaseWebSocket<ArkhamExchange> {
   };
 
   ping = () => {
-    if (this.isConnected) {
-      this.send(JSON.stringify({ type: 'ping' }));
-    }
+    this.clearPingInterval();
 
-    this.pingInterval = setTimeout(() => {
-      if (!this.isDisposed && this.isConnected) {
-        this.ping();
-      }
-    }, 30000);
+    if (!this.isDisposed && this.isConnected) {
+      this.send(JSON.stringify({ type: 'ping' }));
+      this.pingInterval = setTimeout(this.ping, 30000);
+    }
   };
 
-  private handleTickerUpdate = throttle(
-    (data: any) => {
-      try {
-        const ticker = data;
-        const symbol = ticker.symbol;
+  private handleTickerUpdate = (data: any) => {
+    try {
+      const ticker = data;
+      const symbol = ticker.symbol;
+      const currentTicker = this.parent.store.tickersBySymbol[symbol];
 
-        const update: Partial<Ticker> = {
-          id: `${symbol}-${Date.now()}`,
-          symbol,
-          bid: parseFloat(ticker.bid_price),
-          ask: parseFloat(ticker.ask_price),
-          last: parseFloat(ticker.last_price),
-          mark: parseFloat(ticker.last_price),
-          index: parseFloat(ticker.last_price),
-          percentage: parseFloat(ticker.price_change_percent_24h || '0'),
-          volume: parseFloat(ticker.volume_24h || '0'),
-          quoteVolume: parseFloat(ticker.quote_volume_24h || '0'),
-          fundingRate: parseFloat(ticker.funding_rate || '0'),
-          fundingTime: ticker.next_funding_time ? parseInt(ticker.next_funding_time) : 0,
-          openInterest: parseFloat(ticker.open_interest || '0'),
-        };
-
-        this.parent.store.updateTicker(symbol, update);
-      } catch (err) {
-        this.parent.log(`Error handling ticker update: ${err}`);
+      if (!currentTicker) {
+        this.parent.log(`Ignoring ticker update for unknown Arkham symbol ${symbol}`, LogSeverity.Warning);
+        return;
       }
-    },
-    1000,
-    { leading: true, trailing: true },
-  );
+
+      const update: Partial<Ticker> = {
+        bid: parseFloat(ticker.bid_price),
+        ask: parseFloat(ticker.ask_price),
+        last: parseFloat(ticker.last_price),
+        mark: parseFloat(ticker.last_price),
+        index: parseFloat(ticker.last_price),
+        percentage: parseFloat(ticker.price_change_percent_24h || '0'),
+        volume: parseFloat(ticker.volume_24h || '0'),
+        quoteVolume: parseFloat(ticker.quote_volume_24h || '0'),
+        fundingRate: parseFloat(ticker.funding_rate || '0'),
+        fundingTime: ticker.next_funding_time ? parseInt(ticker.next_funding_time) : 0,
+        openInterest: parseFloat(ticker.open_interest || '0'),
+        info: ticker,
+      };
+
+      this.parent.store.updateTicker(currentTicker, update);
+    } catch (err) {
+      this.parent.log(`Error handling ticker update: ${err}`);
+    }
+  };
+
+  private hasLegacyProxyCredentials = () =>
+    typeof this.parent.options.key === 'string' &&
+    this.parent.options.key.length > 0 &&
+    typeof this.parent.options.secret === 'string' &&
+    this.parent.options.secret.length > 0;
+
+  private clearPingInterval = () => {
+    if (this.pingInterval) {
+      clearTimeout(this.pingInterval);
+      this.pingInterval = undefined;
+    }
+  };
+
+  private handleClose = () => {
+    this.clearPingInterval();
+    this.authenticated = false;
+  };
+
+  override dispose() {
+    this.clearPingInterval();
+    this.authenticated = false;
+    super.dispose();
+  }
 
   private handleOrderbookUpdate = throttle(
     (_data: any) => {

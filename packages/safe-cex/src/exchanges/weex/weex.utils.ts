@@ -216,11 +216,27 @@ export const normalizeOrder = (raw: Record<string, any>, market?: Market): Order
 };
 
 export const normalizeAlgoOrder = (raw: Record<string, any>, market?: Market): Order[] => {
+  const rawOrderType = String(raw.orderType ?? raw.type ?? '').toUpperCase();
+  const planType = String(raw.planType ?? '').toUpperCase();
+  const algoType = String(raw.algoType ?? '').toUpperCase();
+  const isTriggerOrder = ['STOP', 'STOP_MARKET', 'TAKE_PROFIT', 'TAKE_PROFIT_MARKET'].includes(rawOrderType);
+  const isProtective =
+    raw.reduceOnly === true ||
+    planType === 'STOP_LOSS' ||
+    planType === 'TAKE_PROFIT' ||
+    algoType === 'TPSL' ||
+    algoType === 'TP_SL';
+  const normalizedType =
+    isProtective && (planType === 'STOP_LOSS' || planType === 'TAKE_PROFIT')
+      ? planType
+      : isTriggerOrder && !isProtective
+        ? 'CONDITIONAL'
+        : raw.orderType ?? raw.planType;
   const baseOrder = normalizeOrder(
     {
       ...raw,
       orderId: raw.algoId ?? raw.orderId,
-      type: raw.orderType ?? raw.planType,
+      type: normalizedType,
       status: raw.algoStatus ?? raw.status,
       origQty: raw.quantity,
       price: raw.price || raw.actualPrice,

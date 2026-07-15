@@ -1,8 +1,8 @@
 import throttle from 'lodash/throttle';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { Balance, LogSeverity, Order, OrderStatus, Position, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
@@ -62,6 +62,7 @@ export class ArkhamPrivateWebSocket extends BaseWebSocket<ArkhamExchange> {
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
+      this.ws.addEventListener('close', this.handleClose);
       this.ws.addEventListener('close', this.onClose);
       this.ws.addEventListener('error', ((event: Event) => {
         this.parent.log(`WebSocket connection error: ${(event as any)?.message || 'Unknown error'}`, LogSeverity.Error);
@@ -108,60 +109,49 @@ export class ArkhamPrivateWebSocket extends BaseWebSocket<ArkhamExchange> {
   };
 
   ping = () => {
-    if (this.isConnected) {
-      this.send(JSON.stringify({ type: 'ping' }));
-    }
+    this.clearPingInterval();
 
-    this.pingInterval = setTimeout(() => {
-      if (!this.isDisposed && this.isConnected) {
-        this.ping();
-      }
-    }, 30000);
+    if (!this.isDisposed && this.isConnected) {
+      this.send(JSON.stringify({ type: 'ping' }));
+      this.pingInterval = setTimeout(this.ping, 30000);
+    }
   };
 
-  private handleOrderUpdate = throttle(
-    (data: any) => {
-      try {
-        const order = data;
-        const side = ORDER_SIDE[order.side];
-        const status = this.mapOrderStatus(order.status);
-        const orderId = String(order.orderId);
+  private handleOrderUpdate = (data: any) => {
+    try {
+      const order = data;
+      const side = ORDER_SIDE[order.side];
+      const status = this.mapOrderStatus(order.status);
+      const orderId = String(order.orderId);
 
-        this.parent.log(`Order update: ${orderId} ${order.symbol} ${order.status} → ${status}`, LogSeverity.Info);
+      this.parent.log(`Order update: ${orderId} ${order.symbol} ${order.status} → ${status}`, LogSeverity.Info);
 
-        const update: Order = {
-          id: orderId,
-          symbol: order.symbol,
-          side,
-          type: this.parent['reverseMapOrderType'](order.type),
-          status,
-          price: order.price ? parseFloat(order.price) : 0,
-          amount: parseFloat(order.size),
-          filled: parseFloat(order.executedSize || '0'),
-          remaining:
-            order.size && order.executedSize
-              ? parseFloat(order.size) - parseFloat(order.executedSize)
-              : parseFloat(order.size || '0'),
-          reduceOnly: order.reduceOnly || false,
-          timeInForce: undefined,
-          info: order,
-          lastUpdate: Date.now(),
-        };
+      const update: Order = {
+        id: orderId,
+        symbol: order.symbol,
+        side,
+        type: this.parent['reverseMapOrderType'](order.type),
+        status,
+        price: order.price ? parseFloat(order.price) : 0,
+        amount: parseFloat(order.size),
+        filled: parseFloat(order.executedSize || '0'),
+        remaining:
+          order.size && order.executedSize
+            ? parseFloat(order.size) - parseFloat(order.executedSize)
+            : parseFloat(order.size || '0'),
+        reduceOnly: order.reduceOnly || false,
+        timeInForce: undefined,
+        info: order,
+        lastUpdate: Date.now(),
+      };
 
-        // Always update the order with its current status (including Canceled/Closed)
-        // This allows users to see their order history
-        this.parent.store.addOrUpdateOrder(update);
-
-        // Trigger throttled fetch to get full order state
-        this.hasPendingOrderEvents = true;
-        this.throttledFetchOrders();
-      } catch (err) {
-        this.parent.log(`Error handling order update: ${err}`, LogSeverity.Error);
-      }
-    },
-    100,
-    { leading: true, trailing: true },
-  );
+      this.parent.store.addOrUpdateOrder(update);
+      this.hasPendingOrderEvents = true;
+      this.throttledFetchOrders();
+    } catch (err) {
+      this.parent.log(`Error handling order update: ${err}`, LogSeverity.Error);
+    }
+  };
 
   private handleTriggerOrderUpdate = (data: any) => {
     try {
@@ -202,80 +192,87 @@ export class ArkhamPrivateWebSocket extends BaseWebSocket<ArkhamExchange> {
     }
   };
 
-  private handlePositionUpdate = throttle(
-    (data: any) => {
-      try {
-        const p = data;
+  private handlePositionUpdate = (data: any) => {
+    try {
+      const p = data;
+      const baseAmount = this.parseNumber(p.base);
+      const existingPosition = this.parent.store.positions.find((position) => position.symbol === p.symbol);
+      const side =
+        baseAmount === 0 && existingPosition
+          ? existingPosition.side
+          : baseAmount >= 0
+            ? PositionSide.Long
+            : PositionSide.Short;
+      const value = Math.abs(this.parseNumber(p.value));
+      const initialMargin = this.parseNumber(p.initialMargin);
+      let leverage = initialMargin > 0 ? value / initialMargin : existingPosition?.leverage || 1;
 
-        // Determine side based on base position (positive = long, negative = short)
-        const baseAmount = parseFloat(p.base);
-        const side = baseAmount >= 0 ? PositionSide.Long : PositionSide.Short;
-
-        if (baseAmount === 0) {
-          // Position closed - remove it
-          // Note: The store will handle removal of zero positions
+      if (!leverage || leverage === 0 || !isFinite(leverage)) {
+        const fetchedLeverage = this.parent.store.fetchedLeverage[p.symbol];
+        if (fetchedLeverage && !fetchedLeverage.isFetching) {
+          leverage = side === PositionSide.Long ? fetchedLeverage.buyLeverage : fetchedLeverage.sellLeverage;
         } else {
-          // Calculate leverage from initial margin: leverage = value / initialMargin
-          const value = Math.abs(parseFloat(p.value));
-          const initialMargin = parseFloat(p.initialMargin);
-          let leverage = initialMargin > 0 ? value / initialMargin : 1;
-
-          // If leverage is not reasonable, try to get it from fetched leverage
-          if (!leverage || leverage === 0 || !isFinite(leverage)) {
-            const fetchedLeverage = this.parent.store.fetchedLeverage[p.symbol];
-            if (fetchedLeverage && !fetchedLeverage.isFetching) {
-              leverage = side === PositionSide.Long ? fetchedLeverage.buyLeverage : fetchedLeverage.sellLeverage;
-            } else {
-              leverage = 1; // Fallback to default leverage
-            }
-          }
-
-          // Position update
-          const update: Position = {
-            id: createPositionId(p.symbol, side),
-            symbol: p.symbol,
-            side,
-            contracts: Math.abs(baseAmount),
-            notional: Math.abs(parseFloat(p.quote)),
-            unrealizedPnl: parseFloat(p.pnl),
-            realizedPnl: 0, // Arkham doesn't provide realized PnL per position
-            leverage,
-            entryPrice: parseFloat(p.averageEntryPrice),
-            liquidationPrice: 0, // Arkham doesn't provide liquidation price directly
-            info: p,
-          };
-
-          this.parent.store.addOrUpdatePosition(update);
+          leverage = 1;
         }
-
-        // Update balance with recalculated used margin from positions
-        const positions = this.parent.store.positions;
-        const usedMargin = positions.reduce((sum, pos) => {
-          const initialMargin = pos.info?.initialMargin ? parseFloat(pos.info.initialMargin) : 0;
-          return sum + initialMargin;
-        }, 0);
-
-        if (usedMargin > 0) {
-          const currentBalance = this.parent.store.balance;
-          this.parent.store.update({
-            balance: {
-              ...currentBalance,
-              used: usedMargin,
-              free: currentBalance.total - usedMargin,
-            },
-          });
-        }
-
-        // Trigger throttled fetch to get full position state
-        this.hasPendingPositionEvents = true;
-        this.throttledFetchPositions();
-      } catch (err) {
-        this.parent.log(`Error handling position update: ${err}`);
       }
-    },
-    100,
-    { leading: true, trailing: true },
-  );
+
+      const update: Position = {
+        id: createPositionId(p.symbol, side),
+        symbol: p.symbol,
+        side,
+        contracts: Math.abs(baseAmount),
+        notional: Math.abs(this.parseNumber(p.quote)),
+        unrealizedPnl: this.parseNumber(p.pnl),
+        realizedPnl: 0,
+        leverage,
+        entryPrice: this.parseNumber(p.averageEntryPrice),
+        liquidationPrice: 0,
+        info: p,
+      };
+
+      this.parent.store.addOrUpdatePosition(update);
+
+      const usedMargin = this.parent.store.positions.reduce((sum, pos) => {
+        return sum + this.parseNumber(pos.info?.initialMargin);
+      }, 0);
+      const currentBalance = this.parent.store.balance;
+      this.parent.store.update({
+        balance: {
+          ...currentBalance,
+          used: usedMargin,
+          free: currentBalance.total - usedMargin,
+        },
+      });
+
+      this.hasPendingPositionEvents = true;
+      this.throttledFetchPositions();
+    } catch (err) {
+      this.parent.log(`Error handling position update: ${err}`);
+    }
+  };
+
+  private parseNumber = (value: unknown, fallback = 0) => {
+    const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  private clearPingInterval = () => {
+    if (this.pingInterval) {
+      clearTimeout(this.pingInterval);
+      this.pingInterval = undefined;
+    }
+  };
+
+  private handleClose = () => {
+    this.clearPingInterval();
+    this.authenticated = false;
+  };
+
+  override dispose() {
+    this.clearPingInterval();
+    this.authenticated = false;
+    super.dispose();
+  }
 
   private handleBalanceUpdate = throttle(
     (data: any) => {
@@ -481,7 +478,10 @@ export class ArkhamPrivateWebSocket extends BaseWebSocket<ArkhamExchange> {
     try {
       this.lastOrderFetchTime = Date.now();
       this.hasPendingOrderEvents = false;
-      await this.parent.fetchOrders();
+      const orders = await this.parent.fetchOrders();
+      if (this.isDisposed) return;
+      this.parent.store.addOrUpdateOrdersFull(orders);
+      this.parent.store.update({ loaded: { ...this.parent.store.loaded, orders: true } });
     } catch {
       // Silent failure, will retry on next event
     }
@@ -524,7 +524,10 @@ export class ArkhamPrivateWebSocket extends BaseWebSocket<ArkhamExchange> {
     try {
       this.lastPositionFetchTime = Date.now();
       this.hasPendingPositionEvents = false;
-      await this.parent.fetchPositions();
+      const positions = await this.parent.fetchPositions();
+      if (this.isDisposed) return;
+      this.parent.store.addOrUpdatePositionsFull(positions);
+      this.parent.store.update({ loaded: { ...this.parent.store.loaded, positions: true } });
     } catch {
       // Silent failure, will retry on next event
     }

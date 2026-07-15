@@ -95,12 +95,22 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
   are implemented and covered with fresh deterministic regressions.
 - Normal order amend is not documented in Contract V3. Use cancel-and-replace
   for `updateOrder`, preserving TP/SL fields when present.
+- TP/SL trigger-price edits use `POST /capi/v3/modifyTpSlOrder`; virtual
+  `__tp`/`__sl` rows send the parent order ID and never cancel that parent.
+  The V3 modify endpoint has no quantity field, so TP/SL size edits fail closed.
+- Opening `OrderType.Conditional` orders use `POST /capi/v3/algoOrder` and
+  require `triggerPrice`; an execution `price` selects STOP (limit), while its
+  absence selects STOP_MARKET. They are read back as opening conditionals and
+  cancel through `/algoOrder`, distinct from position-protective TP/SL plans.
 - Reduce-only request parameters are not documented for normal order
   placement. Prefer `POST /capi/v3/closePositions` for full close flows and
   use `reduceOnly` only where WEEX documents or echoes it.
 - Public symbols are already Tealstreet/Binance-style (`BTCUSDT`).
 - WEEX sizes in V3 REST public examples are base-asset quantities; still keep
   `contractVal` from `exchangeInfo` in `market.info` for smoke-test auditing.
+- Order preflight failures, response-level rejections, and transport failures
+  emit through `emitAndLogError` at their point of origin before rejecting the
+  caller. Keep the POST catch narrow so response parsing is not double-emitted.
 
 ## Primary Endpoints
 
@@ -143,6 +153,16 @@ Public channels:
 - `<symbol>@depth15` or `<symbol>@depth200`
 - `<symbol>@trade`
 - `<symbol>@kline_<interval>_LAST_PRICE`
+
+REST klines accept `1m,5m,15m,30m,1h,4h,12h,1d,1w`; the current V3
+WebSocket candlestick contract additionally accepts `2h` and `6h`. Public
+subscriptions reject other safe-cex intervals before sending and log negative
+subscription acknowledgements from WEEX.
+
+Ticker subscriptions follow `activeTickerSymbols:changed` and send only the
+incremental subscribe/unsubscribe diff. The socket reserves ten of WEEX's 100
+channel slots for chart/orderbook consumers and enforces the documented 240
+subscription operations per rolling hour on each connection.
 
 Private channels:
 

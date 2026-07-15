@@ -6,18 +6,31 @@ import { LogSeverity } from '../../types';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, INTERVAL } from './weex.types';
+import { BASE_WS_URL, INTERVAL, SUPPORTED_WS_INTERVALS } from './weex.types';
 import { normalizeCandle, toIntegerString, toNumber } from './weex.utils';
 
 type MessageHandler = (json: Record<string, any>) => void;
+
+const MAX_WS_CHANNELS = 100;
+const MAX_TICKER_CHANNELS = 90;
+const MAX_SUBSCRIPTION_OPERATIONS_PER_HOUR = 240;
+const SUBSCRIPTION_OPERATION_WINDOW_MS = 60 * 60 * 1000;
 
 export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
   protected override treatAnyMessageAsPong = true;
 
   messageHandlers: Record<string, MessageHandler[]> = {};
   private topics = new Set<string>();
+  private tickerTopics = new Set<string>();
   private subscriptionId = 1;
+  private subscriptionOperationTimestamps: number[] = [];
+  private hasLoggedSubscriptionLimit = false;
   private orderbooks: Record<string, OrderBook & { lastUpdateId?: string }> = {};
+
+  constructor(parent: WeexExchange) {
+    super(parent);
+    this.parent.on('activeTickerSymbols:changed', this.handleActiveTickerSymbolsChanged);
+  }
 
   connectAndSubscribe = () => {
     if (this.isDisposed) return;
@@ -32,6 +45,8 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
   onOpen = () => {
     if (this.isDisposed) return;
 
+    this.subscriptionOperationTimestamps = [];
+    this.hasLoggedSubscriptionLimit = false;
     this.subscribeTickerTopics();
     this.resubscribeTopics();
     this.emitWsReconnected();
@@ -58,6 +73,9 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
     }
 
     if (json.result !== undefined) {
+      if (json.result === false) {
+        this.parent.log(`WEEX public WS subscription failed: ${json.msg || 'unknown error'}`, LogSeverity.Warning);
+      }
       return;
     }
 
@@ -86,6 +104,11 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const interval = INTERVAL[opts.interval];
+    if (!SUPPORTED_WS_INTERVALS.has(interval)) {
+      const message = `WEEX public WebSocket does not support ${opts.interval} candles`;
+      this.parent.log(message, LogSeverity.Warning);
+      throw new Error(message);
+    }
     const topic = `${opts.symbol}@kline_${interval}_LAST_PRICE`;
     const handlerKey = `kline.${opts.symbol}.${interval}`;
 
@@ -138,17 +161,54 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
     };
   };
 
+  override dispose() {
+    this.parent.off('activeTickerSymbols:changed', this.handleActiveTickerSymbolsChanged);
+    super.dispose();
+  }
+
   private subscribeTickerTopics = () => {
+    this.tickerTopics = new Set(this.getDesiredTickerTopics());
+    this.subscribeTopics(Array.from(this.tickerTopics), false);
+  };
+
+  private handleActiveTickerSymbolsChanged = () => {
+    if (this.isDisposed) return;
+    this.reconcileTickerTopics();
+  };
+
+  private getDesiredTickerTopics = () => {
     const availableSymbols = this.store.markets.map((market) => market.symbol);
     const activeSymbols = this.parent.getActiveTickerSymbols();
     const activeSet = new Set(activeSymbols);
-    const symbols = (
-      activeSymbols.length ? availableSymbols.filter((symbol) => activeSet.has(symbol)) : availableSymbols
-    ).slice(0, 90);
-    this.subscribeTopics(
-      symbols.map((symbol) => `${symbol}@ticker`),
-      false,
-    );
+    const desiredSymbols = activeSymbols.length
+      ? availableSymbols.filter((symbol) => activeSet.has(symbol))
+      : availableSymbols;
+    const capacity = Math.min(MAX_TICKER_CHANNELS, Math.max(0, MAX_WS_CHANNELS - this.topics.size));
+    return desiredSymbols.slice(0, capacity).map((symbol) => `${symbol}@ticker`);
+  };
+
+  private reconcileTickerTopics = () => {
+    const nextTopics = new Set(this.getDesiredTickerTopics());
+    const topicsToUnsubscribe = Array.from(this.tickerTopics).filter((topic) => !nextTopics.has(topic));
+    const topicsToSubscribe = Array.from(nextTopics).filter((topic) => !this.tickerTopics.has(topic));
+
+    if (!this.isConnected) {
+      this.tickerTopics = nextTopics;
+      return;
+    }
+
+    const reconciledTopics = new Set(this.tickerTopics);
+    if (
+      topicsToUnsubscribe.length &&
+      this.sendSubscriptionOperation('UNSUBSCRIBE', topicsToUnsubscribe)
+    ) {
+      topicsToUnsubscribe.forEach((topic) => reconciledTopics.delete(topic));
+    }
+    if (topicsToSubscribe.length && this.sendSubscriptionOperation('SUBSCRIBE', topicsToSubscribe)) {
+      topicsToSubscribe.forEach((topic) => reconciledTopics.add(topic));
+    }
+
+    this.tickerTopics = reconciledTopics;
   };
 
   private resubscribeTopics = () => {
@@ -160,13 +220,15 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
 
   private subscribeTopic = (topic: string) => {
     this.topics.add(topic);
+    this.reconcileTickerTopics();
     this.subscribeTopics([topic]);
   };
 
   private unsubscribeTopic = (topic: string) => {
     this.topics.delete(topic);
     if (!this.isConnected) return;
-    this.send(JSON.stringify({ method: 'UNSUBSCRIBE', params: [topic], id: this.subscriptionId++ }));
+    this.sendSubscriptionOperation('UNSUBSCRIBE', [topic]);
+    this.reconcileTickerTopics();
   };
 
   private subscribeTopics = (topics: string[], track = true) => {
@@ -176,8 +238,29 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
     if (!this.isConnected || topics.length === 0) return;
 
     for (let i = 0; i < topics.length; i += 50) {
-      this.send(JSON.stringify({ method: 'SUBSCRIBE', params: topics.slice(i, i + 50), id: this.subscriptionId++ }));
+      this.sendSubscriptionOperation('SUBSCRIBE', topics.slice(i, i + 50));
     }
+  };
+
+  private sendSubscriptionOperation = (method: 'SUBSCRIBE' | 'UNSUBSCRIBE', topics: string[]) => {
+    const now = Date.now();
+    this.subscriptionOperationTimestamps = this.subscriptionOperationTimestamps.filter(
+      (timestamp) => now - timestamp < SUBSCRIPTION_OPERATION_WINDOW_MS,
+    );
+    if (this.subscriptionOperationTimestamps.length >= MAX_SUBSCRIPTION_OPERATIONS_PER_HOUR) {
+      if (!this.hasLoggedSubscriptionLimit) {
+        this.hasLoggedSubscriptionLimit = true;
+        this.parent.log(
+          'WEEX public WS subscription operation limit reached; deferring changes until another symbol update or reconnect',
+          LogSeverity.Warning,
+        );
+      }
+      return false;
+    }
+
+    this.subscriptionOperationTimestamps.push(now);
+    this.send(JSON.stringify({ method, params: topics, id: this.subscriptionId++ }));
+    return true;
   };
 
   private addHandler = (key: string, handler: MessageHandler) => {

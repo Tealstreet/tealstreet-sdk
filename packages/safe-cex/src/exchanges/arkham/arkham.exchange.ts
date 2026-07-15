@@ -72,9 +72,7 @@ export class ArkhamExchange extends BaseExchange {
   }
 
   dispose = () => {
-    this.isDisposed = true;
-    this.publicWebsocket.dispose();
-    this.privateWebsocket.dispose();
+    super.dispose();
   };
 
   async getPositionMode(): Promise<PositionMode> {
@@ -158,7 +156,8 @@ export class ArkhamExchange extends BaseExchange {
       try {
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+        this.store.addOrUpdatePositionsFull(positions);
+        this.store.update({ loaded: { ...this.store.loaded, positions: true } });
 
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
@@ -331,7 +330,7 @@ export class ArkhamExchange extends BaseExchange {
         const priceChangePercent = price24hAgo > 0 ? (priceChange24h / price24hAgo) * 100 : 0;
 
         return {
-          id: `${t.symbol}-${Date.now()}`,
+          id: t.symbol,
           symbol: t.symbol,
           bid: currentPrice, // Will be updated from orderbook via WebSocket
           ask: currentPrice, // Will be updated from orderbook via WebSocket
