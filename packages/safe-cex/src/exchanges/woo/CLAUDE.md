@@ -14,6 +14,9 @@ This directory contains the WooX perpetual futures exchange integration for Teal
 
 - **Current API documentation**: https://developer.woox.io/api-reference/introduction
 - **Official migration map**: https://developer.woox.io/api-reference/migration_guide
+- **V3 futures statistics**: https://developer.woox.io/api-reference/endpoint/public_data/futures
+- **V3 BBO stream**: https://developer.woox.io/api-reference/endpoint/websocket/BBO
+- **V3 Trade stream**: https://developer.woox.io/api-reference/endpoint/websocket/TRADE
 - **Legacy API documentation** (for migration work): https://docs.woox.io/#restful-api
 
 ## Legacy API lifecycle
@@ -27,7 +30,9 @@ write-path migration requires fixture coverage and a credentialed WooX demo life
 The V3 foundation is deliberately non-routable: `woo.v3.contracts.ts` holds the typed route map,
 response/request contracts, and seven hard-false migration gates, while `woo.v3.request.ts` only
 prepares deterministic transport-neutral request descriptors. `woo.v3.public.ts` adds strict
-unknown-input decoders and pure mappers for the five public REST reads. `woo.v3.private.ts` does the
+unknown-input decoders and pure mappers for the five public REST reads. `woo.v3.ticker.ts` purely
+composes one decoded futures-stat row with decoded matching BBO and Trade events.
+`woo.v3.private.ts` does the
 same for account info, asset balances, futures positions, pending regular/algo orders, and transaction
 history. `woo.v3.regular-writes.ts` adds strict, pure descriptors and response decoders for regular
 futures place, zero-fill native amend, cancel-by-ID, and regular pending-order cancellation. It is
@@ -80,10 +85,15 @@ decimal-string precision for values smaller than JavaScript can represent. Price
 sizes must contain a nonzero digit; incremental-book quantities allow zero only for documented level
 deletion, while signed funding/PnL/holdings remain signed wire values.
 
-The V3 futures REST row is deliberately mapped to `WooV3FuturesStats`, not the safe-cex `Ticker`.
+The V3 futures REST row is first mapped to `WooV3FuturesStats`, not directly to a safe-cex `Ticker`.
 The official response has index/mark/funding/open-interest and rolling 24-hour fields, but no
-authoritative best bid, best ask, or last-trade field. Do not fill `Ticker.bid`/`ask`/`last` from
-`24hClose`; full ticker parity needs a separately verified live quote source. The V3 orderbook page
+authoritative best bid, best ask, or last-trade field. The inert ticker composer requires one
+strictly decoded `PERP_BASE_QUOTE` futures row, BBO event, and Trade event with matching normalized
+identity. It takes bid/ask only from BBO and last only from Trade `px`, never from `24hClose`, and
+rejects non-finite, non-positive, overflowed, or underflowed numeric prices. REST mark/index/funding/
+open-interest and 24-hour statistics remain authoritative and are retained in typed provenance.
+This is composition evidence only: runtime subscription/coherence and both public gates remain
+false. The V3 orderbook page
 documents both sides as descending, so the inert mapper sorts into safe-cex's required bid-descending
 / ask-ascending order before calculating cumulative totals. The instruments page has drifted on
 whether `status` is present in its example, so the strict decoder treats only that field as optional;
@@ -163,6 +173,7 @@ satisfies `accountWriteDemoLifecycle`.
 - `woo.v3.contracts.ts` - Non-routable namespaced V3 endpoints, contracts, migration map, and gates
 - `woo.v3.private.ts` - Inert strict authenticated-read decoders and lossless/deferred state mappers
 - `woo.v3.public.ts` - Inert strict public-REST decoders and pure market/stat/book/candle mappers
+- `woo.v3.ticker.ts` - Inert authoritative REST-stats + BBO + Trade ticker composition
 - `woo.v3.regular-writes.ts` - Inert strict regular-order request/response contracts and amend blockers
 - `woo.v3.algo-writes.ts` - Inert strict algo-order request/response contracts and lifecycle blockers
 - `woo.v3.account-writes.ts` - Inert strict leverage read/write and position-mode contracts/evidence blockers

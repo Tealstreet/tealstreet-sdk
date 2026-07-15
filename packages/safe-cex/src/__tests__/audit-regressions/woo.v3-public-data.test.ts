@@ -16,8 +16,12 @@ import {
   mapWooV3Markets,
   mapWooV3OrderBook,
 } from '../../exchanges/woo/woo.v3.public';
+import { composeWooV3AuthoritativeTicker } from '../../exchanges/woo/woo.v3.ticker';
+import type { WooV3WsBbo, WooV3WsTrade } from '../../exchanges/woo/woo.v3.websocket';
+import { decodeWooV3WsDataFrame } from '../../exchanges/woo/woo.v3.websocket';
 
 const envelope = <T>(data: T) => ({ success: true, timestamp: 1_725_000_000_000, data });
+const publicFrame = (topic: string, data: unknown) => ({ topic, ts: 1_725_000_000_000, data });
 
 const instrumentFixture = envelope({
   rows: [
@@ -128,7 +132,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     });
   });
 
-  it('keeps futures REST data as statistics rather than fabricating Ticker bid, ask, or last fields', () => {
+  it('keeps futures REST data as statistics rather than fabricating quote fields from 24hClose', () => {
     const market = mapWooV3Markets(decodeWooV3Instruments(instrumentFixture))[0];
     const stats = mapWooV3FuturesStats(decodeWooV3Futures(futuresFixture), {
       [market.symbol]: market,
@@ -156,6 +160,163 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     expect(stats[0]).not.toHaveProperty('bid');
     expect(stats[0]).not.toHaveProperty('ask');
     expect(stats[0]).not.toHaveProperty('last');
+  });
+
+  it('composes authoritative bid/ask from BBO and last from an actual matching Trade event', () => {
+    const market = mapWooV3Markets(decodeWooV3Instruments(instrumentFixture))[0];
+    const futuresRow = decodeWooV3Futures(futuresFixture)[0];
+    const bbo = decodeWooV3WsDataFrame(
+      publicFrame('bbo@PERP_BTC_USDT', {
+        s: 'PERP_BTC_USDT',
+        ap: '62002.2',
+        aq: '1.05',
+        bp: '62001.1',
+        bq: '2.01',
+        ts: 1_725_000_000_010,
+      }),
+    ).payload as WooV3WsBbo;
+    const trade = decodeWooV3WsDataFrame(
+      publicFrame('trade@PERP_BTC_USDT', {
+        s: 'PERP_BTC_USDT',
+        px: '62001.7',
+        sx: '0.25',
+        sd: 'BUY',
+        src: 1,
+        rpi: false,
+        ts: 1_725_000_000_011,
+      }),
+    ).payload as WooV3WsTrade;
+
+    const ticker = composeWooV3AuthoritativeTicker(futuresRow, bbo, trade, market);
+
+    expect(ticker).toMatchObject({
+      id: 'BTC/USDT:USDT',
+      symbol: 'BTCUSDT',
+      bid: 62001.1,
+      ask: 62002.2,
+      last: 62001.7,
+      index: 62010.5,
+      mark: 62011.2,
+      percentage: 3,
+      openInterest: 120.5,
+      fundingRate: 0.0002,
+      fundingTime: 1_725_001_200_000,
+      volume: 250.25,
+      quoteVolume: 15200000.5,
+    });
+    expect(ticker.last).not.toBe(Number(futuresRow['24hClose']));
+    expect(ticker.info.futuresStats).toMatchObject({
+      open24h: 60000,
+      close24h: 61800,
+      high24h: 63000,
+      low24h: 59000,
+      estimatedFundingRate: -0.0001,
+      lastFundingRate: 0.0002,
+    });
+    expect(ticker.info.bbo).toBe(bbo);
+    expect(ticker.info.trade).toBe(trade);
+  });
+
+  it('rejects mismatched product/symbol identities instead of cross-composing sources', () => {
+    const market = mapWooV3Markets(decodeWooV3Instruments(instrumentFixture))[0];
+    const futuresRow = decodeWooV3Futures(futuresFixture)[0];
+    const trade = decodeWooV3WsDataFrame(
+      publicFrame('trade@PERP_BTC_USDT', {
+        s: 'PERP_BTC_USDT',
+        px: '62001.7',
+        sx: '0.25',
+        sd: 'SELL',
+        src: 0,
+        rpi: false,
+        ts: 1,
+      }),
+    ).payload as WooV3WsTrade;
+    const ethBbo = decodeWooV3WsDataFrame(
+      publicFrame('bbo@PERP_ETH_USDT', {
+        s: 'PERP_ETH_USDT',
+        ap: '3501',
+        aq: '1',
+        bp: '3500',
+        bq: '1',
+        ts: 1,
+      }),
+    ).payload as WooV3WsBbo;
+    const ethTrade = decodeWooV3WsDataFrame(
+      publicFrame('trade@PERP_ETH_USDT', {
+        s: 'PERP_ETH_USDT',
+        px: '3500.5',
+        sx: '0.5',
+        sd: 'BUY',
+        src: 1,
+        rpi: false,
+        ts: 1,
+      }),
+    ).payload as WooV3WsTrade;
+    const spotBbo = decodeWooV3WsDataFrame(
+      publicFrame('bbo@SPOT_BTC_USDT', {
+        s: 'SPOT_BTC_USDT',
+        ap: '62002',
+        aq: '1',
+        bp: '62001',
+        bq: '1',
+        ts: 1,
+      }),
+    ).payload as WooV3WsBbo;
+
+    expect(() => composeWooV3AuthoritativeTicker(futuresRow, ethBbo, trade, market)).toThrow(
+      'matching normalized symbol identities',
+    );
+    expect(() => composeWooV3AuthoritativeTicker(futuresRow, ethBbo, ethTrade, market)).toThrow(
+      'matching normalized symbol identities',
+    );
+    expect(() => composeWooV3AuthoritativeTicker(futuresRow, spotBbo, trade, market)).toThrow(
+      'PERP_BASE_QUOTE',
+    );
+    expect(() => composeWooV3AuthoritativeTicker(futuresRow, ethBbo, ethTrade, { ...market, symbol: 'ETHUSDT' })).toThrow(
+      'matching normalized symbol identities',
+    );
+  });
+
+  it('rejects malformed, non-finite, underflowed, and non-positive quote or trade prices', () => {
+    const market = mapWooV3Markets(decodeWooV3Instruments(instrumentFixture))[0];
+    const futuresRow = decodeWooV3Futures(futuresFixture)[0];
+    const bboFrame = (bidPrice: string, askPrice = '62002') =>
+      publicFrame('bbo@PERP_BTC_USDT', {
+        s: 'PERP_BTC_USDT',
+        ap: askPrice,
+        aq: '1',
+        bp: bidPrice,
+        bq: '1',
+        ts: 1,
+      });
+    const tradeFrame = (price: string) =>
+      publicFrame('trade@PERP_BTC_USDT', {
+        s: 'PERP_BTC_USDT',
+        px: price,
+        sx: '1',
+        sd: 'BUY',
+        src: 1,
+        rpi: false,
+        ts: 1,
+      });
+    const validBbo = decodeWooV3WsDataFrame(bboFrame('62001')).payload as WooV3WsBbo;
+    const validTrade = decodeWooV3WsDataFrame(tradeFrame('62001.5')).payload as WooV3WsTrade;
+
+    expect(() => decodeWooV3WsDataFrame(bboFrame('NaN'))).toThrow('finite decimal string');
+    expect(() => decodeWooV3WsDataFrame(tradeFrame('0'))).toThrow('positive decimal');
+
+    const underflow = `0.${'0'.repeat(400)}1`;
+    const underflowBbo = decodeWooV3WsDataFrame(bboFrame(underflow)).payload as WooV3WsBbo;
+    const overflowTrade = decodeWooV3WsDataFrame(tradeFrame('9'.repeat(400))).payload as WooV3WsTrade;
+    expect(() => composeWooV3AuthoritativeTicker(futuresRow, underflowBbo, validTrade, market)).toThrow(
+      'positive finite price',
+    );
+    expect(() => composeWooV3AuthoritativeTicker(futuresRow, validBbo, overflowTrade, market)).toThrow(
+      'positive finite price',
+    );
+    expect(() =>
+      composeWooV3AuthoritativeTicker(futuresRow, { ...validBbo, askPrice: '-1' }, validTrade, market),
+    ).toThrow('positive finite price');
   });
 
   it('normalizes the documented descending snapshot into safe-cex side order and cumulative totals', () => {
@@ -200,6 +361,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
     for (const runtimeFile of runtimeFiles) {
       const source = readFileSync(join(process.cwd(), 'src/exchanges/woo', runtimeFile), 'utf8');
       expect(source).not.toContain('woo.v3.public');
+      expect(source).not.toContain('woo.v3.ticker');
     }
   });
 
