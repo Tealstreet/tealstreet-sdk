@@ -35,6 +35,16 @@ equally inert and accepts no transport, credentials, or mutable store.
 `woo.v3.algo-writes.ts` adds the matching inert algo descriptors for partial STOP-market,
 explicitly vendor-native trailing-stop, positional TP/SL, zero-fill STOP trigger-amend, cancel-by-ID,
 and all-symbol pending cancellation.
+`woo.v3.account-writes.ts` adds inert leverage read/write and position-mode descriptors. The leverage
+read requires symbol, margin mode, and position mode in its signed query, matches all response scope,
+and accepts exactly one positive-integer `BOTH` detail in one-way mode or unique positive-integer
+`LONG` and `SHORT` details in hedge mode. The published default-margin-mode response is unusable and
+is deliberately excluded. Cross one-way leverage
+is descriptor-ready from decoded margin-account provenance; cross-hedge leverage and every isolated
+path fail closed. A position-mode request requires one atomic reconciliation ID across decoded
+account mode, a complete positions page proving every holding and pending quantity is exact decimal
+zero, and complete empty pending regular/algo order pages. Mutation responses prove request
+acceptance only, so authoritative readback remains mandatory.
 `woo.v3.websocket.ts` adds the matching inert WebSocket channel/topic inventory, listen-key and
 subscription descriptors, strict public/private wire decoders, latency-only heartbeat
 classification, and pure sequence/reconnect/resubscribe primitives.
@@ -128,6 +138,18 @@ the no-query all-symbol descriptor is buildable. Current amend/cancel examples r
 so decoders preserve the validated request target and never invent a response status or echoed ID.
 None of this satisfies `algoWriteDemoLifecycle`.
 
+Account V3 configuration is also fail-closed. `GET /v3/futures/leverage` is the authoritative future
+readback contract because position rows omit leverage; its symbol and both modes must match the
+request and its leg set must exactly match the requested position mode. `PUT /v3/futures/leverage`
+accepts a positive integer and the
+official cross setter ignores `positionMode`; safe-cex therefore builds only cross one-way requests
+until a credentialed demo proves which leverage state cross-hedge mode changes. Isolated leverage is
+outside the current cross-only integration contract. `PUT /v3/futures/positionMode` is buildable only
+from the atomic decoded empty-state evidence above. Its response, like the leverage response, contains
+only `success` and `timestamp`, so never infer resulting leverage or position mode from it. Read back
+the authoritative account/leverage endpoints before considering the state changed. None of this
+satisfies `accountWriteDemoLifecycle`.
+
 ## CCXT Reference Implementation
 
 - **REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/woo.ts
@@ -143,6 +165,7 @@ None of this satisfies `algoWriteDemoLifecycle`.
 - `woo.v3.public.ts` - Inert strict public-REST decoders and pure market/stat/book/candle mappers
 - `woo.v3.regular-writes.ts` - Inert strict regular-order request/response contracts and amend blockers
 - `woo.v3.algo-writes.ts` - Inert strict algo-order request/response contracts and lifecycle blockers
+- `woo.v3.account-writes.ts` - Inert strict leverage read/write and position-mode contracts/evidence blockers
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.v3.websocket.ts` - Inert V3 WS URLs/topics, strict decoders, blockers, and recovery primitives
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
