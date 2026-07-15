@@ -34,7 +34,7 @@ export const ENDPOINTS = {
   OPEN_ORDERS: '/0/private/OpenOrders',
   CLOSED_ORDERS: '/0/private/ClosedOrders',
   ADD_ORDER: '/0/private/AddOrder',
-  EDIT_ORDER: '/0/private/EditOrder',
+  AMEND_ORDER: '/0/private/AmendOrder',
   CANCEL_ORDER: '/0/private/CancelOrder',
   CANCEL_ALL: '/0/private/CancelAll',
   TRADES_HISTORY: '/0/private/TradesHistory',
@@ -51,7 +51,7 @@ export const PUBLIC_ENDPOINTS = [
   ENDPOINTS.SERVER_TIME,
 ];
 
-export const GRAFANA_ENDPOINTS_EVERY = [ENDPOINTS.ADD_ORDER, ENDPOINTS.EDIT_ORDER, ENDPOINTS.CANCEL_ORDER];
+export const GRAFANA_ENDPOINTS_EVERY = [ENDPOINTS.ADD_ORDER, ENDPOINTS.AMEND_ORDER, ENDPOINTS.CANCEL_ORDER];
 
 export const GRAFANA_ENDPOINTS_PERIODIC = [ENDPOINTS.BALANCE, ENDPOINTS.OPEN_ORDERS, ENDPOINTS.TRADE_BALANCE];
 

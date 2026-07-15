@@ -251,6 +251,7 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
       filled: cumQty,
       remaining,
       reduceOnly: false, // Spot doesn't have reduce-only
+      info: item,
       timeInForce,
       lastUpdate: timestamp,
     };

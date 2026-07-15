@@ -128,7 +128,7 @@ describe('Kraken Spot AddOrder client order identifiers', () => {
     expect(request.data).not.toContain('userref=');
   });
 
-  it('continues to cancel by Kraken txid and recreate stop orders with a fresh cl_ord_id', async () => {
+  it('continues to identify stop-order amends by the canonical Kraken txid', async () => {
     const { exchange, post } = createExchange();
     const stopOrder: Order = {
       id: 'ORIGINAL-TXID',
@@ -141,22 +141,21 @@ describe('Kraken Spot AddOrder client order identifiers', () => {
       filled: 0,
       remaining: 1.25,
       reduceOnly: false,
+      info: { descr: { ordertype: 'stop-loss' } },
       timeInForce: OrderTimeInForce.GoodTillCancel,
       lastUpdate: Date.now(),
     };
-    post
-      .mockResolvedValueOnce({ data: { error: [], result: { count: 1 } } })
-      .mockResolvedValueOnce({ data: { error: [], result: { txid: ['REPLACEMENT-TXID'] } } });
+    post.mockResolvedValue({ data: { error: [], result: { amend_id: 'AMEND-TXID' } } });
 
     await expect(exchange.updateOrder({ order: stopOrder, update: { price: 48_500 } })).resolves.toEqual([
-      'REPLACEMENT-TXID',
+      'ORIGINAL-TXID',
     ]);
 
-    expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.CANCEL_ORDER, { txid: 'ORIGINAL-TXID' });
-    const replacementPayload = post.mock.calls[1][1];
-    expect(post.mock.calls[1][0]).toBe(ENDPOINTS.ADD_ORDER);
-    expect(replacementPayload).not.toHaveProperty('userref');
-    expect(replacementPayload.cl_ord_id).toMatch(/^[a-f0-9]{32}$/);
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.AMEND_ORDER, {
+      txid: 'ORIGINAL-TXID',
+      trigger_price: '48500',
+    });
   });
 
   it('keeps reconciliation keyed by Kraken txid, not the optional client identifier', async () => {

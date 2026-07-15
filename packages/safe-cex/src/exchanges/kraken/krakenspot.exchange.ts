@@ -264,6 +264,7 @@ export class KrakenSpotExchange extends BaseExchange {
           filled: executed,
           remaining: Math.max(0, volume - executed),
           reduceOnly: false, // Spot doesn't have reduce-only
+          info: o,
           timeInForce,
           lastUpdate: o.opentm ? o.opentm * 1000 : Date.now(),
         });
@@ -366,40 +367,67 @@ export class KrakenSpotExchange extends BaseExchange {
   updateOrder = async (_opts: UpdateOrderOpts): Promise<string[]> => {
     try {
       const { order, update } = _opts;
-
-      // For stop/TP orders, cancel and recreate
-      if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
-        await this.cancelOrders([order]);
-        const newOrderOpts: PlaceOrderOpts = {
-          symbol: order.symbol,
-          side: order.side,
-          type: order.type,
-          amount: (update as any).amount !== undefined ? (update as any).amount : order.amount,
-          price: (update as any).price !== undefined ? (update as any).price : order.price,
-        };
-        return await this.placeOrder(newOrderOpts);
+      const market = this.store.marketsBySymbol[order.symbol];
+      if (!market) {
+        throw new Error(`Market ${order.symbol} not found`);
       }
 
-      // For limit orders, use EditOrder
-      const market = this.store.marketsBySymbol[order.symbol];
-      const pair = market?.info?.pairName;
+      const rawOrderType = order.info?.descr?.ordertype || order.info?.order_type;
+      const expectedOrderType = rawOrderType ? ORDER_TYPE[rawOrderType] : undefined;
+      const supportsLimitAmend = rawOrderType === 'limit' && order.type === OrderType.Limit;
+      const supportsTriggerAmend =
+        (rawOrderType === 'stop-loss' && order.type === OrderType.StopLoss) ||
+        (rawOrderType === 'take-profit' && order.type === OrderType.TakeProfit);
+
+      if ((!supportsLimitAmend && !supportsTriggerAmend) || expectedOrderType !== order.type) {
+        throw new Error(
+          `Kraken Spot cannot safely amend ${rawOrderType || order.type}; only reconciled limit, stop-loss, and take-profit orders are supported`,
+        );
+      }
+
+      if (supportsLimitAmend && order.timeInForce === OrderTimeInForce.ImmediateOrCancel) {
+        throw new Error('Kraken Spot cannot amend an immediate-or-cancel order');
+      }
 
       const body: Record<string, any> = {
         txid: order.id,
       };
 
-      if (pair) body.pair = pair;
       if ((update as any).amount !== undefined) {
-        body.volume = String(market ? adjust((update as any).amount, market.precision.amount) : (update as any).amount);
+        const amount = adjust((update as any).amount, market.precision.amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error('Kraken Spot amend quantity must be a positive finite amount');
+        }
+        body.order_qty = String(amount);
       }
       if ((update as any).price !== undefined) {
-        body.price = String(market ? adjust((update as any).price, market.precision.price) : (update as any).price);
+        const price = adjust((update as any).price, market.precision.price);
+        if (!Number.isFinite(price) || price <= 0) {
+          throw new Error('Kraken Spot amend price must be a positive finite amount');
+        }
+
+        if (supportsLimitAmend) {
+          body.limit_price = String(price);
+          if (order.timeInForce === OrderTimeInForce.PostOnly) body.post_only = true;
+        } else {
+          body.trigger_price = String(price);
+        }
       }
 
-      const { data } = await this.unlimitedXHR.post(ENDPOINTS.EDIT_ORDER, body);
+      if (body.order_qty === undefined && body.limit_price === undefined && body.trigger_price === undefined) {
+        throw new Error('Kraken Spot amend requires an amount or price change');
+      }
 
-      const txid = data?.result?.txid;
-      return txid ? [txid] : [order.id];
+      const { data } = await this.unlimitedXHR.post(ENDPOINTS.AMEND_ORDER, body);
+
+      const amendId = data?.result?.amend_id;
+      if (typeof amendId !== 'string' || amendId.length === 0) {
+        throw new Error('Kraken Spot AmendOrder response did not include an amend_id');
+      }
+
+      // AmendOrder preserves the order identity. amend_id identifies only the
+      // amend transaction and must not replace the canonical Kraken txid.
+      return [order.id];
     } catch (err: any) {
       const errorMessage = err?.message || 'Failed to update order';
       this.emitAndLogError(errorMessage, 'UpdateOrder Error');

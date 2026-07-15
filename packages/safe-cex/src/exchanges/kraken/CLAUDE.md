@@ -507,6 +507,8 @@ Validates credentials by calling `/v3/accounts`. Checks for:
 - **Spot WebSocket v2**: https://docs.kraken.com/api/docs/guides/spot-ws-intro/
 - **Asset Pairs**: https://docs.kraken.com/api/docs/rest-api/get-tradable-asset-pairs
 - **Add Order**: https://docs.kraken.com/api/docs/rest-api/add-order
+- **Amend Order**: https://docs.kraken.com/api/docs/rest-api/amend-order/
+- **Atomic Amend Guide**: https://docs.kraken.com/exchange/guides/general/amends
 - **CCXT Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/kraken.ts
 
 ## File Structure
@@ -573,7 +575,7 @@ Token-based auth flow:
 | `BALANCE`         | `/0/private/Balance`             | POST   | Yes  | Account balances      |
 | `OPEN_ORDERS`     | `/0/private/OpenOrders`          | POST   | Yes  | Open orders           |
 | `ADD_ORDER`       | `/0/private/AddOrder`            | POST   | Yes  | Place order           |
-| `EDIT_ORDER`      | `/0/private/EditOrder`           | POST   | Yes  | Modify order          |
+| `AMEND_ORDER`     | `/0/private/AmendOrder`          | POST   | Yes  | Atomically amend order |
 | `CANCEL_ORDER`    | `/0/private/CancelOrder`         | POST   | Yes  | Cancel order          |
 | `WS_TOKEN`        | `/0/private/GetWebSocketsToken`  | POST   | Yes  | WebSocket auth token  |
 
@@ -617,6 +619,8 @@ Kraken uses non-standard asset codes. The `normalizeAsset()` function in `kraken
 5. **Balance = portfolio**: Total USD balance includes estimated USD value of all held assets
 6. **No reduce-only**: All `reduceOnly` fields are false
 7. **Client order IDs**: `AddOrder` uses a generated 32-character lowercase hexadecimal short UUID in `cl_ord_id`; it must not send `userref`, because Kraken makes the fields mutually exclusive and `userref` is int32-only. Kraken `txid`s remain the returned, update/cancel, and reconciliation identities.
+8. **Native order amendments**: Reconciled plain limit, stop-loss, and take-profit orders use `/0/private/AmendOrder` by canonical Kraken `txid`. Quantity changes send the requested total base-asset quantity as `order_qty`; limit price changes use `limit_price`; trigger changes use `trigger_price`. Post-only limit price changes set `post_only: true`, so an amend that would take liquidity is rejected. The returned `amend_id` identifies the amend transaction only, so `updateOrder` returns the unchanged order `txid`.
+9. **Ambiguous edits fail closed**: Market, trailing-stop, stop-limit, take-profit-limit, IOC, and unreconciled orders are rejected before any REST write. Do not restore cancel-first replacement: it can lose a live protective order, and the normalized model cannot unambiguously represent both prices of Kraken's triggered-limit orders.
 
 ## Error Handling
 
@@ -658,7 +662,7 @@ Common error codes:
 - [ ] Ticker fetching and WebSocket updates
 - [ ] Balance fetching (multi-asset with USD estimation)
 - [ ] Order placement: limit, market, stop-loss, take-profit
-- [ ] Order modification and cancellation
+- [ ] Order modification via native atomic amend and cancellation
 - [ ] Orderbook WebSocket subscription
 - [ ] OHLC via WebSocket v2 (unlike Futures which uses REST polling)
 - [ ] WebSocket token authentication flow
