@@ -9,6 +9,10 @@ import {
 } from '../config/config';
 import { Candle, LogSeverity, Market, OHLCVOptions, OrderBook, Ticker, Timeframe } from '../types';
 
+export const EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS = 6_000;
+export const EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS = 20_000;
+const EXTERNAL_PUBLIC_DATA_HEARTBEAT_INTERVAL_MS = 1_000;
+
 /**
  * Gateway message types for public data multiplexing
  */
@@ -98,6 +102,8 @@ export class ExternalPublicDataProvider {
   private subscriptions = new Map<string, Set<(data: unknown) => void>>();
   private reconnecting = false;
   private lastReceived = 0;
+  private lastPingSent = 0;
+  private heartbeatTimer?: ReturnType<typeof setTimeout>;
   private reconnectCount = 0;
   private isDisposed = false;
 
@@ -137,6 +143,8 @@ export class ExternalPublicDataProvider {
   private onOpen = () => {
     this.log('Connected to public data gateway', LogSeverity.Info);
     this.lastReceived = Date.now();
+    this.lastPingSent = 0;
+    this.scheduleHeartbeatCheck();
 
     // Authenticate if token provided
     if (this.authToken) {
@@ -170,6 +178,7 @@ export class ExternalPublicDataProvider {
     if (this.isDisposed) return;
 
     this.lastReceived = Date.now();
+    this.lastPingSent = 0;
 
     // Receiving traffic means the connection recovered — reset the counter so
     // the onClose `> 100` cap bounds a single unhealthy streak, not the
@@ -279,6 +288,10 @@ export class ExternalPublicDataProvider {
 
   private onClose = () => {
     if (this.isDisposed) return;
+
+    this.stopHeartbeatCheck();
+    this.lastReceived = 0;
+    this.lastPingSent = 0;
 
     this.log('Disconnected from public data gateway', LogSeverity.Warning);
 
@@ -414,6 +427,42 @@ export class ExternalPublicDataProvider {
     this.ws.send(JSON.stringify(message));
   };
 
+  private scheduleHeartbeatCheck = () => {
+    this.stopHeartbeatCheck();
+
+    const checkAndSchedule = () => {
+      if (this.isDisposed) return;
+
+      const now = Date.now();
+      const timeSinceLastMessage = now - this.lastReceived;
+
+      if (timeSinceLastMessage > EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS) {
+        this.log(
+          `Gateway stale for ${Math.round(timeSinceLastMessage / 1000)}s, reconnecting`,
+          LogSeverity.Warning,
+        );
+        this.ws?.close();
+        return;
+      }
+
+      if (timeSinceLastMessage > EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS && this.lastPingSent === 0) {
+        this.lastPingSent = now;
+        this.send({ type: 'ping', exchangeId: this.exchangeId });
+      }
+
+      this.heartbeatTimer = setTimeout(checkAndSchedule, EXTERNAL_PUBLIC_DATA_HEARTBEAT_INTERVAL_MS);
+    };
+
+    this.heartbeatTimer = setTimeout(checkAndSchedule, EXTERNAL_PUBLIC_DATA_HEARTBEAT_INTERVAL_MS);
+  };
+
+  private stopHeartbeatCheck = () => {
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+  };
+
   private log = (message: string, severity: LogSeverity) => {
     this.parent.emitter.emit('log', `[${this.parent.name}:Gateway] ${message}`, severity);
   };
@@ -430,6 +479,7 @@ export class ExternalPublicDataProvider {
    */
   dispose = () => {
     this.isDisposed = true;
+    this.stopHeartbeatCheck();
     this.orderbookCallbacks.clear();
     this.candleCallbacks.clear();
     this.ws?.close();

@@ -245,6 +245,7 @@ export class BaseExchange implements Exchange {
   private readonly WATCHDOG_STALE_THRESHOLD_MS = 30_000; // Consider stale after 30s without messages
   private readonly WATCHDOG_CONNECTION_TIMEOUT_MS = 60_000; // Max time to wait for first message after init
   private remoteSignerAvailabilityCleanups = new Set<() => void>();
+  private readonly unsubscribeFromStore: () => void;
 
   on: TinyEmitter['on'];
   once: TinyEmitter['once'];
@@ -290,7 +291,7 @@ export class BaseExchange implements Exchange {
     this.once = this.emitter.once.bind(this.emitter);
     this.off = this.emitter.off.bind(this.emitter);
 
-    this.store.subscribe((data) => {
+    this.unsubscribeFromStore = this.store.subscribe((data) => {
       this.emitter.emit('update', data);
     });
   }
@@ -874,6 +875,7 @@ export class BaseExchange implements Exchange {
 
   dispose() {
     this.isDisposed = true;
+    this.unsubscribeFromStore();
     this.remoteSignerAvailabilityCleanups.forEach((cleanup) => cleanup());
     this.remoteSignerAvailabilityCleanups.clear();
 
@@ -910,6 +912,20 @@ export class BaseExchange implements Exchange {
     this.off('updatePositions:done');
     this.off('callMethod');
     this.off('callMethod:done');
+
+    this.off('log');
+    this.off('warning');
+    this.off('ws-reconnected');
+    this.off('remoteSignerStatus');
+    this.off('markets:changed');
+    this.off('activeTickerSymbols:changed');
+
+    this.off('grafana-error');
+    this.off('grafana-http-request');
+    this.off('grafana-http-response');
+    this.off('grafana-info');
+    this.off('grafana-pws');
+    this.off('grafana-pws-sub');
 
     this.store.reset();
   }
@@ -1348,7 +1364,12 @@ export class BaseExchange implements Exchange {
       const socketStaleThresholdMs = socket.getWatchdogStaleThresholdMs() ?? this.WATCHDOG_STALE_THRESHOLD_MS;
 
       // Case 1: Connected and initialized, but no recent messages (stale)
-      if (isConnected && socket.isInitialized && timeSinceLastMessage > socketStaleThresholdMs) {
+      if (
+        isConnected &&
+        socket.isInitialized &&
+        socket.lastReceived > 0 &&
+        timeSinceLastMessage > socketStaleThresholdMs
+      ) {
         this.log(
           `[Watchdog] Socket stale: ${Math.round(timeSinceLastMessage / 1000)}s since last message, forcing reconnect`,
           LogSeverity.Warning,
@@ -1358,12 +1379,14 @@ export class BaseExchange implements Exchange {
       }
 
       // Case 2: Connected but never received messages (stuck on connect)
-      // Check if socket has been "connecting" for too long without receiving data
+      // Use this socket's latest open time, not exchange construction time. A
+      // newly reconnected socket gets the same first-message grace as its first
+      // connection.
       if (isConnected && !socket.isInitialized) {
-        const timeSinceExchangeInit = now - this.initTime;
-        if (timeSinceExchangeInit > this.WATCHDOG_CONNECTION_TIMEOUT_MS) {
+        const timeSinceConnected = socket.lastConnectedAt > 0 ? now - socket.lastConnectedAt : 0;
+        if (timeSinceConnected > this.WATCHDOG_CONNECTION_TIMEOUT_MS) {
           this.log(
-            `[Watchdog] Socket never received messages after ${Math.round(timeSinceExchangeInit / 1000)}s, forcing reconnect`,
+            `[Watchdog] Socket never received messages after ${Math.round(timeSinceConnected / 1000)}s, forcing reconnect`,
             LogSeverity.Warning,
           );
           socket.reconnect();
@@ -1371,10 +1394,20 @@ export class BaseExchange implements Exchange {
         }
       }
 
-      // Case 3: Socket shows connected but lastReceived was reset (inconsistent state)
-      if (isConnected && socket.isInitialized && socket.lastReceived === 0) {
+      // Case 3: A previously initialized socket has just reconnected and is
+      // waiting for its first new frame. This is normal until the per-socket
+      // connection grace expires.
+      if (
+        isConnected &&
+        socket.isInitialized &&
+        socket.lastReceived === 0 &&
+        socket.lastConnectedAt > 0 &&
+        now - socket.lastConnectedAt > this.WATCHDOG_CONNECTION_TIMEOUT_MS
+      ) {
         this.log(
-          `[Watchdog] Socket in inconsistent state (connected + initialized but lastReceived=0), forcing reconnect`,
+          `[Watchdog] Reconnected socket received no messages within ${Math.round(
+            this.WATCHDOG_CONNECTION_TIMEOUT_MS / 1000,
+          )}s, forcing reconnect`,
           LogSeverity.Warning,
         );
         socket.reconnect();

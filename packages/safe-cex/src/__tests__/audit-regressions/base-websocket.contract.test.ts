@@ -1,6 +1,11 @@
 import type { BaseExchange } from '../../exchanges/base';
 
-import { BaseWebSocket, getCloseCodeDescription, WS_RECONNECT_THRESHOLD_MS } from '../../exchanges/base.ws';
+import {
+  BaseWebSocket,
+  getCloseCodeDescription,
+  isHeartbeatFrame,
+  WS_RECONNECT_THRESHOLD_MS,
+} from '../../exchanges/base.ws';
 
 const createParent = (isDisposed = false) =>
   ({
@@ -40,5 +45,24 @@ describe('BaseWebSocket documented runtime contracts', () => {
   test('close codes have stable human-readable fallback text', () => {
     expect(getCloseCodeDescription(1000)).toBe('Normal closure');
     expect(getCloseCodeDescription(4999)).toBe('Unknown close code (4999)');
+  });
+
+  test('only classifies actual protocol heartbeat frames as ping or pong', () => {
+    expect(isHeartbeatFrame('ping')).toBe(true);
+    expect(isHeartbeatFrame(JSON.stringify({ op: 'ping' }))).toBe(true);
+    expect(isHeartbeatFrame(JSON.stringify({ method: 'server.ping', id: 1 }))).toBe(true);
+    expect(isHeartbeatFrame(JSON.stringify({ ping: 123 }))).toBe(true);
+    expect(isHeartbeatFrame(JSON.stringify({ op: 'subscribe', symbol: 'SPONGEUSDT' }))).toBe(false);
+    expect(isHeartbeatFrame(JSON.stringify({ type: 'order', clientId: 'ping-strategy' }))).toBe(false);
+  });
+
+  test('a subscription containing ping in its symbol still triggers reconnect while closed', () => {
+    const socket = new BaseWebSocket(createParent());
+    socket.ws = { readyState: WebSocket.CLOSED } as unknown as WebSocket;
+    const reconnect = vi.spyOn(socket, 'reconnect').mockResolvedValue();
+
+    socket.send(JSON.stringify({ op: 'subscribe', args: ['SPONGEUSDT'] }));
+
+    expect(reconnect).toHaveBeenCalledTimes(1);
   });
 });

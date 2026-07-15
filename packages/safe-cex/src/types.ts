@@ -125,15 +125,7 @@ export type ExchangeOptions = {
     lighterIntegratorAccountIndex?: string;
   };
 
-  /**
-   * External public data provider configuration.
-   * When set, the exchange will NOT create its own public WebSocket connection.
-   * Instead, it will receive public data from the specified provider (e.g., a gateway service).
-   * When NOT set (undefined), the exchange uses direct connection (current behavior).
-   *
-   * This enables WebSocket multiplexing where a single gateway maintains connections
-   * to exchanges and fans out public data to multiple safe-cex instances.
-   */
+  /** Delegates request signing to a signer outside this exchange runtime. */
   readonly remoteSigner?: RemoteSigner;
 
   /**
@@ -142,6 +134,12 @@ export type ExchangeOptions = {
    */
   readonly hostedMode?: boolean;
 
+  /**
+   * External public data provider configuration.
+   * When set, the exchange does not create its own public WebSocket connection.
+   * Instead, it receives public data from a gateway or another in-process exchange.
+   * When undefined, the exchange uses its direct public-data connection.
+   */
   readonly externalPublicData?:
     | {
         /**
@@ -332,6 +330,12 @@ export type Ticker = {
   readonly bid: number;
   readonly ask: number;
   readonly last: number;
+  /**
+   * Derivatives metadata uses `0` when the venue does not publish the field,
+   * including spot venues where the concept does not apply. Consumers must
+   * not interpret zero as proof of a real zero funding rate, mark/index price,
+   * funding time, or open-interest value.
+   */
   readonly mark: number;
   readonly index: number;
   /**

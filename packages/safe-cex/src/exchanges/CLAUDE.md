@@ -26,7 +26,7 @@ packages/safe-cex/src/exchanges/
 ├── external-public-data.ts     # External public-data provider (multiplexing)
 ├── in-process-public-data.ts   # In-process public-data sharing
 ├── registry.ts                 # Exchange name → class mapping
-├── registry.native.ts          # Native-only exchange registry
+├── registry.native.ts          # React Native exchange-name → class mapping
 ├── types.ts                    # Shared types
 └── <exchange>/                 # One directory per exchange
 ```
@@ -63,8 +63,14 @@ directory under different file prefixes (e.g. `binancespot.api.ts`,
 
 `base.ts` defines the `Exchange` interface and `BaseExchange` class. Every
 exchange class extends `BaseExchange` and overrides the methods it needs.
-Methods left as the base implementation throw `'Not implemented'` and will
-fail at runtime if called.
+Most unsupported action/fetch methods throw `'Not implemented'` and fail at
+runtime if called. The base implementations of `fetchOHLCV`,
+`fetchExecutions`, `fetchHistoricalTrades`, `fetchIncomeHistory`, and
+`fetchIncomeHistoryRange` deliberately resolve to empty arrays;
+`updateSymbolMetadata` is a no-op; and `listenOHLCV`, `listenOHLCVs`, and
+`listenOrderBook` return without subscribing unless an external public-data
+provider is configured. Missing overrides for those methods therefore fail
+silently and must be checked explicitly when adding support.
 
 Key methods exchanges typically override:
 
@@ -77,6 +83,12 @@ Key methods exchanges typically override:
 - `fetchOHLCV()`, `fetchExecutions()`
 
 Check `Exchange` interface in `base.ts` for the full surface.
+
+`Ticker` keeps derivatives fields (`mark`, `index`, `fundingRate`,
+`fundingTime`, and `openInterest`) required for compatibility. Spot venues and
+venues that do not publish one of those values use `0`; consumers must treat
+that value as "zero or unavailable," not proof that the upstream value is
+genuinely zero.
 
 ### Common Startup Sequence
 
@@ -229,6 +241,12 @@ contributing to 9-wide e2e "stuck" load failures via signer/CPU contention.
 **If you add another reconnect-triggered REST/auth path, gate it on
 `isDisposed` the same way** — a disposed account must never sign again.
 
+`BaseExchange.dispose()` also unsubscribes the store-to-emitter bridge before
+resetting the store and removes the remaining exchange-level lifecycle,
+market-change, signer-status, log, and Grafana listeners. Consumers may retain
+an emitter reference, but a disposed exchange must not keep its store callback
+or notify those listeners after teardown.
+
 ### Reconnect caps are streak-scoped, not lifetime
 
 The `> 100` guards on `BaseWebSocket.onCloseCount` / `reconnectCount` (mirrored
@@ -238,6 +256,38 @@ in the Lighter ws classes and `external-public-data.ts`) bound a single
 healthy-traffic point). Don't turn them back into lifetime counters — long-lived
 sessions (flaky networks, 24h WS session limits) legitimately accumulate 100+
 closes, and a lifetime cap silently kills the socket forever.
+
+Native-WebSocket reconnects use close-code-scoped exponential backoff. A
+different close code or a failure-free window longer than twice the maximum
+delay resets growth to the base delay. Eight consecutive non-normal close
+codes activate the two-minute reconnect pause; healthy inbound traffic or a
+normal close resets that failure streak.
+
+External public-data gateway connections have their own liveness loop because
+they are not `BaseWebSocket` instances. The provider sends a gateway `ping`
+after 6 seconds without inbound traffic and closes the socket after 20 seconds
+so its reconnect path recovers half-open connections. Any inbound frame,
+including `pong`, satisfies the heartbeat; disposal clears its timer.
+
+The exchange watchdog measures first-message grace from each socket's latest
+successful `open` event. A previously initialized socket resets
+`lastReceived` while reconnecting, so `connected + initialized +
+lastReceived=0` is expected during that grace window and must not be bounced
+immediately based on the exchange object's older construction time.
+
+When a socket is not open, `BaseWebSocket.send()` drops only protocol heartbeat
+frames: literal `ping`/`pong`, JSON heartbeat operations (`op`, `type`,
+`event`, or `method`, including `server.ping`), or JSON frames with a top-level
+`ping`/`pong` key. Do not broaden this to a substring match; subscriptions and
+orders may legitimately contain tokens such as `SPONGE` or client identifiers
+containing `ping`, and those frames must trigger the reconnect path.
+
+Every subclass `onOpen` must preserve the base lifecycle contract: public
+sockets call `emitWsReconnected()` so consumers resubscribe, while private
+sockets arrange `parent.fetchAndSetPrivateSnapshot(10)` after reconnect (the
+native reconnect path installs this through `setupHouseKeepEventListener`).
+An authentication handshake may run first, but the reconnect notification or
+private snapshot refresh must not be omitted.
 
 ### virtualClock
 
@@ -879,7 +929,9 @@ These drift fast. Prefer:
    OKX for OAuth-style passphrase, Hyperliquid for EIP-712, etc.).
 3. Add metadata to `exchangeMetadata.ts` — see `packages/safe-cex/CLAUDE.md`
    for the proxy/tunnel flag matrix.
-4. Register in `registry.ts`.
+4. Register in both `registry.ts` and `registry.native.ts`. Their
+   `Record<ExchangeName, ExchangeLoader>` types enforce name parity, but the
+   native `require()` loader's export name is not type-checked.
 5. Write the per-exchange `CLAUDE.md` against the template above. Link back
    to this parent doc instead of restating shared mechanics.
 6. Freshly author deterministic regressions in

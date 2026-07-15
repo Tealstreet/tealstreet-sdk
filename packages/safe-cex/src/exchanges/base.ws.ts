@@ -131,6 +131,23 @@ export function getCloseCodeDescription(code: number): string {
   return WS_CLOSE_CODE_DESCRIPTIONS[code] || `Unknown close code (${code})`;
 }
 
+export function isHeartbeatFrame(message: string): boolean {
+  const trimmed = message.trim();
+  if (/^(ping|pong)$/i.test(trimmed)) return true;
+
+  try {
+    const payload = JSON.parse(trimmed) as Record<string, unknown>;
+    if (!payload || Array.isArray(payload) || typeof payload !== 'object') return false;
+
+    const heartbeatOperation = [payload.op, payload.type, payload.event, payload.method].some(
+      (value) => typeof value === 'string' && /^(?:server\.)?(?:ping|pong)$/i.test(value),
+    );
+    return heartbeatOperation || Object.hasOwn(payload, 'ping') || Object.hasOwn(payload, 'pong');
+  } catch {
+    return false;
+  }
+}
+
 /*
  * ws onOpen must contain
  *
@@ -145,6 +162,8 @@ export class BaseWebSocket<T extends BaseExchange> {
   onCloseCount = 0;
   reconnectCount = 0;
   lastReceived = 0;
+  /** Timestamp of the most recent successful open event for this socket. */
+  lastConnectedAt = 0;
   lastReceivedTimer: NodeJS.Timeout | undefined;
   pingSent = false;
   /** Track if this WebSocket has ever successfully connected and received messages */
@@ -373,12 +392,19 @@ export class BaseWebSocket<T extends BaseExchange> {
 
     // Add error handler immediately to prevent uncaught errors
     ws.addEventListener('error', this.handleWebSocketError as any);
+    ws.addEventListener('open', this.trackConnected);
 
     // Also override onerror to catch any errors that might bypass addEventListener
     ws.onerror = this.handleWebSocketError as any;
 
     return ws;
   }
+
+  private trackConnected = () => {
+    if (!this.parent.isDisposed) {
+      this.lastConnectedAt = Date.now();
+    }
+  };
 
   protected handleWebSocketError = (event: Event) => {
     // Prevent the error from propagating
@@ -413,7 +439,7 @@ export class BaseWebSocket<T extends BaseExchange> {
       const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
       const stateName = wsState !== undefined ? stateNames[wsState] : 'undefined';
 
-      if (message.match(/(ping|pong)/i)) {
+      if (isHeartbeatFrame(message)) {
         // Silently ignore ping/pong when WebSocket is not OPEN
         this.parent.log(`Skipping ping/pong - WebSocket state: ${stateName} (${wsState})`, LogSeverity.Info);
         return;
