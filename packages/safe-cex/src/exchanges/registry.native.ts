@@ -25,7 +25,6 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   bitunix: load(() => require('./bitunix/bitunix.exchange').BitunixExchange),
   blofin: load(() => require('./blofin/blofin.exchange').BlofinExchange),
   breakoutprop: load(() => require('./breakoutprop/breakoutprop.exchange').BreakoutpropExchange),
-  btcc: load(() => require('./btcc/btcc.exchange').BtccExchange),
   bybit: load(() => require('./bybit/bybit.exchange').BybitExchange),
   bybitdemo: load(() => require('./bybit/bybitdemo.exchange').BybitDemoExchange),
   bybitinverse: load(() => require('./bybit/bybitinverse.exchange').BybitInverseExchange),

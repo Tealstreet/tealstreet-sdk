@@ -26,7 +26,6 @@ describe('exchangeSupportsSecondaryKey', () => {
 
   it('is false for session-login venues where a distinct read key cannot authenticate', () => {
     expect(exchangeSupportsSecondaryKey('breakoutprop')).toBe(false);
-    expect(exchangeSupportsSecondaryKey('btcc')).toBe(false);
   });
 
   it('every excluded entry is unique', () => {

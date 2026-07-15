@@ -25,7 +25,6 @@ export type ExchangeName =
   | 'bitunix'
   | 'blofin'
   | 'breakoutprop'
-  | 'btcc'
   | 'bybit'
   | 'bybitdemo'
   | 'bybitinverse'

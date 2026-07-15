@@ -42,7 +42,6 @@ const EXCHANGE_NAMES = [
   'bitunix',
   'blofin',
   'breakoutprop',
-  'btcc',
   'bybit',
   'bybitdemo',
   'bybitinverse',

@@ -4,10 +4,9 @@ import type { ExchangeName } from '../types';
 //  - wallet / private-key / on-chain signed venues (Ethereum/Cosmos/StarkEx/ZK)
 //    and the Orderly ed25519 DEX family: a single keypair, no server-managed
 //    key+secret with a read-only permission scope.
-//  - session-login venues (breakoutprop=DXtrade session token, btcc=MD5 login):
+//  - session-login venues (breakoutprop=DXtrade session token):
 //    auth is a shared per-session token injected on every request, so a second
-//    client cannot authenticate as a distinct read-only key (and btcc issues all
-//    REST via this.xhr.request(), which the read-routing Proxy does not intercept).
+//    client cannot authenticate as a distinct read-only key.
 // There is nothing to put in a "secondary read-only key" field for these. Every
 // other exchange uses standard per-request HMAC/ed25519/JWT key+secret and can opt in.
 // AsterDEX is deliberately NOT excluded: its V3 agent model issues a distinct
@@ -16,7 +15,6 @@ import type { ExchangeName } from '../types';
 export const exchangesWithoutSecondaryKey: ExchangeName[] = [
   'apexomni',
   'breakoutprop',
-  'btcc',
   'grvt',
   'hyperliquid',
   'hyperliquidspot',

@@ -39,7 +39,6 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     case 'bitunix':
     case 'asterdex':
     case 'apexomni':
-    case 'btcc':
     case 'woo':
     case 'blofin':
     case 'breakoutprop':
@@ -230,7 +229,6 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'bitunix':
     case 'asterdex':
     case 'apexomni':
-    case 'btcc':
     case 'woo':
     case 'okx':
     case 'okxeu':

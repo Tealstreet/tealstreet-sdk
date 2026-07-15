@@ -190,11 +190,6 @@
     "ETHUSD": "ETHUSD",
     "SOLUSD": "SOLUSD"
   },
-  "btcc": {
-    "BTCUSDT": "BTCUSDT",
-    "ETHUSDT": "ETHUSDT",
-    "BTCUSD": "BTCUSD"
-  },
   "bybit": {
     "BTCPERP": "BTCUSDC",
     "0GUSDT": "0GUSDT",

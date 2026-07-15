@@ -1160,30 +1160,6 @@
       "binance": "SOLUSD"
     }
   ],
-  "btcc": [
-    {
-      "symbol": "BTCUSDT",
-      "base": "BTC",
-      "quote": "USDT",
-      "id": "crypto/BTCUSDT100x",
-      "_source": "code-verified",
-      "binance": "BTCUSDT"
-    },
-    {
-      "symbol": "ETHUSDT",
-      "base": "ETH",
-      "quote": "USDT",
-      "id": "crypto/ETHUSDT100x",
-      "binance": "ETHUSDT"
-    },
-    {
-      "symbol": "BTCUSD",
-      "base": "BTC",
-      "quote": "USD",
-      "id": "crypto/BTCUSD100x",
-      "binance": "BTCUSD"
-    }
-  ],
   "bybit": [
     {
       "symbol": "BTCPERP",

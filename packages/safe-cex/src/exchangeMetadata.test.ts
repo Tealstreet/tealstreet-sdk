@@ -349,7 +349,7 @@ describe('exchangeMetadata', () => {
     });
 
     it('exchanges not verified for public-only should have supportsPublicOnly: false', () => {
-      const expectedFalse: ExchangeName[] = ['arkham', 'backpack', 'bitgetinverse', 'bitgetusdc', 'btcc', 'coinbasespot'];
+      const expectedFalse: ExchangeName[] = ['arkham', 'backpack', 'bitgetinverse', 'bitgetusdc', 'coinbasespot'];
       expectedFalse.forEach((name) => {
         expect(exchangeMetadata[name].supportsPublicOnly, `${name}: expected supportsPublicOnly to be false`).toBe(
           false,

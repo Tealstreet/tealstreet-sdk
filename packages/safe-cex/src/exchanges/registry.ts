@@ -97,9 +97,6 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.BreakoutpropExchange,
     ),
 
-  // BTCC
-  btcc: () => import(/* webpackChunkName: "exchange-btcc" */ './btcc/btcc.exchange').then((m) => m.BtccExchange),
-
   // Bybit
   bybit: () => import(/* webpackChunkName: "exchange-bybit" */ './bybit/bybit.exchange').then((m) => m.BybitExchange),
 

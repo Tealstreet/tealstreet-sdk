@@ -15,7 +15,7 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | bitget                                | `{B}{Q}`           | `BTCUSDT`        | USDT          | From API `m.symbol`                                      |
 | bitgetusdc                            | `{B}PERP`          | `BTCPERP`        | USDC          | NOT `{B}{Q}` — uses PERP suffix                          |
 | bitgetinverse                         | `{B}USD`           | `BTCUSD`         | USD           | Filters quoteCoin==='USD'                                |
-| asterdex, bitunix, btcc, phemex, weex | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, WEEX Contract V3 `symbol`                  |
+| asterdex, bitunix, phemex, weex       | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, WEEX Contract V3 `symbol`                  |
 | bingx                                 | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT` but symbol is concat                |
 | apexomni                              | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT`                                     |
 | breakoutprop                          | `{B}USD`           | `BTCUSD`         | USD           | Quote hardcoded to 'USD'                                 |

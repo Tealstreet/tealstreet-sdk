@@ -191,11 +191,10 @@ that wires it MUST equal the set the UI offers it for — i.e. everything **not*
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
 grvt, apexomni, lighter, polymarket, and the orderly ed25519 family
-incl. `tealstreet-dex`) **plus** the session-login venues `breakoutprop` (DXtrade
-session token) and `btcc` (MD5 login) — there a shared per-session token is injected
-on every request so a second client can't authenticate as a distinct key (and btcc
-issues REST via `this.xhr.request()`, which the `.get`-only read Proxy doesn't even
-intercept). A read-only "second API key" is not a coherent concept for any of these.
+incl. `tealstreet-dex`) **plus** the session-login venue `breakoutprop` (DXtrade
+session token) — there a shared per-session token is injected on every request so a
+second client can't authenticate as a distinct key. A read-only "second API key" is
+not a coherent concept for any of these.
 When adding an exchange, wire the helper **and** reconcile that list.
 `binancepm` is the one bespoke case: it has no single `this.xhr` (uses
 `papiXhr`/`fapiXhr`), so it calls `createApiWithSecondaryKey` directly for each and
@@ -239,7 +238,7 @@ Is requiresCors true?
 │       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
 │           Examples: OKX, Binance, BinancePM, BinanceSpot,
-│                     Bybit, BybitSpot, BybitInverse, BTCC, Woo, WEEX
+│                     Bybit, BybitSpot, BybitInverse, Woo, WEEX
 │
 └── YES → tealstreetProxy = true (REST routed through IP proxy)
     │

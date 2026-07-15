@@ -31,7 +31,6 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   bitunix: 'https://fapi.bitunix.com',
   blofin: 'https://openapi.blofin.com',
   breakoutprop: 'https://breakout.prosp.devexperts.com/dxsca-web',
-  btcc: 'https://api1.btloginc.com:9081',
   bybit: 'https://api.bybit.com',
   bybitdemo: 'https://api-demo.bybit.com',
   bybitinverse: 'https://api.bybit.com',
