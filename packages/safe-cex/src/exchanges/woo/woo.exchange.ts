@@ -67,6 +67,7 @@ import { WooPublicWebsocket } from './woo.ws-public';
 export class WOOXExchange extends BaseExchange {
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
   private static readonly FILL_POSITION_REFRESH_BASE_DELAY_MS = 150;
+  private static readonly FUNDING_REFRESH_INTERVAL_MS = 60_000;
 
   xhr: Axios;
   _primaryXhr: Axios;
@@ -87,6 +88,8 @@ export class WOOXExchange extends BaseExchange {
   private _fillPositionRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private _fillPositionRefreshInFlight = new Set<string>();
   private _fillExpectedPositionSignatureBySymbol = new Map<string, string>();
+  private _fundingRefreshTimer?: ReturnType<typeof setInterval>;
+  private _fundingRefreshInFlight = false;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -124,14 +127,85 @@ export class WOOXExchange extends BaseExchange {
   }
 
   dispose = () => {
-    this.isDisposed = true;
     this.off('fill', this.handleFillForPositionSync);
     this._fillPositionRefreshTimers.forEach((timer) => clearTimeout(timer));
     this._fillPositionRefreshTimers.clear();
     this._fillPositionRefreshInFlight.clear();
     this._fillExpectedPositionSignatureBySymbol.clear();
-    this.publicWebsocket.dispose();
-    this.privateWebsocket.dispose();
+    if (this._fundingRefreshTimer !== undefined) {
+      clearInterval(this._fundingRefreshTimer);
+      this._fundingRefreshTimer = undefined;
+    }
+    this._fundingRefreshInFlight = false;
+    super.dispose();
+  };
+
+  private startFundingRatesRefresh = () => {
+    if (this.isDisposed || this._fundingRefreshTimer !== undefined) return;
+
+    this._fundingRefreshTimer = setInterval(() => {
+      void this.refreshFundingRates();
+    }, WOOXExchange.FUNDING_REFRESH_INTERVAL_MS);
+  };
+
+  private parseFiniteFundingNumber = (raw: unknown): number | undefined => {
+    if ((typeof raw !== 'number' && typeof raw !== 'string') || (typeof raw === 'string' && raw.trim() === '')) {
+      return undefined;
+    }
+
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  private refreshFundingRates = async () => {
+    if (this.isDisposed || this._fundingRefreshInFlight) return;
+
+    this._fundingRefreshInFlight = true;
+    try {
+      const { data } = await this.xhr.get<unknown>(ENDPOINTS.FUNDING_RATES);
+      if (this.isDisposed) return;
+
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        (data as { success?: unknown }).success !== true ||
+        !Array.isArray((data as { rows?: unknown }).rows)
+      ) {
+        throw new Error('WOO X funding rates response has an invalid shape');
+      }
+
+      for (const row of (data as { rows: unknown[] }).rows) {
+        if (this.isDisposed) return;
+        if (!row || typeof row !== 'object') continue;
+
+        const {
+          symbol: rawSymbol,
+          est_funding_rate: rawFundingRate,
+          next_funding_time: rawFundingTime,
+        } = row as {
+          symbol?: unknown;
+          est_funding_rate?: unknown;
+          next_funding_time?: unknown;
+        };
+        if (typeof rawSymbol !== 'string' || !rawSymbol.startsWith('PERP_')) continue;
+
+        const fundingRate = this.parseFiniteFundingNumber(rawFundingRate);
+        const fundingTime = this.parseFiniteFundingNumber(rawFundingTime);
+        if (fundingRate === undefined || fundingTime === undefined || fundingTime <= 0) continue;
+
+        const ticker = this.store.tickersBySymbol[normalizeSymbol(rawSymbol)];
+        if (!ticker || rawSymbol !== reverseSymbol(ticker.symbol)) continue;
+
+        if (this.isDisposed) return;
+        this.store.updateTicker(ticker, { fundingRate, fundingTime });
+      }
+    } catch (err: any) {
+      if (!this.isDisposed) {
+        this.emitAndLogError(err?.response?.data?.message || err?.message);
+      }
+    } finally {
+      this._fundingRefreshInFlight = false;
+    }
   };
 
   async getPositionMode(): Promise<PositionMode> {
@@ -627,6 +701,7 @@ export class WOOXExchange extends BaseExchange {
 
       const tickers = this.parseTickers(rawTickers);
       this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+      this.startFundingRatesRefresh();
     }
 
     if (publicDataOnly) {

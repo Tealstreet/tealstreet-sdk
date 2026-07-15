@@ -5,7 +5,6 @@ import flatten from 'lodash/flatten';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { v } from '@tealstreet/safe-cex/src/utils/get-key';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { getCandleStartTime } from '../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../utils/orderbook';
@@ -31,7 +30,6 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
     tickers: [({ data }: Data) => this.handleTickersStreamEvents(data)],
     bbos: [({ data }: Data) => this.handleBBOStreamEvents(data)],
     markprices: [({ data }: Data) => this.handleMarkPricesStreamEvents(data)],
-    estfundingrate: [({ data }: Data) => this.handleFundingRateStreamEvents(data)],
   };
 
   connectAndSubscribe = () => {
@@ -52,7 +50,6 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
       this.send(JSON.stringify({ event: 'subscribe', topic: 'tickers' }));
       this.send(JSON.stringify({ event: 'subscribe', topic: 'bbos' }));
       this.send(JSON.stringify({ event: 'subscribe', topic: 'markprices' }));
-      this.send(JSON.stringify({ event: 'subscribe', topic: 'estfundingrate' }));
       this.resetOrderbook();
       this.subscribe();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -140,22 +137,6 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
         if (ticker) {
           this.store.updateTicker(ticker, {
             mark: row.price,
-          });
-        }
-      }
-    });
-  };
-
-  handleFundingRateStreamEvents = (data: Array<Record<string, any>>) => {
-    data.forEach((row) => {
-      if (row.symbol.startsWith('PERP_')) {
-        const symbol = normalizeSymbol(row.symbol);
-        const ticker = this.parent.store.tickersBySymbol[symbol];
-
-        if (ticker) {
-          this.store.updateTicker(ticker, {
-            fundingRate: parseFloat(v(row, 'fundingRate')),
-            fundingTime: parseFloat(v(row, 'fundingTs')),
           });
         }
       }

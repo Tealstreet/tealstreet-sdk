@@ -19,12 +19,14 @@ This directory contains the WooX perpetual futures exchange integration for Teal
 - **V3 Trade stream**: https://developer.woox.io/api-reference/endpoint/websocket/TRADE
 - **V3 Cancel All After**: https://developer.woox.io/api-reference/endpoint/trading/cancel_all_after
 - **Legacy API documentation** (for migration work): https://docs.woox.io/#restful-api
+- **Legacy all-market funding rates**: https://docs.woox.io/products/woo-x
 
 ## Legacy API lifecycle
 
 WooX scheduled both the legacy REST and WebSocket surfaces used here for deprecation on December 31,
-2025 and describes them as no longer actively maintained. Do not add new legacy dependencies. The
-phased endpoint inventory, parity gates, rollback strategy, and monitoring requirements live in
+2025 and describes them as no longer actively maintained. Do not expand product capabilities on the
+legacy surface; narrow reliability repairs needed while V3 remains gated must be documented and
+fixture-backed. The phased endpoint inventory, parity gates, rollback strategy, and monitoring requirements live in
 `docs/safe_cex_audit_july/woo-v3-migration-plan.md`. Preview and prod are both production lanes, so
 write-path migration requires fixture coverage and a credentialed WooX demo lifecycle smoke first.
 
@@ -228,7 +230,7 @@ None of this satisfies `cancelAllAfterDemoLifecycle`.
 - `woo.v3.public-parity.ts` - Exact public-read canonical strings, mismatch provenance, and ticker blocker
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)
-- `woo.ws-public.ts` - Public WebSocket (tickers, BBOs, mark prices, funding rates, klines, orderbook)
+- `woo.ws-public.ts` - Public WebSocket (tickers, BBOs, mark prices, klines, orderbook)
 
 ## Authentication
 
@@ -310,7 +312,7 @@ The `start()` method orchestrates initialization:
 1. **Parallel fetch** (`Promise.all`):
    - `fetchMarkets()` -> on completion, stores markets, sets `loaded.markets = true`, then immediately calls `publicWebsocket.connectAndSubscribe()` (public WS starts as soon as markets are loaded)
    - `fetchTickersRaw()` -> raw ticker data fetched in parallel
-2. **Parse tickers**: After both resolve, `parseTickers()` converts raw data, stores tickers, sets `loaded.tickers = true`
+2. **Parse tickers**: After both resolve, `parseTickers()` converts raw data, stores tickers, sets `loaded.tickers = true`, and starts the exchange-owned legacy funding refresh timer
 3. **Branch by mode**:
    - **Public data only** (no keys or `publicDataOnly` flag): Marks orders/positions/balance as loaded (empty), returns immediately
    - **Private mode**:
@@ -349,6 +351,7 @@ The `start()` method orchestrates initialization:
 | `/v3/algo/orders/pending`               | v3      | DELETE      | No request owner; metadata only |
 | `/v1/public/info`                       | v1      | GET         | Markets/symbol info             |
 | `/v1/public/futures`                    | v1      | GET         | Futures tickers                 |
+| `/v1/public/funding_rates`              | v1      | GET         | Estimated funding for all perps |
 | `/v1/public/orderbook/{symbol}`         | v1      | GET         | Order book snapshot             |
 | `/v1/orders`                            | v1      | GET/DELETE  | Limit orders / cancel by symbol |
 | `/v1/client/trades`                     | v1      | GET         | Recent historical trades        |
@@ -373,14 +376,17 @@ Both public and private WS URLs are appended with `options.applicationId`.
 
 ### Public WebSocket (`woo.ws-public.ts`)
 
-**On connect**, subscribes to four global topics immediately:
+**On connect**, subscribes to three global topics immediately:
 
 1. `tickers` - Last price, volume, quote volume for all symbols
 2. `bbos` - Best bid/offer for all symbols
 3. `markprices` - Mark prices for all symbols
-4. `estfundingrate` - Estimated funding rates and next funding timestamp
 
 Then re-subscribes to any previously active on-demand topics (klines, orderbooks) and resets orderbook state.
+
+The official funding WebSocket topic is symbol-scoped (`estfundingrate@{symbol}`), so this integration
+does not send the invalid global `estfundingrate` subscription or assume an all-market array message.
+Funding is independent of WebSocket connect/reconnect and is refreshed by REST as described below.
 
 **Ping/pong**: Sends `{ "event": "ping" }`. Responds to server-initiated pings with `{ "event": "pong" }` in `handlePingEvent`. Pong receipt triggers `handlePongEvent()` from `BaseWebSocket`, which schedules the next ping after 5 seconds.
 
@@ -393,7 +399,6 @@ Then re-subscribes to any previously active on-demand topics (klines, orderbooks
 - `tickers`: Updates `last`, `volume`, `quoteVolume`
 - `bbos`: Updates `bid`, `ask`
 - `markprices`: Updates `mark`
-- `estfundingrate`: Updates `fundingRate`, `fundingTime`
 
 **OHLCV streaming** (`WooPublicWebsocket.listenOHLCV`):
 
@@ -601,6 +606,23 @@ Orders exceeding `market.limits.amount.max` are automatically split into lots:
 - Params serialized with alphabetical sort (`localeCompare`)
 
 ## State Reconciliation
+
+### Public funding rates
+
+After direct public tickers initialize, the exchange owns one 60-second interval for
+`GET /v1/public/funding_rates`. Each valid known `PERP_` row maps `est_funding_rate` to
+`Ticker.fundingRate` and `next_funding_time` to `Ticker.fundingTime` through `store.updateTicker`,
+but only when the raw venue symbol exactly equals the canonical `PERP_BASE_QUOTE` derived from the
+matched ticker; lossy normalization aliases are rejected. Updates preserve ticker object identity and
+every unrelated field. A request already in flight causes the
+next interval to be skipped, so calls never overlap. Transport errors, invalid envelopes, malformed
+rows, non-finite numbers, and nonpositive funding timestamps retain the last-known-good values; valid
+rows in a mixed response can still advance. External-public-data mode does not start this direct REST
+timer. `dispose` clears WOO-owned funding/fill timers and in-flight state before delegating to
+`BaseExchange.dispose()` for the store bridge, watchdog, external provider, remote signer, event,
+socket, and store cleanup; sockets are not disposed a second time by WOO. An in-flight response checks
+disposal before every row and immediately before each store write. The funding cadence is not coupled
+to public WebSocket reconnection.
 
 ### Executions and trade history
 

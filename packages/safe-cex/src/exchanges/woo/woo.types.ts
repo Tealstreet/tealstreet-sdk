@@ -36,6 +36,7 @@ export const ENDPOINTS = {
   // v1
   MARKETS: '/v1/public/info',
   TICKERS: '/v1/public/futures',
+  FUNDING_RATES: '/v1/public/funding_rates',
   CLIENT_TRADES: '/v1/client/trades',
   HIST_TRADES: '/v1/client/hist_trades',
   ORDERS: '/v1/orders',
