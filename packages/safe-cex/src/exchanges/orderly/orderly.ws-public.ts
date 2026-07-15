@@ -213,43 +213,50 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
     };
 
     const fetchSnapshot = async () => {
-      const {
-        data: { data },
-      } = await this.parent.xhr.get(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`);
+      try {
+        const {
+          data: { data },
+        } = await this.parent.xhr.get(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`);
 
-      if (!this.isDisposed) {
-        orderBook.bids = data.bids.map((row: Record<string, any>) => ({
-          price: row.price,
-          amount: row.quantity,
-          total: 0,
-        }));
+        if (!this.isDisposed) {
+          orderBook.bids = data.bids.map((row: Record<string, any>) => ({
+            price: row.price,
+            amount: row.quantity,
+            total: 0,
+          }));
 
-        orderBook.asks = data.asks.map((row: Record<string, any>) => ({
-          price: row.price,
-          amount: row.quantity,
-          total: 0,
-        }));
+          orderBook.asks = data.asks.map((row: Record<string, any>) => ({
+            price: row.price,
+            amount: row.quantity,
+            total: 0,
+          }));
 
-        // drop events where timestamp is older than the snapshot
-        innerState.updates = innerState.updates.filter((update: Record<string, any>) => update.ts > data.timestamp);
+          // drop events where timestamp is older than the snapshot
+          innerState.updates = innerState.updates.filter((update: Record<string, any>) => update.ts > data.timestamp);
 
-        // apply all updates
-        innerState.updates.forEach((update: Record<string, any>) => {
-          this.processOrderBookUpdate(orderBook, update);
-        });
+          // apply all updates
+          innerState.updates.forEach((update: Record<string, any>) => {
+            this.processOrderBookUpdate(orderBook, update);
+          });
 
-        calcOrderBookTotal(orderBook);
+          calcOrderBookTotal(orderBook);
 
-        innerState.isSnapshotLoaded = true;
+          innerState.isSnapshotLoaded = true;
+          innerState.updates = [];
+
+          callback(orderBook);
+        }
+      } catch (err: any) {
+        // Re-arm the first-update branch so a transient REST failure cannot
+        // leave the book buffering forever without another snapshot attempt.
         innerState.updates = [];
-
-        callback(orderBook);
+        this.emitAndLogError(err?.response?.data?.message || err?.message || 'Orderly orderbook snapshot failed');
       }
     };
 
     const parser = (json: Data) => {
       if (!innerState.isSnapshotLoaded && innerState.updates.length === 0) {
-        fetchSnapshot();
+        void fetchSnapshot();
         innerState.updates = [json];
         return;
       }

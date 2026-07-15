@@ -7,6 +7,7 @@ Orderly Network is an omnichain orderbook DEX infrastructure that supports white
 ## API Documentation
 
 - **Official API Documentation**: https://orderly.network/docs/build-on-omnichain/evm-api/introduction
+- **Mainnet host note**: Current docs advertise `https://api.orderly.org`, while this integration intentionally remains on the still-live `https://api-evm.orderly.org` EVM host. Treat a host migration as a separately verified routing change, not a documentation-only cleanup.
 
 ## File Structure
 
@@ -35,7 +36,7 @@ Each variant extends `OrderlyExchange` with a different `orderlyExchangeName`:
 | What           | `exchanges/what/what.exchange.ts`                     | `WHAT`                | `TEALWHAT`                             |
 | WooFi          | `exchanges/woofi/woofi.exchange.ts`                   | `WOOFI`               | `TEALSTREET` (default, no special tag) |
 
-The `order_tag` mapping is in `placeOrder()` (`orderly.exchange.ts:746-755`) using if/else on `this.orderlyExchangeName`.
+The `order_tag` mapping is in `OrderlyExchange.placeOrder()` and branches on `this.orderlyExchangeName`.
 
 ## Authentication
 
@@ -43,7 +44,7 @@ Orderly uses **ed25519** signature-based authentication (NOT HMAC):
 
 ### Key Format
 
-Keys must have `ed25519:` prefix. The constructor auto-prepends it if missing (`orderly.exchange.ts:73-78`).
+Keys must have an `ed25519:` prefix. The `OrderlyExchange` constructor prepends it when missing.
 
 ### REST API Headers
 
@@ -57,8 +58,8 @@ Keys must have `ed25519:` prefix. The constructor auto-prepends it if missing (`
 ### Signature Generation (`orderly.encryption.ts`)
 
 1. Concatenate: `timestamp + METHOD + url + body`
-   - Body is JSON-stringified if present and non-empty (`orderly.api.ts:29`)
-   - If params exist, they are serialized into the URL query string before signing (`orderly.api.ts:19-22`)
+   - `signRequest()` JSON-stringifies a present, non-empty body.
+   - `signRequest()` serializes request params into the URL query string before signing.
 2. Sign using ed25519: `sign(encoder.encode(textSign), bs58.decode(secret.split(':')[1]))`
    - Only the portion after the `ed25519:` prefix of the secret is used for signing
 3. Encode result: `base64url(Buffer.from(signature).toString('base64'))`
@@ -66,9 +67,9 @@ Keys must have `ed25519:` prefix. The constructor auto-prepends it if missing (`
 
 ### Public Endpoints
 
-URLs containing `'/public/'` skip authentication entirely (`orderly.api.ts:76-78`).
+The `createAPI()` request interceptor skips authentication for URLs containing `'/public/'`.
 
-### Broker ID Injection (`orderly.api.ts:80-89`)
+### Broker ID Injection
 
 The request interceptor injects broker IDs on POST requests:
 
@@ -77,7 +78,7 @@ The request interceptor injects broker IDs on POST requests:
 - Livenet broker ID: `ab82cb09-cfec-4473-80a3-b740779d0644`
 - Testnet broker ID: `e708a644-9ce5-46c6-b50c-74b15f62d8ca`
 
-### Private WebSocket Authentication (`orderly.ws-private.ts:28-41`)
+### Private WebSocket Authentication
 
 On connection open, sends an `auth` event:
 
@@ -92,17 +93,17 @@ On connection open, sends an `auth` event:
 }
 ```
 
-Subscribes to channels only after receiving `{ "event": "auth", "success": true }` (`orderly.ws-private.ts:83-86`).
+`OrderlyPrivateWebSocket.onMessage()` subscribes to channels only after receiving `{ "event": "auth", "success": true }`.
 
 ## Startup Sequence
 
-The `start()` method (`orderly.exchange.ts:124-171`) executes the following sequence:
+`OrderlyExchange.start()` executes the following sequence:
 
 1. **Validate account** - `start()` calls `GET /v1/client/info` inline. On a **definitive auth rejection** (4xx — expired/revoked/wrong key) it emits `'deactivate'` and returns. On a **transient failure** (no HTTP response, 408, 429, or 5xx) it **throws instead** — see "Transient validation must not deactivate" under Known Quirks.
 2. **Fetch markets** - `fetchMarkets()` calls `GET /v1/public/info`, filters to `PERP_` symbols, stores in store.
 3. **Dispose check** - Returns if `isDisposed` (checked after each async call).
 4. **Fetch tickers** - `fetchTickers()` calls `GET /v1/public/futures`, maps to internal ticker format.
-5. **Fetch account leverage** (fire-and-forget) - `fetchAndUpdateAccountLeverage()` is called without `await`, runs in parallel with subsequent steps. Fetches `GET /v1/client/info` and stores `max_leverage`.
+5. **Fetch account leverage** (fire-and-forget) - `fetchAndUpdateAccountLeverage()` runs in parallel with subsequent steps, fetches `GET /v1/client/info`, and stores `max_leverage`. Its rejection is observed and emitted so a transient failure cannot become an unhandled promise rejection.
 6. **Store markets and tickers** - Updates store with loaded flags.
 7. **Connect WebSockets** - `publicWebsocket.connectAndSubscribe()` and `privateWebsocket.connectAndSubscribe()` start connections in parallel (neither awaited).
 8. **First tick** - `await this.tick()` fetches positions (which also updates balance) and orders.
@@ -126,7 +127,7 @@ The `start()` method (`orderly.exchange.ts:124-171`) executes the following sequ
 | `ORDERBOOK`                                     | `/v1/orderbook`         | GET             | Order book snapshot                                       |
 | `LEVERAGE`                                      | `/v1/client/leverage`   | POST            | Set account leverage                                      |
 
-### Grafana Endpoint Tracking (`orderly.types.ts:46-64`)
+### Grafana Endpoint Tracking
 
 - **Every call**: `ALGO_ORDER`, `POSITION`, `UPDATE_ORDER`, `CANCEL_ORDERS`, `CANCEL_ALGO_ORDERS`, `CANCEL_SYMBOL_ORDERS`, `CANCEL_ORDER`, `PLACE_ORDER`, `LEVERAGE`
 - **Periodic**: `ACCOUNT`, `BALANCE`, `POSITIONS`, `ALGO_ORDERS`, `ORDERS`
@@ -165,7 +166,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 
 **Reconnection**: Uses `BaseWebSocket.createWebsocket()` which creates either a `ReconnectingWebSocket` or native `WebSocket` depending on `ENABLE_RECONNECTING_WEBSOCKET` config. On reconnect, `onOpen` re-subscribes to all stored topics.
 
-**Orderbook pattern** (`listenOrderBook`, `orderly.ws-public.ts:204-314`):
+**Orderbook pattern** (`OrderlyPublicWebsocket.listenOrderBook`):
 
 1. Subscribe to `@orderbookupdate` topic
 2. On first message, fetch REST snapshot via `GET /v1/orderbook/<symbol>`
@@ -173,6 +174,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 4. After snapshot loads, filter buffered updates to only those with `ts > data.timestamp`
 5. Apply buffered updates to snapshot
 6. Subsequent updates applied incrementally via `updateOrderBook()` utility
+7. If the REST snapshot fails, clear the buffered updates and emit the error; the next WS update then starts a fresh snapshot attempt instead of buffering forever.
 
 ### Private WebSocket (`orderly.ws-private.ts`)
 
@@ -181,7 +183,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 1. Signs timestamp with ed25519 and sends `auth` event
 2. If `ENABLE_RECONNECTING_WEBSOCKET`, calls `fetchAndSetPrivateSnapshot()` to re-fetch orders
 
-**After auth success** (`subscribe`, `orderly.ws-private.ts:49-55`):
+**After auth success** (`OrderlyPrivateWebSocket.subscribe`):
 
 1. Subscribes to `executionreport`
 2. Subscribes to `algoexecutionreportv2`
@@ -189,14 +191,14 @@ Both URLs are appended with `options.applicationId` (the account ID).
 
 **Ping/Pong**: Same as public WS (`{ "event": "ping" }`/`{ "event": "pong" }`)
 
-**Execution Report handling** (`handleExecutionReport`, `orderly.ws-private.ts:99-131`):
+**Execution Report handling** (`OrderlyPrivateWebSocket.handleExecutionReport`):
 
 - `NEW`, `REPLACED`, `PARTIAL_FILLED`, `PARTIALLY_FILLED`: Adds or updates order in store
 - `CANCELLED`, `FILLED`: Updates order status
 - `FILLED` or partial fills: Emits `fill` event with `executedPrice` and `executedQuantity`
 - **Cumulative fills**: Private `executionreport` events carry `totalExecutedQuantity`; `mapLimitOrder` uses it before the REST-only `executed` fallback so partial orders retain their full amount, cumulative filled quantity, remaining amount, and Open status between polls.
 
-**Algo Execution Report handling** (`handleAlgoExecutionReport`, `orderly.ws-private.ts:218-255`):
+**Algo Execution Report handling** (`OrderlyPrivateWebSocket.handleAlgoExecutionReport`):
 
 - Data may be a single object or array; normalized to array
 - `NEW`, `REPLACED`, partial fills: Maps child orders via `mapAlgoOrder()` and adds/updates in store
@@ -211,7 +213,7 @@ Both URLs are appended with `options.applicationId` (the account ID).
 | `OrderType.Market`           | `MARKET`          | `/v1/order`      | No price needed           |
 | `OrderType.TakeProfit`       | `TAKE_PROFIT`     | `/v1/algo/order` | Via positional algo order |
 | `OrderType.StopLoss`         | `STOP_LOSS`       | `/v1/algo/order` | Via positional algo order |
-| `OrderType.TrailingStopLoss` | `TRAILING_STOP`   | `/v1/algo/order` | Via algo order API        |
+| `OrderType.TrailingStopLoss` | `TRAILING_STOP`   | read-only mapping | Placement fails closed because callback-rate/value inputs are not represented by the current integration |
 
 ### Order Side Mapping
 
@@ -223,20 +225,20 @@ Both URLs are appended with `options.applicationId` (the account ID).
 ### Limit/Market Orders
 
 1. **Place**: `POST /v1/order` with `order_type`, `order_quantity`, `order_price` (limit only), `side`, `reduce_only`, `order_tag`, `broker_id`
-2. **Large order splitting** (`orderly.exchange.ts:767-775`): If `amount > market.limits.amount.max`, the order is split into equal lots plus a remainder lot. Uses `mapSeries` for sequential placement.
-3. **Update** (`updateOrder`, `orderly.exchange.ts:497-535`): Uses **cancel-and-replace** pattern. Commented-out PUT endpoint code exists but is not used.
+2. **Large order splitting** (`OrderlyExchange.placeOrder`): If `amount > market.limits.amount.max`, the order is split into equal lots plus a remainder lot. Uses `mapSeries` for sequential placement.
+3. **Update** (`OrderlyExchange.updateOrder`): Uses a **cancel-and-replace** pattern. Commented-out PUT endpoint code exists but is not used.
 4. **Cancel**: `DELETE /v1/order?order_id=<id>&symbol=<symbol>` - parameters sent as query string
 
 ### Algo Orders (TP/SL)
 
-1. **Place**: `POST /v1/algo/order` with `algo_type: 'POSITIONAL_TP_SL'` and `child_orders` array containing `STOP_LOSS` and/or `TAKE_PROFIT` children with `type: 'CLOSE_POSITION'` (`orderly.exchange.ts:834-888`)
+1. **Place**: `OrderlyExchange.placePositionalAlgoOrder` posts `algo_type: 'POSITIONAL_TP_SL'` with `STOP_LOSS` and/or `TAKE_PROFIT` children whose type is `CLOSE_POSITION`.
 2. **Sibling management**: When placing a new TP or SL, checks for existing sibling orders (same symbol, different type). If found, cancels parent algo order and re-places both together. Bulk cancellation deliberately bypasses this helper so a panic/nuke cannot recreate a sibling while cancelling.
-3. **Update**: `PUT /v1/algo/order` with `order_id` (parent) and `child_orders` array containing `order_id` and new `trigger_price` (`orderly.exchange.ts:537-553`)
-4. **Cancel** (`cancelAlgoOrder`, `orderly.exchange.ts:676-701`): Cancels via `DELETE /v1/algo/order?order_id=<parentId>&symbol=<symbol>`. If a sibling order exists, it is automatically re-created to preserve the other side of the TP/SL pair.
+3. **Update**: `OrderlyExchange.updateOrder` uses `PUT /v1/algo/order` with the parent `order_id` and a child carrying its `order_id` and new `trigger_price`.
+4. **Cancel** (`OrderlyExchange.cancelAlgoOrder`): Cancels via `DELETE /v1/algo/order?order_id=<parentId>&symbol=<symbol>`. If a sibling order exists, it is automatically re-created to preserve the other side of the TP/SL pair.
 
 ### Bracket Orders
 
-When `placeOrder` is called with `stopLoss` and/or `takeProfit` alongside a limit/market order (`orderly.exchange.ts:786-793`):
+When `OrderlyExchange.placeOrder` receives `stopLoss` and/or `takeProfit` alongside a limit/market order:
 
 1. The main order is placed first
 2. A positional algo order is created with the opposite side containing the bracket orders
@@ -250,8 +252,8 @@ When `placeOrder` is called with `stopLoss` and/or `takeProfit` alongside a limi
 
 - **Orderly format**: `PERP_BTC_USDC` (underscore-separated with `PERP_` prefix)
 - **Internal format**: `BTCUSDC` (concatenated base + quote)
-- **Normalization** (`orderly.utils.ts:3-5`): `PERP_BTC_USDC` -> split on `_` -> take [1] and [2] -> `BTCUSDC`
-- **Reverse** (`orderly.utils.ts:8-10`): `BTCUSDC` -> strip `USDC` -> `PERP_<base>_USDC`
+- **Normalization** (`normalizeSymbol`): `PERP_BTC_USDC` -> split on `_` -> take [1] and [2] -> `BTCUSDC`
+- **Reverse** (`reverseSymbol`): `BTCUSDC` -> strip `USDC` -> `PERP_<base>_USDC`
 - Both functions are memoized with `lodash/memoize`
 - Market ID format: `<base>/<quote>:USDC` (e.g., `BTC/USDC:USDC`)
 
@@ -260,20 +262,20 @@ When `placeOrder` is called with `stopLoss` and/or `takeProfit` alongside a limi
 - **Price precision**: `quote_tick` from `/v1/public/info` (used as the step size, e.g., `0.01`)
 - **Amount precision**: `base_tick` from `/v1/public/info`
 - **Amount limits**: `base_min` and `base_max` from market info
-- **Leverage limits**: `min_leverage` and `max_leverage` from market info, with fallbacks to 1 and 100
+- **Leverage limits**: Minimum leverage falls back to 1. Per-symbol maximum leverage is derived as `Math.round(1 / base_imr)`, with the legacy `max_leverage` field and then 100 as fallbacks for older or incomplete rows.
 - **Price rounding**: Uses `adjust()` utility from `safe-math` module with precision values
-- **uPNL calculation** (`fetchPositions`, `orderly.exchange.ts:379-386`):
+- **uPNL calculation** (`OrderlyExchange.fetchPositions`):
   - `priceDiff = max(entry, mark) - min(entry, mark)`
   - Direction determined by comparing mark vs entry with position side
   - Rounded to 2 decimal places: `Math.round(value * 100) / 100`
-- **Balance derivation**: From positions endpoint fields `total_collateral_value` and `free_collateral`. Balance `total` subtracts computed uPNL in `tick()` (`orderly.exchange.ts:188-189`).
+- **Balance derivation**: From positions endpoint fields `total_collateral_value` and `free_collateral`. `OrderlyExchange.tick()` subtracts computed uPNL from balance `total`.
 
 ## Rate Limiting
 
-- **Primary API**: 10 requests/second (`maxRPS: 10`, `orderly.api.ts:82`)
+- **Primary API**: The `OrderlyExchange` constructor wraps its API client at 10 requests/second.
 - **Timeout**: 20,000ms (`RECV_WINDOW`, configurable via `options.extra.recvWindow`)
-- **Retry**: 3 retries on network errors (`orderly.api.ts:68`)
-- **HTTP over WebSocket**: Supported via `tealstreetTunnel` option (`orderly.api.ts:70-72`)
+- **Retry**: `createAPI()` configures 3 retries on network errors.
+- **HTTP over WebSocket**: `createAPI()` supports the `tealstreetTunnel` option.
 
 ## State Reconciliation
 
@@ -287,20 +289,20 @@ When `placeOrder` is called with `stopLoss` and/or `takeProfit` alongside a limi
 ### Position State
 
 - **REST polling**: Fetched every tick via `GET /v1/positions`
-- **Fake positions**: Created for all active PERP markets with both Long and Short sides, 0 contracts. Real positions override fakes via `uniqBy([...realPositions, ...fakePositions], 'id')` (`orderly.exchange.ts:449`)
-- **Leverage derivation**: Per-position leverage = `1 / imr` (initial margin rate). Falls back to `accountLeverage` if `imr` is 0 (`orderly.exchange.ts:394`)
+- **Fake positions**: `OrderlyExchange.fetchPositions` creates zero-contract Long and Short rows for every active PERP market; real positions override matching fakes via `uniqBy` on `id`.
+- **Leverage derivation**: Per-position leverage is `1 / imr` (initial margin rate), falling back to `accountLeverage` when `imr` is 0.
 
 ### Balance State
 
-- Updated from the positions endpoint response: `free_collateral`, `total_collateral_value` (`orderly.exchange.ts:440-447`)
-- uPNL is computed client-side from positions and subtracted from total/used in `tick()` (`orderly.exchange.ts:186-189`)
+- Updated from the positions endpoint response fields `free_collateral` and `total_collateral_value`.
+- uPNL is computed client-side from positions and reconciled into the balance in `OrderlyExchange.tick()`.
 
 ## Exchange Metadata
 
 - **Position mode**: OneWay only (`PositionMode.OneWay`) - hardcoded, no hedge mode support
 - **Margin type**: Cross only (`MarginType.Cross`) - all positions are cross margin
 - **Leverage**: Account-level, not per-position. Stored in `accountLeverage` from `/v1/client/info` response (`max_leverage`). Applied to all positions.
-- **Leverage constraints**: Clamped to min 1, max 50, rounded to integer (`setAllLeverage`, `orderly.exchange.ts:913-925`)
+- **Leverage constraints**: `setAllLeverage` rounds to an integer and clamps to the venue-supported 1-100 range. Batch updates are allowed to self-adjust symbols whose individual cap is lower.
 
 ## Testnet/Demo
 
@@ -315,31 +317,33 @@ Testnet selection is via `options.testnet` boolean.
 
 ## Known Quirks / Implementation Notes
 
-1. **ed25519 key prefix**: Keys must start with `ed25519:`. The constructor auto-prepends this prefix if missing (`orderly.exchange.ts:73-78`).
-2. **Account-level leverage**: Unlike most exchanges, Orderly sets leverage at the account level, not per-symbol. `setLeverage` delegates to `setAllLeverage` which POSTs to `/v1/client/leverage` (`orderly.exchange.ts:909-925`). The `_symbol` parameter is ignored.
+1. **ed25519 key prefix**: Keys must start with `ed25519:`. The `OrderlyExchange` constructor prepends this prefix if missing.
+2. **Account-level leverage**: Unlike most exchanges, this integration sets leverage account-wide. `setLeverage` delegates to `setAllLeverage`, which POSTs an integer in the 1-100 range to `/v1/client/leverage`; the `_symbol` parameter is ignored and Orderly caps each symbol to its own maximum.
 3. **Positional TP/SL**: TP/SL are placed as `POSITIONAL_TP_SL` algo orders with `child_orders` array containing `STOP_LOSS` and/or `TAKE_PROFIT` children with `type: 'CLOSE_POSITION'`.
 4. **Sibling order management**: When placing a new TP or SL, the code checks for existing sibling orders. If found, it cancels the parent algo order and re-places both together. This prevents orphaned TP/SL orders.
-5. **Cancel algo order re-creates sibling**: When cancelling one side of a TP/SL pair, the code automatically re-creates the sibling order to preserve it (`orderly.exchange.ts:685-693`).
+5. **Cancel algo order re-creates sibling**: `OrderlyExchange.cancelAlgoOrder` automatically re-creates the sibling when cancelling one side of a TP/SL pair.
 6. **Bulk cancellation is direct and complete**: `cancelAllOrders` and `cancelSymbolOrders` sequentially await both normal (`DELETE /v1/orders`) and algo (`DELETE /v1/algo/orders`) paths. They must not call `cancelAlgoOrder`, because that helper re-creates a TP/SL sibling; each path is attempted even if the other fails.
-7. **Update order uses cancel-and-replace**: `updateOrder` for limit orders cancels the old order and places a new one. Commented-out PUT endpoint code exists at `orderly.exchange.ts:520-534`. Algo orders use the PUT `/v1/algo/order` endpoint directly.
+7. **Update order uses cancel-and-replace**: `OrderlyExchange.updateOrder` cancels and replaces limit orders; algo orders use `PUT /v1/algo/order` directly.
 8. **White-label `order_tag`**: Each white-label variant uses a different `order_tag` determined by `this.orderlyExchangeName` in `placeOrder()`.
 9. **Large order splitting**: Orders exceeding `market.limits.amount.max` are automatically split into `Math.ceil(amount / maxSize)` lots plus a remainder.
-10. **Algo order already cancelled**: If algo cancel fails with "already canceled" message, the order status is updated locally to Canceled without throwing (`orderly.exchange.ts:695-698`).
+10. **Algo order already cancelled**: If algo cancel fails with an "already canceled" message, `cancelAlgoOrder` updates the local status to Canceled without throwing.
 11. **Balance from positions endpoint**: Balance is not fetched from `/v1/client/holding`. Instead it comes from the `/v1/positions` response fields (`total_collateral_value`, `free_collateral`). Commented-out balance polling code exists in `tick()`.
-12. **Cancel order uses query params**: Despite being a DELETE, cancel order sends `order_id` and `symbol` as URL query parameters, not as request body (`orderly.exchange.ts:662-671`).
-13. **Params serialization**: Query params are sorted alphabetically via `qs.stringify` with `sort: (a, b) => a.localeCompare(b)` (`orderly.api.ts:56`).
-14. **cancelSymbolOrders**: The variable is named `wooSymbol` (legacy naming from WooX origin, `orderly.exchange.ts:900`), but correctly calls `reverseSymbol()`.
-15. **Kline timestamp**: Kline timestamps from the API are in milliseconds, divided by 1000 for internal use (`orderly.exchange.ts:477`). Results are reversed to ascending order.
+12. **Cancel order uses query params**: Despite being a DELETE, `cancelOrder` sends `order_id` and `symbol` as URL query parameters, not as a request body.
+13. **Params serialization**: Axios's alphabetical `paramsSerializer` applies only to unsigned public requests. `signRequest()` serializes signed params itself in insertion order and signs exactly that query string; do not assume the two serializers are interchangeable.
+14. **cancelSymbolOrders**: Symbol-scoped cancellation converts the internal symbol with `reverseSymbol()` before issuing both normal and algo DELETEs.
+15. **Kline timestamp**: `fetchOHLCV` converts millisecond API timestamps to internal seconds and reverses results into ascending order.
 16. **Transient validation must not deactivate** (`start()` + `isTransientOrderlyValidationError`): `start()` runs on **every (re)connect**, and Orderly is the **only** exchange that emits `'deactivate'`. The web app turns `'deactivate'` into `account.active = false` (`exchangeAccountController` `deactivate-status` handler), and `CleanupComponentWorker` then **force-switches the user off their selected account**. So the account-validation `GET /v1/client/info` at the top of `start()` must only `emit('deactivate')` on a **definitive 4xx auth rejection**; a transient failure (no HTTP response — network/CORS/proxy/tunnel drop — or 408 / 429 / 5xx) must **`throw`** instead, so the worker treats it like any other exchange's transient `start()` failure (logs it, leaves the account ACTIVE, recovers on the next reconnect). Do **not** route this back through `validateAccount()` (which collapses the error to a string and loses the HTTP status needed to classify it). Past bug: a reconnect-time blip on this one request silently disabled a valid account and yanked the user's active-account selection.
+17. **Trailing-stop placement is gated**: Orderly's upstream API supports `TRAILING_STOP`, but this integration does not expose the required callback-rate/value inputs and every family member advertises `supportsTrailingStopLoss: false`. `placeAlgoOrder` therefore emits an actionable error and rejects direct trailing-stop calls instead of posting an empty `POSITIONAL_TP_SL` payload. The mapper remains read-capable for trailing stops created elsewhere.
 
 ## Error Handling
 
 - **Validation failure on start**: Auth rejections (4xx) emit the error and `'deactivate'`, then return without starting WebSockets or the tick loop. Transient failures (no response / 408 / 429 / 5xx) throw instead — see Known Quirks → "Transient validation must not deactivate".
-- **Tick errors**: Caught at tick level, logged via `emitAndLogError`, tick loop continues (`orderly.exchange.ts:230-233`).
-- **Network retries**: 3 retries on network errors via `axios-retry` (`orderly.api.ts:68`).
-- **Algo cancel "already canceled"**: If error message includes "already canceled", order is marked as Canceled locally instead of throwing (`orderly.exchange.ts:695-698`).
+- **Tick errors**: `OrderlyExchange.tick` catches and logs errors with `emitAndLogError`, then continues the loop.
+- **Network retries**: `createAPI()` configures 3 retries on network errors via `axios-retry`.
+- **Algo cancel "already canceled"**: `cancelAlgoOrder` marks the order Canceled locally instead of throwing.
 - **Fetch fallbacks**: Most fetch methods (tickers, positions, limit orders, algo orders) catch errors and return the existing store state or empty array rather than throwing.
-- **PlaceOrder errors**: Logged via `emitAndLogError` and re-thrown to caller (`orderly.exchange.ts:795-798`).
+- **Startup leverage fetch**: The intentionally fire-and-forget account-leverage request has an explicit rejection handler that emits the failure while startup continues.
+- **PlaceOrder errors**: `OrderlyExchange.placeOrder` logs errors via `emitAndLogError` and rethrows them to the caller.
 
 ## Tick Loop
 
@@ -350,7 +354,7 @@ Testnet selection is via `options.testnet` boolean.
 
 ## Testing / Validation
 
-No dedicated test files exist for Orderly. Validation is done at startup via `validateAccount()` which calls `GET /v1/client/info`.
+Fresh deterministic Orderly regressions live under `src/__tests__/audit-regressions/`. They cover bulk algo cancellation, private-WS cumulative fills, per-symbol leverage caps, the 100x account clamp and metadata, orderbook snapshot retry, startup leverage error observation, and fail-closed trailing-stop placement. They do not make network calls or place live orders.
 
 ## CCXT Reference
 

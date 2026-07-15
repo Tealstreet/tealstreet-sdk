@@ -192,7 +192,9 @@ export class OrderlyExchange extends BaseExchange {
     if (this.isDisposed) return;
 
     if (!publicDataOnly) {
-      this.fetchAndUpdateAccountLeverage();
+      void this.fetchAndUpdateAccountLeverage().catch((err: any) => {
+        this.emitAndLogError(err?.response?.data?.message || err?.message || 'Orderly account leverage fetch failed');
+      });
     }
 
     this.log(`Loaded ${Math.min(tickers.length, markets.length)} ${this.orderlyExchangeName} markets`);
@@ -325,7 +327,12 @@ export class OrderlyExchange extends BaseExchange {
         const [, baseAsset, quoteAsset] = r.symbol.split('_');
 
         const minLeverage = Number(v(r, 'min_leverage'));
-        const maxLeverage = Number(v(r, 'max_leverage'));
+        const baseInitialMarginRate = Number(v(r, 'base_imr'));
+        const legacyMaxLeverage = Number(v(r, 'max_leverage'));
+        const maxLeverage =
+          Number.isFinite(baseInitialMarginRate) && baseInitialMarginRate > 0
+            ? Math.round(1 / baseInitialMarginRate)
+            : legacyMaxLeverage;
         const leverageLimits = {
           min: Number.isFinite(minLeverage) && minLeverage > 0 ? minLeverage : 1,
           max: Number.isFinite(maxLeverage) && maxLeverage > 0 ? maxLeverage : 100,
@@ -862,6 +869,12 @@ export class OrderlyExchange extends BaseExchange {
   };
 
   placeAlgoOrder = async (opts: PlaceOrderOpts) => {
+    if (opts.type === OrderType.TrailingStopLoss) {
+      const error = new Error('Orderly trailing-stop placement is not supported');
+      this.emitAndLogError(error);
+      throw error;
+    }
+
     if (!opts.price) {
       this.emitAndLogError('Price is required for algo orders');
       return [];
@@ -986,7 +999,7 @@ export class OrderlyExchange extends BaseExchange {
   };
 
   setAllLeverage = async (inputLeverage: number) => {
-    const clamped = Math.min(50, Math.max(1, inputLeverage));
+    const clamped = Math.min(100, Math.max(1, inputLeverage));
     const leverage = Math.round(clamped);
 
     if (this.accountLeverage !== leverage && !this.isDisposed) {
