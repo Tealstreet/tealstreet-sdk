@@ -91,7 +91,7 @@ describe('Paradex native regular-order batching', () => {
         };
       }
       singleId += 1;
-      return { data: { id: `single-${singleId}` } };
+      return { data: { id: `single-${singleId}`, client_id: body.client_id } };
     });
     exchange.xhr = { post } as unknown as Axios;
 

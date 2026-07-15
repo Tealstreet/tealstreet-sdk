@@ -38,6 +38,7 @@ export const ENDPOINTS = {
   MODIFY_ORDER: '/orders/{id}',
   CANCEL_ORDER: '/orders/{id}', // DELETE method
   CANCEL_ORDER_BY_CLIENT_ID: '/orders/by_client_id/{client_id}', // DELETE method
+  CANCEL_ORDERS_BATCH: '/orders/batch', // DELETE method
   CANCEL_ALL_ORDERS: '/orders', // DELETE method with optional ?market= param
   PLACE_ORDER: '/orders',
   PLACE_ORDERS_BATCH: '/orders/batch',
@@ -215,6 +216,18 @@ export type BATCH_ORDER_ERROR = {
 export type BATCH_ORDER_RESPONSE = {
   errors?: BATCH_ORDER_ERROR[];
   orders?: ORDER_RESPONSE[];
+};
+
+export type BATCH_CANCEL_ORDER_RESULT = {
+  account?: string;
+  client_id?: string;
+  id?: string;
+  market?: string;
+  status?: 'QUEUED_FOR_CANCELLATION' | 'ALREADY_CLOSED' | 'NOT_FOUND';
+};
+
+export type BATCH_CANCEL_ORDER_RESPONSE = {
+  results?: BATCH_CANCEL_ORDER_RESULT[];
 };
 
 export type POSITION_RESPONSE = {

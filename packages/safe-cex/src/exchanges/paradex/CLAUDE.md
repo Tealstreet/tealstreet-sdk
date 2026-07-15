@@ -19,7 +19,9 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 - **REST API Reference**: https://docs.paradex.trade/api/prod/
 - **WebSocket API**: https://docs.paradex.trade/ws/general-information
 - **Rate Limits**: https://docs.paradex.trade/api/general-information/rate-limits
+- **Create Order**: https://docs.paradex.trade/api/prod/orders/new
 - **Batch Orders**: https://docs.paradex.trade/api/prod/orders/batch
+- **Batch Cancellation**: https://docs.paradex.trade/api/prod/orders/cancel-batch
 - **Order Instructions**: https://docs.paradex.trade/trading/orders/order-instructions
 - **WebSocket Error Handling**: https://docs.paradex.trade/ws/general-information/error-handling
 - **CCXT REST**: https://github.com/ccxt/ccxt/blob/master/ts/src/paradex.ts
@@ -195,6 +197,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/orders-history`                  | GET    | List historical orders (execution fallback)   |
 | `/orders`                          | POST   | Place order (with signature)                   |
 | `/orders/batch`                    | POST   | Place 1-10 independently signed LIMIT orders   |
+| `/orders/batch`                    | DELETE | Cancel an exact locally bounded pair by ID     |
 | `/orders`                          | DELETE | Cancel all orders (optional `?market=` filter) |
 | `/orders/{id}`                     | DELETE | Cancel specific order                          |
 | `/orders/by_client_id/{client_id}` | DELETE | Cancel by client ID                            |
@@ -392,14 +395,19 @@ resting limit order.
 
 ### Order Placement (`paradex.exchange.ts:845-972`)
 
-1. **Sign order**: `requestSigner.signOrder()` generates typed data signature with timestamp nonce
-2. **Map order type**: Convert internal `OrderType` to Paradex API type
-3. **Determine trigger price**: For stop orders, `opts.price` is the trigger price
-4. **Map time in force**: Convert to Paradex instruction (`GTC`, `IOC`, `POST_ONLY`)
-5. **Set flags**: TP/SL types always get `REDUCE_ONLY` flag (Paradex rejects TPSL without it)
-6. **Build payload**: `{market, side, type, size, price?, trigger_price?, instruction, flags?, signature, signature_timestamp}`
-7. **POST /orders**: Submit order
-8. **TP/SL bracket orders**: If `takeProfit` or `stopLoss` specified, place as separate orders (`placeTakeProfitStopLoss`)
+1. **Generate identity**: Create one validated `ts_${uuid()}` `client_id` (non-empty suffix, at most 64 characters) before signing
+2. **Sign order**: `requestSigner.signOrder()` generates typed data signature with timestamp nonce
+3. **Map order type**: Convert internal `OrderType` to Paradex API type
+4. **Determine trigger price**: For stop orders, `opts.price` is the trigger price
+5. **Map time in force**: Convert to Paradex instruction (`GTC`, `IOC`, `POST_ONLY`)
+6. **Set flags**: TP/SL types always get `REDUCE_ONLY` flag (Paradex rejects TPSL without it)
+7. **Build payload**: `{market, side, type, size, price?, trigger_price?, instruction, flags?, signature, signature_timestamp, client_id}`
+8. **POST /orders**: Submit order and accept only a non-empty canonical Paradex `id` whose echoed `client_id` exactly matches the request
+9. **TP/SL bracket orders**: If `takeProfit` or `stopLoss` specified, place as separate orders (`placeTakeProfitStopLoss`)
+
+The strict identity contract applies to the main single order. Existing
+attached TP/SL child placement remains sequential after the confirmed main
+order and retains its established partial-success behavior.
 
 ### TP/SL Orders (`paradex.exchange.ts:974-1076`)
 
@@ -431,10 +439,31 @@ cancels or places a replacement from `updateOrder()`:
 
 ### Order Cancellation
 
-- **Single**: `DELETE /orders/{id}` (`paradex.exchange.ts:1176-1184`)
-- **Multiple**: Sequential `forEachSeries` over orders (`paradex.exchange.ts:1186-1194`)
-- **All**: `DELETE /orders` (`paradex.exchange.ts:1196-1204`)
-- **By symbol**: `DELETE /orders?market={symbol}` (`paradex.exchange.ts:1206-1215`)
+- **Single and one-order tail**: `DELETE /orders/{id}`
+- **Multiple**: `DELETE /orders/batch` with Axios request data
+  `{order_ids: [firstId, secondId]}` for exact two-ID chunks only
+- **All**: `DELETE /orders`
+- **By symbol**: `DELETE /orders?market={symbol}`
+
+The official batch-cancel schema publishes no maximum. Its concrete request
+example demonstrates two order IDs, so the integration deliberately adopts
+only exact pairs and never invents a larger venue limit. An odd final order
+stays on the established single-cancel endpoint.
+
+Each batch response must be an object containing a `results` array that
+accounts for every requested ID exactly once. Results may be reordered and are
+correlated only by `id`; missing, duplicate, and unknown identities fail
+closed. `QUEUED_FOR_CANCELLATION` and `ALREADY_CLOSED` are the only successful
+statuses. A correlated `NOT_FOUND` is an explicit rejection. Because the
+official schema says `id` is present only when an order is found, an
+identity-less `NOT_FOUND` remains uncorrelated and is reported as malformed
+with the exact missing requested-ID set—never paired by response position.
+
+`cancelOrders()` attempts every pair and final tail sequentially even when an
+earlier attempt fails. After all requested orders have been attempted, it
+rethrows a sole failure unchanged or throws one aggregate error containing
+every failed chunk's exact IDs and cause. It does not silently swallow a
+partial cancellation failure.
 
 ### Batch Order Placement (`ParadexExchange.placeOrders`)
 
@@ -648,6 +677,19 @@ For order signatures, size and price are scaled by `1e8`:
     echo `client_id`, but published error rows contain only `error` and
     `message`. Correlate successes by generated client identity and report
     failures as an unpaired aggregate missing-ID set; never infer error order.
+
+18. **Single main-order responses are identity checked**: Every
+    `placeMainOrder()` generates the same bounded `ts_${uuid()}` identity used
+    by native placement batches before signing. `POST /orders` must return a
+    non-empty canonical `id` and echo that exact `client_id`; missing or
+    mismatched identity fails closed before attached child placement begins.
+
+19. **Batch cancellation uses a conservative local bound**: Paradex documents
+    `DELETE /orders/batch` but publishes no maximum request size. Use exact
+    two-ID chunks because that is the demonstrated request shape, keep a
+    one-ID tail on the single endpoint, and strictly correlate every response
+    row by order `id`. All chunks are attempted before any collected failure is
+    propagated.
 
 ## Error Handling
 

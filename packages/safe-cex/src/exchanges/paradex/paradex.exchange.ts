@@ -4,7 +4,6 @@ import type { ParadexSDKAccount } from './paradex.sdk';
 
 import rateLimit from 'axios-rate-limit';
 import sumBy from 'lodash/sumBy';
-import { forEachSeries } from 'p-iteration';
 
 import {
   Balance,
@@ -42,6 +41,7 @@ import { createAPI } from './paradex.api';
 import { initializeParadexSDK, ParadexJWTManager, ParadexRequestSigner } from './paradex.sdk';
 import {
   ACCOUNT_RESPONSE,
+  BATCH_CANCEL_ORDER_RESPONSE,
   BATCH_ORDER_RESPONSE,
   ENDPOINTS,
   MARGIN_RESPONSE,
@@ -1167,6 +1167,14 @@ export class ParadexExchange extends BaseExchange {
     );
   };
 
+  private generateClientId = (): string => {
+    const clientId = `ts_${uuid()}`;
+    if (clientId.length <= 3 || clientId.length > 64) {
+      throw new Error('Paradex generated an invalid client_id');
+    }
+    return clientId;
+  };
+
   private buildMainOrderPayload = async (opts: PlaceOrderOpts, clientId?: string) => {
     if (!this.requestSigner) {
       throw new Error('Cannot place order: Request signer not initialized');
@@ -1222,11 +1230,28 @@ export class ParadexExchange extends BaseExchange {
       }
 
       this.log('Signing order...', LogSeverity.Debug);
-      const payload = await this.buildMainOrderPayload(opts);
+      const clientId = this.generateClientId();
+      const payload = await this.buildMainOrderPayload(opts, clientId);
 
       this.log(`Placing order: ${JSON.stringify(payload)}`, LogSeverity.Debug);
 
       const { data } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, payload);
+
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        const message = 'Paradex order response malformed: expected an object';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      if (typeof data.id !== 'string' || data.id.trim().length === 0) {
+        const message = 'Paradex order response malformed: missing canonical order id';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      if (data.client_id !== clientId) {
+        const message = `Paradex order response malformed: expected echoed client_id ${clientId}`;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
 
       this.log(`Main order placed: ${data.id}`, LogSeverity.Info);
       return data.id;
@@ -1278,8 +1303,8 @@ export class ParadexExchange extends BaseExchange {
       }
       const clientIdSet = new Set<string>();
       for (let index = 0; index < orders.length; index++) {
-        const clientId = `ts_${uuid()}`;
-        if (clientId.length <= 3 || clientId.length > 64 || clientIdSet.has(clientId)) {
+        const clientId = this.generateClientId();
+        if (clientIdSet.has(clientId)) {
           throw new Error(`Paradex batch generated an invalid or duplicate client_id at index ${index}`);
         }
         clientIdSet.add(clientId);
@@ -1692,14 +1717,123 @@ export class ParadexExchange extends BaseExchange {
     }
   };
 
-  cancelOrders = async (orders: Order[]): Promise<void> => {
-    await forEachSeries(orders, async (order) => {
-      try {
-        await this.cancelOrder(order.id);
-      } catch (err) {
-        this.log(`Error canceling order ${order.id}: ${err}`, LogSeverity.Error);
-      }
+  private cancelNativeBatchChunk = async (orderIds: readonly string[]): Promise<void> => {
+    if (orderIds.length !== 2) {
+      throw new Error(`Paradex native cancel batch requires exactly 2 order IDs; received ${orderIds.length}`);
+    }
+
+    const requestedIds = [...orderIds];
+    if (requestedIds.some((orderId) => typeof orderId !== 'string' || orderId.trim().length === 0)) {
+      throw new Error('Paradex native cancel batch requires two non-empty order IDs');
+    }
+    if (new Set(requestedIds).size !== requestedIds.length) {
+      throw new Error(`Paradex native cancel batch received duplicate order IDs [${requestedIds.join(', ')}]`);
+    }
+
+    const { data } = await this.xhr.delete<BATCH_CANCEL_ORDER_RESPONSE>(ENDPOINTS.CANCEL_ORDERS_BATCH, {
+      data: { order_ids: requestedIds },
     });
+
+    const malformed = (detail: string): never => {
+      throw new Error(`Paradex batch cancel response malformed: ${detail}`);
+    };
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return malformed('expected an object envelope');
+    }
+    if (!Array.isArray(data.results)) {
+      return malformed('results must be an array');
+    }
+
+    const expected = new Set(requestedIds);
+    const seen = new Set<string>();
+    const rejectedIds: string[] = [];
+    const anomalies: string[] = [];
+
+    for (const [index, row] of data.results.entries()) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        anomalies.push(`results[${index}] must be an object`);
+        continue;
+      }
+
+      const status = row.status;
+      const orderId = row.id;
+      if (typeof orderId !== 'string' || orderId.trim().length === 0) {
+        anomalies.push(
+          status === 'NOT_FOUND'
+            ? `results[${index}] has uncorrelated NOT_FOUND without an order id`
+            : `results[${index}] is missing its order id`,
+        );
+        continue;
+      }
+      if (!expected.has(orderId)) {
+        anomalies.push(`results[${index}] has unknown order id ${orderId}`);
+        continue;
+      }
+      if (seen.has(orderId)) {
+        anomalies.push(`results[${index}] repeats order id ${orderId}`);
+        continue;
+      }
+      seen.add(orderId);
+
+      if (status === 'QUEUED_FOR_CANCELLATION' || status === 'ALREADY_CLOSED') {
+        continue;
+      }
+      if (status === 'NOT_FOUND') {
+        rejectedIds.push(orderId);
+        continue;
+      }
+      anomalies.push(`results[${index}] has unsupported status ${String(status)}`);
+    }
+
+    if (data.results.length !== requestedIds.length) {
+      anomalies.push(`received ${data.results.length} results for ${requestedIds.length} requested IDs`);
+    }
+    const missingIds = requestedIds.filter((orderId) => !seen.has(orderId));
+    if (missingIds.length > 0) {
+      anomalies.push(`missing requested IDs [${missingIds.join(', ')}]`);
+    }
+    if (anomalies.length > 0) {
+      return malformed(anomalies.join('; '));
+    }
+    if (rejectedIds.length > 0) {
+      throw new Error(`Paradex batch cancel rejected order IDs [${rejectedIds.join(', ')}]: NOT_FOUND`);
+    }
+
+    this.log(`Cancelled order batch [${requestedIds.join(', ')}]`, LogSeverity.Debug);
+  };
+
+  cancelOrders = async (orders: Order[]): Promise<void> => {
+    const failures: Array<{ error: unknown; orderIds: string[] }> = [];
+    for (let offset = 0; offset < orders.length; offset += 2) {
+      const chunk = orders.slice(offset, offset + 2);
+      const orderIds = chunk.map((order) => order.id);
+      try {
+        if (orderIds.length === 2) {
+          await this.cancelNativeBatchChunk(orderIds);
+        } else {
+          await this.cancelOrder(orderIds[0]);
+        }
+      } catch (error) {
+        failures.push({ error, orderIds });
+        const message = error instanceof Error ? error.message : String(error);
+        this.log(`Error canceling order chunk [${orderIds.join(', ')}]: ${message}`, LogSeverity.Error);
+      }
+    }
+
+    if (failures.length === 1) {
+      throw failures[0].error;
+    }
+    if (failures.length > 1) {
+      const details = failures
+        .map(({ error, orderIds }) => {
+          const message = error instanceof Error ? error.message : String(error);
+          return `[${orderIds.join(', ')}]: ${message}`;
+        })
+        .join('; ');
+      throw new Error(
+        `Paradex cancellation failed for ${failures.length} chunks after attempting all orders: ${details}`,
+      );
+    }
   };
 
   cancelAllOrders = async (): Promise<void> => {
