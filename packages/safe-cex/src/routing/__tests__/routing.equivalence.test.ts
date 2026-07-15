@@ -39,7 +39,6 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   coinbase: 'https://api.coinbase.com',
   coinbasespot: 'https://api.coinbase.com',
   cryptocom: 'https://api.crypto.com',
-  dydx: 'https://indexer.dydx.trade',
   // grvt issues REST across three hosts (market-data/trades/edge .grvt.io); all
   // match /grvt/i, so any one represents the egress decision faithfully.
   grvt: 'https://trades.grvt.io',

@@ -573,7 +573,7 @@ export class AccountsCommand extends BaseCommand {
       '  -k, --api-key        API key',
       '  -s, --api-secret     API secret',
       '  -p, --passphrase     Passphrase (OKX, BloFin, Bitget, KuCoin)',
-      '  --private-key        Private key (Hyperliquid, dYdX, Paradex)',
+      '  --private-key        Private key (Hyperliquid, Paradex)',
       '  --wallet-address     Wallet address (for DEX exchanges)',
       '  -t, --testnet        Use testnet',
       '  --tealstreet-proxy   Route like web "Use Tealstreet IPs"',

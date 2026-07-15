@@ -129,10 +129,6 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     case 'coinbasespot':
       return symbol.replace(/-/g, '');
 
-    // -- dYdX: BTC-USD → BTCUSD --------------------------------------------
-    case 'dydx':
-      return symbol.replace(/-/g, '');
-
     // -- Paradex: BTC-USD-PERP → BTCUSD -------------------------------------
     case 'paradex': {
       const clean = symbol.endsWith('-PERP') ? symbol.slice(0, -5) : symbol;
@@ -294,12 +290,6 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
 
     // -- Coinbase spot: BTCUSD → BTC-USD ------------------------------------
     case 'coinbasespot': {
-      const { base, quote } = parseBinanceSymbol(symbol);
-      return `${base}-${quote}`;
-    }
-
-    // -- dYdX: BTCUSD → BTC-USD --------------------------------------------
-    case 'dydx': {
       const { base, quote } = parseBinanceSymbol(symbol);
       return `${base}-${quote}`;
     }

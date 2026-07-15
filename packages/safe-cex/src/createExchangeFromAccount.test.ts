@@ -67,19 +67,6 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         enforceWsTunnel: false,
         privateProxyRegions: { SG: ['1.2.3.4'] },
       },
-      dydx: {
-        exchangeName: 'dydx',
-        requiresCors: false,
-        requiresPassphrase: false,
-        requiresApplicationId: false,
-        requiresApiKeyIndex: false,
-        supportsVault: false,
-        requiresOmniKeySeed: false,
-        requiresParadexAddress: false,
-        supportsSubaccount: false,
-        enforceWsTunnel: false,
-        privateProxyRegions: { SG: ['1.2.3.4'] },
-      },
       grvt: {
         exchangeName: 'grvt',
         requiresCors: false,
@@ -481,20 +468,6 @@ describe('accountToExchangeOptions', () => {
 
       expect(options.paradexAddress).toBe('0xparadex');
       expect(options.subkeyAddress).toBe('0xsubkey');
-    });
-
-    it('should include dydxAddress for dydx exchange', () => {
-      const account: ExchangeAccountConfig = {
-        exchange: 'dydx',
-        name: 'test-dydx',
-        apiKey: 'test-key',
-        apiSecret: 'test-secret',
-        dydxAddress: 'dydx-address',
-      };
-
-      const options = accountToExchangeOptions(account);
-
-      expect(options.dydxAddress).toBe('dydx-address');
     });
 
     it('should include grvt fields for grvt exchange', () => {

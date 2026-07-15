@@ -33,7 +33,6 @@ export type ExchangeName =
   | 'coinbase'
   | 'coinbasespot'
   | 'cryptocom'
-  | 'dydx'
   | 'grvt'
   | 'hyperliquid'
   | 'hyperliquidspot'
@@ -80,11 +79,6 @@ export type ExchangeOptions = {
   // Paradex Ethereum authentication (private key stored in key field)
   readonly paradexAddress?: string;
   readonly subkeyAddress?: string;
-
-  // dYdX v4 authentication (wallet address in key, mnemonic in secret or dydxMnemonic)
-  readonly dydxMnemonic?: string;
-  readonly dydxSubaccountNumber?: number;
-  readonly dydxAddress?: string; // Override address for balance/position queries (if different from API wallet)
 
   // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
   readonly grvtSignerAddress?: string;
@@ -225,9 +219,6 @@ export interface ExchangeAccountConfig {
   // Paradex Ethereum authentication (private key stored in apiKey field)
   paradexAddress?: string;
   subkeyAddress?: string;
-
-  // dYdX v4 authentication (separate trading address if different from API wallet)
-  dydxAddress?: string;
 
   // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
   grvtSignerAddress?: string;

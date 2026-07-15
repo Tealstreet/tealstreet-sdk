@@ -1702,44 +1702,6 @@
       "binance": "SOLUSD"
     }
   ],
-  "dydx": [
-    {
-      "symbol": "BTC-USD",
-      "base": "BTC",
-      "quote": "USD",
-      "id": "BTC-USD",
-      "_source": "live",
-      "binance": "BTCUSD"
-    },
-    {
-      "symbol": "ETH-USD",
-      "base": "ETH",
-      "quote": "USD",
-      "id": "ETH-USD",
-      "binance": "ETHUSD"
-    },
-    {
-      "symbol": "LINK-USD",
-      "base": "LINK",
-      "quote": "USD",
-      "id": "LINK-USD",
-      "binance": "LINKUSD"
-    },
-    {
-      "symbol": "SOL-USD",
-      "base": "SOL",
-      "quote": "USD",
-      "id": "SOL-USD",
-      "binance": "SOLUSD"
-    },
-    {
-      "symbol": "ADA-USD",
-      "base": "ADA",
-      "quote": "USD",
-      "id": "ADA-USD",
-      "binance": "ADAUSD"
-    }
-  ],
   "grvt": [
     {
       "symbol": "BTC_USDT_PERP",

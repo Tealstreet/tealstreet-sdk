@@ -30,8 +30,6 @@ const createImplementation = async (
     subkeyAddress: '0x1',
     grvtSignerAddress: '0x0000000000000000000000000000000000000001',
     grvtTradingAccountId: 'capability-contract-account',
-    dydxMnemonic: 'test test test test test test test test test test test junk',
-    dydxAddress: 'dydx1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnrql8a',
   };
 
   const exchange = new Exchange(exchangeName, options, new DefaultStore());

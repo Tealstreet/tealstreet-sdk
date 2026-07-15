@@ -64,11 +64,6 @@ export const SUPPORTED_EXCHANGES: Record<string, ExchangeInfo> = {
     requiredFields: ['apiKey', 'apiSecret'],
     optionalFields: ['testnet'],
   },
-  dydx: {
-    displayName: 'dYdX',
-    requiredFields: ['privateKey', 'walletAddress'],
-    optionalFields: ['testnet'],
-  },
   paradex: {
     displayName: 'Paradex',
     requiredFields: ['privateKey', 'walletAddress'],

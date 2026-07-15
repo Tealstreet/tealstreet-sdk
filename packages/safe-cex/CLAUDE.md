@@ -189,7 +189,7 @@ exchange builds its authed `this.xhr` via the base helper
 raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The set
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
-exclusion list is the wallet / single-keypair venues (hyperliquid, dydx, paradex,
+exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
 grvt, apexomni, lighter, polymarket, and the orderly ed25519 family
 incl. `tealstreet-dex`) **plus** the session-login venues `breakoutprop` (DXtrade
 session token) and `btcc` (MD5 login) — there a shared per-session token is injected
@@ -238,7 +238,7 @@ Is requiresCors true?
 │       │   Examples: Hyperliquid, Paradex, Arkham, KuCoin, Kraken,
 │       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
-│           Examples: OKX, dYdX, Binance, BinancePM, BinanceSpot,
+│           Examples: OKX, Binance, BinancePM, BinanceSpot,
 │                     Bybit, BybitSpot, BybitInverse, BTCC, Woo, WEEX
 │
 └── YES → tealstreetProxy = true (REST routed through IP proxy)

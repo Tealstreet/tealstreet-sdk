@@ -17,7 +17,6 @@ export const exchangesWithoutSecondaryKey: ExchangeName[] = [
   'apexomni',
   'breakoutprop',
   'btcc',
-  'dydx',
   'grvt',
   'hyperliquid',
   'hyperliquidspot',

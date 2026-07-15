@@ -77,11 +77,6 @@ export const SUPPORTED_EXCHANGES: Record<
     requiredFields: ['apiKey', 'apiSecret'],
     optionalFields: ['testnet'],
   },
-  dydx: {
-    displayName: 'dYdX',
-    requiredFields: ['privateKey', 'walletAddress'],
-    optionalFields: ['testnet'],
-  },
   paradex: {
     displayName: 'Paradex',
     requiredFields: ['privateKey', 'walletAddress'],
@@ -117,7 +112,7 @@ export function getExchangeInfo(name: string) {
  * incomplete (it carried `privateKey` / `walletAddress` top-level fields that
  * never existed in the canonical `ExchangeOptions` shape). Replaced with the
  * canonical `createExchangeFromAccount` helper from safe-cex so wallet-based
- * exchanges (Hyperliquid, dYdX, Paradex, Arkham) get their auth fields routed
+ * exchanges (Hyperliquid, Paradex, Arkham) get their auth fields routed
  * through the same translation layer the web app uses.
  */
 export async function createExchangeFromConfig(account: AccountConfig): Promise<BaseExchange> {

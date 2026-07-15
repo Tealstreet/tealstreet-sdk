@@ -33,7 +33,6 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   coinbase: load(() => require('./coinbase/coinbase.exchange').CoinbaseExchange),
   coinbasespot: load(() => require('./coinbase/coinbasespot.exchange').CoinbaseSpotExchange),
   cryptocom: load(() => require('./cryptocom/cryptocom.exchange').CryptocomExchange),
-  dydx: load(() => require('./dydx/dydx.exchange').DydxExchange),
   grvt: load(() => require('./grvt/grvt.exchange').GrvtExchange),
   hyperliquid: load(() => require('./hyperliquid/hyperliquid.exchange').HyperliquidExchange),
   hyperliquidspot: load(() => require('./hyperliquid/hyperliquidspot.exchange').HyperliquidSpotExchange),

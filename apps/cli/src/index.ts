@@ -66,7 +66,6 @@ const SUPPORTED_EXCHANGES: Record<string, ExchangeInfo> = {
   kraken: { displayName: 'Kraken', requiredFields: ['apiKey', 'apiSecret'], optionalFields: [] },
   kucoin: { displayName: 'KuCoin', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: [] },
   phemex: { displayName: 'Phemex', requiredFields: ['apiKey', 'apiSecret'], optionalFields: ['testnet'] },
-  dydx: { displayName: 'dYdX', requiredFields: ['privateKey', 'walletAddress'], optionalFields: ['testnet'] },
   paradex: { displayName: 'Paradex', requiredFields: ['privateKey', 'walletAddress'], optionalFields: ['testnet'] },
   arkham: { displayName: 'Arkham', requiredFields: ['privateKey', 'walletAddress'], optionalFields: [] },
 };

@@ -133,9 +133,6 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.CryptocomExchange,
     ),
 
-  // dYdX (heavy - Cosmos SDK dependencies)
-  dydx: () => import(/* webpackChunkName: "exchange-dydx" */ './dydx/dydx.exchange').then((m) => m.DydxExchange),
-
   // GRVT (heavy - ethers + SDK dependencies)
   grvt: () => import(/* webpackChunkName: "exchange-grvt" */ './grvt/grvt.exchange').then((m) => m.GrvtExchange),
 

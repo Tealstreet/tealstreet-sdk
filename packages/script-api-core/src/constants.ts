@@ -50,7 +50,6 @@ const EXCHANGE_NAMES = [
   'coinbase',
   'coinbasespot',
   'cryptocom',
-  'dydx',
   'grvt',
   'hyperliquid',
   'hyperliquidspot',

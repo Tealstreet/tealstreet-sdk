@@ -329,7 +329,6 @@ describe('exchangeMetadata', () => {
         'bybitinverse',
         'coinbase',
         'cryptocom',
-        'dydx',
         'grvt',
         'hyperliquid',
         'hyperliquidspot',

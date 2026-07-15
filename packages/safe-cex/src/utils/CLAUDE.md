@@ -26,7 +26,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | bitrue                                | `E-{B}-{Q}`        | `E-BTC-USDT`     | USDT          | E- prefix, dash-separated                                |
 | coinbase                              | `{B}-PERP-INTX`    | `ETH-PERP-INTX`  | USDC          | Perp suffix `-PERP-INTX`                                 |
 | coinbasespot                          | `{B}-{Q}`          | `BTC-USD`        | USD           | Dash-separated, from product_id                          |
-| dydx                                  | `{B}-{Q}`          | `BTC-USD`        | USD           | Dash-separated, API dict keys                            |
 | paradex                               | `{B}-{Q}-PERP`     | `AAVE-USD-PERP`  | USD           | Dash-separated with PERP suffix                          |
 | hyperliquid                           | `{B}-PERP`         | `BTC-PERP`       | USDC          | Quote omitted, also `PREFIX\|{B}-PERP`                   |
 | hyperliquidspot                       | `{B}/USDC`         | `PURR/USDC`      | USDC          | Slash-separated                                          |

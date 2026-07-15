@@ -27,7 +27,7 @@
 
 **Exchanges Supported:**
 
-- [x] Bybit, Binance, Hyperliquid, BloFin, Bitget, WOO, OKX, BitMEX, Coinbase, Kraken, KuCoin, Phemex, dYdX, Paradex, Arkham
+- [x] Bybit, Binance, Hyperliquid, BloFin, Bitget, WOO, OKX, BitMEX, Coinbase, Kraken, KuCoin, Phemex, Paradex, Arkham
 
 ---
 

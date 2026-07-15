@@ -72,7 +72,7 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
 
 ### Secondary read-only key (read/write signing split)
 
-Unlike the single-keypair wallet DEXs (hyperliquid, dydx, paradex, lighter, …),
+Unlike the single-keypair wallet DEXs (hyperliquid, paradex, lighter, …),
 AsterDEX **does** support a secondary read-only key — so it is NOT in
 `exchangesWithoutSecondaryKey` (`utils/exchangeSupportsSecondaryKey.ts`). It works
 via the V3 **agent** model: a read-only agent wallet shares the account's main

@@ -22,7 +22,6 @@
     "@tealstreet/http-over-websocket": "*",
     "@tealstreet/json-parse": "*",
     "@tealstreet/sleep": "*",
-    "@dydxprotocol/v4-client-js": "3.6.0",
     "@ethersproject/bignumber": "^5.8.0",
     "@msgpack/msgpack": "^3.1.3",
     "@noble/ed25519": "^3.1.0",

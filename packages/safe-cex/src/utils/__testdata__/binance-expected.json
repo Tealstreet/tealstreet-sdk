@@ -280,13 +280,6 @@
     "ETHUSD-PERP": "ETHUSD",
     "SOLUSD-PERP": "SOLUSD"
   },
-  "dydx": {
-    "BTC-USD": "BTCUSD",
-    "ETH-USD": "ETHUSD",
-    "LINK-USD": "LINKUSD",
-    "SOL-USD": "SOLUSD",
-    "ADA-USD": "ADAUSD"
-  },
   "grvt": {
     "BTC_USDT_PERP": "BTCUSDT",
     "AAVE_USDT_PERP": "AAVEUSDT",

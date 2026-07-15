@@ -75,9 +75,6 @@ export function accountToExchangeOptions(
         }
       : {}),
 
-    // dYdX
-    ...(account.exchange === 'dydx' && account.dydxAddress ? { dydxAddress: account.dydxAddress } : {}),
-
     // GRVT - pass each field independently if set
     ...(account.exchange === 'grvt' && account.grvtSignerAddress
       ? { grvtSignerAddress: account.grvtSignerAddress }

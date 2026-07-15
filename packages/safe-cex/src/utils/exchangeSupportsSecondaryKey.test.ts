@@ -16,7 +16,6 @@ describe('exchangeSupportsSecondaryKey', () => {
 
   it('is false for wallet/private-key and Orderly-ed25519 venues', () => {
     expect(exchangeSupportsSecondaryKey('hyperliquid')).toBe(false);
-    expect(exchangeSupportsSecondaryKey('dydx')).toBe(false);
     expect(exchangeSupportsSecondaryKey('woofi')).toBe(false);
     expect(exchangeSupportsSecondaryKey('what')).toBe(false);
   });
