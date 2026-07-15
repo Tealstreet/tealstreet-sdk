@@ -1145,7 +1145,7 @@ export class KucoinExchange extends BaseExchange {
       return await this.placeOrder(newOrder);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      return [];
+      throw err;
     }
   };
 

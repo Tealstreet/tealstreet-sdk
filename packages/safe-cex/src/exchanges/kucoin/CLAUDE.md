@@ -675,7 +675,7 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
 
 1. **Dynamic WebSocket URLs**: WS endpoints are not hardcoded. Obtained via POST to `bullet-public` / `bullet-private` which returns `instanceServers` with dynamic endpoints and tokens.
 2. **No batch order support used**: Despite `BATCH_ORDERS` endpoint existing (`/api/v1/orders/multi`), orders are placed individually in a loop (`kucoin.exchange.ts:949-972`).
-3. **Update order not supported**: KuCoin has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one (cancel-and-replace pattern).
+3. **Update order not supported**: KuCoin has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one (cancel-and-replace pattern). If replacement fails after cancellation, every normal, algo, and virtual-TP/SL update path emits and rejects; never convert that failure into an empty successful result because the original protection is already gone.
 4. **Full-position TP/SL uses `closeOrder`, not `planType`**: stops post to `/api/v1/orders` (no `planType`). `amount === 0` → `closeOrder: true` with no `size` (KuCoin rejects `size:"0"`); `amount > 0` → `size` in native contracts. See "Full-position vs partial TP/SL" above. The `planType` helper is dead code.
 5. **Virtual TP/SL orders**: Attached `/api/v1/st-orders` trigger fields create compound order IDs: `<orderId>__stop_loss` and `<orderId>__take_profit`; updates re-place through the same st-orders family.
 6. **Success code**: API success is indicated by `data.code === '200000'` (string, not number).
@@ -739,7 +739,7 @@ All KuCoin API responses follow this structure:
 
 - `placeOrderBatch`: Emits error event and throws on failure (`kucoin.exchange.ts:963-968`)
 - `cancelNormalOrders`: Emit error and re-throw (also handles TP/SL; 404→stopOrders fallback)
-- `updateOrder`: emits and rethrows. `updateAlgoOrder`: emits and returns `[]` after a failed cancel-replace so callers receive no replacement id.
+- `updateOrder`, `updateAlgoOrder`, and `updateVirtualTpSlOrder`: emit and rethrow. A failed replacement after cancellation must reject so callers cannot mistake the loss of protection for success.
 
 ## Kline Interval Mapping
 
