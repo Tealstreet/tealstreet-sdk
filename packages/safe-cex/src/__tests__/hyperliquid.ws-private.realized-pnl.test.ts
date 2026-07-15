@@ -427,23 +427,20 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
     (parent.store as any).marketsBySymbol['VNTLS|GAS-PERP'] = hip3Market;
     const ws = new HyperliquidPrivateWebSocket(parent as any);
 
-    ws.handleWebData2({
-      dex: 'vntls',
-      clearinghouseState: {
-        assetPositions: [
-          {
-            position: {
-              coin: 'vntls:GAS',
-              szi: '10',
-              entryPx: '1.59',
-              positionValue: '15.9',
-              leverage: { value: '5', type: 'cross' },
-              unrealizedPnl: '0.01',
-              liquidationPx: '0',
-            },
+    ws.handleHip3ClearinghouseState('vntls', {
+      assetPositions: [
+        {
+          position: {
+            coin: 'vntls:GAS',
+            szi: '10',
+            entryPx: '1.59',
+            positionValue: '15.9',
+            leverage: { value: '5', type: 'cross' },
+            unrealizedPnl: '0.01',
+            liquidationPx: '0',
           },
-        ],
-      },
+        },
+      ],
     } as any);
 
     expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledTimes(1);

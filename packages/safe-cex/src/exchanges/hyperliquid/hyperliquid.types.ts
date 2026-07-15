@@ -212,6 +212,12 @@ export interface WsBook {
   time: number;
 }
 
+export interface WsBbo {
+  coin: string;
+  bbo: [WsLevel | null, WsLevel | null];
+  time: number;
+}
+
 export interface WsLevel {
   px: string;
   sz: string;
@@ -516,11 +522,6 @@ export interface Signature {
 export interface Notification {
   notification: string;
   user: string;
-}
-
-// As flexible as possible
-export interface WebData2 {
-  [key: string]: any;
 }
 
 export interface Candle {

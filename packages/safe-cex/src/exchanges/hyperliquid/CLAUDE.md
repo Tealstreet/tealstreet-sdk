@@ -31,7 +31,7 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), builder fee amount (10 tenths bps = 1bp = 0.01%).                                                                                                                 |
 | `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`). |
 | `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                |
-| `hyperliquid.ws-private.ts`  | Private WebSocket handling `webData2`, `clearinghouseState`, mode-gated `spotState` (unified/portfolio), `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, `notification`.                                                                                                      |
+| `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                              |
 | `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                |
 | `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                   |
 | `hyperliquid.rateLimiter.ts` | Token bucket rate limiter (1200 tokens/minute capacity).                                                                                                                                                                                                                                                      |
@@ -117,6 +117,7 @@ Runtime gating is centralized in `shouldUseSpotCollateralBalance()`:
 If mode is unified/portfolio:
 
 - Perp private WS subscribes to `spotState` (mode-gated, not always-on), adding `isPortfolioMargin: true` for portfolio-margin accounts; its payload is nested as `{ user, spotState: { balances, tokenToAvailableAfterMaintenance } }`.
+- The current `spotState` subscription and nested response shape were re-verified against both mainnet and testnet on 2026-07-15. Keep dispatch support for the legacy `spotClearinghouseState` channel name during the upstream migration, but never send that old name as a WS subscription; it remains only a REST `/info` request type.
 - Perp startup triggers a REST `spotClearinghouseState` refresh as bootstrap safety net.
 - REST and WS retain the complete spot state, including each balance's token id and optional `tokenToAvailableAfterMaintenance` pairs.
 - Token id `0` (USDC) in `tokenToAvailableAfterMaintenance` is the authoritative post-maintenance aggregate availability. It is used directly for `balance.free` and synthetic `currencies.USDC.free`, rather than subtracting core margin or PnL a second time. Once received from the live stream, that authoritative aggregate snapshot cannot be downgraded by a later field-less or stale in-flight REST response.
@@ -140,13 +141,13 @@ Resilience contract:
    - Construct phantom agent: `{ source: "a" (mainnet) or "b" (testnet), connectionId: hash }`
    - EIP-712 sign with domain `{ name: "Exchange", version: "1", chainId: 1337, verifyingContract: 0x0 }`
    - Result: `{ r, s, v }` signature
-   - Reference: `hyperliquid.signing.ts:signL1Action` (line ~84)
+   - Reference: `hyperliquid.signing.ts:signL1Action`
 
 2. **User-Signed Action (wallet-key)** — Used by exchange class for agent approval, builder fee approval, USD transfer, withdraw:
    - EIP-712 sign with domain `{ name: "HyperliquidSignTransaction", version: "1", chainId: 421614, verifyingContract: 0x0 }`
    - `chainId` is ALWAYS `421614` and `signatureChainId` is ALWAYS `"0x66eee"` regardless of mainnet/testnet
    - Only `hyperliquidChain` differs: `"Mainnet"` or `"Testnet"`
-   - Reference: `hyperliquid.signing.ts:signUserSignedAction` (line ~102)
+   - Reference: `hyperliquid.signing.ts:signUserSignedAction`
 
 3. **User-Signed Action (browser-wallet)** — Used for browser-based agent/builder-fee approval via MetaMask:
    - EIP-712 sign with domain `chainId: 42161` (Arbitrum One) for mainnet, `chainId: 421614` (Arbitrum Sepolia) for testnet
@@ -163,13 +164,13 @@ Agent wallets are limited-permission wallets that can trade on behalf of the mai
 4. Submit to Hyperliquid `/exchange` with action type `approveAgent`
 5. Return agent address + private key
 
-Agent name format: `"Tealstreet XXXX"` (15 chars, max 16 chars, random alphanumeric suffix). Reference: `hyperliquid.agent.ts:generateAgentWalletName` (line ~38).
+Agent name format: `"Tealstreet XXXX"` (15 chars, max 16 chars, random alphanumeric suffix). Reference: `hyperliquid.agent.ts:generateAgentWalletName`.
 
 ### Builder Fees
 
 Builder fees (builder codes) allow Tealstreet to receive a portion of trading fees. Fee = 10 tenths of bps = 1bp = 0.01%. Builder info is attached to order actions as `{ b: builderAddress, f: 10 }`.
 
-**Flow**: On startup, check if user has approved builder fee via `maxBuilderFee` info type (`fetchBuilderFeeApproval`, line ~259). If approved, include `builder` field in all order actions. Approval requires EIP-712 signing from the main wallet via `approveBuilderFeeWithBrowserWallet()`.
+**Flow**: On startup, check if user has approved builder fee via `maxBuilderFee` info type (`fetchBuilderFeeApproval`). If approved, include `builder` field in all order actions. Approval requires EIP-712 signing from the main wallet via `approveBuilderFeeWithBrowserWallet()`.
 
 **Builder addresses** (from `hyperliquid.constants.ts`):
 
@@ -177,6 +178,8 @@ Builder fees (builder codes) allow Tealstreet to receive a portion of trading fe
 - Testnet: `0x76676949EA8f83A3a461AdfefD9a8C35d8e41fba`
 
 **Approval status** is cached in `_builderFeeApproved` (null = unknown, true = approved, false = not approved). If unknown when placing an order, `getBuilderInfo()` re-fetches the status. On successful browser-wallet approval, a fire-and-forget POST to `/api/logger/builder-fee` logs the event.
+
+`HyperliquidExchange.getBuilderInfo()` is the only order-path builder-info gate. Keep it tied to the live `maxBuilderFee` approval state; do not reintroduce environment-based signing helpers.
 
 ### EIP-712 Domain Details
 
@@ -201,7 +204,7 @@ Phase 1: Parallel initial data fetch
 │   ├── POST /info { type: "metaAndAssetCtxs" }         — core perp markets + tickers
 │   ├── fetchFee() → POST /info { type: "userFees" }    — user fee rates
 │   └── fetchHip3Dexs() → POST /info { type: "perpDexs" }  — HIP-3 DEX list
-│       └── For each DEX (parallel): POST /info { type: "metaAndAssetCtxs", dex: name }
+│       └── For each DEX (strictly sequential, 8s total budget): POST /info { type: "metaAndAssetCtxs", dex: name }
 ├── fetchBuilderFeeApproval() → POST /info { type: "maxBuilderFee" }
 └── fetchCorePerpsState() → POST /info { type: "clearinghouseState" }; authoritative core-position + balance bootstrap
 
@@ -324,11 +327,12 @@ HIP-3 (per dex):
 
 ### Public WebSocket Channels
 
-| Channel   | Subscription                                      | Data                                         |
-| --------- | ------------------------------------------------- | -------------------------------------------- |
-| `allMids` | `{ type: "allMids" }`                             | Mid prices for all coins (ticker updates)    |
-| `l2Book`  | `{ type: "l2Book", coin: "BTC" }`                 | Orderbook levels (per coin, on-demand)       |
-| `candle`  | `{ type: "candle", coin: "BTC", interval: "1m" }` | OHLCV candles (per coin+interval, on-demand) |
+| Channel   | Subscription                                      | Data                                              |
+| --------- | ------------------------------------------------- | ------------------------------------------------- |
+| `allMids` | `{ type: "allMids" }`                             | Mid prices for all coins (ticker updates)         |
+| `l2Book`  | `{ type: "l2Book", coin: "BTC" }`                 | Standard 20-level orderbook depth, on demand      |
+| `bbo`     | `{ type: "bbo", coin: "BTC" }`                    | Fresh best bid/ask overlay for each active ladder |
+| `candle`  | `{ type: "candle", coin: "BTC", interval: "1m" }` | OHLCV candles (per coin+interval, on-demand)      |
 
 **Ping**: Every 15 seconds via `{ method: "ping" }` (`HyperliquidPublicWebSocket.PING_INTERVAL_MS`). Ping is not sent immediately on connect — first scheduled ping fires after 15s delay to avoid issues with premature pings before subscription responses.
 
@@ -342,19 +346,19 @@ HIP-3 (per dex):
 - `case 'l2Book'`: direct `messageHandlers[\`l2Book.\${coin}\`]`lookup. Don't reintroduce the`Object.keys.filter(k === ...)` walk that used to allocate the keys array and run a linear scan to find the single match.
 - `case 'candle'`: sample the first entry's `s` and `i`, look up `messageHandlers[\`candle.\${s}.\${i}\`]` directly. The prior all-handlers iteration fired every candle parser on every frame and relied on each parser's internal symbol/interval filter — wasteful when N-1 of N parsers were guaranteed no-ops.
 - `handleAllMids`: `for (const id in data)` over the mids object instead of `Object.entries`; avoids the per-frame ~600-tuple array allocation. Reads tickers via the `tickersById` hashmap.
-- Perp `l2Book` parser: subscribe once at exact/full precision and parse the returned snapshot directly. Do not infer a grouping bucket from adjacent price gaps; HIP-3 books can be thin or irregular enough that adjacent gaps round to zero against market precision and produce `Infinity`/`-Infinity` grouping errors.
+- Perp orderbook intentionally pairs exact/full-precision standard `l2Book` with `bbo`: the standard tier preserves the 20-level ladder the UI needs, while BBO refreshes the top level without shrinking the ladder to the `fast:true` tier's five levels. When BBO moves through stale depth, discard levels that claim to be better than the new best. Do not infer a grouping bucket from adjacent price gaps; HIP-3 books can be thin or irregular enough that adjacent gaps round to zero against market precision and produce `Infinity`/`-Infinity` grouping errors.
 - `l2Book` parser: indexed `for`-loop with direct `lvl.px` / `lvl.sz` access, never `forEach({ px, sz })`. **No trailing `sortOrderBook`** — Hyperliquid's `levels[0]` (bids) is DESC and `levels[1]` (asks) is ASC per the WS contract, and we push them in order, so the resulting arrays are already sorted.
 - Spot `l2Book` parser meta-book aggregation: build via direct `metaBook.bids.push(b)` inside indexed for-loops. **Don't reintroduce** the `groupingLevels.reduce((acc, g) => ({ bids: [...acc.bids, ...filtered] }))` shape — that spread the growing accumulator per iteration (quadratic) and allocated a fresh filter array per side per grouping.
-- `handleAllMids` / `handleHip3AllMids` / `handleWebData2`: reuse a single `_midsUpdateBuf` / `_webData2UpdateBuf` instead of allocating `{ last: ... }` or `{ mark, last, ... }` per ticker. The store's `updateTicker` iterates the buffer fields onto the live ticker without retaining the reference, so reuse is safe. Also skip the `updatedSymbols` `Set<string>` allocation entirely when `positions.length === 0` (consumer bails fast in that case anyway).
+- `handleAllMids` / `handleHip3AllMids`: reuse a single `_midsUpdateBuf` instead of allocating `{ last, midPrice }` per ticker. The store's `updateTicker` iterates the buffer fields onto the live ticker without retaining the reference, so reuse is safe. Also skip the `updatedSymbols` `Set<string>` allocation entirely when `positions.length === 0` (consumer bails fast in that case anyway).
 - `onMessage`: **deliberately** calls `recordMessageHandlerStats('pong')` unconditionally on every inbound frame, in addition to the channel-specific stats record. This is a load-bearing hack against Hyperliquid's flaky pong cadence: the staleness watchdog (in `apps/web/src/utils/misc/getGroupedMessageTopicStats.ts`) gates on `now - pong.lastMessageTimestamp`, and without this bump the public WS gets falsely flagged as dead and reconnects even when tickers/orderbooks are flowing normally. **Do not "fix" this** — same hack lives in `hyperliquidspot.ws-private.ts → onMessage` for the same reason. If the perp private WS ever starts spuriously reconnecting, that's the next place to apply the hack (it currently only records pong inside the dedicated pong branch).
 
 ### Private WS hot-path conventions
 
 - `processMessage 'activeAssetData'`: indexed scan with `continue` over `store.positions`, NOT `positions.filter(p => p.symbol === market.symbol)`. And drop the `{ ...position, ...overrides }` spread in `updatePosition` — the store writes only the fields in `changes` onto the live position; the spread copied every position field into a fresh object just to write it back unchanged. Pass only the 3 fields you actually want to update (`positionMode`, `marginType`, `leverage`).
-- `handleWebData2` and `handleOrderUpdates` order processing: pre-build `existingOrdersById: Record<string, Order>` once at the top of the call and use it for HIP-3 type-preservation + tif fallback lookups. The prior shape ran `store.orders.find(o => o.id === orderId)` per openOrder — potentially twice — for ~50 orders × ~50 stored = ~5K linear comparisons per frame.
+- `handleOrderUpdates` order processing: pre-build `existingOrdersById: Record<string, Order>` once at the top of the call and use it for HIP-3 type-preservation + tif fallback lookups. The prior shape ran `store.orders.find(o => o.id === orderId)` per update — potentially twice — for ~50 orders × ~50 stored = ~5K linear comparisons per frame.
 - `new Set(arr.map(o => o.id))` should be a direct loop into a pre-allocated Set — drops the intermediate `.map(o => o.id)` array that's only consumed by Set's iterator.
-- `handleWebData2` openOrders / `handleClearinghouseState` / spot equivalents: collapse `arr.filter(...).map(...).filter(o => o !== null)` chains into a single indexed for-loop with `continue` for the skip cases and `push` for the build step. The prior chain allocated three intermediate arrays + two closure pools per frame.
-- `handleWebData2` HIP-3 positions merge: build via `Map<id, Position>` (last-write-wins) instead of `[...incoming, ...preserve, ...fakes] + uniqBy(arr, 'id')` (first-occurrence-wins). To preserve the original "incoming > preserve > fake" precedence, insert in REVERSE: fakes first, preserve second, incoming last. Drops the triple-spread array (~610 entries on multi-dex accounts) and the uniqBy result + internal Set.
+- `handleClearinghouseState` and spot equivalents: collapse `arr.filter(...).map(...).filter(o => o !== null)` chains into a single indexed for-loop with `continue` for the skip cases and `push` for the build step.
+- `handleHip3ClearinghouseState` builds via `Map<id, Position>` with fakes first, preserved core/other-DEX positions second, and incoming positions last. A dex-scoped empty snapshot is authoritative and must remove closed positions for that DEX.
 - `_getSymbolConfigurationFromAssetData`: defaults branch returns the shared frozen `DEFAULT_SYMBOL_CONFIG` singleton instead of allocating a fresh `{ marginType, positionMode, leverage }` per call. Callers always spread the result into a new position object — never mutate — so sharing is safe. `Object.freeze` makes the contract explicit. Same pattern in the spot exchange (`SPOT_SYMBOL_CONFIG`).
 - `handleFills`: indexed for-loop over `forEach`. Snapshot loads can carry hundreds of fills.
 - `handleClearinghouseState` upnl recompute: indexed for-loop over `positions.reduce((acc, p) => acc + p.upnl, 0)`. Drops the closure allocation per balance update.
@@ -366,7 +370,7 @@ Subscribed for the user (or vault address):
 
 | Channel                       | Core Perps                                | HIP-3 (per dex)                 | Data                                                                                                              |
 | ----------------------------- | ----------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `webData2`                    | Yes                                       | Yes (with `dex` param)          | Positions, orders, tickers, balance (periodic snapshot ~0.4/s)                                                    |
+| `allMids`                     | No                                        | Yes (with `dex` param)          | HIP-3 published mid-price updates                                                                                 |
 | `clearinghouseState`          | Yes                                       | Yes (with `dex` param)          | Positions + margin (real-time, primary for positions)                                                             |
 | `spotState`                   | Conditional (unified/portfolio mode only) | No                              | Nested spot state; token 0 `tokenToAvailableAfterMaintenance` is authoritative unified free margin               |
 | `activeAssetData`             | Yes (per coin)                            | No (subscription limit concern) | Leverage, margin info per market                                                                                  |
@@ -377,7 +381,9 @@ Subscribed for the user (or vault address):
 | `userNonFundingLedgerUpdates` | Yes                                       | -                               | Deposits, withdrawals, transfers, liquidations                                                                    |
 | `notification`                | Yes                                       | -                               | User notifications                                                                                                |
 
-**HIP-3 subscription channels per dex**: `webData2`, `clearinghouseState`, `userFills`, `orderUpdates`, `userEvents` (5 channels per dex). `activeAssetData` is NOT subscribed for HIP-3 markets to avoid exceeding the 1000 channel limit.
+**HIP-3 subscription channels per dex**: `allMids`, `clearinghouseState`, `userFills`, `orderUpdates`, `userEvents` (5 channels per dex). `activeAssetData` is NOT subscribed for HIP-3 markets to avoid exceeding the 1000 channel limit.
+
+**Deliberate `webData3` non-adoption**: Mainnet and testnet probes on 2026-07-15 returned only `userState` and `perpDexStates`. The feed does not replace position, order, or ticker reconciliation, so neither perp nor spot subscribes it. `webData2` is rejected upstream and its dead handlers have been removed.
 
 **Ping**: Every 15 seconds.
 
@@ -393,7 +399,7 @@ Subscribed for the user (or vault address):
 | `TakeProfit`       | `{ trigger: { isMarket: true, tpsl: "tp", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
 | `StopLoss`         | `{ trigger: { isMarket: true, tpsl: "sl", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
 | Limit + TP + SL    | Combined wires                                              | `normalTpsl`                                              |
-| `TrailingStopLoss` | **Not supported** (throws error at line ~2024)              | -                                                         |
+| `TrailingStopLoss` | **Not supported** (throws before submission)                | -                                                         |
 
 ### TIF Mappings
 
@@ -411,7 +417,7 @@ Subscribed for the user (or vault address):
 
 ### Market Order Implementation
 
-Market orders are sent as `Gtc` limit orders at 5% above/below mark price (or last price if mark unavailable). Mark price is preferred over last price to avoid "price too far from oracle" errors, especially for HIP-3 markets with thin liquidity. Reference: `hyperliquid.exchange.ts:2070-2079`.
+Market orders are sent as `Gtc` limit orders at 5% above/below mark price (or last price if mark unavailable). Mark price is preferred over last price to avoid "price too far from oracle" errors, especially for HIP-3 markets with thin liquidity. Reference: `HyperliquidExchange.placeOrder`.
 
 ### Order Wire Format
 
@@ -443,10 +449,10 @@ interface OrderWire {
 
 ### Update Flow (Cancel + Replace)
 
-Hyperliquid does not support in-place order modification for TP/SL. The `updateOrder` method (`hyperliquid.exchange.ts:2417`):
+Hyperliquid does not support in-place order modification for TP/SL. The `HyperliquidExchange.updateOrder` method:
 
 1. Build `newOrder` from existing order + updates
-2. **TP/SL type re-evaluation**: If the new price crosses the current market price, the order type changes (e.g., TP becomes SL). This prevents accidental position closure when dragging orders past current price (`hyperliquid.exchange.ts:2435-2460`)
+2. **TP/SL type re-evaluation**: If the new price crosses the current market price, the order type changes (e.g., TP becomes SL). This prevents accidental position closure when dragging orders past current price.
 3. **HIP-3 optimistic update**: Add an order with `OrderStatus.Updating` at the new price for immediate UI feedback
 4. Cancel original order via `cancelOrders()`
 5. Mark original as "dead" in `_deadOrders` Set (prevents WS from re-adding it)
@@ -464,7 +470,7 @@ Hyperliquid does not support in-place order modification for TP/SL. The `updateO
 
 After placing HIP-3 orders, a coalesced retry chain fetches `frontendOpenOrders` with progressive delays: **300ms, 700ms, 1500ms, 3000ms, 5000ms** (max 5 attempts). Multiple rapid placements merge order IDs into the same chain rather than spawning parallel chains (`_pendingRetryOrderIds` Set, `_retryChainActive` flag).
 
-Reference: `hyperliquid.exchange.ts:refreshHip3OrdersWithRetry` (line ~1380).
+Reference: `HyperliquidExchange.refreshHip3OrdersWithRetry`.
 
 ### Fetch Orders Deduplication
 
@@ -495,7 +501,7 @@ Overlapping `fetchOrders()` calls are collapsed into a single in-flight request 
 
 The pipe `|` separator is used instead of colon `:` to avoid TradingView conflicts.
 
-**Conversion**: `symbolToCoin("VNTLS|VKRAKEN-PERP")` returns `"vntls:VKRAKEN"` (lowercase dex, uppercase asset — asset is uppercased during market creation at line 732).
+**Conversion**: `symbolToCoin("VNTLS|VKRAKEN-PERP")` returns `"vntls:VKRAKEN"` (lowercase dex, uppercase asset; the asset is uppercased during market creation).
 
 ### Case-Insensitive Lookup
 
@@ -505,7 +511,7 @@ A `marketsLowerCaseMap` (`Map<string, Market>`) provides O(1) case-insensitive l
 
 ### Price Precision Algorithm
 
-Uses a CCXT-compatible algorithm (`calculatePricePrecision` in `hyperliquid.utils.ts:33`):
+Uses a CCXT-compatible algorithm (`calculatePricePrecision` in `hyperliquid.utils.ts`):
 
 1. Price = 0: `pricePrecision = min(maxDecimals - szDecimals, 5)`
 2. Price between 0 and 1: Count leading zeros after decimal, add 5 significant digits, cap at `maxDecimals - szDecimals`
@@ -513,14 +519,14 @@ Uses a CCXT-compatible algorithm (`calculatePricePrecision` in `hyperliquid.util
 
 `maxDecimals` is `6` for Hyperliquid perps (core + HIP-3) and `8` for Hyperliquid spot.
 
-### `priceToPrecision` (exchange.ts:2490)
+### `priceToPrecision`
 
 Applies two rounds of precision:
 
 1. First round: `decimalToPrecision(price, ROUND, significantDigits, SIGNIFICANT_DIGITS)` where `significantDigits = max(5, integerPartLength)`
 2. Second round: `decimalToPrecision(result, ROUND, 6 - amountPrecisionDigits, DECIMAL_PLACES)` caps decimal places
 
-### `floatToWire` (signing.ts:190)
+### `floatToWire`
 
 Converts float to string with up to 8 decimal places:
 
@@ -562,11 +568,13 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 
 **Order fetch per-DEX**: Sequential (`fetchOrdersInternal` iterates HIP-3 dexes in a `for` loop).
 
+**HIP-3 market metadata**: Sequential per DEX with an 8-second total startup budget. Official `/info` weights are 20 for `metaAndAssetCtxs`, 60 for `userRole`, and 1200 total per IP per minute. Live discovery on 2026-07-15 returned one core plus nine HIP-3 entries on mainnet; testnet's much larger catalog remains restricted to the four-DEX whitelist. Do not turn this loop back into `Promise.all`: multiple browser accounts can share one proxy egress budget.
+
 ## State Reconciliation
 
 ### Position Reconciliation
 
-**Core perps**: Primary source is `clearinghouseState` WS channel. Hyperliquid's live subscription frame is wrapped as `{ user, dex: '', clearinghouseState }`, so the private WS must unwrap `data.clearinghouseState ?? data` before giving it to `applyCoreClearinghouseState`; passing the outer wrapper silently drops positions and balance updates. Core WS frames merge incrementally because they can be scoped; the startup and reconnect REST `clearinghouseState` snapshot is authoritative and replaces core rows in full while preserving HIP-3 rows and fake position defaults, so closures during a disconnect are removed. A source-time guard prevents an older REST response from overwriting newer WS state. `webData2` is no longer subscribed by either perp or spot: Hyperliquid rejects it, and the perp handler remains only to normalize HIP-3 `clearinghouseState` frames.
+**Core perps**: Primary source is `clearinghouseState` WS channel. Hyperliquid's live subscription frame is wrapped as `{ user, dex: '', clearinghouseState }`, so the private WS must unwrap `data.clearinghouseState ?? data` before giving it to `applyCoreClearinghouseState`; passing the outer wrapper silently drops positions and balance updates. Core WS frames merge incrementally because they can be scoped; the startup and reconnect REST `clearinghouseState` snapshot is authoritative and replaces core rows in full while preserving HIP-3 rows and fake position defaults, so closures during a disconnect are removed. A source-time guard prevents an older REST response from overwriting newer WS state.
 
 **HIP-3 positions**: Primary source is `clearinghouseState` WS with `dex` parameter. When updating:
 
@@ -574,7 +582,7 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 - Empty `assetPositions` correctly indicates the position is closed (uses `data.dex` flag, not coin content detection, because an empty array has no coins to detect)
 - REST `clearinghouseState` per-dex runs every 120s (`HIP3_POSITION_REFRESH_INTERVAL_MS`) as safety net
 
-**Leverage preservation**: `activeAssetData` can lag behind `clearinghouseState` with stale leverage values. For **open** positions, leverage/marginType from position streams are preserved. For **empty/fake** positions, `activeAssetData` values are applied so pre-position leverage defaults stay current (`hyperliquid.ws-private.ts:458-470`).
+**Leverage preservation**: `activeAssetData` can lag behind `clearinghouseState` with stale leverage values. For **open** positions, leverage/marginType from position streams are preserved. For **empty/fake** positions, `activeAssetData` values are applied so pre-position leverage defaults stay current.
 
 ### Balance Reconciliation
 
@@ -603,7 +611,7 @@ Spot collateral freshness:
 
 ### Order Reconciliation
 
-**REST as source of truth** (`fetchOrdersInternal`, line ~1222):
+**REST as source of truth** (`fetchOrdersInternal`):
 
 1. Fetch core perp orders + per-DEX HIP-3 orders
 2. For each fetched order, reconcile with cancel suppression:
@@ -614,10 +622,11 @@ Spot collateral freshness:
    - Optimistic orders (Creating/Updating status)
    - HIP-3 orders from DEXes whose REST fetch failed
 
-**webData2 order snapshots**:
+**WebSocket order updates**:
 
-- Core perps: Full replacement, preserving HIP-3 and optimistic orders
-- HIP-3: **Additive only** — webData2 snapshots can add/update orders but never remove them (too stale, causes flicker). Order removal is handled only by `orderUpdates` WS and `fetchOrders()` REST
+- `orderUpdates` is the only live order feed for core and HIP-3.
+- HIP-3 updates omit order type fields, so pending/pre-placement caches preserve known metadata and unknown orders trigger the bounded REST retry chain.
+- Order removal comes from terminal `orderUpdates` states and authoritative `fetchOrders()` reconciliation.
 
 **Cancellation Suppression** (`_cancelledOrders` map):
 
@@ -638,7 +647,7 @@ Uses the singleton `HyperliquidCrossCache`:
 
 ### Realized PnL Tracking
 
-The private WS tracks per-position realized PnL (`hyperliquid.ws-private.ts:924-938`):
+The private WS tracks per-position realized PnL in `handleFills`:
 
 - On "Open" fill with `startPosition === 0`: Reset accumulator to 0
 - On "Close" fill: Increment by `closedPnl - fee` (net realized PnL)
@@ -687,14 +696,14 @@ Entries expire after 60 seconds.
 
 ### Feature Limitations on Testnet
 
-- **HIP-3 DEX whitelist**: Only these DEXes are fetched on testnet: `['vntls', 'xyz', 'VOLMEX', 'flx']` (`TESTNET_HIP3_WHITELIST`, line ~656). This reduces API calls from 60+ to just 4.
+- **HIP-3 DEX whitelist**: Only these DEXes are fetched on testnet: `['vntls', 'xyz', 'VOLMEX', 'flx']` (`TESTNET_HIP3_WHITELIST`). This constrains the large testnet catalog to four metadata calls.
 - **Signing differences**: Phantom agent `source: "b"` (vs `"a"` for mainnet), `hyperliquidChain: "Testnet"` (vs `"Mainnet"`). The wallet-key signing path (`signUserSignedAction`) uses the same `chainId: 421614` and `signatureChainId: "0x66eee"` on both mainnet and testnet. The browser-wallet path uses `chainId: 421614` (Arbitrum Sepolia) for testnet vs `42161` (Arbitrum One) for mainnet.
 - **Leverage defaults**: Defaults to 20x cross margin until WebSocket delivers leverage info.
 
 ## Known Quirks / Implementation Notes
 
 1. **HIP-3 `orderUpdates` missing fields**: `orderType`, `triggerPx`, `tpsl`, `tif` are omitted (API limitation). Requires the multi-layer inference system described above.
-2. **`webData2` is snapshot-based (~0.4/s)**: Inherently stale. HIP-3 orders use additive-only logic to prevent flicker from stale snapshots.
+2. **`webData2`/`webData3` are not reconciliation feeds**: `webData2` is rejected; current `webData3` contains frontend user/DEX status but no positions, orders, or ticker contexts. Do not add either subscription without a concrete consumer and refreshed upstream evidence.
 3. **Balance scoping depends on account abstraction mode**: `clearinghouseState` with `dex` returns dex-specific margin only. In `unifiedAccount`/`portfolioMargin`, all collateral and holds are in spot state: use the current `spotState` WS channel, not the rejected `spotClearinghouseState` WS channel. Token 0 `tokenToAvailableAfterMaintenance` is authoritative free USDC; only responses without it fall back to core margin plus spot-hold reconstruction. Keep `currencies.USDC` as the aggregate margin slice for sizing; raw spot slices belong under `balance.info.spotCollateralCurrencies`.
 4. **`activeAssetData` not available for HIP-3**: Only subscribes for core perp markets (channel limit concern). HIP-3 leverage defaults until WS delivers.
 5. **Case-insensitive coin names**: HIP-3 API may return coin names with inconsistent casing. All lookups fall back to `marketsLowerCaseMap`.
@@ -708,7 +717,7 @@ Entries expire after 60 seconds.
 13. **Spot WebSocket URL difference**: Spot uses `wss://api.hyperliquid.xyz/ws` (not `api-ui`), as per `hyperliquidspot.types.ts`.
 14. **placeOrders (batch)**: Uses `mapSeries` (sequential), not parallel. Each order is placed one at a time.
 15. **Legacy accounts may be missing `applicationId`**: Auto-resolved at startup via `userRole` info type. See "applicationId auto-resolution" under Authentication for the resolver contract; don't refactor it without updating the consumers that read `options.applicationId` directly. The resolved value is not persisted upstream — every startup pays one `userRole` round-trip for affected accounts.
-16. **`midPx` populates `ticker.midPrice`**: Hyperliquid's `bid`/`ask` come from `impactPxs`, NOT L1 top-of-book — they're impact-weighted prices and notably wider than the true mid. The canonical mid (`asset.midPx` from `webData2`/`allMids`, or `sourceTicker.midPx` from REST) is therefore populated on **both** `ticker.last` AND `ticker.midPrice` so consumers that want the published mid (e.g. the cli's `$mid` constant) read `ticker.midPrice` directly rather than computing `(bid+ask)/2`. Don't drop `midPrice` from any path that already sets `last = midPx`.
+16. **`midPx` populates `ticker.midPrice`**: Hyperliquid's `bid`/`ask` come from `impactPxs`, NOT L1 top-of-book — they're impact-weighted prices and notably wider than the true mid. The canonical mid (`allMids`, or `sourceTicker.midPx` from REST) is therefore populated on **both** `ticker.last` AND `ticker.midPrice` so consumers that want the published mid (e.g. the cli's `$mid` constant) read `ticker.midPrice` directly rather than computing `(bid+ask)/2`. Don't drop `midPrice` from any path that already sets `last = midPx`.
 17. **`userAbstraction: "default"` is currently treated as standard fallback**: unified collateral merge only enables for explicit `unifiedAccount` / `portfolioMargin`. If Hyperliquid remaps `"default"` semantics in the future, update `shouldUseSpotCollateralBalance`.
 18. **DEX abstraction deprecation can be per-account before global date**: users can be migrated early via `agentSetAbstraction` / UI flows before network-wide milestones. Never gate balance mode on calendar date; always read runtime `userAbstraction`.
 
@@ -716,7 +725,7 @@ Entries expire after 60 seconds.
 
 ### API Response Error Detection
 
-The response interceptor in `hyperliquid.api.ts:10-43` checks multiple error patterns in the response:
+The response interceptor in `hyperliquid.api.ts` checks multiple error patterns in the response:
 
 | Pattern                               | Location in Response | Handling                                       |
 | ------------------------------------- | -------------------- | ---------------------------------------------- |
@@ -737,7 +746,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 
 ### Order Validation Errors
 
-`validateResponseAndExtractOrderIds()` (`hyperliquid.exchange.ts:931`) throws:
+`validateResponseAndExtractOrderIds()` throws:
 
 - `"Invalid response from Hyperliquid API"` — if `data.response.data.statuses` is missing
 - `"Hyperliquid order error: ..."` — joins all status errors from the response
@@ -786,7 +795,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 - [ ] Order update (cancel + replace) with type re-evaluation
 - [ ] Order cancellation with suppression
 - [ ] HIP-3 order type inference (pre-placement cache, pending cache, retry chain)
-- [ ] Position tracking: core perps (clearinghouseState + webData2)
+- [ ] Position tracking: core perps (`clearinghouseState` WS + REST reconciliation)
 - [ ] Position tracking: HIP-3 (clearinghouseState with dex + REST 120s safety net)
 - [ ] Leverage change and margin type switch
 - [ ] Fill notifications with cross-instance deduplication
@@ -795,7 +804,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 - [ ] Vault trading (vaultAddress in requests)
 - [ ] Orderbook subscription and depth display
 - [ ] OHLCV candle data (REST fetch + WS streaming)
-- [ ] Ticker updates via allMids (public WS) and webData2 (private WS)
+- [ ] Ticker updates via public core `allMids` and dex-scoped HIP-3 `allMids`
 - [ ] Testnet mode (whitelisted HIP-3 DEXes)
 - [ ] WebSocket reconnection handling
 - [ ] Fake positions generation for all markets

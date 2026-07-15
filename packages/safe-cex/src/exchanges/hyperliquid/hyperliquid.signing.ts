@@ -1,31 +1,7 @@
 import { encode } from '@msgpack/msgpack';
 import { ethers } from 'ethers';
 
-import { getBuilderAddress, TEALSTREET_BUILDER_FEE } from './hyperliquid.constants';
 import { BuilderInfo, CancelOrderRequest, OrderRequest, OrderType, OrderWire, Signature } from './hyperliquid.types';
-
-/**
- * Check if builder fee should be enabled
- * Builder fee is only enforced in development environment for now
- */
-export function isBuilderFeeEnabled(): boolean {
-  return process.env.NODE_ENV !== 'production';
-}
-
-/**
- * Get builder info if enabled, otherwise undefined
- * @param _walletAddress - The wallet address (currently unused)
- * @param testnet - Whether to use testnet builder address
- */
-export function getBuilderInfoForWallet(_walletAddress: string, testnet: boolean = false): BuilderInfo | undefined {
-  if (isBuilderFeeEnabled()) {
-    return {
-      b: getBuilderAddress(testnet).toLowerCase(),
-      f: TEALSTREET_BUILDER_FEE,
-    };
-  }
-  return undefined;
-}
 
 const phantomDomain = {
   name: 'Exchange',

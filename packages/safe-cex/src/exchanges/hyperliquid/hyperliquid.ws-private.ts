@@ -10,8 +10,6 @@ import {
   Position,
   PositionMode,
   PositionSide,
-  Ticker,
-  Writable,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
@@ -20,7 +18,7 @@ import { systemSubscriptionTypes } from './hyperliquid.constants';
 import { hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import { HyperliquidExchange } from './hyperliquid.exchange';
 import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from './hyperliquid.order-inference';
-import { UserFills, UserFundingEntry, UserNonFundingLedgerEntry, WebData2, WSS_URLS } from './hyperliquid.types';
+import { UserFills, UserFundingEntry, UserNonFundingLedgerEntry, WSS_URLS } from './hyperliquid.types';
 
 // Per-channel timestamp tracking for deduplication
 interface PerChannelTimestampState {
@@ -39,10 +37,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
   };
 
   // Core-perp clearinghouseState is the primary source of truth for positions.
-  // webData2 snapshots can be stale and must only be used as fallback.
   private lastCoreClearinghouseStateAt = 0;
   private lastCoreClearinghouseStateServerTime = 0;
-  private static readonly WEB_DATA2_CORE_POSITION_FALLBACK_MS = 20_000;
   private static readonly MAX_TRACKED_REALIZED_PNL_FILL_IDS = 20_000;
   private static readonly CORE_FILL_POSITION_EPSILON = 1e-10;
   private realizedPnlByPositionKey = new Map<string, number>();
@@ -167,7 +163,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     // See: https://hyperliquid.gitbook.io/hyperliquid-docs
     for (const dexName of this.parent.hip3DexNames) {
       // allMids with dex is the reliable HIP-3 last-price stream.
-      // webData2 with dex can fall back to core-perp payloads on some paths.
       this.send(
         JSON.stringify({
           method: 'subscribe',
@@ -253,7 +248,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
   private getStaleCheckChannelKey(channel: string, data: any): string {
     // Keep timestamp streams separate per HIP-3 dex so updates from one dex
     // do not incorrectly suppress another dex's updates.
-    if ((channel === 'clearinghouseState' || channel === 'webData2') && data?.dex) {
+    if (channel === 'clearinghouseState' && data?.dex) {
       return `${channel}:${String(data.dex).toLowerCase()}`;
     }
     return channel;
@@ -263,7 +258,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     // Hyperliquid payloads are inconsistent:
     // - some channels use data.serverTime
     // - clearinghouseState commonly uses data.time
-    // - webData2 may include nested clearinghouseState.time
     const rawTimestamp = data?.serverTime ?? data?.time ?? data?.clearinghouseState?.time;
     const timestamp = Number(rawTimestamp);
     if (!Number.isFinite(timestamp) || timestamp <= 0) {
@@ -454,9 +448,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           }
         }
         break;
-      case 'webData2':
-        this.handleWebData2(json?.data || {});
-        break;
       case 'error':
         this.handleServerError(json?.data);
         break;
@@ -474,19 +465,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           // the nested state before routing it to the core handler.
           const chState = json.data.clearinghouseState || json.data;
           if (json.data.dex) {
-            // HIP-3 clearinghouseState with dex parameter — route through handleWebData2
-            // which already handles per-dex position preservation correctly.
-            // The dex channel may send data either as:
-            //   { dex: "xyz", assetPositions: [...] }
-            //   { dex: "xyz", clearinghouseState: { assetPositions: [...] } }
-            // Normalize to the format handleWebData2 expects.
-            this.handleWebData2({
-              clearinghouseState: {
-                assetPositions: chState.assetPositions,
-                marginSummary: chState.marginSummary,
-              },
-              dex: json.data.dex,
-            });
+            this.handleHip3ClearinghouseState(json.data.dex, chState);
           } else {
             // Core perps clearinghouseState (no dex)
             this.applyCoreClearinghouseState(chState);
@@ -707,331 +686,57 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     this.ws?.close?.();
   };
 
-  // Reusable update buffer for webData2 ticker fields. webData2 frames
-  // arrive ~0.4–50/sec depending on dex count; the prior shape allocated
-  // a fresh `Partial<Ticker>` per ticker per frame (up to ~600 allocs/frame
-  // × N dex subscriptions). The buffer always carries the same 9 fields,
-  // so the store's `updateTicker` for-in iterates and writes them onto
-  // the live ticker — no reference is retained, so reuse is safe.
-  private _webData2UpdateBuf: Partial<Writable<Ticker>> = {
-    mark: 0,
-    last: 0,
-    midPrice: 0,
-    index: 0,
-    bid: 0,
-    ask: 0,
-    openInterest: 0,
-    fundingRate: 0,
-    volume: 0,
-  };
+  handleHip3ClearinghouseState = (dex: string, data: { assetPositions?: any[] }) => {
+    const messageDex = String(dex || '').toLowerCase();
+    if (!messageDex || !Array.isArray(data?.assetPositions)) return;
 
-  handleWebData2 = (data: WebData2) => {
-    // Skip the `Set` allocation when there are no positions to sync —
-    // `syncBalanceFromLivePositions` bails fast in that case anyway.
-    const hasPositions = this.parent.store.positions.length > 0;
-    const updatedSymbols: Set<string> | undefined = hasPositions ? new Set<string>() : undefined;
-
-    if (data?.meta?.universe && Array.isArray(data?.meta?.universe)) {
-      try {
-        // handle market data changes
-        // Use O(1) hashmap lookup instead of O(n) find
-        const tickersById = this.parent.store.tickersById;
-        const universe = data.meta.universe;
-        const assetCtxs = data?.assetCtxs;
-        const updateBuf = this._webData2UpdateBuf;
-        for (let i = 0; i < universe.length; i++) {
-          const asset = assetCtxs?.[i];
-          if (!asset) continue;
-          const ticker = tickersById[universe[i].name];
-          if (!ticker) continue;
-
-          const midPx = parseFloat(asset.midPx);
-          updateBuf.mark = parseFloat(asset.markPx);
-          updateBuf.last = midPx;
-          updateBuf.midPrice = midPx;
-          updateBuf.index = parseFloat(asset.oraclePx);
-          updateBuf.bid = parseFloat(asset.impactPxs?.[0] || asset.midPx);
-          updateBuf.ask = parseFloat(asset.impactPxs?.[1] || asset.midPx);
-          updateBuf.openInterest = parseFloat(asset.openInterest);
-          updateBuf.fundingRate = parseFloat(asset.funding);
-          updateBuf.volume = parseFloat(asset.dayNtlVlm);
-
-          this.store.updateTicker(ticker, updateBuf);
-          if (updatedSymbols) updatedSymbols.add(ticker.symbol);
-        }
-      } catch (e) {
-        this.parent.log(`Error processing ticker update: ${e}`, LogSeverity.Error);
+    const marketsById = this.parent.store.marketsById;
+    const incomingPositions: Position[] = [];
+    for (let i = 0; i < data.assetPositions.length; i++) {
+      const assetPosition = data.assetPositions[i];
+      const coin = String(assetPosition?.position?.coin || '');
+      let market: Market | undefined = marketsById[coin];
+      if (!market && coin.includes(':')) {
+        market = this.parent.marketsLowerCaseMap.get(coin.toLowerCase());
       }
+      if (!market) continue;
+
+      const positionMode = this.resolvePositionMode(assetPosition);
+      const side = +assetPosition.position.szi > 0 ? PositionSide.Long : PositionSide.Short;
+      const realizedPnl = this.getRealizedPnlForPosition(market.symbol, side);
+      incomingPositions.push({
+        ...this.parent._getSymbolConfigurationFromAssetData(market.id),
+        id: createPositionId(market.symbol, side, positionMode),
+        symbol: market.symbol,
+        side,
+        entryPrice: +assetPosition.position.entryPx,
+        notional: +assetPosition.position.positionValue,
+        leverage: +assetPosition.position.leverage.value,
+        unrealizedPnl: +assetPosition.position.unrealizedPnl,
+        ...(realizedPnl !== undefined ? { realizedPnl } : {}),
+        contracts: Math.abs(+assetPosition.position.szi),
+        liquidationPrice: +assetPosition.position.liquidationPx,
+        marginSize: assetPosition.position.marginUsed != null ? +assetPosition.position.marginUsed : undefined,
+        positionMode,
+        marginType: assetPosition.position.leverage.type === 'cross' ? MarginType.Cross : MarginType.Isolated,
+      });
     }
 
-    if (updatedSymbols && updatedSymbols.size > 0) {
-      this.parent.syncBalanceFromLivePositions(updatedSymbols);
+    // A dex-scoped empty snapshot is authoritative for closures on that DEX.
+    // Preserve core positions and positions from every other HIP-3 DEX.
+    const currentPositions = this.parent.store.positions;
+    const fakes = this.parent.getFakePositions();
+    const merged = new Map<string, Position>();
+    for (let i = 0; i < fakes.length; i++) merged.set(fakes[i].id, fakes[i]);
+    for (let i = 0; i < currentPositions.length; i++) {
+      const position = currentPositions[i];
+      const positionDex = this.parent.store.marketsBySymbol[position.symbol]?.info?.hip3Dex?.toLowerCase();
+      if (!positionDex || positionDex !== messageDex) merged.set(position.id, position);
     }
-
-    if (data?.clearinghouseState?.assetPositions) {
-      const messageDex = (data as any)?.dex?.toLowerCase();
-      const isHip3Message =
-        !!messageDex ||
-        (data?.clearinghouseState?.assetPositions || []).some((ap: any) => ap.position?.coin?.includes(':'));
-
-      // For core perps, prefer dedicated clearinghouseState stream.
-      // webData2 position snapshots are periodic and can re-introduce stale leverage.
-      const hasRecentCoreClearinghouseState =
-        this.lastCoreClearinghouseStateAt > 0 &&
-        Date.now() - this.lastCoreClearinghouseStateAt <
-          HyperliquidPrivateWebSocket.WEB_DATA2_CORE_POSITION_FALLBACK_MS;
-      if (!isHip3Message && hasRecentCoreClearinghouseState) {
-        // Skip only position replacement from core webData2 while primary stream is healthy.
-      } else {
-        // Use O(1) hashmap lookup instead of O(n) find in map
-        const marketsById2 = this.parent.store.marketsById;
-
-        // This handler receives clearinghouseState from both core perps (no-dex)
-        // and HIP-3 (official API with dex). Core perps come without colon in coin names.
-        // Indexed for-loop with `continue` instead of `.map(...).filter(...)`.
-        const rawAssetPositions = data?.clearinghouseState?.assetPositions || [];
-        const incomingPositions: Position[] = [];
-        for (let i = 0; i < rawAssetPositions.length; i++) {
-          const assetPosition = rawAssetPositions[i];
-          // Try exact match first
-          let market: Market | undefined = marketsById2[assetPosition.position.coin];
-          // If not found and coin has colon (HIP-3 format), try case-insensitive
-          if (!market && assetPosition.position.coin.includes(':')) {
-            market = this.parent.marketsLowerCaseMap.get(assetPosition.position.coin.toLowerCase());
-          }
-          if (!market) continue;
-
-          const positionMode = this.resolvePositionMode(assetPosition);
-          const side = +assetPosition.position.szi > 0 ? PositionSide.Long : PositionSide.Short;
-          const realizedPnl = this.getRealizedPnlForPosition(market.symbol, side);
-
-          incomingPositions.push({
-            // Spread defaults first, then explicit API values override them
-            ...this.parent._getSymbolConfigurationFromAssetData(market.id),
-            id: createPositionId(market.symbol, side, positionMode),
-            symbol: market.symbol,
-            side,
-            entryPrice: +assetPosition.position.entryPx,
-            notional: +assetPosition.position.positionValue,
-            leverage: +assetPosition.position.leverage.value,
-            unrealizedPnl: +assetPosition.position.unrealizedPnl,
-            ...(realizedPnl !== undefined ? { realizedPnl } : {}),
-            contracts: Math.abs(+assetPosition.position.szi),
-            liquidationPrice: +assetPosition.position.liquidationPx,
-            marginSize: assetPosition.position.marginUsed != null ? +assetPosition.position.marginUsed : undefined,
-            positionMode,
-            marginType: assetPosition.position.leverage.type === 'cross' ? MarginType.Cross : MarginType.Isolated,
-          });
-        }
-
-        // Detect if this message is from a HIP-3 dex or core perps.
-        // Use data.dex as the primary signal — it's always present for HIP-3 messages
-        // (set by the dex subscription or by our clearinghouseState routing).
-        // Coin content detection is a fallback only. This is critical because when a
-        // HIP-3 position is CLOSED, assetPositions is empty and .some() returns false,
-        // which would incorrectly treat the message as core perp data and preserve
-        // the closed position in the store.
-        if (isHip3Message) {
-          // Preserve positions from:
-          // 1. Core perps (always)
-          // 2. Other HIP-3 DEXes (not this one)
-          const positionsToPreserve = this.parent.store.positions.filter((p) => {
-            const market = this.parent.store.marketsBySymbol[p.symbol];
-            const positionDex = market?.info?.hip3Dex?.toLowerCase();
-
-            if (!positionDex) {
-              // Core perp position - always preserve
-              return true;
-            } else {
-              // HIP-3 position - preserve only if different DEX
-              return positionDex !== messageDex;
-            }
-          });
-
-          // Merge via Map instead of `[...spread, ...spread, ...spread]`
-          // + `uniqBy(arr, 'id')`. The prior shape allocated a triple-
-          // spread array of all three sources (~610 entries on a typical
-          // HIP-3 account: ~5 incoming + ~5 preserve + ~600 fake),
-          // then `uniqBy` allocated a deduped result + internal Set.
-          //
-          // `uniqBy` keeps the FIRST occurrence; `Map.set` keeps the
-          // LAST. To match the original semantic (incoming wins over
-          // preserve wins over fake), insert in REVERSE precedence:
-          // fakes first (lowest), preserve second, incoming last.
-          const fakes = this.parent.getFakePositions();
-          const merged = new Map<string, Position>();
-          for (let i = 0; i < fakes.length; i++) merged.set(fakes[i].id, fakes[i]);
-          for (let i = 0; i < positionsToPreserve.length; i++) {
-            merged.set(positionsToPreserve[i].id, positionsToPreserve[i]);
-          }
-          for (let i = 0; i < incomingPositions.length; i++) {
-            merged.set(incomingPositions[i].id, incomingPositions[i]);
-          }
-          this.parent.store.addOrUpdatePositionsFull(Array.from(merged.values()));
-        } else {
-          // This is core perp data coming from webData2 fallback.
-          //
-          // webData2 snapshots can be partial/stale while core clearinghouseState is degraded.
-          // Using full replacement here can transiently zero live core positions, which causes
-          // visible UI row/account flapping until the next authoritative update arrives.
-          //
-          // Merge incrementally instead; position removals are still handled by the authoritative
-          // core clearinghouseState stream and periodic reconciliation paths.
-          if (incomingPositions.length > 0) {
-            this.parent.store.addOrUpdatePositions(incomingPositions);
-          }
-        }
-      }
+    for (let i = 0; i < incomingPositions.length; i++) {
+      merged.set(incomingPositions[i].id, incomingPositions[i]);
     }
-
-    // IMPORTANT:
-    // Do NOT update global balance from webData2 snapshots.
-    //
-    // webData2 can be stale and can also arrive from HIP-3 subscriptions where
-    // payload shape is not consistently tagged. In practice this can overwrite
-    // a valid core-perp balance with zero when the user is flat.
-    //
-    // Global balance is sourced exclusively from handleClearinghouseState()
-    // (core clearinghouseState stream), with startup REST fetch as initial seed.
-
-    if (data?.openOrders) {
-      // Use O(1) hashmap lookup instead of O(n) find in map
-      const marketsById3 = this.parent.store.marketsById;
-
-      // Detect whether this webData2 message is from a HIP-3 dex or core perps.
-      // This mirrors the same detection used in the clearinghouseState section above.
-      const messageDex = (data as any)?.dex?.toLowerCase();
-      const isHip3Snapshot = !!messageDex;
-
-      // Pre-build orderId → existingOrder hashmap once. The prior shape
-      // ran `store.orders.find(o => o.id === orderId)` per openOrder
-      // (potentially twice — once for HIP-3 type preservation, once for
-      // tif fallback). For ~50 orders in the snapshot × ~50 stored, that
-      // was ~5K linear comparisons per webData2 frame.
-      const existingOrdersById: Record<string, Order> = {};
-      const storeOrders = this.parent.store.orders;
-      for (let i = 0; i < storeOrders.length; i++) {
-        existingOrdersById[storeOrders[i].id] = storeOrders[i];
-      }
-
-      // Parse incoming orders from the snapshot. Single indexed for-loop
-      // replaces filter().map().filter(...). The prior chain allocated
-      // three intermediate arrays + two closure pools; this builds the
-      // result directly via push with `continue` for the skip cases.
-      const rawOpenOrders = data.openOrders;
-      const newOrders: Order[] = [];
-      for (let i = 0; i < rawOpenOrders.length; i++) {
-        const openOrder = rawOpenOrders[i];
-        const oid = `${openOrder.oid}`;
-        // Filter out dead orders (from updateOrder cancel+replace)
-        if (this.parent._deadOrders.has(oid)) continue;
-        // Filter out recently cancelled orders
-        if (this.parent.isOrderCancelled(oid)) continue;
-
-        // Try exact match first, then case-insensitive for HIP-3 markets
-        let market: Market | undefined = marketsById3[openOrder.coin];
-        if (!market && openOrder.coin.includes(':')) {
-          market = this.parent.marketsLowerCaseMap.get(openOrder.coin.toLowerCase());
-        }
-        if (!market) continue;
-
-        // Single O(1) lookup feeds both the HIP-3 type-preservation path
-        // and the timeInForce fallback below.
-        const existingOrder = existingOrdersById[oid];
-        let inferredType: OrderType;
-        let inferredPrice: number;
-
-        // For HIP-3 orders, check if already in store (from frontendOpenOrders)
-        const isHip3 = market.id.includes(':');
-
-        if (isHip3 && existingOrder) {
-          // Preserve order type from store
-          inferredType = existingOrder.type;
-          inferredPrice = existingOrder.price;
-        } else if (isHip3 && !openOrder.orderType && !openOrder.triggerPx && openOrder.limitPx) {
-          // HIP-3 order not in store - try pre-placement cache with WS data for disambiguation
-          const side = openOrder.side === 'B' ? OrderSide.Buy : OrderSide.Sell;
-          const wsLimitPx = parseFloat(openOrder.limitPx) || undefined;
-          const wsAmount = openOrder.origSz ? +openOrder.origSz : undefined;
-          const prePlacement = this.parent.matchPrePlacement(openOrder.coin, side, wsLimitPx, wsAmount);
-          if (prePlacement) {
-            inferredType = prePlacement.type;
-            inferredPrice = prePlacement.price;
-          } else {
-            // Not in any cache - skip and let REST add it correctly
-            this.parent._hip3OrdersNeedRefresh = true;
-            continue;
-          }
-        } else {
-          const inferred = inferHyperliquidOrderTypeAndPrice(openOrder);
-          inferredType = inferred.type;
-          inferredPrice = inferred.price;
-        }
-
-        // Determine timeInForce: use WS data if present, fall back to store value.
-        // webData2 openOrders may omit tif for some orders — preserve from store to prevent
-        // PostOnly being lost on full array replacement.
-        const tif = parseHyperliquidOrderTimeInForce(openOrder.tif) || existingOrder?.timeInForce;
-
-        newOrders.push({
-          id: oid,
-          status: OrderStatus.Open,
-          symbol: market.symbol,
-          type: inferredType,
-          side: openOrder.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
-          price: inferredPrice,
-          amount: +openOrder.origSz,
-          filled: +openOrder.origSz - +openOrder.sz,
-          remaining: +openOrder.sz,
-          reduceOnly: Boolean(openOrder.reduceOnly),
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          timeInForce: tif,
-          info: openOrder,
-        });
-      }
-
-      // Build the set of new order IDs so we can skip duplicates when
-      // preserving. Direct loop avoids the intermediate `.map(o => o.id)`
-      // array that the prior shape allocated just to feed Set's iterator.
-      const newOrderIds = new Set<string>();
-      for (let i = 0; i < newOrders.length; i++) newOrderIds.add(newOrders[i].id);
-
-      if (isHip3Snapshot) {
-        // HIP-3 dex webData2: this snapshot only contains orders for ONE dex.
-        // Treat as ADDITIVE ONLY — can add/update orders but never remove them.
-        // webData2 snapshots are periodic (~0.4/s) and inherently stale. They may
-        // not include orders that were already confirmed by the real-time orderUpdates
-        // channel. Removing confirmed orders based on a stale snapshot causes visible
-        // flicker (orders vanish for 1-2s until the next snapshot or orderUpdates restores them).
-        // Order removal is handled by authoritative channels:
-        //   - orderUpdates WS: real-time (canceled, filled, rejected)
-        //   - fetchOrders() REST: source of truth (120s safety net)
-        const ordersToPreserve = this.parent.store.orders.filter((order) => {
-          if (this.parent.isOrderCancelled(order.id)) return false;
-          if (newOrderIds.has(order.id)) return false; // Already in snapshot — use snapshot version
-          return true; // Preserve everything else
-        });
-
-        this.parent.store.addOrUpdateOrdersFull([...newOrders, ...ordersToPreserve]);
-      } else {
-        // Core perps webData2: this snapshot contains all core perp orders.
-        // Preserve existing HIP-3 orders (they come from dex-specific channels).
-        // Also preserve optimistic core perp orders not yet in the snapshot.
-        const existingHip3Orders = this.parent.store.orders.filter((order) => {
-          if (this.parent.isOrderCancelled(order.id)) return false;
-          if (newOrderIds.has(order.id)) return false; // Already in snapshot — use snapshot version
-
-          // Always preserve optimistic orders not yet confirmed by WS
-          const isOptimistic = order.status === OrderStatus.Creating || order.status === OrderStatus.Updating;
-          if (isOptimistic) return true;
-
-          const market = this.parent.store.marketsBySymbol[order.symbol];
-          return market?.id?.includes(':') || order.symbol.includes('|');
-        });
-
-        this.parent.store.addOrUpdateOrdersFull([...newOrders, ...existingHip3Orders]);
-      }
-    }
+    this.parent.store.addOrUpdatePositionsFull(Array.from(merged.values()));
   };
 
   handleFills = (data: { fills: UserFills[]; isSnapshot: boolean; user: string }) => {

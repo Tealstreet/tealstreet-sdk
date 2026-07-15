@@ -484,11 +484,6 @@ export interface Notification {
   user: string;
 }
 
-// As flexible as possible
-export interface WebData2 {
-  [key: string]: any;
-}
-
 export interface Candle {
   t: number; // open time
   T: number; // close time

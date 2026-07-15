@@ -1732,7 +1732,7 @@ export class HyperliquidExchange extends BaseExchange {
 
   /**
    * Fetch HIP-3 positions for a specific DEX and update the store.
-   * Called when a fill is received for a HIP-3 market since webData2/clearinghouseState
+   * Called when a fill is received for a HIP-3 market since clearinghouseState
    * channels do not include HIP-3 positions.
    */
   fetchHip3Positions = async (dexName: string): Promise<void> => {
@@ -2012,7 +2012,7 @@ export class HyperliquidExchange extends BaseExchange {
       // This preserves object references for unchanged orders, preventing unnecessary re-renders
       //
       // IMPORTANT: Re-read currentOrders from the store AFTER all REST calls complete.
-      // During the awaited REST calls above, WS handlers (webData2, orderUpdates) may have
+      // During the awaited REST calls above, WS handlers (clearinghouseState, orderUpdates) may have
       // replaced the orders array via addOrUpdateOrdersFull. If we captured currentOrders
       // before the REST calls, we'd hold a reference to the OLD array and the removal step
       // would incorrectly remove orders that WS handlers had already added to the NEW array.

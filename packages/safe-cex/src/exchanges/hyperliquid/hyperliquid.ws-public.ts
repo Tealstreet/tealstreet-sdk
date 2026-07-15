@@ -6,7 +6,7 @@ import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, Writable } from '
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { BaseWebSocket } from '../base.ws';
 import { HyperliquidExchange } from './hyperliquid.exchange';
-import { AllMids, HyperliquidCandle, WsBook, WSS_URLS } from './hyperliquid.types';
+import { AllMids, HyperliquidCandle, WsBbo, WsBook, WSS_URLS } from './hyperliquid.types';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -109,6 +109,11 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
     return true;
   };
 
+  private sendUnsubscription = (subscription: Record<string, unknown>): void => {
+    this.activeSubscriptions.delete(JSON.stringify(subscription));
+    this.send(JSON.stringify({ method: 'unsubscribe', subscription }));
+  };
+
   subscribeUserTopics = () => {
     const topics = flatten(Object.keys(this.topics));
     for (const topic of topics) {
@@ -123,6 +128,10 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       } else if (id === 'l2Book') {
         this.sendSubscription({
           type: 'l2Book',
+          coin: symbol,
+        });
+        this.sendSubscription({
+          type: 'bbo',
           coin: symbol,
         });
       }
@@ -212,6 +221,21 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
               // Individual try/catch per handler to prevent one crashed
               // handler from blocking subsequent handlers. Indexed for-loop
               // avoids iterator allocation per frame.
+              for (let i = 0; i < handlers.length; i++) {
+                try {
+                  handlers[i](payload);
+                } catch (_e) {}
+              }
+            }
+            break;
+          }
+          case 'bbo': {
+            const coin = json?.data?.coin;
+            if (!coin) break;
+
+            const handlers = this.messageHandlers[`bbo.${coin}`];
+            if (handlers) {
+              const payload = json?.data;
               for (let i = 0; i < handlers.length; i++) {
                 try {
                   handlers[i](payload);
@@ -355,6 +379,7 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
 
     const topic = `l2Book.${subSymbol}`;
     const handler = `l2Book.${subSymbol}`;
+    const bboHandler = `bbo.${subSymbol}`;
 
     const innerId = nanoid();
 
@@ -364,6 +389,53 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         isSnapshotLoaded: false,
       };
     }
+
+    let depthBook: OrderBook | undefined;
+    let depthTime = 0;
+    let latestBbo: WsBbo | undefined;
+
+    const emitCombinedBook = () => {
+      if (!depthBook || !this.orderBookInnerState[innerId]?.isSnapshotLoaded) return;
+
+      const orderBook: OrderBook = {
+        bids: depthBook.bids.map((level) => ({ ...level, total: 0 })),
+        asks: depthBook.asks.map((level) => ({ ...level, total: 0 })),
+      };
+
+      // The standard l2Book feed carries the UI's 20-level depth, while bbo
+      // updates on every block where the best price/size changes. Overlay only
+      // a BBO at least as new as the depth snapshot and discard stale levels
+      // that would otherwise appear better than the current best.
+      if (latestBbo && latestBbo.time >= depthTime) {
+        const overlaySide = (
+          levels: OrderBook['bids'],
+          best: WsBbo['bbo'][number],
+          isBid: boolean,
+        ): OrderBook['bids'] => {
+          if (!best) return [];
+          const bestPrice = Number(best.px);
+          const bestAmount = Number(best.sz);
+          if (!Number.isFinite(bestPrice) || !Number.isFinite(bestAmount)) return levels;
+
+          const combined: OrderBook['bids'] = [{ price: bestPrice, amount: bestAmount, total: 0 }];
+          for (let i = 0; i < levels.length && combined.length < 20; i++) {
+            const level = levels[i];
+            if (isBid ? level.price < bestPrice : level.price > bestPrice) {
+              combined.push({ ...level, total: 0 });
+            }
+          }
+          return combined;
+        };
+
+        orderBook.bids = overlaySide(orderBook.bids, latestBbo.bbo[0], true);
+        orderBook.asks = overlaySide(orderBook.asks, latestBbo.bbo[1], false);
+      }
+
+      if (orderBook.asks.length !== 0 || orderBook.bids.length !== 0) {
+        calcOrderBookTotal(orderBook);
+        callback(orderBook);
+      }
+    };
 
     const parser = (json: Data) => {
       const event = json as WsBook;
@@ -408,14 +480,20 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         this.orderBookInnerState[innerId].isSnapshotLoaded = true;
       }
 
-      if (orderBook.asks.length !== 0 || orderBook.bids.length !== 0) {
-        // Hyperliquid l2Book frames arrive pre-sorted: levels[0] is bids
-        // descending and levels[1] is asks ascending. We push them in order
-        // above, so the resulting arrays are already sorted; no need for a
-        // trailing sortOrderBook re-sort.
-        calcOrderBookTotal(orderBook);
-        callback(orderBook);
-      }
+      // Hyperliquid l2Book frames arrive pre-sorted: levels[0] is bids
+      // descending and levels[1] is asks ascending. Keep the full standard
+      // depth snapshot and overlay the fresher BBO before emitting.
+      depthBook = orderBook;
+      depthTime = Number(event.time) || 0;
+      emitCombinedBook();
+    };
+
+    const bboParser = (json: Data) => {
+      const event = json as WsBbo;
+      if (!Array.isArray(event.bbo) || !Number.isFinite(Number(event.time))) return;
+      if (latestBbo && event.time < latestBbo.time) return;
+      latestBbo = event;
+      emitCombinedBook();
     };
 
     let waitingTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -423,19 +501,12 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       if (this.isConnected) {
         const shouldSubscribe = !this.messageHandlers[handler]?.length;
         this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+        this.messageHandlers[bboHandler] = [...(this.messageHandlers[bboHandler] || []), bboParser];
         this.topics[topic] = (this.topics[topic] || 0) + 1;
 
         if (shouldSubscribe) {
-          // Subscribe to Hyperliquid WebSocket - single subscription without nSigFigs
-          // Multiple nSigFigs subscriptions can overwhelm the server
-          const payload = {
-            method: 'subscribe',
-            subscription: {
-              type: 'l2Book',
-              coin: subSymbol,
-            },
-          };
-          this.send(JSON.stringify(payload));
+          this.sendSubscription({ type: 'l2Book', coin: subSymbol });
+          this.sendSubscription({ type: 'bbo', coin: subSymbol });
         }
       } else {
         waitingTimeout = setTimeout(() => waitForConnectedAndSubscribe(), 100);
@@ -457,18 +528,12 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       delete this.orderBookInnerState[innerId];
 
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
+      this.messageHandlers[bboHandler] = [...(this.messageHandlers[bboHandler] || []).filter((f) => f !== bboParser)];
       this.topics[topic]--;
 
       if (this.isConnected && !this.messageHandlers[handler].length) {
-        // Unsubscribe from Hyperliquid WebSocket
-        const payload = {
-          method: 'unsubscribe',
-          subscription: {
-            type: 'l2Book',
-            coin: subSymbol,
-          },
-        };
-        this.send(JSON.stringify(payload));
+        this.sendUnsubscription({ type: 'l2Book', coin: subSymbol });
+        this.sendUnsubscription({ type: 'bbo', coin: subSymbol });
       }
     };
   };

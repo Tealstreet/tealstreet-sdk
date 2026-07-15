@@ -198,7 +198,6 @@ export {
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
 
-export { isBuilderFeeEnabled } from './exchanges/hyperliquid/hyperliquid.signing';
 
 export type {
   BuilderFeeApprovalResult,
