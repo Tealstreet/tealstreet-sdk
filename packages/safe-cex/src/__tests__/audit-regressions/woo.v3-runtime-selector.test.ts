@@ -154,7 +154,9 @@ describe('WOO V3 inert runtime route selector', () => {
     }
     const legacySnapshot = Object.freeze([{ symbol: 'BTCUSDT' }]);
     const observed = Object.freeze([{ symbol: 'BTCUSDT' }]);
-    const decodeAndCanonicalizeV3 = vi.fn(() => JSON.stringify(observed));
+    const decodeAndCanonicalizeV3 = vi.fn(() =>
+      Object.freeze({ canonical: JSON.stringify(observed), observed }),
+    );
 
     const match = compareWooV3ShadowRead({
       selection,
@@ -169,6 +171,7 @@ describe('WOO V3 inert runtime route selector', () => {
       storeAction: 'retain-legacy',
     });
     expect(match.authoritative).toBe(legacySnapshot);
+    expect(match.status === 'match' && match.observed).toBe(observed);
     expect(decodeAndCanonicalizeV3).toHaveBeenCalledWith({ fixture: true });
 
     const mismatch = compareWooV3ShadowRead({
@@ -176,7 +179,7 @@ describe('WOO V3 inert runtime route selector', () => {
       legacySnapshot,
       legacyCanonical: JSON.stringify(legacySnapshot),
       v3Response: observed,
-      decodeAndCanonicalizeV3: () => '[{"symbol":"ETHUSDT"}]',
+      decodeAndCanonicalizeV3: () => ({ canonical: '[{"symbol":"ETHUSDT"}]', observed }),
     });
     expect(mismatch).toMatchObject({ status: 'mismatch', storeAction: 'retain-legacy' });
     expect(mismatch.authoritative).toBe(legacySnapshot);
@@ -215,7 +218,7 @@ describe('WOO V3 inert runtime route selector', () => {
       decodeAndCanonicalizeV3: (value) => {
         const parsedCanonical = JSON.parse(legacyCanonical) as typeof nestedAlias;
         parsedCanonical.rows.length = 0;
-        return JSON.stringify({ rows: value });
+        return { canonical: JSON.stringify({ rows: value }), observed: value };
       },
     });
 
@@ -223,6 +226,47 @@ describe('WOO V3 inert runtime route selector', () => {
     expect(comparison.authoritative).toBe(legacySnapshot);
     expect(legacySnapshot).toEqual({ rows: [{ symbol: 'BTCUSDT', active: true }] });
     expect(nestedAlias.rows).toBe(legacySnapshot.rows);
+  });
+
+  it('fails closed when the V3 decoder omits or cannot expose its observed value', () => {
+    const selection = selectWooV3RuntimeRoute('markets', 'shadow-v3');
+    if (selection.status !== 'ready' || selection.requestedMode !== 'shadow-v3') {
+      throw new Error('expected a shadow read selection');
+    }
+    const legacySnapshot = [{ symbol: 'BTCUSDT' }];
+    const legacyCanonical = JSON.stringify(legacySnapshot);
+
+    const missingObserved = compareWooV3ShadowRead({
+      selection,
+      legacySnapshot,
+      legacyCanonical,
+      v3Response: {},
+      decodeAndCanonicalizeV3: () => ({ canonical: legacyCanonical }) as never,
+    });
+    expect(missingObserved).toMatchObject({
+      status: 'decode-or-map-failed',
+      error: expect.objectContaining({ message: expect.stringContaining('canonical string and its observed value') }),
+      storeAction: 'retain-legacy',
+    });
+
+    const throwingObserved = compareWooV3ShadowRead({
+      selection,
+      legacySnapshot,
+      legacyCanonical,
+      v3Response: {},
+      decodeAndCanonicalizeV3: () =>
+        ({
+          canonical: legacyCanonical,
+          get observed() {
+            throw new Error('observed getter exploded');
+          },
+        }) as never,
+    });
+    expect(throwingObserved).toMatchObject({
+      status: 'decode-or-map-failed',
+      error: new Error('observed getter exploded'),
+      storeAction: 'retain-legacy',
+    });
   });
 
   it('remains disconnected from active Woo runtime and owns no transport or store', () => {

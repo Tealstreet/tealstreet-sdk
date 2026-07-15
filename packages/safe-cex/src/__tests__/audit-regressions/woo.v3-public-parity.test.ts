@@ -23,6 +23,7 @@ import {
   compareWooV3OrderBook,
   compareWooV3TickerStats,
 } from '../../exchanges/woo/woo.v3.public-parity';
+import { decodeWooV3OrderBook, mapWooV3OrderBook } from '../../exchanges/woo/woo.v3.public';
 import { compareWooV3ShadowRead, selectWooV3RuntimeRoute } from '../../exchanges/woo/woo.v3.runtime-selector';
 
 const market = (symbol: string, overrides: Partial<Market> = {}): Market => {
@@ -356,7 +357,10 @@ describe('WOO V3 endpoint-specific public read parity', () => {
       legacySnapshot: legacy,
       legacyCanonical: canonicalizeWooV3Markets(legacy),
       v3Response: observed,
-      decodeAndCanonicalizeV3: (value) => canonicalizeWooV3Markets(value as readonly Market[]),
+      decodeAndCanonicalizeV3: (value) => ({
+        canonical: canonicalizeWooV3Markets(value as readonly Market[]),
+        observed: value as readonly Market[],
+      }),
     });
 
     expect(comparison).toMatchObject({ status: 'match', storeAction: 'retain-legacy' });
@@ -374,7 +378,10 @@ describe('WOO V3 endpoint-specific public read parity', () => {
       legacySnapshot: candles,
       legacyCanonical: canonicalizeWooLegacyCandles(request, candles),
       v3Response: wrongRows,
-      decodeAndCanonicalizeV3: (value) => canonicalizeWooV3KlineRows(request, value as WooV3KlineRow[]),
+      decodeAndCanonicalizeV3: (value) => ({
+        canonical: canonicalizeWooV3KlineRows(request, value as WooV3KlineRow[]),
+        observed: value as WooV3KlineRow[],
+      }),
     });
     expect(rejected).toMatchObject({
       status: 'decode-or-map-failed',
@@ -382,6 +389,43 @@ describe('WOO V3 endpoint-specific public read parity', () => {
       storeAction: 'retain-legacy',
     });
     expect(rejected.authoritative).toBe(candles);
+  });
+
+  it('retains the mapped orderbook timestamp through the highest generic shadow boundary', () => {
+    const selection = selectWooV3RuntimeRoute('orderbook', 'shadow-v3');
+    if (selection.status !== 'ready' || selection.requestedMode !== 'shadow-v3') {
+      throw new Error('expected an orderbook shadow selection');
+    }
+    const request = { symbol: 'PERP_BTC_USDT' };
+    const legacy = orderBook();
+    const raw = {
+      success: true,
+      timestamp: 1_725_000_000_000,
+      data: {
+        bids: [
+          { price: '101', quantity: '2' },
+          { price: '100', quantity: '3' },
+        ],
+        asks: [
+          { price: '102', quantity: '1' },
+          { price: '103', quantity: '4' },
+        ],
+      },
+    };
+
+    const comparison = compareWooV3ShadowRead({
+      selection,
+      legacySnapshot: legacy,
+      legacyCanonical: canonicalizeWooV3OrderBook(request, { ...legacy, timestamp: raw.timestamp }),
+      v3Response: raw,
+      decodeAndCanonicalizeV3: (value) => {
+        const observed = mapWooV3OrderBook(decodeWooV3OrderBook(value));
+        return { canonical: canonicalizeWooV3OrderBook(request, observed), observed };
+      },
+    });
+
+    expect(comparison).toMatchObject({ status: 'match', storeAction: 'retain-legacy' });
+    expect(comparison.status === 'match' && comparison.observed.timestamp).toBe(raw.timestamp);
   });
 
   it('remains transport-free, disconnected, and behind all eight hard-false gates', () => {

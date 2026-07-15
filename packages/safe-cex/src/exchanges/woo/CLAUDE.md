@@ -73,8 +73,9 @@ corresponding hard gate is false. Unknown runtime modes fail closed. Routes with
 The already-active `/v3/trade/transactionHistory` route is a no-op in legacy/V3 mode and is rejected
 in shadow mode so it can never be double-called. The comparator never passes the authoritative
 legacy snapshot to callbacks: callers provide an already-built canonical string, and the only
-callback decodes and canonicalizes V3. It returns the original snapshot by identity on matches,
-mismatches, and decode/map/canonicalization failures.
+callback decodes V3 and returns both its canonical string and observed value. The comparator retains
+that V3 observation as non-authoritative provenance while returning the original legacy snapshot by
+identity on matches, mismatches, and decode/map/canonicalization failures.
 `woo.v3.public-parity.ts` supplies the endpoint-specific canonical strings and structured mismatch
 diagnostics for the five public GET routes. Markets compare only normalized safe-cex fields and
 ignore source-only `info`; books require identical legacy/V3 request symbols before comparing
@@ -113,7 +114,8 @@ reconnect requires a fresh snapshot. The inert REST decoder requires the top-lev
 to be a positive JavaScript-safe integer in milliseconds and preserves it through the V3-specific
 mapped book and parity observation. Value-parity canonicalization intentionally excludes timestamp
 because legacy and V3 snapshots are separate requests, but the typed V3 result retains it for that
-future `prevTs` join. No socket, buffering/recovery coordinator, or runtime activation implements the
+future `prevTs` join, including through the generic shadow comparator. No socket,
+buffering/recovery coordinator, or runtime activation implements the
 join yet, and every V3 migration gate remains false. Private frames decode only to gateway wire models. Do not
 replace store state from them until credentialed evidence proves whether account/balance/position
 arrays are snapshots or patches, the exhaustive ordinary/algo execution lifecycle, command failure

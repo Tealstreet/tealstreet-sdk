@@ -225,12 +225,18 @@ export const selectWooV3RuntimeRoute = (
   });
 };
 
-export type WooV3ShadowReadComparison<TLegacy> =
+export type WooV3ObservedCanonical<TObserved> = Readonly<{
+  canonical: string;
+  observed: TObserved;
+}>;
+
+export type WooV3ShadowReadComparison<TLegacy, TObserved> =
   | Readonly<{
       status: 'match' | 'mismatch';
       routeId: WooV3MigrationRouteId;
       authoritative: TLegacy;
       observedCanonical: string;
+      observed: TObserved;
       storeAction: 'retain-legacy';
     }>
   | Readonly<{
@@ -247,22 +253,37 @@ const normalizeError = (error: unknown): Error =>
 /**
  * Runs a synchronous exact comparison without exposing the authoritative
  * legacy snapshot to a callback. The caller supplies an already-built legacy
- * canonical string, while the only callback decodes and canonicalizes the V3
- * response. Endpoint-specific code owns canonical field selection. The legacy
- * snapshot is returned by identity in every outcome.
+ * canonical string, while the only callback decodes the V3 response and
+ * returns both its endpoint canonical string and observed value. The observed
+ * value remains available as provenance; the legacy snapshot is returned by
+ * identity in every outcome and remains the only store authority.
  */
-export const compareWooV3ShadowRead = <TLegacySnapshot>(
+export const compareWooV3ShadowRead = <TLegacySnapshot, TObserved>(
   input: Readonly<{
     selection: WooV3ShadowReadSelection;
     legacySnapshot: TLegacySnapshot;
     legacyCanonical: string;
     v3Response: unknown;
-    decodeAndCanonicalizeV3: (response: unknown) => string;
+    decodeAndCanonicalizeV3: (response: unknown) => WooV3ObservedCanonical<TObserved>;
   }>,
-): WooV3ShadowReadComparison<TLegacySnapshot> => {
+): WooV3ShadowReadComparison<TLegacySnapshot, TObserved> => {
   let observedCanonical: string;
+  let observed: TObserved;
   try {
-    observedCanonical = input.decodeAndCanonicalizeV3(input.v3Response);
+    const decoded = input.decodeAndCanonicalizeV3(input.v3Response);
+    if (
+      typeof decoded !== 'object' ||
+      decoded === null ||
+      !Object.prototype.hasOwnProperty.call(decoded, 'canonical') ||
+      !Object.prototype.hasOwnProperty.call(decoded, 'observed')
+    ) {
+      throw new Error('WOO V3 shadow decoder must return a canonical string and its observed value');
+    }
+    observedCanonical = decoded.canonical;
+    observed = decoded.observed;
+    if (typeof observedCanonical !== 'string') {
+      throw new Error('WOO V3 shadow decoder must return a canonical string and its observed value');
+    }
   } catch (error) {
     return Object.freeze({
       status: 'decode-or-map-failed',
@@ -278,6 +299,7 @@ export const compareWooV3ShadowRead = <TLegacySnapshot>(
     routeId: input.selection.routeId,
     authoritative: input.legacySnapshot,
     observedCanonical,
+    observed,
     storeAction: 'retain-legacy',
   });
 };
