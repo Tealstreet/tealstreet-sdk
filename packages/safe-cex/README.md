@@ -1,8 +1,8 @@
 # @tealstreet/safe-cex
 
-Unified exchange integration SDK for 28 crypto exchanges (CEX, DEX, and
-prediction/prop markets) — one API for market data, orders, positions,
-balances, and real-time WebSocket streams.
+Unified exchange integration SDK for CEX, DEX, prediction-market, and prop
+venues — one API for market data, orders, positions, balances, and real-time
+WebSocket streams. See `src/exchanges/` for the current integration set.
 
 ## Consuming it
 

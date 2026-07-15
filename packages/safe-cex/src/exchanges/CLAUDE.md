@@ -26,6 +26,7 @@ packages/safe-cex/src/exchanges/
 ├── external-public-data.ts     # External public-data provider (multiplexing)
 ├── in-process-public-data.ts   # In-process public-data sharing
 ├── registry.ts                 # Exchange name → class mapping
+├── registry.native.ts          # Native-only exchange registry
 ├── types.ts                    # Shared types
 └── <exchange>/                 # One directory per exchange
 ```
@@ -874,7 +875,7 @@ These drift fast. Prefer:
 1. Use `yarn add-exchange` (skill: `add-exchange`) to scaffold the
    directory and files in the standard layout.
 2. Implement REST + WS following the shape in a similar exchange (look at
-   one with comparable architecture: Binance for HMAC HMAC + listen-key,
+   one with comparable architecture: Binance for HMAC + listen-key,
    OKX for OAuth-style passphrase, Hyperliquid for EIP-712, etc.).
 3. Add metadata to `exchangeMetadata.ts` — see `packages/safe-cex/CLAUDE.md`
    for the proxy/tunnel flag matrix.

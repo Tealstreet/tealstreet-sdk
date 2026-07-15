@@ -4,6 +4,15 @@ WEEX uses Contract V3 for this adapter. The Contract V3 changelog states
 that Futures Contract V3 launched on 2026-03-09 and Contract WebSocket V3
 launched on 2026-03-18; V2 is no longer maintained.
 
+## Exchange Information
+
+- Exchange name: `weex` (Contract V3 perpetual futures).
+- Availability: development-only (`enabled: false`, `enabledInDev: true`,
+  `enableInPreview: false`). Preview and production are both production lanes;
+  do not enable this adapter there without a fresh release review.
+- Testnet/demo: the adapter does not expose testnet support. WEEX documents a
+  limited demo API, but it is not wired into this integration.
+
 ## Local Smoke Test Keys
 
 Use `.apikey.json` in this directory for local manual smoke tests. It is
@@ -70,11 +79,20 @@ immediately with `{ "method": "PONG", "id": n }`. Public pings instead use
 
 - [Contract V3 WebSocket overview](https://www.weex.com/api-doc/contract/Websocket/websocket-intro)
 - [Contract V3 introduction](https://www.weex.com/api-doc/contract/intro)
+- [Contract V3 changelog](https://www.weex.com/api-doc/contract/changelog)
+- [Contract V3 signature](https://www.weex.com/api-doc/contract/QuickStart/Signature)
+- [CCXT WEEX reference](https://github.com/ccxt/ccxt/wiki/weex)
+
+## File Structure
+
+Follows the standard layout in `../CLAUDE.md`; `weex.utils.ts` contains the
+Contract V3 signing helpers shared by the REST and private WebSocket paths.
 
 ## Implementation Notes
 
-- `POST /capi/v3/batchOrders` is explicitly unavailable in Contract V3, so
-  `placeOrders` should call `placeOrder` serially.
+- WEEX launched `POST /capi/v3/batchOrders` on 2026-05-28. The adapter still
+  calls `placeOrder` serially until batch response and partial-failure behavior
+  are implemented and covered with fresh deterministic regressions.
 - Normal order amend is not documented in Contract V3. Use cancel-and-replace
   for `updateOrder`, preserving TP/SL fields when present.
 - Reduce-only request parameters are not documented for normal order
