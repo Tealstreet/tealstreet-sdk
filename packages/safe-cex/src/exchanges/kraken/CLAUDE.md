@@ -470,23 +470,26 @@ Validates credentials by calling `/v3/accounts`. Checks for:
 - **Parse errors**: Caught and logged with raw data for debugging (`kraken.ws-public.ts`)
 - **Throttled order fetch failures**: Silent catch, will retry on next event (`kraken.ws-private.ts`)
 
-## Testing / Validation
+## Manual Validation Matrix
 
-- [ ] Account validation with API keys (auth flow)
-- [ ] Balance fetching: cash account, flex (multi-collateral) account, per-market margin accounts
-- [ ] Order placement: limit, market, stop (`stp`), take profit
-- [ ] Order modification: edit for limit orders, cancel-and-recreate for TP/SL
-- [ ] Order cancellation: single and batch
-- [ ] Position tracking: correct OneWay mode, margin type detection (cross/isolated via `maxFixedLeverage`)
-- [ ] Margin type switching: cross to isolated and back
-- [ ] Leverage setting in isolated mode
-- [ ] Orderbook: snapshot + delta updates, quantities multiplied by contractSize
-- [ ] OHLCV chart data via REST polling (not WebSocket)
-- [ ] Ticker updates via WebSocket (ticker feed)
-- [ ] Fake positions generated for all active perpetual markets
-- [ ] WebSocket reconnection: public and private re-authentication
-- [ ] Throttled order fetching after WebSocket events (1-second debounce)
-- [ ] Nonce uniqueness under rapid request scenarios
+These are credentialed/manual coverage targets, not an unchecked implementation
+backlog. Run the relevant subset before enabling or releasing Kraken Futures.
+
+- Account validation with API keys (auth flow)
+- Balance fetching: cash account, flex (multi-collateral) account, per-market margin accounts
+- Order placement: limit, market, stop (`stp`), take profit
+- Order modification: edit for limit orders, cancel-and-recreate for TP/SL
+- Order cancellation: single and batch
+- Position tracking: correct OneWay mode, margin type detection (cross/isolated via `maxFixedLeverage`)
+- Margin type switching: cross to isolated and back
+- Leverage setting in isolated mode
+- Orderbook: snapshot + delta updates, quantities multiplied by contractSize
+- OHLCV chart data via REST polling (not WebSocket)
+- Ticker updates via WebSocket (ticker feed)
+- Fake positions generated for all active perpetual markets
+- WebSocket reconnection: public and private re-authentication
+- Throttled order fetching after WebSocket events (1-second debounce)
+- Nonce uniqueness under rapid request scenarios
 
 ---
 
@@ -655,15 +658,18 @@ Common error codes:
 }
 ```
 
-## Testing / Validation
+## Manual Validation Matrix
 
-- [ ] Account validation with Kraken Spot API keys
-- [ ] Market loading from AssetPairs endpoint
-- [ ] Ticker fetching and WebSocket updates
-- [ ] Balance fetching (multi-asset with USD estimation)
-- [ ] Order placement: limit, market, stop-loss, take-profit
-- [ ] Order modification via native atomic amend and cancellation
-- [ ] Orderbook WebSocket subscription
-- [ ] OHLC via WebSocket v2 (unlike Futures which uses REST polling)
-- [ ] WebSocket token authentication flow
-- [ ] WebSocket reconnection and token refresh
+These are credentialed/manual coverage targets, not an unchecked implementation
+backlog. Run the relevant subset before enabling or releasing Kraken Spot.
+
+- Account validation with Kraken Spot API keys
+- Market loading from AssetPairs endpoint
+- Ticker fetching and WebSocket updates
+- Balance fetching (multi-asset with USD estimation)
+- Order placement: limit, market, stop-loss, take-profit
+- Order modification via native atomic amend and cancellation
+- Orderbook WebSocket subscription
+- OHLC via WebSocket v2 (unlike Futures which uses REST polling)
+- WebSocket token authentication flow
+- WebSocket reconnection and token refresh
