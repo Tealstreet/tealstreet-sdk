@@ -36,11 +36,13 @@ import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
+import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
 import { createAPI } from './paradex.api';
 import { initializeParadexSDK, ParadexJWTManager, ParadexRequestSigner } from './paradex.sdk';
 import {
   ACCOUNT_RESPONSE,
+  BATCH_ORDER_RESPONSE,
   ENDPOINTS,
   MARGIN_RESPONSE,
   MARKET_RESPONSE,
@@ -1146,6 +1148,68 @@ export class ParadexExchange extends BaseExchange {
     }
   };
 
+  private isNativeBatchOrder = (opts: PlaceOrderOpts): boolean => {
+    const supportedTimeInForce =
+      opts.timeInForce === undefined ||
+      opts.timeInForce === 'GoodTillCancel' ||
+      opts.timeInForce === 'ImmediateOrCancel' ||
+      opts.timeInForce === 'PostOnly';
+
+    return (
+      opts.type === OrderType.Limit &&
+      opts.triggerPrice === undefined &&
+      opts.stopLoss === undefined &&
+      opts.takeProfit === undefined &&
+      opts.tpTriggerType === undefined &&
+      opts.slTriggerType === undefined &&
+      opts.close !== true &&
+      supportedTimeInForce
+    );
+  };
+
+  private buildMainOrderPayload = async (opts: PlaceOrderOpts, clientId?: string) => {
+    if (!this.requestSigner) {
+      throw new Error('Cannot place order: Request signer not initialized');
+    }
+    const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
+    const type = this.mapOrderType(opts.type);
+    const isStopOrder = isParadexTriggerOrderType(type);
+    const isMarketTypeOrder = isParadexMarketOrderType(type);
+    const triggerPrice = isStopOrder ? opts.price : opts.triggerPrice;
+    const signOrderParams: {
+      market: string;
+      side: 'BUY' | 'SELL';
+      type: string;
+      size: string;
+      price?: string;
+    } = {
+      market: opts.symbol,
+      side,
+      type,
+      size: opts.amount.toString(),
+    };
+    if (!isMarketTypeOrder && opts.price && !isStopOrder) {
+      signOrderParams.price = opts.price.toString();
+    }
+    const { signature, signature_timestamp } = await this.requestSigner.signOrder(signOrderParams);
+    const instruction = this.mapTimeInForce(opts.timeInForce);
+    const shouldBeReduceOnly = opts.reduceOnly || isStopOrder;
+
+    return omitUndefined({
+      market: opts.symbol,
+      side,
+      type,
+      size: opts.amount.toString(),
+      price: !isMarketTypeOrder && !isStopOrder && opts.price ? opts.price.toString() : undefined,
+      trigger_price: triggerPrice?.toString(),
+      instruction,
+      flags: shouldBeReduceOnly ? ['REDUCE_ONLY'] : undefined,
+      signature,
+      signature_timestamp,
+      client_id: clientId,
+    });
+  };
+
   private placeMainOrder = async (opts: PlaceOrderOpts): Promise<string> => {
     try {
       // Ensure SDK is initialized and request signer is available
@@ -1157,55 +1221,8 @@ export class ParadexExchange extends BaseExchange {
         throw new Error('Cannot place order: Request signer not initialized');
       }
 
-      const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-      const type = this.mapOrderType(opts.type);
-
-      // Check if this is a stop/trigger order type
-      const isStopOrder = isParadexTriggerOrderType(type);
-      const isMarketTypeOrder = isParadexMarketOrderType(type);
-
-      // For stop/take-profit orders, opts.price is the trigger price
-      // For regular orders, opts.price is the limit price
-      const triggerPrice = isStopOrder ? opts.price : opts.triggerPrice;
-
-      // Sign the order
       this.log('Signing order...', LogSeverity.Debug);
-      const signOrderParams: any = {
-        market: opts.symbol,
-        side,
-        type,
-        size: opts.amount.toString(),
-      };
-      // Market-type orders don't include price in signature
-      if (!isMarketTypeOrder && opts.price && !isStopOrder) {
-        signOrderParams.price = opts.price.toString();
-      }
-      const { signature, signature_timestamp } = await this.requestSigner.signOrder(signOrderParams);
-
-      this.log(`Order signed: timestamp=${signature_timestamp}`, LogSeverity.Debug);
-
-      // Map timeInForce to Paradex instruction
-      const instruction = this.mapTimeInForce(opts.timeInForce);
-
-      // For TP/SL orders, always include REDUCE_ONLY flag as required by Paradex
-      // Paradex API rejects TPSL orders without REDUCE_ONLY flag
-      const isTpSlType = isParadexTriggerOrderType(type);
-      const shouldBeReduceOnly = opts.reduceOnly || isTpSlType;
-
-      // Build payload with signature
-      const payload = omitUndefined({
-        market: opts.symbol,
-        side,
-        type,
-        size: opts.amount.toString(),
-        price: !isMarketTypeOrder && !isStopOrder && opts.price ? opts.price.toString() : undefined,
-        trigger_price: triggerPrice?.toString(),
-        instruction,
-        flags: shouldBeReduceOnly ? ['REDUCE_ONLY'] : undefined,
-        signature, // Add order signature
-        signature_timestamp, // Add signature timestamp in milliseconds
-        client_id: undefined,
-      });
+      const payload = await this.buildMainOrderPayload(opts);
 
       this.log(`Placing order: ${JSON.stringify(payload)}`, LogSeverity.Debug);
 
@@ -1236,6 +1253,120 @@ export class ParadexExchange extends BaseExchange {
 
       throw err;
     }
+  };
+
+  private placeNativeBatchChunk = async (orders: readonly PlaceOrderOpts[]): Promise<string[]> => {
+    if (orders.length < 1 || orders.length > 10) {
+      const message = `Paradex native order batch must contain between 1 and 10 orders; received ${orders.length}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+    if (this.sdkInitPromise) {
+      await this.sdkInitPromise;
+    }
+
+    const expectedClientIds: string[] = [];
+    const payloads: Awaited<ReturnType<ParadexExchange['buildMainOrderPayload']>>[] = [];
+    try {
+      for (const order of orders) {
+        if (!order.symbol || !Number.isFinite(order.amount) || order.amount <= 0) {
+          throw new Error('Paradex batch LIMIT order requires a symbol and a finite positive amount');
+        }
+        if (!Number.isFinite(order.price) || !order.price || order.price <= 0) {
+          throw new Error('Paradex batch LIMIT order requires a finite positive price');
+        }
+      }
+      const clientIdSet = new Set<string>();
+      for (let index = 0; index < orders.length; index++) {
+        const clientId = `ts_${uuid()}`;
+        if (clientId.length <= 3 || clientId.length > 64 || clientIdSet.has(clientId)) {
+          throw new Error(`Paradex batch generated an invalid or duplicate client_id at index ${index}`);
+        }
+        clientIdSet.add(clientId);
+        expectedClientIds.push(clientId);
+      }
+      for (let index = 0; index < orders.length; index++) {
+        payloads.push(await this.buildMainOrderPayload(orders[index], expectedClientIds[index]));
+      }
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      this.emitAndLogError(message);
+      throw error;
+    }
+
+    let data: BATCH_ORDER_RESPONSE;
+    try {
+      ({ data } = await this.xhr.post<BATCH_ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDERS_BATCH, payloads));
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || String(error);
+      this.emitAndLogError(message);
+      throw error;
+    }
+
+    const malformed = (detail: string): never => {
+      const message = `Paradex batch order response malformed: ${detail}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return malformed('expected an object envelope');
+    }
+    if (data.orders !== undefined && !Array.isArray(data.orders)) {
+      return malformed('orders must be an array when present');
+    }
+    if (data.errors !== undefined && !Array.isArray(data.errors)) {
+      return malformed('errors must be an array when present');
+    }
+
+    const expected = new Set(expectedClientIds);
+    const idsByClientId = new Map<string, string>();
+    for (const [index, row] of (data.orders || []).entries()) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        return malformed(`orders[${index}] must be an object`);
+      }
+      if (typeof row.client_id !== 'string' || !expected.has(row.client_id)) {
+        return malformed(`orders[${index}] has an unknown or missing client_id`);
+      }
+      if (idsByClientId.has(row.client_id)) {
+        return malformed(`orders[${index}] repeats client_id ${row.client_id}`);
+      }
+      if (typeof row.id !== 'string' || row.id.length === 0) {
+        return malformed(`orders[${index}] is missing its Paradex order id`);
+      }
+      idsByClientId.set(row.client_id, row.id);
+    }
+
+    const decodedErrors = (data.errors || []).map((row, index) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        return malformed(`errors[${index}] must be an object`);
+      }
+      const error = row.error;
+      const message = row.message;
+      if ((error !== undefined && typeof error !== 'string') || (message !== undefined && typeof message !== 'string')) {
+        return malformed(`errors[${index}] must contain only string error/message fields`);
+      }
+      if (!error && !message) {
+        return malformed(`errors[${index}] does not contain an error or message`);
+      }
+      return [error, message].filter(Boolean).join(': ');
+    });
+    const missingClientIds = expectedClientIds.filter((clientId) => !idsByClientId.has(clientId));
+
+    if (decodedErrors.length > 0) {
+      if (missingClientIds.length !== decodedErrors.length) {
+        return malformed(
+          `${idsByClientId.size} successes plus ${decodedErrors.length} errors do not account for ${expectedClientIds.length} requests`,
+        );
+      }
+      const message = `Paradex batch rejected client IDs [${missingClientIds.join(', ')}]: ${decodedErrors.join('; ')}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+    if (missingClientIds.length > 0 || idsByClientId.size !== expectedClientIds.length) {
+      return malformed(`missing results for client IDs [${missingClientIds.join(', ')}]`);
+    }
+
+    return expectedClientIds.map((clientId) => idsByClientId.get(clientId)!);
   };
 
   private placeTakeProfitStopLoss = async (opts: PlaceOrderOpts, _mainOrderId: string): Promise<string[]> => {
@@ -1381,14 +1512,31 @@ export class ParadexExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     const results: string[] = [];
-    await forEachSeries(orders, async (order) => {
+    let nativeBatch: PlaceOrderOpts[] = [];
+    const flushNativeBatch = async () => {
+      if (nativeBatch.length === 0) return;
+      const batch = nativeBatch;
+      nativeBatch = [];
+      results.push(...(await this.placeNativeBatchChunk(batch)));
+    };
+
+    for (const order of orders) {
+      if (this.isNativeBatchOrder(order)) {
+        nativeBatch.push(order);
+        if (nativeBatch.length === 10) {
+          await flushNativeBatch();
+        }
+        continue;
+      }
+
+      await flushNativeBatch();
       try {
-        const orderIds = await this.placeOrder(order);
-        results.push(...orderIds);
+        results.push(...(await this.placeOrder(order)));
       } catch (err) {
         this.log(`Error placing order: ${err}`, LogSeverity.Error);
       }
-    });
+    }
+    await flushNativeBatch();
     return results;
   };
 

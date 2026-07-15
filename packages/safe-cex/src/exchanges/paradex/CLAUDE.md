@@ -19,6 +19,8 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 - **REST API Reference**: https://docs.paradex.trade/api/prod/
 - **WebSocket API**: https://docs.paradex.trade/ws/general-information
 - **Rate Limits**: https://docs.paradex.trade/api/general-information/rate-limits
+- **Batch Orders**: https://docs.paradex.trade/api/prod/orders/batch
+- **Order Instructions**: https://docs.paradex.trade/trading/orders/order-instructions
 - **WebSocket Error Handling**: https://docs.paradex.trade/ws/general-information/error-handling
 - **CCXT REST**: https://github.com/ccxt/ccxt/blob/master/ts/src/paradex.ts
 - **CCXT WebSocket**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/paradex.ts
@@ -192,6 +194,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/orders`                          | GET    | List open orders                               |
 | `/orders-history`                  | GET    | List historical orders (execution fallback)   |
 | `/orders`                          | POST   | Place order (with signature)                   |
+| `/orders/batch`                    | POST   | Place 1-10 independently signed LIMIT orders   |
 | `/orders`                          | DELETE | Cancel all orders (optional `?market=` filter) |
 | `/orders/{id}`                     | DELETE | Cancel specific order                          |
 | `/orders/by_client_id/{client_id}` | DELETE | Cancel by client ID                            |
@@ -433,9 +436,28 @@ cancels or places a replacement from `updateOrder()`:
 - **All**: `DELETE /orders` (`paradex.exchange.ts:1196-1204`)
 - **By symbol**: `DELETE /orders?market={symbol}` (`paradex.exchange.ts:1206-1215`)
 
-### Batch Order Placement (`paradex.exchange.ts:1115-1126`)
+### Batch Order Placement (`ParadexExchange.placeOrders`)
 
-Orders are placed sequentially via `forEachSeries` — not in parallel. Individual failures are caught and logged without stopping the batch.
+Contiguous ordinary `LIMIT` orders use the official `POST /orders/batch`
+boundary in chunks of 1-10. The whole local chunk is preflighted, assigned a
+unique `client_id`, and independently signed before the first network write.
+Successful rows are correlated exclusively by their echoed `client_id`, so a
+reordered response still returns Paradex order IDs in input order.
+
+Paradex publishes batch errors only as `{error, message}` without a client ID,
+request index, or response-order guarantee. If any risk-checked row fails, the
+adapter therefore throws one aggregate error containing the exact missing
+client-ID set and all decoded upstream errors; it never guesses a one-to-one
+pairing or returns partial IDs. Missing, duplicate, unknown, or count-mismatched
+response identities fail closed.
+
+Only documented LIMIT instruction combinations are batched: GTC, POST_ONLY,
+and IOC. MARKET remains on the existing single-order path because Paradex's
+instruction matrix says GTC cannot accompany MARKET and IOC is LIMIT-only,
+while the legacy single mapper defaults MARKET to GTC. Trigger/conditional,
+attached TP/SL, trailing, close, unsupported-TIF, and otherwise composite
+orders also retain their dedicated sequential paths so no child or semantic
+attribute is dropped.
 
 ## Symbol Format
 
@@ -622,6 +644,11 @@ For order signatures, size and price are scaled by `1e8`:
 
 16. **Public/private mode detection**: Paradex must not be treated as public-only just because `secret` is empty. Runtime private-mode checks must use Paradex credentials (`key`, `paradexAddress`, `subkeyAddress`).
 
+17. **Batch errors have no row identity**: `POST /orders/batch` success rows
+    echo `client_id`, but published error rows contain only `error` and
+    `message`. Correlate successes by generated client identity and report
+    failures as an unpaired aggregate missing-ID set; never infer error order.
+
 ## Error Handling
 
 ### API Error Extraction (`paradex.api.ts:129-169`)
@@ -664,6 +691,11 @@ network-dependent test scripts beside exchange runtime code.
 `ModifyOrder` signature, stable response identity, partial-fill total-base
 sizing, exact trigger-type preservation, flags-based reduce-only readback, and
 all no-cancel/no-place failure boundaries.
+
+`paradex.batch-orders.test.ts` locks 10-order chunking, exact LIMIT-only
+eligibility, independent signing, client-ID correlation under reordered
+successes, preflight/signing atomicity, mixed-family routing, aggregate
+unidentified error handling, and malformed-response rejection.
 
 ### Known Test Gaps (from TODO.md)
 

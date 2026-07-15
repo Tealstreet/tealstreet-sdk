@@ -40,6 +40,7 @@ export const ENDPOINTS = {
   CANCEL_ORDER_BY_CLIENT_ID: '/orders/by_client_id/{client_id}', // DELETE method
   CANCEL_ALL_ORDERS: '/orders', // DELETE method with optional ?market= param
   PLACE_ORDER: '/orders',
+  PLACE_ORDERS_BATCH: '/orders/batch',
 
   // Positions
   POSITIONS: '/positions',
@@ -175,7 +176,8 @@ export type MARKET_RESPONSE = {
 
 export type ORDER_RESPONSE = {
   id: string;
-  client_order_id: string;
+  client_id?: string;
+  client_order_id?: string;
   market: string;
   side: 'BUY' | 'SELL';
   size: string;
@@ -203,6 +205,16 @@ export type ORDER_RESPONSE = {
   trigger_price?: string;
   post_only?: boolean;
   reduce_only?: boolean;
+};
+
+export type BATCH_ORDER_ERROR = {
+  error?: string;
+  message?: string;
+};
+
+export type BATCH_ORDER_RESPONSE = {
+  errors?: BATCH_ORDER_ERROR[];
+  orders?: ORDER_RESPONSE[];
 };
 
 export type POSITION_RESPONSE = {
