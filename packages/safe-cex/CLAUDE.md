@@ -57,6 +57,29 @@ so reports expose the real production-code coverage floor. Keep the runtime tree
 test-free; the absence of an exchange-tree exclusion is intentional and prevents
 future test files from being silently ignored.
 
+## Reconciliation fetch and store safety
+
+`fetchOrders()`, `fetchPositions()`, and `fetchBalance()` return reconciliation
+data. Callers must assign, return, or explicitly commit that data; a bare,
+awaited-only, voided, or unused `Promise.all` fetch is not a refresh. The local
+`safe-cex/no-discarded-fetch-result` ESLint rule enforces this in
+`src/exchanges/**`. Keep fetch implementations pure: store mutation belongs in
+the caller after disposal and stale-snapshot guards, so the same fetch can be
+used safely by startup, tick, and WebSocket healing paths.
+
+Hyperliquid is the documented narrow legacy exception: its DEX-aware order
+reconciler performs surgical store mutation inside `fetchOrdersInternal()`.
+Fire-and-forget callers use the explicitly named `refreshOrders()` wrapper; do
+not generalize that exception or discard `fetchOrders()` directly.
+
+Error paths must preserve last-known-good state. A failed reconciliation should
+rethrow, or return the relevant current store value when best-effort behavior is
+part of the venue contract. Never turn a transport/auth/rate-limit failure into
+`[]` and then commit it as an authoritative empty snapshot. This convention is
+documented rather than statically enforced because distinguishing a legitimate
+successful empty response from an error fallback requires venue-specific
+control-flow and response knowledge.
+
 ## Metadata capability non-fallback baseline
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,

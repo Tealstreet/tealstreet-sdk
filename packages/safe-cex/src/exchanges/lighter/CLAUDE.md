@@ -39,6 +39,10 @@ Lighter is not available in CCXT. Use <https://github.com/ccxt/ccxt> for general
 | `lighter.builder-fee.ts` | Integrator fee mode and transaction attribution helpers                                             |
 | `lighter.ws-private.ts` | Private WebSocket (`LighterPrivateWebsocket`); account events: orders, positions, fills, balance           |
 
+`fetchOrders()` coalesces and returns the REST order snapshot without mutating
+the store. The periodic private snapshot and throttled private-WebSocket heal
+commit that result with `addOrUpdateOrdersFull()` after disposal checks.
+
 ## Authentication
 
 Lighter uses a two-layer authentication model:
@@ -493,7 +497,8 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 
 ### Order Reconciliation
 
-- `fetchOrders()` uses `addOrUpdateOrdersFull()` to replace entire order list
+- `fetchOrders()` returns the coalesced REST snapshot; the private snapshot and
+  throttled WebSocket heal call `addOrUpdateOrdersFull()` after disposal guards.
 - `recentlyCancelledOrders` map filters out orders pending cancellation
 - Submission-time `placedOrderHints` preserve conditional intent (`StopLoss`/`TakeProfit`), side, reduceOnly, and TIF during WS/REST reconciliation by order ID.
 - Conditional price mapping prioritizes `triggerPrice` over `limitPrice`; if payload is incomplete, reconciliation falls back to stored hint price.

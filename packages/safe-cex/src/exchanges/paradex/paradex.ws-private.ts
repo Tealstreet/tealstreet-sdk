@@ -377,7 +377,9 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     try {
       this.lastPositionFetchTime = Date.now();
       this.hasPendingPositionEvents = false;
-      await this.parent.fetchPositions();
+      const positions = await this.parent.fetchPositions();
+      if (this.isDisposed || this.parent.isDisposed) return;
+      this.parent.store.addOrUpdatePositionsFull(positions);
     } catch {
       // Silent failure, will retry on next event
     }

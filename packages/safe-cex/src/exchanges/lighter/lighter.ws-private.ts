@@ -481,7 +481,9 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
         if (opts.skipIfRecent && this.parent.shouldSkipOrderReconciliationFetch()) {
           return;
         }
-        await this.parent.fetchOrders();
+        const orders = await this.parent.fetchOrders();
+        if (this.isDisposed || this.parent.isDisposed) return;
+        this.parent.store.addOrUpdateOrdersFull(orders);
       },
       '[Lighter] Error fetching orders:',
     );

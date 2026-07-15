@@ -32,6 +32,9 @@ same for account info, asset balances, futures positions, pending regular/algo o
 history. `woo.v3.regular-writes.ts` adds strict, pure descriptors and response decoders for regular
 futures place, zero-fill native amend, cancel-by-ID, and regular pending-order cancellation. It is
 equally inert and accepts no transport, credentials, or mutable store.
+`woo.v3.algo-writes.ts` adds the matching inert algo descriptors for partial STOP-market,
+explicitly vendor-native trailing-stop, positional TP/SL, zero-fill STOP trigger-amend, cancel-by-ID,
+and all-symbol pending cancellation.
 None of these files is imported by
 `woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
@@ -82,6 +85,21 @@ from this regular-only layer because it cancels algo orders as well. These contr
 `regularWriteDemoLifecycle`; a credentialed demo lifecycle is required before any active runtime
 imports them, and all migration gates remain literal `false`.
 
+Algo V3 writes are similarly fail-closed. STOP and positional TP/SL descriptors accept only the
+officially documented `MARKET_PRICE` trigger, which WOO defines as last price; do not translate the
+legacy `MARK_PRICE`, `INDEX_PRICE`, or `LAST_PRICE` labels. Trailing descriptors require an explicit
+`WOO_NATIVE_CALLBACK_VALUE` source and never derive callback units from a safe-cex absolute trigger
+because the official page does not define that conversion. Positional placement builds at most one
+`TAKE_PROFIT` and one `STOP_LOSS` `CLOSE_POSITION` child, but its success rows do not publish the
+root/leaf relationship needed for safe-cex IDs, so decoding stops at a typed demo blocker. The edit
+page has no `childOrders` or trailing callback fields: positional and trailing edits are blocked,
+while only trigger-price changes on decoded untriggered zero-fill `STOP` orders with an existing
+`MARKET_PRICE` trigger are descriptor-ready. Quantity and partial-fill edits are also blocked. The
+pending-cancel page says symbol/all scope while its query schema publishes IDs and no symbol; only
+the no-query all-symbol descriptor is buildable. Current amend/cancel examples return empty `data`,
+so decoders preserve the validated request target and never invent a response status or echoed ID.
+None of this satisfies `algoWriteDemoLifecycle`.
+
 ## CCXT Reference Implementation
 
 - **REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/woo.ts
@@ -96,6 +114,7 @@ imports them, and all migration gates remain literal `false`.
 - `woo.v3.private.ts` - Inert strict authenticated-read decoders and lossless/deferred state mappers
 - `woo.v3.public.ts` - Inert strict public-REST decoders and pure market/stat/book/candle mappers
 - `woo.v3.regular-writes.ts` - Inert strict regular-order request/response contracts and amend blockers
+- `woo.v3.algo-writes.ts` - Inert strict algo-order request/response contracts and lifecycle blockers
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)

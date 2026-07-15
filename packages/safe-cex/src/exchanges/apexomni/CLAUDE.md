@@ -25,6 +25,11 @@ ApeX Omni is a decentralized perpetual futures exchange using zkLink's Layer 2 i
 | `apexomni.ws-private.ts` | Private WebSocket: account data (orders, positions, fills, wallets).                 |
 | `apexomni.ws-public.ts`  | Public WebSocket: market data (tickers, orderbook, candles, recent trades).          |
 
+`fetchOrders()` is a pure REST mapper. Startup/tick reconciliation and the
+private WebSocket's throttled order heal commit its returned snapshot with
+`addOrUpdateOrdersFull()` only after checking disposal, so a late response cannot
+mutate a torn-down exchange.
+
 ### Interface Directory (`interface/`)
 
 | File                            | Description                                                                                                                                                                               |
@@ -503,7 +508,10 @@ Position leverage (`apexomni.exchange.ts:1218-1225`):
 
 ### Order Store Strategy
 
-- `fetchOrders()` uses `store.addOrUpdateOrdersFull()` (full replacement) -- removes any orders no longer in the API response.
+- `fetchOrders()` only returns the mapped REST snapshot. The private snapshot
+  helper and throttled WebSocket heal commit successful results with
+  `store.addOrUpdateOrdersFull()` (full replacement), which removes orders no
+  longer in the API response.
 - WebSocket `handleOrderTopic()` uses `store.addOrUpdateOrders()` (partial update) and `store.removeOrders()` for cancellations.
 
 ### Fake Positions

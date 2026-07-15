@@ -984,7 +984,7 @@ export class LighterExchange extends BaseExchange {
 
   fetchAndSetPrivateSnapshotHelper = async () => {
     try {
-      const [fetchedPositions] = await Promise.all([
+      const [fetchedPositions, fetchedOrders] = await Promise.all([
         this.fetchPositions(undefined, { allowRecentAccountSnapshot: true }),
         this.fetchOrders(),
       ]);
@@ -1000,6 +1000,7 @@ export class LighterExchange extends BaseExchange {
 
       // Update positions
       this.store.addOrUpdatePositionsFull(positions);
+      this.store.addOrUpdateOrdersFull(fetchedOrders);
 
       this.store.update({
         loaded: { ...this.store.loaded, positions: true, orders: true },
@@ -1397,9 +1398,6 @@ export class LighterExchange extends BaseExchange {
     });
 
     const mappedOrders = filteredOrders.flatMap((order: any) => this.mapOrder(order));
-
-    // Replace entire order list with what API returns
-    this.store.addOrUpdateOrdersFull(mappedOrders);
 
     return mappedOrders;
   };

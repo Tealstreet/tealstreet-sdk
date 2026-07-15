@@ -189,7 +189,6 @@ export class BinancePMExchange extends BaseExchange {
       loaded: { ...this.store.loaded, orders: true },
     });
 
-    this.fetchPositions();
   };
 
   _startPublicDataOnly = async () => {

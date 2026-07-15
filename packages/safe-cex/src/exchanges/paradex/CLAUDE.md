@@ -42,6 +42,10 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 | `paradex.ws-public.ts`  | Public WebSocket: BBO tickers, orderbook snapshots, trades, OHLCV polling                |
 | `paradex.ws-private.ts` | Private WebSocket: orders, positions, balance updates with JWT auth                      |
 
+Private position events are coalesced into a throttled REST reconciliation. The
+returned full snapshot is committed with `addOrUpdatePositionsFull()` after a
+disposal guard; a thrown fetch leaves the last-known-good store untouched.
+
 ## Authentication
 
 Paradex uses a complex multi-layer authentication model combining StarkNet signatures, JWT tokens, and subkey delegation.

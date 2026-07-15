@@ -333,7 +333,6 @@ export class BitunixExchange extends BaseExchange {
       loaded: { ...this.store.loaded, orders: true },
     });
 
-    this.fetchPositions();
   };
 
   tick = async (count = 0) => {

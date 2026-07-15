@@ -478,6 +478,12 @@ Reference: `HyperliquidExchange.refreshHip3OrdersWithRetry`.
 
 Overlapping `fetchOrders()` calls are collapsed into a single in-flight request via `_fetchOrdersInFlight` promise. The second caller receives the same promise result as the first.
 
+Hyperliquid is the narrow legacy exception to the package's pure-fetch
+convention: `fetchOrdersInternal()` performs surgical, DEX-aware store
+reconciliation while producing its result. Fire-and-forget startup/debounce/tick
+heals therefore call the explicitly named `refreshOrders()` completion wrapper;
+directly discarding `fetchOrders()` remains forbidden by the package lint rule.
+
 ### Order Refresh Debounce
 
 `scheduleOrderRefresh()` debounces order refreshes with a 500ms window and a minimum 1s interval (`HIP3_ORDER_REFRESH_INTERVAL_MS`). Triggered by position closures (auto-cancel TP/SL) and unrecognized HIP-3 WS orders.

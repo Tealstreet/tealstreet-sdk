@@ -11,7 +11,7 @@
     "fix-all-files": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --fix",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/core-lib.eslintcache",
     "test": "run-s test-unit",
-    "test-ci": "vitest run",
+    "test-ci": "node --test eslint-rules/*.test.mjs && vitest run",
     "test:lighter-smoke": "vitest run src/exchangeMetadata.test.ts src/__tests__/lighter.utils.test.ts src/__tests__/lighter.signer.test.ts src/__tests__/lighter.ws-private.test.ts",
     "test-unit": "vitest run",
     "test-unit-watch": "vitest watch --ui",

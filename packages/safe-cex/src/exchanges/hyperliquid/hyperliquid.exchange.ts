@@ -965,7 +965,7 @@ export class HyperliquidExchange extends BaseExchange {
     // Fetch initial orders (including HIP-3) after markets are loaded
     // This ensures orders are available before WebSocket starts streaming updates
     this._lastOrderRefreshTime = Date.now(); // Prevent immediate re-fetch in tick
-    this.fetchOrders().catch((error) => {
+    this.refreshOrders().catch((error) => {
       this.log(`Failed to fetch initial orders: ${error}`, LogSeverity.Warning);
     });
 
@@ -1032,7 +1032,7 @@ export class HyperliquidExchange extends BaseExchange {
       const now = Date.now();
       if (now - this._lastOrderRefreshTime > this.HIP3_ORDER_REFRESH_INTERVAL_MS) {
         this._lastOrderRefreshTime = now;
-        this.fetchOrders().catch((error) => {
+        this.refreshOrders().catch((error) => {
           this.log(`Debounced order refresh failed: ${error}`, LogSeverity.Warning);
         });
       }
@@ -1056,7 +1056,7 @@ export class HyperliquidExchange extends BaseExchange {
         this._hip3OrdersNeedRefresh = false;
         this._lastOrderRefreshTime = now;
         this.log(`Refreshing HIP-3 orders (new order detected via WS)`, LogSeverity.Debug);
-        this.fetchOrders().catch((error) => {
+        this.refreshOrders().catch((error) => {
           this.log(`HIP-3 order refresh failed: ${error}`, LogSeverity.Warning);
         });
       }
@@ -2108,6 +2108,12 @@ export class HyperliquidExchange extends BaseExchange {
       }
     }
   };
+
+  // Hyperliquid is the narrow legacy exception to safe-cex's pure fetcher
+  // convention: fetchOrdersInternal performs surgical, DEX-aware reconciliation
+  // while it builds the result. Fire-and-forget callers must use this explicitly
+  // side-effecting name instead of discarding fetchOrders() directly.
+  private refreshOrders = (): Promise<void> => this.fetchOrders().then(() => undefined);
 
   // Single coalesced retry chain for HIP-3 order refresh.
   // Multiple rapid order placements merge into one chain instead of spawning parallel chains.

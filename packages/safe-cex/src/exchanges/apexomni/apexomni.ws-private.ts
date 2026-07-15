@@ -152,7 +152,9 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       this.ordersThrottleTimeout = undefined;
       if (!this.isDisposed) {
         try {
-          await this.parent.fetchOrders();
+          const orders = await this.parent.fetchOrders();
+          if (this.isDisposed || this.parent.isDisposed) return;
+          this.parent.store.addOrUpdateOrdersFull(orders);
         } catch (err: any) {
           // Route through the structured log pipeline at Warning severity so a
           // reconnect storm doesn't paint DevTools red with raw console.error

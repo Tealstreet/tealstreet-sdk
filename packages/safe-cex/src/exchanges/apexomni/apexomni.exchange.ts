@@ -275,7 +275,7 @@ export class ApexOmniExchange extends BaseExchange {
 
   fetchAndSetPrivateSnapshotHelper = async () => {
     try {
-      const [fetchedPositions, _fetchedOrders] = await Promise.all([this.fetchPositions(), this.fetchOrders()]);
+      const [fetchedPositions, fetchedOrders] = await Promise.all([this.fetchPositions(), this.fetchOrders()]);
 
       if (this.isDisposed) return;
 
@@ -288,9 +288,7 @@ export class ApexOmniExchange extends BaseExchange {
 
       // Update positions - note this is now safe because we're also fetching orders
       this.store.addOrUpdatePositionsFull(positions);
-
-      // Note: fetchOrders already calls store.addOrUpdateOrders internally
-      // so we don't need to do it here
+      this.store.addOrUpdateOrdersFull(fetchedOrders);
 
       this.store.update({
         loaded: { ...this.store.loaded, positions: true, orders: true },
@@ -441,10 +439,6 @@ export class ApexOmniExchange extends BaseExchange {
     });
 
     const mappedOrders = filteredOrders.flatMap((order: any) => this.mapOrder(order));
-
-    // Replace entire order list with what API returns
-    // This ensures orders that are no longer in API (cancelled, filled, etc.) are removed
-    this.store.addOrUpdateOrdersFull(mappedOrders);
 
     return mappedOrders;
   };
