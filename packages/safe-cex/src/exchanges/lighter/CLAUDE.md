@@ -35,6 +35,8 @@ Lighter is not available in CCXT. Use <https://github.com/ccxt/ccxt> for general
 | `lighter.ws-public-parsers.ts` | Public-frame dispatch and numeric parsing helpers                                               |
 | `lighter.ws-policy.ts` | Public/private close classification and reconnect delay policy                                          |
 | `lighter.signer.ts` | Lighter transaction signer adapter                                                                          |
+| `lighter.builder-approval.ts` | Builder/integrator approval status and submission helpers                                       |
+| `lighter.builder-fee.ts` | Integrator fee mode and transaction attribution helpers                                             |
 | `lighter.ws-private.ts` | Private WebSocket (`LighterPrivateWebsocket`); account events: orders, positions, fills, balance           |
 
 ## Authentication
@@ -123,9 +125,6 @@ Signer startup resolves account index, initializes Poseidon WASM, validates API 
 | `/api/v1/account`           | GET    | Get account info (`accountIndex`, `referrer`)                 |
 | `/api/v1/accountLimits`     | GET    | Get account tier/limits (`user_tier`, `user_tier_name`)       |
 | `/api/v1/changeAccountTier` | POST   | Change account tier (`standard`, `premium`, `plus`)           |
-| `/api/v1/account/balance`   | GET    | Get balance (`totalEquity`, `usedMargin`, `availableBalance`) |
-| `/api/v1/account/nonce`     | GET    | Get account nonce                                             |
-| `/api/v1/account/api-keys`  | GET    | Get API keys                                                  |
 
 Additional account-related endpoints used in discovery/integration:
 
@@ -148,25 +147,17 @@ Additional account-related endpoints used in discovery/integration:
 
 ### Orders
 
-| Endpoint                        | Method   | Description                                                        |
-| ------------------------------- | -------- | ------------------------------------------------------------------ |
-| `/api/v1/orders`                | GET/POST | List orders / Create order                                         |
-| `/api/v1/orders/open`           | GET      | Get open orders                                                    |
-| `/api/v1/orders/history`        | GET      | Get order history                                                  |
-| `/api/v1/accountInactiveOrders` | GET      | Account inactive order history (primary for `fetchExecutions`)     |
-| `/api/v1/orders/all`            | DELETE   | Cancel all orders                                                  |
-
-### Positions
-
-| Endpoint            | Method | Description       |
-| ------------------- | ------ | ----------------- |
-| `/api/v1/positions` | GET    | Get all positions |
+| Endpoint                        | Method | Description                                                    |
+| ------------------------------- | ------ | -------------------------------------------------------------- |
+| `/api/v1/accountActiveOrders`   | GET    | Open-order reconciliation                                      |
+| `/api/v1/accountInactiveOrders` | GET    | Account inactive order history (primary for `fetchExecutions`) |
 
 ### Transactions
 
-| Endpoint               | Method | Description                    |
-| ---------------------- | ------ | ------------------------------ |
-| `/api/v1/transactions` | POST   | Submit signed raw transactions |
+| Endpoint              | Method | Description                                 |
+| --------------------- | ------ | ------------------------------------------- |
+| `/api/v1/sendTx`      | POST   | Submit one signed transaction               |
+| `/api/v1/sendTxBatch` | POST   | Submit a batch of signed order transactions |
 
 **Note**:
 
@@ -181,7 +172,7 @@ Additional account-related endpoints used in discovery/integration:
 
 ### Public WebSocket (`lighter.ws-public.ts`)
 
-**Connection**: URL appends a unique `?requestId=<nanoid>` query parameter on each connection (`lighter.ws-public.ts:44`).
+**Connection**: URL appends a unique `?requestId=<nanoid>` query parameter on each connection (`connectAndSubscribe`).
 
 **Subscription format**: `{ type: "subscribe", channel: "<channel>" }`
 
@@ -196,6 +187,8 @@ Topics are tracked per channel and re-subscribed on reconnect.
 | `trade/<marketId>`              | Trade stream (secondary source for real-time candle updates)       |
 
 **Ping/pong**: Sends ping on open, responds to server ping with pong, and tracks latency via base WS helpers.
+
+**Error frames**: Channel-less `{ error: { code, message } }` frames are recorded as public-handler telemetry and logged with both fields at warning severity, so rejected subscriptions cannot disappear as an apparently quiet stream.
 
 **Reconnect and route promotion**:
 
@@ -457,7 +450,7 @@ Extracted from market data during `fetchMarketsHelper()`:
 - Lighter has both IP and L1/account-scoped limits. Current public docs do not expose a stable error discriminator that tells us which bucket was exceeded.
 - Do not assume rate-limit errors are IP-only. User-facing warnings should stay neutral unless we have stronger local context, for example cached account tier or degraded direct-connectivity state.
 - When direct private WS falls into readonly/degraded mode or Lighter returns explicit policy/geo restriction signals, prefer georestriction/degraded-connectivity wording. Do not suggest self-heal or account-tier switching for that path; use VPN / Tealstreet WS proxy guidance instead.
-- Standard accounts remain much tighter; Plus and Premium have higher `sendTx`/`sendTxBatch` limits. Premium also has volume quota for create/cancel-all/modify/grouped order transaction types.
+- Standard accounts remain much tighter; Plus, Premium, and Builder tiers have higher weighted limits. Builder is documented at 240,000 weighted requests/minute. Premium `sendTx`/`sendTxBatch` capacity scales with staked LIT (currently 4,000-40,000/minute), and Premium also has volume quota for create/cancel-all/modify/grouped order transaction types.
 - Rate-limit toasts are tier-aware via cached `/api/v1/accountLimits` only. Standard accounts can mention small limits and Plus/Premium guidance; Premium/Plus accounts should not be told to upgrade; unknown tier should keep neutral account/session wording. Do not fetch account limits from the toast path because the account may already be rate-limited.
 - Private WS has explicit rate-limit handling:
   - server rate-limit detection (`too many websocket messages`, `rate limit`)
@@ -469,7 +462,7 @@ Extracted from market data during `fetchMarketsHelper()`:
 - Public WS reconnect policy includes explicit rate-limit reconnect delay handling.
 - Order-placement errors with HTTP `429`/`405`, rate-limit text, or volume-quota text normalize through the same tier-aware Lighter rate-limit guidance.
 - Future improvement: preserve `sendRawTx` / `sendRawTxBatch` quota telemetry such as `volume_quota_remaining` from successful transaction responses. That could support a separate "trading quota low/exhausted" warning, but it should not be used to claim IP-vs-account REST/WS bucket unless Lighter exposes an explicit discriminator.
-- `recvWindow`: 20,000ms (`lighter.types.ts:3`)
+- `recvWindow`: 20,000ms (`RECV_WINDOW`)
 - `tickInterval`: 2,000ms (polling interval between tick cycles)
 - Lot order submissions: 100ms delay between orders
 - Cancel batches: 1-second delay between groups of 10
@@ -653,8 +646,8 @@ Raw Lighter requests support only `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `12h`, a
 
 ## Grafana Monitoring
 
-**Every-request tracking**: `CREATE_ORDER`, `CANCEL_ORDER`, `CANCEL_ALL_ORDERS`
-**Periodic tracking**: `ACCOUNT`, `ACCOUNT_BALANCE`, `POSITIONS`, `OPEN_ORDERS`
+**Every-request tracking**: `SEND_TX`, `SEND_TX_BATCH`
+**Periodic tracking**: `ACCOUNT`, `ACCOUNT_LIMITS`, `OPEN_ORDERS`
 
 ## 2026-03 Integration Update
 

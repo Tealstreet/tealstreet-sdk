@@ -20,49 +20,24 @@ export const BASE_WS_URL = {
 };
 
 export const ENDPOINTS = {
-  // Account endpoints
   ACCOUNT: '/api/v1/account',
   ACCOUNTS_BY_L1_ADDRESS: '/api/v1/accountsByL1Address',
   ACCOUNT_LIMITS: '/api/v1/accountLimits',
   CHANGE_ACCOUNT_TIER: '/api/v1/changeAccountTier',
-  ACCOUNT_BALANCE: '/api/v1/account/balance',
-  ACCOUNT_NONCE: '/api/v1/account/nonce',
-  API_KEYS: '/api/v1/account/api-keys',
-
-  // Market data endpoints
   MARKETS: '/api/v1/orderBooks',
   ORDER_BOOK_DETAILS: '/api/v1/orderBookDetails',
   EXCHANGE_STATS: '/api/v1/exchangeStats',
   CANDLES: '/api/v1/candles',
-  // Legacy aliases retained for downstream compatibility; public fallback code must not call these routes.
-  TICKERS: '/api/v1/tickers',
-  ORDERBOOK: '/api/v1/orderbook',
   TRADES: '/api/v1/trades',
-
-  // Order endpoints
-  ORDERS: '/api/v1/orders',
   OPEN_ORDERS: '/api/v1/accountActiveOrders',
   INACTIVE_ORDERS: '/api/v1/accountInactiveOrders',
-  ORDER_HISTORY: '/api/v1/orders/history',
-  CREATE_ORDER: '/api/v1/orders',
-  CANCEL_ORDER: '/api/v1/orders',
-  CANCEL_ALL_ORDERS: '/api/v1/orders/all',
-
-  // Position endpoints
-  POSITIONS: '/api/v1/positions',
-
-  // Transaction endpoints
-  TRANSACTIONS: '/api/v1/transactions',
+  SEND_TX: '/api/v1/sendTx',
+  SEND_TX_BATCH: '/api/v1/sendTxBatch',
 };
 
-export const GRAFANA_ENDPOINTS_EVERY = [ENDPOINTS.CREATE_ORDER, ENDPOINTS.CANCEL_ORDER, ENDPOINTS.CANCEL_ALL_ORDERS];
+export const GRAFANA_ENDPOINTS_EVERY = [ENDPOINTS.SEND_TX, ENDPOINTS.SEND_TX_BATCH];
 
-export const GRAFANA_ENDPOINTS_PERIODIC = [
-  ENDPOINTS.ACCOUNT,
-  ENDPOINTS.ACCOUNT_BALANCE,
-  ENDPOINTS.POSITIONS,
-  ENDPOINTS.OPEN_ORDERS,
-];
+export const GRAFANA_ENDPOINTS_PERIODIC = [ENDPOINTS.ACCOUNT, ENDPOINTS.ACCOUNT_LIMITS, ENDPOINTS.OPEN_ORDERS];
 
 export const INTERVAL: Partial<Record<Timeframe, string>> = {
   '1m': '1m',

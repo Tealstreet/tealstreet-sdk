@@ -926,15 +926,22 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       }
       this.trackLastReceived();
       const handlers = Object.entries(this.messageHandlers);
+      const json = jsonParse(data);
 
       if (data.includes('type":"ping')) {
         this.sendPayload({ type: 'pong', timestamp: virtualClock.getCurrentTimeMs() });
       }
 
+      if (json?.error) {
+        const code = json.error.code ?? 'unknown';
+        const message = json.error.message ?? 'Unknown public stream error';
+        this.recordMessageHandlerStats('error');
+        this.parent.log(`[Lighter] Public WS error ${code}: ${message}`, LogSeverity.Warning);
+      }
+
       for (const [topic, handler] of handlers) {
         if (shouldDispatchLighterPublicMessage(topic, data)) {
           this.recordMessageHandlerStats(topic);
-          const json = jsonParse(data);
           for (const cb of handler) {
             if (json) cb(json);
           }
