@@ -59,7 +59,10 @@ import {
 } from './bitunix.types';
 import { BitunixFuturesWebsocket } from './bitunix.ws-futures';
 import { BitunixPrivateWebsocket } from './bitunix.ws-private';
-import { BitunixPublicWebsocket } from './bitunix.ws-public';
+import {
+  BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION,
+  BitunixPublicWebsocket,
+} from './bitunix.ws-public';
 
 // TODO: translate our err messages
 export class BitunixExchange extends BaseExchange {
@@ -68,6 +71,7 @@ export class BitunixExchange extends BaseExchange {
 
   publicWebsocket: BitunixPublicWebsocket;
   publicWebsocketSecondary: BitunixPublicWebsocket;
+  publicWebsocketShards: BitunixPublicWebsocket[] = [];
   privateWebsocket: BitunixPrivateWebsocket;
   futuresWebsocket: BitunixFuturesWebsocket;
 
@@ -215,8 +219,31 @@ export class BitunixExchange extends BaseExchange {
     super.dispose();
     this.publicWebsocket.dispose();
     this.publicWebsocketSecondary.dispose();
+    this.publicWebsocketShards.forEach((websocket) => websocket.dispose());
     this.futuresWebsocket.dispose();
     this.privateWebsocket.dispose();
+  };
+
+  private configurePublicWebsocketShards = (markets: Market[]) => {
+    this.publicWebsocketShards.forEach((websocket) => websocket.dispose());
+    this.publicWebsocketShards = [];
+
+    const symbolShards = chunk(
+      markets.map((market) => market.symbol),
+      BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION,
+    );
+    const firstShard = symbolShards[0] || [];
+    this.publicWebsocket.setMarketSymbols(firstShard);
+    this.publicWebsocketSecondary.setMarketSymbols(firstShard);
+
+    for (const symbols of symbolShards.slice(1)) {
+      this.publicWebsocketShards.push(
+        new BitunixPublicWebsocket(this, false, symbols),
+        new BitunixPublicWebsocket(this, true, symbols),
+      );
+    }
+
+    return [this.publicWebsocket, this.publicWebsocketSecondary, ...this.publicWebsocketShards];
   };
 
   validateAccount = async () => {
@@ -271,9 +298,9 @@ export class BitunixExchange extends BaseExchange {
         loaded: { ...this.store.loaded, tickers: true },
       });
 
-      // start websocket streams
-      this.publicWebsocket.connectAndSubscribe();
-      this.publicWebsocketSecondary.connectAndSubscribe();
+      // Each public connection carries one channel per market. Bitunix caps a
+      // connection at 300 subscriptions, so shard both ticker and price feeds.
+      this.configurePublicWebsocketShards(markets).forEach((websocket) => websocket.connectAndSubscribe());
     }
 
     if (this.isPublicDataOnly) {
@@ -371,7 +398,12 @@ export class BitunixExchange extends BaseExchange {
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS);
 
       const markets: Market[] = symbols
-        .filter((m) => v(m, 'symbolStatus') === 'OPEN' && v(m, 'quote') === 'USDT')
+        .filter(
+          (m) =>
+            v(m, 'symbolStatus') === 'OPEN' &&
+            v(m, 'quote') === 'USDT' &&
+            v(m, 'isApiSupported') !== false,
+        )
         .map((m) => {
           const baseAsset = v(m, 'base');
           const quoteAsset = v(m, 'quote');
@@ -381,7 +413,7 @@ export class BitunixExchange extends BaseExchange {
             symbol: m.symbol,
             base: baseAsset,
             quote: quoteAsset,
-            active: m.status === 'TRADING',
+            active: v(m, 'symbolStatus') === 'OPEN',
             precision: {
               amount: +(parsePrecision(v(m, 'basePrecision')) || 0),
               price: +(parsePrecision(v(m, 'quotePrecision')) || 0),
@@ -419,15 +451,17 @@ export class BitunixExchange extends BaseExchange {
 
         //console.log('ticket', ticker);
 
+        const last = parseFloat(v(ticker, 'last'));
+        const open = parseFloat(v(ticker, 'open'));
         const finalTicker: Ticker = {
           id: market.id,
           symbol: market.symbol,
           bid: parseFloat(v(ticker, 'last')),
           ask: parseFloat(v(ticker, 'last')),
-          last: parseFloat(v(ticker, 'last')),
+          last,
           mark: parseFloat(v(ticker, 'markPrice')),
           index: parseFloat(v(ticker, 'markPrice')),
-          percentage: parseFloat(v(ticker, 'priceChangePercent')),
+          percentage: open === 0 ? 0 : ((last - open) / open) * 100,
           fundingRate: 0,
           fundingTime: 0,
           // fundingRate: parseFloat(v(ticker, 'lastFundingRate')),
@@ -944,7 +978,7 @@ export class BitunixExchange extends BaseExchange {
       return [];
     };
 
-    const fetchRows = async (endpoint: string): Promise<Array<Record<string, any>>> => {
+    const fetchRows = async (): Promise<Array<Record<string, any>>> => {
       const historyParams = omitUndefined({
         symbol: market.symbol,
         orderId,
@@ -953,12 +987,8 @@ export class BitunixExchange extends BaseExchange {
         limit: maxLimit,
       });
 
-      const userTradesParams = omitUndefined({
-        symbol: market.symbol,
-      });
-
       const requestConfig: any = {
-        params: endpoint === ENDPOINTS.HISTORY_TRADES ? historyParams : userTradesParams,
+        params: historyParams,
         __suppressExchangeError: true,
         __suppressExchangeRateLimitError: true,
         headers: {
@@ -966,17 +996,15 @@ export class BitunixExchange extends BaseExchange {
           'x-tealstreet-suppress-exchange-rate-limit-error': '1',
         },
       };
-      const response = await this.xhr.get(endpoint, requestConfig);
+      const response = await this.xhr.get(ENDPOINTS.HISTORY_TRADES, requestConfig);
       return extractRows(response?.data);
     };
 
     try {
-      const primaryRows = await fetchRows(ENDPOINTS.HISTORY_TRADES);
-      const fallbackRows: Array<Record<string, any>> =
-        primaryRows.length === 0 ? await fetchRows(ENDPOINTS.USER_TRADES) : [];
+      const primaryRows = await fetchRows();
 
       const deduped = new Map<string, Execution>();
-      for (const execution of [...parseRows(primaryRows), ...parseRows(fallbackRows)]) {
+      for (const execution of parseRows(primaryRows)) {
         if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
           continue;
         }
@@ -989,26 +1017,6 @@ export class BitunixExchange extends BaseExchange {
 
       return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxLimit);
     } catch (err: any) {
-      let fallbackRows: Array<Record<string, any>> = [];
-      try {
-        fallbackRows = await fetchRows(ENDPOINTS.USER_TRADES);
-      } catch {
-        fallbackRows = [];
-      }
-      if (fallbackRows.length > 0) {
-        const deduped = new Map<string, Execution>();
-        for (const execution of parseRows(fallbackRows)) {
-          if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
-            continue;
-          }
-          if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
-            continue;
-          }
-          const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
-          deduped.set(key, execution);
-        }
-        return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxLimit);
-      }
       this.log(`fetchExecutions failed: ${err?.response?.data?.msg || err?.message}`, LogSeverity.Warning);
       return [];
     }
@@ -1096,7 +1104,7 @@ export class BitunixExchange extends BaseExchange {
 
     try {
       await this.xhr.post(ENDPOINTS.HEDGE_MODE, {
-        dualSidePosition: hedged ? 'true' : 'false',
+        positionMode: hedged ? 'HEDGE' : 'ONE_WAY',
       });
       this.store.setSetting('isHedged', hedged);
     } catch (err: any) {
@@ -1552,6 +1560,11 @@ export class BitunixExchange extends BaseExchange {
   };
 
   private formatTPSLOrder = (opts: PlaceOrderOpts) => {
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
+
     // Find the position to apply TP/SL to
     const positionSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
     const position = this.store.positions.find(
@@ -1559,7 +1572,7 @@ export class BitunixExchange extends BaseExchange {
     );
 
     if (!position) {
-      throw new Error(`No open ${positionSide} position found for ${opts.symbol}`);
+      return rejectPreflight(`No open ${positionSide} position found for ${opts.symbol}`);
     }
 
     // Prefer WS-cached positionId (updated immediately on position events)
@@ -1567,12 +1580,12 @@ export class BitunixExchange extends BaseExchange {
     const resolvedPositionId = this.positionIdCache.get(`${opts.symbol}:${positionSide}`) || position.info?.positionId;
 
     if (!resolvedPositionId) {
-      throw new Error(`Missing positionId for ${opts.symbol} TP/SL order`);
+      return rejectPreflight(`Missing positionId for ${opts.symbol} TP/SL order`);
     }
 
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) {
-      throw new Error(`Market ${opts.symbol} not found`);
+      return rejectPreflight(`Market ${opts.symbol} not found`);
     }
 
     const pPrice = market.precision.price;
@@ -1584,7 +1597,7 @@ export class BitunixExchange extends BaseExchange {
     // This will close the entire position when triggered
     if (isFullPositionOrder) {
       if (!opts.price) {
-        throw new Error('Price is required for Position TP/SL orders');
+        return rejectPreflight('Price is required for Position TP/SL orders');
       }
 
       const price = adjust(opts.price, pPrice);
@@ -1655,7 +1668,7 @@ export class BitunixExchange extends BaseExchange {
 
     // For partial position TP/SL orders, use the regular TP/SL endpoint
     if (!opts.price) {
-      throw new Error('Price is required for TP/SL orders');
+      return rejectPreflight('Price is required for TP/SL orders');
     }
 
     const pAmount = market.precision.amount;

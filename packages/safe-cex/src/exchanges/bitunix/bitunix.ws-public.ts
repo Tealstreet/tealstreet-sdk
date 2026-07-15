@@ -11,6 +11,10 @@ type MessageHandlers = {
   [topic: string]: Array<(json: Data) => void>;
 };
 
+export const BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION = 300;
+const BITUNIX_SUBSCRIBE_BATCH_SIZE = 20;
+const BITUNIX_SUBSCRIBE_INTERVAL_MS = 250;
+
 export const INTERVAL: Record<Timeframe, KlineInterval> = {
   '1m': '1min',
   '3m': '3min',
@@ -33,6 +37,8 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
 
   pingLoopTimeoutId?: NodeJS.Timeout;
 
+  subscriptionTimeoutId?: NodeJS.Timeout;
+
   isSecondary = false;
 
   private messageCount = 0;
@@ -40,14 +46,54 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
   private lastMessageCount = 0;
   private connectionAttempts = 0;
   private readonly MAX_ATTEMPTS = 2;
+  private marketSymbols?: Set<string>;
+  private subscriptionQueue: Array<Array<Record<string, string>>> = [];
 
-  constructor(parent: BitunixExchange, isSecondary = false) {
+  constructor(parent: BitunixExchange, isSecondary = false, marketSymbols?: string[]) {
     super(parent);
     this.isSecondary = isSecondary;
+    this.setMarketSymbols(marketSymbols);
   }
+
+  setMarketSymbols = (marketSymbols?: string[]) => {
+    this.marketSymbols = marketSymbols ? new Set(marketSymbols) : undefined;
+  };
+
+  private clearSubscriptionQueue = () => {
+    clearTimeout(this.subscriptionTimeoutId);
+    this.subscriptionTimeoutId = undefined;
+    this.subscriptionQueue = [];
+  };
+
+  private drainSubscriptionQueue = () => {
+    if (this.isDisposed || this.subscriptionQueue.length === 0) {
+      this.subscriptionTimeoutId = undefined;
+      return;
+    }
+
+    const args = this.subscriptionQueue.shift();
+    if (args?.length) {
+      this.send(JSON.stringify({ op: 'subscribe', args }));
+    }
+
+    // Keep a cooldown timer even after the current queue drains. A dynamic
+    // subscription arriving immediately afterwards must not create a burst.
+    this.subscriptionTimeoutId = setTimeout(this.drainSubscriptionQueue, BITUNIX_SUBSCRIBE_INTERVAL_MS);
+  };
+
+  private enqueueSubscriptions = (args: Array<Record<string, string>>, batchSize = BITUNIX_SUBSCRIBE_BATCH_SIZE) => {
+    for (let index = 0; index < args.length; index += batchSize) {
+      this.subscriptionQueue.push(args.slice(index, index + batchSize));
+    }
+
+    if (!this.subscriptionTimeoutId) {
+      this.drainSubscriptionQueue();
+    }
+  };
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
+      this.clearSubscriptionQueue();
       // Only switch to fallback URL if we've tried the normal connection multiple times without success
       if (this.connectionAttempts >= this.MAX_ATTEMPTS && this.lastMessageCount === 0 && this.messageCount === 0) {
         this.useFallbackUrl = true;
@@ -72,6 +118,7 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
 
       const handleClose = () => {
         clearTimeout(this.pingLoopTimeoutId);
+        this.clearSubscriptionQueue();
         this.onClose();
       };
 
@@ -128,7 +175,9 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
     if (added.length === 0 || !this.ws || this.isDisposed) return;
 
     const channel = this.isSecondary ? 'price' : 'ticker';
-    const args = added.map((m) => ({ symbol: m.symbol, ch: channel }));
+    const args = added
+      .filter((market) => !this.marketSymbols || this.marketSymbols.has(market.symbol))
+      .map((market) => ({ symbol: market.symbol, ch: channel }));
 
     // Track topics
     for (const arg of args) {
@@ -136,11 +185,7 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
       this.topics[key] = 1;
     }
 
-    // Subscribe in batches of 20
-    for (let i = 0; i < args.length; i += 20) {
-      const batch = args.slice(i, i + 20);
-      this.send(JSON.stringify({ op: 'subscribe', args: batch }));
-    }
+    this.enqueueSubscriptions(args);
   };
 
   subscribe = () => {
@@ -150,18 +195,17 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
 
     // Send depth topics individually
     for (const topic of depthTopics) {
-      this.send(JSON.stringify({ op: 'subscribe', args: [JSON.parse(topic)] }));
+      this.enqueueSubscriptions([JSON.parse(topic)], 1);
     }
 
-    // Batch other topics in groups of 20
-    for (let i = 0; i < otherTopics.length; i += 20) {
-      const batch = otherTopics.slice(i, i + 20).map((topic) => JSON.parse(topic));
-      this.send(JSON.stringify({ op: 'subscribe', args: batch }));
-    }
+    this.enqueueSubscriptions(otherTopics.map((topic) => JSON.parse(topic)));
   };
 
   subscribeMarketsToChannel = (channel: string) => {
-    const args = this.parent.store.markets.map((m) => ({ symbol: m.symbol, ch: channel }));
+    const args = this.parent.store.markets
+      .filter((market) => !this.marketSymbols || this.marketSymbols.has(market.symbol))
+      .slice(0, BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION)
+      .map((market) => ({ symbol: market.symbol, ch: channel }));
 
     // Track topics
     for (const arg of args) {
@@ -169,27 +213,20 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
       this.topics[key] = 1;
     }
 
-    // Subscribe in batches of 20
-    for (let i = 0; i < args.length; i += 20) {
-      const batch = args.slice(i, i + 20);
-      const payload = {
-        op: 'subscribe',
-        args: batch,
-      };
-      this.send(JSON.stringify(payload));
-    }
   };
 
   subscribeToBook = (symbol: string, sub: 'depth_book1' | 'depth_book5' | 'depth_book15' | 'depth_books') => {
     const key = JSON.stringify({ symbol, ch: sub });
     this.topics[key] = 1;
 
-    this.send(
-      JSON.stringify({
-        op: 'subscribe',
-        args: [{ symbol, ch: sub }],
-      }),
-    );
+    this.enqueueSubscriptions([{ symbol, ch: sub }], 1);
+  };
+
+  dispose = () => {
+    this.parent.emitter.off('markets:changed', this.onMarketsChanged);
+    clearTimeout(this.pingLoopTimeoutId);
+    this.clearSubscriptionQueue();
+    super.dispose();
   };
 
   onMessage = ({ data }: MessageEvent) => {

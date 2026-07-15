@@ -147,7 +147,7 @@ describe('Targeted exchange fetchExecutions mapping', () => {
     ]);
   });
 
-  it('returns empty for Bitunix when both primary and fallback are empty', async () => {
+  it('returns empty for Bitunix when the documented history endpoint is empty', async () => {
     const market = {
       id: 'BTCUSDT',
       symbol: 'BTCUSDT',
@@ -156,17 +156,13 @@ describe('Targeted exchange fetchExecutions mapping', () => {
       precision: { amount: 0.001, price: 0.1 },
     };
     const exchange = new BitunixExchange('bitunix' as any, baseOptions, createStore([market]));
-    const get = vi
-      .fn()
-      .mockResolvedValueOnce({ data: { data: { data: { tradeList: [] } } } })
-      .mockResolvedValueOnce({ data: { data: { data: { tradeList: [] } } } });
+    const get = vi.fn().mockResolvedValueOnce({ data: { data: { data: { tradeList: [] } } } });
     exchange.xhr = { get } as any;
 
     const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 100 });
 
     expect(get.mock.calls[0][0]).toBe(BITUNIX_ENDPOINTS.HISTORY_TRADES);
-    expect(get.mock.calls[1][0]).toBe(BITUNIX_ENDPOINTS.USER_TRADES);
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledTimes(1);
     expect(executions).toEqual([]);
   });
 
@@ -217,7 +213,7 @@ describe('Targeted exchange fetchExecutions mapping', () => {
     ]);
   });
 
-  it('falls back to Bitunix USER_TRADES only when primary request errors', async () => {
+  it('returns empty for Bitunix when the documented history endpoint errors', async () => {
     const market = {
       id: 'BTCUSDT',
       symbol: 'BTCUSDT',
@@ -226,49 +222,15 @@ describe('Targeted exchange fetchExecutions mapping', () => {
       precision: { amount: 0.001, price: 0.1 },
     };
     const exchange = new BitunixExchange('bitunix' as any, baseOptions, createStore([market]));
-    const get = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('Network Error'))
-      .mockResolvedValueOnce({
-        data: {
-          data: {
-            data: {
-              tradeList: [
-                {
-                  symbol: 'BTCUSDT',
-                  orderId: 'bitunix-fallback-order',
-                  side: 'BUY',
-                  price: '51000',
-                  qty: '0.02',
-                  fee: '-0.2',
-                  ctime: 1700000004000,
-                  feeCurrency: 'USDT',
-                },
-              ],
-            },
-          },
-        },
-      });
+    const get = vi.fn().mockRejectedValueOnce(new Error('Network Error'));
     exchange.xhr = { get } as any;
 
     const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 100 });
 
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][0]).toBe(BITUNIX_ENDPOINTS.HISTORY_TRADES);
-    expect(get.mock.calls[1][0]).toBe(BITUNIX_ENDPOINTS.USER_TRADES);
-    expect(get.mock.calls[1][1]).toMatchObject({ __suppressExchangeError: true });
-    expect(executions).toEqual([
-      {
-        timestamp: 1700000004,
-        symbol: 'BTCUSDT',
-        orderId: 'bitunix-fallback-order',
-        price: 51000,
-        qty: 0.02,
-        side: OrderSide.Buy,
-        commission: 0.2,
-        commissionAsset: 'USDT',
-      },
-    ]);
+    expect(get.mock.calls[0][1]).toMatchObject({ __suppressExchangeError: true });
+    expect(executions).toEqual([]);
   });
 
   it('handles Bitunix null open-orders payload without throwing', async () => {

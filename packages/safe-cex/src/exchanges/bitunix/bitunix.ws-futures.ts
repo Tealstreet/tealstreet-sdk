@@ -1,9 +1,7 @@
-import { nanoid } from 'nanoid';
 import { inflate } from 'pako';
 import { Candle, OHLCVOptions, OrderBook } from '../../types';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
-import { updateOrderBook } from '../../utils/updateOrderBook';
+import { calcOrderBookTotal } from '../../utils/orderbook';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { MessageHandlers } from '../types';
@@ -196,15 +194,6 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
     };
     let timeoutId: NodeJS.Timeout | null = null;
 
-    const innerId = nanoid();
-
-    if (!this.orderBookInnerState[innerId]) {
-      this.orderBookInnerState[innerId] = {
-        updates: [],
-        isSnapshotLoaded: false,
-      };
-    }
-
     const topic = JSON.stringify(arg);
     const orderBook: OrderBook = { bids: [], asks: [] };
 
@@ -223,7 +212,6 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
         total: 0,
       }));
 
-      sortOrderBook(orderBook);
       calcOrderBookTotal(orderBook);
 
       callback(orderBook);
@@ -252,9 +240,6 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
       orderBook.asks = [];
       orderBook.bids = [];
-      this.orderBookInnerState[innerId].updates = [];
-      this.orderBookInnerState[innerId].isSnapshotLoaded = false;
-
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
@@ -270,19 +255,4 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
     };
   };
 
-  private processOrderBookUpdate = (orderBook: OrderBook, update: Record<string, any>) => {
-    const sides = { bids: update.b, asks: update.a };
-
-    Object.entries(sides).forEach(([side, data]) => {
-      // we need this for ts compile
-      if (side !== 'bids' && side !== 'asks') return;
-
-      data.forEach(([p, a]: string[]) => {
-        const price = parseFloat(p);
-        const amount = parseFloat(a);
-        const update = { price, amount, total: 0 };
-        updateOrderBook(orderBook, side, update);
-      });
-    });
-  };
 }

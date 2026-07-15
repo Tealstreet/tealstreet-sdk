@@ -45,7 +45,6 @@ export const ENDPOINTS = {
   SET_LEVERAGE: '/api/v1/futures/account/change_leverage',
   OPEN_ORDERS: '/api/v1/futures/trade/get_pending_orders',
   OPEN_TPSL_ORDERS: '/api/v1/futures/tpsl/get_pending_orders',
-  CANCEL_SYMBOL_ORDERS: '/api/v1/allOpenOrders',
   ORDER: '/api/v1/futures/trade/place_order',
   TP_SL_ORDER: '/api/v1/futures/tpsl/place_order',
   POSITION_TP_SL_ORDER: '/api/v1/futures/tpsl/position/place_order',
@@ -53,21 +52,17 @@ export const ENDPOINTS = {
   CANCEL_ORDER_TP_SL: '/api/v1/futures/tpsl/cancel_order',
   CANCEL_ORDER: '/api/v1/futures/trade/cancel_orders',
   KLINE: '/api/v1/futures/market/kline',
-  LISTEN_KEY: '/api/v1/listenKey',
-  ORDERBOOK: '/api/v1/depth',
   HISTORY_TRADES: '/api/v1/futures/trade/get_history_trades',
-  USER_TRADES: '/api/v1/userTrades',
   SET_MARGIN_TYPE: '/api/v1/futures/account/change_margin_mode',
   POSITIONS: '/api/v1/futures/position/get_pending_positions',
 };
 
-export const PUBLIC_ENDPOINTS = [ENDPOINTS.MARKETS, ENDPOINTS.TICKERS, ENDPOINTS.KLINE, ENDPOINTS.ORDERBOOK];
+export const PUBLIC_ENDPOINTS = [ENDPOINTS.MARKETS, ENDPOINTS.TICKERS, ENDPOINTS.KLINE];
 
 export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.ORDER,
   ENDPOINTS.BATCH_ORDERS,
   ENDPOINTS.SET_LEVERAGE,
-  ENDPOINTS.CANCEL_SYMBOL_ORDERS,
   ENDPOINTS.HEDGE_MODE,
 ];
 
