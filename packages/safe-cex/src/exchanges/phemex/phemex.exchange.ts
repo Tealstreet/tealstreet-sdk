@@ -1014,6 +1014,13 @@ export class PhemexExchange extends BaseExchange {
       return await this.formatCreateTrailingStopLossOrder(opts);
     }
 
+    if (opts.type === OrderType.Conditional) {
+      const message =
+        'Phemex opening trigger orders are disabled until stopPxRp and triggerType are implemented and verified.';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     const market = this.store.marketsBySymbol[opts.symbol];
 
     if (!market) {
@@ -1152,12 +1159,14 @@ export class PhemexExchange extends BaseExchange {
 
     //const distancePercentage = Math.round(((priceDistance * 100) / ticker.last) * 10) / 10;
 
+    // This formatter remains capability-gated by supportsTrailingStopLoss=false.
+    // Keep its dormant wire shape aligned with PUT /g-orders/create so a future
+    // enablement cannot silently submit a quantity-less order.
     const payload = {
       symbol: this.formatSymbolOut(opts.symbol),
       posSide: await this.getOrderPositionSide(opts),
       side: capitalize(inverseObj(ORDER_SIDE)[opts.side]),
-      type: inverseObj(ORDER_TYPE)[OrderType.TrailingStopLoss],
-      quantity: `${position.contracts}`,
+      orderQtyRq: `${position.contracts}`,
       ordType: 'Stop',
       //triggerType: 'ByMarkPrice',
       pegOffsetValueRp: `${opts.side === OrderSide.Sell ? -1 * priceDistance : priceDistance}`,

@@ -164,6 +164,8 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 
 **Topic management**: Uses a `topics` dictionary with reference counting. Topics are unsubscribed only when all listeners are removed (count reaches 0).
 
+The always-on ticker stream plus dynamic topics are counted against Phemex's 20-subscription connection cap. A warning is logged at 18/20 active subscriptions, and zero-reference topics are deleted so reconnect only restores live listeners.
+
 ### Private WebSocket (`phemex.ws-private.ts`)
 
 Class name is `BinancePrivateWebsocket` (legacy naming from fork).
@@ -197,6 +199,7 @@ Defined in `ORDER_TYPE` mapping:
 | `StopLoss`         | `Stop`                                                   |
 | `TakeProfit`       | `MarketIfTouched`                                        |
 | `TrailingStopLoss` | `MarketIfTouched` (with `pegPriceType: TrailingStopPeg`) |
+| `Conditional`      | Disabled; fails closed until `stopPxRp` + `triggerType` are verified |
 
 **Order status mapping** (`ORDER_STATUS`):
 
@@ -269,11 +272,17 @@ When a parent order has attached TP/SL, the WebSocket reports them as:
 
 ### Trailing Stop Loss (`formatCreateTrailingStopLossOrder`, `phemex.exchange.ts:897`)
 
+- Metadata keeps `supportsTrailingStopLoss: false`; this dormant path is not exposed in the UI and must be live-validated before enablement.
 - Resolves position for the symbol and opposite side
 - Calculates `priceDistance` as absolute difference between `ticker.last` and `opts.price`
 - Sets `pegPriceType: 'TrailingStopPeg'` and `pegOffsetValueRp` (negative for sell, positive for buy)
 - Always uses the full position size (`position.contracts`)
+- Uses the documented `orderQtyRq` quantity field and does not send the non-contract `type` field
 - Sets `ordType: 'Stop'` (not `MarketIfTouched`)
+
+### Opening Trigger Orders
+
+Metadata keeps `supportsOpeningTriggerOrders: false`. `formatCreateOrder` explicitly rejects `OrderType.Conditional` so non-UI callers cannot send the old malformed `priceRp` payload. Before enabling, implement and verify `stopPxRp` plus `triggerType` according to `CONDITIONAL_ORDERS.md`.
 
 ### Position Side Resolution (`getOrderPositionSide`, `phemex.exchange.ts:937`)
 
@@ -411,7 +420,7 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - **REST base URL**: `https://testnet-api.phemex.com`
 - **WebSocket URL**: `wss://testnet-api.phemex.com/ws` (same for public and private)
 - URLs are selected via `options.testnet` boolean
-- No known feature limitations documented in the code
+- Metadata sets `supportsTestnet: false`; the dormant URLs are not a supported environment and the testnet WS host remains unverified
 - Same broker ID (`Tealstreet_`) used for both environments
 
 ## Known Quirks / Implementation Notes

@@ -4,6 +4,7 @@ import type { PhemexExchange } from './phemex.exchange';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { LogSeverity } from '../../types';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
@@ -15,6 +16,9 @@ type MessageHandlers = {
 };
 
 export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
+  private static readonly MAX_SUBSCRIPTIONS = 20;
+  private static readonly SUBSCRIPTION_WARNING_THRESHOLD = 18;
+  private hasWarnedSubscriptionLimit = false;
   messageHandlers: MessageHandlers = {
     'perp_market24h_pack_p.update': [(d: Data) => this.handleTickerStreamEvents(d)],
   };
@@ -60,6 +64,23 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
           id: id++,
         }),
       );
+    }
+  };
+
+  private updateSubscriptionLimitWarning = () => {
+    const activeSubscriptions =
+      1 + Object.values(this.topics).filter((referenceCount) => referenceCount > 0).length;
+    if (
+      activeSubscriptions >= BinancePublicWebsocket.SUBSCRIPTION_WARNING_THRESHOLD &&
+      !this.hasWarnedSubscriptionLimit
+    ) {
+      this.hasWarnedSubscriptionLimit = true;
+      this.parent.log(
+        `[Phemex] Public WebSocket has ${activeSubscriptions}/${BinancePublicWebsocket.MAX_SUBSCRIPTIONS} active subscriptions; additional charts or orderbooks may be rejected.`,
+        LogSeverity.Warning,
+      );
+    } else if (activeSubscriptions < BinancePublicWebsocket.SUBSCRIPTION_WARNING_THRESHOLD) {
+      this.hasWarnedSubscriptionLimit = false;
     }
   };
 
@@ -193,6 +214,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
 
         this.topics[topic] = (this.topics[topic] || 0) + 1;
+        this.updateSubscriptionLimitWarning();
 
         const payload = {
           method: 'kline_p.subscribe',
@@ -222,6 +244,8 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         this.cleanupMessageHandlerStats(handler);
         this.send(JSON.stringify(payload));
       }
+      if (this.topics[topic] <= 0) delete this.topics[topic];
+      this.updateSubscriptionLimitWarning();
     };
   };
 
@@ -311,6 +335,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
 
         this.topics[topic] = (this.topics[topic] || 0) + 1;
+        this.updateSubscriptionLimitWarning();
 
         const payload = { method: 'orderbook_p.subscribe', params: [symbol], id: 3 };
         this.send(JSON.stringify(payload));
@@ -340,6 +365,8 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         this.cleanupMessageHandlerStats(handler);
         this.send(JSON.stringify(payload));
       }
+      if (this.topics[topic] <= 0) delete this.topics[topic];
+      this.updateSubscriptionLimitWarning();
     };
   };
 
