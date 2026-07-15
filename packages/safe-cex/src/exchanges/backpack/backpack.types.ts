@@ -182,7 +182,7 @@ export interface BackpackBalance {
 
 export interface BackpackOrder {
   id: string;
-  clientId?: string;
+  clientId?: number;
   symbol: string;
   side: 'Bid' | 'Ask';
   orderType: 'Limit' | 'Market';
@@ -212,7 +212,7 @@ export interface BackpackOrderRequest {
   quoteQuantity?: string;
   timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'PO';
   selfTradePrevention?: 'RejectTaker' | 'RejectMaker' | 'RejectBoth' | 'Allow';
-  clientId?: string;
+  clientId?: number;
   postOnly?: boolean;
   reduceOnly?: boolean;
   // Trigger order settings
@@ -228,7 +228,7 @@ export interface BackpackOrderRequest {
 }
 
 export interface BackpackFill {
-  clientId?: string;
+  clientId?: number;
   orderId: string;
   symbol: string;
   side: 'Bid' | 'Ask';

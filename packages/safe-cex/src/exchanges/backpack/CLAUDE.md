@@ -57,6 +57,14 @@ Backpack's narrow request window when the local system clock is skewed.
 The SHA-512 implementation from `@noble/hashes/sha2.js` is installed as
 `ed25519.hashes.sha512` at module load time.
 
+`POST /api/v1/orders` has a distinct signing contract. Its JSON body stays an
+array: sort each row independently, prefix each row with
+`instruction=orderExecute`, concatenate the row query strings, then append one
+shared `timestamp` and `window`. Never object-spread the array into numeric
+keys. Backpack's current primary OpenAPI shows a two-row example but publishes
+no request `maxItems`; safe-cex therefore caps active batching at exactly two
+rows and does not rely on the older, unsupported claim that the maximum is 20.
+
 ### Instruction Types
 
 Each authenticated endpoint maps to a specific instruction string used in signature generation:
@@ -67,6 +75,7 @@ Each authenticated endpoint maps to a specific instruction string used in signat
 | `/api/v1/order`                    | POST   | `orderExecute`         |
 | `/api/v1/order`                    | DELETE | `orderCancel`          |
 | `/api/v1/orders`                   | GET    | `orderQueryAll`        |
+| `/api/v1/orders`                   | POST   | `orderExecute`         |
 | `/api/v1/orders`                   | DELETE | `orderCancelAll`       |
 | `/api/v1/capital`                  | GET    | `balanceQuery`         |
 | `/api/v1/capital/collateral`       | GET    | `collateralQuery`      |
@@ -122,6 +131,7 @@ Defined by `BackpackExchange.start()`:
 ### Trading (Authenticated)
 
 - `POST /api/v1/order` - Place single order (instruction: `orderExecute`)
+- `POST /api/v1/orders` - Place one conservative two-row native LIMIT batch (instruction: `orderExecute`; special per-row signing contract)
 - `DELETE /api/v1/order` - Cancel single order (instruction: `orderCancel`)
 - `DELETE /api/v1/orders` - Cancel all orders for a symbol (instruction: `orderCancelAll`)
 - `GET /api/v1/order` - Get open order details (instruction: `orderQuery`)
@@ -279,6 +289,19 @@ Supported values: `RejectTaker`, `RejectMaker`, `RejectBoth`, `Allow`
 5. For limit orders with TP/SL: place main order, then separate TP/SL trigger orders sequentially
 6. For market orders with TP/SL: use attached `takeProfitTriggerPrice`/`stopLossTriggerPrice` params
 7. Returns array of order IDs
+
+`placeOrders()` uses `POST /api/v1/orders` only for adjacent pairs of
+independently placeable ordinary LIMIT orders. Both rows must resolve to active,
+writable markets, carry finite positive price/amount values within local amount
+bounds, and have none of the trigger, TP/SL, or `close` semantics. MARKET,
+trigger, TP/SL/composite, invalid/oversize, and one-order-tail rows keep the
+existing single path. Both rows and unique positive uint32 `clientId` values are
+built before the single batch write. Responses must contain exactly two `Ok`
+rows and are correlated by echoed `clientId`, never array position; missing,
+duplicate, unknown, malformed, or failed rows, duplicate/empty exchange IDs, or
+identity mismatches fail the whole pair without inventing IDs. Batch transport
+and decode failures are emitted to the exchange error channel while
+`placeOrders()` continues with later inputs as before.
 
 REST order mapping preserves Backpack's documented `reduceOnly` response flag.
 For older responses that omit it, trigger orders retain the conservative

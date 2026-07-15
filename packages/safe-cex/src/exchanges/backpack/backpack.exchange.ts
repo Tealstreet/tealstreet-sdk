@@ -6,13 +6,14 @@ import sumBy from 'lodash/sumBy';
 import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
+import { getExchangeMetadata } from '../../exchangeMetadata';
 import {
   Balance,
   Candle,
-  Execution,
-  ExecutionsOptions,
   ExchangeName,
   ExchangeOptions,
+  Execution,
+  ExecutionsOptions,
   LogSeverity,
   MarginType,
   Market,
@@ -20,8 +21,8 @@ import {
   Order,
   OrderBook,
   OrderSide,
-  OrderStopTriggerType,
   OrderStatus,
+  OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
@@ -32,7 +33,6 @@ import {
   UpdateOrderOpts,
   Writable,
 } from '../../types';
-import { getExchangeMetadata } from '../../exchangeMetadata';
 import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
 import { virtualClock } from '../../utils/virtualClock';
@@ -67,6 +67,14 @@ export class BackpackExchange extends BaseExchange {
 
   // Account-level leverage limit (fetched from account info)
   private accountLeverageLimit: number = 1;
+
+  private nextBatchClientId = (): number => {
+    if (globalThis.crypto?.getRandomValues) {
+      return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+    }
+
+    return Math.floor(Math.random() * 0x1_0000_0000);
+  };
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -671,7 +679,8 @@ export class BackpackExchange extends BaseExchange {
     explicitTriggerType?: OrderStopTriggerType,
   ): NonNullable<BackpackOrderRequest['triggerBy']> => {
     const metadata = getExchangeMetadata('backpack');
-    const triggerType = explicitTriggerType ?? (kind === 'tp' ? metadata.defaultTPTriggerType : metadata.defaultSLTriggerType);
+    const triggerType =
+      explicitTriggerType ?? (kind === 'tp' ? metadata.defaultTPTriggerType : metadata.defaultSLTriggerType);
 
     switch (triggerType) {
       case OrderStopTriggerType.LastPrice:
@@ -682,6 +691,180 @@ export class BackpackExchange extends BaseExchange {
       default:
         return 'MarkPrice';
     }
+  };
+
+  private isOrdinaryLimitOrder = (opts: PlaceOrderOpts): boolean =>
+    opts.type === OrderType.Limit &&
+    opts.triggerPrice === undefined &&
+    opts.takeProfit === undefined &&
+    opts.stopLoss === undefined &&
+    opts.tpTriggerType === undefined &&
+    opts.slTriggerType === undefined &&
+    opts.close !== true;
+
+  private canUseNativeBatch = (opts: PlaceOrderOpts): boolean => {
+    if (!this.isOrdinaryLimitOrder(opts)) return false;
+
+    try {
+      this.buildBatchLimitOrderRequest(opts, 1);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  private buildBatchLimitOrderRequest = (opts: PlaceOrderOpts, clientId: number): BackpackOrderRequest => {
+    if (!this.isOrdinaryLimitOrder(opts)) {
+      throw new Error('Backpack native batches only support ordinary LIMIT orders');
+    }
+    if (!Number.isInteger(clientId) || clientId <= 0 || clientId > 0xffff_ffff) {
+      throw new Error(`Invalid Backpack batch clientId: ${clientId}`);
+    }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      throw new Error(`Market not found: ${opts.symbol}`);
+    }
+    if (!market.active || market.isReadOnly) {
+      throw new Error(`Market is not independently placeable: ${opts.symbol}`);
+    }
+    if (!Number.isFinite(opts.amount) || opts.amount <= 0) {
+      throw new Error(`Invalid order amount: ${opts.amount}`);
+    }
+    if (opts.amount < market.limits.amount.min || opts.amount > market.limits.amount.max) {
+      throw new Error(
+        `Order amount ${opts.amount} is outside ${opts.symbol} bounds ${market.limits.amount.min}-${market.limits.amount.max}`,
+      );
+    }
+    if (!Number.isFinite(opts.price) || (opts.price ?? 0) <= 0) {
+      throw new Error(`Invalid limit order price: ${opts.price}`);
+    }
+
+    const formatValue = (value: number, precision: number, field: string): string => {
+      if (!Number.isFinite(precision) || precision <= 0) {
+        throw new Error(`Invalid ${field} precision for ${opts.symbol}: ${precision}`);
+      }
+
+      const factor = 1 / precision;
+      const rounded = Math.round(value * factor) / factor;
+      const precisionString = precision.toString();
+      const decimalIndex = precisionString.indexOf('.');
+      const decimals = precision >= 1 || decimalIndex === -1 ? 0 : precisionString.length - decimalIndex - 1;
+      const formatted = decimals > 0 ? rounded.toFixed(decimals) : Math.round(rounded).toString();
+
+      if (!Number.isFinite(Number(formatted)) || Number(formatted) <= 0) {
+        throw new Error(`Invalid formatted ${field} for ${opts.symbol}: ${formatted}`);
+      }
+      return formatted;
+    };
+
+    const isPostOnly = opts.timeInForce === OrderTimeInForce.PostOnly;
+    const request: BackpackOrderRequest = {
+      symbol: market.id,
+      side: opts.side === OrderSide.Buy ? 'Bid' : 'Ask',
+      orderType: 'Limit',
+      price: formatValue(opts.price!, market.precision.price, 'price'),
+      quantity: formatValue(opts.amount, market.precision.amount, 'amount'),
+      timeInForce: isPostOnly ? 'GTC' : this.mapTimeInForce(opts.timeInForce),
+      postOnly: isPostOnly,
+      clientId,
+    };
+
+    if (opts.reduceOnly) {
+      request.reduceOnly = true;
+    }
+
+    return request;
+  };
+
+  private createBatchClientIds = (count: number): number[] => {
+    const ids = new Set<number>();
+
+    for (let attempts = 0; ids.size < count && attempts < 64; attempts += 1) {
+      const clientId = this.nextBatchClientId();
+      if (Number.isInteger(clientId) && clientId > 0 && clientId <= 0xffff_ffff) {
+        ids.add(clientId);
+      }
+    }
+
+    if (ids.size !== count) {
+      throw new Error(`Unable to generate ${count} unique Backpack uint32 clientIds`);
+    }
+
+    return [...ids];
+  };
+
+  private decodeBatchOrderResponse = (data: unknown, requests: readonly BackpackOrderRequest[]): string[] => {
+    if (!Array.isArray(data) || data.length !== requests.length) {
+      throw new Error(`Backpack batch response count mismatch: expected ${requests.length}`);
+    }
+
+    const expectedByClientId = new Map<number, BackpackOrderRequest>();
+    for (const request of requests) {
+      if (!Number.isInteger(request.clientId) || request.clientId! <= 0 || request.clientId! > 0xffff_ffff) {
+        throw new Error('Backpack batch request is missing a valid uint32 clientId');
+      }
+      if (expectedByClientId.has(request.clientId!)) {
+        throw new Error(`Duplicate Backpack batch request clientId: ${request.clientId}`);
+      }
+      expectedByClientId.set(request.clientId!, request);
+    }
+
+    const orderIdByClientId = new Map<number, string>();
+    const exchangeIds = new Set<string>();
+
+    for (const row of data) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        throw new Error('Malformed Backpack batch response row');
+      }
+
+      const result = row as Record<string, unknown>;
+      if (result.operation !== 'Ok') {
+        throw new Error(`Backpack batch row failed with operation ${String(result.operation)}`);
+      }
+
+      const clientId = result.clientId;
+      if (!Number.isInteger(clientId) || (clientId as number) <= 0 || (clientId as number) > 0xffff_ffff) {
+        throw new Error('Backpack batch response row is missing a valid uint32 clientId');
+      }
+
+      const expected = expectedByClientId.get(clientId as number);
+      if (!expected) {
+        throw new Error(`Unknown Backpack batch response clientId: ${clientId}`);
+      }
+      if (orderIdByClientId.has(clientId as number)) {
+        throw new Error(`Duplicate Backpack batch response clientId: ${clientId}`);
+      }
+      if (
+        result.symbol !== expected.symbol ||
+        result.side !== expected.side ||
+        result.orderType !== expected.orderType
+      ) {
+        throw new Error(`Backpack batch response identity mismatch for clientId ${clientId}`);
+      }
+
+      const exchangeId = typeof result.id === 'string' ? result.id.trim() : '';
+      if (!exchangeId) {
+        throw new Error(`Backpack batch response clientId ${clientId} is missing an exchange order id`);
+      }
+      if (exchangeIds.has(exchangeId)) {
+        throw new Error(`Duplicate Backpack batch exchange order id: ${exchangeId}`);
+      }
+
+      exchangeIds.add(exchangeId);
+      orderIdByClientId.set(clientId as number, exchangeId);
+    }
+
+    return requests.map((request) => orderIdByClientId.get(request.clientId!)!);
+  };
+
+  private placeBatchPair = async (orders: readonly [PlaceOrderOpts, PlaceOrderOpts]): Promise<string[]> => {
+    const clientIds = this.createBatchClientIds(orders.length);
+    // Build both rows before making the only write. A failure in either row
+    // therefore cannot leave a partially preflighted pair on the exchange.
+    const requests = orders.map((order, index) => this.buildBatchLimitOrderRequest(order, clientIds[index]));
+    const { data } = await this.xhr.post<unknown>(ENDPOINTS.ORDERS, requests);
+    return this.decodeBatchOrderResponse(data, requests);
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
@@ -1006,14 +1189,29 @@ export class BackpackExchange extends BaseExchange {
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     const orderIds: string[] = [];
 
-    for (const order of orders) {
+    for (let index = 0; index < orders.length;) {
+      const first = orders[index];
+      const second = orders[index + 1];
+
+      if (second && this.canUseNativeBatch(first) && this.canUseNativeBatch(second)) {
+        try {
+          const ids = await this.placeBatchPair([first, second]);
+          orderIds.push(...ids);
+        } catch (err) {
+          this.emitAndLogError(err as Error, 'Failed to place Backpack native order pair');
+        }
+        index += 2;
+        continue;
+      }
+
       try {
-        const ids = await this.placeOrder(order);
+        const ids = await this.placeOrder(first);
         orderIds.push(...ids);
       } catch (err) {
         this.log(`Error placing order in batch: ${err}`, LogSeverity.Error);
         // Continue with other orders
       }
+      index += 1;
     }
 
     return orderIds;

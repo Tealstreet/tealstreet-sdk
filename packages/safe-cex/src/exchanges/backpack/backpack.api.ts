@@ -1,8 +1,11 @@
+import type { ExchangeOptions } from '../../types';
+import type { BackpackSigningParams } from './backpack.signing';
+
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
+
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
-import type { ExchangeOptions } from '../../types';
 import { BaseExchange } from '../base';
 import { generateAuthHeaders } from './backpack.signing';
 import { BASE_URLS, INSTRUCTIONS } from './backpack.types';
@@ -46,8 +49,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         // Determine the instruction based on the method and endpoint
         const instruction = getInstruction(config.method?.toUpperCase() || 'GET', config.url || '');
 
-        // Get parameters from either query params or request body
-        const params = { ...(config.params || {}), ...(config.data || {}) };
+        // Preserve batch request bodies as arrays. Object-spreading an array
+        // changes its signed shape into numeric keys and invalidates Backpack's
+        // special POST /orders signing contract.
+        const params = collectAuthParams(config.params, config.data);
 
         // Generate authentication headers
         const authHeaders = await generateAuthHeaders(
@@ -55,7 +60,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
           params,
           options.key,
           options.secret,
-          options?.extra?.recvWindow || 5000
+          options?.extra?.recvWindow || 5000,
         );
 
         // Merge auth headers with existing headers
@@ -123,11 +128,33 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // If no response data, throw original error
       exchange.emitAndLogError(`Backpack API request failed: ${error.message}`);
       throw error;
-    }
+    },
   );
 
   return xhr;
 };
+
+export const collectAuthParams = (queryParams: unknown, requestData: unknown): BackpackSigningParams => {
+  const query = isRecord(queryParams) ? queryParams : {};
+
+  if (Array.isArray(requestData)) {
+    if (Object.keys(query).length > 0) {
+      throw new Error('Backpack batch request signing does not support query parameters');
+    }
+    if (!requestData.every(isRecord)) {
+      throw new Error('Backpack batch request body must contain only object rows');
+    }
+    return requestData;
+  }
+
+  return {
+    ...query,
+    ...(isRecord(requestData) ? requestData : {}),
+  };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /**
  * Check if an endpoint is public (doesn't require authentication)
@@ -156,7 +183,7 @@ function isPublicEndpoint(url: string): boolean {
 /**
  * Determine the instruction type based on the HTTP method and endpoint
  */
-function getInstruction(method: string, url: string): string {
+export function getInstruction(method: string, url: string): string {
   // Order endpoints
   if (url.includes('/api/v1/order') && !url.includes('/api/v1/orders')) {
     if (method === 'GET') return INSTRUCTIONS.ORDER_QUERY;
@@ -166,6 +193,7 @@ function getInstruction(method: string, url: string): string {
 
   if (url.includes('/api/v1/orders')) {
     if (method === 'GET') return INSTRUCTIONS.ORDER_QUERY_ALL;
+    if (method === 'POST') return INSTRUCTIONS.ORDER_EXECUTE;
     if (method === 'DELETE') return INSTRUCTIONS.ORDER_CANCEL_ALL;
   }
 

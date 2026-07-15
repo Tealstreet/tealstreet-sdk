@@ -30,11 +30,15 @@ describe('Backpack execution history audit regression', () => {
         },
       ],
     });
-    exchange = new BackpackExchange('backpack', { key: 'public-key', secret: 'secret', testnet: false } as ExchangeOptions, store);
+    exchange = new BackpackExchange(
+      'backpack',
+      { key: 'public-key', secret: 'secret', testnet: false } as ExchangeOptions,
+      store,
+    );
     get = vi.fn().mockResolvedValue({
       data: [
         {
-          clientId: 'client-1',
+          clientId: 1,
           fee: '-0.25',
           feeSymbol: 'USDC',
           isMaker: false,
