@@ -42,7 +42,7 @@ import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
-import { add, adjust, subtract } from '../../utils/safe-math';
+import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
@@ -54,6 +54,7 @@ import {
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TIME_IN_FORCE,
+  ORDER_TIME_IN_FORCE_OUTBOUND,
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
   POSITION_SIDE,
@@ -75,7 +76,9 @@ export class BybitSpotExchange extends BaseExchange {
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
-  private unifiedMarginStatus: number = 1;
+  // Bybit no longer offers Classic accounts. Start in UTA 2.0 Pro mode so
+  // account validation never probes the retired CONTRACT wallet API first.
+  private unifiedMarginStatus: number = 6;
 
   private needsReinit = false;
 
@@ -327,75 +330,30 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   formatBalance = (rawBalance: any) => {
-    // UNIFIED ACCOUNT TYPE BALANCE CALCULATION
-    // ----------------------------------------
-    if (this.accountType === 'UNIFIED') {
-      const [firstAccount] = rawBalance || [];
-
-      // this is no longer compatible with our approach to USDC pnl. Need to sum up position pnl
-      // const upnl = parseFloat(firstAccount.totalPerpUPL);
-      const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
-      const total = subtract(parseFloat(firstAccount.totalEquity), upnl);
-
-      /*
-      "coin": [
-    {
-      "availableToBorrow": "",
-      "bonus": "0",
-      "accruedInterest": "0",
-      "availableToWithdraw": "0.20012198",
-      "totalOrderIM": "0",
-      "equity": "0.20012198",
-      "totalPositionMM": "0",
-      "usdValue": "12259.75659676",
-      "unrealisedPnl": "0",
-      "collateralSwitch": true,
-      "spotHedgingQty": "0",
-      "borrowAmount": "0.000000000000000000",
-      "totalPositionIM": "0",
-      "walletBalance": "0.20012198",
-      "cumRealisedPnl": "-0.00024048",
-      "locked": "0",
-      "marginCollateral": true,
-      "coin": "BTC"
-    },
-       */
-
-      const balance: Balance = {
-        total,
-        upnl,
-        used: parseFloat(firstAccount.totalMaintenanceMargin) + parseFloat(firstAccount.totalInitialMargin),
-        free: parseFloat(firstAccount.totalAvailableBalance ?? firstAccount.totalMarginBalance),
-        coins: firstAccount.coin.reduce(
-          (prev: { [coin: string]: CoinBalance }, coin: any) => {
-            prev[coin.coin] = {
-              base: coin.coin,
-              amount: parseFloat(coin.equity),
-              notional: parseFloat(coin.usdValue),
-            };
-            return prev;
-          },
-          {} as { [coin: string]: CoinBalance },
-        ),
-        info: firstAccount,
-      };
-
-      return balance;
+    if (!Array.isArray(rawBalance) || rawBalance.length === 0) {
+      return this.store.balance;
     }
-
-    // NORMAL ACCOUNT TYPE BALANCE CALCULATION
-    // ---------------------------------------
-    const [firstAccount] = rawBalance || [];
-    const usdt = firstAccount?.coin?.find?.((c: any) => c.coin === 'USDT');
-
-    // The user has no USDT balance, yet?
-    if (!usdt) return this.store.balance;
+    const [firstAccount] = rawBalance;
+    const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
+    const total = subtract(parseFloat(firstAccount.totalEquity), upnl);
 
     const balance: Balance = {
-      total: parseFloat(usdt.walletBalance),
-      upnl: parseFloat(usdt.unrealisedPnl),
-      used: add(parseFloat(usdt.totalOrderIM), parseFloat(usdt.totalPositionIM)),
-      free: parseFloat(usdt.availableToWithdraw),
+      total,
+      upnl,
+      used: parseFloat(firstAccount.totalMaintenanceMargin) + parseFloat(firstAccount.totalInitialMargin),
+      free: parseFloat(firstAccount.totalAvailableBalance ?? firstAccount.totalMarginBalance),
+      coins: firstAccount.coin.reduce(
+        (prev: { [coin: string]: CoinBalance }, coin: any) => {
+          prev[coin.coin] = {
+            base: coin.coin,
+            amount: parseFloat(coin.equity),
+            notional: parseFloat(coin.usdValue),
+          };
+          return prev;
+        },
+        {} as { [coin: string]: CoinBalance },
+      ),
+      info: firstAccount,
     };
 
     return balance;
@@ -662,7 +620,7 @@ export class BybitSpotExchange extends BaseExchange {
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
     const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-    const timeInForce = inverseObj(ORDER_TIME_IN_FORCE)[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
     const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
     let triggerDirection: number | undefined = undefined;
@@ -1013,36 +971,18 @@ export class BybitSpotExchange extends BaseExchange {
       // TODO proper rate limiting
       if (i > 0) await sleep(1000);
 
-      if (this.accountType === 'UNIFIED') {
-        const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ORDERS, {
-          category,
-          request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
-        });
-        if (data.retMsg !== 'OK') {
-          this.emitAndLogError(data.retMsg);
-          throw new Error(data.retMsg);
-        }
-        const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
-        if (foundErr) {
-          this.emitAndLogError(foundErr.msg);
-          throw new Error(foundErr.msg);
-        }
-      } else {
-        const errors: Array<string | undefined | null> = [];
-        await forEachSeries(orders, async (order) => {
-          const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ORDER, {
-            category,
-            symbol: order.symbol,
-            orderId: order.id,
-          });
-          if (data.retMsg !== 'OK') {
-            errors.push(data.retMsg);
-          }
-        });
-        if (errors.length > 0) {
-          this.emitAndLogError(errors.join(', '));
-          throw new Error(errors.join(', '));
-        }
+      const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ORDERS, {
+        category,
+        request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
+      });
+      if (data.retMsg !== 'OK') {
+        this.emitAndLogError(data.retMsg);
+        throw new Error(data.retMsg);
+      }
+      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
+      if (foundErr) {
+        this.emitAndLogError(foundErr.msg);
+        throw new Error(foundErr.msg);
       }
     });
   };

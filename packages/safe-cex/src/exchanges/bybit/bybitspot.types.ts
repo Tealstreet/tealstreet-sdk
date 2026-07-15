@@ -69,7 +69,7 @@ export const ENDPOINTS = {
   CREATE_ORDER: '/v5/order/create',
   REPLACE_ORDER: '/v5/order/amend',
   SET_POSITION_MODE: '/v5/position/switch-mode',
-  SET_MARGIN_TYPE: '/v5/position/switch-isolated',
+  SET_MARGIN_MODE: '/v5/account/set-margin-mode',
   USER_ORDERS: '/v5/order/history',
   USER_TRADES: '/v5/execution/list',
   USER_CLOSED_PNL: '/v5/position/closed-pnl',
@@ -79,7 +79,7 @@ export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.CREATE_ORDER,
   ENDPOINTS.REPLACE_ORDER,
   ENDPOINTS.SET_POSITION_MODE,
-  ENDPOINTS.SET_MARGIN_TYPE,
+  ENDPOINTS.SET_MARGIN_MODE,
   ENDPOINTS.SET_LEVERAGE,
   ENDPOINTS.CANCEL_ORDER,
   ENDPOINTS.CANCEL_ORDERS,
@@ -151,6 +151,14 @@ export const ORDER_TIME_IN_FORCE: Record<string, OrderTimeInForce> = {
   IOC: OrderTimeInForce.ImmediateOrCancel,
   FOK: OrderTimeInForce.FillOrKill,
   PostOnly: OrderTimeInForce.PostOnly,
+  RPI: OrderTimeInForce.PostOnly,
+};
+
+export const ORDER_TIME_IN_FORCE_OUTBOUND: Record<OrderTimeInForce, string> = {
+  [OrderTimeInForce.GoodTillCancel]: 'GTC',
+  [OrderTimeInForce.ImmediateOrCancel]: 'IOC',
+  [OrderTimeInForce.FillOrKill]: 'FOK',
+  [OrderTimeInForce.PostOnly]: 'PostOnly',
 };
 
 export const ORDER_TRIGGER_TYPE: Record<string, OrderStopTriggerType> = {

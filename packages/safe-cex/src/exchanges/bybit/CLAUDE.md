@@ -160,7 +160,7 @@ All endpoints use the V5 API prefix. Defined in `bybit.types.ts`:
 | `CREATE_BATCH_ORDER`   | `/v5/order/create-batch`       | POST   | Place batch orders (up to 20)          |
 | `REPLACE_ORDER`        | `/v5/order/amend`              | POST   | Amend existing order                   |
 | `SET_POSITION_MODE`    | `/v5/position/switch-mode`     | POST   | Switch one-way/hedge mode              |
-| `SET_MARGIN_TYPE`      | `/v5/position/switch-isolated` | POST   | Switch cross/isolated margin           |
+| `SET_MARGIN_MODE`      | `/v5/account/set-margin-mode`  | POST   | Switch account-wide UTA margin mode    |
 | `USER_ORDERS`          | `/v5/order/history`            | GET    | Historical orders                      |
 | `USER_TRADES`          | `/v5/execution/list`           | GET    | Execution/fill history                 |
 | `USER_CLOSED_PNL`      | `/v5/position/closed-pnl`      | GET    | Closed PnL records                     |
@@ -259,6 +259,13 @@ Messages are routed by string matching on the raw data (`data.includes('topic":"
 | `IOC`       | `ImmediateOrCancel` |
 | `FOK`       | `FillOrKill`        |
 | `PostOnly`  | `PostOnly`          |
+| `RPI`       | `PostOnly`          |
+
+Bybit RPI orders are maker-only and can be placed by eligible market makers.
+Tealstreet does not place RPI orders, but orders created elsewhere map to the
+internal `PostOnly` value so their time-in-force is never undefined. Outbound
+serialization uses the separate `ORDER_TIME_IN_FORCE_OUTBOUND` map so native
+Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 
 ### Order Status Mapping (`ORDER_STATUS`)
 
@@ -427,7 +434,7 @@ unrealizedPnl = direction * (ticker.mark * contracts - entryPrice * contracts)
 
 ### Balance Calculations
 
-**UNIFIED account** (`bybit.exchange.ts:391-425`):
+All Bybit variants use the UTA account-wide fields:
 
 - `total = totalEquity - sumOfPositionUPnL` (position uPnL is summed from store, not the API field)
 - `upnl = sum of all position unrealizedPnl`
@@ -435,12 +442,9 @@ unrealizedPnl = direction * (ticker.mark * contracts - entryPrice * contracts)
 - `free = totalAvailableBalance` (falls back to `totalMarginBalance`)
 - Per-coin balances reported with `equity` and `usdValue`
 
-**CONTRACT account** (`bybit.exchange.ts:427-447`):
-
-- Uses the USDT coin from the first account
-- `total = walletBalance`, `upnl = unrealisedPnl`
-- `used = totalOrderIM + totalPositionIM`, `free = availableToWithdraw`
-- If no USDT coin exists, returns existing store balance unchanged
+The retired Classic-account calculation was removed. In particular, do not
+restore a balance path based on per-coin `availableToWithdraw`; Bybit deprecated
+that field for UNIFIED accounts on 2025-01-09.
 
 ## Rate Limiting
 
@@ -475,7 +479,7 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
 ### Pagination Limits
 
 - Orders: 50 per page, recursive cursor-based fetch (`bybit.exchange.ts:526-527`)
-- Positions: 200 per page (TODO: no recursive fetch for > 200 positions -- `bybit.exchange.ts:572`)
+- Positions: 200 per page, recursively follows `nextPageCursor` for both full-account and symbol queries
 - Executions: 100 per page, max 5 recursion depth (`bybit.exchange.ts:826-829`)
 - Income history: 50 per page default, max 10 pages safety limit (`bybit.exchange.ts:923`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
@@ -516,11 +520,10 @@ When set, the next tick cycle performs a full `fetchOrdersPositionsAndBalance()`
 
 #### Unified Margin Status
 
-The `unifiedMarginStatus` field from `/v5/account/info` determines the account type:
-
-- `1` = CONTRACT account (Classic) -> uses `accountType: 'CONTRACT'` for balance queries
-- Other values = UNIFIED account (UTA) -> uses `accountType: 'UNIFIED'` for balance queries
-- `6` = Forced UNIFIED (set when API returns "accountType only support UNIFIED.")
+Bybit documents Classic accounts as unavailable. Each variant therefore starts
+with `unifiedMarginStatus = 6` (UTA 2.0 Pro), and its first wallet request uses
+`accountType: 'UNIFIED'`. The status returned by `/v5/account/info` is still
+retained for account diagnostics and the defensive retired-account fallback.
 
 #### UTA 2.0 Handling (`bybit.exchange.ts:374-389`)
 
@@ -534,7 +537,8 @@ If the balance endpoint returns `"accountType only support UNIFIED."`, the code 
 
 **UNIFIED account**: Uses `totalEquity` minus summed position uPnL for total. Available balance from `totalAvailableBalance`. Reports per-coin balances including USD values.
 
-**CONTRACT account**: Uses USDT coin balance. Total from `walletBalance`, uPnL from `unrealisedPnl`, used from `totalOrderIM + totalPositionIM`, free from `availableToWithdraw`.
+The exact retired-account error match remains only as a defensive retry guard;
+normal startup no longer depends on it.
 
 ### Markets Include PreLaunch
 
@@ -669,11 +673,11 @@ Comment in code: "we need to re-create TP/SL after cancel all / before bybit was
 
 ### Margin Type
 
-- `tradeMode: 0` = Cross margin
-- `tradeMode: 1` = Isolated margin
-- The `marginMode` from account info: `'ISOLATED_MARGIN'` or other (Cross)
-- **UNIFIED accounts**: `changeMarginType` may return "unified account is forbidden" (retCode 100028)
-- Both `buyLeverage` and `sellLeverage` must be set together
+- Margin mode is global for a UTA account (`marginTypeIsGlobal: true`), not per symbol.
+- `changeMarginType(true)` sends `setMarginMode: 'ISOLATED_MARGIN'`.
+- `changeMarginType(false)` sends `setMarginMode: 'REGULAR_MARGIN'` (cross margin).
+- After a successful switch, every position is refetched because one request changes the whole account.
+- Bybit returns detailed failures in `result.reasons`; surface those reason messages before the generic `retMsg`.
 
 ### WebSocket Position Update Invalidation
 
@@ -768,7 +772,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | `"error sign!"`                                   | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:17-22`               |
 | `"timestamp and recv_window param"`               | Auto time sync via `virtualClock.syncBybitClientServerTime()`                          | `bybit.api.ts:92-96`               |
 | `"accountType only support UNIFIED."`             | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
-| `"unified account is forbidden"` (retCode 100028) | Log error and throw                                                                    | `bybit.exchange.ts:1831-1834`      |
+| Account margin-mode failure                       | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
 | `"order not modified"`                            | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
 | `"Partial symbols switched successfully..."`      | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
 | `"All symbols switched successfully."`            | Silent success                                                                         | `bybit.exchange.ts:1786`           |
@@ -826,13 +830,12 @@ yarn test-ci
 
 1. **"error sign!" on requests**: Signature mismatch. Check time sync, recv_window. The API retries 3x automatically.
 2. **"timestamp and recv_window param"**: Local clock is out of sync. Auto-resolved by `virtualClock.syncBybitClientServerTime()`.
-3. **"accountType only support UNIFIED."**: UTA 2.0 account. Handled automatically by `forceUnifiedBalance` fallback.
-4. **"unified account is forbidden"**: Cannot switch margin type on UNIFIED accounts (retCode 100028).
+3. **"accountType only support UNIFIED."**: Defensive fallback for an unexpected stale account status; normal requests are UNIFIED-first.
+4. **Margin-mode switch rejected**: Surface Bybit's returned reason; the integration uses the UTA account-level margin-mode endpoint.
 5. **Batch order failures**: Falls back to individual order placement per order in the failed batch.
 6. **WebSocket auth failure**: Retries up to 3 times with time re-sync between attempts.
 7. **TP/SL not updating**: Check if the order is virtual (bracket on parent), position-bound, or free-floating conditional -- each uses a different update path.
 8. **Order "not modified" response**: Treated as success (no-op), not an error.
 9. **Partial position mode switch**: Returns "Partial symbols switched successfully, excluding symbols with open orders or positions." -- logged as error but does not throw.
-10. **Missing USDT balance**: If CONTRACT account has no USDT coin, returns existing store balance unchanged.
-11. **False PartiallyFilled on replace**: When replacing an order, Bybit emits a PartiallyFilled event with 0 price and 0 amount. This is filtered out in `handleOrderTopic`.
-12. **Position fetch limited to 200**: No recursive pagination for positions. Accounts with > 200 positions per settleCoin will have incomplete position data.
+10. **False PartiallyFilled on replace**: When replacing an order, Bybit emits a PartiallyFilled event with 0 price and 0 amount. This is filtered out in `handleOrderTopic`.
+11. **Position pagination**: Position fetches follow `nextPageCursor`; do not collapse them back to a single 200-row request.

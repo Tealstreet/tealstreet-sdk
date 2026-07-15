@@ -335,6 +335,8 @@ const BybitMetadata: ExchangeMetadata = {
   hasEmptyPositions: false,
   // sort of global, we dont pass symbol so it tries to set as many as possible so we need to do full fetches on update
   positionModeIsGlobal: true,
+  // UTA margin mode is account-wide via /v5/account/set-margin-mode.
+  marginTypeIsGlobal: true,
   tickInterval: 500,
   supportsFeeRates: true,
   privateProxyIps: privateProxyIpsSingapore,

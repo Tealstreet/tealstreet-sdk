@@ -50,7 +50,7 @@ import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
-import { add, adjust, subtract } from '../../utils/safe-math';
+import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
@@ -67,6 +67,7 @@ import {
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TIME_IN_FORCE,
+  ORDER_TIME_IN_FORCE_OUTBOUND,
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
   POSITION_SIDE,
@@ -105,7 +106,9 @@ export class BybitExchange extends BaseExchange {
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
-  private unifiedMarginStatus: number = 1;
+  // Bybit no longer offers Classic accounts. Start in UTA 2.0 Pro mode so
+  // account validation never probes the retired CONTRACT wallet API first.
+  private unifiedMarginStatus: number = 6;
   private marginType: MarginType = MarginType.Cross;
 
   private needsReinit = false;
@@ -500,59 +503,31 @@ export class BybitExchange extends BaseExchange {
   };
 
   formatBalance = (rawBalance: any) => {
-    // UNIFIED ACCOUNT TYPE BALANCE CALCULATION
-    // ----------------------------------------
-    if (this.accountType === 'UNIFIED') {
-      // Ensure rawBalance is an array before destructuring
-      if (!Array.isArray(rawBalance) || rawBalance.length === 0) {
-        this.log('Invalid or empty balance data received', LogSeverity.Warning);
-        return this.store.balance;
-      }
-      const [firstAccount] = rawBalance;
-
-      const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
-      const total = subtract(parseFloat(firstAccount.totalEquity), upnl);
-
-      const balance: Balance = {
-        total,
-        upnl,
-        used: parseFloat(firstAccount.totalMaintenanceMargin) + parseFloat(firstAccount.totalInitialMargin),
-        free: parseFloat(firstAccount.totalAvailableBalance ?? firstAccount.totalMarginBalance),
-        coins: firstAccount.coin.reduce(
-          (prev: { [coin: string]: CoinBalance }, coin: any) => {
-            prev[coin.coin] = {
-              base: coin.coin,
-              amount: parseFloat(coin.equity),
-              notional: parseFloat(coin.usdValue),
-            };
-            return prev;
-          },
-          {} as { [coin: string]: CoinBalance },
-        ),
-        info: firstAccount,
-      };
-
-      return balance;
-    }
-
-    // NORMAL ACCOUNT TYPE BALANCE CALCULATION
-    // ---------------------------------------
-    // Ensure rawBalance is an array before destructuring
     if (!Array.isArray(rawBalance) || rawBalance.length === 0) {
       this.log('Invalid or empty balance data received', LogSeverity.Warning);
       return this.store.balance;
     }
     const [firstAccount] = rawBalance;
-    const usdt = firstAccount?.coin?.find?.((c: any) => c.coin === 'USDT');
-
-    // The user has no USDT balance, yet?
-    if (!usdt) return this.store.balance;
+    const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
+    const total = subtract(parseFloat(firstAccount.totalEquity), upnl);
 
     const balance: Balance = {
-      total: parseFloat(usdt.walletBalance),
-      upnl: parseFloat(usdt.unrealisedPnl),
-      used: add(parseFloat(usdt.totalOrderIM), parseFloat(usdt.totalPositionIM)),
-      free: parseFloat(usdt.availableToWithdraw),
+      total,
+      upnl,
+      used: parseFloat(firstAccount.totalMaintenanceMargin) + parseFloat(firstAccount.totalInitialMargin),
+      free: parseFloat(firstAccount.totalAvailableBalance ?? firstAccount.totalMarginBalance),
+      coins: firstAccount.coin.reduce(
+        (prev: { [coin: string]: CoinBalance }, coin: any) => {
+          prev[coin.coin] = {
+            base: coin.coin,
+            amount: parseFloat(coin.equity),
+            notional: parseFloat(coin.usdValue),
+          };
+          return prev;
+        },
+        {} as { [coin: string]: CoinBalance },
+      ),
+      info: firstAccount,
     };
 
     return balance;
@@ -680,39 +655,44 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
-  // TODO: fetch recursively to handle > 200 positions
   fetchPositionsHelper = async (symbols?: string[], category?: string, settleCoin?: string) => {
-    if (symbols && symbols.length > 0) {
-      const positions: Position[][] = await mapSeries(symbols, async (symbol) => {
-        const { data } = await this.xhr.get(ENDPOINTS.POSITIONS, {
-          params: {
-            symbol,
-            category: this.getCategoryForSymbol(symbol),
-            limit: 200,
-          },
-        });
-        if (v(data, 'retMsg') !== 'OK') {
-          this.emitAndLogError(v(data, 'retMsg'));
-          throw new Error(v(data, 'retMsg'));
-        }
-        return data.result.list.map(this.mapPosition.bind(this));
-      });
-      return positions.flat();
-    } else {
+    const fetchAllPages = async (
+      params: Record<string, unknown>,
+      failClosed: boolean,
+      cursor = '',
+      accumulated: Array<Record<string, any>> = [],
+    ): Promise<Array<Record<string, any>>> => {
       const { data } = await this.xhr.get(ENDPOINTS.POSITIONS, {
-        params: {
-          category,
-          settleCoin,
-          limit: 200,
-        },
+        params: { ...params, limit: 200, cursor },
       });
       if (v(data, 'retMsg') !== 'OK') {
         this.emitAndLogError(v(data, 'retMsg'));
+        if (failClosed) throw new Error(v(data, 'retMsg'));
         this.needsReinit = true;
         return [];
       }
-      const positions: Position[] = data.result.list.map(this.mapPosition.bind(this));
+
+      const page = Array.isArray(data?.result?.list) ? data.result.list : [];
+      const positions = [...accumulated, ...page];
+      const nextPageCursor = data?.result?.nextPageCursor;
+      if (nextPageCursor && nextPageCursor !== cursor) {
+        return fetchAllPages(params, failClosed, nextPageCursor, positions);
+      }
       return positions;
+    };
+
+    if (symbols && symbols.length > 0) {
+      const positions: Position[][] = await mapSeries(symbols, async (symbol) => {
+        const bybitPositions = await fetchAllPages(
+          { symbol, category: this.getCategoryForSymbol(symbol) },
+          true,
+        );
+        return bybitPositions.map(this.mapPosition.bind(this));
+      });
+      return positions.flat();
+    } else {
+      const bybitPositions = await fetchAllPages({ category, settleCoin }, false);
+      return bybitPositions.map(this.mapPosition.bind(this));
     }
   };
 
@@ -1448,7 +1428,7 @@ export class BybitExchange extends BaseExchange {
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
     const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-    const timeInForce = inverseObj(ORDER_TIME_IN_FORCE)[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
     const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
     let triggerDirection: number | undefined = undefined;
@@ -1805,7 +1785,7 @@ export class BybitExchange extends BaseExchange {
       const price = opts.price ? adjust(opts.price, pPrice) : null;
       const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
       const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-      const timeInForce = inverseObj(ORDER_TIME_IN_FORCE)[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
       const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
       let triggerDirection: number | undefined = undefined;
@@ -2064,36 +2044,18 @@ export class BybitExchange extends BaseExchange {
       // TODO proper rate limiting
       if (i > 0) await sleep(1000);
 
-      if (this.accountType === 'UNIFIED') {
-        const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ORDERS, {
-          category,
-          request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
-        });
-        if (data.retMsg !== 'OK') {
-          this.emitAndLogError(data.retMsg);
-          throw new Error(data.retMsg);
-        }
-        const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
-        if (foundErr) {
-          this.emitAndLogError(foundErr.msg);
-          throw new Error(foundErr.msg);
-        }
-      } else {
-        const errors: Array<string | undefined | null> = [];
-        await forEachSeries(orders, async (order) => {
-          const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ORDER, {
-            category,
-            symbol: order.symbol,
-            orderId: order.id,
-          });
-          if (data.retMsg !== 'OK') {
-            errors.push(data.retMsg);
-          }
-        });
-        if (errors.length > 0) {
-          this.emitAndLogError(errors.join(', '));
-          throw new Error(errors.join(', '));
-        }
+      const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ORDERS, {
+        category,
+        request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
+      });
+      if (data.retMsg !== 'OK') {
+        this.emitAndLogError(data.retMsg);
+        throw new Error(data.retMsg);
+      }
+      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
+      if (foundErr) {
+        this.emitAndLogError(foundErr.msg);
+        throw new Error(foundErr.msg);
       }
     });
   };
@@ -2195,39 +2157,22 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
-  changeMarginType = async (isolated: boolean, symbol?: string) => {
-    if (!symbol) {
-      this.emitAndLogError('Symbol is required when changing margin type');
-      throw new Error('Symbol is required when changing margin type');
-    }
-
-    let foundPositions = this.store.positions.filter((p) => p.symbol === symbol);
-    if (foundPositions.length === 0) {
-      foundPositions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(foundPositions);
-    }
-
-    const leverage = foundPositions[0]?.leverage || 1;
-
-    const { data } = await this.xhr.post(ENDPOINTS.SET_MARGIN_TYPE, {
-      category: this.getCategoryForSymbol(symbol),
-      symbol,
-      tradeMode: isolated ? 1 : 0,
-      buyLeverage: `${leverage}`,
-      sellLeverage: `${leverage}`,
+  changeMarginType = async (isolated: boolean, _symbol?: string) => {
+    const { data } = await this.xhr.post(ENDPOINTS.SET_MARGIN_MODE, {
+      setMarginMode: isolated ? 'ISOLATED_MARGIN' : 'REGULAR_MARGIN',
     });
 
-    if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0) {
-      const errorMsg = v(data, 'retMsg') || 'Failed to switch margin type';
+    const reasons = Array.isArray(data?.result?.reasons) ? data.result.reasons : [];
+    if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0 || reasons.length > 0) {
+      const reasonMessage = reasons.map((reason: any) => reason?.reasonMsg).filter(Boolean).join(', ');
+      const errorMsg = reasonMessage || v(data, 'retMsg') || 'Failed to switch margin type';
       this.emitAndLogError(errorMsg);
       throw new Error(errorMsg);
     }
 
-    // Keep local cache in sync; mapped positions currently read this value.
     this.marginType = isolated ? MarginType.Isolated : MarginType.Cross;
-
-    const positions = await this.fetchPositions([symbol]);
-    this.store.addOrUpdatePositions(positions);
+    const positions = await this.fetchPositions();
+    this.store.update({ positions });
   };
 
   mapPosition(p: Record<string, any>) {
