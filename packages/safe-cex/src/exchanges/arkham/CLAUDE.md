@@ -4,6 +4,10 @@
 
 Arkham is disabled in every environment. `ArkhamMetadata` must keep
 `enabled`, `enabledInDev`, and `enableInPreview` false.
+The frozen adapter also keeps `supportsTradesHistory`, `supportsPartialStops`,
+and all TP/SL trigger/default advertising disabled. Its legacy method bodies
+are not evidence of a usable capability against a service that no longer
+publishes or serves this CEX protocol.
 
 This directory is a frozen legacy centralized-exchange adapter. Arkham's
 official April 2026 announcement describes its current trading product as a

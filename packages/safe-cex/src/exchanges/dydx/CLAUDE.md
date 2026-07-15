@@ -412,6 +412,9 @@ error. This allows new or unfunded accounts to connect without errors.
 - **Position Mode**: One-way only (`getPositionMode()` returns `PositionMode.OneWay`)
 - **Margin Type**: Cross-margin by default; isolated via subaccounts
 - **Contract Size**: Always 1
+- **Trade History**: `supportsTradesHistory: false`; the adapter has no
+  `fetchExecutions` or `fetchHistoricalTrades` implementation. Private fill
+  events do not make a historical REST method available.
 - **Fees**: Public-only markets expose clearly documented display defaults.
   Private startup queries `ValidatorClient.get.getUserFeeTier()` and replaces
   every market with the wallet's current maker/taker PPM values.

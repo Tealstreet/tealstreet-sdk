@@ -463,7 +463,8 @@ const BinancePMMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: true,
-  supportsTradesHistory: true,
+  // No fetchExecutions/fetchHistoricalTrades implementation in the PM adapter.
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'Binance Portfolio Margin',
   privateProxyIps: privateProxyIpsTokyo,
@@ -598,7 +599,8 @@ const BinanceSpotMetadata: ExchangeMetadata = {
   enabled: false,
   enabledInDev: true,
   supportsTestnet: true,
-  supportsTradesHistory: true,
+  // No fetchExecutions/fetchHistoricalTrades implementation in the Spot adapter.
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   privateProxyIps: privateProxyIpsTokyo,
   supportsChaser: true,
@@ -1493,7 +1495,8 @@ const DydxMetadata: ExchangeMetadata = {
   enabledInDev: false,
   enableInPreview: false,
   supportsTestnet: true,
-  supportsTradesHistory: true,
+  // Private fill events exist, but no historical safe-cex fetch method does.
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 5, 10, 15, 20, 25, 50],
   orderbookTickDelay: 60,
   prettyName: 'dYdX',
@@ -2067,21 +2070,22 @@ const ArkhamMetadata: ExchangeMetadata = {
   enabledInDev: false,
   enableInPreview: false,
   supportsTestnet: false, // No testnet available yet
-  supportsTradesHistory: true,
+  // Frozen legacy adapter has no safe-cex history implementation.
+  supportsTradesHistory: false,
   orderbookTickDelay: 100,
   prettyName: 'Arkham',
   defaultSymbol: 'BTC_USDT_PERP',
   privateProxyIps: privateProxyIpsTokyo,
   supportsTrailingStopLoss: false,
-  supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
-  defaultTPTriggerType: OrderStopTriggerType.MarkPrice,
-  defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
+  supportedTPSLTriggerTypes: [],
+  defaultTPTriggerType: undefined,
+  defaultSLTriggerType: undefined,
   positionModes: [PositionMode.OneWay], // Arkham only supports one-way mode
   marginTypes: [MarginType.Cross], // Arkham uses dynamic margin schedules, not traditional isolated/cross
   tickInterval: 500,
   tvMaxGetBarFetches: 10,
   supportsReadOnlyKey: false,
-  supportsPartialStops: true,
+  supportsPartialStops: false,
   supportsTPSLCloseAttribute: false,
   leverageSliderDisabled: false,
   hasIndependentHedgedLeverageInIsolatedMargin: false,
@@ -2201,7 +2205,8 @@ const PolymarketMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: false, // Disabled in preview
   supportsTestnet: false, // Polymarket only has mainnet
-  supportsTradesHistory: true,
+  // Upstream has a trades endpoint, but this adapter does not map it yet.
+  supportsTradesHistory: false,
   orderbookTickDelay: 100,
   prettyName: 'Polymarket',
   defaultQuote: 'pUSD',

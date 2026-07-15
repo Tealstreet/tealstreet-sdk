@@ -57,6 +57,32 @@ so reports expose the real production-code coverage floor. Keep the runtime tree
 test-free; the absence of an exchange-tree exclusion is intentional and prevents
 future test files from being silently ignored.
 
+## Metadata capability non-fallback baseline
+
+`BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
+`fetchExecutions`, and `fetchHistoricalTrades`. These functions carry a private
+runtime brand exposed through `isBaseCapabilityFallback`; derived class fields
+replace the branded function during construction. The deterministic capability
+suite in `src/__tests__/audit-regressions/exchange-metadata-capabilities.test.ts`
+loads the real registry and enforces the following minimum contracts:
+
+- `supportsTradesHistory` requires a non-fallback executions or historical-
+  trades path, while `supportsExecutionsHistory` specifically requires a real
+  `fetchExecutions` override;
+- trailing-stop, partial/full TP/SL, or trigger-type advertising requires a
+  non-fallback `placeOrder` and `features.orders: true`;
+- `supportsPublicOnly` requires construction with `publicDataOnly: true` and a
+  non-fallback `start` implementation;
+- TP/SL trigger defaults must belong to the unique advertised trigger set.
+
+This baseline proves only that metadata does not point at a known inert base
+method. It cannot prove that an override maps every advertised order type or
+trigger correctly, that a history endpoint returns valid rows, or that public
+startup succeeds end-to-end. Those claims need venue-specific deterministic
+request/response regressions; live startup and authentication additionally need
+network or credentialed probes. Do not replace that evidence with source-text
+grep, and do not add a second capability manifest that duplicates metadata.
+
 ## Proxy & Tunnel Architecture
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.

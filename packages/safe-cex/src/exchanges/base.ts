@@ -71,6 +71,36 @@ const normalizeSymbols = (symbols: string[]): string[] => {
   return Array.from(deduped);
 };
 
+/**
+ * BaseExchange supplies a few deliberately inert fallbacks so that older
+ * integrations can omit optional methods.  Metadata must never advertise one
+ * of those fallbacks as an implemented capability.  Brand the actual runtime
+ * function rather than inspecting source text; derived class fields replace
+ * the branded function during construction.  This is intentionally only a
+ * non-fallback baseline: a venue-specific override still needs behavioral
+ * regressions and, where applicable, credentialed validation.
+ */
+const baseCapabilityFallback = Symbol('baseCapabilityFallback');
+
+export type BaseCapabilityMethod = 'fetchExecutions' | 'fetchHistoricalTrades' | 'placeOrder' | 'start';
+
+type BrandedCapabilityFallback = {
+  [baseCapabilityFallback]?: BaseCapabilityMethod;
+};
+
+const markBaseCapabilityFallback = <T extends object>(method: BaseCapabilityMethod, fn: T): T => {
+  Object.defineProperty(fn, baseCapabilityFallback, {
+    value: method,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+  return fn;
+};
+
+export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityMethod): boolean =>
+  typeof value === 'function' && (value as BrandedCapabilityFallback)[baseCapabilityFallback] === method;
+
 export type CallableMethodsInWorker =
   | 'setLeverage'
   | 'changePositionMode'
@@ -555,9 +585,9 @@ export class BaseExchange implements Exchange {
     this.emitter.emit('log', `[${this.name}] ${message}`, severity);
   };
 
-  start = async () => {
+  start = markBaseCapabilityFallback('start', async () => {
     await Promise.reject(new Error('Not implemented'));
-  };
+  });
 
   fetchSymbolMaxLeverage = async (_symbol: string) => {
     await Promise.reject(new Error('Not implemented'));
@@ -608,10 +638,10 @@ export class BaseExchange implements Exchange {
     });
   };
 
-  placeOrder = async (_opts: PlaceOrderOpts) => {
+  placeOrder = markBaseCapabilityFallback('placeOrder', async (_opts: PlaceOrderOpts) => {
     await Promise.reject(new Error('Not implemented'));
     return [] as string[];
-  };
+  });
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
@@ -648,13 +678,13 @@ export class BaseExchange implements Exchange {
     return await Promise.resolve([] as Candle[]);
   };
 
-  fetchExecutions = async (_opts: ExecutionsOptions) => {
+  fetchExecutions = markBaseCapabilityFallback('fetchExecutions', async (_opts: ExecutionsOptions) => {
     return await Promise.resolve([] as Execution[]);
-  };
+  });
 
-  fetchHistoricalTrades = async (_opts: HistoricalTradeOptions) => {
+  fetchHistoricalTrades = markBaseCapabilityFallback('fetchHistoricalTrades', async (_opts: HistoricalTradeOptions) => {
     return await Promise.resolve([] as HistoricalTrade[]);
-  };
+  });
 
   // Default implementation - exchanges that support income history should override
   fetchIncomeHistory = async (_opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {

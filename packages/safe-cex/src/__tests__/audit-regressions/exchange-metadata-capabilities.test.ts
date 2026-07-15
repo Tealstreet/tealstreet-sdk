@@ -1,0 +1,134 @@
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { exchangeMetadata } from '../../exchangeMetadata';
+import {
+  BaseCapabilityMethod,
+  BaseExchange,
+  isBaseCapabilityFallback,
+} from '../../exchanges/base';
+import { exchangeRegistry } from '../../exchanges/registry';
+import { DefaultStore } from '../../store/store.base';
+import { ExchangeName, ExchangeOptions } from '../../types';
+
+const liveInstances: BaseExchange[] = [];
+
+const createImplementation = async (
+  exchangeName: ExchangeName,
+  publicDataOnly = false,
+): Promise<BaseExchange> => {
+  const Exchange = await exchangeRegistry[exchangeName]();
+  const options: ExchangeOptions = {
+    key: 'capability-contract-key',
+    secret: 'capability-contract-secret',
+    passphrase: 'capability-contract-passphrase',
+    applicationId: 'capability-contract-application',
+    apiKeyIndex: '0',
+    publicDataOnly,
+    starkPrivateKey: '0x1',
+    paradexAddress: '0x1',
+    subkeyAddress: '0x1',
+    grvtSignerAddress: '0x0000000000000000000000000000000000000001',
+    grvtTradingAccountId: 'capability-contract-account',
+    dydxMnemonic: 'test test test test test test test test test test test junk',
+    dydxAddress: 'dydx1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnrql8a',
+  };
+
+  const exchange = new Exchange(exchangeName, options, new DefaultStore());
+  liveInstances.push(exchange);
+  return exchange;
+};
+
+const expectImplemented = (exchange: BaseExchange, method: BaseCapabilityMethod, exchangeName: ExchangeName) => {
+  expect(
+    isBaseCapabilityFallback(exchange[method], method),
+    `${exchangeName}: metadata advertises a capability but ${method} is the inert BaseExchange fallback`,
+  ).toBe(false);
+};
+
+afterEach(() => {
+  liveInstances.splice(0).forEach((exchange) => exchange.dispose());
+});
+
+describe('exchange metadata runtime non-fallback invariants', () => {
+  it('loads and constructs every registered exchange without starting I/O', async () => {
+    for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
+      await expect(
+        createImplementation(name, exchangeMetadata[name].supportsPublicOnly),
+        `${name}: registry loader or constructor failed`,
+      ).resolves.toBeInstanceOf(BaseExchange);
+    }
+  });
+
+  it('advertised trade history has a non-fallback executions or historical-trades path', async () => {
+    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
+      (name) => exchangeMetadata[name].supportsTradesHistory,
+    );
+
+    for (const name of advertised) {
+      const exchange = await createImplementation(name);
+      const hasExecutionHistory = !isBaseCapabilityFallback(exchange.fetchExecutions, 'fetchExecutions');
+      const hasHistoricalTrades = !isBaseCapabilityFallback(
+        exchange.fetchHistoricalTrades,
+        'fetchHistoricalTrades',
+      );
+
+      expect(
+        hasExecutionHistory || hasHistoricalTrades,
+        `${name}: supportsTradesHistory uses both inert BaseExchange history fallbacks`,
+      ).toBe(true);
+    }
+  });
+
+  it('advertised executions history does not use the inert executions fallback', async () => {
+    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
+      (name) => exchangeMetadata[name].supportsExecutionsHistory,
+    );
+
+    for (const name of advertised) {
+      expectImplemented(await createImplementation(name), 'fetchExecutions', name);
+    }
+  });
+
+  it('advertised order capabilities do not use the inert placement fallback', async () => {
+    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter((name) => {
+      const metadata = exchangeMetadata[name];
+      return (
+        metadata.supportsTrailingStopLoss ||
+        metadata.supportsPartialStops ||
+        metadata.supportsInfinityStops ||
+        metadata.supportedTPSLTriggerTypes.length > 0
+      );
+    });
+
+    for (const name of advertised) {
+      expectImplemented(await createImplementation(name), 'placeOrder', name);
+      expect(exchangeMetadata[name].features.orders, `${name}: stop capability requires order management`).toBe(true);
+    }
+  });
+
+  it('advertised public-only support constructs in public mode and overrides startup', async () => {
+    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
+      (name) => exchangeMetadata[name].supportsPublicOnly,
+    );
+
+    for (const name of advertised) {
+      expectImplemented(await createImplementation(name, true), 'start', name);
+    }
+  });
+
+  it('publishes internally consistent TP/SL trigger selections', () => {
+    for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
+      const metadata = exchangeMetadata[name];
+      const supported = metadata.supportedTPSLTriggerTypes;
+
+      expect(new Set(supported).size, `${name}: supported TP/SL trigger types must be unique`).toBe(supported.length);
+
+      if (metadata.defaultTPTriggerType !== undefined) {
+        expect(supported, `${name}: default TP trigger must be advertised`).toContain(metadata.defaultTPTriggerType);
+      }
+      if (metadata.defaultSLTriggerType !== undefined) {
+        expect(supported, `${name}: default SL trigger must be advertised`).toContain(metadata.defaultSLTriggerType);
+      }
+    }
+  });
+});

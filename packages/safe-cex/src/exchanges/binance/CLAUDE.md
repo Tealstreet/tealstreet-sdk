@@ -663,7 +663,7 @@ alwaysCalculateUnrealizedPnlFromLastPrice: true
 tickInterval: 500
 latencyDomain: papi.binance.com
 orderbookTickDelay: 60
-supportsTradesHistory: true
+supportsTradesHistory: false  (no executions/historical-trades implementation)
 ```
 
 ### Binance Spot (`binancespot`)
@@ -675,7 +675,7 @@ supportsChaser: true
 doesNotSupportOpenInterest: true
 latencyDomain: api.binance.com
 orderbookTickDelay: 60
-supportsTradesHistory: true
+supportsTradesHistory: false  (no executions/historical-trades implementation)
 ```
 
 ## Testnet / Demo
