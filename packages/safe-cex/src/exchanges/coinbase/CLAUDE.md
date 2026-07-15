@@ -175,13 +175,41 @@ runbook remain unresolved. Enabling anything requires trusted portfolio binding
 and a reviewed code change, not caller input or configuration. The assessment
 has no endpoint, transport, store, registry, metadata, or routing import.
 
+The eighth follow-on is implemented in
+`coinbase.starbase-public-frames.ts`. It is an inert public-only classifier for
+independently captured live envelopes from 2026-07-15. A subscription frame is
+accepted only as exact JSON-RPC `method: subscription`, without `id`/`result`,
+when `params.channel` exactly matches a desired, acknowledged public channel;
+the captured `params` boundary is passed to the existing `{ data }` decoder.
+Heartbeat frames accept only `params.type: heartbeat | test_request`, without
+an ID. A `public/test` response requires a known positive pending request ID
+and exactly one valid `result` or `error`. Its only optional top-level keys are
+the proven gateway metadata `usIn`, `usOut`, `usDiff`, and `testnet`; timestamps
+must be positive safe integers, the difference non-negative, and jointly
+present timing values must agree. Every other own key is rejected.
+Canonical error codes must be safe integers; integer-looking values outside
+JavaScript's exact range fail closed.
+
+Before `JSON.parse`, a bounded JSON grammar scan rejects duplicate object keys
+at every depth after decoding escapes, including spellings such as `id` and
+`\u0069d`. This prevents last-key-wins parsing from bypassing exact envelope or
+result/error checks while preserving arrays and escaped string contents.
+
+The classifier does not infer private channels from public evidence. Every
+non-acknowledged subscription, including private-looking names, remains
+explicitly unsupported and unclassified. The published AsyncAPI still omits
+the outer envelope, so the source capture hashes are pinned in code and the
+migration doc. The classifier owns no socket, dispatch, subscription state,
+store, routing, or active import, and its activation constant is literal
+`false`.
+
 `private/get_user_trades_by_order` is also deferred: its published response
 example contains a trade array, but `PrivateGetUserTradesByOrderResponse`
 defines no `result` property. The inert reader uses the coherent
 `private/get_user_trades_by_currency*` response family until Coinbase publishes
 an exact by-order result schema.
 
-All seven modules are intentionally inert: no current exchange, WebSocket, API
+All eight modules are intentionally inert: no current exchange, WebSocket, API
 factory, metadata, or shared-routing file imports them. Do not wire them into
 the active adapter until read-only private state passes source-of-truth parity
 and all normalization blockers are resolved. The public mapper supports only
@@ -189,12 +217,13 @@ schema-enumerated BTC/ETH linear USDC perpetuals; expanded product bases and an
 exact amount increment remain gated because the current schema enumerates only
 BTC/ETH and publishes a minimum trade amount, not an amount step or maximum
 base amount. The inert market-parity assessment returns typed blockers for both
-fields instead of manufacturing a safe-cex `Market`. Coinbase has not yet
-published the inbound `heartbeat`/`test_request` notification envelope in its
-Starbase OpenAPI or AsyncAPI schema, so the controller accepts an
-already-classified signal and must not grow a guessed wire-frame parser. Public
-stream mappers likewise start at the AsyncAPI channel payload's published
-`{ data }` shape, not a guessed outer notification envelope.
+fields instead of manufacturing a safe-cex `Market`. Coinbase has not published
+the inbound notification envelope in its Starbase OpenAPI or AsyncAPI schema.
+The inert public classifier is therefore bounded to the pinned 2026-07-15 live
+public captures; the controller still accepts an already-classified signal
+because the two modules are not wired together. Public stream mappers start at
+the AsyncAPI channel payload's published `{ data }` shape, reached through the
+captured notification `params` boundary.
 
 The private read layer currently consumes only JSON-RPC method results.
 Although AsyncAPI lists private portfolio/order/position channels, Coinbase has
@@ -229,6 +258,7 @@ resolve the unlabelled PnL-unit blocker.
 | `coinbase.starbase-session.ts` | Inert Starbase Cancel on Disconnect request/response contracts, including explicit WebSocket-only mutation metadata. No transport and not routed. |
 | `coinbase.starbase-ws-session.ts` | Inert unified-WebSocket activation, re-auth, heartbeat, Cancel on Disconnect proof, subscription-replay ordering, and rate-limit backoff gate. No socket, classifier, routing, or active import. |
 | `coinbase.starbase-cutover.ts` | Inert product-unbound cutover assessment: repository-owned evidence, test-only HTTP JSON-RPC shadow evaluation, separately closed WebSocket gates, legacy authority, and compile-time-disabled activation. No active import. |
+| `coinbase.starbase-public-frames.ts` | Inert public-only raw text-frame classifier bounded to pinned live notification/heartbeat envelopes and known `public/test` IDs. Private subscriptions remain unsupported/unclassified; activation is false. |
 
 ## Authentication
 
