@@ -33,6 +33,7 @@ export const WOO_V3_ENDPOINTS = {
   TRADE_ALGO_ORDER: '/v3/trade/algoOrder',
   TRADE_ALGO_ORDERS: '/v3/trade/algoOrders',
   TRADE_ALL_ORDERS: '/v3/trade/allOrders',
+  TRADE_CANCEL_ALL_AFTER: '/v3/trade/cancelAllAfter',
   TRANSACTION_HISTORY: '/v3/trade/transactionHistory',
   ACCOUNT_INFO: '/v3/account/info',
   ACCOUNT_LISTEN_KEY: '/v3/account/listenKey',
@@ -51,6 +52,7 @@ export type WooV3MigrationGate =
   | 'privateReadParity'
   | 'regularWriteDemoLifecycle'
   | 'algoWriteDemoLifecycle'
+  | 'cancelAllAfterDemoLifecycle'
   | 'accountWriteDemoLifecycle'
   | 'publicWebsocketParity'
   | 'privateWebsocketParity';
@@ -61,6 +63,7 @@ export const WOO_V3_MIGRATION_GATES: Readonly<Record<WooV3MigrationGate, false>>
   privateReadParity: false,
   regularWriteDemoLifecycle: false,
   algoWriteDemoLifecycle: false,
+  cancelAllAfterDemoLifecycle: false,
   accountWriteDemoLifecycle: false,
   publicWebsocketParity: false,
   privateWebsocketParity: false,
@@ -243,6 +246,15 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Path: WOO_V3_ENDPOINTS.TRADE_ALGO_ORDERS,
     gate: 'algoWriteDemoLifecycle',
     consumer: 'cancelAllOrders',
+  },
+  {
+    id: 'cancel-all-after',
+    legacyMethod: 'POST',
+    legacyPath: '/v1/order/cancel_all_after',
+    v3Method: 'POST',
+    v3Path: WOO_V3_ENDPOINTS.TRADE_CANCEL_ALL_AFTER,
+    gate: 'cancelAllAfterDemoLifecycle',
+    consumer: 'dead-man-switch (not currently owned by safe-cex runtime)',
   },
   {
     id: 'recent-trades',

@@ -284,8 +284,8 @@ describe('WooX V3 inert regular-order writes', () => {
     expect(() => decodeWooV3RegularCancelResponse({ success: 'false' }, { orderId: 135 })).toThrow('boolean');
   });
 
-  it('keeps all seven gates false and proves no active Woo runtime imports the write foundation', () => {
-    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false]);
+  it('keeps all eight gates false and proves no active Woo runtime imports the write foundation', () => {
+    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
     expect(WOO_V3_REGULAR_WRITE_PARITY).toEqual(
       expect.objectContaining({
         runtimeImported: false,

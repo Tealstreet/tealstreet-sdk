@@ -17,6 +17,7 @@ This directory contains the WooX perpetual futures exchange integration for Teal
 - **V3 futures statistics**: https://developer.woox.io/api-reference/endpoint/public_data/futures
 - **V3 BBO stream**: https://developer.woox.io/api-reference/endpoint/websocket/BBO
 - **V3 Trade stream**: https://developer.woox.io/api-reference/endpoint/websocket/TRADE
+- **V3 Cancel All After**: https://developer.woox.io/api-reference/endpoint/trading/cancel_all_after
 - **Legacy API documentation** (for migration work): https://docs.woox.io/#restful-api
 
 ## Legacy API lifecycle
@@ -28,7 +29,7 @@ phased endpoint inventory, parity gates, rollback strategy, and monitoring requi
 write-path migration requires fixture coverage and a credentialed WooX demo lifecycle smoke first.
 
 The V3 foundation is deliberately non-routable: `woo.v3.contracts.ts` holds the typed route map,
-response/request contracts, and seven hard-false migration gates, while `woo.v3.request.ts` only
+response/request contracts, and eight hard-false migration gates, while `woo.v3.request.ts` only
 prepares deterministic transport-neutral request descriptors. `woo.v3.public.ts` adds strict
 unknown-input decoders and pure mappers for the five public REST reads. `woo.v3.ticker.ts` purely
 composes one decoded futures-stat row with decoded matching BBO and Trade events.
@@ -50,6 +51,13 @@ path fail closed. A position-mode request requires one atomic reconciliation ID 
 account mode, a complete positions page proving every holding and pending quantity is exact decimal
 zero, and complete empty pending regular/algo order pages. Mutation responses prove request
 acceptance only, so authoritative readback remains mandatory.
+`woo.v3.cancel-all-after.ts` adds an inert VIP-only dead-man-switch descriptor for
+`POST /v3/trade/cancelAllAfter`. Its `triggerAfter` is an integer millisecond offset from 0 through
+900000 inclusive; 0 cancels the timer, and a repeated request replaces the existing timer. The
+strict success decoder accepts exact response/data keys and nonnegative safe-integer server
+timestamps. The endpoint cancels both ordinary and algo orders, so it has its own hard-false
+`cancelAllAfterDemoLifecycle` gate rather than inheriting either order-family gate. It has no
+transport owner, runtime import, selector, or activation.
 `woo.v3.websocket.ts` adds the matching inert WebSocket channel/topic inventory, listen-key and
 subscription descriptors, strict public/private wire decoders, latency-only heartbeat
 classification, and pure sequence/reconnect/resubscribe primitives.
@@ -160,6 +168,14 @@ only `success` and `timestamp`, so never infer resulting leverage or position mo
 the authoritative account/leverage endpoints before considering the state changed. None of this
 satisfies `accountWriteDemoLifecycle`.
 
+Cancel-All-After is VIP-only and spans both ordinary and algo order families. The official schema
+and prose define `triggerAfter` as an integer millisecond timeout capped at 900000 and use 0 to
+cancel the timer. The same page's example is a contradictory quoted, absolute-looking timestamp;
+the inert builder follows the typed schema, prose, and migration map and rejects that example shape.
+Before activation, a credentialed VIP demo must prove timer creation, replacement, zero-disable,
+ordinary+algo cancellation, reconnect/outage behavior, and authoritative readback/observability.
+None of this satisfies `cancelAllAfterDemoLifecycle`.
+
 ## CCXT Reference Implementation
 
 - **REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/woo.ts
@@ -177,6 +193,7 @@ satisfies `accountWriteDemoLifecycle`.
 - `woo.v3.regular-writes.ts` - Inert strict regular-order request/response contracts and amend blockers
 - `woo.v3.algo-writes.ts` - Inert strict algo-order request/response contracts and lifecycle blockers
 - `woo.v3.account-writes.ts` - Inert strict leverage read/write and position-mode contracts/evidence blockers
+- `woo.v3.cancel-all-after.ts` - Inert strict VIP dead-man-switch descriptor and response decoder
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.v3.websocket.ts` - Inert V3 WS URLs/topics, strict decoders, blockers, and recovery primitives
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized

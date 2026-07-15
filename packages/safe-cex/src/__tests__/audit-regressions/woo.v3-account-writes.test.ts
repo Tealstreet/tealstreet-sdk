@@ -403,7 +403,7 @@ describe('WooX V3 inert account writes', () => {
   });
 
   it('keeps every migration gate false and proves no active runtime import or transport exists', () => {
-    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false]);
+    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
     expect(WOO_V3_ACCOUNT_WRITE_PARITY).toEqual(
       expect.objectContaining({
         runtimeImported: false,

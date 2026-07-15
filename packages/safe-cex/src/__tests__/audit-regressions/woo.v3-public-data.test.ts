@@ -355,7 +355,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
   });
 
   it('preserves all hard-false migration gates and has no import from active Woo runtime entrypoints', () => {
-    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false]);
+    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
 
     const runtimeFiles = ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts'];
     for (const runtimeFile of runtimeFiles) {

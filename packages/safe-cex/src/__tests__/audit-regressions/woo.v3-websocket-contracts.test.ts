@@ -591,8 +591,8 @@ describe('WOO V3 inert websocket contracts', () => {
     ).toThrow();
   });
 
-  it('keeps all seven gates false and proves no active Woo runtime imports or transports this layer', () => {
-    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false]);
+  it('keeps all eight gates false and proves no active Woo runtime imports or transports this layer', () => {
+    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
     expect(WOO_V3_WS_BLOCKERS['listen-key-rotation-overlap-undocumented']).toMatchObject({
       requires: 'credentialed-demo',
     });

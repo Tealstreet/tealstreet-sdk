@@ -121,7 +121,7 @@ const listenKeyFixture = {
 describe('WooX V3 migration foundation', () => {
   it('keeps every migration family hard-disabled and disconnected from runtime', () => {
     expect(WOO_V3_RUNTIME_STATUS).toBe('scaffold-only');
-    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false]);
+    expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
     expect(WOO_V3_MIGRATION_ROUTES.every(({ gate }) => WOO_V3_MIGRATION_GATES[gate] === false)).toBe(true);
   });
 
