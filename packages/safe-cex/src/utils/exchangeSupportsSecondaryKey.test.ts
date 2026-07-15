@@ -7,7 +7,6 @@ describe('exchangeSupportsSecondaryKey', () => {
     expect(exchangeSupportsSecondaryKey('bybit')).toBe(true);
     expect(exchangeSupportsSecondaryKey('binance')).toBe(true);
     expect(exchangeSupportsSecondaryKey('okx')).toBe(true);
-    expect(exchangeSupportsSecondaryKey('arkham')).toBe(true);
   });
 
   it('is true for asterdex — V3 agent model supports a distinct read-only agent wallet', () => {

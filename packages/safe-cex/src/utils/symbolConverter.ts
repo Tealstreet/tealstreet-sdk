@@ -177,9 +177,8 @@ export function toBinance(symbol: string, from: ExchangeName): string {
       return clean;
     }
 
-    // -- GRVT/Arkham/Backpack: BTC_USDT_PERP → BTCUSDT ---------------------
+    // -- GRVT/Backpack: BTC_USDT_PERP → BTCUSDT ----------------------------
     case 'grvt':
-    case 'arkham':
     case 'backpack': {
       const clean = symbol.endsWith('_PERP') ? symbol.slice(0, -5) : symbol;
       return clean.replace(/_/g, '');
@@ -336,9 +335,8 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
       return `${kucoinBase}${quote}M`;
     }
 
-    // -- GRVT/Arkham/Backpack: BTCUSDT → BTC_USDT_PERP ---------------------
+    // -- GRVT/Backpack: BTCUSDT → BTC_USDT_PERP ----------------------------
     case 'grvt':
-    case 'arkham':
     case 'backpack': {
       const { base, quote } = parseBinanceSymbol(symbol);
       return `${base}_${quote}_PERP`;

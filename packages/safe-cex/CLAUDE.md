@@ -234,7 +234,7 @@ Is requiresCors true?
 │   │
 │   └── Is enforceWsTunnel true?
 │       ├── YES → WS tunnel only, no CORS proxy
-│       │   Examples: Hyperliquid, Paradex, Arkham, KuCoin, Kraken,
+│       │   Examples: Hyperliquid, Paradex, KuCoin, Kraken,
 │       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
 │           Examples: OKX, Binance, BinancePM, BinanceSpot,

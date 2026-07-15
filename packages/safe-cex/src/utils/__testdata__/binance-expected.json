@@ -45,12 +45,6 @@
     "METUSDT": "METUSDT",
     "MONUSDT": "MONUSDT"
   },
-  "arkham": {
-    "BTC_USDT_PERP": "BTCUSDT",
-    "ETH_USDT_PERP": "ETHUSDT",
-    "SOL_USDT_PERP": "SOLUSDT",
-    "LINK_USDT_PERP": "LINKUSDT"
-  },
   "asterdex": {
     "BTCUSDT": "BTCUSDT",
     "ASTERUSDT": "ASTERUSDT",

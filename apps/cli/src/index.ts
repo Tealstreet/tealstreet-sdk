@@ -67,7 +67,6 @@ const SUPPORTED_EXCHANGES: Record<string, ExchangeInfo> = {
   kucoin: { displayName: 'KuCoin', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: [] },
   phemex: { displayName: 'Phemex', requiredFields: ['apiKey', 'apiSecret'], optionalFields: ['testnet'] },
   paradex: { displayName: 'Paradex', requiredFields: ['privateKey', 'walletAddress'], optionalFields: ['testnet'] },
-  arkham: { displayName: 'Arkham', requiredFields: ['privateKey', 'walletAddress'], optionalFields: [] },
 };
 
 function getSupportedExchangeNames(): string[] {

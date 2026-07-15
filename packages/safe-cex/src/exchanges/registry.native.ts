@@ -9,7 +9,6 @@ const load = (loader: () => typeof BaseExchange): ExchangeLoader => () => Promis
 
 export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   apexomni: load(() => require('./apexomni/apexomni.exchange').ApexOmniExchange),
-  arkham: load(() => require('./arkham/arkham.exchange').ArkhamExchange),
   asterdex: load(() => require('./asterdex/asterdex.exchange').AsterDEXExchange),
   backpack: load(() => require('./backpack/backpack.exchange').BackpackExchange),
   binance: load(() => require('./binance/binance.exchange').BinanceExchange),

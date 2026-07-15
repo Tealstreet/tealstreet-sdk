@@ -27,7 +27,6 @@ function getSamples(exchange: string): Sample[] {
 
 const ALL_EXCHANGES: ExchangeName[] = [
   'apexomni',
-  'arkham',
   'asterdex',
   'backpack',
   'binance',

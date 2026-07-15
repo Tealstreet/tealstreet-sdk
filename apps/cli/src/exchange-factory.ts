@@ -82,11 +82,6 @@ export const SUPPORTED_EXCHANGES: Record<
     requiredFields: ['privateKey', 'walletAddress'],
     optionalFields: ['testnet'],
   },
-  arkham: {
-    displayName: 'Arkham',
-    requiredFields: ['privateKey', 'walletAddress'],
-    optionalFields: [],
-  },
 };
 
 export function getSupportedExchangeNames(): string[] {
@@ -112,7 +107,7 @@ export function getExchangeInfo(name: string) {
  * incomplete (it carried `privateKey` / `walletAddress` top-level fields that
  * never existed in the canonical `ExchangeOptions` shape). Replaced with the
  * canonical `createExchangeFromAccount` helper from safe-cex so wallet-based
- * exchanges (Hyperliquid, Paradex, Arkham) get their auth fields routed
+ * exchanges (Hyperliquid and Paradex) get their auth fields routed
  * through the same translation layer the web app uses.
  */
 export async function createExchangeFromConfig(account: AccountConfig): Promise<BaseExchange> {

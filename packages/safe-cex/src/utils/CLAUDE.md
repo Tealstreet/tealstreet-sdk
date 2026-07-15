@@ -33,7 +33,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | krakenspot                            | `{B}/{Q}`          | `BTC/USD`        | USD           | Slash-separated wsname format                            |
 | kucoin                                | `{B}{Q}M`          | `XBTUSDTM`       | USDT          | M suffix, XBT alias for BTC                              |
 | grvt                                  | `{B}_{Q}_PERP`     | `AAVE_USDT_PERP` | USDT          | Underscore-sep with PERP                                 |
-| arkham                                | `{B}_{Q}_PERP`     | `BTC_USDT_PERP`  | USDT          | Underscore-sep, API baseSymbol has `.P` suffix for perps |
 | backpack                              | `{B}_{Q}_PERP`     | `BTC_USDC_PERP`  | USDC          | Underscore-sep, spot: `{B}_{Q}`                          |
 | cryptocom                             | `{B}{Q}-PERP`      | `BTCUSD-PERP`    | USD           | Concat base+quote then `-PERP`                           |
 | lighter                               | `{B}`              | `APT`            | USDT          | Just base, some have `{B}/USDC`                          |
@@ -43,7 +42,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 ### Key Gotchas
 
 - **bitgetusdc** uses `BTCPERP` format (NOT `BTCUSDC`) — confirmed via API
-- **Arkham** perps are `BTC_USDT_PERP` (NOT `BTC_PERP`) — confirmed via API and `__testdata__/market-samples.json`.
 - **KuCoin** symbols have `M` suffix (`XBTUSDTM`) and use XBT for BTC — code does `split('_')[0]` which is a noop since no underscore exists
 - **KuCoin** prefers `m.baseCurrency` for the base asset and only falls back to
   `m.rootSymbol`; do not reverse that order because `rootSymbol` can be the

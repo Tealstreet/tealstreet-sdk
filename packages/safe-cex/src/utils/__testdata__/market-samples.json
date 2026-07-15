@@ -277,37 +277,6 @@
       "binance": "MONUSDT"
     }
   ],
-  "arkham": [
-    {
-      "symbol": "BTC_USDT_PERP",
-      "base": "BTC",
-      "quote": "USDT",
-      "id": "BTC_USDT_PERP",
-      "_source": "code-verified",
-      "binance": "BTCUSDT"
-    },
-    {
-      "symbol": "ETH_USDT_PERP",
-      "base": "ETH",
-      "quote": "USDT",
-      "id": "ETH_USDT_PERP",
-      "binance": "ETHUSDT"
-    },
-    {
-      "symbol": "SOL_USDT_PERP",
-      "base": "SOL",
-      "quote": "USDT",
-      "id": "SOL_USDT_PERP",
-      "binance": "SOLUSDT"
-    },
-    {
-      "symbol": "LINK_USDT_PERP",
-      "base": "LINK",
-      "quote": "USDT",
-      "id": "LINK_USDT_PERP",
-      "binance": "LINKUSDT"
-    }
-  ],
   "asterdex": [
     {
       "symbol": "BTCUSDT",

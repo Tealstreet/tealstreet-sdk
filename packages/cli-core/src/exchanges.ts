@@ -69,11 +69,6 @@ export const SUPPORTED_EXCHANGES: Record<string, ExchangeInfo> = {
     requiredFields: ['privateKey', 'walletAddress'],
     optionalFields: ['testnet'],
   },
-  arkham: {
-    displayName: 'Arkham',
-    requiredFields: ['privateKey', 'walletAddress'],
-    optionalFields: [],
-  },
 };
 
 export function getSupportedExchangeNames(): string[] {

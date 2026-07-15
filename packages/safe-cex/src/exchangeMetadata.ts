@@ -1962,80 +1962,6 @@ const ParadexMetadata: ExchangeMetadata = {
   },
 };
 
-const ArkhamMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  exchangeName: 'arkham' as ExchangeName,
-  logo: '/static/exchanges/logos/ARKHAM/logo.png',
-  lightLogo: '/static/exchanges/logos/ARKHAM/light.png',
-  darkLogo: '/static/exchanges/logos/ARKHAM/dark.png',
-  refLink: 'https://arkm.com',
-  refImage: '/static/exchanges/reflinks/arkham/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: false,
-  // The legacy CEX REST and WebSocket API is unavailable. Do not re-enable
-  // until Arkham publishes and we validate a replacement trading protocol.
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
-  supportsTestnet: false, // No testnet available yet
-  // Frozen legacy adapter has no safe-cex history implementation.
-  supportsTradesHistory: false,
-  orderbookTickDelay: 100,
-  prettyName: 'Arkham',
-  defaultSymbol: 'BTC_USDT_PERP',
-  privateProxyIps: privateProxyIpsTokyo,
-  supportsTrailingStopLoss: false,
-  supportedTPSLTriggerTypes: [],
-  defaultTPTriggerType: undefined,
-  defaultSLTriggerType: undefined,
-  positionModes: [PositionMode.OneWay], // Arkham only supports one-way mode
-  marginTypes: [MarginType.Cross], // Arkham uses dynamic margin schedules, not traditional isolated/cross
-  tickInterval: 500,
-  tvMaxGetBarFetches: 10,
-  supportsReadOnlyKey: false,
-  supportsPartialStops: false,
-  supportsTPSLCloseAttribute: false,
-  leverageSliderDisabled: false,
-  hasIndependentHedgedLeverageInIsolatedMargin: false,
-  leverageMagnets: [1, 5, 10, 20, 50, 100],
-  defaultQuote: 'USDT',
-  candleApiCountLimit: 500,
-  tvIntraDayMultipliers: ['1', '5', '15', '30', '60'],
-  tvHasDaily: false, // Arkham API doesn't support 1D candles natively, TradingView builds from intraday
-  tvHasWeeklyAndMonthly: false, // Not supported natively
-  hasEmptyPositions: false,
-  positionModeIsGlobal: true,
-  marginTypeIsGlobal: true, // Dynamic margin system is global
-  leverageIsGlobal: false,
-  disconnectWarningThreshold: 5000,
-  supportsFeeRates: true,
-  marketOrderDelayInSeconds: 0,
-  privateProxyRegions: {},
-  autoDownSizeReduceOrders: true,
-  supportsChaser: false,
-  supportsPositionMargin: false,
-  supportsClosedPnLEndpoint: false,
-  requiresCors: false,
-  forbidCors: false,
-  orderPendingUpdateDelay: 1000,
-  stopOrderPendingUpdateDelay: 1000,
-  requiresNoSecret: false,
-  hideMarginTypeSelector: true, // Hide margin type selector since Arkham uses dynamic margin schedules
-  hidePositionModeSelector: true, // Hide position mode selector since only OneWay is supported
-  fetchLeverageOnMarginSymbolChange: true, // Fetch leverage when active margin symbol changes
-  alwaysCalculateUnrealizedPnlFromLastPrice: true, // Calculate PnL from last price instead of mark price
-  supportsInfinityStops: false, // Arkham doesn't support full position TP/SL
-  enforceWsTunnel: true,
-  latencyDomain: 'arkm.com',
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
 const AsterDEXMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2222,7 +2148,6 @@ const LighterMetadata: ExchangeMetadata = {
 export const exchangeMetadata: {
   [key in ExchangeName]: ExchangeMetadata;
 } = {
-  arkham: ArkhamMetadata,
   asterdex: AsterDEXMetadata,
   backpack: BackpackMetadata,
   bybit: BybitMetadata,

@@ -93,19 +93,6 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         enforceWsTunnel: false,
         privateProxyRegions: { SG: ['1.2.3.4'] },
       },
-      arkham: {
-        exchangeName: 'arkham',
-        requiresCors: false,
-        requiresPassphrase: false,
-        requiresApplicationId: true,
-        requiresApiKeyIndex: true,
-        supportsVault: false,
-        requiresOmniKeySeed: false,
-        requiresParadexAddress: false,
-        supportsSubaccount: false,
-        enforceWsTunnel: false,
-        privateProxyRegions: { SG: ['1.2.3.4'] },
-      },
       lighter: {
         exchangeName: 'lighter',
         requiresCors: false,
@@ -386,8 +373,8 @@ describe('accountToExchangeOptions', () => {
   describe('exchange-specific fields', () => {
     it('should include applicationId when exchange requires it', () => {
       const account: ExchangeAccountConfig = {
-        exchange: 'arkham',
-        name: 'test-arkham',
+        exchange: 'lighter',
+        name: 'test-lighter',
         apiKey: 'test-key',
         apiSecret: 'test-secret',
         applicationId: 'app-123',
@@ -414,8 +401,8 @@ describe('accountToExchangeOptions', () => {
 
     it('should include apiKeyIndex when exchange requires it', () => {
       const account: ExchangeAccountConfig = {
-        exchange: 'arkham',
-        name: 'test-arkham',
+        exchange: 'lighter',
+        name: 'test-lighter',
         apiKey: 'test-key',
         apiSecret: 'test-secret',
         apiKeyIndex: '0',

@@ -22,10 +22,6 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   apexomni: () =>
     import(/* webpackChunkName: "exchange-apexomni" */ './apexomni/apexomni.exchange').then((m) => m.ApexOmniExchange),
 
-  // Arkham
-  arkham: () =>
-    import(/* webpackChunkName: "exchange-arkham" */ './arkham/arkham.exchange').then((m) => m.ArkhamExchange),
-
   // AsterDEX
   asterdex: () =>
     import(/* webpackChunkName: "exchange-asterdex" */ './asterdex/asterdex.exchange').then((m) => m.AsterDEXExchange),

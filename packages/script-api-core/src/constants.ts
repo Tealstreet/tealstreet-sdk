@@ -26,7 +26,6 @@ import type { CoreConstants, ExchangeNameMap } from './api/CoreApi.types';
 
 const EXCHANGE_NAMES = [
   'apexomni',
-  'arkham',
   'asterdex',
   'backpack',
   'binance',

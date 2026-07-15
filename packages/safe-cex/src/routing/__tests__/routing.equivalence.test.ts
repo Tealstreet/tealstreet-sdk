@@ -15,7 +15,6 @@ import { resolveExchangeRouting } from '../resolveExchangeRouting';
 // Tokyo match flips, this map (and the reconciliation it forces) is the tripwire.
 const REST_BASE_URLS: Record<ExchangeName, string> = {
   apexomni: 'https://omni.apex.exchange/api',
-  arkham: 'https://arkm.com/api',
   asterdex: 'https://fapi.asterdex.com',
   backpack: 'https://api.backpack.exchange',
   binance: 'https://fapi.binance.com',
@@ -101,12 +100,7 @@ const wsRoute = { tealstreetWsRoute: true };
 
 describe('routing table / resolver (Epic 1 net)', () => {
   it('WS hosts reproduce the current hardcoded literals', () => {
-    // alwaysProxy (arkham public+private, grvt private) — no option gates it.
-    expect(resolveExchangeRouting('arkham', offProxy).wsPublic).toEqual({
-      tunnelled: true,
-      host: 'wss://fsjnpy143pbz.jp.tealstreet.io/arkm',
-    });
-    expect(resolveExchangeRouting('arkham', offProxy).wsPrivate.host).toBe('wss://fsjnpy143pbz.jp.tealstreet.io/arkm');
+    // alwaysProxy (grvt private) — no option gates it.
     expect(resolveExchangeRouting('grvt', proxy).wsPrivate.host).toBe('wss://fsjnpy143pbz.jp.tealstreet.io/grvt');
 
     // proxyConditional: on -> tunnel host, off -> direct.

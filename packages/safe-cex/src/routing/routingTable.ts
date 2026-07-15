@@ -20,7 +20,6 @@ const JP = `${T}.jp.tealstreet.io`;
 const ASIA = `${T}.asia.tealstreet.io`;
 
 const WS = {
-  arkham: `${JP}/arkm`,
   grvt: `${JP}/grvt`,
   okxPrivate: `${ASIA}/okx/private`,
   okxBusiness: `${ASIA}/okx/business`,
@@ -68,7 +67,6 @@ const bitmexWs: WsGroup = {
 
 // Per-exchange WS overrides (everything not listed defaults to all-direct).
 const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
-  arkham: { public: { kind: 'alwaysProxy', host: WS.arkham }, private: { kind: 'alwaysProxy', host: WS.arkham } },
   grvt: { private: { kind: 'alwaysProxy', host: WS.grvt } },
   okx: okxWs,
   okxeu: okxWs, // OKXEUExchange extends OKXExchange {}

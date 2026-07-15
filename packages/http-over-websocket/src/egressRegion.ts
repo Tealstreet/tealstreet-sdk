@@ -8,12 +8,9 @@
 
 // Exchanges that should use the Tokyo (jp) egress server. Matched as a
 // case-insensitive substring against either an exchange name OR a request
-// baseURL, so `arkham`/`arkm`, `binance`/`binancespot`, `bitget`/`bitgetusdc`,
+// baseURL, so `binance`/`binancespot`, `bitget`/`bitgetusdc`,
 // `breakout`/`breakoutprop`, `aster`/`asterdex`, etc. all resolve together.
 export const TOKYO_EGRESS_EXCHANGES = [
-  // url pattern, so both arkham & arkm
-  'arkham',
-  'arkm',
   'hlnode',
   'hyperliquid',
   'hyperliquidspot',

@@ -32,9 +32,9 @@ export type WsHost = string;
 // interprets these against the resolved transport options. Each kind names the CURRENT
 // observed behavior faithfully so the golden master can prove the cutover is a no-op.
 export type WsStrategy =
-  // Always the exchange's own WS — never tunnelled (the ~28 default exchanges).
+  // Always the exchange's own WS — never tunnelled (the default strategy).
   | { kind: 'direct' }
-  // Always the tunnel host regardless of options (arkham, grvt).
+  // Always the tunnel host regardless of options (grvt).
   | { kind: 'alwaysProxy'; host: WsHost }
   // tealstreetProxy ? host : direct (okx private/business, blofin, coinbase, apexomni).
   | { kind: 'proxyConditional'; host: WsHost }
