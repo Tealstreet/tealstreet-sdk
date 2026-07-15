@@ -268,6 +268,15 @@ Order book is subscribed on-demand (not at startup):
 6. Every snapshot records `seqId`; every delta must have `prevSeqId` equal to
    the last accepted sequence. A discontinuity is ignored and triggers one
    unsubscribe/subscribe cycle; deltas remain suppressed until a fresh snapshot.
+   This predecessor check intentionally remains bespoke instead of using
+   `SequencedDeltaOrderBook`: OKX documents valid maintenance-reset deltas where
+   `prevSeqId` matches the last message but `seqId` becomes smaller. The shared
+   helper currently treats every lower sequence as stale and would discard that
+   valid depth change. Its OKX adoption gate is a reset-aware policy plus
+   deterministic maintenance-reset coverage; do not migrate before both exist.
+   An empty keepalive update with `prevSeqId === seqId` is also valid. Replayed or
+   otherwise discontinuous frames fail closed through the existing resubscribe.
+   The deprecated `checksum` remains present as `0` and is not consulted.
 7. **Post-processing**: Filters out invalid prices (bids > last price, asks < last price), sorts, and calculates totals
 8. Stores topic for re-subscription on reconnect; reconnect clears the old sequence state
 9. The cleanup function filters out its parser; when the last parser is

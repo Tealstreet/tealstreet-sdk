@@ -179,7 +179,12 @@ action, predecessor semantics, duplicate/replay behavior, reset behavior, and
 numeric width. Also prove that a refcount-safe resubscribe produces a new
 snapshot, reset the helper on close/final unsubscribe, and lock those behaviors
 in a fresh audit regression. Existing bespoke OKX and BloFin recovery stays in
-place until those adoption gates are reviewed venue by venue.
+place until those adoption gates are reviewed venue by venue. OKX is explicitly
+blocked today: its official maintenance-reset frame is an incremental update
+with a predecessor equal to the last accepted sequence and a new sequence lower
+than that predecessor, while this helper deliberately classifies lower
+sequences as stale. A future OKX adapter must opt into reset semantics without
+weakening the default monotonic contract.
 
 ## `virtualClock` time-source order — don't lead with direct `api.bybit.com`
 
