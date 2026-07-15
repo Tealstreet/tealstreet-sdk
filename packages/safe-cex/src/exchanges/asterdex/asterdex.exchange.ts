@@ -73,7 +73,8 @@ import { AsterDEXPublicWebsocket } from './asterdex.ws-public';
 
 const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
 const BALANCE_RECONCILIATION_INTERVAL_MS = 25_000;
-const PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS = 75_000;
+const POSITION_SAFETY_RECONCILIATION_INTERVAL_MS = 25_000;
+const ORDER_SAFETY_RECONCILIATION_INTERVAL_MS = 75_000;
 
 export class AsterDEXExchange extends BaseExchange {
   private static readonly OPEN_INTEREST_POLL_INTERVAL_MS = 15000;
@@ -260,10 +261,10 @@ export class AsterDEXExchange extends BaseExchange {
       now - this.lastBalanceReconciliationAt >= BALANCE_RECONCILIATION_INTERVAL_MS;
     const shouldReconcilePositions =
       this.lastPositionSafetyReconciliationAt === 0 ||
-      now - this.lastPositionSafetyReconciliationAt >= PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS;
+      now - this.lastPositionSafetyReconciliationAt >= POSITION_SAFETY_RECONCILIATION_INTERVAL_MS;
     const shouldReconcileOrders =
       this.lastOrderSafetyReconciliationAt === 0 ||
-      now - this.lastOrderSafetyReconciliationAt >= PRIVATE_SNAPSHOT_RECONCILIATION_INTERVAL_MS;
+      now - this.lastOrderSafetyReconciliationAt >= ORDER_SAFETY_RECONCILIATION_INTERVAL_MS;
 
     if (shouldReconcileBalance) {
       await this.reconcileBalanceAfterPrivateUpdate(this.balanceStateVersion);

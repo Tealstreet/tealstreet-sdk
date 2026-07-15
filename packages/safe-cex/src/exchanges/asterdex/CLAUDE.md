@@ -163,9 +163,9 @@ Most endpoints use `/fapi/{apiVersion}/...` where `apiVersion` is `v1` or `v3`.
 
 ### Network Configuration
 
-| Component  | Production | Testnet |
-| ---------- | ---------- | ------- |
-| Public WS  | `wss://fstream.asterdex.com/stream?requestId=<nanoid>` | `wss://fstream5.asterdex-testnet.com/stream?requestId=<nanoid>` |
+| Component | Production | Testnet |
+| --------- | ---------- | ------- |
+| Public WS | `wss://fstream.asterdex.com/stream?requestId=<nanoid>` | `wss://fstream5.asterdex-testnet.com/stream?requestId=<nanoid>` |
 | Private WS | `wss://fstream.asterdex.com/ws/<listenKey>` | `wss://fstream5.asterdex-testnet.com/ws/<listenKey>` |
 
 Each environment uses one host for public and private streams, with `/stream`
@@ -295,13 +295,11 @@ for public multiplexed traffic and `/ws/<listenKey>` for private user data.
 
 ## Order Types and Mappings
 
-| Internal Type                | AsterDEX API Value     | Notes                                  |
-| ---------------------------- | ---------------------- | -------------------------------------- |
-| `OrderType.Limit`            | `LIMIT`                | Requires `price` and `timeInForce`     |
-| `OrderType.Market`           | `MARKET`               | No `price` or `timeInForce`            |
-| `OrderType.StopLoss`         | `STOP_MARKET`          | Requires `stopPrice` and `workingType` |
-| `OrderType.TakeProfit`       | `TAKE_PROFIT_MARKET`   | Requires `stopPrice` and `workingType` |
-| `OrderType.TrailingStopLoss` | `TRAILING_STOP_MARKET` | Not advertised and rejected by `placeOrder`: Aster requires `callbackRate`, which `PlaceOrderOpts` cannot represent unambiguously. |
+- `OrderType.Limit` -> `LIMIT`: Requires `price` and `timeInForce`
+- `OrderType.Market` -> `MARKET`: No `price` or `timeInForce`
+- `OrderType.StopLoss` -> `STOP_MARKET`: Requires `stopPrice` and `workingType`
+- `OrderType.TakeProfit` -> `TAKE_PROFIT_MARKET`: Requires `stopPrice` and `workingType`
+- `OrderType.TrailingStopLoss` -> `TRAILING_STOP_MARKET`: Disabled; Aster requires `callbackRate`, which `PlaceOrderOpts` cannot represent unambiguously.
 
 Additional reverse mappings exist for `STOP` -> `StopLoss`, `TAKE_PROFIT` -> `TakeProfit`, `TRAILING_STOP` -> `TrailingStopLoss` (`AsterDEXExchange.reverseMapOrderType`).
 
@@ -413,7 +411,7 @@ Four API instances with different rate limits (`createAPIInstances`):
 
 ### Position State
 
-- **REST polling**: Fetched as a safety reconciliation roughly every 75
+- **REST polling**: Fetched as a safety reconciliation roughly every 25
   seconds, with a stale-response guard based on `positionStateVersion`
 - **WebSocket updates**: `ACCOUNT_UPDATE` events provide immediate position changes
   - Updates existing positions if found in store
@@ -530,7 +528,7 @@ the dedicated Aster clock uses the same REST constant.
   work. It is a scheduler, not a full refresh loop.
 - **Balance reconciliation**: roughly every 25 seconds via the account
   endpoint.
-- **Position safety reconciliation**: roughly every 75 seconds via
+- **Position safety reconciliation**: roughly every 25 seconds via
   `positionRisk`, guarded by `positionStateVersion` so stale REST cannot
   overwrite newer WS position deltas.
 - **Order safety reconciliation**: roughly every 75 seconds via
