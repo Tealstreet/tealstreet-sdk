@@ -141,6 +141,7 @@ export type BTCCOrderRaw = {
 export type BTCCOrderListResponse = {
   code: number;
   msg: string;
+  total?: number;
   orders: BTCCOrderRaw[];
 };
 

@@ -819,7 +819,9 @@ const CryptocomMetadata: ExchangeMetadata = {
 
 const BtccMetadata: ExchangeMetadata = {
   ...defaultMetaData,
-  supportsPublicOnly: true,
+  // BTCC has no verified quote/orderbook implementation in safe-cex. Keep the
+  // venue unavailable until its current Futures quote contract is integrated.
+  supportsPublicOnly: false,
   exchangeName: 'btcc' as ExchangeName,
   logo: '',
   lightLogo: '',
@@ -828,7 +830,8 @@ const BtccMetadata: ExchangeMetadata = {
   requiresPassphrase: true,
   requiresApplicationId: true,
   enabled: false,
-  enabledInDev: true,
+  enabledInDev: false,
+  enableInPreview: false,
   supportsTestnet: false,
   supportsTradesHistory: true,
   supportsExecutionsHistory: true,
@@ -850,8 +853,8 @@ const BtccMetadata: ExchangeMetadata = {
   leverageMagnets: [1, 2, 5, 10, 20, 50, 100],
   supportsClosedPnLEndpoint: true,
   features: {
-    kline: true,
-    orderbook: true,
+    kline: false,
+    orderbook: false,
     orders: true,
     positions: true,
     balance: true,

@@ -12,17 +12,17 @@
 ## API Documentation
 
 - **Base URL**: `https://api1.btloginc.com:9081`
-- No publicly available API documentation link found. Implementation based on proprietary API.
+- BTCC's [official API Futures Trading page](https://www.btcc.com/en-CA/support-center/detail/24451281100697), updated 2025-11-18, says it is the sole current API documentation and links downloadable Futures and quote-WebSocket guides. The public article and its server data expose the guide names but not their download targets, so the legacy TradeOpenAPI wire contract remains externally unverifiable from this environment.
 
 ## File Structure
 
 | File               | Description                                                                       |
 | ------------------ | --------------------------------------------------------------------------------- |
 | `btcc.api.ts`      | Minimal REST API client (no auth interceptor -- signing is in the exchange class) |
-| `btcc.exchange.ts` | Main exchange class extending `BaseExchange` (~934 lines)                         |
+| `btcc.exchange.ts` | Main exchange class extending `BaseExchange`                         |
 | `btcc.types.ts`    | Type definitions, endpoint constants, enums, and response types                   |
 
-**Note**: BTCC is a **REST-only** implementation. There are no WebSocket files. All data is fetched via polling.
+**Note**: BTCC is a **REST-only** implementation. There are no WebSocket files. Private data is fetched via polling. The integration is unavailable in both production and development discovery until a current, verified Futures quote/orderbook source replaces its zero-value placeholders.
 
 ## Authentication
 
@@ -37,11 +37,20 @@ BTCC requires four credentials, mapped to Tealstreet fields:
 | Application ID   | `user_name`  | Account username             | `ensureCredentials()` |
 | Passphrase       | `password`   | Account password             | `ensureCredentials()` |
 
-Validation in `ensureCredentials()` (`btcc.exchange.ts:105-118`) throws descriptive errors for each missing field.
+Validation in `ensureCredentials()` throws descriptive errors for each missing field.
+
+All local credential/account preflight failures and unsupported user actions go
+through `throwUserError()`, which calls `emitAndLogError()` immediately before
+throwing so the account-controller toast path is preserved.
+
+Remote signing is deliberately unsupported. `ensureCredentials()` rejects any
+`remoteSigner` configuration before a request is built because BTCC signing is
+performed in the exchange class, not in an axios interceptor that the hosted
+remote-signing adapter can delegate.
 
 ### Login Flow
 
-`ensureLoggedIn()` (`btcc.exchange.ts:198-220`):
+`ensureLoggedIn()`:
 
 1. If `force` is false and `this.token` exists, returns immediately (cached session).
 2. Calls `ensureCredentials()` to validate all four fields are present.
@@ -51,9 +60,12 @@ Validation in `ensureCredentials()` (`btcc.exchange.ts:105-118`) throws descript
 6. Stores `token`, `account`, and `accountNumber`.
 7. Starts heartbeat timer.
 
+An in-flight login is memoized. Concurrent callers await the same promise; the
+guard is cleared after either success or failure so a later call can retry.
+
 ### Request Signing (MD5)
 
-`buildSignedParams()` (`btcc.exchange.ts:140-167`):
+`buildSignedParams()`:
 
 1. Collect all non-empty parameters as strings:
    - Booleans become `"1"` or `"0"`
@@ -63,13 +75,19 @@ Validation in `ensureCredentials()` (`btcc.exchange.ts:105-118`) throws descript
 3. Sort all keys alphabetically using `localeCompare`.
 4. Build query string: `key1=encodeURIComponent(value1)&key2=encodeURIComponent(value2)&...`
 5. Compute `sign = MD5(queryString)` (using Node.js `crypto.createHash('md5')`).
-6. Return original params with `sign` appended.
+6. Return the prepared params -- including `secret_key` -- with `sign` appended.
+
+`secret_key` therefore remains present in the transmitted query parameters.
+This is intentionally unchanged: the current BTCC-hosted support article does
+not expose its downloadable Futures guide target, and official-domain searches
+do not publish the legacy TradeOpenAPI signing contract. Do not remove the
+field until a BTCC-hosted guide or BTCC support confirms it is sign-base-only.
 
 **Important**: The secret key is included directly in the sorted parameter string before hashing (not as a separate HMAC key). This MD5 approach is unusual for crypto exchanges.
 
 ### Authenticated Request Flow
 
-`apiRequest()` (`btcc.exchange.ts:169-196`):
+`apiRequest()`:
 
 1. If `auth !== false`:
    - Calls `ensureLoggedIn()` to guarantee valid session
@@ -81,7 +99,7 @@ Validation in `ensureCredentials()` (`btcc.exchange.ts:105-118`) throws descript
 
 ### Session Keepalive
 
-`startHeartbeat()` (`btcc.exchange.ts:222-236`):
+`startHeartbeat()`:
 
 - `setInterval` runs every **20 seconds**
 - Calls `GET /v1/user/keepalive`
@@ -95,26 +113,27 @@ Two different identifiers used in different contexts:
 - `account.id` (numeric): Used as `accountid` parameter in most API requests
 - `account.account_no` (string): Stored as `accountNumber`, used for report queries as `accountNo`
 
-`ensureAccountNumber()` (`btcc.exchange.ts:120-129`) resolves from `this.accountNumber` or `this.account?.account_no`.
+`ensureAccountNumber()` resolves from `this.accountNumber` or `this.account?.account_no`.
 
 ## Startup Sequence
 
-Defined in `btcc.exchange.ts:378-398` (`start()`):
+`start()` follows this sequence:
 
-1. **`ensureLoggedIn()`** -- Authenticates with BTCC, gets token and account data. Starts heartbeat.
-2. **`fetchMarkets()`** -- REST call to `/v1/config/symbollist`. Builds symbol mapping tables. Store updated with markets.
-3. **`fetchTickers()`** -- Returns placeholder tickers (all zeros) derived from market list. Store updated with tickers.
-4. **`tick()`** -- First tick: fetches positions, balance, orders. Continues polling.
+1. **`initExternalPublicData()`** -- Uses the shared external provider when one is available.
+2. **`ensureLoggedIn()`** -- For private accounts, authenticates and starts the heartbeat.
+3. **`fetchMarkets()` / `fetchTickers()`** -- When external public data is absent, loads symbols and zero-value placeholder tickers.
+4. **Public-only exit** -- Marks private stores loaded without starting private polling.
+5. **`tick()`** -- For private accounts, starts the positions, balance, and orders polling loop.
 
 There is no WebSocket initialization step.
 
 ### Tick Loop
 
-`tick()` (`btcc.exchange.ts:400-428`):
+`tick()`:
 
 - **Every tick**: Fetch positions via `POSITION_LIST`, fetch orders via `ORDER_LIST`
 - **Every other tick** (`count % 2 === 0`): Fetch balance via `ACCOUNT_INFO`
-- Wait for `tickInterval` (configurable via `options.extra.tickInterval`), then repeat
+- Wait for the metadata-driven 2-second `tickInterval` (`options.extra.tickInterval` may override it), then repeat
 - On error, logs and continues (does not crash the loop)
 
 ## REST API Endpoints
@@ -142,11 +161,11 @@ There is no WebSocket initialization step.
 
 **None.** BTCC is entirely REST-based. All `listen*` methods are no-ops:
 
-- `listenOrderBook()` -- Returns empty cleanup function (`btcc.exchange.ts:917-919`)
-- `listenOHLCV()` -- Returns empty cleanup function (`btcc.exchange.ts:921-923`)
-- `listenOHLCVs()` -- Empty function (`btcc.exchange.ts:925`)
-- `listenOHLCVWebworker()` -- Returns empty cleanup function (`btcc.exchange.ts:927-929`)
-- `listenOrderBookWebworker()` -- Returns empty cleanup function (`btcc.exchange.ts:931-933`)
+- `listenOrderBook()` -- Returns empty cleanup function
+- `listenOHLCV()` -- Returns empty cleanup function
+- `listenOHLCVs()` -- Empty function
+- `listenOHLCVWebworker()` -- Returns empty cleanup function
+- `listenOrderBookWebworker()` -- Returns empty cleanup function
 
 ## Order Types and Mappings
 
@@ -162,7 +181,7 @@ There is no WebSocket initialization step.
 
 ### Internal Type to BTCC Type Mapping
 
-Determined by `derivePendingType()` (`btcc.exchange.ts:596-607`):
+Determined by `derivePendingType()`:
 
 | `PlaceOrderOpts.type`  | `reduceOnly`/`close`? | BTCC Order Type                                     |
 | ---------------------- | --------------------- | --------------------------------------------------- |
@@ -207,7 +226,7 @@ Determined by `derivePendingType()` (`btcc.exchange.ts:596-607`):
 
 ### Market Order Placement
 
-`placeOrder()` (`btcc.exchange.ts:609-676`):
+`placeOrder()`:
 
 Market orders bypass the pending order system entirely:
 
@@ -225,7 +244,7 @@ For Limit/StopLoss/TakeProfit orders:
 
 ### Order Update (Native Amend)
 
-`updateOrder()` (`btcc.exchange.ts:687-710`):
+`updateOrder()`:
 
 BTCC supports native order amendment via `UPDATE_PENDING`:
 
@@ -235,24 +254,24 @@ BTCC supports native order amendment via `UPDATE_PENDING`:
 
 ### Order Cancellation
 
-`cancelOrders()` (`btcc.exchange.ts:712-716`):
+`cancelOrders()`:
 
 - Cancels orders one at a time via `POST` to `CANCEL_PENDING` with `{ id: <orderId> }`.
 - No batch cancel support.
 
-`cancelAllOrders()` (`btcc.exchange.ts:718-722`):
+`cancelAllOrders()`:
 
 - Fetches all current orders, then cancels each individually.
 
 ### Batch Order Placement
 
-`placeOrders()` (`btcc.exchange.ts:678-685`):
+`placeOrders()`:
 
 - Sequential execution (no parallelism). Each order is placed via `placeOrder()` one at a time.
 
 ### Position Lookup for Reduce-Only
 
-`findPositionForReduceOnly()` (`btcc.exchange.ts:586-594`):
+`findPositionForReduceOnly()`:
 
 - Finds position on the opposite side (Buy order -> Short position, Sell order -> Long position).
 - Falls back to any position for the symbol if no opposite-side match found.
@@ -269,7 +288,7 @@ BTCC uses internal symbol names that differ from display format:
 
 ### Symbol Mapping Infrastructure
 
-Three bidirectional maps (`btcc.exchange.ts:85-87`):
+Three bidirectional maps:
 
 - **`rawSymbolToDisplay`**: `Map<string, string>` -- API name to clean display name
 - **`displaySymbolToRaw`**: `Map<string, string>` -- Reverse mapping for API calls
@@ -277,7 +296,7 @@ Three bidirectional maps (`btcc.exchange.ts:85-87`):
 
 ### `buildDisplaySymbol()` Logic
 
-`btcc.exchange.ts:280-292`:
+
 
 1. If `base_currency` and `profit_currency` exist on the symbol metadata, concatenate them (e.g., `BTC` + `USDT` = `BTCUSDT`).
 2. Otherwise, take the last segment of the name after `/`, and try regex match `^([A-Z]+)([A-Z]+)(\d+)?x?$` to extract base and quote.
@@ -285,11 +304,11 @@ Three bidirectional maps (`btcc.exchange.ts:85-87`):
 
 ### `clampSymbol()` Helper
 
-`btcc.exchange.ts:75`: Removes colons and whitespace, uppercases result.
+Removes colons and whitespace, uppercases result.
 
 ### Leverage Extraction from Symbol Name
 
-`getDefaultLeverage()` (`btcc.exchange.ts:294-308`):
+`getDefaultLeverage()`:
 
 1. Extract numeric suffix from raw name (e.g., `100x` in `crypto/BTCUSDT100x` -> `100`).
 2. Fall back to `leverage_max` from symbol metadata.
@@ -303,7 +322,7 @@ Three bidirectional maps (`btcc.exchange.ts:85-87`):
 
 ### Amount Precision
 
-`getPrecisionFromStep()` (`btcc.exchange.ts:60-73`):
+`getPrecisionFromStep()`:
 
 - Derived from `volumes_step` (e.g., `0.01` -> precision `2`).
 - Handles scientific notation (e.g., `1e-8` -> precision `8`).
@@ -311,7 +330,7 @@ Three bidirectional maps (`btcc.exchange.ts:85-87`):
 
 ### Balance Calculation
 
-`fetchBalance()` (`btcc.exchange.ts:430-456`):
+`fetchBalance()`:
 
 ```
 total = equity ?? balance
@@ -320,9 +339,13 @@ used = margin ?? (total - free)
 upnl = total - balance
 ```
 
+`validateAccount()` reuses this same mapping against the account included in
+the login response and returns `{ error: '', balance }`; it does not spend a
+second request on `ACCOUNT_INFO` during the add-account gate.
+
 ### Position Mapping
 
-`mapPosition()` (`btcc.exchange.ts:458-482`):
+`mapPosition()`:
 
 - `contracts` = `volume` or `exec_volume`
 - `entryPrice` = `open_price`
@@ -333,7 +356,7 @@ upnl = total - balance
 
 ### `toNumber()` Helper
 
-`btcc.exchange.ts:132-138`: Safe number conversion with fallback. Returns `fallback` for null, undefined, empty string, NaN, Infinity.
+Safe number conversion with fallback. Returns `fallback` for null, undefined, empty string, NaN, Infinity.
 
 ## Rate Limiting
 
@@ -348,8 +371,8 @@ upnl = total - balance
 
 Since there are no WebSockets, all state is reconciled through REST polling:
 
-- **Positions**: Fetched every tick via `POSITION_LIST`. Filtered to `status === BTCCPositionStatus.Open` and `volume > 0`. Uses `store.addOrUpdatePositionsFull()` for full replacement.
-- **Orders**: Fetched every tick via `ORDER_LIST`. Filtered to open statuses (Initial, Pending, PartiallyFilled). Uses `store.addOrUpdateOrdersFull()` for full replacement.
+- **Positions**: Fetched every tick via `POSITION_LIST`. All pages are collected before filtering to `status === BTCCPositionStatus.Open` and `volume > 0`. Uses `store.addOrUpdatePositionsFull()` for full replacement.
+- **Orders**: `ORDER_LIST` is paginated with 200 rows per request. Full-store replacement happens only after all pages have been collected and filtered to open statuses (Initial, Pending, PartiallyFilled).
 - **Balance**: Fetched every other tick via `ACCOUNT_INFO`.
 
 ### No Deduplication Needed
@@ -359,6 +382,13 @@ Because the store is fully replaced each tick (`addOrUpdatePositionsFull`, `addO
 ## Exchange Metadata
 
 - `exchangeName`: `'btcc'`
+- `enabled`: `false`
+- `enabledInDev`: `false`
+- `enableInPreview`: `false` (preview is a production lane, not staging)
+- `supportsPublicOnly`: `false`
+- `supportsTestnet`: `false`
+- `features.kline`: `false`
+- `features.orderbook`: `false`
 - `token`: Session token from login (nullable)
 - `account`: Full account object from login response
 - `accountNumber`: String version of `account.account_no`
@@ -403,11 +433,11 @@ No testnet or demo mode is implemented. The base URL is hardcoded to production 
 
 8. **No position mode or margin type changes**: Both `changePositionMode()` and `changeMarginType()` throw errors. Hardcoded to `OneWay` + `Cross`.
 
-9. **Liquidation price from `close_price`**: The raw position's `close_price` field is mapped to `liquidationPrice` (`btcc.exchange.ts:478`).
+9. **Liquidation price from `close_price`**: The raw position's `close_price` field is mapped to `liquidationPrice`.
 
 10. **Balance polling throttled**: Balance is only fetched every other tick (`count % 2 === 0`) to reduce API calls.
 
-11. **Order update type field quirk**: When updating a pending order via `UPDATE_PENDING`, the `type` parameter is `1` for stop orders (`StopOpen`, `MarketStopLoss`, `MarketTakeProfit`) and `0` for limit orders (`btcc.exchange.ts:691-695`). This differs from the `BTCCOrderType` enum values.
+11. **Order update type field quirk**: When updating a pending order via `UPDATE_PENDING`, the `type` parameter is `1` for stop orders (`StopOpen`, `MarketStopLoss`, `MarketTakeProfit`) and `0` for limit orders. This differs from the `BTCCOrderType` enum values.
 
 12. **Account number vs account ID**: `account.id` (numeric) is used for API requests as `accountid`; `account.account_no` (string) is stored separately for report queries as `accountNo`.
 
@@ -427,7 +457,7 @@ No testnet or demo mode is implemented. The base URL is hardcoded to production 
 
 ### API Error Detection
 
-`apiRequest()` (`btcc.exchange.ts:191-193`):
+`apiRequest()`:
 
 - All responses checked for `data.code !== 0`
 - Error message extracted from `data.msg` or defaults to `'BTCC API error'`
@@ -437,18 +467,18 @@ No testnet or demo mode is implemented. The base URL is hardcoded to production 
 
 - `ensureCredentials()` throws descriptive errors per missing field
 - Login failure throws with `data.msg` or `'BTCC login failed'`
-- `validateAccount()` catches login errors and returns error message string (does not throw)
+- `validateAccount()` catches login errors and returns `{ error }`; on success it returns `{ error: '', balance }` from the login response account
 
 ### Keepalive Errors
 
-`startHeartbeat()` (`btcc.exchange.ts:230-234`):
+`startHeartbeat()`:
 
 - On keepalive failure: emits error via `emitAndLogError`, clears token
 - Does not throw -- silently degrades to re-login on next request
 
 ### Tick Loop Errors
 
-`tick()` (`btcc.exchange.ts:422-425`):
+`tick()`:
 
 - Catches all errors within the tick
 - Emits via `emitAndLogError` with message `'BTCC polling tick failed'`
@@ -456,16 +486,14 @@ No testnet or demo mode is implemented. The base URL is hardcoded to production 
 
 ### Position Not Found
 
-`placeOrder()` for reduce-only market orders (`btcc.exchange.ts:619-621`):
+`placeOrder()` for reduce-only market orders:
 
 - If no matching position found, throws `'No BTCC position available to close'`
 
 ## Testing / Validation
 
-No test file exists for the BTCC exchange. The implementation should be validated manually through:
-
-1. Login and session management
-2. Symbol mapping correctness
-3. Order placement (market and pending)
-4. Position fetching and mapping
-5. Report/execution history retrieval
+Fresh deterministic mapper, payload, authentication, pagination, validation,
+and metadata regressions live in
+`src/__tests__/audit-regressions/btcc.audit-regressions.test.ts`. They require
+no credentials or network. Live credential checks remain manual and must not be
+added beneath `src/exchanges/**`.

@@ -78,6 +78,7 @@ export class BtccExchange extends BaseExchange {
   unlimitedXHR: Axios;
 
   private token: string | null = null;
+  private loginPromise: Promise<void> | null = null;
   private account: BTCCAccountRaw | null = null;
   private accountNumber: string | null = null;
 
@@ -101,18 +102,28 @@ export class BtccExchange extends BaseExchange {
     super.dispose();
   };
 
+  private throwUserError(message: string): never {
+    this.emitAndLogError(message);
+    throw new Error(message);
+  }
+
   private ensureCredentials() {
-    if (!this.options.key) {
-      throw new Error('BTCC requires an API key');
+    if (this.options.remoteSigner) {
+      const message = 'BTCC does not support remote signing';
+      this.emitAndLogError(message);
+      throw new Error(message);
     }
-    if (!this.options.secret && !this.options.remoteSigner) {
-      throw new Error('BTCC requires an API secret key');
+    if (!this.options.key) {
+      this.throwUserError('BTCC requires an API key');
+    }
+    if (!this.options.secret) {
+      this.throwUserError('BTCC requires an API secret key');
     }
     if (!this.options.applicationId) {
-      throw new Error('BTCC requires an account username (set Application ID field)');
+      this.throwUserError('BTCC requires an account username (set Application ID field)');
     }
     if (!this.options.passphrase) {
-      throw new Error('BTCC requires an account password (set Passphrase field)');
+      this.throwUserError('BTCC requires an account password (set Passphrase field)');
     }
   }
 
@@ -125,7 +136,7 @@ export class BtccExchange extends BaseExchange {
       this.accountNumber = String(maybeAccount);
       return this.accountNumber;
     }
-    throw new Error('BTCC account number unavailable');
+    this.throwUserError('BTCC account number unavailable');
   }
 
   private toNumber(value: any, fallback = 0): number {
@@ -201,24 +212,38 @@ export class BtccExchange extends BaseExchange {
     if (!force && this.token) {
       return;
     }
-    this.ensureCredentials();
-
-    const params = {
-      user_name: this.options.applicationId,
-      password: this.options.passphrase,
-      company_id: 1,
-      api_key: this.options.key,
-    };
-
-    const data = await this.apiRequest<BTCCLoginResponse>(ENDPOINTS.LOGIN, params, 'POST', { auth: false });
-    if (!data?.token) {
-      throw new Error(data?.msg || 'BTCC login failed');
+    if (this.loginPromise) {
+      return this.loginPromise;
     }
 
-    this.token = data.token;
-    this.account = data.account;
-    this.accountNumber = data.account?.account_no ? String(data.account.account_no) : null;
-    this.startHeartbeat();
+    const loginPromise = (async () => {
+      this.ensureCredentials();
+
+      const params = {
+        user_name: this.options.applicationId,
+        password: this.options.passphrase,
+        company_id: 1,
+        api_key: this.options.key,
+      };
+
+      const data = await this.apiRequest<BTCCLoginResponse>(ENDPOINTS.LOGIN, params, 'POST', { auth: false });
+      if (!data?.token) {
+        throw new Error(data?.msg || 'BTCC login failed');
+      }
+
+      this.token = data.token;
+      this.account = data.account;
+      this.accountNumber = data.account?.account_no ? String(data.account.account_no) : null;
+      this.startHeartbeat();
+    })();
+    this.loginPromise = loginPromise;
+    try {
+      await loginPromise;
+    } finally {
+      if (this.loginPromise === loginPromise) {
+        this.loginPromise = null;
+      }
+    }
   }
 
   private startHeartbeat() {
@@ -240,7 +265,7 @@ export class BtccExchange extends BaseExchange {
   validateAccount = async () => {
     try {
       await this.ensureLoggedIn(true);
-      return { error: '' };
+      return { error: '', balance: this.mapBalance(this.account) };
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message || 'Invalid credentials';
       this.emitAndLogError(err, 'BTCC account validation failed');
@@ -251,7 +276,7 @@ export class BtccExchange extends BaseExchange {
   getAccount = async () => {
     await this.ensureLoggedIn();
     if (!this.account) {
-      throw new Error('BTCC account not available after login');
+      this.throwUserError('BTCC account not available after login');
     }
     const accountNo = this.ensureAccountNumber();
     return {
@@ -443,10 +468,7 @@ export class BtccExchange extends BaseExchange {
     }
   }
 
-  fetchBalance = async (): Promise<Balance> => {
-    const data = await this.apiRequest<BTCCAccountInfoResponse>(ENDPOINTS.ACCOUNT_INFO, {});
-    const account = data.account ?? this.account;
-
+  private mapBalance(account: BTCCAccountRaw | null | undefined): Balance {
     if (!account) {
       return {
         used: 0,
@@ -469,6 +491,11 @@ export class BtccExchange extends BaseExchange {
       upnl,
       info: account,
     };
+  }
+
+  fetchBalance = async (): Promise<Balance> => {
+    const data = await this.apiRequest<BTCCAccountInfoResponse>(ENDPOINTS.ACCOUNT_INFO, {});
+    return this.mapBalance(data.account ?? this.account);
   };
 
   private mapPosition(raw: BTCCPositionRaw): Position {
@@ -498,18 +525,27 @@ export class BtccExchange extends BaseExchange {
   }
 
   fetchPositions = async (symbols?: string[]): Promise<Position[]> => {
-    const params: Record<string, any> = {
-      pageNo: 1,
-      pageSize: 200,
-    };
+    const pageSize = 200;
+    const params: Record<string, any> = {};
 
     if (symbols && symbols.length === 1) {
       params.symbol = this.getRawSymbolFromDisplay(symbols[0]);
     }
 
-    const response = await this.apiRequest<BTCCPositionListResponse>(ENDPOINTS.POSITION_LIST, params);
+    const rawPositions: BTCCPositionRaw[] = [];
+    for (let pageNo = 1; ; pageNo += 1) {
+      const response = await this.apiRequest<BTCCPositionListResponse>(ENDPOINTS.POSITION_LIST, {
+        ...params,
+        pageNo,
+        pageSize,
+      });
+      const page = response.positions ?? [];
+      rawPositions.push(...page);
+      if (page.length < pageSize || (response.total !== undefined && rawPositions.length >= response.total)) {
+        break;
+      }
+    }
 
-    const rawPositions = response.positions ?? [];
     const mapped = rawPositions
       .filter((position) => position.status === BTCCPositionStatus.Open && this.toNumber(position.volume, 0) > 0)
       .map((position) => this.mapPosition(position));
@@ -566,12 +602,22 @@ export class BtccExchange extends BaseExchange {
   }
 
   fetchOrders = async (): Promise<Order[]> => {
-    const response = await this.apiRequest<BTCCOrderListResponse>(ENDPOINTS.ORDER_LIST, {});
-    if (!response.orders?.length) {
+    const pageSize = 200;
+    const rawOrders: BTCCOrderRaw[] = [];
+    for (let pageNo = 1; ; pageNo += 1) {
+      const response = await this.apiRequest<BTCCOrderListResponse>(ENDPOINTS.ORDER_LIST, { pageNo, pageSize });
+      const page = response.orders ?? [];
+      rawOrders.push(...page);
+      if (page.length < pageSize || (response.total !== undefined && rawOrders.length >= response.total)) {
+        break;
+      }
+    }
+
+    if (!rawOrders.length) {
       return [];
     }
 
-    return response.orders
+    return rawOrders
       .filter((order) =>
         [BTCCOrderStatus.Initial, BTCCOrderStatus.Pending, BTCCOrderStatus.PartiallyFilled].includes(order.status),
       )
@@ -633,7 +679,7 @@ export class BtccExchange extends BaseExchange {
       if (opts.reduceOnly || opts.close) {
         const position = this.findPositionForReduceOnly(opts.symbol, opts.side);
         if (!position?.info?.id) {
-          throw new Error('No BTCC position available to close');
+          this.throwUserError('No BTCC position available to close');
         }
 
         const response = await this.apiRequest(
@@ -912,15 +958,15 @@ export class BtccExchange extends BaseExchange {
   };
 
   setLeverage = async () => {
-    throw new Error('BTCC API does not expose leverage adjustment endpoint');
+    this.throwUserError('BTCC API does not expose leverage adjustment endpoint');
   };
 
   changePositionMode = async () => {
-    throw new Error('BTCC API does not support position mode changes via API');
+    this.throwUserError('BTCC API does not support position mode changes via API');
   };
 
   changeMarginType = async () => {
-    throw new Error('BTCC API does not expose margin type changes');
+    this.throwUserError('BTCC API does not expose margin type changes');
   };
 
   fetchSymbolMaxLeverage = async (symbol: string) => {
