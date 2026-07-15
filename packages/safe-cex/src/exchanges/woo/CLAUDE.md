@@ -29,7 +29,9 @@ response/request contracts, and seven hard-false migration gates, while `woo.v3.
 prepares deterministic transport-neutral request descriptors. `woo.v3.public.ts` adds strict
 unknown-input decoders and pure mappers for the five public REST reads. `woo.v3.private.ts` does the
 same for account info, asset balances, futures positions, pending regular/algo orders, and transaction
-history. It is equally inert and accepts no transport, credentials, or mutable store.
+history. `woo.v3.regular-writes.ts` adds strict, pure descriptors and response decoders for regular
+futures place, zero-fill native amend, cancel-by-ID, and regular pending-order cancellation. It is
+equally inert and accepts no transport, credentials, or mutable store.
 None of these files is imported by
 `woo.api.ts`, `woo.exchange.ts`, or either websocket implementation, and none owns an Axios,
 fetch, or websocket client. Enabling any gate or wiring these modules into runtime is a separate
@@ -65,6 +67,21 @@ replacement and retain the previous known-good slice on any failure or deferred 
 Transaction rows omit `positionSide`; they map losslessly to `Execution`, while `HistoricalTrade`
 is emitted with `both` only for a separately decoded one-way account and is deferred in hedge mode.
 
+Regular V3 write descriptors are futures-only and fail closed. They accept `PERP_BASE_QUOTE`
+symbols and decimal-string base quantity, never the spot-only quote `amount`; encode GTC/IOC/FOK/
+post-only through WOO's `type`; derive hedge `positionSide` from side plus reduce-only while omitting
+it in one-way mode; hard-code `marginMode: CROSS` to match current Woo metadata/runtime support; and
+use only JavaScript-safe integer IDs. Isolated writes remain outside this contract. Place responses must echo type,
+quantity, price when applicable, and client ID, and must return a previously unknown positive order
+ID. Amend/cancel responses do not echo an ID, so their identity evidence is the validated request
+target only. Native amend is descriptor-ready only for a decoded `NEW` order with zero executed
+quantity, where total and remaining quantity are identical. Partial-fill amend remains a typed
+blocker because the endpoint page does not unambiguously define total-versus-remaining request
+quantity; it needs a credentialed demo lifecycle before use. `/v3/trade/allOrders` is also deferred
+from this regular-only layer because it cancels algo orders as well. These contracts do not satisfy
+`regularWriteDemoLifecycle`; a credentialed demo lifecycle is required before any active runtime
+imports them, and all migration gates remain literal `false`.
+
 ## CCXT Reference Implementation
 
 - **REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/woo.ts
@@ -78,6 +95,7 @@ is emitted with `both` only for a separately decoded one-way account and is defe
 - `woo.v3.contracts.ts` - Non-routable namespaced V3 endpoints, contracts, migration map, and gates
 - `woo.v3.private.ts` - Inert strict authenticated-read decoders and lossless/deferred state mappers
 - `woo.v3.public.ts` - Inert strict public-REST decoders and pure market/stat/book/candle mappers
+- `woo.v3.regular-writes.ts` - Inert strict regular-order request/response contracts and amend blockers
 - `woo.v3.request.ts` - Pure V3 request normalization/signing descriptor (no transport or I/O)
 - `woo.utils.ts` - Symbol normalization utilities (`PERP_BTC_USDT` <-> `BTCUSDT`), memoized
 - `woo.ws-private.ts` - Private WebSocket (HMAC auth, execution reports, algo execution reports)
