@@ -163,15 +163,12 @@ export class ApexOmniExchange extends BaseExchange {
   };
 
   getAccount = async () => {
-    const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT);
-
-    if (data.retCode !== 0) {
-      throw new Error(data.retMsg);
-    }
+    const { data } = await this.xhr.get<{ data: { id: string } }>(ENDPOINTS.ACCOUNT);
 
     return {
-      userId: data?.result?.userID,
-      affiliateId: data?.result?.inviterID,
+      userId: data.data.id,
+      // ApeX Omni's documented v3 account response has no inviter/referrer field.
+      affiliateId: null,
     };
   };
 
@@ -1634,10 +1631,14 @@ export class ApexOmniExchange extends BaseExchange {
 
     let foundPositions = this.store.positions.filter((p) => p.symbol === symbol);
     if (foundPositions.length === 0) {
-      const foundPositions = await this.fetchPositions();
-      this.store.addOrUpdatePositions(foundPositions);
+      const fetchedPositions = await this.fetchPositions();
+      this.store.addOrUpdatePositions(fetchedPositions);
+      foundPositions = fetchedPositions.filter((p) => p.symbol === symbol);
     }
     const position = foundPositions[0];
+    if (!position) {
+      throw new Error(`Position state for ${symbol} is unavailable; cannot set leverage`);
+    }
 
     const leverage = Math.min(Math.max(inputLeverage, market.limits.leverage.min), market.limits.leverage.max);
 

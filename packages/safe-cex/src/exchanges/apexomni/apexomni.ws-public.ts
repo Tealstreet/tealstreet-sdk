@@ -39,9 +39,13 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
 
   connectAndSubscribe = (_isReconnect = false) => {
     if (!this.isDisposed) {
-      this.ws = this.createWebsocket(
-        BASE_WS_URL.public.linear[this.parent.options.testnet ? 'testnet' : 'livenet'] + '?requestId=' + nanoid(),
+      const defaultEndpoint = BASE_WS_URL.public.linear[this.parent.options.testnet ? 'testnet' : 'livenet'];
+      const endpointWithLiveTimestamp = defaultEndpoint.replace(
+        /timestamp=\d+/,
+        `timestamp=${virtualClock.getCurrentTimeMs()}`,
       );
+      const queryJoiner = endpointWithLiveTimestamp.includes('?') ? '&' : '?';
+      this.ws = this.createWebsocket(`${endpointWithLiveTimestamp}${queryJoiner}requestId=${nanoid()}`);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
@@ -179,11 +183,12 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
         // position pnl updates are slow. we can try and calculate it here
         const referencePrice = update.mark || update.last;
         if (referencePrice) {
+          // Use O(1) hashmap lookup once per ticker. An unknown/inverse market
+          // skips only this ticker's local PnL calculation, not the rest of the frame.
+          const market = this.store.marketsBySymbol[d.s];
+          if (!market || market.isInverse) continue;
           const matchingPositions = this.store.positions.filter((p) => p.symbol === d.s && p.contracts !== 0);
           for (const position of matchingPositions) {
-            // Use O(1) hashmap lookup instead of O(n) find
-            const market = this.store.marketsBySymbol[d.s];
-            if (!market || market.isInverse) return;
             const entryValue = position.contracts * position.entryPrice;
             const currentValue = position.contracts * referencePrice;
             const directionMult = position.side === PositionSide.Long ? 1 : -1;

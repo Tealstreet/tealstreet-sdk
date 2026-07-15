@@ -337,6 +337,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       }
 
       const orders = this.parent.mapOrder(order);
+      if (orders.length === 0) return;
 
       const price = parseFloat(v(order, 'price'));
       const amount = parseFloat(v(order, 'size'));

@@ -54,10 +54,11 @@ ApeX Omni uses a **triple authentication** system:
 Every REST request is signed via an axios request interceptor (`apexomni.api.ts:46-101`):
 
 - **Headers**: `APEX-SIGNATURE`, `APEX-API-KEY`, `APEX-PASSPHRASE`, `APEX-TIMESTAMP`
-- **Signature construction**: Concatenates `[timestamp, HTTP_METHOD, '/api', endpoint, '?' (for GET/DELETE with params), sorted_params, body_for_order_endpoint]`
+- **Primary signature construction**: Concatenates `timestamp + HTTP_METHOD + /api<endpoint>[?<sorted query>] + <sorted body for writes>`. The primary serializer preserves meaningful falsy values such as `0` and `false`.
+- **Legacy compatibility retry**: A response code `20016`/`401`, or a response message mentioning `sign`/`signature`, is retried once with the older serializer/signature shape. That legacy serializer drops falsy values; it is never forced for a particular endpoint.
 - **Key handling**: `Buffer.from(options.secret).toString('base64')` is the HMAC key
 - **Hash**: `@noble/hashes` HMAC-SHA256, output as base64 string (`hmacSha256Base64` in `apexomni.utils.ts`)
-- **Parameter sorting**: Both GET params and POST data are serialized with `qs.stringify()` with alphabetical sorting and filtering of falsy values (`apexomni.api.ts:58-71`)
+- **Parameter sorting**: Both GET params and POST data are serialized with `qs.stringify()` and alphabetical sorting; only `undefined`/`null` are removed on the primary path.
 - **Credentials required**: `key` (API key), `secret` (API secret), `passphrase`
 - **Exception**: Kline endpoint (`/v3/klines`) is sent with empty headers (no auth) (`apexomni.api.ts:54-56`)
 
@@ -153,7 +154,7 @@ Execution-history behavior (`fetchExecutions`):
 - Tries symbol variants (`market.id` and `market.symbol`) to handle response/query format drift
 - Uses v3-first params (`symbol`, `page`, `limit`, optional time window) and omits `token` by default
 - Falls back to `/v3/history-orders` rows where `cumSuccessFillSize > 0`
-- Forces legacy-compatible signing shape for fills/history endpoints to reduce `20016` auth drift in strict environments
+- Uses the normal primary signing path; any signature rejection follows the API client's one-shot legacy retry shared by all endpoints
 - Accepts both nested payload roots (`data`, `result`) and proxy-wrapped `body` roots when extracting rows
 - Normalizes to `Execution[]` with Unix-second timestamps, symbol guards, side/price/qty field fallbacks, and fee/orderId mapping when present
 - Supports both verbose row fields (for example `symbol/side/price/size/createdAt`) and compact fill rows (`s/S/p/v/T/i`)
@@ -209,7 +210,7 @@ Execution-history behavior (`fetchExecutions`):
 
 - Updates ticker fields: `last` (p), `mark` (mp), `index` (xp), `percentage` (pr \* 100), `openInterest` (o), `fundingRate` (fr), `volume` (v), `quoteVolume` (to).
 - Fallback: If mark price is absent but index is present, mark = index.
-- **Real-time PnL**: Calculates unrealized PnL from mark/last price for matching positions (long/short direction aware). Skips inverse markets.
+- **Real-time PnL**: Calculates unrealized PnL from mark/last price for matching positions (long/short direction aware). Unknown/inverse markets skip only that ticker's PnL work and never abort the rest of the batch.
 
 ### Private WebSocket (`apexomni.ws-private.ts`)
 
@@ -242,9 +243,9 @@ Execution-history behavior (`fetchExecutions`):
 
 **Ping/Pong** (`apexomni.ws-private.ts`):
 
-- Client sends heartbeat: `{ op: "ping" }` every 15s
+- Client sends heartbeat: `{ op: "ping" }` every 5s. Keep this cadence: 15s correlated with code-1005 closes through the roughly 30s tunnel idle window.
 - Server ping compatibility: `{ op: "ping" }` or `{ ping: <ts> }` -- client responds with `{ op: "pong", args: [...] }`
-- Pong compatibility: handles `{ op: "pong" }`, `{ ret_msg: "pong" }`, or `{ pong: <ts> }` and updates latency via `handlePongEvent(15000)`
+- Pong compatibility: handles `{ op: "pong" }`, `{ ret_msg: "pong" }`, or `{ pong: <ts> }` and updates latency via `handlePongEvent(5_000)`
 
 **Throttled Refetch Mechanism**:
 
@@ -572,7 +573,8 @@ Order signatures include a 1-week buffer (168 hours) added to the expiration tim
 
 - **Position mode**: Always `PositionMode.Hedged` (separate long/short per symbol).
 - **Margin type**: Always `MarginType.Cross` (not configurable).
-- **Leverage**: Sent as `initialMarginRate = 1/leverage` to the `SET_LEVERAGE` endpoint, clamped to market min/max bounds.
+- **Leverage**: Sent as `initialMarginRate = 1/leverage` to the `SET_LEVERAGE` endpoint, clamped to market min/max bounds. If the symbol is absent from the store, `setLeverage()` refreshes positions, re-filters for the symbol, and fails clearly if state is still unavailable.
+- **Account identity**: `getAccount()` reads `data.data.id` from `/v3/account`. The documented v3 response has no inviter field, so `affiliateId` is null.
 
 ### Ticker Abbreviations
 
@@ -589,6 +591,7 @@ Only markets with `enableTrade: true` are included (`apexomni.exchange.ts:551`).
 ### mapOrder Empty Array on Missing Market
 
 `mapOrder()` returns an empty array `[]` if the market is not found (`apexomni.exchange.ts:1329-1332`), with a console warning.
+Private WebSocket order processing treats that as an ignorable per-order result and continues the rest of the batch before any `orders[0]` access.
 
 ### TP/SL Params API Inconsistency
 
