@@ -1,6 +1,8 @@
 import * as ed25519 from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 
+import { virtualClock } from '../../utils/virtualClock';
+
 const sha512ForEd25519: NonNullable<typeof ed25519.hashes.sha512> = (message) =>
   Uint8Array.from(sha512(message));
 
@@ -68,7 +70,7 @@ export async function generateAuthHeaders(
   secret: string,
   window: number = 5000,
 ): Promise<Record<string, string>> {
-  const timestamp = Date.now();
+  const timestamp = virtualClock.getCurrentTimeMs();
   const signature = await signRequest(instruction, params, timestamp, window, secret);
 
   return {
@@ -92,7 +94,7 @@ export async function generateWsAuthSignature(
   secret: string,
   window: number = 5000,
 ): Promise<[string, string, string, string]> {
-  const timestamp = Date.now();
+  const timestamp = virtualClock.getCurrentTimeMs();
 
   // For WebSocket subscription, signature payload is just: instruction=subscribe&timestamp=...&window=...
   const signature = await signRequest('subscribe', {}, timestamp, window, secret);

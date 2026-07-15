@@ -9,6 +9,8 @@ import { forEachSeries } from 'p-iteration';
 import {
   Balance,
   Candle,
+  Execution,
+  ExecutionsOptions,
   ExchangeName,
   ExchangeOptions,
   LogSeverity,
@@ -39,6 +41,7 @@ import { createAPI } from './backpack.api';
 import {
   BackpackAccount,
   BackpackCollateral,
+  BackpackFill,
   BackpackKline,
   BackpackMarket,
   BackpackMarkPrice,
@@ -408,6 +411,72 @@ export class BackpackExchange extends BaseExchange {
     }
   };
 
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+    if (this.isPublicDataOnly || !opts.symbol) {
+      return [];
+    }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      return [];
+    }
+
+    const toMilliseconds = (value?: number) => {
+      if (value === undefined || !Number.isFinite(value)) return undefined;
+      return value >= 1_000_000_000_000 ? Math.floor(value) : Math.floor(value * 1000);
+    };
+    const toSeconds = (value: string) => {
+      const parsedDate = Date.parse(value);
+      if (Number.isFinite(parsedDate)) return Math.floor(parsedDate / 1000);
+
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+      return numeric >= 1_000_000_000_000 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+    };
+
+    const { data } = await this.xhr.get<BackpackFill[]>(ENDPOINTS.FILLS_HISTORY, {
+      params: {
+        symbol: market.id,
+        orderId: opts.orderId,
+        from: toMilliseconds(opts.from),
+        to: toMilliseconds(opts.to),
+        limit: Math.min(Math.max(opts.limit ?? 100, 1), 1000),
+        sortDirection: 'Desc',
+      },
+    });
+
+    if (!Array.isArray(data)) {
+      throw new Error('Backpack fill history response is not an array');
+    }
+
+    return data.reduce<Execution[]>((executions, fill) => {
+      if (fill.symbol !== market.id) return executions;
+      if (opts.orderId && fill.orderId !== opts.orderId) return executions;
+
+      const timestamp = toSeconds(fill.timestamp);
+      const price = parseFloat(fill.price);
+      const qty = parseFloat(fill.quantity);
+      const side = fill.side === 'Bid' ? OrderSide.Buy : fill.side === 'Ask' ? OrderSide.Sell : undefined;
+      if (!timestamp || !Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0 || !side) {
+        return executions;
+      }
+
+      const commission = parseFloat(fill.fee);
+      executions.push({
+        id: String(fill.tradeId),
+        timestamp,
+        symbol: market.symbol,
+        orderId: fill.orderId,
+        price,
+        qty,
+        side,
+        commission: Number.isFinite(commission) ? Math.abs(commission) : undefined,
+        commissionAsset: fill.feeSymbol || undefined,
+      });
+      return executions;
+    }, []);
+  };
+
   fetchOrders = async (symbols?: string[]): Promise<Order[]> => {
     try {
       // Try to fetch all orders at once (orderQueryAll)
@@ -424,7 +493,7 @@ export class BackpackExchange extends BaseExchange {
       return orders.map((o) => this.mapOrder(o));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
-      return [];
+      throw err;
     }
   };
 
@@ -593,7 +662,7 @@ export class BackpackExchange extends BaseExchange {
       return uniqBy([...actualPositions, ...fakePositions], 'id');
     } catch (err) {
       this.log(`Error fetching positions: ${err}`, LogSeverity.Error);
-      return [];
+      throw err;
     }
   };
 
@@ -1018,7 +1087,7 @@ export class BackpackExchange extends BaseExchange {
       remaining: amount - parseFloat(o.executedQuantity || '0'),
       status: this.mapOrderStatus(o.status),
       lastUpdate: o.createdAt,
-      reduceOnly: isTriggerOrder, // Trigger orders are typically reduce-only
+      reduceOnly: o.reduceOnly ?? isTriggerOrder,
       timeInForce: this.mapBackpackTimeInForce(o.timeInForce),
     };
   };

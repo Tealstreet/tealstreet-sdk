@@ -267,15 +267,24 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       const side = netQuantity >= 0 ? PositionSide.Long : PositionSide.Short;
       const positionMode = await this.parent.getPositionMode();
       const positionId = createPositionId(market.symbol, side, positionMode);
+      const oppositeSide = side === PositionSide.Long ? PositionSide.Short : PositionSide.Long;
+      const oppositePositionId = createPositionId(market.symbol, oppositeSide, positionMode);
 
       if (size === 0) {
-        // Position closed - remove it from store
-        const existingPosition = this.store.positions.find((p) => p.id === positionId);
-        if (existingPosition) {
-          const updatedPositions = this.store.positions.filter((p) => p.id !== positionId);
+        // A zero net quantity has no side, so clear both internal side records.
+        const updatedPositions = this.store.positions.filter(
+          (position) => position.id !== positionId && position.id !== oppositePositionId,
+        );
+        if (updatedPositions.length !== this.store.positions.length) {
           this.store.update({ positions: updatedPositions });
         }
         return;
+      }
+
+      // Backpack reports one signed net quantity per symbol. Evict the stale
+      // internal side before applying a flip that crosses through zero.
+      if (this.store.positions.some((position) => position.id === oppositePositionId)) {
+        this.store.update({ positions: this.store.positions.filter((position) => position.id !== oppositePositionId) });
       }
 
       // Entry price is in 'b' (breakeven) or 'B' field
@@ -426,16 +435,20 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
     try {
       this.lastPositionFetchTime = Date.now();
       this.hasPendingPositionEvents = false;
-      await this.parent.fetchPositions();
+      const positions = await this.parent.fetchPositions();
+      if (!this.isDisposed) {
+        this.store.update({ positions });
+      }
     } catch {
       // Silent failure, will retry on next event
     }
   };
 
-  // Throttled order fetching - uses a longer delay (10s) to batch order updates
+  // Trailing order reconciliation: the first event starts one 10s window.
+  // Later events share that timer instead of postponing it indefinitely.
   private throttledFetchOrders = () => {
     if (this.ordersThrottleTimeout) {
-      clearTimeout(this.ordersThrottleTimeout);
+      return;
     }
     this.ordersThrottleTimeout = setTimeout(this.fetchThrottledOrders, 10000);
   };
@@ -495,7 +508,10 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
     try {
       this.lastBalanceFetchTime = Date.now();
       this.hasPendingBalanceEvents = false;
-      await this.parent.fetchBalance();
+      const balance = await this.parent.fetchBalance();
+      if (!this.isDisposed) {
+        this.store.update({ balance });
+      }
     } catch {
       // Silent failure, will retry on next event
     }

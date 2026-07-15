@@ -36,8 +36,8 @@ export const ENDPOINTS = {
   ACCOUNT: '/api/v1/account',
 
   // History endpoints
-  FILLS_HISTORY: '/history/fills',
-  ORDERS_HISTORY: '/history/orders',
+  FILLS_HISTORY: '/wapi/v1/history/fills',
+  ORDERS_HISTORY: '/wapi/v1/history/orders',
   DEPOSITS: '/wapi/v1/capital/deposits',
   WITHDRAWALS: '/wapi/v1/capital/withdrawals',
   DEPOSIT_ADDRESS: '/wapi/v1/capital/deposit/address',
@@ -198,6 +198,7 @@ export interface BackpackOrder {
   createdAt: number;
   executedQuantity?: string;
   executedQuoteQuantity?: string;
+  reduceOnly?: boolean;
 }
 
 export interface BackpackOrderRequest {
@@ -227,16 +228,16 @@ export interface BackpackOrderRequest {
 }
 
 export interface BackpackFill {
-  id: string;
+  clientId?: string;
   orderId: string;
   symbol: string;
   side: 'Bid' | 'Ask';
   price: string;
   quantity: string;
   fee: string;
-  feeAsset: string;
+  feeSymbol: string;
   tradeId: number;
-  timestamp: number;
+  timestamp: string;
   isMaker: boolean;
 }
 
