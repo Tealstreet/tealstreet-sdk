@@ -318,8 +318,12 @@ Implementation behavior:
 1. Orders are formatted via `formatCreateOrder()`
 2. Trailing stops are handled separately via `formatCreateTrailingStopLossOrder()`
 3. Orders exceeding `maxSize` are split into multiple lots
-4. **All orders are placed sequentially** via `placeOrderBatch()`, sending one at a time to `ENDPOINTS.ORDER`
-5. Attached TP/SL orders (`opts.stopLoss`, `opts.takeProfit`) are added as additional payloads using `TRIGGER_MARKET` type (since position likely isn't open yet)
+4. Every emitted ordinary `MARKET`/`LIMIT` lot gets its own lowercase
+   `clientOrderId` (`ts` + the shared cryptographic nanoid helper, at most 23
+   alphanumeric characters total). This stays inside BingX's documented 1–40
+   character limit and avoids collisions after BingX lowercases the field.
+5. **All orders are placed sequentially** via `placeOrderBatch()`, sending one at a time to `ENDPOINTS.ORDER`
+6. Attached TP/SL orders (`opts.stopLoss`, `opts.takeProfit`) are added as additional payloads using `TRIGGER_MARKET` type (since position likely isn't open yet). Standalone, attached, and trailing trigger payloads do not receive `clientOrderId`; the current primary reference limits it to `MARKET`/`LIMIT`.
 
 **Note**: There is a legacy `placeOrderBatchOld()` method that used actual batch placement, but it is no longer in use.
 

@@ -162,6 +162,13 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 
 **OHLCV streaming**: Kline topic format is `kline_p.subscribe|||{symbol}|||{resolution}`. Message handler key uses interval and symbol: `kline_p.{interval}.{symbol}`. Each kline message contains up to 2 rows (current and previous candle). The handler processes both and filters by matching interval. Kline data format: `[timestamp, interval, lastClose, open, high, low, close, volume, turnover]`.
 
+**Inbound dispatch**: `onMessage` does not scan the handler map or search the
+raw frame body. It routes the packed ticker by exact `method`, orderbook frames
+by `orderbook_p.{symbol}`, and kline frames by translating row field 1 (wire
+resolution) back to the exact `kline_p.{interval}.{symbol}` handler key. One
+kline/orderbook frame records one stats hit for its matched topic; the fixed
+packed-ticker topic preserves its historical per-callback stats accounting.
+
 **Topic management**: Uses a `topics` dictionary with reference counting. Topics are unsubscribed only when all listeners are removed (count reaches 0).
 
 The always-on ticker stream plus dynamic topics are counted against Phemex's 20-subscription connection cap. A warning is logged at 18/20 active subscriptions, and zero-reference topics are deleted so reconnect only restores live listeners.

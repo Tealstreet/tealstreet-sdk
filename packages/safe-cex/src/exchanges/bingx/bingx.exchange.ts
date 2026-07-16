@@ -43,6 +43,7 @@ import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
+import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI, FETCH_POSITIONS_RESPONSE } from './bingx.api';
@@ -99,6 +100,8 @@ export class BingxExchange extends BaseExchange {
     const details = originalErrorMessage ? ` (BingX message: ${originalErrorMessage})` : '';
     return `BingX OpenAPI requires Hedged position mode for non-crypto symbols. Switch this BingX account to Hedged mode and retry (${symbol}).${details}`;
   };
+
+  private createClientOrderId = () => `ts${uuid()}`.toLowerCase().slice(0, 40);
 
   private normalizeOrderPlacementError = (symbol: string, errorMessage: string) => {
     if (/non-crypto symbol with one-way mode not support openapi and copy trade/i.test(errorMessage)) {
@@ -1170,15 +1173,21 @@ export class BingxExchange extends BaseExchange {
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
 
+    const isOrdinaryOrder = opts.type === OrderType.Market || opts.type === OrderType.Limit;
+    const withClientOrderId = (payload: Record<string, any>) =>
+      isOrdinaryOrder ? { ...payload, clientOrderId: this.createClientOrderId() } : payload;
+
     const payloads: Array<Record<string, any>> = wantsFullPositionStop
       ? [req]
-      : times(lots, () => ({
-          ...req,
-          quantity: lotSize,
-        }));
+      : times(lots, () =>
+          withClientOrderId({
+            ...req,
+            quantity: lotSize,
+          }),
+        );
 
     if (rest) {
-      payloads.push({ ...req, quantity: rest });
+      payloads.push(withClientOrderId({ ...req, quantity: rest }));
     }
 
     if (opts.stopLoss) {
@@ -1264,7 +1273,6 @@ export class BingxExchange extends BaseExchange {
       quantity: `${position.contracts}`,
       priceRate: `${priceRate}`,
       priceProtect: 'true',
-      //clientOrderID: uuid(),
     };
 
     return [payload];

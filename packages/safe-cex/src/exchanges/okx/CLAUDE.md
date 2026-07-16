@@ -232,7 +232,14 @@ Subscribed per-instrument for all loaded markets on `onOpen`:
 | `funding-rate`  | `handleFundingRateEvents`  | Funding rate and next funding time                                                     |
 | `books`         | Order book listener        | Snapshot + incremental updates (subscribed on-demand per symbol via `listenOrderBook`) |
 
-**Message routing**: Uses string `includes()` checks on the raw data for channel detection before JSON parsing.
+**Message routing**: Public and business frames are parsed once and routed only
+from the exact `arg.channel`, `arg.instId`, and (where present) `arg.instType`
+tuple. Public order books use `books.{instId}`; business candle wire channels
+(`candle1m`, `candle1H`, etc.) reverse-map through `INTERVAL` to the internal
+`candle.{timeframe}.{instId}` handler key. Algo-order channels are matched by
+their exact `arg.channel`. Handler stats are updated only when that exact key
+has callbacks (or an exact dedicated algo-order channel is handled); payload
+fields outside `arg` never influence dispatch.
 
 ### Private WebSocket Channels (`okx.ws-private.ts`)
 

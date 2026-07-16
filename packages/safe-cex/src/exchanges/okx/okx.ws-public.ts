@@ -145,25 +145,31 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
         return;
       }
 
-      for (const [channel, handler] of Object.entries(this.messageHandlers)) {
-        let [leftmost, _mid, instId] = channel.split('.');
-        if (leftmost === 'books') {
-          instId = _mid;
-        }
-        if (
-          data.includes(`channel":"${leftmost}`) &&
-          (!instId || data.includes(`instId":"${instId}`)) &&
-          !data.includes('event":"subscribe"')
-        ) {
-          const json = bigIntAsStringJsonParse(data);
-          if (leftmost === 'books' && json && !this.acceptOrderBookSequence(channel, json)) {
-            continue;
-          }
-          for (const cb of handler) {
-            if (json) cb(json);
-          }
-        }
+      const json = bigIntAsStringJsonParse<Data>(data);
+      if (!json || json.event === 'subscribe') return;
+
+      const channel = typeof json.arg?.channel === 'string' ? json.arg.channel : '';
+      const instId = typeof json.arg?.instId === 'string' ? json.arg.instId : '';
+      if (!channel) return;
+
+      if (instId) {
+        this.dispatchMessageHandler(`${channel}.${instId}`, json);
       }
+      this.dispatchMessageHandler(channel, json);
+    }
+  };
+
+  private dispatchMessageHandler = (handler: string, json: Data) => {
+    const callbacks = this.messageHandlers[handler];
+    if (!callbacks?.length) return;
+
+    if (handler.startsWith('books.') && !this.acceptOrderBookSequence(handler, json)) {
+      return;
+    }
+
+    this.recordMessageHandlerStats(handler);
+    for (const callback of callbacks) {
+      callback(json);
     }
   };
 

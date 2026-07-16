@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { Candle, OHLCVOptions } from '../../types';
+import type { Candle, OHLCVOptions, Timeframe } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
 import { OKXPrivateWebsocket } from './okx.ws-private';
@@ -14,6 +14,12 @@ type Data = Record<string, any>;
 type SubscribedTopics = {
   [id: string]: Array<{ channel: string; instId: string }>;
 };
+
+const TIMEFRAME_BY_CANDLE_CHANNEL = Object.fromEntries(
+  Object.entries(INTERVAL).map(([timeframe, interval]) => [`candle${interval}`, timeframe]),
+) as Record<string, Timeframe>;
+
+const ORDER_CHANNELS = new Set(['orders', 'orders-algo', 'algo-advance']);
 
 export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   topics: SubscribedTopics = {};
@@ -131,51 +137,54 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
         this.parent.emitter.emit('grafana-pws', `${data}`);
       }
 
-      if (data.includes('event":"subscribe"')) {
-        return;
-      }
-
       if (data === 'pong') {
         this.handlePongEvent();
         return;
       }
 
-      if (data.includes('login')) {
-        try {
-          const json = jsonParse(data);
-          if (+json?.code === 0) {
-            this.subscribe();
-          }
-        } catch {}
+      const json = jsonParse<Data>(data);
+      if (!json || json.event === 'subscribe') return;
+
+      if (json.event === 'login') {
+        if (+json.code === 0) {
+          this.subscribe();
+        }
         return;
       }
 
-      if (
-        data.includes('"channel":"orders"') ||
-        data.includes('"channel":"orders-algo"') ||
-        data.includes('"channel":"algo-advance"')
-      ) {
-        const json = jsonParse(data);
-        if (json) this.handleOrderTopic(json);
+      const channel = typeof json.arg?.channel === 'string' ? json.arg.channel : '';
+      const instId = typeof json.arg?.instId === 'string' ? json.arg.instId : '';
+      const instType = typeof json.arg?.instType === 'string' ? json.arg.instType : '';
+      if (!channel) return;
+
+      if (ORDER_CHANNELS.has(channel)) {
+        this.recordMessageHandlerStats(channel);
+        this.handleOrderTopic(json);
         return;
       }
 
-      for (const [channel, handler] of Object.entries(this.messageHandlers)) {
-        let [leftmost, _mid, instId] = channel.split('.');
-        if (leftmost === 'books') {
-          instId = _mid;
-        }
-        if (
-          data.includes(`channel":"${leftmost}`) &&
-          (!instId || data.includes(`instId":"${instId}`)) &&
-          !data.includes('event":"subscribe"')
-        ) {
-          const json = jsonParse(data);
-          for (const cb of handler) {
-            if (json) cb(json);
-          }
-        }
+      const timeframe = TIMEFRAME_BY_CANDLE_CHANNEL[channel];
+      if (timeframe && instId) {
+        this.dispatchMessageHandler(`candle.${timeframe}.${instId}`, json);
       }
+
+      if (instType && instId) {
+        this.dispatchMessageHandler(`${channel}.${instType}.${instId}`, json);
+      }
+      if (instId) {
+        this.dispatchMessageHandler(`${channel}.${instId}`, json);
+      }
+      this.dispatchMessageHandler(channel, json);
+    }
+  };
+
+  private dispatchMessageHandler = (handler: string, json: Data) => {
+    const callbacks = this.messageHandlers[handler];
+    if (!callbacks?.length) return;
+
+    this.recordMessageHandlerStats(handler);
+    for (const callback of callbacks) {
+      callback(json);
     }
   };
 

@@ -27,6 +27,8 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
 
   requestId: number = 1200;
 
+  private klineIntervalByResolution?: Map<number, string>;
+
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       this.ws = this.createWebsocket(BASE_WS_URL.public[this.parent.options.testnet ? 'testnet' : 'livenet']);
@@ -91,11 +93,35 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
     }
   };
 
+  private dispatchTopic = (topic: string, payload: any, recordStatsPerCallback = false) => {
+    const callbacks = this.messageHandlers[topic];
+    if (!callbacks?.length) return;
+
+    if (!recordStatsPerCallback) this.recordMessageHandlerStats(topic);
+    for (const callback of callbacks) {
+      if (recordStatsPerCallback) this.recordMessageHandlerStats(topic);
+      callback(payload);
+    }
+  };
+
+  private getKlineInterval = (resolution: unknown): string | undefined => {
+    const numericResolution = Number(resolution);
+    if (!Number.isFinite(numericResolution)) return undefined;
+
+    if (!this.klineIntervalByResolution) {
+      const timeframes: Record<string, string> = this.parent.timeframes;
+      this.klineIntervalByResolution = new Map<number, string>();
+      for (const interval of Object.keys(timeframes)) {
+        this.klineIntervalByResolution.set(Number(timeframes[interval]), interval);
+      }
+    }
+
+    return this.klineIntervalByResolution.get(numericResolution);
+  };
+
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      const handlers = Object.entries(this.messageHandlers);
-
       const json = jsonParse(data);
 
       if (json?.method === 'server.ping' || json?.result === 'pong') {
@@ -105,36 +131,31 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
 
       const jsonSymbol = json?.symbol;
 
-      for (const [topic, callbacks] of handlers) {
-        if (topic.startsWith('kline_p')) {
-          if (json?.kline_p) {
-            // interval is field #1 (not #0)
-            const [, , symbol] = topic.split('.');
-            if (jsonSymbol === symbol) {
-              this.recordMessageHandlerStats(topic);
-              for (const callback of callbacks) {
-                callback(json?.kline_p || []);
-              }
-            }
-          }
-        } else if (topic.startsWith('orderbook_p')) {
-          if (json?.orderbook_p) {
-            // interval is field #1 (not #0)
-            const [, symbol] = topic.split('.');
-            if (jsonSymbol === symbol) {
-              this.recordMessageHandlerStats(topic);
-              for (const callback of callbacks) {
-                callback(json?.orderbook_p || { bids: [], asks: [], sequence: json?.sequence });
-              }
-            }
-          }
-        } else if (data.includes(topic)) {
-          for (const callback of callbacks) {
-            this.recordMessageHandlerStats(topic);
+      if (json?.kline_p && typeof jsonSymbol === 'string') {
+        const dispatchedTopics = new Set<string>();
+        for (const row of json.kline_p) {
+          const interval = Array.isArray(row) ? this.getKlineInterval(row[1]) : undefined;
+          if (!interval) continue;
 
-            if (json) callback(Array.isArray(json) ? json : [json]);
+          const topic = `kline_p.${interval}.${jsonSymbol}`;
+          if (!dispatchedTopics.has(topic)) {
+            dispatchedTopics.add(topic);
+            this.dispatchTopic(topic, json.kline_p);
           }
         }
+        return;
+      }
+
+      if (json?.orderbook_p && typeof jsonSymbol === 'string') {
+        this.dispatchTopic(`orderbook_p.${jsonSymbol}`, json.orderbook_p);
+        return;
+      }
+
+      if (typeof json?.method === 'string') {
+        // The always-on packed ticker handler historically records one stats
+        // hit per callback. Keep that metric contract while avoiding a raw
+        // frame substring scan.
+        this.dispatchTopic(json.method, Array.isArray(json) ? json : [json], true);
       }
     }
   };

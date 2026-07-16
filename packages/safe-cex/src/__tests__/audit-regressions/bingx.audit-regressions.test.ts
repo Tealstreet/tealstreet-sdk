@@ -265,6 +265,136 @@ describe('audit regression: BingX', () => {
     expect(getExchangeMetadata('bingx').supportsInfinityStops).toBe(true);
   });
 
+  it('assigns distinct bounded clientOrderId values to every ordinary MARKET and LIMIT lot only', async () => {
+    const exchange = createExchange();
+    const createClientOrderId = vi.spyOn(exchange as any, 'createClientOrderId');
+    createClientOrderId
+      .mockReturnValueOnce('tsmarketlot1')
+      .mockReturnValueOnce('tsmarketlot2')
+      .mockReturnValueOnce('tslimitlot1')
+      .mockReturnValueOnce('tslimitlot2');
+    exchange.store.update({
+      markets: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
+        },
+      ],
+    });
+    (exchange as any)._accountPositionMode = PositionMode.Hedged;
+
+    const marketPayloads = await (exchange as any).formatCreateOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Market,
+      side: OrderSide.Buy,
+      amount: 2,
+    });
+    const limitPayloads = await (exchange as any).formatCreateOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 2,
+      price: 50_000,
+    });
+    const payloads = [...marketPayloads, ...limitPayloads];
+    const clientOrderIds = payloads.map((payload) => payload.clientOrderId);
+
+    expect(payloads).toHaveLength(4);
+    expect(clientOrderIds).toEqual(['tsmarketlot1', 'tsmarketlot2', 'tslimitlot1', 'tslimitlot2']);
+    expect(createClientOrderId).toHaveBeenCalledTimes(4);
+    expect(payloads.every((payload) => !('clientOrderID' in payload))).toBe(true);
+
+    const generatedId = (createExchange() as any).createClientOrderId();
+    expect(generatedId).toMatch(/^ts[a-z0-9]*$/);
+    expect(generatedId.length).toBeGreaterThanOrEqual(2);
+    expect(generatedId.length).toBeLessThanOrEqual(23);
+  });
+
+  it('keeps clientOrderId off standalone, attached, and trailing trigger payloads', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        },
+      ],
+      tickers: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          bid: 49_999,
+          ask: 50_001,
+          last: 50_000,
+          mark: 50_000,
+          index: 50_000,
+          percentage: 0,
+          openInterest: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+        },
+      ],
+      positions: [
+        {
+          id: 'BTCUSDT-short',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Short,
+          entryPrice: 50_000,
+          notional: 50_000,
+          leverage: 10,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.Hedged,
+          unrealizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 60_000,
+        },
+      ],
+    });
+    (exchange as any)._accountPositionMode = PositionMode.Hedged;
+
+    const [parent, attachedStop, attachedTakeProfit] = await (exchange as any).formatCreateOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 50_000,
+      stopLoss: 49_000,
+      takeProfit: 51_000,
+    });
+    const [standaloneStop] = await (exchange as any).formatCreateOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 51_000,
+    });
+    const [trailingStop] = await (exchange as any).formatCreateTrailingStopLossOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.TrailingStopLoss,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 51_000,
+    });
+
+    expect(parent.clientOrderId).toMatch(/^ts[a-z0-9]+$/);
+    for (const triggerPayload of [attachedStop, attachedTakeProfit, standaloneStop, trailingStop]) {
+      expect(triggerPayload).not.toHaveProperty('clientOrderId');
+      expect(triggerPayload).not.toHaveProperty('clientOrderID');
+    }
+  });
+
   it('retries failed listen-key refreshes and recovers expired streams with a fresh socket', async () => {
     vi.useFakeTimers();
     try {
