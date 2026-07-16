@@ -303,19 +303,25 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
               // Find the associated position if any
               const positionId = tpslOrder.positionId;
               const position = this.parent.store.positions.find((p) => p.info?.positionId === positionId);
+              const rawOrderId = v(tpslOrder, 'orderId');
+              const hasTp = tpslOrder.tpPrice && !isNaN(parseFloat(tpslOrder.tpPrice));
+              const hasSl = tpslOrder.slPrice && !isNaN(parseFloat(tpslOrder.slPrice));
+              const useLegOrderIds = !!hasTp && !!hasSl;
+              const orderInfo = {
+                ...tpslOrder,
+                id: rawOrderId,
+                orderId: rawOrderId,
+              };
 
               const newOrders: Array<Writable<Order>> = [];
 
               // Process take profit order if it exists
-              if (tpslOrder.tpPrice && !isNaN(parseFloat(tpslOrder.tpPrice))) {
+              if (hasTp) {
                 const tpQty = parseFloat(tpslOrder.tpQty || '0');
                 const isFullTp = position && tpQty === +position.contracts;
 
                 newOrders.push({
-                  id:
-                    tpslOrder.tpPrice && tpslOrder.slPrice
-                      ? `${tpslOrder.orderId}__${tpslOrder.positionId}__tp`
-                      : tpslOrder.orderId,
+                  id: this.parent.getTpslLegOrderId(rawOrderId, tpslOrder.positionId, 'tp', useLegOrderIds),
                   status: OrderStatus.Open,
                   symbol: tpslOrder.symbol,
                   type: OrderType.TakeProfit,
@@ -330,22 +336,19 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   filled: 0,
                   lastUpdate: virtualClock.getCurrentTimeMs(),
                   remaining: tpQty,
-                  info: tpslOrder,
+                  info: orderInfo,
                   // Bitunix omits tpStopType when it's MarkPrice (the default)
                   tpTriggerType: ORDER_TRIGGER_TYPE[tpslOrder.tpStopType] || OrderStopTriggerType.MarkPrice,
                 });
               }
 
               // Process stop loss order if it exists
-              if (tpslOrder.slPrice && !isNaN(parseFloat(tpslOrder.slPrice))) {
+              if (hasSl) {
                 const slQty = parseFloat(tpslOrder.slQty || '0');
                 const isFullSl = position && slQty === +position.contracts;
 
                 newOrders.push({
-                  id:
-                    tpslOrder.tpPrice && tpslOrder.slPrice
-                      ? `${tpslOrder.orderId}__${tpslOrder.positionId}__sl`
-                      : tpslOrder.orderId,
+                  id: this.parent.getTpslLegOrderId(rawOrderId, tpslOrder.positionId, 'sl', useLegOrderIds),
                   status: OrderStatus.Open,
                   symbol: tpslOrder.symbol,
                   type: OrderType.StopLoss,
@@ -360,7 +363,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   filled: 0,
                   lastUpdate: virtualClock.getCurrentTimeMs(),
                   remaining: slQty,
-                  info: tpslOrder,
+                  info: orderInfo,
                   // Bitunix omits slStopType when it's MarkPrice (the default)
                   slTriggerType: ORDER_TRIGGER_TYPE[tpslOrder.slStopType] || OrderStopTriggerType.MarkPrice,
                 });
@@ -387,11 +390,11 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   const tpPrice = json?.data?.tpPrice ? parseFloat(json.data.tpPrice) : undefined;
                   // Update stop loss price if available
                   const slPrice = json?.data?.slPrice ? parseFloat(json.data.slPrice) : undefined;
+                  const triggerPrice = o.type === OrderType.TakeProfit ? tpPrice : slPrice;
 
                   return {
                     ...o,
-                    ...(tpPrice && { takeProfit: tpPrice }),
-                    ...(slPrice && { stopLoss: slPrice }),
+                    ...(triggerPrice && { price: triggerPrice }),
                     ...(json?.data?.tpStopType && { tpTriggerType: ORDER_TRIGGER_TYPE[json.data.tpStopType] }),
                     ...(json?.data?.slStopType && { slTriggerType: ORDER_TRIGGER_TYPE[json.data.slStopType] }),
                   };

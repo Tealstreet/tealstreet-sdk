@@ -347,10 +347,15 @@ For orders that contain attached TP/SL:
 - Virtual TP: `{orderId}__tp`
 - Virtual SL: `{orderId}__sl`
 
-For TP/SL orders from the `tpsl` WS channel with both TP and SL:
+For standalone TP/SL rows from REST or the `tpsl` WS channel with both TP and
+SL on one raw Bitunix TP/SL order id:
 
 - TP order: `{orderId}__{positionId}__tp`
 - SL order: `{orderId}__{positionId}__sl`
+- The raw Bitunix TP/SL id is retained in `order.info.id` and
+  `order.info.orderId`. Chart display IDs must stay distinct so the TP and SL
+  lines do not collapse into one `OrderLineManager` entry, but exchange writes
+  that target TP/SL endpoints must send the raw id.
 
 ### Cancel Orders (`cancelOrders`)
 

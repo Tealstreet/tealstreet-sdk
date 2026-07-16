@@ -163,6 +163,63 @@ export class BitunixExchange extends BaseExchange {
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
+  private hasFiniteTriggerPrice = (value: unknown) => {
+    if (value === undefined || value === null || value === '') {
+      return false;
+    }
+
+    return Number.isFinite(Number(value));
+  };
+
+  getTpslLegOrderId = (rawOrderId: unknown, positionId: unknown, leg: 'tp' | 'sl', disambiguate: boolean) => {
+    const orderId = String(rawOrderId ?? '');
+    if (!disambiguate) {
+      return orderId;
+    }
+
+    const positionPart =
+      positionId === undefined || positionId === null || positionId === '' ? 'position' : String(positionId);
+    return `${orderId}__${positionPart}__${leg}`;
+  };
+
+  private getTpslRawOrderId = (order: Pick<Order, 'id'> & { info?: Record<string, any> }) => {
+    const rawOrderId = order.info?.id ?? order.info?.orderId;
+    if (rawOrderId !== undefined && rawOrderId !== null && rawOrderId !== '') {
+      return String(rawOrderId);
+    }
+
+    return order.id;
+  };
+
+  private getVirtualTpslLeg = (orderId: string): 'tp' | 'sl' | undefined => {
+    if (orderId.endsWith('__tp')) return 'tp';
+    if (orderId.endsWith('__sl')) return 'sl';
+    return undefined;
+  };
+
+  private getVirtualTpslParentOrderId = (orderId: string) => {
+    const leg = this.getVirtualTpslLeg(orderId);
+    if (!leg) {
+      return orderId;
+    }
+
+    return orderId.slice(0, orderId.length - `__${leg}`.length);
+  };
+
+  private getAttachedVirtualTpslLeg = (order: Order): 'tp' | 'sl' | undefined => {
+    const leg = this.getVirtualTpslLeg(order.id);
+    if (!leg) {
+      return undefined;
+    }
+
+    const parentOrderId = this.getVirtualTpslParentOrderId(order.id);
+    const parentOrder = this.store.orders.find((candidate) => candidate.id === parentOrderId);
+
+    return parentOrder && parentOrder.type !== OrderType.TakeProfit && parentOrder.type !== OrderType.StopLoss
+      ? leg
+      : undefined;
+  };
+
   private extractAccountRow = (payload: unknown, marginCoin = 'USDT') => {
     const accountFields = [
       'marginCoin',
@@ -798,41 +855,52 @@ export class BitunixExchange extends BaseExchange {
     const orders: Order[] = orderList.flatMap((o) => {
       const subList = [];
       const position = positionsLookup.get(o.positionId);
+      const rawOrderId = this.getTpslRawOrderId({ id: String(v(o, 'id') || v(o, 'orderId') || ''), info: o });
+      const hasTp = this.hasFiniteTriggerPrice(o.tpPrice);
+      const hasSl = this.hasFiniteTriggerPrice(o.slPrice);
+      const useLegOrderIds = hasTp && hasSl;
+      const orderInfo = {
+        ...o,
+        id: rawOrderId,
+        orderId: rawOrderId,
+      };
 
-      if (!isNull(o.tpPrice)) {
-        const isFullTp = o.positionId && position && +position.contracts === parseFloat(v(o, 'tpQty'));
+      if (hasTp) {
+        const tpQty = this.parseFiniteNumber(v(o, 'tpQty'));
+        const isFullTp = o.positionId && position && +position.contracts === tpQty;
         subList.push({
-          id: v(o, 'id'),
+          id: this.getTpslLegOrderId(rawOrderId, o.positionId, 'tp', useLegOrderIds),
           status: OrderStatus.Open,
           symbol: o.symbol,
           type: OrderType.TakeProfit,
           side: position ? (position?.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy) : ORDER_SIDE[o.side],
           price: parseFloat(o.tpPrice), // || parseFloat(v(o, 'stopPrice')),
-          amount: this.enableFakeFullTpSl && isFullTp ? 0 : parseFloat(v(o, 'tpQty')),
+          amount: this.enableFakeFullTpSl && isFullTp ? 0 : tpQty,
           reduceOnly: v(o, 'reduceOnly') || false,
           filled: 0,
           lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(v(o, 'tpQty')),
-          info: o,
+          remaining: tpQty,
+          info: orderInfo,
           tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpStopType')] || OrderStopTriggerType.MarkPrice,
         });
       }
 
-      if (!isNull(o.slPrice)) {
-        const isFullSl = o.positionId && position && +position.contracts === parseFloat(v(o, 'slQty'));
+      if (hasSl) {
+        const slQty = this.parseFiniteNumber(v(o, 'slQty'));
+        const isFullSl = o.positionId && position && +position.contracts === slQty;
         subList.push({
-          id: v(o, 'id'),
+          id: this.getTpslLegOrderId(rawOrderId, o.positionId, 'sl', useLegOrderIds),
           status: OrderStatus.Open,
           symbol: o.symbol,
           type: OrderType.StopLoss,
           side: position ? (position?.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy) : ORDER_SIDE[o.side],
           price: parseFloat(o.slPrice), // || parseFloat(v(o, 'stopPrice')),
-          amount: this.enableFakeFullTpSl && isFullSl ? 0 : parseFloat(v(o, 'slQty')),
+          amount: this.enableFakeFullTpSl && isFullSl ? 0 : slQty,
           reduceOnly: v(o, 'reduceOnly') || false,
           filled: 0,
           lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(v(o, 'slQty')),
-          info: o,
+          remaining: slQty,
+          info: orderInfo,
           slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slStopType')] || OrderStopTriggerType.MarkPrice,
         });
       }
@@ -1159,8 +1227,8 @@ export class BitunixExchange extends BaseExchange {
   cancelOrders = async (orders: Order[]) => {
     try {
       // Separate virtual TP/SL orders from regular orders
-      const virtualTpSlOrders = orders.filter((o) => o.id.includes('__tp') || o.id.includes('__sl'));
-      const regularOrders = orders.filter((o) => !o.id.includes('__tp') && !o.id.includes('__sl'));
+      const virtualTpSlOrders = orders.filter((o) => this.getAttachedVirtualTpslLeg(o));
+      const regularOrders = orders.filter((o) => !this.getAttachedVirtualTpslLeg(o));
 
       // console.log('virtualTpSlOrders', virtualTpSlOrders);
       // console.log('regularOrders', regularOrders);
@@ -1169,8 +1237,8 @@ export class BitunixExchange extends BaseExchange {
       const parentOrdersToRecreate = new Map<string, { parentOrder: Order; keepTp: boolean; keepSl: boolean }>();
 
       for (const virtualOrder of virtualTpSlOrders) {
-        const parentOrderId = virtualOrder.id.split('__')[0];
-        const isTP = virtualOrder.id.includes('__tp');
+        const parentOrderId = this.getVirtualTpslParentOrderId(virtualOrder.id);
+        const isTP = this.getAttachedVirtualTpslLeg(virtualOrder) === 'tp';
 
         // Find parent order and related virtual orders
         const parentOrder = this.store.orders.find((o) => o.id === parentOrderId);
@@ -1210,7 +1278,7 @@ export class BitunixExchange extends BaseExchange {
       for (const order of standaloneTPSLOrders) {
         await this.xhr.post(ENDPOINTS.CANCEL_ORDER_TP_SL, {
           symbol: order.symbol,
-          orderId: order.id,
+          orderId: this.getTpslRawOrderId(order),
         });
       }
 
@@ -1279,10 +1347,11 @@ export class BitunixExchange extends BaseExchange {
       throw new Error(message);
     };
 
-    const isVirtualTp = order.id.endsWith('__tp');
-    const isVirtualSl = order.id.endsWith('__sl');
-    const isVirtualTpSl = isVirtualTp || isVirtualSl;
-    const parentOrderId = isVirtualTpSl ? order.id.slice(0, order.id.lastIndexOf('__')) : order.id;
+    const virtualTpslLeg = this.getAttachedVirtualTpslLeg(order);
+    const isVirtualTp = virtualTpslLeg === 'tp';
+    const isVirtualSl = virtualTpslLeg === 'sl';
+    const isVirtualTpSl = !!virtualTpslLeg;
+    const parentOrderId = isVirtualTpSl ? this.getVirtualTpslParentOrderId(order.id) : order.id;
     const targetOrder = isVirtualTpSl ? this.store.orders.find((candidate) => candidate.id === parentOrderId) : order;
 
     if (!targetOrder) {
