@@ -24,7 +24,7 @@
 | `cryptocom.api.ts`        | Axios REST client with request/response interceptors, auth injection     |
 | `cryptocom.exchange.ts`   | Main exchange class: order management, market data, position handling    |
 | `cryptocom.types.ts`      | All type definitions, endpoint constants, URL mappings, WS message types |
-| `cryptocom.ws-public.ts`  | Public WebSocket: tickers, orderbook, trades, candlesticks               |
+| `cryptocom.ws-public.ts`  | Public WebSocket: tickers, valuations, orderbook, trades, candlesticks   |
 | `cryptocom.ws-private.ts` | Private WebSocket: orders, positions, balances with auth                 |
 
 ## Authentication
@@ -98,8 +98,8 @@ exchanges, this is not unconditionally applied.
 9. Connect the private WebSocket and enqueue `user.order`,
    `user.advance.order`, `user.positions`, and `user.balance` before auth.
 10. Wait one second for the connection-rate window.
-11. Batch-subscribe ticker channels in chunks of 100; order books, trades, and
-    candles remain lazy per consumer.
+11. Batch-subscribe ticker, mark, index, and current-funding channels in chunks
+    of 100; order books, trades, and candles remain lazy per consumer.
 12. Run the first REST position/balance/order reconciliation.
 
 External public data mode does not open the market WebSocket. Public-only mode
@@ -173,10 +173,17 @@ synchronized virtual clock.
 - Each subscription tracked in a `Set<string>` (deduplication)
 - Subscriptions use incrementing `messageId` counter
 - Format: `{ id, method: 'subscribe', params: { channels: [...] }, nonce }`
+- Startup and reconnect frames use a conservative local limit of 100 channels.
+  Crypto.com documents 100 market-data request commands per second, but does
+  not document either a per-frame channel limit or a total connection cap.
 
 **Channel Naming**:
 
 - Ticker: `ticker.<instrument_name>` (e.g., `ticker.BTCUSD-PERP`)
+- Mark: `mark.<instrument_name>`
+- Index: `index.<underlying_symbol>` (e.g., `index.BTCUSD-INDEX`, not the
+  perpetual's `BTCUSD-PERP` id)
+- Current settling funding rate: `funding.<instrument_name>`
 - Order book: `book.<instrument_name>.<depth>` (e.g., `book.BTCUSD-PERP.50`)
 - Trades: `trade.<instrument_name>`
 - Candlestick: `candlestick.<interval>.<instrument_name>`
@@ -189,6 +196,14 @@ synchronized virtual clock.
   - `trade` -> `handleTradeUpdate()` (no-op currently)
   - `book` / `book.update` -> `handleBookUpdate()` (throttled to 100ms)
   - `candlestick` -> `handleCandlestickUpdate()`
+  - `mark` / `index` / `funding` -> finite guarded ticker updates
+
+Crypto.com's `funding` value is the decimal rate settling at the end of the
+current hour, so it maps to `Ticker.fundingRate` without scaling. The distinct
+`estimatedfunding` channel is a next-interval estimate; safe-cex has no
+`nextFundingRate` field, so startup does not subscribe to it and forwarded
+frames never overwrite the current rate. The valuation timestamp is an update
+time, not the next settlement time, so `fundingTime` remains unchanged.
 
 **Ticker Throttling**:
 
@@ -362,6 +377,8 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
 - Perpetual futures: `{BASE}{QUOTE}-PERP` (e.g., `BTCUSD-PERP`, `ETHUSD-PERP`)
 - Filtering: Only instruments with `inst_type === 'PERPETUAL_SWAP'` and `tradable === true` are loaded (`fetchMarkets`)
 - `market.id` and `market.symbol` are both the raw `symbol` (no remapping)
+- `market.info.underlyingSymbol` retains the API's distinct index instrument
+  name for `index.<underlying_symbol>` subscriptions and frame routing.
 - All markets marked as: `type: 'swap'`, `swap: true`, `linear: true`, `contract: true`, `contractSize` from `contract_size` (default 1), `inverse: false`, `spot: false`
 
 ## Data Precision & Conversion
@@ -512,18 +529,19 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
    market precision; `placeOrder()` does not call `adjust()`.
 6. **Sequential batch cancellation**: `cancelOrders()` intentionally continues
    one order at a time after individual failures.
-7. **Ticker mark/index/funding remain unavailable in store state**: the ticker
-   channel carries bid/ask/last/change/volume/open-interest only. Dedicated
-   `mark.{instrument}`, `index.{instrument}`, `funding.{instrument}`, and
-   `estimatedfunding.{instrument}` channels exist, but are not subscribed; the
-   corresponding ticker fields remain zero. Do not replace this with a large
-   per-symbol REST valuation fanout.
+7. **Ticker valuations use dedicated public streams**: startup batch-subscribes
+   `mark`, `index`, and current `funding` beside ticker channels. Invalid or
+   non-positive price values are ignored; funding may be negative or zero.
+   Index topics use each market's distinct `underlying_symbol` (for example,
+   `BTCUSD-INDEX`). `estimatedfunding` is deliberately not mapped onto the
+   current-rate field.
 8. **Account identity**: `getAccount()` uses the current
    `private/get-accounts` endpoint and returns `this_account.uuid`; the removed
    `private/get-account-summary` path must not be restored.
 9. **Default orderbook mode is full snapshot**: every book frame replaces the
    entire local top 50. Applying these frames as deltas creates stale levels.
-10. **Crypto.com uses `instrument_name` as both market id and symbol**.
+10. **Crypto.com uses `instrument_name` as both market id and symbol**, except
+    index frames, whose instrument is the distinct underlying index symbol.
 11. **Response interceptor unwraps `result`**: callers receive the result
     object, not the full `{ id, method, code, result }` envelope.
 12. **HTTP-over-WebSocket is conditional**: only enabled when
@@ -574,6 +592,7 @@ Fresh audit regressions live in `src/__tests__/audit-regressions/` and cover:
 - full-snapshot orderbook replacement;
 - batched order/position frames, leverage/liquidation enrichment, and live balance;
 - REST and WebSocket candlestick interval mapping and dispatch;
+- batched public valuation subscriptions and mark/index/current-funding frames;
 - hidden/fail-closed legacy margin switching and real account identity.
 
 Before enabling Crypto.com outside development, run UAT end to end with real

@@ -86,15 +86,18 @@ export class PhemexExchange extends BaseExchange {
   };
 
   getAccount = async () => {
-    const {
-      data: {
-        data: { account },
-      },
-    } = await this.xhr.get<{ data: POSITIONS_RESPONSE }>(ENDPOINTS.ACCOUNT, {
+    const { data } = await this.xhr.get<{ data: POSITIONS_RESPONSE }>(ENDPOINTS.ACCOUNT, {
       params: { currency: 'USDT' },
     });
+    const userID = data?.data?.account?.userID;
 
-    return { userId: String(account.userID) };
+    if (userID === undefined || userID === null) {
+      const msg = 'Phemex account-position response did not include a user ID';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    return { userId: String(userID) };
   };
 
   validateAccount = async () => {

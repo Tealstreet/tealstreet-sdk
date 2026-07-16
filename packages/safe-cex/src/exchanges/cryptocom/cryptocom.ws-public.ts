@@ -5,6 +5,7 @@ import type {
   CryptocomWsResponse,
   CryptocomWsTickerUpdate,
   CryptocomWsTradeUpdate,
+  CryptocomWsValuationUpdate,
 } from './cryptocom.types';
 
 import throttle from 'lodash/throttle';
@@ -16,8 +17,16 @@ import { BaseWebSocket } from '../base.ws';
 import { CryptocomExchange } from './cryptocom.exchange';
 import { mapCandlestickInterval, WSS_URLS } from './cryptocom.types';
 
+const SUBSCRIBE_CHUNK_SIZE = 100;
+
+export type CryptocomMarketDataSubscription = {
+  instrumentName: string;
+  indexInstrumentName?: string;
+};
+
 export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
   private subscriptions: Set<string> = new Set();
+  private marketIdsByIndexInstrument = new Map<string, Set<string>>();
   private messageId = 1;
   private reconnectSubscriptionTimer?: ReturnType<typeof setTimeout>;
 
@@ -50,17 +59,31 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
 
   private resubscribe = () => {
     if (this.subscriptions.size > 0) {
+      this.sendSubscriptionFrames(Array.from(this.subscriptions));
+    }
+  };
+
+  private sendSubscriptionFrames = (channels: string[]) => {
+    for (let i = 0; i < channels.length; i += SUBSCRIBE_CHUNK_SIZE) {
       this.send(
         JSON.stringify({
           id: this.messageId++,
           method: 'subscribe',
-          params: {
-            channels: Array.from(this.subscriptions),
-          },
+          params: { channels: channels.slice(i, i + SUBSCRIBE_CHUNK_SIZE) },
           nonce: virtualClock.getCurrentTimeMs(),
         }),
       );
     }
+  };
+
+  private registerAndSubscribe = (channels: string[]) => {
+    const newChannels: string[] = [];
+    for (const channel of channels) {
+      if (this.subscriptions.has(channel)) continue;
+      this.subscriptions.add(channel);
+      newChannels.push(channel);
+    }
+    this.sendSubscriptionFrames(newChannels);
   };
 
   subscribeToOrderBook = (symbol: string, depth = 50) => {
@@ -97,31 +120,26 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
     }
   };
 
-  // Batched subscribe used at startup. One subscribe message per chunk of
-  // SUBSCRIBE_CHUNK channels — Crypto.com closes the connection with 40107
-  // "Maximum subscriptions exceeded" if you fire one message per market for
-  // 250+ perp tickers.
+  // Batched subscribe used at startup. 100 channels is a conservative local
+  // frame size; Crypto.com documents a 100 market-data request/second limit,
+  // but does not document a per-frame channel count or total connection cap.
   subscribeToTickers = (symbols: string[]) => {
-    const SUBSCRIBE_CHUNK = 100;
-    const newChannels: string[] = [];
-    for (const symbol of symbols) {
-      const channel = `ticker.${symbol}`;
-      if (!this.subscriptions.has(channel)) {
-        this.subscriptions.add(channel);
-        newChannels.push(channel);
-      }
-    }
-    for (let i = 0; i < newChannels.length; i += SUBSCRIBE_CHUNK) {
-      const chunk = newChannels.slice(i, i + SUBSCRIBE_CHUNK);
-      this.send(
-        JSON.stringify({
-          id: this.messageId++,
-          method: 'subscribe',
-          params: { channels: chunk },
-          nonce: virtualClock.getCurrentTimeMs(),
-        }),
-      );
-    }
+    this.registerAndSubscribe(symbols.map((symbol) => `ticker.${symbol}`));
+  };
+
+  subscribeToMarketData = (markets: CryptocomMarketDataSubscription[]) => {
+    const channels = markets.flatMap(({ instrumentName, indexInstrumentName }) => {
+      const marketChannels = [`ticker.${instrumentName}`, `mark.${instrumentName}`, `funding.${instrumentName}`];
+      if (!indexInstrumentName) return marketChannels;
+
+      const marketIds = this.marketIdsByIndexInstrument.get(indexInstrumentName) || new Set<string>();
+      marketIds.add(instrumentName);
+      this.marketIdsByIndexInstrument.set(indexInstrumentName, marketIds);
+      marketChannels.splice(2, 0, `index.${indexInstrumentName}`);
+      return marketChannels;
+    });
+
+    this.registerAndSubscribe(channels);
   };
 
   subscribeToTrades = (symbol: string) => {
@@ -193,6 +211,16 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
             case 'candlestick':
               this.handleCandlestickUpdate(json.result as CryptocomWsCandlestickUpdate);
               break;
+            case 'mark':
+            case 'index':
+            case 'funding':
+              this.handleValuationUpdate(json.result as CryptocomWsValuationUpdate);
+              break;
+            case 'estimatedfunding':
+              // Ticker exposes the current funding rate, not a distinct next-
+              // interval estimate. Do not overwrite `funding` semantics if an
+              // externally managed subscription forwards this channel.
+              break;
           }
           return;
         }
@@ -249,6 +277,52 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
     1000,
     { leading: true, trailing: true },
   );
+
+  private handleValuationUpdate = (update: CryptocomWsValuationUpdate) => {
+    const rawValue = update.data[0]?.v;
+    if (typeof rawValue !== 'string' || rawValue.trim() === '') return;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    if ((update.channel === 'mark' || update.channel === 'index') && value <= 0) return;
+
+    if (update.channel === 'index') {
+      for (const marketId of this.getMarketIdsByIndexInstrument(update.instrument_name)) {
+        const market = this.store.marketsById[marketId];
+        if (!market) continue;
+
+        const ticker = this.store.tickersBySymbol[market.symbol];
+        if (ticker) this.store.updateTicker(ticker, { index: value });
+      }
+      return;
+    }
+
+    const market = this.store.marketsById[update.instrument_name];
+    if (!market) return;
+
+    const ticker = this.store.tickersBySymbol[market.symbol];
+    if (!ticker) return;
+
+    if (update.channel === 'mark') {
+      this.store.updateTicker(ticker, { mark: value });
+    } else if (update.channel === 'funding') {
+      // Crypto.com documents `funding` as the rate settling at the end of the
+      // current hour. It is already a decimal rate, matching Ticker semantics.
+      this.store.updateTicker(ticker, { fundingRate: value });
+    }
+  };
+
+  private getMarketIdsByIndexInstrument = (indexInstrumentName: string) => {
+    const cached = this.marketIdsByIndexInstrument.get(indexInstrumentName);
+    if (cached) return cached;
+
+    const marketIds = new Set(
+      this.store.markets
+        .filter((market) => market.info?.underlyingSymbol === indexInstrumentName)
+        .map((market) => market.id),
+    );
+    if (marketIds.size > 0) this.marketIdsByIndexInstrument.set(indexInstrumentName, marketIds);
+    return marketIds;
+  };
 
   private handleBookUpdate = throttle(
     (update: CryptocomWsBookUpdate) => {
@@ -412,6 +486,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
   dispose = () => {
     clearTimeout(this.reconnectSubscriptionTimer);
     this.subscriptions.clear();
+    this.marketIdsByIndexInstrument.clear();
     if (this.ws) {
       this.ws.close();
     }

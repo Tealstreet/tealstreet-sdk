@@ -378,7 +378,7 @@ Order type is determined by checking trigger metadata first:
 ### Order Placement (`grvt.exchange.ts:985-1334`)
 
 1. Validate wallet exists and market is found
-2. Fetch instrument details (re-fetches all instruments to get `instrument_hash`, `base_decimals`, `quote_decimals`)
+2. Read `instrument_hash`, `base_decimals`, and `quote_decimals` from the current market snapshot's `info`; fail closed if the cached signing metadata is missing or invalid
 3. Round price and size to market precision via `adjust()`
 4. Generate nonce (random up to 1e9) and expiration (1 hour in nanoseconds)
 5. Build EIP-712 message with contract-level values:
@@ -643,7 +643,7 @@ Stored in `.apikey.json`:
 
 2. **Lite vs Full format everywhere**: Nearly every data parser has dual-format handling (e.g., `feed.i || feed.instrument`). The implementation primarily uses lite format for efficiency.
 
-3. **Instrument re-fetch on every order**: `placeOrder()` re-fetches all instruments to get `instrument_hash`, `base_decimals`, and `quote_decimals` for EIP-712 signing (`grvt.exchange.ts:1005-1009`). This is wasteful and could be cached.
+3. **Instrument signing metadata cache**: `fetchMarkets()` retains only `ih`, `bd`, and `qd` in each `Market.info`. `placeOrder()` reads and validates that snapshot instead of re-fetching all instruments. GRVT's market refresh replaces same-ID markets too, so metadata-only upstream changes do not leave signing stale.
 
 4. **Private WS through proxy**: Private WebSocket gets its Tealstreet proxy host from `resolveExchangeRouting(...).wsPrivate`, rather than connecting directly to GRVT, because browser security prevents sending cookies directly.
 

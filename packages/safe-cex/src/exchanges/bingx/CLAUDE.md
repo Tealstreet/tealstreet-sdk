@@ -211,7 +211,7 @@ The `formatTickers()` method joins them by `symbol`.
 
 **Order book**: Full replacement on each update (no incremental delta). Each message contains full bids/asks arrays with `{ price, volume }` objects.
 
-Non-ticker frames use direct lookup by exact `dataType`; only a matched topic records handler statistics and dispatches callbacks.
+Non-ticker frames use direct lookup by exact `dataType`; only a matched topic records handler statistics and dispatches callbacks. Ping/Pong control frames return before topic routing.
 
 ### Private WebSocket (`bingx.ws-private.ts`)
 

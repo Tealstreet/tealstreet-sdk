@@ -372,6 +372,20 @@ export interface CryptocomWsTickerUpdate {
   }>;
 }
 
+export type CryptocomWsValuationChannel = 'mark' | 'index' | 'funding' | 'estimatedfunding';
+
+// The four public valuation channels share the same v1 payload. `v` remains
+// a string on the wire; handlers must validate it before updating a ticker.
+export interface CryptocomWsValuationUpdate {
+  instrument_name: string;
+  subscription: string;
+  channel: CryptocomWsValuationChannel;
+  data: Array<{
+    v: string;
+    t: number;
+  }>;
+}
+
 export interface CryptocomWsTradeUpdate {
   instrument_name: string;
   subscription: string;

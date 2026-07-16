@@ -9,7 +9,7 @@ import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { getCandleStartTime } from '../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { add } from '../../utils/safe-math';
-import { updateOrderBook } from '../../utils/updateOrderBook';
+import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS } from './woo.types';
 import { normalizeSymbol, reverseSymbol } from './woo.utils';
@@ -69,17 +69,27 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      const handlers = Object.entries(this.messageHandlers);
 
-      for (const [topic, handler] of handlers) {
-        if (data.includes(`event":"${topic}`) || data.includes(`topic":"${topic}`)) {
-          this.recordMessageHandlerStats(topic);
-          const json = jsonParse(data);
-          for (const cb of handler) {
-            if (json) cb(json);
-          }
-          break;
-        }
+      const json = jsonParse<Data>(data);
+      if (!json) return;
+
+      let handlerKey = '';
+      if (typeof json.event === 'string') {
+        // Legacy WOO control frames use event only for ping/pong and
+        // subscribe/unsubscribe acknowledgements. Control always wins over a
+        // stray payload topic so acknowledgements cannot reach data handlers.
+        if (json.event !== 'ping' && json.event !== 'pong') return;
+        handlerKey = json.event;
+      } else if (typeof json.topic === 'string') {
+        handlerKey = json.topic;
+      }
+
+      const handlers = this.messageHandlers[handlerKey];
+      if (!handlers?.length) return;
+
+      this.recordMessageHandlerStats(handlerKey);
+      for (const callback of handlers) {
+        callback(json);
       }
     }
   };
@@ -438,17 +448,18 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
   };
 
   private processOrderBookUpdate = (orderBook: OrderBook, update: Record<string, any>) => {
-    const sides = { bids: update.data.bids, asks: update.data.asks };
+    const bids = update.data.bids;
+    if (Array.isArray(bids)) {
+      for (let i = 0; i < bids.length; i++) {
+        updateOrderBookByPrice(orderBook, 'bids', bids[i][0], bids[i][1]);
+      }
+    }
 
-    Object.entries(sides).forEach(([side, data]) => {
-      // we need this for ts compile
-      if (side !== 'bids' && side !== 'asks') return;
-      if (!Array.isArray(data)) return;
-
-      data.forEach(([price, amount]: [number, number]) => {
-        const update = { price, amount, total: 0 };
-        updateOrderBook(orderBook, side, update);
-      });
-    });
+    const asks = update.data.asks;
+    if (Array.isArray(asks)) {
+      for (let i = 0; i < asks.length; i++) {
+        updateOrderBookByPrice(orderBook, 'asks', asks[i][0], asks[i][1]);
+      }
+    }
   };
 }

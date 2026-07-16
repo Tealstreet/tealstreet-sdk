@@ -146,16 +146,20 @@ export class CryptocomExchange extends BaseExchange {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     if (!useExternalPublicData) {
-      // Subscribe to all market tickers in batched messages. Order book and
-      // trades are subscribed lazily per-symbol via listenOrderBook / consumers;
-      // firing 250+ * 3 individual subscribe messages here trips Crypto.com's
-      // 40107 "Maximum subscriptions exceeded" cap and tears down the WS.
+      // Subscribe to ticker + mark/index/current-funding channels in bounded
+      // batches. Order book and trades remain lazy per consumer. The bounded
+      // helper also preserves batching when the socket reconnects.
       //
       // Gated on `!useExternalPublicData` because `BaseWebSocket.send()` will
       // auto-connect a public WS when the socket isn't OPEN — calling this
       // without the guard would defeat external public data mode by silently
       // opening a direct exchange WS in the background.
-      this.publicWebsocket.subscribeToTickers(this.store.markets.map((m) => m.id));
+      this.publicWebsocket.subscribeToMarketData(
+        this.store.markets.map((market) => ({
+          instrumentName: market.id,
+          indexInstrumentName: market.info?.underlyingSymbol,
+        })),
+      );
     }
 
     await this.tick();
@@ -233,6 +237,7 @@ export class CryptocomExchange extends BaseExchange {
             linear: true,
             inverse: false,
             contractSize: parseFloat(m.contract_size) || 1,
+            info: { underlyingSymbol: m.underlying_symbol },
             precision: {
               amount: qtyTick || Math.pow(10, -m.quantity_decimals),
               price: priceTick || Math.pow(10, -m.quote_decimals),

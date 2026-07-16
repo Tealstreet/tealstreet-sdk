@@ -40,7 +40,7 @@ When working with Bybit exchange integration, consult the official API documenta
 
 | File                    | Description                                                                                                                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bybitdemo.exchange.ts` | Minimal subclass of `BybitExchange` that sets `isDemo = true` and restricts to `['linear']` category. Uses demo-specific REST and WebSocket URLs (`api-demo.bybit.com`, `stream-demo.bybit.com`). |
+| `bybitdemo.exchange.ts` | Minimal subclass of `BybitExchange` that sets `isDemo = true` and restricts to `['linear']` category. Uses demo-specific REST and private WebSocket URLs (`api-demo.bybit.com`, `stream-demo.bybit.com`); public data stays on the mainnet stream. |
 
 ### Inverse Perpetual - `BybitInverseExchange`
 
@@ -173,7 +173,7 @@ All endpoints use the V5 API prefix. Defined in `bybit.types.ts`:
 | ----------- | ------------------------------- | ------------------------------------------------- | -------------------------------------------------- | ------------------------------------------- |
 | **Livenet** | `https://api.bybit.com`         | `wss://stream.bybit.com/v5/public/linear`         | `wss://stream.bybit.com/v5/public/inverse`         | `wss://stream.bybit.com/v5/private`         |
 | **Testnet** | `https://api-testnet.bybit.com` | `wss://stream-testnet.bybit.com/v5/public/linear` | `wss://stream-testnet.bybit.com/v5/public/inverse` | `wss://stream-testnet.bybit.com/v5/private` |
-| **Demo**    | `https://api-demo.bybit.com`    | `wss://stream-demo.bybit.com/v5/public/linear`    | `wss://stream-demo.bybit.com/v5/public/inverse`    | `wss://stream-demo.bybit.com/v5/private`    |
+| **Demo**    | `https://api-demo.bybit.com`    | `wss://stream.bybit.com/v5/public/linear`         | `wss://stream.bybit.com/v5/public/inverse`         | `wss://stream-demo.bybit.com/v5/private`    |
 | **Spot**    | `https://api.bybit.com`         | `wss://stream.bybit.com/v5/public/spot`           | N/A                                                | `wss://stream.bybit.com/v5/private`         |
 
 ## WebSocket Implementation
@@ -615,7 +615,7 @@ Fetched per category via `fetchFees()` before market loading (`bybit.exchange.ts
 
 A minimal subclass of `BybitExchange` with only two changes:
 
-- `isDemo = true` -- triggers demo URL selection in API client and WebSocket
+- `isDemo = true` -- triggers demo URL selection for REST and the private WebSocket; public data intentionally uses mainnet
 - `get supportedCategories()` returns `['linear']`
 
 All logic (order placement, position management, etc.) is inherited from `BybitExchange`.
@@ -625,7 +625,7 @@ All logic (order placement, position management, etc.) is inherited from `BybitE
 | Component  | Livenet            | Testnet                    | Demo                    |
 | ---------- | ------------------ | -------------------------- | ----------------------- |
 | REST       | `api.bybit.com`    | `api-testnet.bybit.com`    | `api-demo.bybit.com`    |
-| Public WS  | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream-demo.bybit.com` |
+| Public WS  | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream.bybit.com`      |
 | Private WS | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream-demo.bybit.com` |
 
 URL selection logic (`bybit.api.ts:27-29`):
@@ -849,7 +849,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | isSpot                | false                          | false                               | true                                | false                     |
 | isDemo                | false                          | false                               | false                               | true                      |
 | REST URL              | `api.bybit.com`                | `api.bybit.com`                     | `api.bybit.com`                     | `api-demo.bybit.com`      |
-| Public WS             | `v5/public/linear`             | `v5/public/inverse`                 | `v5/public/spot`                    | `v5/public/linear` (demo) |
+| Public WS             | `v5/public/linear`             | `v5/public/inverse`                 | `v5/public/spot`                    | `v5/public/linear` (mainnet) |
 | Orderbook depth       | 1000 levels                    | 1000 levels                         | 200 levels                          | 1000 levels               |
 | Leverage range        | From market info               | From market info                    | Fixed 1x                            | From market info          |
 | Amount handling       | Precision-adjusted float       | Integer USD contracts               | Precision-adjusted float            | Precision-adjusted float  |

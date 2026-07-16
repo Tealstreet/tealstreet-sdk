@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { Store } from '../../store/store.interface';
-import type { GrvtKline, GrvtOrderSide, GrvtOrderType, GrvtTimeInForce } from './grvt.types';
+import type { GrvtInstrumentLite, GrvtKline, GrvtOrderSide, GrvtOrderType, GrvtTimeInForce } from './grvt.types';
 
 import rateLimit from 'axios-rate-limit';
 import { ethers } from 'ethers';
@@ -63,6 +63,8 @@ type GrvtBuilderAuthState =
   | { status: 'authorized' }
   | { status: 'unauthorized' }
   | { status: 'cap-too-low'; authorizedRaw?: number };
+
+type GrvtInstrumentSigningMetadata = Required<Pick<GrvtInstrumentLite, 'ih' | 'bd' | 'qd'>>;
 
 export class GrvtExchange extends BaseExchange {
   xhr: Axios; // Market Data Gateway (public)
@@ -772,6 +774,11 @@ export class GrvtExchange extends BaseExchange {
           },
           isSpot,
           isPerpetual,
+          info: {
+            ih: inst.ih,
+            bd: inst.bd,
+            qd: inst.qd,
+          },
         };
       });
 
@@ -781,6 +788,57 @@ export class GrvtExchange extends BaseExchange {
       this.log(`Error fetching markets: ${err}`, LogSeverity.Error);
       throw err;
     }
+  };
+
+  /**
+   * GRVT signing metadata is part of the market snapshot. Replace markets even
+   * when instrument membership is unchanged so a metadata-only venue refresh
+   * cannot leave placeOrder signing with stale ih/bd/qd values.
+   */
+  refreshMarkets = async (): Promise<{ added: Market[]; removed: Market[] }> => {
+    const oldMarkets = new Map(this.store.markets.map((market) => [market.id, market]));
+    const newMarkets = await this.fetchMarkets();
+    const added = newMarkets.filter((market) => !oldMarkets.has(market.id));
+    const removed = Array.from(oldMarkets.values()).filter(
+      (market) => !newMarkets.some((newMarket) => newMarket.id === market.id),
+    );
+
+    this.store.update({ markets: newMarkets });
+
+    if (added.length > 0 || removed.length > 0) {
+      this.emitter.emit('markets:changed', { added, removed });
+      this.log(
+        `Markets refreshed: +${added.length} -${removed.length} (total: ${newMarkets.length})`,
+        LogSeverity.Info,
+      );
+    }
+
+    return { added, removed };
+  };
+
+  private getInstrumentSigningMetadata = (market: Market): GrvtInstrumentSigningMetadata => {
+    const info = market.info as Partial<GrvtInstrumentSigningMetadata> | undefined;
+    const instrumentHash = info?.ih;
+    const baseDecimals = info?.bd;
+    const quoteDecimals = info?.qd;
+    const hasValidHash =
+      typeof instrumentHash === 'string' && /^0x[0-9a-fA-F]+$/.test(instrumentHash) && instrumentHash.length <= 66;
+
+    // GRVT decimal exponents are signed integers: +3 means 0.001, -3 means
+    // 1000, and 0 means 1. Do not reject valid negative exponents.
+    if (
+      !hasValidHash ||
+      typeof baseDecimals !== 'number' ||
+      !Number.isSafeInteger(baseDecimals) ||
+      typeof quoteDecimals !== 'number' ||
+      !Number.isSafeInteger(quoteDecimals)
+    ) {
+      throw new Error(
+        `Market ${market.id} does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order`,
+      );
+    }
+
+    return { ih: instrumentHash, bd: baseDecimals, qd: quoteDecimals };
   };
 
   /**
@@ -1300,19 +1358,11 @@ export class GrvtExchange extends BaseExchange {
         throw new Error(`Market ${opts.symbol} not found`);
       }
 
-      // Fetch instrument details to get decimals and instrument_hash for EIP-712 signing
-      const instResponse = await this.xhr.post<{ r: any[] }>(ENDPOINTS.INSTRUMENTS, {});
-      const instrument = instResponse.data?.r?.find((i: any) => i.i === market.id); // Use market.id (original case)
-      if (!instrument) {
-        throw new Error(`Instrument ${market.id} not found in API response`);
-      }
-
-      // Parse instrument fields (lite format)
-      this.log(`Instrument payload received (fieldCount=${Object.keys(instrument).length})`, LogSeverity.Debug);
-
-      const instrumentHash = instrument.ih; // instrument_hash (e.g., "0x030501")
-      const baseDecimals = instrument.bd || 9; // base_decimals
-      const quoteDecimals = instrument.qd || 6; // quote_decimals
+      const {
+        ih: instrumentHash,
+        bd: baseDecimals,
+        qd: quoteDecimals,
+      } = this.getInstrumentSigningMetadata(market);
 
       this.log(
         `Instrument details: hash=${instrumentHash}, baseDecimals=${baseDecimals}, quoteDecimals=${quoteDecimals}`,

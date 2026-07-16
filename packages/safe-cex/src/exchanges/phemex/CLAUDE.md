@@ -45,6 +45,11 @@ Signing uses HMAC-SHA256 with the following process:
 
 **Time synchronization**: Uses `virtualClock.getCurrentTime()` for timestamps, not `Date.now()`. This is important for keeping request signatures valid when the local clock drifts.
 
+**Account identity**: `getAccount()` reads `data.account.userID` from the
+USDT `/g-accounts/accountPositions` response. A malformed success payload with
+no user ID fails with an explicit error instead of returning a fabricated ID or
+throwing from nested destructuring.
+
 ### WebSocket Authentication (`phemex.ws-private.ts`)
 
 1. Compute expiry: same as REST (`(currentTime + 60000) / 1000`)

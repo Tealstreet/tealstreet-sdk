@@ -35,16 +35,6 @@ export const DEMO_URL = {
 };
 
 export const DEMO_WS_URL = {
-  public: {
-    linear: {
-      livenet: 'wss://stream-demo.bybit.com/v5/public/linear',
-      testnet: 'wss://stream-testnet.bybit.com/v5/public/linear',
-    },
-    inverse: {
-      livenet: 'wss://stream-demo.bybit.com/v5/public/inverse',
-      testnet: 'wss://stream-testnet.bybit.com/v5/public/inverse',
-    },
-  },
   private: {
     livenet: 'wss://stream-demo.bybit.com/v5/private',
     testnet: 'wss://stream-testnet.bybit.com/v5/private',

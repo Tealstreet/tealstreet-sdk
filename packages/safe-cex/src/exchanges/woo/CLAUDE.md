@@ -413,7 +413,12 @@ Funding is independent of WebSocket connect/reconnect and is refreshed by REST a
 
 **Reconnection**: On reconnect, emits `emitWsReconnected()` if `ENABLE_RECONNECTING_WEBSOCKET` is enabled.
 
-**Message routing**: Uses string matching on raw data (`data.includes(...)`) to route messages to handlers. Matches against both `event":"<topic>` and `topic":"<topic>` patterns. First matching handler wins (break after match).
+**Message routing**: Parses each legacy frame once. Exact top-level `event`
+values route only `ping`/`pong`; other event frames are subscription control
+acknowledgements and are ignored. Market data uses one exact top-level `topic`
+lookup and invokes every listener registered for that key with the unchanged
+parsed frame. Handler stats update only for a key with listeners. Never route
+from nested payload fields, topic prefixes, or raw-frame substring scans.
 
 **Ticker data handling**: Filters to `PERP_` symbols only. Updates are split across multiple topics:
 
@@ -436,7 +441,10 @@ Funding is independent of WebSocket connect/reconnect and is refreshed by REST a
 3. Buffer WS updates while snapshot loads
 4. After snapshot, filter buffered updates by `ts > data.timestamp` (timestamp-based, not sequence)
 5. Apply buffered updates, then process incrementally
-6. Uses `updateOrderBook()` utility for insert/update/delete operations
+6. Applies bid and ask tuples with indexed loops and
+   `updateOrderBookByPrice()`. Existing prices are replaced in place,
+   zero-quantity levels are removed, and new levels retain bid-descending /
+   ask-ascending order without allocating a wrapper for every delta.
 7. WS update data format: `{ data: { bids: [[price, amount], ...], asks: [[price, amount], ...] } }`
 
 ### Private WebSocket (`woo.ws-private.ts`)

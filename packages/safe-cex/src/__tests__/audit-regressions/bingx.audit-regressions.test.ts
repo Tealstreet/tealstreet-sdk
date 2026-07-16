@@ -57,7 +57,7 @@ describe('audit regression: BingX', () => {
     expect(ENDPOINTS.BALANCE).toBe('/openApi/swap/v3/user/balance');
   });
 
-  it('dispatches a public frame only to its exact topic and records only that topic', async () => {
+  it('dispatches public frames only by exact dataType while preserving control frames', async () => {
     const parent = {
       isDisposed: false,
       options: { testnet: false },
@@ -73,15 +73,28 @@ describe('audit regression: BingX', () => {
       'market.depth.ETH-USDT.step0.level100': [unrelated],
     };
     const recordStats = vi.spyOn(websocket as any, 'recordMessageHandlerStats');
+    const send = vi.spyOn(websocket, 'send').mockImplementation(() => undefined);
+    const handlePongEvent = vi.spyOn(websocket, 'handlePongEvent').mockImplementation(() => undefined);
 
     await websocket.onMessage({
       data: JSON.stringify({ dataType: 'market.kline.BTC-USDT.1min.trade.utc+8', data: { value: 1 } }),
     } as MessageEvent);
+    await websocket.onMessage({
+      data: JSON.stringify({ dataType: 'market.kline.ETH-USDT.1min.trade.utc+8', data: { value: 2 } }),
+    } as MessageEvent);
+    await websocket.onMessage({ data: 'Ping' } as MessageEvent);
+    await websocket.onMessage({ data: JSON.stringify({ ping: 'server-ping' }) } as MessageEvent);
+    await websocket.onMessage({ data: 'Pong' } as MessageEvent);
+    await websocket.onMessage({ data: JSON.stringify({ pong: 'server-pong' }) } as MessageEvent);
 
     expect(matched).toHaveBeenCalledOnce();
     expect(unrelated).not.toHaveBeenCalled();
     expect(recordStats).toHaveBeenCalledOnce();
     expect(recordStats).toHaveBeenCalledWith('market.kline.BTC-USDT.1min.trade.utc+8');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenNthCalledWith(1, 'Pong');
+    expect(send).toHaveBeenNthCalledWith(2, 'Pong');
+    expect(handlePongEvent).toHaveBeenCalledTimes(2);
   });
 
   it('continues individual cancels and marks only confirmed or already-absent orders canceled', async () => {
