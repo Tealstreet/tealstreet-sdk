@@ -26,6 +26,13 @@ describe('proxyTokenClient', () => {
   });
 
   describe('isTokenExpired', () => {
+    it('shares one implementation with the public access-token facade', async () => {
+      const accessToken = await import('./accessToken');
+      const proxyTokenClient = await import('./proxyTokenClient');
+
+      expect(accessToken.isTokenExpired).toBe(proxyTokenClient.isTokenExpired);
+    });
+
     it('should return true for empty token', async () => {
       const { isTokenExpired } = await import('./proxyTokenClient');
       expect(isTokenExpired('')).toBe(true);

@@ -28,6 +28,7 @@ import {
   OrderBook,
   OrderSide,
   OrderStatus,
+  OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
@@ -965,9 +966,32 @@ export class BlofinExchange extends BaseExchange {
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
     if (order.type === OrderType.Conditional) {
-      const message = 'BloFin trigger orders are read-only in Tealstreet; update this order on BloFin';
-      this.emitAndLogError(message);
-      throw new Error(message);
+      const raw = order.info as Record<string, any> | undefined;
+      if (raw?.orderType !== 'trigger' || String(raw?.algoId || '') !== order.id) {
+        const message = 'Cannot safely update a BloFin trigger without authoritative trigger-order provenance';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      const rawOrderPrice = Number(raw.orderPrice);
+      const attached = Array.isArray(raw.attachAlgoOrders) ? raw.attachAlgoOrders[0] : undefined;
+      const replacement: PlaceOrderOpts = {
+        symbol: order.symbol,
+        type: OrderType.Conditional,
+        side: order.side,
+        amount: 'amount' in update ? update.amount : (order.extra?.remainingNative ?? order.amount),
+        price: Number.isFinite(rawOrderPrice) && rawOrderPrice > 0 ? rawOrderPrice : undefined,
+        triggerPrice: 'price' in update ? update.price : order.price,
+        stopLoss: this.parsePositivePrice(attached?.slTriggerPrice),
+        takeProfit: this.parsePositivePrice(attached?.tpTriggerPrice),
+        reduceOnly: false,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+        slTriggerType: this.mapBlofinTriggerType(attached?.slTriggerPriceType),
+        tpTriggerType: this.mapBlofinTriggerType(attached?.tpTriggerPriceType),
+      };
+      const payload = await this.formatTriggerOrder(replacement, raw);
+      await this.cancelTriggerOrders([order]);
+      return [await this.placeTriggerOrder(payload)];
     }
 
     const realId = order.id.split('__')[0];
@@ -1035,12 +1059,6 @@ export class BlofinExchange extends BaseExchange {
   };
 
   cancelOrders = async (_orders: Order[]) => {
-    if (_orders.some((order) => order.type === OrderType.Conditional)) {
-      const message = 'BloFin trigger orders are read-only in Tealstreet; cancel them on BloFin';
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
     // Check if we're canceling a single TP/SL order with amount=0
     let orderToPreserve: Order | undefined;
     if (_orders.length === 1 && _orders[0].id.includes('__') && (!_orders[0].amount || _orders[0].amount === 0)) {
@@ -1085,10 +1103,12 @@ export class BlofinExchange extends BaseExchange {
       'id',
     );
 
-    const [algoOrders, normalOrders] = partition(orders, (o) => this.isAlgoOrder(o.type));
+    const [triggerOrders, nonTriggerOrders] = partition(orders, (o) => o.type === OrderType.Conditional);
+    const [algoOrders, normalOrders] = partition(nonTriggerOrders, (o) => this.isAlgoOrder(o.type));
 
     if (normalOrders.length) await this.cancelNormalOrders(normalOrders);
     if (algoOrders.length) await this.cancelAlgoOrders(algoOrders);
+    if (triggerOrders.length) await this.cancelTriggerOrders(triggerOrders);
 
     // If we need to preserve an order, re-create it
     if (orderToPreserve) {
@@ -1193,9 +1213,7 @@ export class BlofinExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     if (opts.type === OrderType.Conditional) {
-      const message = 'Opening trigger-order placement is not implemented for BloFin';
-      this.emitAndLogError(message);
-      throw new Error(message);
+      return [await this.placeTriggerOrder(await this.formatTriggerOrder(opts))];
     }
 
     if (this.isAlgoOrder(opts.type)) {
@@ -1214,13 +1232,8 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
-    if (opts.some((order) => order.type === OrderType.Conditional)) {
-      const message = 'Opening trigger-order placement is not implemented for BloFin';
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
-    const [algoOrders, normalOrders] = partition(opts, (o) => this.isAlgoOrder(o.type));
+    const [triggerOrders, nonTriggerOrders] = partition(opts, (o) => o.type === OrderType.Conditional);
+    const [algoOrders, normalOrders] = partition(nonTriggerOrders, (o) => this.isAlgoOrder(o.type));
 
     // force fetch here before map
     await Promise.all([this.getOrFetchPositionMode(), this.getOrFetchMarginType()]);
@@ -1237,7 +1250,14 @@ export class BlofinExchange extends BaseExchange {
     const algoOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatAlgoOrder(o)));
 
     // For batch orders, we don't have the original opts context, so we use the basic batch method
-    return [...(await this.placeOrderBatch(normalOrdersOpts)), ...(await this.placeAlgoOrderBatch(algoOrdersOpts))];
+    const triggerOrderIds = await mapSeries(triggerOrders, async (order) =>
+      this.placeTriggerOrder(await this.formatTriggerOrder(order)),
+    );
+    return [
+      ...(await this.placeOrderBatch(normalOrdersOpts)),
+      ...(await this.placeAlgoOrderBatch(algoOrdersOpts)),
+      ...triggerOrderIds,
+    ];
   };
 
   mapOrders = (orders: Array<Record<string, any>>) => {
@@ -1549,6 +1569,106 @@ export class BlofinExchange extends BaseExchange {
     } else if (method === 'changeMarginType') {
       this._accountMarginType = args[0] ? MarginType.Isolated : MarginType.Cross;
     }
+  };
+
+  private parsePositivePrice = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  };
+
+  private mapBlofinTriggerType = (value: unknown): OrderStopTriggerType | undefined => {
+    if (value === 'last') return OrderStopTriggerType.LastPrice;
+    if (value === 'mark') return OrderStopTriggerType.MarkPrice;
+    if (value === 'index') return OrderStopTriggerType.IndexPrice;
+    return undefined;
+  };
+
+  private toBlofinTriggerType = (value: OrderStopTriggerType | undefined) => {
+    if (value === OrderStopTriggerType.MarkPrice) return 'mark';
+    if (value === OrderStopTriggerType.IndexPrice) return 'index';
+    return 'last';
+  };
+
+  private formatTriggerOrder = async (opts: PlaceOrderOpts, source?: Record<string, any>) => {
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      throw new Error(`Market ${opts.symbol} not found on Blofin`);
+    }
+    if (opts.reduceOnly || opts.close) {
+      throw new Error('BloFin opening trigger orders cannot be reduce-only or close-only');
+    }
+    if (opts.timeInForce && opts.timeInForce !== OrderTimeInForce.GoodTillCancel) {
+      throw new Error('BloFin opening trigger orders support only GoodTillCancel semantics');
+    }
+
+    const lotSize = market.info.lotSize ? Number(market.info.lotSize) : Number(market.info.minSize);
+    const amount = adjust(opts.amount, lotSize);
+    const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, market.precision.price) : 0;
+    const orderPrice = opts.price ? adjust(opts.price, market.precision.price) : -1;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('BloFin opening trigger amount must be positive');
+    }
+    if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
+      throw new Error(`Trigger price is required for conditional BloFin orders (${opts.symbol})`);
+    }
+
+    const sourceInstId = source?.instId;
+    if (source && sourceInstId !== market.id) {
+      throw new Error('Cannot replace a BloFin trigger whose instrument identity changed');
+    }
+    const marginMode =
+      source?.marginMode === 'cross' || source?.marginMode === 'isolated'
+        ? source.marginMode
+        : await this.getOrFetchMarginType(market.symbol);
+    const positionSide =
+      source?.positionSide === 'net' || source?.positionSide === 'long' || source?.positionSide === 'short'
+        ? source.positionSide
+        : await this.getPositionSide(opts);
+    const triggerPriceType = ['last', 'mark', 'index'].includes(source?.triggerPriceType)
+      ? source!.triggerPriceType
+      : 'last';
+
+    const attached: Record<string, string> = {};
+    if (opts.takeProfit) {
+      attached.tpTriggerPrice = `${adjust(opts.takeProfit, market.precision.price)}`;
+      attached.tpOrderPrice = '-1';
+      attached.tpTriggerPriceType = this.toBlofinTriggerType(opts.tpTriggerType);
+    }
+    if (opts.stopLoss) {
+      attached.slTriggerPrice = `${adjust(opts.stopLoss, market.precision.price)}`;
+      attached.slOrderPrice = '-1';
+      attached.slTriggerPriceType = this.toBlofinTriggerType(opts.slTriggerType);
+    }
+
+    return omitUndefined({
+      instId: market.id,
+      marginMode,
+      positionSide,
+      side: inverseObj(ORDER_SIDE)[opts.side],
+      size: `${amount}`,
+      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      orderPrice: `${orderPrice}`,
+      orderType: 'trigger',
+      triggerPrice: `${triggerPrice}`,
+      triggerPriceType,
+      ...(Object.keys(attached).length ? { attachAlgoOrders: [attached] } : {}),
+      ...(process.env.NODE_ENV === 'production' || this.options.tealstreetProxy ? { brokerId: BROKER_ID } : {}),
+    });
+  };
+
+  private placeTriggerOrder = async (payload: Record<string, any>) => {
+    const { data } = await this.xhr.post<{
+      code: string;
+      msg?: string;
+      data?: { algoId?: string; clientOrderId?: string; code?: string; msg?: string };
+    }>(ENDPOINTS.PLACE_TRIGGER_ORDER, payload);
+    const row = data?.data;
+    const message = row?.msg || data?.msg || 'BloFin trigger placement returned an invalid response';
+    if (data?.code !== '0' || (row?.code !== undefined && row.code !== '0') || !row?.algoId) {
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+    return String(row.algoId);
   };
 
   private formatAlgoOrder = async (opts: PlaceOrderOpts) => {
@@ -2004,6 +2124,49 @@ export class BlofinExchange extends BaseExchange {
         }
       }
       await sleep(1_000);
+    });
+  };
+
+  private cancelTriggerOrders = async (orders: Order[]) => {
+    const payloads = orders.map((order) => {
+      const market = this.store.marketsBySymbol[order.symbol];
+      const raw = order.info as Record<string, any> | undefined;
+      const algoId = String(raw?.algoId || order.id || '');
+      if (!market || raw?.orderType !== 'trigger' || raw?.instId !== market.id || algoId !== order.id) {
+        throw new Error(`Cannot safely cancel BloFin trigger order ${order.id}: authoritative provenance is missing`);
+      }
+      return { instId: market.id, algoId };
+    });
+
+    await forEachSeries(payloads, async (payload) => {
+      let response;
+      try {
+        response = await this.xhr.post<{
+          code: string;
+          msg?: string;
+          data?: { algoId?: string; clientOrderId?: string; code?: string; msg?: string };
+        }>(ENDPOINTS.CANCEL_TRIGGER_ORDER, payload);
+      } catch (err: any) {
+        const message = err?.response?.data?.msg || err?.message;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      const row = response.data?.data;
+      if (this.isAlreadyGoneCancelRow(row) && row?.algoId === payload.algoId) {
+        this.store.removeOrders([{ id: payload.algoId }]);
+      } else if (
+        response.data?.code !== '0' ||
+        (row?.code !== undefined && row.code !== '0') ||
+        row?.algoId !== payload.algoId
+      ) {
+        const message = row?.msg || response.data?.msg || 'BloFin trigger cancellation returned an invalid response';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+
+      // BloFin's documented trade limit is 30 requests per 10 seconds per user.
+      await sleep(350);
     });
   };
 

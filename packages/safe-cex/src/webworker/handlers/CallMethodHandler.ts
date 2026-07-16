@@ -28,6 +28,9 @@ export class CallMethodHandler extends BaseHandler {
         case 'setLeverage':
           result = await this._exchange.setLeverage(...(args as Parameters<typeof this._exchange.setLeverage>));
           break;
+        case 'scheduleCancel':
+          result = await this._exchange.scheduleCancel(...(args as Parameters<typeof this._exchange.scheduleCancel>));
+          break;
         case 'updateSymbolMetadata':
           this.symbolMetadataThrottler.call(...(args as Parameters<typeof this._exchange.updateSymbolMetadata>));
           break;

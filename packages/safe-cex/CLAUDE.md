@@ -309,6 +309,9 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
 - `src/httpOverWebsocket/` — Thin safe-cex compatibility re-exports and
   `configureHOW` wiring; the adapter implementation lives in
   `@tealstreet/http-over-websocket`
+- `src/proxyTokenExpiry.ts` — The single hardened proxy-JWT expiry check
+  re-exported by both `accessToken.ts` and `proxyTokenClient.ts`; keep malformed
+  token handling and virtual-clock semantics centralized here.
 - `src/routing/resolveExchangeRouting.ts` + `src/utils/transportResolution.ts` — CORS proxy URL / transport resolver used by safe-cex REST clients (the old `src/utils/getPrivateProxy.ts` no longer exists)
 - `src/types.ts` — Shared types (`ExchangeOptions`, `ExchangeAccountConfig`, etc.)
 - `src/health/errorPatterns.ts` — Fuzzy health classification. Critical auth

@@ -53,6 +53,58 @@ vi.mock('../../exchanges/apexomni/apexomni.ws-private', () => ({
   },
 }));
 
+const createBracketExchange = () => {
+  const store = new DefaultStore();
+  store.update({
+    markets: [
+      {
+        id: 'BTC-USDT',
+        symbol: 'BTC-USDT',
+        base: 'BTC',
+        quote: 'USDT',
+        active: true,
+        precision: { amount: 1, price: 1 },
+        limits: {
+          amount: { min: 1, max: 9 },
+          leverage: { min: 1, max: 50 },
+        },
+        isExpiring: false,
+        info: {},
+      },
+    ] as any,
+    tickers: [
+      {
+        id: 'BTC-USDT',
+        symbol: 'BTC-USDT',
+        bid: 100,
+        ask: 100,
+        last: 100,
+        mark: 100,
+        index: 100,
+        percentage: 0,
+        openInterest: 0,
+        fundingRate: 0,
+        fundingTime: 0,
+        volume: 0,
+        quoteVolume: 0,
+      },
+    ],
+  });
+  store.updateZkLinkConfig({
+    id: '1',
+    contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
+    contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
+  } as any);
+
+  let postCount = 0;
+  const post = vi.fn(async (_path: string, _body: string) => ({ data: { data: { id: `order-${++postCount}` } } }));
+  createApiMock.mockReturnValue({ post });
+  const exchange = new ApexOmniExchange('apexomni' as any, { omniKeySeed: 'seed' } as any, store);
+  vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+
+  return { exchange, post };
+};
+
 describe('Apex Omni split-order TP/SL regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -60,55 +112,12 @@ describe('Apex Omni split-order TP/SL regression', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.1);
   });
 
-  it('rejects a split order with attached TP/SL before any write', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
-        {
-          id: 'BTC-USDT',
-          symbol: 'BTC-USDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 1 },
-          limits: {
-            amount: { min: 1, max: 9 },
-            leverage: { min: 1, max: 50 },
-          },
-          isExpiring: false,
-          info: {},
-        },
-      ] as any,
-      tickers: [
-        {
-          id: 'BTC-USDT',
-          symbol: 'BTC-USDT',
-          bid: 100,
-          ask: 100,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-    });
-    store.updateZkLinkConfig({
-      id: '1',
-      contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
-      contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
-    } as any);
-
-    let postCount = 0;
-    const post = vi.fn(async (_path: string, _body: string) => ({ data: { data: { id: `order-${++postCount}` } } }));
-    createApiMock.mockReturnValue({ post });
-    const exchange = new ApexOmniExchange('apexomni' as any, { omniKeySeed: 'seed' } as any, store);
-    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
-
+  it.each([
+    ['take profit', { takeProfit: 110 }],
+    ['stop loss', { stopLoss: 90 }],
+    ['take profit and stop loss', { takeProfit: 110, stopLoss: 90 }],
+  ])('rejects a split order with attached %s before any write', async (_label, brackets) => {
+    const { exchange, post } = createBracketExchange();
     const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
 
     await expect(
@@ -118,16 +127,45 @@ describe('Apex Omni split-order TP/SL regression', () => {
         side: OrderSide.Buy,
         amount: 20,
         price: 100,
-        takeProfit: 110,
-        stopLoss: 90,
+        ...brackets,
       }),
-    ).rejects.toThrow('ApeX Omni does not support attached TP/SL on split orders');
+    ).rejects.toThrow('ApeX Omni cannot atomically attach TP/SL to split orders');
 
-    expect(emitError).toHaveBeenCalledWith('ApeX Omni does not support attached TP/SL on split orders');
+    expect(emitError).toHaveBeenCalledWith('ApeX Omni cannot atomically attach TP/SL to split orders');
     expect(initSdkMock).not.toHaveBeenCalled();
     expect(signer.initZklinkSigner).not.toHaveBeenCalled();
     expect(signContractMock).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
     expect(exchange.privateWebsocket.throttleFetchOrders).not.toHaveBeenCalled();
+  });
+
+  it('keeps the documented one-request bracket path at the exact split boundary', async () => {
+    const { exchange, post } = createBracketExchange();
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 9,
+        price: 100,
+        takeProfit: 110,
+        stopLoss: 90,
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    expect(post).toHaveBeenCalledOnce();
+    const body = post.mock.calls[0][1];
+    const params = Object.fromEntries(new URLSearchParams(body));
+    expect(params).toMatchObject({
+      size: '9',
+      isOpenTpslOrder: 'true',
+      isSetOpenTp: 'true',
+      tpSize: '9',
+      isSetOpenSl: 'true',
+      slSize: '9',
+    });
+    expect(signContractMock).toHaveBeenCalledTimes(3);
+    expect(exchange.privateWebsocket.throttleFetchOrders).toHaveBeenCalledOnce();
   });
 });

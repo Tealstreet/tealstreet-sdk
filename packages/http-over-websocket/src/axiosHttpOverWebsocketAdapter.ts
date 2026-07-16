@@ -253,6 +253,28 @@ const BYPASS_PROXY_PATTERN = new RegExp(BYPASS_PROXY_EXCHANGES.join('|'), 'i');
 export let howWebSocketSG = new HOWWebSocket(SIGNAPORE_HOW_EGRESS);
 export let howWebSocketJA = new HOWWebSocket(TOKYO_HOW_EGRESS);
 
+// A Bad auth response is connection-scoped, but many HTTP requests can observe
+// it concurrently. Elect one request to refresh/send the token and let the
+// others await that same attempt instead of emitting duplicate rpc.auth frames.
+const badAuthRefreshBySocket = new WeakMap<HOWWebSocket, Promise<string>>();
+
+const refreshBadAuthOnce = (howWebSocket: HOWWebSocket, refresh: () => Promise<string>): Promise<string> => {
+  const activeRefresh = badAuthRefreshBySocket.get(howWebSocket);
+  if (activeRefresh) return activeRefresh;
+
+  const refreshPromise = refresh();
+  badAuthRefreshBySocket.set(howWebSocket, refreshPromise);
+
+  const clearRefresh = () => {
+    if (badAuthRefreshBySocket.get(howWebSocket) === refreshPromise) {
+      badAuthRefreshBySocket.delete(howWebSocket);
+    }
+  };
+  void refreshPromise.then(clearRefresh, clearRefresh);
+
+  return refreshPromise;
+};
+
 const createAxiosHttpOverWebsocketAdapter = (
   options?: CreateAxiosHttpOverWebsocketAdapterOptions | ((str: string) => any),
 ): AxiosAdapter => {
@@ -483,11 +505,25 @@ const createAxiosHttpOverWebsocketAdapter = (
               throw new Error('Cannot refresh auth token, please reload the terminal');
             }
 
-            // Get fresh valid token from SharedWorker
-            token = await getValidToken();
-
-            if (token) {
-              await safeSendToken(token);
+            try {
+              token = await awaitWithinDeadline(
+                refreshBadAuthOnce(howWebSocket, async () => {
+                  const refreshedToken = await getValidToken();
+                  if (refreshedToken) {
+                    await safeSendToken(refreshedToken);
+                  }
+                  return refreshedToken;
+                }),
+              );
+            } catch (error) {
+              // A joined refresh may have been owned by a shorter-deadline
+              // request. Its timeout belongs only to that caller; retry this
+              // request's loop so it can elect a new owner under its own
+              // deadline. All non-timeout refresh failures still propagate.
+              if (error instanceof TradeTunnelTimeoutError && error.config !== config) {
+                continue;
+              }
+              throw error;
             }
           }
         }

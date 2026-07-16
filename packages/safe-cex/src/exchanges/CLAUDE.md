@@ -267,7 +267,18 @@ External public-data gateway connections have their own liveness loop because
 they are not `BaseWebSocket` instances. The provider sends a gateway `ping`
 after 6 seconds without inbound traffic and closes the socket after 20 seconds
 so its reconnect path recovers half-open connections. Any inbound frame,
-including `pong`, satisfies the heartbeat; disposal clears its timer.
+including `pong`, satisfies the heartbeat; disposal clears its timer. The
+provider exposes the same initialized/healthy/last-message surface consumed by
+`BaseExchange.syncSocketHealthToStoreInternal`, so gateway-only public data is
+reflected in `store.socketHealth` and the reconnect banner instead of being
+reported healthy by the empty direct-socket fallback. Candle subscription keys
+split at the final delimiter during reconnect because normalized symbols may
+themselves contain `:`.
+
+Routine socket churn is not an exchange error: ordinary disconnect/reconnect
+messages use warning severity, and heartbeat frames dropped while a socket is
+closed use debug severity. Error severity remains reserved for terminal give-up
+paths such as reconnect-count exhaustion.
 
 The exchange watchdog measures first-message grace from each socket's latest
 successful `open` event. A previously initialized socket resets

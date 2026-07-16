@@ -144,6 +144,7 @@ All three variants follow the same high-level pattern, with variant-specific dif
 | `/fapi/v1/batchOrders`       | POST/DELETE | Place or cancel batch regular orders (max 5 per batch for placing, 10 for canceling) |
 | `/fapi/v1/algoOrder`         | POST/DELETE | Place or cancel a single algo order (SL/TP/trailing)                                 |
 | `/fapi/v1/allOpenOrders`     | DELETE      | Cancel all open orders for a symbol                                                  |
+| `/fapi/v1/algoOpenOrders`    | DELETE      | Cancel all open algo orders for a symbol (SL/TP/trailing)                            |
 | `/fapi/v1/positionSide/dual` | GET/POST    | Get or set hedge mode (dual position side)                                           |
 | `/fapi/v1/leverage`          | POST        | Set leverage for a symbol                                                            |
 | `/fapi/v1/marginType`        | POST        | Set margin type (ISOLATED or CROSSED)                                                |
@@ -487,13 +488,22 @@ PM splits orders differently (`binancepm.exchange.ts:878-935`):
 
 ### Order Cancellation
 
-**Futures** (`binance.exchange.ts:1042-1130`):
+**Futures** (`BinanceExchange.cancelOrders`):
 
 1. Split orders into regular and algo based on `isAlgoOrderType()`.
 2. **Regular orders**: Group by symbol. Single cancel via `DELETE /fapi/v1/order` with `orderId`. Batch cancel via `DELETE /fapi/v1/batchOrders` with `orderIdList` (max 10 per batch, processed via `forEachSeries`).
 3. **Algo orders**: Cancel one at a time via `DELETE /fapi/v1/algoOrder` with `algoId` parameter.
 4. Error code `-2011` ("Unknown order sent") is treated as success (order already cancelled).
-5. Batch cancel constructs `orderIdList` as raw string `[123,456]` (not parsed with `parseInt`) to avoid precision loss on large IDs (`binance.exchange.ts:1074`).
+5. Batch cancel constructs `orderIdList` as raw string `[123,456]` (not parsed with `parseInt`) to avoid precision loss on large IDs.
+
+Symbol-wide cancellation calls both Binance cancel-all families: regular
+`DELETE /fapi/v1/allOpenOrders` and Algo Service
+`DELETE /fapi/v1/algoOpenOrders`, each with `symbol`. Binance documents the
+second endpoint specifically for conditional TP/SL and trailing orders; the
+regular endpoint does not claim that coverage. Both requests are attempted even
+when one fails. Local regular and algo rows are marked canceled independently
+only after their corresponding request succeeds, and any partial failure is
+re-thrown so the caller cannot mistake a partial cancel for full success.
 
 **Portfolio Margin** (`binancepm.exchange.ts:626-673`):
 
@@ -742,6 +752,11 @@ silent `-2011` handling absorbs the discrepancy.
 
 As of 2025-12-09, stop/TP/trailing orders must use the Algo Order API. The `isAlgoOrderType()` helper determines routing. This affects both placement and cancellation endpoints. The comment in `binance.types.ts:42-43` documents this migration date.
 
+The separation also applies to symbol-wide cancellation. Always keep
+`/fapi/v1/allOpenOrders` and `/fapi/v1/algoOpenOrders` paired in
+`cancelSymbolOrders`; do not optimistically mark both order families canceled
+after only one endpoint succeeds.
+
 ### Standalone Binance WebSocket Consumers Outside `safe-cex`
 
 A few UI components open their own Binance USDⓈ-M futures WebSockets directly (bypassing the exchange layer). These must use the post-2026-04-23 category-prefixed URLs the same way the exchange layer does:
@@ -852,6 +867,7 @@ For batch order placement via `/fapi/v1/batchOrders`, each item in the response 
 - [ ] Bracket orders (entry + SL + TP)
 - [ ] closePosition orders (only one per direction per symbol)
 - [ ] Algo order cancellation (individual via algoId)
+- [x] Symbol-wide regular + Algo Service cancellation with partial-failure-safe local state
 - [ ] Batch regular order cancellation (up to 10 per batch)
 - [ ] Order updates via cancel-and-recreate
 - [ ] Position mode switching (One-Way / Hedged)

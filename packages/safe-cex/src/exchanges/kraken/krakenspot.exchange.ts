@@ -305,6 +305,8 @@ export class KrakenSpotExchange extends BaseExchange {
         ordertype = 'stop-loss';
       } else if (opts.type === OrderType.TakeProfit) {
         ordertype = 'take-profit';
+      } else if (opts.type === OrderType.TrailingStopLoss) {
+        ordertype = 'trailing-stop';
       }
 
       const volume = adjust(opts.amount, market.precision.amount);
@@ -330,6 +332,25 @@ export class KrakenSpotExchange extends BaseExchange {
       // Add price for stop/TP orders (trigger price)
       if ((opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) && opts.price) {
         body.price = String(adjust(opts.price, market.precision.price));
+      }
+
+      if (opts.type === OrderType.TrailingStopLoss) {
+        const ticker = this.store.tickersBySymbol[opts.symbol];
+        if (!ticker || !Number.isFinite(ticker.last) || ticker.last <= 0) {
+          throw new Error(`Ticker ${opts.symbol} is required for a Kraken Spot trailing stop`);
+        }
+        if (!Number.isFinite(opts.price) || opts.price! <= 0) {
+          throw new Error(`Trailing stop price for ${opts.symbol} must be a positive finite value`);
+        }
+
+        const deviation = adjust(Math.abs(ticker.last - opts.price!), market.precision.price);
+        if (!Number.isFinite(deviation) || deviation <= 0) {
+          throw new Error(`Trailing stop price for ${opts.symbol} must differ from the last price`);
+        }
+
+        // Kraken Spot requires a relative `+` price for trailing stops and
+        // derives direction from the order side.
+        body.price = `+${deviation}`;
       }
 
       // Time in force / order flags

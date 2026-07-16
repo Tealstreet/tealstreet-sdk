@@ -46,7 +46,6 @@ import {
   ENDPOINTS,
   MARGIN_RESPONSE,
   MARKET_RESPONSE,
-  isParadexMarketOrderType,
   isParadexTriggerOrderType,
   ORDER_TYPE,
   ORDER_RESPONSE,
@@ -1176,14 +1175,36 @@ export class ParadexExchange extends BaseExchange {
   };
 
   private buildMainOrderPayload = async (opts: PlaceOrderOpts, clientId?: string) => {
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
     if (!this.requestSigner) {
       throw new Error('Cannot place order: Request signer not initialized');
+    }
+    if (opts.type === OrderType.TrailingStopLoss) {
+      return rejectPreflight('Paradex trailing-stop orders are not supported by the current order schema');
+    }
+    const isOpeningTrigger = opts.type === OrderType.Conditional;
+    if (isOpeningTrigger) {
+      if (!Number.isFinite(opts.price) || !opts.price || opts.price <= 0) {
+        return rejectPreflight('Paradex opening trigger orders require a finite positive execution price');
+      }
+      if (!Number.isFinite(opts.triggerPrice) || !opts.triggerPrice || opts.triggerPrice <= 0) {
+        return rejectPreflight('Paradex opening trigger orders require a finite positive trigger price');
+      }
+      if (opts.reduceOnly) {
+        return rejectPreflight('Paradex opening trigger orders cannot be reduce-only; use a stop-loss order instead');
+      }
+      if (opts.takeProfit !== undefined || opts.stopLoss !== undefined) {
+        return rejectPreflight('Paradex cannot safely attach TP/SL children before an opening trigger order fills');
+      }
     }
     const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
     const type = this.mapOrderType(opts.type);
     const isStopOrder = isParadexTriggerOrderType(type);
-    const isMarketTypeOrder = isParadexMarketOrderType(type);
-    const triggerPrice = isStopOrder ? opts.price : opts.triggerPrice;
+    const hasLimitExecutionPrice = type === 'LIMIT' || type === 'STOP_LIMIT' || type.endsWith('_LIMIT');
+    const triggerPrice = isOpeningTrigger ? opts.triggerPrice : isStopOrder ? opts.price : opts.triggerPrice;
     const signOrderParams: {
       market: string;
       side: 'BUY' | 'SELL';
@@ -1196,22 +1217,23 @@ export class ParadexExchange extends BaseExchange {
       type,
       size: opts.amount.toString(),
     };
-    if (!isMarketTypeOrder && opts.price && !isStopOrder) {
+    if (hasLimitExecutionPrice && opts.price) {
       signOrderParams.price = opts.price.toString();
     }
     const { signature, signature_timestamp } = await this.requestSigner.signOrder(signOrderParams);
     const instruction = this.mapTimeInForce(opts.timeInForce);
-    const shouldBeReduceOnly = opts.reduceOnly || isStopOrder;
+    const shouldBeReduceOnly = opts.reduceOnly || (isStopOrder && !isOpeningTrigger);
 
     return omitUndefined({
       market: opts.symbol,
       side,
       type,
       size: opts.amount.toString(),
-      price: !isMarketTypeOrder && !isStopOrder && opts.price ? opts.price.toString() : undefined,
+      price: hasLimitExecutionPrice && opts.price ? opts.price.toString() : undefined,
       trigger_price: triggerPrice?.toString(),
       instruction,
       flags: shouldBeReduceOnly ? ['REDUCE_ONLY'] : undefined,
+      stp: 'EXPIRE_TAKER',
       signature,
       signature_timestamp,
       client_id: clientId,
@@ -1597,11 +1619,17 @@ export class ParadexExchange extends BaseExchange {
         `Paradex native amendment supports only exactly reconciled open LIMIT or untriggered TPSL orders; ${rawType || 'unknown'} ${rawStatus || 'unknown'} is unsupported`,
       );
     }
+    const rawReduceOnly =
+      typeof raw?.reduce_only === 'boolean'
+        ? raw.reduce_only
+        : Array.isArray(raw?.flags)
+          ? raw.flags.includes('REDUCE_ONLY')
+          : undefined;
     if (
       rawId !== order.id ||
       rawMarket !== order.symbol ||
       rawSide !== expectedSide ||
-      this.reverseMapOrderType(rawType) !== order.type
+      this.reverseMapOrderType(rawType, rawReduceOnly) !== order.type
     ) {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: order identity or immutable shape is not reconciled`);
     }
@@ -1617,12 +1645,6 @@ export class ParadexExchange extends BaseExchange {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: time-in-force/post-only state is not reconciled`);
     }
 
-    const rawReduceOnly =
-      typeof raw?.reduce_only === 'boolean'
-        ? raw.reduce_only
-        : Array.isArray(raw?.flags)
-          ? raw.flags.includes('REDUCE_ONLY')
-          : undefined;
     if (rawReduceOnly === undefined || rawReduceOnly !== order.reduceOnly) {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: reduce-only state is not reconciled`);
     }
@@ -2004,7 +2026,13 @@ export class ParadexExchange extends BaseExchange {
 
   private mapOrder = (o: ORDER_RESPONSE): Order => {
     const side = ORDER_SIDE[o.side];
-    const type = this.reverseMapOrderType(o.type);
+    const reduceOnly =
+      typeof o.reduce_only === 'boolean'
+        ? o.reduce_only
+        : Array.isArray(o.flags)
+          ? o.flags.includes('REDUCE_ONLY')
+          : false;
+    const type = this.reverseMapOrderType(o.type, reduceOnly);
     const status = this.mapOrderStatus(o.status);
 
     // For stop orders, use trigger_price as the price (since _MARKET types have no limit price)
@@ -2022,8 +2050,7 @@ export class ParadexExchange extends BaseExchange {
       amount: parseFloat(o.size),
       filled: parseFloat(o.size) - parseFloat(o.remaining_size),
       remaining: parseFloat(o.remaining_size),
-      reduceOnly:
-        typeof o.reduce_only === 'boolean' ? o.reduce_only : Array.isArray(o.flags) ? o.flags.includes('REDUCE_ONLY') : false,
+      reduceOnly,
       timeInForce: undefined,
       lastUpdate: new Date(o.created_at).getTime(),
       info: o, // Store all raw data from API
@@ -2052,7 +2079,7 @@ export class ParadexExchange extends BaseExchange {
     const mapping: Record<OrderType, string> = {
       [OrderType.Market]: 'MARKET',
       [OrderType.Limit]: 'LIMIT',
-      [OrderType.Conditional]: 'STOP_MARKET',
+      [OrderType.Conditional]: 'STOP_LIMIT',
       [OrderType.StopLoss]: 'STOP_MARKET',
       [OrderType.TakeProfit]: 'TAKE_PROFIT_MARKET',
       [OrderType.TrailingStopLoss]: 'STOP_MARKET',
@@ -2060,7 +2087,10 @@ export class ParadexExchange extends BaseExchange {
     return mapping[type] || 'LIMIT';
   };
 
-  private reverseMapOrderType = (type: string): OrderType => {
+  private reverseMapOrderType = (type: string, reduceOnly = true): OrderType => {
+    if (!reduceOnly && (type === 'STOP_LIMIT' || type === 'STOP_MARKET')) {
+      return OrderType.Conditional;
+    }
     return ORDER_TYPE[type] || OrderType.Limit;
   };
 

@@ -39,7 +39,9 @@ export const ENDPOINTS = {
   KLINE: '/v1/kline',
   CANCEL_ORDER: '/v1/order',
   PLACE_ORDER: '/v1/order',
-  LEVERAGE: '/v1/client/leverage',
+  LEVERAGE: '/v1/client/leverages',
+  MARGIN_MODE: '/v1/client/margin_mode',
+  MARGIN_MODES: '/v1/client/margin_modes',
   ORDERBOOK: '/v1/orderbook',
 };
 
@@ -61,6 +63,7 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.POSITIONS,
   ENDPOINTS.ALGO_ORDERS,
   ENDPOINTS.ORDERS,
+  ENDPOINTS.MARGIN_MODES,
 ];
 
 export const ORDER_TYPE: Record<string, OrderType> = {

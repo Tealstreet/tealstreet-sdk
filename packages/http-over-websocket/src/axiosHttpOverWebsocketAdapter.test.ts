@@ -65,6 +65,7 @@ const mockWs = howWebSocketSG as unknown as {
   isTokenSent: boolean;
   emitter: Emitter.TinyEmitter;
   sentMessages: any[];
+  sendToken: ReturnType<typeof vi.fn>;
   replyTo: (sent: any) => void;
 };
 const mockWsJA = howWebSocketJA as unknown as {
@@ -89,6 +90,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     mockWsJA.sentMessages.length = 0;
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    mockWs.sendToken.mockReset();
   });
 
   afterEach(() => {
@@ -327,6 +329,180 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     };
 
     await expect(adapter(callerConfig)).rejects.toThrow('proxy token unavailable');
+  });
+
+  it('coalesces concurrent Bad-auth refreshes into one token fetch and rpc.auth frame', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveRefreshToken!: (token: string) => void;
+      const refreshToken = new Promise<string>((resolve) => {
+        resolveRefreshToken = resolve;
+      });
+      const getProxyToken = vi.fn(() => {
+        if (getProxyToken.mock.calls.length <= 2) return Promise.resolve('initial-token');
+        return refreshToken;
+      });
+      configureHOW({ getProxyToken, isTokenExpired: () => false });
+      mockWs.authState = 'Bad';
+      mockWs.isTokenSent = true;
+      mockWs.sendToken.mockImplementation(() => {
+        mockWs.authState = 'Good';
+      });
+      mockWs.replyTo = (sent) => {
+        mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+      };
+
+      const adapter = createAxiosHttpOverWebsocketAdapter();
+      const first = adapter({
+        url: '/first',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 5_000,
+      } as any);
+      const second = adapter({
+        url: '/second',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 5_000,
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(600);
+      expect(getProxyToken).toHaveBeenCalledTimes(3);
+
+      resolveRefreshToken('refreshed-token');
+      await Promise.all([first, second]);
+
+      expect(mockWs.sendToken).toHaveBeenCalledTimes(1);
+      expect(mockWs.sendToken).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'rpc.auth', token: 'refreshed-token' }),
+      );
+      expect(mockWs.sentMessages.filter((message) => message.type === 'rpc.http')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps each joined Bad-auth request on its own typed timeout deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const neverResolvingToken = new Promise<string>(() => {});
+      const getProxyToken = vi.fn(() => {
+        if (getProxyToken.mock.calls.length <= 2) return Promise.resolve('initial-token');
+        if (getProxyToken.mock.calls.length === 3) return neverResolvingToken;
+        return Promise.resolve('retry-token');
+      });
+      configureHOW({ getProxyToken, isTokenExpired: () => false });
+      mockWs.authState = 'Bad';
+      mockWs.isTokenSent = true;
+      mockWs.sendToken.mockImplementation(() => {
+        mockWs.authState = 'Good';
+      });
+      mockWs.replyTo = (sent) => {
+        mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+      };
+
+      const adapter = createAxiosHttpOverWebsocketAdapter();
+      const shortConfig: any = {
+        url: '/short',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 550,
+      };
+      const longConfig: any = {
+        url: '/long',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 2_000,
+      };
+      const shortResult = adapter(shortConfig).catch((error) => error);
+      const longResult = adapter(longConfig);
+
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(shortResult).resolves.toMatchObject({
+        name: 'TradeTunnelTimeoutError',
+        config: shortConfig,
+      });
+
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(longResult).resolves.toMatchObject({ data: { ok: true }, config: longConfig });
+      expect(mockWs.sendToken).toHaveBeenCalledTimes(1);
+      expect(mockWs.sendToken).toHaveBeenCalledWith(expect.objectContaining({ token: 'retry-token' }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shares Bad-auth refresh failures and clears the single-flight for a retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const refreshFailure = new Error('shared token refresh failed');
+      let rejectRefreshToken!: (error: Error) => void;
+      const refreshToken = new Promise<string>((_resolve, reject) => {
+        rejectRefreshToken = reject;
+      });
+      const getProxyToken = vi.fn(() => {
+        if (getProxyToken.mock.calls.length <= 2) return Promise.resolve('initial-token');
+        return refreshToken;
+      });
+      configureHOW({ getProxyToken, isTokenExpired: () => false });
+      mockWs.authState = 'Bad';
+      mockWs.isTokenSent = true;
+
+      const adapter = createAxiosHttpOverWebsocketAdapter();
+      const first = adapter({
+        url: '/first',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 5_000,
+      } as any);
+      const second = adapter({
+        url: '/second',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 5_000,
+      } as any);
+      const outcomes = Promise.allSettled([first, second]);
+
+      await vi.advanceTimersByTimeAsync(600);
+      expect(getProxyToken).toHaveBeenCalledTimes(3);
+      rejectRefreshToken(refreshFailure);
+      const failed = await outcomes;
+
+      expect(failed).toEqual([
+        expect.objectContaining({ status: 'rejected', reason: refreshFailure }),
+        expect.objectContaining({ status: 'rejected', reason: refreshFailure }),
+      ]);
+      expect(mockWs.sendToken).not.toHaveBeenCalled();
+
+      const retryGetProxyToken = vi.fn().mockResolvedValue('retry-token');
+      configureHOW({ getProxyToken: retryGetProxyToken, isTokenExpired: () => false });
+      mockWs.authState = 'Bad';
+      mockWs.sendToken.mockImplementation(() => {
+        mockWs.authState = 'Good';
+      });
+      mockWs.replyTo = (sent) => {
+        mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+      };
+
+      const retry = adapter({
+        url: '/retry',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+        timeout: 5_000,
+      } as any);
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(retry).resolves.toMatchObject({ data: { ok: true } });
+      expect(mockWs.sendToken).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('applies the caller timeout to the pre-send connection wait', async () => {

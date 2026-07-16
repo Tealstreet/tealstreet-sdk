@@ -83,6 +83,14 @@ yarn test           # Vitest
   authentication, simulation, and response handling all consume the same
   budget. When it expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
+- A `Bad` authentication state is connection-scoped. Concurrent Axios requests
+  share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
+  weak single-flight map, so one bad-token episode emits one `rpc.auth` frame.
+  The single-flight is cleared on both success and failure. Each caller still
+  waits under its own complete-request deadline; if it joined an attempt owned
+  by a shorter-deadline request, it may elect a new attempt rather than inherit
+  the other request's `TradeTunnelTimeoutError` context. Non-timeout refresh
+  failures remain shared and propagate to every joined caller.
 - Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
   constructor path that accepts headers.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`

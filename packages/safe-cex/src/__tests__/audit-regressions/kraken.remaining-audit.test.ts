@@ -8,6 +8,7 @@ import { ENDPOINTS } from '../../exchanges/kraken/kraken.types';
 import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';
 import { ENDPOINTS as SPOT_ENDPOINTS, INTERVAL } from '../../exchanges/kraken/krakenspot.types';
 import { KrakenSpotPrivateWebsocket } from '../../exchanges/kraken/krakenspot.ws-private';
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,
@@ -74,12 +75,136 @@ const createFuturesExchange = () => {
 
 const createSpotExchange = () => {
   const store = new DefaultStore();
-  store.update({ markets: [SPOT_MARKET] });
+  store.update({
+    markets: [SPOT_MARKET],
+    tickers: [
+      {
+        id: SPOT_MARKET.id,
+        symbol: SPOT_MARKET.symbol,
+        bid: 49_999,
+        ask: 50_001,
+        last: 50_000,
+        mark: 50_000,
+        index: 50_000,
+        percentage: 0,
+        fundingRate: 0,
+        fundingTime: 0,
+        volume: 0,
+        quoteVolume: 0,
+        openInterest: 0,
+      },
+    ],
+  });
   const exchange = new KrakenSpotExchange('krakenspot', { key: 'key', secret: 'c2VjcmV0' }, store);
   return { exchange, store };
 };
 
 describe('Kraken remaining July audit regressions', () => {
+  it('places a futures trailing stop with a native quote-currency deviation', async () => {
+    const { exchange } = createFuturesExchange();
+    const post = vi.fn().mockResolvedValue({
+      data: { result: 'success', sendStatus: { status: 'placed', order_id: 'trailing-id' } },
+    });
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'PF_XBTUSD',
+        type: OrderType.TrailingStopLoss,
+        side: OrderSide.Sell,
+        price: 48_000,
+        amount: 2,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    ).resolves.toEqual(['trailing-id']);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.ORDER,
+      expect.objectContaining({
+        orderType: 'trailing_stop',
+        size: 2,
+        side: 'sell',
+        trailingStopMaxDeviation: 2_000,
+        trailingStopDeviationUnit: 'QUOTE_CURRENCY',
+        triggerSignal: 'mark',
+        reduceOnly: true,
+      }),
+    );
+    expect(exchangeMetadata.kraken.supportsTrailingStopLoss).toBe(true);
+  });
+
+  it('rejects a zero-distance futures trailing stop before REST placement', async () => {
+    const { exchange } = createFuturesExchange();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const post = vi.fn();
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'PF_XBTUSD',
+        type: OrderType.TrailingStopLoss,
+        side: OrderSide.Sell,
+        price: 50_000,
+        amount: 2,
+      }),
+    ).rejects.toThrow('must differ from the last price');
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('rejects futures trailing-stop edits before canceling or writing', async () => {
+    const { exchange } = createFuturesExchange();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const cancelOrders = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue();
+    const post = vi.fn();
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'trailing-id',
+          status: OrderStatus.Open,
+          symbol: 'PF_XBTUSD',
+          type: OrderType.TrailingStopLoss,
+          side: OrderSide.Sell,
+          price: 48_000,
+          amount: 2,
+          filled: 0,
+          remaining: 2,
+          reduceOnly: true,
+          lastUpdate: 1,
+          info: { trailingStopMaxDeviation: 2_000 },
+        },
+        update: { price: 47_000 },
+      }),
+    ).rejects.toThrow('recreating it would reset its trailing state');
+
+    expect(cancelOrders).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('places a Spot trailing stop with Kraken\'s required relative price', async () => {
+    const { exchange } = createSpotExchange();
+    const post = vi.fn().mockResolvedValue({ data: { error: [], result: { txid: ['spot-trailing-id'] } } });
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'XBT/USD',
+        type: OrderType.TrailingStopLoss,
+        side: OrderSide.Sell,
+        price: 48_000,
+        amount: 0.1,
+      }),
+    ).resolves.toEqual(['spot-trailing-id']);
+
+    expect(post).toHaveBeenCalledWith(
+      SPOT_ENDPOINTS.ADD_ORDER,
+      expect.objectContaining({ ordertype: 'trailing-stop', price: '+2000', type: 'sell', volume: '0.1' }),
+    );
+    expect(exchangeMetadata.krakenspot.supportsTrailingStopLoss).toBe(true);
+  });
+
   it('maps the documented unrealizedPnl field and preserves WS-only position values', async () => {
     const { exchange, store } = createFuturesExchange();
     store.update({

@@ -6,6 +6,7 @@ import {
   isHeartbeatFrame,
   WS_RECONNECT_THRESHOLD_MS,
 } from '../../exchanges/base.ws';
+import { LogSeverity } from '../../types';
 
 const createParent = (isDisposed = false) =>
   ({
@@ -64,5 +65,25 @@ describe('BaseWebSocket documented runtime contracts', () => {
     socket.send(JSON.stringify({ op: 'subscribe', args: ['SPONGEUSDT'] }));
 
     expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test('routine heartbeat drops and reconnects stay below error severity', () => {
+    vi.useFakeTimers();
+    const parent = createParent();
+    const socket = new BaseWebSocket(parent);
+    socket.ws = {
+      readyState: WebSocket.CLOSED,
+      removeEventListener: vi.fn(),
+    } as unknown as WebSocket;
+
+    socket.send('ping');
+    expect(parent.log).toHaveBeenCalledWith(expect.stringContaining('Skipping ping/pong'), LogSeverity.Debug);
+
+    (socket as any).processClose(undefined, '', 'Unknown');
+    expect(parent.log).toHaveBeenCalledWith(expect.stringContaining('reconnecting...'), LogSeverity.Warning);
+
+    socket.dispose();
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 });

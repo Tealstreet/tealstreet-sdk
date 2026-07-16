@@ -1270,14 +1270,23 @@ export class BinanceExchange extends BaseExchange {
 
   cancelSymbolOrders = async (symbol: string) => {
     try {
-      await this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
-        params: { symbol },
-      });
+      const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
+      const regularOrders = symbolOrders.filter((order) => !this.isAlgoOrderType(order.type));
+      const algoOrders = symbolOrders.filter((order) => this.isAlgoOrderType(order.type));
+      const [regularResult, algoResult] = await Promise.allSettled([
+        this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol } }),
+        this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ALGO_ORDERS, { params: { symbol } }),
+      ]);
 
-      this.store.updateOrdersStatus(
-        this.store.orders.filter((o) => o.symbol === symbol),
-        OrderStatus.Canceled,
-      );
+      if (regularResult.status === 'fulfilled') {
+        this.store.updateOrdersStatus(regularOrders, OrderStatus.Canceled);
+      }
+      if (algoResult.status === 'fulfilled') {
+        this.store.updateOrdersStatus(algoOrders, OrderStatus.Canceled);
+      }
+
+      if (regularResult.status === 'rejected') throw regularResult.reason;
+      if (algoResult.status === 'rejected') throw algoResult.reason;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;

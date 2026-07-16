@@ -195,6 +195,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 | `mkt`, `market`    | `OrderType.Market`                               |
 | `stp`, `stop`      | `OrderType.StopLoss`                             |
 | `take_profit`      | `OrderType.TakeProfit`                           |
+| `trailing_stop`    | `OrderType.TrailingStopLoss`                     |
 | `post`             | `OrderType.Limit` (with `PostOnly` TIF)          |
 | `ioc`              | `OrderType.Limit` (with `ImmediateOrCancel` TIF) |
 | `fok`              | `OrderType.Limit` (with `FillOrKill` TIF)        |
@@ -210,6 +211,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 | `OrderType.Market`              | `'mkt'`            |
 | `OrderType.StopLoss`            | `'stp'`            |
 | `OrderType.TakeProfit`          | `'take_profit'`    |
+| `OrderType.TrailingStopLoss`    | `'trailing_stop'`  |
 
 ### WebSocket Order Direction
 
@@ -231,10 +233,11 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 3. Round `size` via `adjust(amount, market.precision.amount)`
 4. Build body: `orderType`, `symbol`, `side`, `size`, `cliOrdId` (prefixed `ts_` + uuid), `broker` code
 5. For limit orders: add `limitPrice` (rounded)
-6. For stop/TP orders: add `stopPrice`, `reduceOnly: true`, optional `triggerSignal` (`mark`, `index`, or `last`)
-7. POST to `/v3/sendorder` via `unlimitedXHR` (bypasses rate limiter)
-8. Validate: `result === 'success'` AND `sendStatus.status` is `'placed'` or `'filled'`
-9. If original order was Limit with attached TP/SL: derive algo orders via `deriveAlgoOrdersFromNormalOrdersOpts` and place them separately
+6. For stop/TP orders: add `stopPrice`, `reduceOnly: true`, optional `triggerSignal` (`mark`, `spot`, or `last`)
+7. For trailing stops: convert the chart price into the positive distance from the current last price, send it as `trailingStopMaxDeviation` with `QUOTE_CURRENCY`, and force `reduceOnly: true`. Missing ticker/price and zero-distance inputs fail before REST.
+8. POST to `/v3/sendorder` via `unlimitedXHR` (bypasses rate limiter)
+9. Validate: `result === 'success'` AND `sendStatus.status` is `'placed'` or `'filled'`
+10. If original order was Limit with attached TP/SL: derive algo orders via `deriveAlgoOrdersFromNormalOrdersOpts` and place them separately
 
 **Broker tag**: `'AA73 N84G 7YOF J26Y'` is included in all order placements.
 
@@ -244,6 +247,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
   1. Cancel existing order via `cancelOrders()`
   2. Place new order with updated params via `placeOrder()`
 - **Limit orders**: Use `/v3/editorder` endpoint with `orderId`, optional `size` and `limitPrice`
+- **Trailing stops**: Reject edits before any cancellation/write. Cancel-and-recreate would reset the exchange-maintained trailing state.
 
 ### Canceling Orders (`kraken.exchange.ts`)
 
@@ -355,7 +359,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
   supportsPartialStops: true,
   supportsInfinityStops: false,
   supportsTPSLCloseAttribute: false,
-  supportsTrailingStopLoss: false,
+  supportsTrailingStopLoss: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
   defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
@@ -624,6 +628,7 @@ Kraken uses non-standard asset codes. The `normalizeAsset()` function in `kraken
 7. **Client order IDs**: `AddOrder` uses a generated 32-character lowercase hexadecimal short UUID in `cl_ord_id`; it must not send `userref`, because Kraken makes the fields mutually exclusive and `userref` is int32-only. Kraken `txid`s remain the returned, update/cancel, and reconciliation identities.
 8. **Native order amendments**: Reconciled plain limit, stop-loss, and take-profit orders use `/0/private/AmendOrder` by canonical Kraken `txid`. Quantity changes send the requested total base-asset quantity as `order_qty`; limit price changes use `limit_price`; trigger changes use `trigger_price`. Post-only limit price changes set `post_only: true`, so an amend that would take liquidity is rejected. The returned `amend_id` identifies the amend transaction only, so `updateOrder` returns the unchanged order `txid`.
 9. **Ambiguous edits fail closed**: Market, trailing-stop, stop-limit, take-profit-limit, IOC, and unreconciled orders are rejected before any REST write. Do not restore cancel-first replacement: it can lose a live protective order, and the normalized model cannot unambiguously represent both prices of Kraken's triggered-limit orders.
+10. **Trailing-stop placement**: `AddOrder` requires `ordertype: trailing-stop` and a relative `+` price. The adapter converts the chart price into a positive quote-currency distance from the latest ticker and rejects missing or zero-distance inputs before REST. Native trailing-stop amend remains intentionally unsupported because the normalized order does not preserve enough state for a safe edit.
 
 ## Error Handling
 
@@ -647,6 +652,7 @@ Common error codes:
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,  // Kraken Spot has no testnet
+  supportsTrailingStopLoss: true,
   positionModes: [PositionMode.OneWay],
   marginTypes: [MarginType.Isolated],
   hideMarginTypeSelector: true,
@@ -667,7 +673,7 @@ backlog. Run the relevant subset before enabling or releasing Kraken Spot.
 - Market loading from AssetPairs endpoint
 - Ticker fetching and WebSocket updates
 - Balance fetching (multi-asset with USD estimation)
-- Order placement: limit, market, stop-loss, take-profit
+- Order placement: limit, market, stop-loss, take-profit, trailing-stop
 - Order modification via native atomic amend and cancellation
 - Orderbook WebSocket subscription
 - OHLC via WebSocket v2 (unlike Futures which uses REST polling)

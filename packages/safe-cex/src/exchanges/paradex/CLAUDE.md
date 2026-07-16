@@ -6,7 +6,7 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 
 - **Type**: Decentralized exchange (Starknet L2)
 - **Signing**: StarkNet typed data signatures (EIP-712 style)
-- **Margin**: Cross-margin only
+- **Margin**: Cross-margin only in this integration (the venue's isolated-account routing is not represented safely yet)
 - **Position Mode**: One-way (no hedge mode)
 - **Quote Currency**: USD
 - **Status**: Enabled (`enabled: true`, `supportsTestnet: true`)
@@ -346,9 +346,10 @@ Execution-history behavior (`fetchExecutions`):
 | ---------------------------- | -------------------- |
 | `OrderType.Market`           | `MARKET`             |
 | `OrderType.Limit`            | `LIMIT`              |
+| `OrderType.Conditional`      | `STOP_LIMIT`         |
 | `OrderType.StopLoss`         | `STOP_MARKET`        |
 | `OrderType.TakeProfit`       | `TAKE_PROFIT_MARKET` |
-| `OrderType.TrailingStopLoss` | `STOP_MARKET`        |
+| `OrderType.TrailingStopLoss` | Rejected             |
 
 ### API -> Internal Type Mapping
 
@@ -364,10 +365,11 @@ Execution-history behavior (`fetchExecutions`):
 | `TAKE_PROFIT_LIMIT`     | `OrderType.TakeProfit` |
 
 The REST and private-WebSocket mappers share `ORDER_TYPE` and
-`isParadexTriggerOrderType` from `paradex.types.ts`. Keep all documented
-trigger variants in those definitions so readback displays `trigger_price` and
-cancel-and-replace retains the protective `OrderType` instead of recreating a
-resting limit order.
+`isParadexTriggerOrderType` from `paradex.types.ts`. Generic `STOP_LIMIT` and
+`STOP_MARKET` rows without `REDUCE_ONLY` map to `OrderType.Conditional`; the
+same types with `REDUCE_ONLY` remain protective stop-loss orders. Keep all
+documented trigger variants in those definitions so readback displays
+`trigger_price` and native amendment retains the correct trigger family.
 
 ### Order Status Mapping
 
@@ -397,11 +399,11 @@ resting limit order.
 
 1. **Generate identity**: Create one validated `ts_${uuid()}` `client_id` (non-empty suffix, at most 64 characters) before signing
 2. **Sign order**: `requestSigner.signOrder()` generates typed data signature with timestamp nonce
-3. **Map order type**: Convert internal `OrderType` to Paradex API type
-4. **Determine trigger price**: For stop orders, `opts.price` is the trigger price
+3. **Map order type**: Convert internal `OrderType` to Paradex API type; opening conditionals use `STOP_LIMIT`
+4. **Determine prices**: Opening conditionals require separate finite positive `price` (execution) and `triggerPrice`; protective stops keep `opts.price` as the trigger price
 5. **Map time in force**: Convert to Paradex instruction (`GTC`, `IOC`, `POST_ONLY`)
-6. **Set flags**: TP/SL types always get `REDUCE_ONLY` flag (Paradex rejects TPSL without it)
-7. **Build payload**: `{market, side, type, size, price?, trigger_price?, instruction, flags?, signature, signature_timestamp, client_id}`
+6. **Set safety attributes**: TP/SL types get `REDUCE_ONLY`; opening conditionals do not. Main and native-batch orders explicitly use Paradex's documented default `stp: EXPIRE_TAKER`
+7. **Build payload**: `{market, side, type, size, price?, trigger_price?, instruction, flags?, stp, signature, signature_timestamp, client_id}`
 8. **POST /orders**: Submit order and accept only a non-empty canonical Paradex `id` whose echoed `client_id` exactly matches the request
 9. **TP/SL bracket orders**: If `takeProfit` or `stopLoss` specified, place as separate orders (`placeTakeProfitStopLoss`)
 
@@ -487,6 +489,27 @@ while the legacy single mapper defaults MARKET to GTC. Trigger/conditional,
 attached TP/SL, trailing, close, unsupported-TIF, and otherwise composite
 orders also retain their dedicated sequential paths so no child or semantic
 attribute is dropped.
+
+### Roadmap feature boundaries
+
+- Opening trigger orders are implemented through the existing safe-cex
+  `price + triggerPrice` shape as non-reduce-only `STOP_LIMIT` requests. Missing
+  prices, reduce-only routing, attached TP/SL children, and trailing orders
+  reject before signing or writing.
+- Custom STP selection is not exposed by `PlaceOrderOpts`; placements therefore
+  pin the venue's documented `EXPIRE_TAKER` default. Do not infer another STP
+  mode from TIF or order side.
+- RPI, interactive/VWAP flags, and the newer named TPSL limit families do not
+  have lossless generic safe-cex write shapes. Readback remains supported, but
+  writes stay schema-gated rather than overloading unrelated fields.
+- Paradex isolated orders require `on_behalf_of_account` and can coexist with a
+  main-account position for the same market. The current order input and
+  symbol-keyed position/margin selection do not carry that routing identity,
+  so metadata remains cross-only and isolated writes/amends fail closed.
+- The official WebSocket trading schema currently exposes only LIMIT, MARKET,
+  STOP_LIMIT, and STOP_MARKET while REST exposes eight order families. Trading
+  remains on REST until the adapter can choose the transport without dropping
+  a type/flag and the authenticated request lifecycle can be validated.
 
 ## Symbol Format
 
@@ -607,6 +630,7 @@ For order signatures, size and price are scaled by `1e8`:
 | `supportsTradesHistory`                     | `false`                                       |
 | `supportsFeeRates`                          | `false`                                       |
 | `supportsTrailingStopLoss`                  | `false`                                       |
+| `supportsOpeningTriggerOrders`              | `true`                                        |
 | `supportsReadOnlyKey`                       | `false`                                       |
 | `supportsClosedPnLEndpoint`                 | `false`                                       |
 | `tvMaxGetBarFetches`                        | `10`                                          |
@@ -691,6 +715,11 @@ For order signatures, size and price are scaled by `1e8`:
     row by order `id`. All chunks are attempted before any collected failure is
     propagated.
 
+20. **Opening conditionals are exact STOP_LIMIT orders**: Require distinct
+    positive execution and trigger prices, omit `REDUCE_ONLY`, and classify
+    readback by its reduce-only state. Never degrade a trailing order to a
+    static stop or attach TP/SL children before the opening trigger fills.
+
 ## Error Handling
 
 ### API Error Extraction (`paradex.api.ts:129-169`)
@@ -738,6 +767,11 @@ all no-cancel/no-place failure boundaries.
 eligibility, independent signing, client-ID correlation under reordered
 successes, preflight/signing atomicity, mixed-family routing, aggregate
 unidentified error handling, and malformed-response rejection.
+
+`paradex.opening-trigger.test.ts` locks the STOP_LIMIT signing/request shape,
+separate execution and trigger prices, non-reduce semantics, explicit default
+STP, readback classification, capability metadata, and every no-write
+preflight boundary.
 
 ### Known Test Gaps (from TODO.md)
 

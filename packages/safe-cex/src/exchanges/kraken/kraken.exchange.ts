@@ -307,6 +307,8 @@ export class KrakenExchange extends BaseExchange {
           orderType = OrderType.StopLoss;
         } else if (orderTypeStr === 'take_profit') {
           orderType = OrderType.TakeProfit;
+        } else if (orderTypeStr === 'trailing_stop') {
+          orderType = OrderType.TrailingStopLoss;
         } else if (orderTypeStr.includes('lmt') || orderTypeStr === 'limit') {
           orderType = OrderType.Limit;
         } else {
@@ -327,7 +329,9 @@ export class KrakenExchange extends BaseExchange {
                 ? OrderSide.Buy
                 : OrderSide.Sell,
           price:
-            orderType === OrderType.StopLoss || orderType === OrderType.TakeProfit
+            orderType === OrderType.StopLoss ||
+            orderType === OrderType.TakeProfit ||
+            orderType === OrderType.TrailingStopLoss
               ? parseFloat((o as any).stopPrice ?? (o as any).stop_price ?? 0)
               : parseFloat((o as any).limitPrice ?? (o as any).limit_price ?? (o as any).price ?? 0),
           amount:
@@ -360,6 +364,8 @@ export class KrakenExchange extends BaseExchange {
         orderType = 'stp';
       } else if (opts.type === OrderType.TakeProfit) {
         orderType = 'take_profit';
+      } else if (opts.type === OrderType.TrailingStopLoss) {
+        orderType = 'trailing_stop';
       } else if (opts.type === OrderType.Limit) {
         if (opts.timeInForce === OrderTimeInForce.PostOnly) orderType = 'post';
         else if (opts.timeInForce === OrderTimeInForce.ImmediateOrCancel) orderType = 'ioc';
@@ -393,7 +399,25 @@ export class KrakenExchange extends BaseExchange {
       const toSignal = (t?: OrderStopTriggerType) =>
         t === OrderStopTriggerType.MarkPrice ? 'mark' : t === OrderStopTriggerType.IndexPrice ? 'spot' : 'last';
 
-      if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
+      if (opts.type === OrderType.TrailingStopLoss) {
+        const ticker = this.store.tickersBySymbol[opts.symbol];
+        if (!ticker || !Number.isFinite(ticker.last) || ticker.last <= 0) {
+          throw new Error(`Ticker ${opts.symbol} is required for a Kraken trailing stop`);
+        }
+        if (!Number.isFinite(opts.price) || opts.price! <= 0) {
+          throw new Error(`Trailing stop price for ${opts.symbol} must be a positive finite value`);
+        }
+
+        const deviation = adjust(Math.abs(ticker.last - opts.price!), market.precision.price);
+        if (!Number.isFinite(deviation) || deviation <= 0) {
+          throw new Error(`Trailing stop price for ${opts.symbol} must differ from the last price`);
+        }
+
+        body.trailingStopMaxDeviation = deviation;
+        body.trailingStopDeviationUnit = 'QUOTE_CURRENCY';
+        body.reduceOnly = true;
+        if (opts.slTriggerType) body.triggerSignal = toSignal(opts.slTriggerType);
+      } else if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
         // Stop and take profit orders must have stopPrice and are always reduceOnly
         if (opts.price) {
           body.stopPrice = adjust(opts.price, market.precision.price);
@@ -473,6 +497,12 @@ export class KrakenExchange extends BaseExchange {
   updateOrder = async (_opts: UpdateOrderOpts): Promise<string[]> => {
     try {
       const { order, update } = _opts;
+
+      if (order.type === OrderType.TrailingStopLoss) {
+        throw new Error(
+          `Cannot safely update Kraken trailing stop order ${order.id}: recreating it would reset its trailing state`,
+        );
+      }
 
       // For stop loss and take profit orders, cancel and recreate
       if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {

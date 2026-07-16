@@ -51,6 +51,9 @@ import { adjust, divide, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
+
+import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import {
   BYBIT_RATE_LIMIT_TABLE as BYBITINVERSE_RATE_LIMIT_TABLE,
   BybitAccountType as BybitInverseAccountType,
@@ -1163,7 +1166,20 @@ export class BybitInverseExchange extends BaseExchange {
         );
   };
 
-  placeOrder = async (opts: PlaceOrderOpts) => {
+  private getOrderExecutionParams = (opts: PlaceOrderOpts) => {
+    try {
+      return getBybitOrderExecutionParams(opts, this.getCategoryForSymbol(opts.symbol));
+    } catch (error: any) {
+      const message = error?.message || `${error}`;
+      this.emitAndLogError(message);
+      throw error;
+    }
+  };
+
+  placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    const category = this.getCategoryForSymbol(opts.symbol);
+    const orderExecutionParams = this.getOrderExecutionParams(opts);
+
     if (
       this._hasFullSizedPositionOppositeSide(opts.symbol, opts.side, opts.amount) &&
       (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)
@@ -1242,12 +1258,12 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     const req = omitUndefined({
-      category: this.getCategoryForSymbol(opts.symbol),
+      category,
       symbol: opts.symbol,
       side: inverseObj(ORDER_SIDE)[opts.side],
       orderType: inverseObj(ORDER_TYPE)[type],
       qty: market.isInverse ? `${Math.floor(amount)}` : `${amount}`, // Ensure integer for inverse
-      price: opts.type === OrderType.Limit ? `${price}` : undefined,
+      price: opts.type === OrderType.Limit && orderExecutionParams.bboSideType === undefined ? `${price}` : undefined,
       stopLoss: opts.stopLoss ? `${stopLoss}` : undefined,
       takeProfit: opts.takeProfit ? `${takeProfit}` : undefined,
       reduceOnly: opts.reduceOnly || false,
@@ -1276,6 +1292,7 @@ export class BybitInverseExchange extends BaseExchange {
       timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
       closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
       positionIdx,
+      ...orderExecutionParams,
     });
 
     // For inverse contracts, we work with integer USD values
@@ -1411,9 +1428,13 @@ export class BybitInverseExchange extends BaseExchange {
     return [];
   };
 
-  placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+  placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
     if (orders.length === 0) {
       return [];
+    }
+
+    for (const order of orders) {
+      this.getOrderExecutionParams(order);
     }
 
     // Separate orders that need special handling
@@ -1425,7 +1446,8 @@ export class BybitInverseExchange extends BaseExchange {
       if (
         (this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount) &&
           (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit)) ||
-        order.type === OrderType.TrailingStopLoss
+        order.type === OrderType.TrailingStopLoss ||
+        hasBybitSingleOrderParams(order)
       ) {
         specialOrders.push(order);
       } else {

@@ -13,6 +13,15 @@ export const EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS = 6_000;
 export const EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS = 20_000;
 const EXTERNAL_PUBLIC_DATA_HEARTBEAT_INTERVAL_MS = 1_000;
 
+const getCandleSubscriptionKey = (symbol: string, interval: Timeframe) => `${symbol}:${interval}`;
+
+const parseCandleSubscriptionKey = (key: string): [symbol: string, interval: Timeframe] => {
+  // Timeframes never contain ':', while normalized symbols may. Split at the
+  // final delimiter so reconnect subscriptions preserve colon-bearing symbols.
+  const separatorIndex = key.lastIndexOf(':');
+  return [key.slice(0, separatorIndex), key.slice(separatorIndex + 1) as Timeframe];
+};
+
 /**
  * Gateway message types for public data multiplexing
  */
@@ -101,6 +110,7 @@ export class ExternalPublicDataProvider {
 
   private subscriptions = new Map<string, Set<(data: unknown) => void>>();
   private reconnecting = false;
+  private initialized = false;
   private lastReceived = 0;
   private lastPingSent = 0;
   private heartbeatTimer?: ReturnType<typeof setTimeout>;
@@ -142,6 +152,7 @@ export class ExternalPublicDataProvider {
 
   private onOpen = () => {
     this.log('Connected to public data gateway', LogSeverity.Info);
+    this.initialized = true;
     this.lastReceived = Date.now();
     this.lastPingSent = 0;
     this.scheduleHeartbeatCheck();
@@ -272,7 +283,7 @@ export class ExternalPublicDataProvider {
   };
 
   private handleCandle = (symbol: string, interval: Timeframe, candle: Candle) => {
-    const key = `${symbol}:${interval}`;
+    const key = getCandleSubscriptionKey(symbol, interval);
     const callbacks = this.candleCallbacks.get(key);
     if (callbacks) {
       callbacks.forEach((cb) => cb(candle));
@@ -356,7 +367,7 @@ export class ExternalPublicDataProvider {
    * Subscribe to candle updates for a symbol/interval
    */
   subscribeCandle = (opts: OHLCVOptions, callback: (candle: Candle) => void): (() => void) => {
-    const key = `${opts.symbol}:${opts.interval}`;
+    const key = getCandleSubscriptionKey(opts.symbol, opts.interval);
 
     // Add callback
     if (!this.candleCallbacks.has(key)) {
@@ -408,7 +419,7 @@ export class ExternalPublicDataProvider {
 
     // Re-subscribe candles
     for (const key of this.candleCallbacks.keys()) {
-      const [symbol, interval] = key.split(':');
+      const [symbol, interval] = parseCandleSubscriptionKey(key);
       this.send({
         type: 'subscribe',
         exchangeId: this.exchangeId,
@@ -472,6 +483,25 @@ export class ExternalPublicDataProvider {
    */
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /** Whether this provider has reached an open gateway connection at least once. */
+  get isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * Gateway health mirrors BaseWebSocket health: the socket must be open and
+   * inbound traffic must remain inside the provider's stale threshold.
+   */
+  get isHealthy(): boolean {
+    if (!this.isConnected || this.lastReceived === 0) return false;
+    return Date.now() - this.lastReceived < EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS;
+  }
+
+  /** Timestamp used by the store socket-health bridge. */
+  get lastMessageTimestamp(): number | undefined {
+    return this.lastReceived > 0 ? this.lastReceived : undefined;
   }
 
   /**

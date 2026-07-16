@@ -30,6 +30,7 @@ When working with Bybit exchange integration, consult the official API documenta
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bybit.exchange.ts`   | Main exchange class extending `BaseExchange`. Handles linear perpetual futures (USDT and USDC settled). Contains order placement, position management, balance calculation, and all trading operations.                                                                    |
 | `bybit.api.ts`        | REST API client factory. Creates Axios instance with HMAC-SHA256 signing, retry logic, recv_window handling, and virtual clock time synchronization.                                                                                                                       |
+| `bybit.order-params.ts` | Validates and serializes shared `maxSlippagePct` plus adapter-only typed BBO and TickSize execution controls.                                                                                                                                                                      |
 | `bybit.types.ts`      | Type definitions, endpoint constants, type mapping objects (`ORDER_TYPE`, `ORDER_SIDE`, `ORDER_STATUS`, `ORDER_TIME_IN_FORCE`, `ORDER_TRIGGER_TYPE`, `POSITION_SIDE`), WebSocket URL constants, interval mappings, `BybitApiKeyInfo` interface, and transaction log types. |
 | `bybit.rateLimits.ts` | VIP-level rate limit table. Defines `BybitVipLevel` (No VIP through PRO-6), `BybitProductType` (Futures/Option/Spot), and `BybitAccountType` (Classic+UTA / UTA Pro). Used to dynamically adjust batch order limits.                                                       |
 | `bybit.ws-public.ts`  | Public WebSocket (`BybitPublicWebsocket`). Handles ticker updates, kline/OHLCV streaming, orderbook snapshot+delta, and public trade data for linear markets.                                                                                                              |
@@ -319,14 +320,56 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 
 6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
 
+### Native Market Slippage Protection
+
+All Bybit variants map `PlaceOrderOpts.maxSlippagePct` to V5
+`slippageToleranceType: 'Percent'` and `slippageTolerance`. The value must be
+within `0.01`–`10` and have no more than two decimal places. It is accepted
+only for plain `OrderType.Market` orders; Bybit does not allow these native
+fields on conditional orders or market orders carrying attached TP/SL.
+
+Programmatic callers can additionally import `BybitPlaceOrderOpts` (or the
+narrower `BybitTickSizeMarketOrderOpts`) and set
+`bybitSlippageToleranceTicks`. The tick count must be an integer from 1 through
+10000 and is serialized as `slippageToleranceType: 'TickSize'`. It is accepted
+only on plain market orders and is mutually exclusive with `maxSlippagePct`.
+No default is supplied: omitting both fields sends neither native slippage
+parameter. Spot retains its existing Bybit market-quantity unit behavior; this
+option changes only execution-price tolerance.
+
+Protected orders always use the single-order endpoint. Bybit's batch-place
+documentation does not expose the slippage fields, so `placeOrders` preflights
+them and routes each through `placeOrder`.
+
+Do not silently translate `maxSlippagePct` to Bybit's `TickSize` mode: the
+shared field is explicitly a percentage and cannot represent a tick count.
+
+### Programmatic BBO Orders
+
+`BybitBboOrderOpts` exposes BBO placement without adding order-ticket UI. Set
+`bybitBbo: { sideType: 'Queue' | 'Counterparty', level: 1 | 2 | 3 | 4 | 5 }`.
+BBO is available only on linear/inverse adapters (including the linear demo
+adapter), omits absolute `price`, and always uses `/v5/order/create` because the
+batch schema does not list BBO fields.
+
+Bybit's BBO-specific documentation does not define interactions with order
+type, TIF, conditionals, attached TP/SL, or slippage fields. The adapter
+therefore deliberately restricts the first typed surface to a plain Limit
+order, absent/default `GoodTillCancel`, no absolute price, no trigger/TP/SL,
+and no slippage control. Those are adapter safety restrictions, not claims
+about undocumented venue behavior. `Queue`/`Counterparty` and level are never
+inferred from a regular limit order, and omitting `bybitBbo` sends no BBO
+fields.
+
 ### Batch Order Placement (`placeOrders` -- `bybit.exchange.ts:1251-1293`)
 
-1. **Separation**: Orders are split into "special" (position-bound SL/TP and trailing stops) and "regular" orders
-2. **Special orders**: Placed individually via `placeOrder()`, errors are logged and non-fatal
-3. **Regular orders**: Grouped by category, chunked by `batchLimit` (10 or 20 based on VIP level)
-4. **Batch fallback**: If `CREATE_BATCH_ORDER` fails for a batch, falls back to individual `CREATE_ORDER` per order in that batch (`bybit.exchange.ts:1336-1346`)
-5. **Inter-batch delay**: 1200ms sleep between batches (`bybit.exchange.ts:1328-1329`)
-6. **Error handling**: Individual order errors within a batch are reported via `retExtInfo.list[].code` and logged, but partial successes are preserved
+1. **Preflight**: Explicit Percent/TickSize/BBO controls for the whole list are validated before any I/O, so invalid intent cannot be swallowed by the special-order continue-on-error loop
+2. **Separation**: Orders are split into "special" (position-bound SL/TP, trailing stops, native slippage-protected market orders, and BBO orders) and "regular" orders
+3. **Special orders**: Placed individually via `placeOrder()`, transport/venue errors are logged and non-fatal
+4. **Regular orders**: Grouped by category, chunked by `batchLimit` (10 or 20 based on VIP level)
+5. **Batch fallback**: If `CREATE_BATCH_ORDER` fails for a batch, falls back to individual `CREATE_ORDER` per order in that batch (`bybit.exchange.ts:1336-1346`)
+6. **Inter-batch delay**: 1200ms sleep between batches (`bybit.exchange.ts:1328-1329`)
+7. **Error handling**: Individual order errors within a batch are reported via `retExtInfo.list[].code` and logged, but partial successes are preserved
 
 ### Virtual TP/SL Orders (`mapOrder` -- `bybit.exchange.ts:1895-1970`)
 

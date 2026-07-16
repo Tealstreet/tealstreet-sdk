@@ -140,8 +140,10 @@ All endpoints are prefixed with `/api/v1/`. Defined in `ENDPOINTS` object in `bl
 | `PLACE_ORDERS`         | `/api/v1/trade/order`               | POST   | Place single order                                  |
 | `PLACE_ORDERS_BATCH`   | `/api/v1/trade/batch-orders`        | POST   | Place batch orders (max 20)                         |
 | `PLACE_TPSL_ORDER`     | `/api/v1/trade/order-tpsl`          | POST   | Place TP/SL algo order                              |
+| `PLACE_TRIGGER_ORDER`  | `/api/v1/trade/order-algo`          | POST   | Place opening trigger/algo order                    |
 | `CANCEL_ORDERS`        | `/api/v1/trade/cancel-batch-orders` | POST   | Cancel batch orders (max 20)                        |
 | `CANCEL_ALGO_ORDER`    | `/api/v1/trade/cancel-tpsl`         | POST   | Cancel TP/SL orders (max 10)                        |
+| `CANCEL_TRIGGER_ORDER` | `/api/v1/trade/cancel-algo`         | POST   | Cancel one opening trigger/algo order               |
 | `UNFILLED_ORDERS`      | `/api/v1/trade/orders-pending`      | GET    | Get pending normal orders                           |
 | `UNFILLED_ALGO_ORDERS` | `/api/v1/trade/orders-tpsl-pending` | GET    | Get pending TP/SL orders                            |
 | `UNFILLED_TRIGGER_ORDERS` | `/api/v1/trade/orders-algo-pending` | GET | Read externally placed opening triggers             |
@@ -259,17 +261,20 @@ Additional BloFin order types mapped to internal types:
   payload, and the `move_order_stop` value has not been validated against
   BloFin's schema. Do not treat it as an implemented order type.
 
-### Opening Trigger Orders (read-only)
+### Opening Trigger Orders
 
 `fetchOrders` includes BloFin's documented
 `GET /api/v1/trade/orders-algo-pending?orderType=trigger` family, paginated by
 `algoId`. These externally placed orders map to `OrderType.Conditional` using
-their `triggerPrice`, so protection or entries created on BloFin are visible in
-Tealstreet. The metadata capability remains disabled and the write lifecycle is
-intentionally fail-closed: placement, cancel, and update reject with an
-actionable message instead of routing a trigger to the normal-order or TP/SL
-endpoint. Users must mutate these orders on BloFin until placement, amend, and
-cancel are implemented and tested as one complete lifecycle.
+their `triggerPrice`, and `supportsOpeningTriggerOrders` is enabled. Placement
+uses the dedicated `POST /api/v1/trade/order-algo` object contract, with
+positive native-contract size, explicit trigger price, `orderPrice: -1` for
+market execution, and optional attached TP/SL protection. Cancellation uses
+the single-object `POST /api/v1/trade/cancel-algo` contract with exact `algoId`
+response correlation. BloFin publishes no amend endpoint for this family, so
+edits preflight a full replacement before cancellation while preserving raw
+margin mode, position side, trigger reference, execution price, native
+remaining size, and attached protection. Missing provenance fails before I/O.
 
 ### Algo Order Batching
 
@@ -311,6 +316,10 @@ The adapter handles both:
    - Apply the price/amount update to the correct leg (parent, stop_loss, or take_profit)
 3. Cancel the appropriate orders (algo orders use `cancelAlgoOrders`, normal use `cancelOrders`)
 4. Place a new order with the updated parameters via `placeOrder`
+
+Opening trigger edits use their own bounded cancel-replace path. They never
+flow through normal-order or TP/SL endpoints, and the complete replacement
+payload is constructed and validated before the old `algoId` is canceled.
 
 ### Cancel Orders with Preserve Logic
 
@@ -460,6 +469,11 @@ account and order lifecycle against demo trading.
     cumulative `filledSize` only while an order is active. Filled and canceled
     terminal events delete the order ID after processing, preventing stale
     entries from accumulating for the life of the socket.
+19. **Opening trigger writes are single-row**: BloFin publishes no batch
+    placement/cancellation contract for `/order-algo` and `/cancel-algo`.
+    `placeOrders` retains ordinary/TP-SL batching but serializes Conditional
+    writes. Trigger cancels are paced at 350 ms to remain below the documented
+    30 trade requests per 10 seconds per-user limit.
 
 ## Error Handling
 
@@ -498,7 +512,7 @@ BloFin API success payloads are not perfectly uniform, but generally follow:
 ### Error Propagation in Orders
 
 - `placeOrderBatch`: Checks top-level `code` and per-order `msg` fields. Treats `success`, `Order placed`, and empty/undefined row messages as successful; throws on other row messages.
-- `cancelNormalOrders` / `cancelAlgoOrders`: Throw on HTTP errors and on genuine API error codes — **except** rows the exchange reports as already gone (per-row `code:"1000"` / message "Cancel failed as the order has been filled, triggered, canceled or does not exist"). Those are reconciled out of the store via `removeOrders` and treated as canceled, not thrown (see `isAlreadyGoneCancelRow`). Throwing on already-gone rows made flatten/cancel-all loops spin forever — the stale store order never left, so each retry re-issued a cancel that always "failed" (e2e cleanup timeout on blofin). The cancel only throws when at least one row failed for a _different_ reason (or the response carried no per-row data). Algo rows map back to store ids by the exact `${tpslId}` segment (`id.split('__')[0] === tpslId`, not a raw prefix, so `12` can't sweep away `123`'s legs). Already-gone rows that can't be mapped back to a store id (no `orderId` / `tpslId`) are treated as real failures and throw, rather than silently swallowed.
+- `cancelNormalOrders` / `cancelAlgoOrders` / `cancelTriggerOrders`: Throw on HTTP errors and on genuine API error codes — **except** rows the exchange reports as already gone (per-row `code:"1000"` / message "Cancel failed as the order has been filled, triggered, canceled or does not exist"). Those are reconciled out of the store via `removeOrders` and treated as canceled, not thrown (see `isAlreadyGoneCancelRow`). Throwing on already-gone rows made flatten/cancel-all loops spin forever — the stale store order never left, so each retry re-issued a cancel that always "failed" (e2e cleanup timeout on blofin). The cancel only tolerates an already-gone result when its exact `orderId`, `tpslId`, or `algoId` correlates to the requested/store identity. Every other partial, missing, or mismatched row throws.
 
 ## Testing / Validation
 

@@ -8,7 +8,9 @@
 
 import jwt from 'jsonwebtoken';
 
-import { virtualClock } from './utils/virtualClock';
+import { isTokenExpired } from './proxyTokenExpiry';
+
+export { isTokenExpired } from './proxyTokenExpiry';
 
 // BroadcastChannel message types
 type BroadcastMessage = { type: 'proxyTokenUpdate'; token: string; expiresAt: number } | { type: 'proxyTokenRequest' };
@@ -46,25 +48,6 @@ function isWorkerContext(): boolean {
 function getProxyKeyApiUrl(): string {
   const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
   return `${baseUrl}/api/proxykey`;
-}
-
-/**
- * Check if token is expired
- */
-export function isTokenExpired(token: string): boolean {
-  if (!token || token === '') {
-    return true;
-  }
-  try {
-    const decoded = jwt.decode(token, { json: true });
-    if (!decoded) {
-      return true;
-    }
-    const expiration = new Date((decoded.exp || 0) * 1000);
-    return expiration < (virtualClock.getCurrentTimeMs() || new Date());
-  } catch {
-    return true;
-  }
 }
 
 /**

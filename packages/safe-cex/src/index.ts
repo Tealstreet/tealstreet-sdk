@@ -180,6 +180,13 @@ export const createPublicExchange = async (
 export { normalizeExchangeAccountConfig } from './accounts/normalizeExchangeAccountConfig';
 export { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
 export type { ExchangeAccountConfig, PublicExchangeOptions } from './types';
+export type {
+  BybitBboLevel,
+  BybitBboOrderOpts,
+  BybitBboSideType,
+  BybitPlaceOrderOpts,
+  BybitTickSizeMarketOrderOpts,
+} from './exchanges/bybit/bybit.order-params';
 
 /**
  * Hyperliquid builder fee utilities

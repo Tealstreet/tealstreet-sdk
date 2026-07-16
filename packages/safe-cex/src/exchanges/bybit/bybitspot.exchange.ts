@@ -46,6 +46,9 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
+
+import { getBybitOrderExecutionParams } from './bybit.order-params';
 import {
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
@@ -591,7 +594,19 @@ export class BybitSpotExchange extends BaseExchange {
         );
   };
 
-  placeOrder = async (opts: PlaceOrderOpts) => {
+  private getOrderExecutionParams = (opts: PlaceOrderOpts) => {
+    try {
+      return getBybitOrderExecutionParams(opts, 'spot');
+    } catch (error: any) {
+      const message = error?.message || `${error}`;
+      this.emitAndLogError(message);
+      throw error;
+    }
+  };
+
+  placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    const orderExecutionParams = this.getOrderExecutionParams(opts);
+
     if (
       this._hasFullSizedPositionOppositeSide(opts.symbol, opts.side, opts.amount) &&
       (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)
@@ -673,6 +688,7 @@ export class BybitSpotExchange extends BaseExchange {
       timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
       closeOnTrigger: false,
       positionIdx,
+      ...orderExecutionParams,
     });
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
@@ -715,6 +731,15 @@ export class BybitSpotExchange extends BaseExchange {
     }
 
     return fullfilled.map((resp) => resp.result.orderId);
+  };
+
+  placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    for (const order of orders) {
+      this.getOrderExecutionParams(order);
+    }
+
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
   };
 
   placeStopLossOrTakeProfit = async (opts: PlaceOrderOpts) => {

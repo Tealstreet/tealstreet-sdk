@@ -141,6 +141,12 @@ All endpoints are prefixed with the base URL (`https://omni.apex.exchange/api`):
 | `CANCEL_ORDERS`  | `/v3/delete-open-orders`      | POST   | Cancel all open orders for a symbol (form-urlencoded)                              |
 | `SET_LEVERAGE`   | `/v3/set-initial-margin-rate` | POST   | Set leverage via initial margin rate (`multipart/form-data`)                       |
 
+The current official Python connector also contains a `create_batch_orders_v3()` method that posts
+an `orders` array to `/v3/batch-orders`. The current official API reference and connector README do
+not document that endpoint's response schema, maximum order count, processing order, partial-failure
+behavior, rollback behavior, or atomicity. It is therefore intentionally absent from `ENDPOINTS` and
+is not used as a split-order safety mechanism.
+
 ### Request Content Types
 
 - **Order creation** (`CREATE_ORDER`): `application/x-www-form-urlencoded; charset=UTF-8` (params stringified via `qs`)
@@ -569,9 +575,18 @@ Private WebSocket uses direct ApeX endpoints by default and switches to Tealstre
 
 Large orders exceeding `maxOrderSize` are automatically split into multiple lots only when they do
 not carry attached TP/SL. A split order with `stopLoss` or `takeProfit` fails before SDK setup or any
-REST write: attaching one lot-sized bracket would leave the remaining lots unprotected, while
-attaching a bracket to every lot has not been verified as an atomic whole-request strategy. Single-lot
-orders keep attached TP/SL, with `tpSize` and `slSize` matching the exact signed parent size.
+REST write. The official `/v3/order` contract covers one parent plus its attached TP/SL legs; its REST
+success only means the request was received, with acceptance confirmed later through WebSocket order
+state. Although the official Python connector contains an undocumented `/v3/batch-orders` call, ApeX
+does not publish an all-or-none commit/rollback guarantee for its rows. Sequential calls and that
+undocumented batch can therefore both leave only some lots live or protected. Single-lot orders keep
+the documented attached TP/SL path, with `tpSize` and `slSize` matching the exact signed parent size.
+
+The upstream blocker is specifically a missing atomic contract, not missing request serialization:
+safe split brackets require ApeX to document that every parent and attached leg in a multi-order
+request is accepted or rejected as one transaction, including the behavior when matching/L2
+validation rejects one row after REST receipt. Until then, `placeOrder()` emits and throws
+`ApeX Omni cannot atomically attach TP/SL to split orders` before signing or sending anything.
 
 ### Virtual bracket updates
 

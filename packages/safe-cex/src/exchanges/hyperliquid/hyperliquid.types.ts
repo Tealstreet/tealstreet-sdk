@@ -510,7 +510,7 @@ export interface ModifyWire {
 
 export interface ScheduleCancelAction {
   type: 'scheduleCancel';
-  time?: number | null;
+  time?: number;
 }
 
 export interface Signature {

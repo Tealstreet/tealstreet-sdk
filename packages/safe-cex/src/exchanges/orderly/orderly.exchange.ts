@@ -39,13 +39,13 @@ import { BaseExchange } from '../base';
 import { createAPI } from './orderly.api';
 import {
   ACCOUNT_RESPONSE,
+  EDIT_ORDER_REQUEST,
+  EDIT_ORDER_RESPONSE,
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   ORDER_SIDE,
   ORDER_TYPE,
-  EDIT_ORDER_REQUEST,
-  EDIT_ORDER_RESPONSE,
   PLACE_ORDER_RESPONSE,
 } from './orderly.types';
 import { normalizeSymbol, reverseSymbol } from './orderly.utils';
@@ -90,6 +90,7 @@ export class OrderlyExchange extends BaseExchange {
   // we call the ACCOUNT endpoint, and copy this value into positions
   private accountLeverage = 1;
   private _accountPositionMode: PositionMode | null = null;
+  private marginTypeBySymbol = new Map<string, MarginType>();
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     // Ensure key and secret have the "ed25519:" prefix
@@ -194,6 +195,11 @@ export class OrderlyExchange extends BaseExchange {
     if (this.isDisposed) return;
 
     if (!publicDataOnly) {
+      try {
+        await this.fetchAndUpdateMarginTypes();
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.message || err?.message || 'Orderly margin-mode fetch failed');
+      }
       void this.fetchAndUpdateAccountLeverage().catch((err: any) => {
         this.emitAndLogError(err?.response?.data?.message || err?.message || 'Orderly account leverage fetch failed');
       });
@@ -313,6 +319,19 @@ export class OrderlyExchange extends BaseExchange {
 
     // same with positionMode
     this._accountPositionMode = PositionMode.OneWay;
+  };
+
+  fetchAndUpdateMarginTypes = async () => {
+    const response = await this.xhr.get<{ data: { rows?: Array<Record<string, any>> } }>(ENDPOINTS.MARGIN_MODES);
+    const rows = response.data?.data?.rows;
+    if (!Array.isArray(rows)) return;
+
+    for (const row of rows) {
+      if (typeof row?.symbol !== 'string') continue;
+      const rawMarginType = v(row, 'default_margin_mode');
+      if (rawMarginType !== 'CROSS' && rawMarginType !== 'ISOLATED') continue;
+      this.marginTypeBySymbol.set(normalizeSymbol(row.symbol), this.mapMarginType(rawMarginType));
+    }
   };
 
   fetchMarkets = async () => {
@@ -437,48 +456,16 @@ export class OrderlyExchange extends BaseExchange {
 
       const positionMode = await this.getPositionMode();
       const realPositions = positions.reduce<Position[]>((acc, p) => {
-        const symbol = normalizeSymbol(p.symbol);
-        const ticker = this.store.tickersBySymbol[symbol];
-
-        if (!ticker) return acc;
         if (!p.position_qty) return acc;
-
-        const entryPrice = v(p, 'average_open_price');
-        const holdings = v(p, 'position_qty');
-        const contracts = Math.abs(holdings);
-        const side = holdings > 0 ? PositionSide.Long : PositionSide.Short;
-
-        const priceDiff = Math.max(entryPrice, ticker.mark) - Math.min(entryPrice, ticker.mark);
-
-        const isLoss =
-          (side === PositionSide.Long && ticker.mark < entryPrice) ||
-          (side === PositionSide.Short && ticker.mark > entryPrice);
-
-        const absUPNL = priceDiff * contracts;
-        const upnl = Math.round((isLoss ? -absUPNL : absUPNL) * 100) / 100;
-
-        const position: Position = {
-          id: createPositionId(symbol, side, positionMode),
-          symbol,
-          side,
-          entryPrice,
-          notional: contracts * ticker.mark,
-          leverage: Boolean(+p.imr) ? 1 / +p.imr : this.accountLeverage,
-          unrealizedPnl: upnl,
-          contracts,
-          liquidationPrice: v(p, 'est_liq_price'),
-          positionMode: positionMode,
-          marginType: MarginType.Cross,
-          info: cloneDeep(p),
-        };
-
-        return [...acc, position];
+        const position = this.mapPosition(p, positionMode);
+        return position ? [...acc, position] : acc;
       }, []);
 
       const fakePositions: Position[] = this.store.markets.reduce((acc: Position[], m) => {
+        const marginType = this.getCurrentMarginType(m.symbol);
         const fakePositionsForSymbol = [
           {
-            id: createPositionId(m.symbol, PositionSide.Long, positionMode),
+            id: this.createOrderlyPositionId(m.symbol, PositionSide.Long, positionMode, marginType),
             symbol: m.symbol,
             side: PositionSide.Long,
             entryPrice: 0,
@@ -488,10 +475,10 @@ export class OrderlyExchange extends BaseExchange {
             contracts: 0,
             liquidationPrice: 0,
             positionMode: positionMode,
-            marginType: MarginType.Cross,
+            marginType,
           },
           {
-            id: createPositionId(m.symbol, PositionSide.Short, positionMode),
+            id: this.createOrderlyPositionId(m.symbol, PositionSide.Short, positionMode, marginType),
             symbol: m.symbol,
             side: PositionSide.Short,
             entryPrice: 0,
@@ -501,7 +488,7 @@ export class OrderlyExchange extends BaseExchange {
             contracts: 0,
             liquidationPrice: 0,
             positionMode: positionMode,
-            marginType: MarginType.Cross,
+            marginType,
           },
         ];
 
@@ -523,6 +510,86 @@ export class OrderlyExchange extends BaseExchange {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return this.store.positions;
     }
+  };
+
+  private mapMarginType = (rawMarginType: unknown): MarginType => {
+    return typeof rawMarginType === 'string' && rawMarginType.toUpperCase() === 'ISOLATED'
+      ? MarginType.Isolated
+      : MarginType.Cross;
+  };
+
+  private toOrderlyMarginMode = (marginType: MarginType): 'CROSS' | 'ISOLATED' => {
+    return marginType === MarginType.Isolated ? 'ISOLATED' : 'CROSS';
+  };
+
+  private getCurrentMarginType = (symbol: string): MarginType => {
+    const cached = this.marginTypeBySymbol.get(symbol);
+    if (cached) return cached;
+
+    const activeMarginTypes = uniqBy(
+      this.store.positions.filter((position) => position.symbol === symbol && position.contracts > 0),
+      'marginType',
+    ).map((position) => position.marginType);
+    return activeMarginTypes.length === 1 && activeMarginTypes[0] ? activeMarginTypes[0] : MarginType.Cross;
+  };
+
+  private createOrderlyPositionId = (
+    symbol: string,
+    side: PositionSide,
+    positionMode: PositionMode,
+    marginType: MarginType,
+  ) => {
+    const baseId = createPositionId(symbol, side, positionMode);
+    return marginType === MarginType.Isolated ? `${baseId}:isolated` : baseId;
+  };
+
+  mapPosition = (p: Record<string, any>, positionMode: PositionMode = PositionMode.OneWay): Position | null => {
+    const symbol = normalizeSymbol(p.symbol);
+    const ticker = this.store.tickersBySymbol[symbol];
+    if (!ticker) return null;
+
+    const holdings = Number(v(p, 'position_qty'));
+    if (!Number.isFinite(holdings)) return null;
+
+    const entryPrice = Number(v(p, 'average_open_price')) || 0;
+    const contracts = Math.abs(holdings);
+    const side = holdings >= 0 ? PositionSide.Long : PositionSide.Short;
+    const markPrice = Number(v(p, 'mark_price')) || ticker.mark;
+    const notional = contracts * markPrice;
+
+    const priceDiff = Math.max(entryPrice, markPrice) - Math.min(entryPrice, markPrice);
+    const isLoss =
+      (side === PositionSide.Long && markPrice < entryPrice) || (side === PositionSide.Short && markPrice > entryPrice);
+    const absUPNL = priceDiff * contracts;
+    const upnl = contracts > 0 ? Math.round((isLoss ? -absUPNL : absUPNL) * 100) / 100 : 0;
+
+    const marginType = this.mapMarginType(v(p, 'margin_mode'));
+    const rawLeverage = Number(v(p, 'leverage'));
+    const imr = Number(v(p, 'imr'));
+    const leverage =
+      Number.isFinite(rawLeverage) && rawLeverage > 0
+        ? rawLeverage
+        : Number.isFinite(imr) && imr > 0
+          ? 1 / imr
+          : this.accountLeverage;
+    const rawMargin = Number(v(p, 'margin'));
+
+    return {
+      id: this.createOrderlyPositionId(symbol, side, positionMode, marginType),
+      symbol,
+      side,
+      entryPrice,
+      notional,
+      leverage,
+      unrealizedPnl: upnl,
+      contracts,
+      liquidationPrice: Number(v(p, 'est_liq_price')) || 0,
+      marginSize: Number.isFinite(rawMargin) && rawMargin > 0 ? rawMargin : leverage > 0 ? notional / leverage : 0,
+      positionMode,
+      marginType,
+      info: cloneDeep(p),
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+    };
   };
 
   fetchOrders = async () => {
@@ -587,10 +654,12 @@ export class OrderlyExchange extends BaseExchange {
       this.store.orders.find((candidate) => candidate.id === order.id && candidate.symbol === order.symbol) ??
       fail('requires an exactly reconciled store order');
 
-    const stableFields: ReadonlyArray<keyof Pick<
-      Order,
-      'status' | 'symbol' | 'type' | 'side' | 'price' | 'amount' | 'filled' | 'remaining' | 'reduceOnly'
-    >> = ['status', 'symbol', 'type', 'side', 'price', 'amount', 'filled', 'remaining', 'reduceOnly'];
+    const stableFields: ReadonlyArray<
+      keyof Pick<
+        Order,
+        'status' | 'symbol' | 'type' | 'side' | 'price' | 'amount' | 'filled' | 'remaining' | 'reduceOnly'
+      >
+    > = ['status', 'symbol', 'type', 'side', 'price', 'amount', 'filled', 'remaining', 'reduceOnly'];
     if (stableFields.some((field) => !Object.is(current[field], order[field]))) {
       fail('requires the submitted order to match the reconciled store row');
     }
@@ -637,7 +706,7 @@ export class OrderlyExchange extends BaseExchange {
       'margin_mode',
     ];
     if (requiredRestFields.some((field) => !own(raw, field))) {
-      fail('requires explicit REST identity, fill, visibility, reduce-only, and CROSS-margin provenance');
+      fail('requires explicit REST identity, fill, visibility, reduce-only, and margin-mode provenance');
     }
 
     const rawOrderId = raw.order_id;
@@ -666,7 +735,9 @@ export class OrderlyExchange extends BaseExchange {
     if (raw.reduce_only !== current.reduceOnly || typeof raw.reduce_only !== 'boolean') {
       fail('requires explicit reduce-only parity');
     }
-    if (raw.margin_mode !== 'CROSS') fail('supports only proven CROSS-margin orders');
+    if (raw.margin_mode !== 'CROSS' && raw.margin_mode !== 'ISOLATED') {
+      fail('requires proven CROSS or ISOLATED margin provenance');
+    }
 
     const executionFields = [
       raw.total_executed_quantity,
@@ -857,6 +928,10 @@ export class OrderlyExchange extends BaseExchange {
           filled,
           remaining: subtract(co.quantity, filled),
           lastUpdate: virtualClock.getCurrentTimeMs(),
+          info: {
+            ...cloneDeep(co),
+            margin_mode: v(co, 'margin_mode') ?? v(o, 'margin_mode'),
+          },
         };
       });
   };
@@ -893,11 +968,13 @@ export class OrderlyExchange extends BaseExchange {
 
       if (sibling) {
         const priceKey = sibling.type === OrderType.StopLoss ? 'stopLoss' : 'takeProfit';
+        const siblingMarginType = this.mapMarginType(v(sibling.info, 'margin_mode'));
 
         await this.placePositionalAlgoOrder({
           symbol: sibling.symbol,
           side: sibling.side,
           [priceKey]: sibling.price,
+          marginMode: this.toOrderlyMarginMode(siblingMarginType),
         });
       }
     } catch (err: any) {
@@ -950,6 +1027,8 @@ export class OrderlyExchange extends BaseExchange {
 
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     const type = inverseObj(ORDER_TYPE)[opts.type];
+    const marginType = this.resolveMarginTypeForOrder(opts);
+    const marginMode = this.toOrderlyMarginMode(marginType);
 
     // Determine order_tag based on exchange type
     let orderTag = 'TEALSTREET';
@@ -970,6 +1049,7 @@ export class OrderlyExchange extends BaseExchange {
       reduce_only: opts.reduceOnly,
       side: inverseObj(ORDER_SIDE)[opts.side],
       position_side: await this.getPositionSideForOrder(opts),
+      margin_mode: marginMode,
       order_tag: orderTag,
     });
 
@@ -996,6 +1076,7 @@ export class OrderlyExchange extends BaseExchange {
         const algoIds = await this.placePositionalAlgoOrder({
           ...opts,
           side: opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy,
+          marginMode,
         });
         orderIds.push(...algoIds);
       }
@@ -1019,11 +1100,14 @@ export class OrderlyExchange extends BaseExchange {
       return [];
     }
 
+    const marginMode = this.toOrderlyMarginMode(this.resolveMarginTypeForOrder({ ...opts, reduceOnly: true }));
+
     const sibling = this.store.orders.find(
       (o) =>
         o.symbol === opts.symbol &&
         (o.type === OrderType.StopLoss || o.type === OrderType.TakeProfit) &&
-        o.status === OrderStatus.Open,
+        o.status === OrderStatus.Open &&
+        this.toOrderlyMarginMode(this.mapMarginType(v(o.info, 'margin_mode'))) === marginMode,
     );
 
     let stopLoss = opts.type === OrderType.StopLoss ? opts.price : undefined;
@@ -1043,10 +1127,38 @@ export class OrderlyExchange extends BaseExchange {
       ...(typeof takeProfit === 'number' ? { takeProfit } : {}),
     };
 
-    return await this.placePositionalAlgoOrder(params);
+    return await this.placePositionalAlgoOrder({
+      ...params,
+      marginMode,
+    });
   };
 
-  placePositionalAlgoOrder = async (opts: Pick<PlaceOrderOpts, 'side' | 'stopLoss' | 'symbol' | 'takeProfit'>) => {
+  private resolveMarginTypeForOrder = (opts: Pick<PlaceOrderOpts, 'reduceOnly' | 'side' | 'symbol'>): MarginType => {
+    const cached = this.marginTypeBySymbol.get(opts.symbol);
+    if (!opts.reduceOnly) return cached ?? this.getCurrentMarginType(opts.symbol);
+
+    const closingSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
+    const candidates = this.store.positions.filter(
+      (position) => position.symbol === opts.symbol && position.side === closingSide && position.contracts > 0,
+    );
+    if (cached) {
+      const selected = candidates.filter((position) => position.marginType === cached);
+      if (selected.length === 1) return cached;
+    }
+    if (candidates.length === 1) return candidates[0].marginType ?? MarginType.Cross;
+    if (candidates.length > 1) {
+      throw new Error(
+        `Orderly reduce-only order for ${opts.symbol} is ambiguous across Cross and Isolated positions; select the intended margin mode first`,
+      );
+    }
+    return cached ?? this.getCurrentMarginType(opts.symbol);
+  };
+
+  placePositionalAlgoOrder = async (
+    opts: Pick<PlaceOrderOpts, 'side' | 'stopLoss' | 'symbol' | 'takeProfit'> & {
+      marginMode?: 'CROSS' | 'ISOLATED';
+    },
+  ) => {
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) {
       throw new Error(`Market ${opts.symbol} not found`);
@@ -1065,6 +1177,7 @@ export class OrderlyExchange extends BaseExchange {
       ...otherProps,
       symbol: reverseSymbol(opts.symbol),
       algo_type: 'POSITIONAL_TP_SL',
+      margin_mode: opts.marginMode ?? this.toOrderlyMarginMode(this.getCurrentMarginType(opts.symbol)),
       child_orders: [],
     };
 
@@ -1133,21 +1246,66 @@ export class OrderlyExchange extends BaseExchange {
     }
   };
 
-  setLeverage = (_symbol: string, inputLeverage: number) => {
-    return this.setAllLeverage(inputLeverage);
+  setLeverage = async (symbol: string, inputLeverage: number) => {
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market ${symbol} not found`);
+    if (!Number.isFinite(inputLeverage)) throw new Error('Orderly leverage must be a finite number');
+
+    const marginType = this.getCurrentMarginType(symbol);
+    const clamped = Math.min(market.limits.leverage.max, Math.max(market.limits.leverage.min, inputLeverage));
+    const leverage = Math.round(clamped);
+    const payload = {
+      leverage,
+      symbol: reverseSymbol(symbol),
+      margin_mode: this.toOrderlyMarginMode(marginType),
+    };
+
+    try {
+      const { data } = await this.xhr.post(ENDPOINTS.LEVERAGE, payload);
+      if (data?.success !== true) throw new Error(data?.message || 'Orderly leverage update failed');
+      if (marginType === MarginType.Cross) this.accountLeverage = leverage;
+      this.store.updatePositions(
+        this.store.positions
+          .filter((position) => position.symbol === symbol && position.marginType === marginType)
+          .map((position) => [position, { leverage }] as [Position, Partial<Position>]),
+      );
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      throw err;
+    }
   };
 
   setAllLeverage = async (inputLeverage: number) => {
+    if (!Number.isFinite(inputLeverage)) throw new Error('Orderly leverage must be a finite number');
     const clamped = Math.min(100, Math.max(1, inputLeverage));
     const leverage = Math.round(clamped);
 
     if (this.accountLeverage !== leverage && !this.isDisposed) {
       try {
-        await this.xhr.post(ENDPOINTS.LEVERAGE, { leverage });
+        const { data } = await this.xhr.post(ENDPOINTS.LEVERAGE, { leverage, margin_mode: 'CROSS' });
+        if (data?.success !== true) throw new Error(data?.message || 'Orderly leverage update failed');
         this.accountLeverage = leverage;
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.message || err?.message);
       }
+    }
+  };
+
+  changeMarginType = async (isolated: boolean, symbol?: string) => {
+    if (!symbol) throw new Error('Orderly margin mode update requires a symbol');
+    if (!this.store.marketsBySymbol[symbol]) throw new Error(`Market ${symbol} not found`);
+
+    const marginType = isolated ? MarginType.Isolated : MarginType.Cross;
+    try {
+      const { data } = await this.xhr.post(ENDPOINTS.MARGIN_MODE, {
+        symbol: reverseSymbol(symbol),
+        default_margin_mode: this.toOrderlyMarginMode(marginType),
+      });
+      if (data?.success !== true) throw new Error(data?.message || 'Orderly margin mode update failed');
+      this.marginTypeBySymbol.set(symbol, marginType);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      throw err;
     }
   };
 

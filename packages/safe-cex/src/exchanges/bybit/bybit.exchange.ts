@@ -54,6 +54,9 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
+
+import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
 import {
@@ -1398,7 +1401,20 @@ export class BybitExchange extends BaseExchange {
         );
   };
 
-  placeOrder = async (opts: PlaceOrderOpts) => {
+  private getOrderExecutionParams = (opts: PlaceOrderOpts) => {
+    try {
+      return getBybitOrderExecutionParams(opts, this.getCategoryForSymbol(opts.symbol));
+    } catch (error: any) {
+      const message = error?.message || `${error}`;
+      this.emitAndLogError(message);
+      throw error;
+    }
+  };
+
+  placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    const category = this.getCategoryForSymbol(opts.symbol);
+    const orderExecutionParams = this.getOrderExecutionParams(opts);
+
     if (
       this._hasFullSizedPositionOppositeSide(opts.symbol, opts.side, opts.amount) &&
       (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)
@@ -1458,12 +1474,16 @@ export class BybitExchange extends BaseExchange {
     }
 
     const req = omitUndefined({
-      category: this.getCategoryForSymbol(opts.symbol),
+      category,
       symbol: opts.symbol,
       side: inverseObj(ORDER_SIDE)[opts.side],
       orderType: inverseObj(ORDER_TYPE)[type],
       qty: `${amount}`,
-      price: opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? `${price}` : undefined,
+      price:
+        orderExecutionParams.bboSideType === undefined &&
+        (opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price))
+          ? `${price}`
+          : undefined,
       stopLoss: opts.stopLoss ? `${stopLoss}` : undefined,
       takeProfit: opts.takeProfit ? `${takeProfit}` : undefined,
       reduceOnly: opts.type === OrderType.Conditional ? false : opts.reduceOnly || false,
@@ -1484,6 +1504,7 @@ export class BybitExchange extends BaseExchange {
         opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
       closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
       positionIdx,
+      ...orderExecutionParams,
     });
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
@@ -1613,9 +1634,15 @@ export class BybitExchange extends BaseExchange {
     return [];
   };
 
-  placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+  placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
     if (orders.length === 0) {
       return [];
+    }
+
+    // Explicit execution controls must reject atomically before any request;
+    // the special-order loop intentionally continues after transport errors.
+    for (const order of orders) {
+      this.getOrderExecutionParams(order);
     }
 
     // Separate orders that need special handling
@@ -1627,7 +1654,8 @@ export class BybitExchange extends BaseExchange {
       if (
         (this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount) &&
           (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit)) ||
-        order.type === OrderType.TrailingStopLoss
+        order.type === OrderType.TrailingStopLoss ||
+        hasBybitSingleOrderParams(order)
       ) {
         specialOrders.push(order);
       } else {

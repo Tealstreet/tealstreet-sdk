@@ -5,15 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
 import { ENDPOINTS } from '../../exchanges/orderly/orderly.types';
 import { DefaultStore } from '../../store/store.base';
-import {
-  ExchangeOptions,
-  Market,
-  Order,
-  OrderSide,
-  OrderStatus,
-  OrderTimeInForce,
-  OrderType,
-} from '../../types';
+import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 
 const MARKET: Market = {
   id: 'BTC/USDC:USDC',
@@ -77,10 +69,7 @@ const createExchange = (
   return { exchange, store, order, put, cancelOrders, placeOrder };
 };
 
-const expectNoCancelReplace = (
-  cancelOrders: ReturnType<typeof vi.spyOn>,
-  placeOrder: ReturnType<typeof vi.spyOn>,
-) => {
+const expectNoCancelReplace = (cancelOrders: ReturnType<typeof vi.spyOn>, placeOrder: ReturnType<typeof vi.spyOn>) => {
   expect(cancelOrders).not.toHaveBeenCalled();
   expect(placeOrder).not.toHaveBeenCalled();
 };
@@ -124,6 +113,21 @@ describe('audit regression: Orderly stable-ID native LIMIT amend', () => {
     expectNoCancelReplace(cancelOrders, placeOrder);
   });
 
+  it('preserves a proven isolated-margin order while editing by stable ID', async () => {
+    const { exchange, order, put, cancelOrders, placeOrder } = createExchange({ margin_mode: 'ISOLATED' });
+
+    await expect(exchange.updateOrder({ order, update: { price: 50_100 } })).resolves.toEqual(['78151']);
+
+    expect(put).toHaveBeenCalledWith(ENDPOINTS.UPDATE_ORDER, {
+      order_id: '78151',
+      symbol: 'PERP_BTC_USDC',
+      order_type: 'LIMIT',
+      side: 'BUY',
+      order_price: 50_100,
+    });
+    expectNoCancelReplace(cancelOrders, placeOrder);
+  });
+
   it('prefers an explicit REST reduce_only false over a conflicting camel-case value in the mapper', () => {
     const { exchange } = createExchange({ reduce_only: false, reduceOnly: true });
 
@@ -154,9 +158,7 @@ describe('audit regression: Orderly stable-ID native LIMIT amend', () => {
     const { exchange, order, put, cancelOrders, placeOrder } = createExchange();
     put.mockRejectedValueOnce(new Error('signed request failed'));
 
-    await expect(exchange.updateOrder({ order, update: { amount: 1 } })).rejects.toThrow(
-      'signed request failed',
-    );
+    await expect(exchange.updateOrder({ order, update: { amount: 1 } })).rejects.toThrow('signed request failed');
 
     expectNoCancelReplace(cancelOrders, placeOrder);
   });
@@ -191,13 +193,20 @@ describe('audit regression: Orderly stable-ID native LIMIT amend', () => {
       raw: { reduce_only: undefined },
       deleteRawKeys: ['reduce_only'],
       update: { price: 50_100 },
-      error: 'requires explicit REST identity, fill, visibility, reduce-only, and CROSS-margin provenance',
+      error: 'requires explicit REST identity, fill, visibility, reduce-only, and margin-mode provenance',
     },
     {
-      name: 'isolated-margin row',
-      raw: { margin_mode: 'ISOLATED' },
+      name: 'websocket camel-case margin mode without REST provenance',
+      raw: { marginMode: 'ISOLATED' },
+      deleteRawKeys: ['margin_mode'],
       update: { price: 50_100 },
-      error: 'supports only proven CROSS-margin orders',
+      error: 'requires explicit REST identity, fill, visibility, reduce-only, and margin-mode provenance',
+    },
+    {
+      name: 'unknown REST margin mode',
+      raw: { margin_mode: 'PORTFOLIO' },
+      update: { price: 50_100 },
+      error: 'requires proven CROSS or ISOLATED margin provenance',
     },
     {
       name: 'iceberg visibility',
@@ -258,9 +267,9 @@ describe('audit regression: Orderly stable-ID native LIMIT amend', () => {
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
     store.update({ orders: [] });
 
-    await expect(
-      exchange.updateOrder({ order, update: { price: 50_100, amount: 1 } } as any),
-    ).rejects.toThrow('requires exactly one price or quantity change');
+    await expect(exchange.updateOrder({ order, update: { price: 50_100, amount: 1 } } as any)).rejects.toThrow(
+      'requires exactly one price or quantity change',
+    );
     await expect(exchange.updateOrder({ order, update: { price: 50_100 } })).rejects.toThrow(
       'requires an exactly reconciled store order',
     );
@@ -291,9 +300,7 @@ describe('audit regression: Orderly stable-ID native LIMIT amend', () => {
       lastUpdate: 1_784_505_600_000,
     };
 
-    await expect(exchange.updateOrder({ order: triggerOrder, update: { price: 48_500 } })).resolves.toEqual([
-      '99',
-    ]);
+    await expect(exchange.updateOrder({ order: triggerOrder, update: { price: 48_500 } })).resolves.toEqual(['99']);
     expect(put).toHaveBeenCalledWith(ENDPOINTS.ALGO_ORDER, {
       order_id: 88,
       child_orders: [{ order_id: '99', trigger_price: 48_500 }],

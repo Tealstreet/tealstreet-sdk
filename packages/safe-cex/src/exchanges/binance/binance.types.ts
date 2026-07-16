@@ -53,6 +53,7 @@ export const ENDPOINTS = {
   // Algo Order endpoints (for STOP_MARKET, TAKE_PROFIT_MARKET, etc. as of 2025-12-09)
   ALGO_ORDER: '/fapi/v1/algoOrder',
   OPEN_ALGO_ORDERS: '/fapi/v1/openAlgoOrders',
+  CANCEL_SYMBOL_ALGO_ORDERS: '/fapi/v1/algoOpenOrders',
   // Income history (realized PnL, funding fees, commissions)
   INCOME: '/fapi/v1/income',
 };
@@ -73,6 +74,7 @@ export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.SET_LEVERAGE,
   ENDPOINTS.SET_MARGIN_TYPE,
   ENDPOINTS.CANCEL_SYMBOL_ORDERS,
+  ENDPOINTS.CANCEL_SYMBOL_ALGO_ORDERS,
   ENDPOINTS.HEDGE_MODE,
 ];
 

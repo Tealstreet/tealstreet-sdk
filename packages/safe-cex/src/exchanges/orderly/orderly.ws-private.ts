@@ -1,11 +1,12 @@
+import type { OrderlyExchange } from './orderly.exchange';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { OrderStatus } from '../../types';
 import { v } from '../../utils/get-key';
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { orderlySign } from './orderly.encryption';
-import type { OrderlyExchange } from './orderly.exchange';
 import { BASE_WS_URL, ORDER_SIDE } from './orderly.types';
 import { normalizeSymbol } from './orderly.utils';
 
@@ -14,9 +15,7 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
     if (!this.isDisposed) {
       const baseURL = BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'];
 
-      this.ws = this.createWebsocket(
-        `${baseURL}/${this.parent.options.applicationId}`,
-      );
+      this.ws = this.createWebsocket(`${baseURL}/${this.parent.options.applicationId}`);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
@@ -50,6 +49,7 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
     if (!this.isDisposed) {
       this.sendWithLog(JSON.stringify({ topic: 'executionreport', event: 'subscribe' }));
       this.sendWithLog(JSON.stringify({ topic: 'algoexecutionreportv2', event: 'subscribe' }));
+      this.sendWithLog(JSON.stringify({ topic: 'position', event: 'subscribe' }));
       this.ping();
     }
   };
@@ -92,7 +92,20 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
 
       if (json?.topic === 'algoexecutionreportv2') {
         this.handleAlgoExecutionReport(json?.data);
+        return;
       }
+
+      if (json?.topic === 'position') {
+        this.handlePositionReport(json?.data);
+      }
+    }
+  };
+
+  handlePositionReport = (data: Record<string, any>) => {
+    const positions = Array.isArray(data?.positions) ? data.positions : [];
+    for (const rawPosition of positions) {
+      const position = this.parent.mapPosition(rawPosition);
+      if (position) this.store.addOrUpdatePosition(position);
     }
   };
 

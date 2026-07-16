@@ -18,7 +18,7 @@ describe('audit regression: Orderly 100x leverage support', () => {
 
     await exchange.setAllLeverage(125);
 
-    expect(post).toHaveBeenCalledWith('/v1/client/leverage', { leverage: 100 });
+    expect(post).toHaveBeenCalledWith('/v1/client/leverages', { leverage: 100, margin_mode: 'CROSS' });
   });
 
   it('offers 100x as a leverage magnet for every Orderly-family integration', () => {

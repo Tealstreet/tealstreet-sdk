@@ -1,4 +1,4 @@
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeOptions, PlaceOrderOpts } from '../../types';
 
 export const ASTERDEX_ENDPOINTS = {
   REST: {
@@ -19,6 +19,16 @@ export const ASTERDEX_ENDPOINTS = {
 
 export type AsterDEXAPIVersion = 'v1' | 'v3';
 export type AsterDEXFapiVersion = AsterDEXAPIVersion | 'v4';
+
+export const ASTERDEX_STP_MODES = ['EXPIRE_TAKER', 'EXPIRE_MAKER', 'EXPIRE_BOTH'] as const;
+export type AsterDEXStpMode = (typeof ASTERDEX_STP_MODES)[number];
+export type AsterDEXPlaceOrderOpts = PlaceOrderOpts & {
+  /** V3-only per-order override of the account-level self-trade-prevention mode. */
+  readonly stpMode?: AsterDEXStpMode;
+};
+
+export const isAsterDEXStpMode = (value: unknown): value is AsterDEXStpMode =>
+  typeof value === 'string' && ASTERDEX_STP_MODES.some((mode) => mode === value);
 
 export type AsterDEXV3AuthContext = {
   userAddress?: string;

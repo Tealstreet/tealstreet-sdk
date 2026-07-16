@@ -269,6 +269,53 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
   });
 
+  it('preserves typed Bybit execution controls through single and batch proxy dispatch', async () => {
+    const ctx = buildCtx();
+    const script = buildScript({
+      capabilities: { ...baseCaps, writes: ['placeOrder', 'placeOrders'] },
+      code: `
+        await api.exchange.placeOrder({
+          symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 1,
+          bybitBbo: { sideType: 'Queue', level: 3 }
+        });
+        await api.exchange.placeOrders([{
+          symbol: 'ETHUSDT', side: 'sell', type: 'market', amount: 2,
+          bybitSlippageToleranceTicks: 25
+        }]);
+      `,
+    });
+
+    const result = await runScript(script, '', ctx);
+    expect(result.ok).toBe(true);
+    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    expect(adapter.logs.writes).toEqual([
+      {
+        kind: 'placeOrder',
+        account: 'mybybit',
+        opts: {
+          symbol: 'BTCUSDT',
+          side: 'buy',
+          type: 'limit',
+          amount: 1,
+          bybitBbo: { sideType: 'Queue', level: 3 },
+        },
+      },
+      {
+        kind: 'placeOrders',
+        account: 'mybybit',
+        list: [
+          {
+            symbol: 'ETHUSDT',
+            side: 'sell',
+            type: 'market',
+            amount: 2,
+            bybitSlippageToleranceTicks: 25,
+          },
+        ],
+      },
+    ]);
+  });
+
   it('denies writes not in capabilities.writes BEFORE reaching the adapter', async () => {
     const ctx = buildCtx();
     const script = buildScript({

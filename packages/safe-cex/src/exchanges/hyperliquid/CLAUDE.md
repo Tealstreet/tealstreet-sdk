@@ -287,6 +287,7 @@ fill would make the replacement overfill the target.
 | `order`                | Place orders (with `grouping`: `na`, `normalTpsl`, `positionTpsl`) |
 | `cancel`               | Cancel orders by asset index + order ID                            |
 | `cancelByCloid`        | Cancel by client order ID                                          |
+| `scheduleCancel`       | Set or clear the account-wide dead man's switch                    |
 | `modify`               | Modify existing order                                              |
 | `batchModify`          | Batch modify orders                                                |
 | `updateLeverage`       | Change leverage/margin type for a market                           |
@@ -296,6 +297,26 @@ fill would make the replacement overfill the target.
 | `vaultTransfer`        | Transfer to/from vault                                             |
 | `approveAgent`         | Approve agent wallet                                               |
 | `approveBuilderFee`    | Approve builder fee                                                |
+
+### Dead man's switch (`scheduleCancel`)
+
+`HyperliquidExchange.scheduleCancel(time)` exposes the upstream account-wide
+dead man's switch through both the direct exchange API and the typed worker
+method bridge. `time` is an absolute UTC millisecond timestamp and must be a
+safe integer at least five seconds after `virtualClock.getCurrentTimeMs()`.
+Passing `null` or omitting the argument removes the existing schedule by
+omitting `action.time` from the signed L1 action; never serialize `time: null`.
+The request uses the normal monotonic nonce, vault-aware phantom-agent
+signature, `/exchange` transport, and propagates transport/upstream errors.
+
+Lifecycle ownership is deliberately explicit. Safe-cex does not auto-arm,
+refresh, or clear this switch during startup/disposal, and there is no implicit
+account setting. A strategy or UI that opts in must periodically move the
+deadline forward while healthy and treat every rejected refresh as unarmed.
+This avoids silently cancelling orders when a browser worker is suspended and
+avoids consuming Hyperliquid's limit of ten actual dead-man triggers per UTC
+day. The upstream deadline cancels all open orders for the account, including
+core perps, HIP-3, and spot; it is not scoped to the current safe-cex instance.
 
 ## WebSocket Implementation
 
@@ -728,6 +749,7 @@ Entries expire after 60 seconds.
 16. **`midPx` populates `ticker.midPrice`**: Hyperliquid's `bid`/`ask` come from `impactPxs`, NOT L1 top-of-book — they're impact-weighted prices and notably wider than the true mid. The canonical mid (`allMids`, or `sourceTicker.midPx` from REST) is therefore populated on **both** `ticker.last` AND `ticker.midPrice` so consumers that want the published mid (e.g. the cli's `$mid` constant) read `ticker.midPrice` directly rather than computing `(bid+ask)/2`. Don't drop `midPrice` from any path that already sets `last = midPx`.
 17. **`userAbstraction: "default"` is currently treated as standard fallback**: unified collateral merge only enables for explicit `unifiedAccount` / `portfolioMargin`. If Hyperliquid remaps `"default"` semantics in the future, update `shouldUseSpotCollateralBalance`.
 18. **DEX abstraction deprecation can be per-account before global date**: users can be migrated early via `agentSetAbstraction` / UI flows before network-wide milestones. Never gate balance mode on calendar date; always read runtime `userAbstraction`.
+19. **Dead man's switch lifecycle is caller-owned**: `scheduleCancel` is an explicit API/worker capability, not a startup heartbeat. Callers must refresh an armed deadline themselves; safe-cex neither auto-arms nor clears it on disposal.
 
 ## Error Handling
 

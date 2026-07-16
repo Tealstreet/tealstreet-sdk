@@ -135,7 +135,13 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       const order = data.data;
       const side = ORDER_SIDE[order.side];
       const status = this.mapOrderStatus(order.status);
-      const orderType = this.parent['reverseMapOrderType'](order.type);
+      const reduceOnly =
+        typeof order.reduce_only === 'boolean'
+          ? order.reduce_only
+          : Array.isArray(order.flags)
+            ? order.flags.includes('REDUCE_ONLY')
+            : false;
+      const orderType = this.parent['reverseMapOrderType'](order.type, reduceOnly);
 
       // For stop orders, use trigger_price as the price (since _MARKET types have no limit price)
       const isStopOrder = isParadexTriggerOrderType(order.type);
@@ -151,12 +157,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         amount: parseFloat(order.size),
         filled: parseFloat(order.size) - parseFloat(order.remaining_size),
         remaining: parseFloat(order.remaining_size),
-        reduceOnly:
-          typeof order.reduce_only === 'boolean'
-            ? order.reduce_only
-            : Array.isArray(order.flags)
-              ? order.flags.includes('REDUCE_ONLY')
-              : false,
+        reduceOnly,
         timeInForce: order.time_in_force,
         lastUpdate: Date.now(),
         info: order, // Store all raw data from WebSocket

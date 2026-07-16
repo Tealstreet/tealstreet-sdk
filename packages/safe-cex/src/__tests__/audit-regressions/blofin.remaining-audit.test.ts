@@ -9,7 +9,8 @@ import {
   buildBlofinSubscribeFrames,
 } from '../../exchanges/blofin/blofin.ws-public';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { getExchangeMetadata } from '../../exchangeMetadata';
+import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
 
 const MARKET: Market = {
   id: 'BTC-USDT',
@@ -20,6 +21,7 @@ const MARKET: Market = {
   precision: { amount: 1, price: 0.1 },
   limits: { amount: { min: 1, max: 1_000 }, leverage: { min: 1, max: 100 } },
   contractSize: 0.001,
+  info: { lotSize: '1', minSize: '1', contractValue: '0.001' },
 };
 
 const createExchange = () => {
@@ -81,7 +83,7 @@ describe('BloFin remaining audit regressions', () => {
     ]);
   });
 
-  it('fetches and maps externally placed opening triggers as read-only conditionals', async () => {
+  it('fetches and maps externally placed opening triggers as conditionals', async () => {
     const exchange = createExchange();
     const trigger = {
       algoId: 'algo-2101',
@@ -220,37 +222,130 @@ describe('BloFin remaining audit regressions', () => {
     }
   });
 
-  it('fails closed instead of sending trigger orders to normal or TPSL write endpoints', async () => {
+  it('places opening triggers on the dedicated algo endpoint and advertises the capability', async () => {
     const exchange = createExchange();
-    const post = vi.fn();
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+    const post = vi.fn().mockResolvedValue({
+      data: { code: '0', msg: 'success', data: { algoId: 'algo-new', clientOrderId: 'client-new', code: '0' } },
+    });
     exchange.xhr = { post } as any;
-    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
-    const triggerOrder = exchange.mapOrders([
-      {
-        algoId: 'algo-2101',
-        instId: MARKET.id,
-        side: 'buy',
-        orderType: 'trigger',
-        size: '1',
-        state: 'live',
-        triggerPrice: '51000',
-      },
-    ])[0];
 
-    await expect(exchange.cancelOrders([triggerOrder])).rejects.toThrow('read-only');
-    await expect(exchange.updateOrder({ order: triggerOrder, update: { price: 52_000 } })).rejects.toThrow(
-      'read-only',
-    );
     await expect(
       exchange.placeOrder({
         symbol: MARKET.symbol,
         side: OrderSide.Buy,
         type: OrderType.Conditional,
-        amount: 0.001,
+        amount: 2,
+        price: 50_500,
         triggerPrice: 51_000,
+        stopLoss: 49_000,
+        takeProfit: 55_000,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+        tpTriggerType: OrderStopTriggerType.IndexPrice,
       }),
-    ).rejects.toThrow('not implemented');
-    expect(post).not.toHaveBeenCalled();
+    ).resolves.toEqual(['algo-new']);
+
+    expect(getExchangeMetadata('blofin').supportsOpeningTriggerOrders).toBe(true);
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.PLACE_TRIGGER_ORDER, {
+      instId: MARKET.id,
+      marginMode: 'cross',
+      side: 'buy',
+      size: '2',
+      clientOrderId: expect.any(String),
+      orderPrice: '50500',
+      orderType: 'trigger',
+      triggerPrice: '51000',
+      triggerPriceType: 'last',
+      attachAlgoOrders: [
+        {
+          tpTriggerPrice: '55000',
+          tpOrderPrice: '-1',
+          tpTriggerPriceType: 'index',
+          slTriggerPrice: '49000',
+          slOrderPrice: '-1',
+          slTriggerPriceType: 'mark',
+        },
+      ],
+    });
+  });
+
+  it('cancel-replaces a reconciled trigger while preserving execution and attachment provenance', async () => {
+    vi.useFakeTimers();
+    const exchange = createExchange();
+    const triggerOrder = exchange.mapOrders([
+      {
+        algoId: 'algo-2101',
+        instId: MARKET.id,
+        marginMode: 'isolated',
+        positionSide: 'long',
+        side: 'buy',
+        orderType: 'trigger',
+        size: '2',
+        state: 'live',
+        triggerPrice: '51000',
+        triggerPriceType: 'mark',
+        orderPrice: '50500',
+        reduceOnly: 'false',
+        attachAlgoOrders: [
+          {
+            tpTriggerPrice: '55000',
+            tpOrderPrice: '-1',
+            tpTriggerPriceType: 'index',
+            slTriggerPrice: '49000',
+            slOrderPrice: '-1',
+            slTriggerPriceType: 'mark',
+          },
+        ],
+      },
+    ])[0];
+    const post = vi.fn().mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.CANCEL_TRIGGER_ORDER) {
+        return Promise.resolve({ data: { code: '0', data: { algoId: 'algo-2101', code: '0' } } });
+      }
+      if (endpoint === ENDPOINTS.PLACE_TRIGGER_ORDER) {
+        return Promise.resolve({ data: { code: '0', data: { algoId: 'algo-replacement', code: '0' } } });
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    });
+    exchange.xhr = { post } as any;
+
+    try {
+      const pending = exchange.updateOrder({ order: triggerOrder, update: { price: 52_000 } });
+      await vi.runAllTimersAsync();
+      await expect(pending).resolves.toEqual(['algo-replacement']);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(post.mock.calls[0]).toEqual([
+      ENDPOINTS.CANCEL_TRIGGER_ORDER,
+      { instId: MARKET.id, algoId: 'algo-2101' },
+    ]);
+    expect(post.mock.calls[1][0]).toBe(ENDPOINTS.PLACE_TRIGGER_ORDER);
+    expect(post.mock.calls[1][1]).toEqual(
+      expect.objectContaining({
+        instId: MARKET.id,
+        marginMode: 'isolated',
+        positionSide: 'long',
+        side: 'buy',
+        size: '2',
+        orderPrice: '50500',
+        orderType: 'trigger',
+        triggerPrice: '52000',
+        triggerPriceType: 'mark',
+        attachAlgoOrders: [
+          {
+            tpTriggerPrice: '55000',
+            tpOrderPrice: '-1',
+            tpTriggerPriceType: 'index',
+            slTriggerPrice: '49000',
+            slOrderPrice: '-1',
+            slTriggerPriceType: 'mark',
+          },
+        ],
+      }),
+    );
   });
 
   it('fails a rejected margin-mode change before refetching or mutating position state', async () => {

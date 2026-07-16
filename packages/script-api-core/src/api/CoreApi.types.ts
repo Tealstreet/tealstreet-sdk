@@ -166,6 +166,16 @@ export interface PlaceOrderOptions {
   readonly takeProfit?: number;
   readonly slTriggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
+  /**
+   * Bybit V5 book-priced limit order. Valid only for plain Bybit linear or
+   * inverse limit orders without an explicit price, trigger, or attached TP/SL.
+   */
+  readonly bybitBbo?: {
+    readonly sideType: 'Queue' | 'Counterparty';
+    readonly level: 1 | 2 | 3 | 4 | 5;
+  };
+  /** Bybit V5 market-order slippage tolerance, expressed as an integer number of ticks (1..10000). */
+  readonly bybitSlippageToleranceTicks?: number;
   readonly account?: string;
 }
 

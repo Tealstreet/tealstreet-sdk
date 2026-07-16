@@ -156,6 +156,7 @@ Most endpoints use `/fapi/{apiVersion}/...` where `apiVersion` is `v1` or `v3`.
 | leverage           | `/fapi/v1/leverage`          | `/fapi/v3/leverage`          | signed                       |
 | position mode      | `/fapi/v1/positionSide/dual` | `/fapi/v3/positionSide/dual` | signed                       |
 | margin type        | `/fapi/v1/marginType`        | `/fapi/v3/marginType`        | signed                       |
+| STP mode           | not available                | `/fapi/v3/stpMode`           | signed, account-global       |
 | listen key         | `/fapi/v1/listenKey`         | `/fapi/v3/listenKey`         | private WS lifecycle         |
 | time               | `/fapi/v1/time`              | `/fapi/v3/time`              | public                       |
 
@@ -349,6 +350,16 @@ When `takeProfit` or `stopLoss` is provided with a limit/market order (`AsterDEX
 - **TakeProfit**: Defaults to `CONTRACT_PRICE` (LastPrice), uses `MARK_PRICE` only if explicitly set to `MarkPrice`
 - **StopLoss**: Defaults to `MARK_PRICE` (MarkPrice), uses `CONTRACT_PRICE` only if explicitly set to `LastPrice`
 
+### Self-Trade Prevention (V3 only)
+
+- `fetchStpMode()` reads the account-global mode and accepts only
+  `EXPIRE_TAKER`, `EXPIRE_MAKER`, or `EXPIRE_BOTH`.
+- `changeStpMode(mode)` changes the account-global mode.
+- Aster-specific callers may pass `stpMode` through
+  `AsterDEXPlaceOrderOpts` to override the account default for one order.
+- All three paths reject before request I/O on V1, and malformed runtime
+  values or unknown read responses fail closed.
+
 ## Symbol Format
 
 - **Format**: Concatenated base + quote: `BTCUSDT`, `ETHUSDT`
@@ -469,6 +480,38 @@ the dedicated Aster clock uses the same REST constant.
 - **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).
 - **Close-position TP/SL**: `amount=0` uses `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.
 - **Trailing stops are intentionally disabled in metadata**: Aster requires a `callbackRate` (and supports an optional activation price), but the shared `PlaceOrderOpts` has only a generic price field. Do not re-enable the UI capability until the order input can encode the rate without guessing.
+- **Native chase remains deliberately unwired**: the V3 chase placement
+  response exposes a strategy ID but no underlying order ID. The shared
+  chaser immediately tracks, reconciles, and cancels concrete order IDs, and
+  Aster does not document a deterministic response mapping from the returned
+  strategy/client-strategy ID to that order ID. Keep the existing client-side
+  chaser until the full placement/cancel/fill lifecycle can be represented.
+- **OTO/OCO/OTOCO strategy brackets remain deliberately unwired**: the V3
+  schema lists `firstDriven*` and `secondDriven*` fields but does not define a
+  normative TP/SL trigger graph or provide an OTOCO bracket example. Guessing
+  those edges could leave an entry unprotected or both exits live, so attached
+  TP/SL continues through the documented sequential path.
+- **Agent registration remains an onboarding boundary**:
+  `registerAndApproveAgent` must be signed by the user's owner wallet and
+  requires explicit permission, expiry, chain, and optional withdrawal/IP
+  choices. The exchange runtime holds the already-approved agent signer, not
+  an owner-wallet consent surface, so it must not synthesize this request.
+- **Guarded cancellation requires unavailable placement provenance**: Aster's
+  guarded cancel contract requires the exact nonce originally used to place
+  the order or batch. The request signer currently creates that nonce inside
+  the Axios interceptor, the order response/store model does not retain it,
+  and normal signing generates a fresh nonce for cancellation. Never route an
+  order through `guardedCancelOrder`/`guardedBatchOrders` without durable,
+  per-order placement-nonce provenance.
+- **Builder reads are not account execution history**:
+  `builder/userTrades` returns every approved user's activity under the
+  authenticated builder identity, while `builder/approvedUserList` is builder
+  administration data. Neither maps to `fetchExecutions()` for the current
+  account, and safe-cex has no builder-admin result surface, so these endpoints
+  remain outside the exchange runtime rather than contaminating user history.
+- **STP is available only through the typed Aster runtime surface**: the
+  integration supports V3 account-global read/write and per-order overrides;
+  there is no generic cross-exchange UI setting yet.
 - **Orderbook snapshots fail closed**: `handleDepthSnapshot` consumes only documented partial-book streams. Every level must be an exact two-string pair; it drops boolean, numeric, array, object, malformed, zero-quantity, empty-side, or crossed frames rather than treating diffs as snapshots, trimming levels, or synthesizing a spread.
 - **Orderbook registrations are counted, not deduplicated**: subscribing the same callback twice creates two independent registrations. Each returned unsubscribe removes only its own registration; the upstream stream closes only after the final registration is removed.
 - **Historical trades disabled**: `fetchHistoricalTrades` currently returns an empty array with a warning.
@@ -551,6 +594,10 @@ the deferred initial-sync disposal race.
 canonical USDT ACCOUNT_UPDATE mapping, strict `E` ordering, malformed-frame
 rejection, and non-USDT last-known-good root preservation plus stale-guarded
 authoritative reconciliation.
+
+`src/__tests__/audit-regressions/asterdex.v3-stp.test.ts` locks V3-only STP
+account reads/writes, per-order override serialization, V1 rejection before
+I/O, and malformed mode rejection.
 
 ## CCXT Reference
 

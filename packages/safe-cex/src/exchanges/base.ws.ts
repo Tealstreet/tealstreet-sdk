@@ -441,7 +441,7 @@ export class BaseWebSocket<T extends BaseExchange> {
 
       if (isHeartbeatFrame(message)) {
         // Silently ignore ping/pong when WebSocket is not OPEN
-        this.parent.log(`Skipping ping/pong - WebSocket state: ${stateName} (${wsState})`, LogSeverity.Info);
+        this.parent.log(`Skipping ping/pong - WebSocket state: ${stateName} (${wsState})`, LogSeverity.Debug);
         return;
       }
 
@@ -677,7 +677,7 @@ export class BaseWebSocket<T extends BaseExchange> {
       if (!this.parent.isDisposed) {
         this.parent.log(
           `WebSocket connection disconnected (code: ${closeCode ?? 'unknown'}, reason: ${closeReason || 'none'}), reconnecting...`,
-          LogSeverity.Error,
+          LogSeverity.Warning,
         );
       }
 
@@ -695,7 +695,7 @@ export class BaseWebSocket<T extends BaseExchange> {
       if (!this.parent.isDisposed) {
         this.parent.log(
           `WebSocket connection disconnected (code: ${closeCode ?? 'unknown'}, reason: ${closeReason || 'none'}), reconnecting...`,
-          LogSeverity.Error,
+          LogSeverity.Warning,
         );
       }
 

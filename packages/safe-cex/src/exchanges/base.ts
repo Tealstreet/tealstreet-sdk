@@ -103,6 +103,7 @@ export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityM
 
 export type CallableMethodsInWorker =
   | 'setLeverage'
+  | 'scheduleCancel'
   | 'changePositionMode'
   | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
@@ -182,6 +183,7 @@ export interface Exchange {
   cancelOrders: (orders: Order[]) => Promise<void>;
   cancelSymbolOrders: (symbol: string) => Promise<void>;
   cancelAllOrders: () => Promise<void>;
+  scheduleCancel: (time?: number | null) => Promise<void>;
   fetchOHLCV: (opts: OHLCVOptions) => Promise<Candle[]>;
   fetchExecutions: (opts: ExecutionsOptions) => Promise<Execution[]>;
   fetchMarkets?: () => Promise<Market[]>;
@@ -672,6 +674,10 @@ export class BaseExchange implements Exchange {
         await this.cancelSymbolOrders(symbol);
       }
     });
+  };
+
+  scheduleCancel = async (_time?: number | null) => {
+    await Promise.reject(new Error('Not implemented'));
   };
 
   fetchOHLCV = async (_opts: OHLCVOptions) => {
@@ -1457,9 +1463,21 @@ export class BaseExchange implements Exchange {
     const privateSockets = this.getPrivateSockets();
 
     const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
-    const publicHealthy = initializedPublicSockets.length === 0 || initializedPublicSockets.some((s) => s.isHealthy);
-    const publicInitialized = initializedPublicSockets.length > 0;
+    const gatewayProvider =
+      this.externalPublicDataProvider instanceof ExternalPublicDataProvider
+        ? this.externalPublicDataProvider
+        : undefined;
+    const initializedGatewayProvider = gatewayProvider?.isInitialized ? gatewayProvider : undefined;
+    const hasInitializedPublicSource = initializedPublicSockets.length > 0 || !!initializedGatewayProvider;
+    const publicHealthy =
+      !hasInitializedPublicSource ||
+      initializedPublicSockets.some((s) => s.isHealthy) ||
+      initializedGatewayProvider?.isHealthy === true;
+    const publicInitialized = hasInitializedPublicSource;
     const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
+    if (initializedGatewayProvider) {
+      publicTimestamps.push(initializedGatewayProvider.lastMessageTimestamp || 0);
+    }
     const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
 
     const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);

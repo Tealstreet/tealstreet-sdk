@@ -1204,7 +1204,9 @@ export class ApexOmniExchange extends BaseExchange {
     const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
 
     if (amount > maxSize && (stopLoss || takeProfit)) {
-      const message = 'ApeX Omni does not support attached TP/SL on split orders';
+      // ApeX documents parent + TP/SL creation only within one /v3/order payload.
+      // Its SDK-only batch route has no documented all-or-none contract.
+      const message = 'ApeX Omni cannot atomically attach TP/SL to split orders';
       this.emitAndLogError(message);
       throw new Error(message);
     }

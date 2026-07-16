@@ -10,8 +10,6 @@
  * In CLI/Node.js contexts, a custom refresh function can be provided.
  */
 
-import jwt from 'jsonwebtoken';
-
 import {
   getCurrentToken,
   getProxyToken as getProxyTokenFromClient,
@@ -19,7 +17,9 @@ import {
   refreshProxyToken as refreshProxyTokenFromClient,
   setToken,
 } from './proxyTokenClient';
-import { virtualClock } from './utils/virtualClock';
+import { isTokenExpired } from './proxyTokenExpiry';
+
+export { isTokenExpired } from './proxyTokenExpiry';
 
 // Optional custom refresh function (for CLI environments)
 let customRefreshFn: (() => Promise<string>) | null = null;
@@ -35,18 +35,6 @@ export let currentProxyToken = '';
 function syncToken() {
   currentProxyToken = getCurrentToken();
 }
-
-export const isTokenExpired = (token: string) => {
-  if (!token || token === '') {
-    return true;
-  }
-  const decoded = jwt.decode(token, { json: true });
-  if (!decoded) {
-    return true;
-  }
-  const expiration = new Date((decoded.exp || 0) * 1000);
-  return expiration < (virtualClock.getCurrentTimeMs() || new Date());
-};
 
 async function getContextualProxyToken(): Promise<string | null> {
   const contextualTokenProvider = contextualTokenProviderFn?.();

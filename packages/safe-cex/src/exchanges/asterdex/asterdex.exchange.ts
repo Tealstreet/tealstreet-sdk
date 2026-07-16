@@ -29,8 +29,10 @@ import type {
   AsterDEXMarketResponse,
   AsterDEXOpenInterestResponse,
   AsterDEXOrderResponse,
+  AsterDEXPlaceOrderOpts,
   AsterDEXPositionModeResponse,
   AsterDEXPositionResponse,
+  AsterDEXStpMode,
   AsterDEXTickerResponse,
   AsterDEXTradeResponse,
   AsterDEXUserTradeResponse,
@@ -62,6 +64,7 @@ import {
   getAsterDEXFapiPath,
   hasAsterDEXV3AuthContext,
   isAsterDEXAddress,
+  isAsterDEXStpMode,
   isAsterDEXV3PrivateKey,
   normalizeAsterDEXRealizedPnlDeltas,
   resolveAsterDEXApiVersion,
@@ -699,12 +702,55 @@ export class AsterDEXExchange extends BaseExchange {
     }
   };
 
-  placeOrder = async (opts: PlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
+  private assertV3Feature = (feature: string): void => {
+    if (this.apiVersion === 'v3') return;
+
+    const message = `AsterDEX ${feature} requires API v3`;
+    this.emitAndLogError(message);
+    throw new Error(message);
+  };
+
+  fetchStpMode = async (): Promise<AsterDEXStpMode> => {
+    this.assertV3Feature('self-trade prevention');
+
+    const response = await this.primaryAPI.get<{ stpMode?: unknown }>(this.getFapiPath('stpMode'));
+    if (!isAsterDEXStpMode(response.data?.stpMode)) {
+      const message = 'AsterDEX returned an invalid self-trade-prevention mode';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return response.data.stpMode;
+  };
+
+  changeStpMode = async (stpMode: AsterDEXStpMode): Promise<void> => {
+    this.assertV3Feature('self-trade prevention');
+    if (!isAsterDEXStpMode(stpMode)) {
+      const message = `Invalid AsterDEX self-trade-prevention mode: ${String(stpMode)}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    await this.primaryAPI.post(this.getFapiPath('stpMode'), { stpMode });
+  };
+
+  placeOrder = async (opts: AsterDEXPlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
     // Aster requires callbackRate for TRAILING_STOP_MARKET, but shared order
     // inputs do not expose it. Reject this before any capacity checks or REST
     // calls so programmatic callers cannot submit an invalid order.
     if (opts.type === OrderType.TrailingStopLoss) {
-      throw new Error('AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable');
+      const message = 'AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    if (opts.stpMode !== undefined) {
+      this.assertV3Feature('per-order self-trade prevention');
+      if (!isAsterDEXStpMode(opts.stpMode)) {
+        const message = `Invalid AsterDEX self-trade-prevention mode: ${String(opts.stpMode)}`;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
     }
 
     // Handle bracket orders (TP/SL attached to entry orders)
@@ -722,7 +768,7 @@ export class AsterDEXExchange extends BaseExchange {
       this.assertAlgoOrderCapacity(opts.symbol, newAlgoOrders);
 
       // Create array of orders: main order + TP + SL
-      const ordersToPlace: PlaceOrderOpts[] = [
+      const ordersToPlace: AsterDEXPlaceOrderOpts[] = [
         // Main entry order (without TP/SL params to avoid recursion)
         {
           ...opts,
@@ -821,6 +867,9 @@ export class AsterDEXExchange extends BaseExchange {
         side,
         type: orderType,
       };
+      if (opts.stpMode !== undefined) {
+        orderParams.stpMode = opts.stpMode;
+      }
       const positionSide = this.getOrderPositionSide(opts);
       if (positionSide !== 'BOTH') {
         orderParams.positionSide = positionSide;
@@ -889,7 +938,7 @@ export class AsterDEXExchange extends BaseExchange {
     }
   };
 
-  placeOrders = async (orders: PlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
+  placeOrders = async (orders: AsterDEXPlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
     const orderIds: string[] = [];
     let errMsg = '';
 

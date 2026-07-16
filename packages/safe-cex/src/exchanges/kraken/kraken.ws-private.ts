@@ -262,6 +262,8 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
         orderType = OrderType.StopLoss;
       } else if (typ === 'take_profit') {
         orderType = OrderType.TakeProfit;
+      } else if (typ === 'trailing_stop') {
+        orderType = OrderType.TrailingStopLoss;
       } else if (typ.includes('limit') || typ === 'lmt') {
         orderType = OrderType.Limit;
       } else {
@@ -278,7 +280,9 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
 
       // Use stop_price for stop/take profit orders, otherwise use limit_price
       const price =
-        orderType === OrderType.StopLoss || orderType === OrderType.TakeProfit
+        orderType === OrderType.StopLoss ||
+        orderType === OrderType.TakeProfit ||
+        orderType === OrderType.TrailingStopLoss
           ? parseFloat(o.stop_price || o.stopPrice || 0)
           : parseFloat(o.limit_price || o.limitPrice || o.price || 0);
 

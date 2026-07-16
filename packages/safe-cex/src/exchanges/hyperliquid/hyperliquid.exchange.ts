@@ -77,6 +77,7 @@ import {
   PerpDex,
   PerpDexs,
   SpotClearinghouseState,
+  ScheduleCancelAction,
 } from './hyperliquid.types';
 import { calculatePricePrecision, symbolToCoin } from './hyperliquid.utils';
 import { HyperliquidPrivateWebSocket } from './hyperliquid.ws-private';
@@ -3228,6 +3229,51 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     this.store.removeOrders(orders.map((o) => ({ id: o.id })));
+  };
+
+  /**
+   * Schedule Hyperliquid's account-wide dead man's switch at an absolute UTC
+   * millisecond deadline. Passing null/undefined removes an existing schedule.
+   * Lifecycle ownership stays with the caller: an automated client should
+   * periodically move the deadline forward while it remains healthy.
+   */
+  scheduleCancel = async (time?: number | null): Promise<void> => {
+    const action: ScheduleCancelAction = {
+      type: 'scheduleCancel',
+    };
+
+    if (time !== null && time !== undefined) {
+      if (!Number.isSafeInteger(time)) {
+        throw new Error('Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds');
+      }
+
+      const minimumDeadline = virtualClock.getCurrentTimeMs() + 5_000;
+      if (time < minimumDeadline) {
+        throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
+      }
+      action.time = time;
+    }
+
+    const nonce = this.generateNonce();
+    const signature = await signL1Action(
+      createWalletFromPrivateKey(this.options.secret),
+      action,
+      this.options.vault || null,
+      nonce,
+      !this.options.testnet,
+    );
+    const payload = {
+      action,
+      nonce,
+      signature,
+      ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
+    };
+
+    await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
   };
 
   public _deadOrders = new Set<string>();
