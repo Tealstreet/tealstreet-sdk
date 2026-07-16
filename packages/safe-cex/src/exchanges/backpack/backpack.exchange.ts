@@ -179,7 +179,6 @@ export class BackpackExchange extends BaseExchange {
         try {
           this.publicWebsocket.subscribeToTicker(market.id);
           this.publicWebsocket.subscribeToTrades(market.id);
-          this.publicWebsocket.subscribeToOrderBook(market.id);
           this.publicWebsocket.subscribeToBookTicker(market.id);
         } catch (err) {
           // Log but don't fail - WebSocket subscriptions are for real-time updates

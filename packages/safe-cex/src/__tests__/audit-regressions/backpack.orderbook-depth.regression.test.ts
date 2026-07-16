@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
 import { BackpackPublicWebSocket } from '../../exchanges/backpack/backpack.ws-public';
+import { DefaultStore } from '../../store/store.base';
 
 const symbol = 'BTC_USDC_PERP';
 
@@ -63,6 +65,59 @@ const deferred = <T,>() => {
 describe('Backpack depth audit regression', () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('keeps startup market coverage on lightweight streams without opening every depth feed', async () => {
+    vi.useFakeTimers();
+    const exchange = new BackpackExchange(
+      'backpack',
+      { key: '', secret: '', testnet: false } as any,
+      new DefaultStore(),
+    );
+    const publicWebsocket = {
+      subscribeToTicker: vi.spyOn(exchange.publicWebsocket, 'subscribeToTicker').mockImplementation(() => {}),
+      subscribeToTrades: vi.spyOn(exchange.publicWebsocket, 'subscribeToTrades').mockImplementation(() => {}),
+      subscribeToOrderBook: vi.spyOn(exchange.publicWebsocket, 'subscribeToOrderBook').mockImplementation(() => {}),
+      subscribeToBookTicker: vi.spyOn(exchange.publicWebsocket, 'subscribeToBookTicker').mockImplementation(() => {}),
+    };
+    const markets = [{ id: 'BTC_USDC_PERP' }, { id: 'ETH_USDC_PERP' }];
+
+    (exchange as any).subscribeToAllMarkets(markets);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(publicWebsocket.subscribeToTicker.mock.calls).toEqual([['BTC_USDC_PERP'], ['ETH_USDC_PERP']]);
+    expect(publicWebsocket.subscribeToTrades.mock.calls).toEqual([['BTC_USDC_PERP'], ['ETH_USDC_PERP']]);
+    expect(publicWebsocket.subscribeToBookTicker.mock.calls).toEqual([['BTC_USDC_PERP'], ['ETH_USDC_PERP']]);
+    expect(publicWebsocket.subscribeToOrderBook).not.toHaveBeenCalled();
+    exchange.dispose();
+  });
+
+  it('keeps depth subscription ownership with active orderbook listeners', () => {
+    const { websocket } = createWebsocket([
+      { lastUpdateId: 100, bids: [['100', '1']], asks: [['101', '1']] },
+      { lastUpdateId: 100, bids: [['100', '1']], asks: [['101', '1']] },
+    ]);
+    const send = (websocket as any).ws.send as ReturnType<typeof vi.fn>;
+
+    const unsubscribeFirst = websocket.listenOrderBook(symbol, vi.fn());
+    const unsubscribeSecond = websocket.listenOrderBook(symbol, vi.fn());
+    const sentFrames = () => send.mock.calls.map(([frame]) => JSON.parse(frame));
+
+    expect(
+      sentFrames().filter((frame) => frame.method === 'SUBSCRIBE' && frame.params?.[0] === `depth.${symbol}`),
+    ).toHaveLength(1);
+    expect((websocket as any).topics[`depth.${symbol}`]).toBe(2);
+
+    unsubscribeFirst();
+    expect(sentFrames().filter((frame) => frame.method === 'UNSUBSCRIBE')).toHaveLength(0);
+    expect((websocket as any).subscriptions.has(`depth.${symbol}`)).toBe(true);
+
+    unsubscribeSecond();
+    expect(
+      sentFrames().some((frame) => frame.method === 'UNSUBSCRIBE' && frame.params?.[0] === `depth.${symbol}`),
+    ).toBe(true);
+    expect((websocket as any).subscriptions.has(`depth.${symbol}`)).toBe(false);
   });
 
   it('delivers every delta to every active orderbook handler without a shared throttle', () => {

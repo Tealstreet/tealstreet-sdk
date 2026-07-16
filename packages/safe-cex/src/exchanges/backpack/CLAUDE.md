@@ -102,7 +102,7 @@ Defined by `BackpackExchange.start()`:
 2. **Store update**: markets + `loaded.markets = true`
 3. **`fetchTickers()`** (sequential) -- fetches `/api/v1/tickers` and `/api/v1/markPrices` in parallel (`Promise.all`). Only PERP markets (those with mark price data) are included
 4. **Store update**: tickers + `loaded.tickers = true`
-5. Open the public WebSocket and schedule all-market subscriptions after a two-second connection delay.
+5. Open the public WebSocket and schedule lightweight all-market subscriptions after a two-second connection delay.
 6. Public-data-only instances mark account state loaded and stop here.
 7. Authenticated instances run **`tick()`** (sequential) -- initial data fetch cycle:
    - `fetchAccountInfo()` -- gets account leverage limit from `/api/v1/account`
@@ -112,7 +112,10 @@ Defined by `BackpackExchange.start()`:
 8. **`fetchOrders()`** once more for the explicit startup snapshot, then store it and mark orders loaded.
 9. Connect the private WebSocket.
 
-`subscribeToAllMarkets()` subscribes ticker, trades, orderbook, and bookTicker for every market after the public socket has had two seconds to establish.
+`subscribeToAllMarkets()` subscribes ticker, trades, and bookTicker for every
+market after the public socket has had two seconds to establish. Full
+`depth.<symbol>` streams are intentionally on-demand: `listenOrderBook()` owns
+their subscription refcount plus the matching REST snapshot/delta lifecycle.
 
 ## REST API Endpoints
 
@@ -177,15 +180,15 @@ authenticated request is verified end-to-end through the production proxy.
 - Unsubscribe: `{ "method": "UNSUBSCRIBE", "params": ["stream1", "stream2"] }`
 - Messages: `{ "stream": "<stream_name>", "data": { "e": "<event_type>", ... } }`
 
-**Public streams** (subscribed per-market on startup):
+**Public streams**:
 
-| Stream                      | Format                     | Throttle | Description                  |
-| --------------------------- | -------------------------- | -------- | ---------------------------- |
-| `ticker.<symbol>`           | `ticker.BTC_USDC_PERP`     | 1000ms   | 24h ticker updates           |
-| `depth.<symbol>`            | `depth.BTC_USDC_PERP`      | handler: none; ticker: 100ms per symbol | Order book delta updates |
-| `trade.<symbol>`            | `trade.BTC_USDC_PERP`      | none     | Individual trade stream      |
-| `bookTicker.<symbol>`       | `bookTicker.BTC_USDC_PERP` | none     | Best bid/ask updates         |
-| `kline.<interval>.<symbol>` | `kline.1m.BTC_USDC_PERP`   | none     | Candlestick data (on demand) |
+| Stream                      | Format                     | Throttle                                | Subscription scope                           |
+| --------------------------- | -------------------------- | --------------------------------------- | -------------------------------------------- |
+| `ticker.<symbol>`           | `ticker.BTC_USDC_PERP`     | 1000ms                                  | Every market at startup                      |
+| `depth.<symbol>`            | `depth.BTC_USDC_PERP`      | handler: none; ticker: 100ms per symbol | On demand while an orderbook listener exists |
+| `trade.<symbol>`            | `trade.BTC_USDC_PERP`      | none                                    | Every market at startup                      |
+| `bookTicker.<symbol>`       | `bookTicker.BTC_USDC_PERP` | none                                    | Every market at startup                      |
+| `kline.<interval>.<symbol>` | `kline.1m.BTC_USDC_PERP`   | none                                    | On demand                                    |
 
 **Throttling details**:
 

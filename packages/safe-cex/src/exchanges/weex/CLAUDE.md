@@ -80,6 +80,7 @@ immediately with `{ "method": "PONG", "id": n }`. Public pings instead use
 - [Contract V3 WebSocket overview](https://www.weex.com/api-doc/contract/Websocket/websocket-intro)
 - [Contract V3 introduction](https://www.weex.com/api-doc/contract/intro)
 - [Contract V3 changelog](https://www.weex.com/api-doc/contract/changelog)
+- [Contract V3 access restrictions](https://www.weex.com/api-doc/contract/QuickStart/AccessRestrictions)
 - [Contract V3 signature](https://www.weex.com/api-doc/contract/QuickStart/Signature)
 - [Place orders in batch](https://www.weex.com/api-doc/contract/Transaction_API/PlaceOrdersBatch)
 - [Modify TP/SL conditional order](https://www.weex.com/api-doc/contract/Transaction_API/ModifyTpSlOrder)
@@ -121,6 +122,17 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
 - Order preflight failures, response-level rejections, and transport failures
   emit through `emitAndLogError` at their point of origin before rejecting the
   caller. Keep the POST catch narrow so response parsing is not double-emitted.
+- Contract V3 returns HTTP 429 when an IP-weight or account order-count limit is
+  exceeded and documents a 10-second ban for continued abuse. Automatic retry
+  is therefore read-only: GET/HEAD plus the documented read-only
+  `POST /capi/v3/account/income` query. A 429 gets at most one retry, preferring
+  `Retry-After`, then exhausted `X-REMAINING-WEIGHT-*` /
+  `X-ORDER-REMAINING-*` windows, then the published `X-USED-WEIGHT-*` /
+  `X-ORDER-COUNT-*` interval, with a 10-second fallback and a 60-second cap.
+  Read network failures retain up to three retries. Order placement,
+  cancellation, TP/SL modification, leverage/margin changes, closing, and all
+  other mutations are never retried automatically, including after ambiguous
+  network failures, because their execution status may be unknown.
 
 ## Primary Endpoints
 

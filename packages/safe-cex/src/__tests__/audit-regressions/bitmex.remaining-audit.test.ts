@@ -99,9 +99,8 @@ describe('BitMEX remaining July audit regressions', () => {
     const topic = 'orderBookL2:xbtusd:Aggregated';
     expect(JSON.parse(send.mock.calls[0][0])).toEqual({ op: 'subscribe', args: [topic] });
 
-    const parser = websocket.messageHandlers[topic][0];
-    parser([
-      {
+    websocket.onMessage({
+      data: JSON.stringify({
         table: 'orderBookL2',
         action: 'partial',
         data: [
@@ -109,8 +108,8 @@ describe('BitMEX remaining July audit regressions', () => {
           { symbol: 'XBTUSD', side: 'Buy', price: 50_000, size: 999, pool: 'Secondary' },
           { symbol: 'XBTUSD', side: 'Sell', price: 50_001, size: 200, pool: 'Aggregated' },
         ],
-      },
-    ]);
+      }),
+    } as MessageEvent);
 
     expect(callback).toHaveBeenCalledWith({
       bids: [{ price: 50_000, amount: 300, total: 300 }],
@@ -121,5 +120,30 @@ describe('BitMEX remaining July audit regressions', () => {
     expect(JSON.parse(send.mock.calls[1][0])).toEqual({ op: 'unsubscribe', args: [topic] });
     expect(websocket.topics[topic]).toBeUndefined();
     expect(websocket.messageHandlers[topic]).toBeUndefined();
+  });
+
+  it('routes public frames by exact wire topic and records stats only for matched handlers', () => {
+    const exchange = createExchange();
+    const websocket = exchange.publicWebsocket;
+    const tradeCallback = vi.fn();
+    const unrelatedCallback = vi.fn();
+    const recordStats = vi.spyOn(websocket as any, 'recordMessageHandlerStats');
+
+    websocket.messageHandlers['trade:XBTUSD'] = [tradeCallback];
+    websocket.messageHandlers['orderBookL2:ethusd:Aggregated'] = [unrelatedCallback];
+    (websocket as any).statsKeyByHandler.set(tradeCallback, 'trade:XBTUSD:1m');
+    (websocket as any).statsKeyByHandler.set(unrelatedCallback, 'orderBookL2:ethusd:Aggregated');
+
+    const message = {
+      table: 'trade',
+      action: 'insert',
+      data: [{ symbol: 'XBTUSD', price: 50_000, size: 10, timestamp: '2026-07-16T00:00:00.000Z' }],
+    };
+    websocket.onMessage({ data: JSON.stringify(message) } as MessageEvent);
+
+    expect(tradeCallback).toHaveBeenCalledWith([message]);
+    expect(unrelatedCallback).not.toHaveBeenCalled();
+    expect(recordStats).toHaveBeenCalledTimes(1);
+    expect(recordStats).toHaveBeenCalledWith('trade:XBTUSD:1m');
   });
 });

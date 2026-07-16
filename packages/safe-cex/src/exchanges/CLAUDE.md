@@ -959,8 +959,9 @@ These drift fast. Prefer:
 3. Add metadata to `exchangeMetadata.ts` — see `packages/safe-cex/CLAUDE.md`
    for the proxy/tunnel flag matrix.
 4. Register in both `registry.ts` and `registry.native.ts`. Their
-   `Record<ExchangeName, ExchangeLoader>` types enforce name parity, but the
-   native `require()` loader's export name is not type-checked.
+   `Record<ExchangeName, ExchangeLoader>` types enforce name parity, while
+   `exchange-registry-native-parity.audit-regression.test.ts` parses both
+   registries and every target module to enforce native module/export parity.
 5. Write the per-exchange `CLAUDE.md` against the template above. Link back
    to this parent doc instead of restating shared mechanics.
 6. Freshly author deterministic regressions in

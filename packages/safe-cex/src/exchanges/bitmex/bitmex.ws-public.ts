@@ -13,11 +13,35 @@ import { BASE_WS_URL } from './bitmex.types';
 
 type Data = Array<Record<string, any>>;
 type MessageHandlers = {
-  [topic: string]: Array<(json: Data) => void>;
+  [wireTopic: string]: Array<(json: Data) => void>;
+};
+
+const getWireTopics = (json: Record<string, any>): string[] => {
+  const table = json?.table;
+  if (table !== 'orderBookL2' && table !== 'trade') {
+    return [];
+  }
+
+  const rows = Array.isArray(json.data) ? json.data : [];
+  const topics = new Set<string>();
+  for (const row of rows) {
+    if (typeof row?.symbol !== 'string' || !row.symbol) {
+      continue;
+    }
+
+    if (table === 'trade') {
+      topics.add(`trade:${row.symbol}`);
+    } else {
+      const pool = typeof row.pool === 'string' && row.pool ? row.pool : 'Aggregated';
+      topics.add(`orderBookL2:${row.symbol.toLowerCase()}:${pool}`);
+    }
+  }
+  return [...topics];
 };
 
 export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
   messageHandlers: MessageHandlers = {};
+  private readonly statsKeyByHandler = new WeakMap<(json: Data) => void, string>();
 
   topics: { [key: string]: number } = {};
 
@@ -67,7 +91,6 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      const handlers = Object.entries(this.messageHandlers);
 
       if (data === 'pong') {
         this.handlePongEvent();
@@ -126,14 +149,16 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
             });
           }
         }
-      } else {
-        for (const [topic, callbacks] of handlers) {
-          this.recordMessageHandlerStats(topic);
-          const [leftmost, _symbol] = topic.split(':');
-          if (data.includes(`${leftmost}`)) {
-            for (const callback of callbacks) {
-              if (json) callback(Array.isArray(json) ? json : [json]);
-            }
+      } else if (json && !Array.isArray(json)) {
+        for (const wireTopic of getWireTopics(json)) {
+          const handlers = this.messageHandlers[wireTopic];
+          if (!handlers) {
+            continue;
+          }
+
+          for (const callback of handlers) {
+            this.recordMessageHandlerStats(this.statsKeyByHandler.get(callback) || wireTopic);
+            callback([json]);
           }
         }
       }
@@ -195,7 +220,8 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
         // 3. store all incoming updates in an array
         // 4. when the snapshot is received, apply all updates and send the order book to the callback
         // 5. then on each update, apply it to the order book and send it to the callback
-        this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+        this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
+        this.statsKeyByHandler.set(parser, handler);
 
         this.topics[topic] = (this.topics[topic] || 0) + 1;
 
@@ -209,7 +235,8 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
-      this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
+      this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((callback) => callback !== parser)];
+      this.statsKeyByHandler.delete(parser);
       orderBook.asks = [];
       orderBook.bids = [];
 
@@ -220,8 +247,10 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
 
       this.topics[topic] = Math.max((this.topics[topic] || 1) - 1, 0);
 
-      if (!this.messageHandlers[handler].length) {
+      if (!this.messageHandlers[topic].some((callback) => this.statsKeyByHandler.get(callback) === handler)) {
         this.cleanupMessageHandlerStats(handler);
+      }
+      if (!this.messageHandlers[topic].length) {
         if (this.isConnected) {
           const payload = { op: 'unsubscribe', args: [topic] };
           this.send(JSON.stringify(payload));
@@ -231,8 +260,8 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
       if (this.topics[topic] === 0) {
         delete this.topics[topic];
       }
-      if (!this.messageHandlers[handler].length) {
-        delete this.messageHandlers[handler];
+      if (!this.messageHandlers[topic].length) {
+        delete this.messageHandlers[topic];
       }
     };
   };
@@ -487,7 +516,8 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
       if (!isActive) return;
 
       if (this.isConnected) {
-        this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []), parser];
+        this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
+        this.statsKeyByHandler.set(parser, handler);
         this.topics[topic] = (this.topics[topic] || 0) + 1;
         this.send(JSON.stringify({ op: 'subscribe', args: [topic] }));
       } else {
@@ -514,13 +544,19 @@ export class BitmexPublicWebsocket extends BaseWebSocket<BitmexExchange> {
 
       stopFallbackPolling();
 
-      this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
+      this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((callback) => callback !== parser)];
+      this.statsKeyByHandler.delete(parser);
+      if (!this.messageHandlers[topic].some((callback) => this.statsKeyByHandler.get(callback) === handler)) {
+        this.cleanupMessageHandlerStats(handler);
+      }
+      if (!this.messageHandlers[topic].length) {
+        delete this.messageHandlers[topic];
+      }
       this.topics[topic] = Math.max((this.topics[topic] || 1) - 1, 0);
 
       if (this.topics[topic] === 0) {
         delete this.topics[topic];
         if (this.isConnected) {
-          this.cleanupMessageHandlerStats(handler);
           this.send(JSON.stringify({ op: 'unsubscribe', args: [topic] }));
         }
       }
