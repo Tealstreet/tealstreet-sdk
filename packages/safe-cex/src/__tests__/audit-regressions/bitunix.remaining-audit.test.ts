@@ -198,6 +198,56 @@ describe('Bitunix remaining July audit regressions', () => {
     );
   });
 
+  it('refreshes a missing TP/SL positionId before emitting a preflight error', async () => {
+    const exchange = createExchange();
+    const stalePosition = {
+      id: 'BTCUSDT:long',
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      contracts: 1,
+      entryPrice: 50_000,
+      notional: 50_000,
+      leverage: 10,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      liquidationPrice: 45_000,
+      info: {},
+    } as Position;
+    const freshPosition = {
+      ...stalePosition,
+      info: { positionId: 'position-1' },
+    };
+    exchange.store.update({ markets: [market], positions: [stalePosition] });
+    const fetchPositions = vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([freshPosition]);
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
+    const post = vi.fn().mockResolvedValue({
+      data: { code: 0, data: { orderId: 'tpsl-1' }, msg: 'Success' },
+    });
+    exchange.unlimitedXHR = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0.5,
+        price: 49_000,
+      }),
+    ).resolves.toEqual(['tpsl-1']);
+
+    expect(fetchPositions).toHaveBeenCalledOnce();
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.TP_SL_ORDER,
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        positionId: 'position-1',
+        slPrice: '49000',
+        slQty: '0.5',
+      }),
+    );
+  });
+
   it('shards public subscriptions at 300 topics and paces each connection without duplicate frames', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

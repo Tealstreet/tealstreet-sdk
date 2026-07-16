@@ -297,6 +297,11 @@ Two distinct paths based on order amount:
 - **Partial TP/SL** (specific amount): Uses `TP_SL_ORDER` endpoint with `tpQty`/`slQty`.
 
 Both require `positionId`. Prefers WS-cached positionId over REST-polled `position.info`.
+Before formatting a TP/SL or reduce-only payload, `placeOrder`/`placeOrders`
+silently refresh positions once when a live position exists but has no
+`positionId`; only the post-refresh preflight miss should emit/log. This keeps
+the expected market-fill-before-positionId hydration race out of Sentry while
+still surfacing persistent identity failures.
 
 ### Batch Order Processing (`placeOrderBatch`)
 

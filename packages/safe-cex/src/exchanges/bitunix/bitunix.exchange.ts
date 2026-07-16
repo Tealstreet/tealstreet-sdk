@@ -1478,6 +1478,7 @@ export class BitunixExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     try {
+      await this.hydratePositionIdBeforeFormatting(opts);
       const payloads = this.formatCreateOrder(opts);
       return await this.placeOrderBatch(payloads);
     } catch (err: any) {
@@ -1509,6 +1510,9 @@ export class BitunixExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    for (const order of orders) {
+      await this.hydratePositionIdBeforeFormatting(order);
+    }
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };
@@ -1557,6 +1561,26 @@ export class BitunixExchange extends BaseExchange {
 
     // Try info.positionId first, then fall back to cache
     return position?.info?.positionId || this.positionIdCache.get(`${symbol}:${positionSide}`);
+  };
+
+  private hydratePositionIdBeforeFormatting = async (opts: PlaceOrderOpts) => {
+    const needsPositionId =
+      opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit || opts.reduceOnly === true;
+    if (!needsPositionId) {
+      return;
+    }
+
+    const positionSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
+    const cacheKey = `${opts.symbol}:${positionSide}`;
+    const position = this.store.positions.find(
+      (p) => p.symbol === opts.symbol && p.side === positionSide && p.contracts > 0,
+    );
+    if (!position || position.info?.positionId || this.positionIdCache.get(cacheKey)) {
+      return;
+    }
+
+    const freshPositions = await this.fetchPositions();
+    this.store.update({ positions: freshPositions });
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
