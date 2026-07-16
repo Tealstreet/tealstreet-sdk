@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
+import { BROKER_ID, ENDPOINTS } from '../../exchanges/apexomni/apexomni.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
@@ -105,7 +106,7 @@ const createBracketExchange = () => {
   return { exchange, post };
 };
 
-describe('Apex Omni split-order TP/SL regression', () => {
+describe('Apex Omni order placement regressions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
@@ -167,5 +168,26 @@ describe('Apex Omni split-order TP/SL regression', () => {
     });
     expect(signContractMock).toHaveBeenCalledTimes(3);
     expect(exchange.privateWebsocket.throttleFetchOrders).toHaveBeenCalledOnce();
+  });
+
+  it('emits the canonical numeric broker attribution in the exact order payload', async () => {
+    const { exchange, post } = createBracketExchange();
+
+    expect(BROKER_ID).toBe('6587');
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.CREATE_ORDER,
+      'brokerId=6587&clientId=apexomni-1-1700000000000-111111&clientOrderId=apexomni-1-1700000000000-111111&expiration=1703199600000&limitFee=0.100000&price=100&side=BUY&signature=signature-1000000000000000000&size=1&symbol=BTC-USDT&timeInForce=GOOD_TIL_CANCEL&type=LIMIT',
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' } },
+    );
   });
 });

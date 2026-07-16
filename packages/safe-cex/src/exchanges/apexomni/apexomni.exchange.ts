@@ -51,6 +51,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './apexomni.api';
 import {
+  BROKER_ID,
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
@@ -1269,7 +1270,7 @@ export class ApexOmniExchange extends BaseExchange {
               : 'MARKET'
             : undefined,
       timeInForce,
-      brokerId: '6587',
+      brokerId: BROKER_ID,
     });
 
     this.log(`Order request: ${JSON.stringify(req)}`, LogSeverity.Info);

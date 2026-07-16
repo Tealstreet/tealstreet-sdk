@@ -672,6 +672,11 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 
 ### Orders
 
+- **Legacy list construction**: `parseTickers`, `fetchOpenPositions`,
+  `fetchLimitOrders`, and `fetchAlgoOrders` use indexed accumulation. Preserve
+  venue order, unknown-market/empty-row filtering, child-order flatten order,
+  and the existing all-or-fallback error behavior; do not restore
+  reduce-plus-spread growth in these reconciliation paths.
 - **Initial state**: Fetched via REST on startup (both limit orders from `/v1/orders` and algo orders from `/v3/algo/orders`)
 - **Paginated fetching**: `fetchOrdersRecursively()` handles pagination, fetching with `status: 'INCOMPLETE'` and recursively loading additional pages when `total > records_per_page * page`
 - **WebSocket updates**: Execution reports and algo execution reports incrementally update/add/remove orders

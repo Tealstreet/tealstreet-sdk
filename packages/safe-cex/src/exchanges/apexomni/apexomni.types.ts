@@ -1,7 +1,7 @@
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, Timeframe } from '../../types';
 
 export const RECV_WINDOW = 20_000;
-export const BROKER_ID = 'Tealstreet';
+export const BROKER_ID = '6587'; // Tealstreet broker attribution
 
 export const BASE_URL = {
   livenet: 'https://omni.apex.exchange/api',

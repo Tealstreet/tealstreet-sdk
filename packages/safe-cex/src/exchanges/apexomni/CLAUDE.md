@@ -364,7 +364,7 @@ Where `UINT32_MAX = '4294967295'` and `UINT64_MAX = '18446744073709551615'`.
    - Limit: use the provided price.
    - Market: `mark * 1.02` (buy) or `mark * 0.98` (sell).
    - StopLoss/TakeProfit: `calculateTpSlPrice()` with 0.5% slippage from trigger.
-5. Build request with `brokerId: '6587'`.
+5. Build the request with the canonical `BROKER_ID` (`'6587'`).
 6. **Order splitting**: If amount exceeds `maxOrderSize`, split into lots. Only the first lot includes TP/SL. Rest amount (modulo) goes in a final lot.
 7. For each lot (sequential via `mapSeries`):
    - Generate client order ID.
@@ -550,7 +550,9 @@ Position leverage (`apexomni.exchange.ts:1218-1225`):
 
 ### Broker ID
 
-All orders include `brokerId: '6587'` for Tealstreet attribution (`apexomni.exchange.ts:782`).
+All orders use the single `BROKER_ID = '6587'` constant for Tealstreet
+attribution. The trusted order-placement regression pins the exact serialized
+transport payload so the numeric broker ID cannot drift back to a display name.
 
 ## Testnet/Demo
 

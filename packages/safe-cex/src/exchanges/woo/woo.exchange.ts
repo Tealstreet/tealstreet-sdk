@@ -858,12 +858,15 @@ export class WOOXExchange extends BaseExchange {
   parseTickers = (rows: any) => {
     try {
       if (!rows) return this.store.tickers;
+      if (!Array.isArray(rows)) throw new TypeError('rows.reduce is not a function');
 
-      return rows.reduce((acc: Ticker[], row: any) => {
+      const tickers: Ticker[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
         const symbol = normalizeSymbol(row.symbol);
         const market = this.store.marketsBySymbol[symbol];
 
-        if (!market) return acc;
+        if (!market) continue;
 
         const open = v(row, '24h_open');
         const close = v(row, '24h_close');
@@ -886,8 +889,9 @@ export class WOOXExchange extends BaseExchange {
           openInterest: v(row, 'open_interest'),
         };
 
-        return [...acc, ticker];
-      }, []);
+        tickers.push(ticker);
+      }
+      return tickers;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return this.store.tickers;
@@ -1035,12 +1039,16 @@ export class WOOXExchange extends BaseExchange {
 
       const positionMode = await this.getPositionMode();
       const positions = data?.data?.positions || [];
-      return positions.reduce<Position[]>((acc, p) => {
+      if (!Array.isArray(positions)) throw new TypeError('positions.reduce is not a function');
+
+      const mappedPositions: Position[] = [];
+      for (let i = 0; i < positions.length; i++) {
+        const p = positions[i];
         const symbol = normalizeSymbol(p.symbol);
         const ticker = this.store.tickersBySymbol[symbol];
 
-        if (!ticker) return acc;
-        if (!p.holding) return acc;
+        if (!ticker) continue;
+        if (!p.holding) continue;
 
         const entryPrice = v(p, 'averageOpenPrice');
         const holdings = v(p, 'holding');
@@ -1075,8 +1083,9 @@ export class WOOXExchange extends BaseExchange {
           this.emitAndLogError('Detected isolated margin position. Only cross margin is supported');
         }
 
-        return [...acc, position];
-      }, []);
+        mappedPositions.push(position);
+      }
+      return mappedPositions;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return this.store.positions;
@@ -1375,11 +1384,14 @@ export class WOOXExchange extends BaseExchange {
   fetchLimitOrders = async () => {
     try {
       const rows = await this.fetchOrdersRecursively(ENDPOINTS.ORDERS);
+      if (!Array.isArray(rows)) throw new TypeError('rows.reduce is not a function');
 
-      return rows.reduce<Order[]>((acc, o) => {
-        const order = this.mapLimitOrder(o);
-        return order !== null ? [...acc, order] : acc;
-      }, []);
+      const orders: Order[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const order = this.mapLimitOrder(rows[i]);
+        if (order !== null) orders.push(order);
+      }
+      return orders;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return [];
@@ -1422,11 +1434,16 @@ export class WOOXExchange extends BaseExchange {
   fetchAlgoOrders = async () => {
     try {
       const rows = await this.fetchOrdersRecursively(ENDPOINTS.ALGO_ORDERS);
+      if (!Array.isArray(rows)) throw new TypeError('rows.reduce is not a function');
 
-      return rows.reduce<Order[]>((acc, o) => {
-        const childOrders = this.mapAlgoOrder(o);
-        return [...acc, ...childOrders];
-      }, []);
+      const orders: Order[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const childOrders = this.mapAlgoOrder(rows[i]);
+        for (let j = 0; j < childOrders.length; j++) {
+          orders.push(childOrders[j]);
+        }
+      }
+      return orders;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return [];
