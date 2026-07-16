@@ -206,6 +206,16 @@ describe('Bitunix native modify-order safety boundary', () => {
       error: 'supports only reconciled pending LIMIT orders',
     },
     {
+      name: 'standalone TP/SL display leg with raw exchange id in info',
+      order: createParentOrder({
+        id: 'tpsl-order-1__position-1__sl',
+        type: OrderType.StopLoss,
+        info: { id: 'tpsl-order-1', orderId: 'tpsl-order-1', positionId: 'position-1', slPrice: '49000', slQty: '1' },
+      }),
+      update: { price: 48_500 },
+      error: 'supports only reconciled pending LIMIT orders',
+    },
+    {
       name: 'unreconciled regular order id',
       order: createParentOrder({ info: { ...createParentOrder().info, orderId: 'different-order-id' } }),
       update: { price: 50_100 },

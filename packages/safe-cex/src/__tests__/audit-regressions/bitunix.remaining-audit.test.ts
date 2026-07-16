@@ -6,7 +6,7 @@ import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
 import { ENDPOINTS } from '../../exchanges/bitunix/bitunix.types';
 import { BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION } from '../../exchanges/bitunix/bitunix.ws-public';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
+import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -128,6 +128,74 @@ describe('Bitunix remaining July audit regressions', () => {
 
     expect(get).toHaveBeenCalledOnce();
     expect(get.mock.calls[0][0]).toBe(ENDPOINTS.HISTORY_TRADES);
+  });
+
+  it('splits a combined pending TP/SL row into distinct display orders with the raw Bitunix id retained', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [market],
+      positions: [
+        {
+          id: 'BTCUSDT:long',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          contracts: 0.01,
+          entryPrice: 50_000,
+          notional: 500,
+          leverage: 10,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          liquidationPrice: 45_000,
+          info: { positionId: 'position-1' },
+        } as Position,
+      ],
+    });
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          data: [
+            {
+              id: 'tpsl-1',
+              positionId: 'position-1',
+              symbol: 'BTCUSDT',
+              tpPrice: '52000',
+              tpStopType: 'LAST_PRICE',
+              tpQty: '0.01',
+              slPrice: '49000',
+              slStopType: 'MARK_PRICE',
+              slQty: '0.01',
+            },
+          ],
+        },
+      }),
+    } as any;
+
+    const orders = await exchange.fetchTpslOrders();
+
+    expect(orders).toHaveLength(2);
+    expect(orders.map((order) => order.id).sort()).toEqual([
+      'tpsl-1__position-1__sl',
+      'tpsl-1__position-1__tp',
+    ]);
+    expect(new Set(orders.map((order) => order.id)).size).toBe(2);
+    expect(orders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'tpsl-1__position-1__tp',
+          type: OrderType.TakeProfit,
+          status: OrderStatus.Open,
+          price: 52_000,
+          info: expect.objectContaining({ id: 'tpsl-1', orderId: 'tpsl-1' }),
+        }),
+        expect.objectContaining({
+          id: 'tpsl-1__position-1__sl',
+          type: OrderType.StopLoss,
+          status: OrderStatus.Open,
+          price: 49_000,
+          info: expect.objectContaining({ id: 'tpsl-1', orderId: 'tpsl-1' }),
+        }),
+      ]),
+    );
   });
 
   it('shards public subscriptions at 300 topics and paces each connection without duplicate frames', () => {
