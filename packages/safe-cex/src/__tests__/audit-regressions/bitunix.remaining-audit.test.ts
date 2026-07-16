@@ -248,6 +248,74 @@ describe('Bitunix remaining July audit regressions', () => {
     );
   });
 
+  it('refreshes current TP/SL rows before full-position placement so adding TP preserves existing SL', async () => {
+    const exchange = createExchange();
+    const position = {
+      id: 'BTCUSDT:long',
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      contracts: 1,
+      entryPrice: 50_000,
+      notional: 50_000,
+      leverage: 10,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      liquidationPrice: 45_000,
+      info: { positionId: 'position-1' },
+    } as Position;
+    const existingStopLoss = {
+      id: 'position-tpsl-1',
+      status: OrderStatus.Open,
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 49_000,
+      amount: 0,
+      filled: 0,
+      remaining: 0,
+      reduceOnly: true,
+      lastUpdate: 1,
+      info: {
+        id: 'position-tpsl-1',
+        orderId: 'position-tpsl-1',
+        type: 'POSITION_TPSL',
+        positionId: 'position-1',
+        slPrice: '49000',
+        slStopType: 'MARK_PRICE',
+      },
+      slTriggerType: OrderStopTriggerType.MarkPrice,
+    };
+    exchange.store.update({ markets: [market], positions: [position], orders: [] });
+    const fetchOrders = vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([existingStopLoss as any]);
+    const post = vi.fn().mockResolvedValue({
+      data: { code: 0, data: { orderId: 'position-tpsl-1' }, msg: 'Success' },
+    });
+    exchange.unlimitedXHR = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.TakeProfit,
+        side: OrderSide.Sell,
+        amount: 0,
+        price: 52_000,
+      }),
+    ).resolves.toEqual(['position-tpsl-1']);
+
+    expect(fetchOrders).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.POSITION_TP_SL_ORDER,
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        positionId: 'position-1',
+        tpPrice: '52000',
+        tpStopType: 'LAST_PRICE',
+        slPrice: '49000',
+        slStopType: 'MARK_PRICE',
+      }),
+    );
+  });
+
   it('shards public subscriptions at 300 topics and paces each connection without duplicate frames', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

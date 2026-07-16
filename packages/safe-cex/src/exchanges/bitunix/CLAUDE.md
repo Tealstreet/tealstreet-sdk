@@ -131,6 +131,14 @@ Defined by `BitunixExchange.tick()`:
 
 **Public endpoints** (no auth): `MARKETS`, `TICKERS`, `KLINE`
 
+Additional TP/SL modify endpoints:
+
+- `MODIFY_TP_SL_ORDER`: `/api/v1/futures/tpsl/modify_order` for standalone
+  partial TP/SL rows by raw TP/SL order id.
+- `MODIFY_POSITION_TP_SL_ORDER`:
+  `/api/v1/futures/tpsl/position/modify_order` for full-position TP/SL rows by
+  symbol and `positionId`.
+
 Execution-history behavior (`fetchExecutions`):
 
 - Uses the documented `HISTORY_TRADES` endpoint with symbol/time-window params.
@@ -302,6 +310,9 @@ silently refresh positions once when a live position exists but has no
 `positionId`; only the post-refresh preflight miss should emit/log. This keeps
 the expected market-fill-before-positionId hydration race out of Sentry while
 still surfacing persistent identity failures.
+For full-position TP/SL (`amount: 0`), placement also refreshes open orders
+before formatting so adding one side includes any live sibling side in the
+position TP/SL payload. Omitting the sibling can clear it on Bitunix.
 
 ### Batch Order Processing (`placeOrderBatch`)
 
@@ -337,12 +348,13 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   Bitunix explicitly says HTTP acknowledgement is not authoritative; the
   existing private order-channel refresh owns final state reconciliation.
 
-There is no cancel/recreate fallback. Market orders, standalone/position
-TP/SL rows, missing or inconsistent raw order metadata, and malformed prices or
-quantities reject before any exchange write. Although Bitunix documents both
-`/tpsl/modify_order` and `/tpsl/position/modify_order`, the pending REST row
-does not reliably identify which creation route owns a TP/SL order, so choosing
-between those endpoints would be ambiguous.
+There is no cancel/recreate fallback. Market orders, missing or inconsistent
+raw order metadata, and malformed prices or quantities reject before any
+exchange write. Standalone partial TP/SL rows route through
+`MODIFY_TP_SL_ORDER` with the raw Bitunix TP/SL id retained in `order.info`;
+full-position TP/SL rows (`info.type === "POSITION_TPSL"` or `amount === 0`)
+route through `MODIFY_POSITION_TP_SL_ORDER` and preserve the sibling leg when it
+is present in the store.
 
 ### Virtual Order ID Generation
 

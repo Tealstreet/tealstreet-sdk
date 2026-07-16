@@ -183,6 +183,106 @@ describe('Bitunix native modify-order safety boundary', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it('updates a standalone partial TP/SL display leg through the raw Bitunix TP/SL id', async () => {
+    const { exchange, post } = createExchange();
+    const takeProfit = createParentOrder({
+      id: 'tpsl-order-1__position-1__tp',
+      type: OrderType.TakeProfit,
+      side: OrderSide.Sell,
+      price: 52_000,
+      amount: 0.5,
+      filled: 0,
+      remaining: 0.5,
+      reduceOnly: true,
+      info: {
+        id: 'tpsl-order-1',
+        orderId: 'tpsl-order-1',
+        positionId: 'position-1',
+        tpPrice: '52000',
+        tpStopType: 'LAST_PRICE',
+        tpOrderType: 'MARKET',
+        tpQty: '0.5',
+        slPrice: '49000',
+        slStopType: 'MARK_PRICE',
+        slOrderType: 'MARKET',
+        slQty: '0.5',
+      },
+      tpTriggerType: OrderStopTriggerType.LastPrice,
+    });
+    const stopLoss = {
+      ...takeProfit,
+      id: 'tpsl-order-1__position-1__sl',
+      type: OrderType.StopLoss,
+      price: 49_000,
+      slTriggerType: OrderStopTriggerType.MarkPrice,
+      tpTriggerType: undefined,
+    };
+    exchange.store.update({ orders: [takeProfit, stopLoss] });
+
+    await expect(exchange.updateOrder({ order: takeProfit, update: { price: 52_250.04 } })).resolves.toEqual([
+      takeProfit.id,
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.MODIFY_TP_SL_ORDER, {
+      orderId: 'tpsl-order-1',
+      tpPrice: '52250',
+      tpStopType: 'LAST_PRICE',
+      tpQty: '0.5',
+      tpOrderType: 'MARKET',
+      slPrice: '49000',
+      slStopType: 'MARK_PRICE',
+      slQty: '0.5',
+      slOrderType: 'MARKET',
+    });
+  });
+
+  it('updates a standalone position TP/SL leg through the position modify endpoint while preserving its sibling', async () => {
+    const { exchange, post } = createExchange();
+    const takeProfit = createParentOrder({
+      id: 'position-tpsl-1__position-1__tp',
+      type: OrderType.TakeProfit,
+      side: OrderSide.Sell,
+      price: 52_000,
+      amount: 0,
+      filled: 0,
+      remaining: 0,
+      reduceOnly: true,
+      info: {
+        id: 'position-tpsl-1',
+        orderId: 'position-tpsl-1',
+        type: 'POSITION_TPSL',
+        positionId: 'position-1',
+        tpPrice: '52000',
+        tpStopType: 'LAST_PRICE',
+        slPrice: '49000',
+        slStopType: 'MARK_PRICE',
+      },
+      tpTriggerType: OrderStopTriggerType.LastPrice,
+    });
+    const stopLoss = {
+      ...takeProfit,
+      id: 'position-tpsl-1__position-1__sl',
+      type: OrderType.StopLoss,
+      price: 49_000,
+      slTriggerType: OrderStopTriggerType.MarkPrice,
+      tpTriggerType: undefined,
+    };
+    exchange.store.update({ orders: [takeProfit, stopLoss] });
+
+    await expect(exchange.updateOrder({ order: stopLoss, update: { price: 48_750.04 } })).resolves.toEqual([
+      stopLoss.id,
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.MODIFY_POSITION_TP_SL_ORDER, {
+      symbol: MARKET.symbol,
+      positionId: 'position-1',
+      slPrice: '48750',
+      slStopType: 'MARK_PRICE',
+      tpPrice: '52000',
+      tpStopType: 'LAST_PRICE',
+    });
+  });
+
   it('repeating the same desired amend reuses the stable order id and exact payload', async () => {
     const { exchange, post } = createExchange();
     const order = createParentOrder({ info: { ...createParentOrder().info, tpPrice: null, slPrice: null } });
@@ -195,26 +295,6 @@ describe('Bitunix native modify-order safety boundary', () => {
   });
 
   it.each([
-    {
-      name: 'standalone TP/SL order with ambiguous route',
-      order: createParentOrder({
-        id: 'tpsl-order-1',
-        type: OrderType.StopLoss,
-        info: { id: 'tpsl-order-1', positionId: 'position-1', slPrice: '49000', slQty: '1' },
-      }),
-      update: { price: 48_500 },
-      error: 'supports only reconciled pending LIMIT orders',
-    },
-    {
-      name: 'standalone TP/SL display leg with raw exchange id in info',
-      order: createParentOrder({
-        id: 'tpsl-order-1__position-1__sl',
-        type: OrderType.StopLoss,
-        info: { id: 'tpsl-order-1', orderId: 'tpsl-order-1', positionId: 'position-1', slPrice: '49000', slQty: '1' },
-      }),
-      update: { price: 48_500 },
-      error: 'supports only reconciled pending LIMIT orders',
-    },
     {
       name: 'unreconciled regular order id',
       order: createParentOrder({ info: { ...createParentOrder().info, orderId: 'different-order-id' } }),

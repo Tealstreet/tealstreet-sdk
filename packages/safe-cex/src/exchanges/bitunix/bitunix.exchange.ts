@@ -220,6 +220,70 @@ export class BitunixExchange extends BaseExchange {
       : undefined;
   };
 
+  private isStandaloneTpslOrder = (order: Order) => {
+    return (
+      (order.type === OrderType.TakeProfit || order.type === OrderType.StopLoss) && !this.getAttachedVirtualTpslLeg(order)
+    );
+  };
+
+  private isPositionTpslOrder = (order: Order) => {
+    return String(order.info?.type || '').toUpperCase() === 'POSITION_TPSL' || order.amount === 0;
+  };
+
+  private getBitunixTriggerType = (triggerType: OrderStopTriggerType | undefined, rawTriggerType: unknown) => {
+    const raw = String(rawTriggerType || '').toUpperCase();
+    if (raw === 'MARK' || raw === 'MARK_PRICE') {
+      return 'MARK_PRICE';
+    }
+    if (raw === 'LAST' || raw === 'LAST_PRICE') {
+      return 'LAST_PRICE';
+    }
+    return triggerType === OrderStopTriggerType.MarkPrice ? 'MARK_PRICE' : 'LAST_PRICE';
+  };
+
+  private getTpslLegSnapshot = (order: Order, leg: 'tp' | 'sl') => {
+    const rawOrderId = this.getTpslRawOrderId(order);
+    const positionId = order.info?.positionId;
+    const sameRawOrderId = (candidate: Order) => this.getTpslRawOrderId(candidate) === rawOrderId;
+    const samePositionId = (candidate: Order) =>
+      positionId !== undefined && positionId !== null && candidate.info?.positionId === positionId;
+    const legType = leg === 'tp' ? OrderType.TakeProfit : OrderType.StopLoss;
+    const currentOrderMatchesLeg = order.type === legType;
+
+    const relatedOrder =
+      currentOrderMatchesLeg && this.isStandaloneTpslOrder(order)
+        ? order
+        : this.store.orders.find(
+            (candidate) =>
+              candidate.symbol === order.symbol &&
+              candidate.type === legType &&
+              this.isStandaloneTpslOrder(candidate) &&
+              (sameRawOrderId(candidate) || samePositionId(candidate)),
+          );
+
+    const info = relatedOrder?.info || order.info || {};
+    const priceField = leg === 'tp' ? 'tpPrice' : 'slPrice';
+    const qtyField = leg === 'tp' ? 'tpQty' : 'slQty';
+    const stopTypeField = leg === 'tp' ? 'tpStopType' : 'slStopType';
+    const orderTypeField = leg === 'tp' ? 'tpOrderType' : 'slOrderType';
+    const orderPriceField = leg === 'tp' ? 'tpOrderPrice' : 'slOrderPrice';
+    const triggerType = leg === 'tp' ? relatedOrder?.tpTriggerType : relatedOrder?.slTriggerType;
+    const price = relatedOrder?.price ?? this.parseFiniteNumber(info[priceField], NaN);
+    const qty = relatedOrder?.amount ?? this.parseFiniteNumber(info[qtyField], NaN);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return undefined;
+    }
+
+    return {
+      price,
+      qty,
+      stopType: this.getBitunixTriggerType(triggerType, info[stopTypeField]),
+      orderType: String(info[orderTypeField] || 'MARKET').toUpperCase(),
+      orderPrice: this.parseFiniteNumber(info[orderPriceField], NaN),
+    };
+  };
+
   private extractAccountRow = (payload: unknown, marginCoin = 'USDT') => {
     const accountFields = [
       'marginCoin',
@@ -1341,6 +1405,105 @@ export class BitunixExchange extends BaseExchange {
     return await this.cancelOrders(this.store.orders.filter((o) => o.symbol === symbol));
   };
 
+  private updateStandaloneTpslOrder = async (order: Order, update: UpdateOrderOpts['update']) => {
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
+    const market = this.store.marketsBySymbol[order.symbol];
+    if (!market) {
+      return rejectPreflight(`Market ${order.symbol} not found`);
+    }
+
+    const leg = order.type === OrderType.TakeProfit ? 'tp' : 'sl';
+    const isPositionOrder = this.isPositionTpslOrder(order);
+    const rawOrderId = this.getTpslRawOrderId(order);
+    const positionId = order.info?.positionId;
+
+    if (isPositionOrder && 'amount' in update) {
+      return rejectPreflight('Bitunix full-position TP/SL quantity cannot be amended');
+    }
+
+    const payload: Record<string, string> = isPositionOrder
+      ? {
+          symbol: order.symbol,
+          positionId: String(positionId || ''),
+        }
+      : {
+          orderId: rawOrderId,
+        };
+
+    if (isPositionOrder && !positionId) {
+      return rejectPreflight(`Bitunix cannot amend ${order.id}: missing positionId`);
+    }
+
+    const appendLeg = (targetLeg: 'tp' | 'sl', requestedOrder?: Order) => {
+      const snapshot = this.getTpslLegSnapshot(requestedOrder || order, targetLeg);
+      if (!snapshot) {
+        return;
+      }
+
+      const prefix = targetLeg;
+      const triggerPrice =
+        targetLeg === leg && 'price' in update ? adjust(update.price, market.precision.price) : snapshot.price;
+      if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
+        return rejectPreflight(`Bitunix ${prefix.toUpperCase()} trigger price is invalid`);
+      }
+
+      payload[`${prefix}Price`] = `${triggerPrice}`;
+      payload[`${prefix}StopType`] = snapshot.stopType;
+
+      if (isPositionOrder) {
+        return;
+      }
+
+      const qty = targetLeg === leg && 'amount' in update ? adjust(update.amount, market.precision.amount) : snapshot.qty;
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return rejectPreflight(`Bitunix ${prefix.toUpperCase()} quantity is invalid`);
+      }
+
+      payload[`${prefix}Qty`] = `${qty}`;
+      payload[`${prefix}OrderType`] = snapshot.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
+
+      if (snapshot.orderType === 'LIMIT') {
+        const orderPrice = adjust(snapshot.orderPrice, market.precision.price);
+        if (!Number.isFinite(orderPrice) || orderPrice <= 0) {
+          return rejectPreflight(`Bitunix ${prefix.toUpperCase()} LIMIT execution price is invalid`);
+        }
+        payload[`${prefix}OrderPrice`] = `${orderPrice}`;
+      }
+    };
+
+    appendLeg(leg);
+    const siblingLeg = leg === 'tp' ? 'sl' : 'tp';
+    const siblingOrder = this.store.orders.find(
+      (candidate) =>
+        candidate.symbol === order.symbol &&
+        candidate.type === (siblingLeg === 'tp' ? OrderType.TakeProfit : OrderType.StopLoss) &&
+        this.isStandaloneTpslOrder(candidate) &&
+        (this.getTpslRawOrderId(candidate) === rawOrderId ||
+          (positionId !== undefined && positionId !== null && candidate.info?.positionId === positionId)),
+    );
+    if (siblingOrder) {
+      appendLeg(siblingLeg, siblingOrder);
+    }
+
+    try {
+      const endpoint = isPositionOrder ? ENDPOINTS.MODIFY_POSITION_TP_SL_ORDER : ENDPOINTS.MODIFY_TP_SL_ORDER;
+      const response = await this.unlimitedXHR.post(endpoint, payload);
+      const code = Number(response?.data?.code);
+      if (code !== 0) {
+        throw new Error(response?.data?.msg || `Bitunix TP/SL modify failed with code ${response?.data?.code}`);
+      }
+
+      return [order.id];
+    } catch (err: any) {
+      const message = err?.response?.data?.msg || err?.message || 'Bitunix TP/SL modify failed';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+  };
+
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
     const rejectPreflight = (message: string): never => {
       this.emitAndLogError(message);
@@ -1353,6 +1516,10 @@ export class BitunixExchange extends BaseExchange {
     const isVirtualTpSl = !!virtualTpslLeg;
     const parentOrderId = isVirtualTpSl ? this.getVirtualTpslParentOrderId(order.id) : order.id;
     const targetOrder = isVirtualTpSl ? this.store.orders.find((candidate) => candidate.id === parentOrderId) : order;
+
+    if (!isVirtualTpSl && this.isStandaloneTpslOrder(order)) {
+      return this.updateStandaloneTpslOrder(order, update);
+    }
 
     if (!targetOrder) {
       return rejectPreflight(`Bitunix cannot safely amend ${order.id}: reconciled parent order not found`);
@@ -1570,17 +1737,27 @@ export class BitunixExchange extends BaseExchange {
       return;
     }
 
+    const isFullPositionTpsl =
+      (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) && (!opts.amount || opts.amount === 0);
     const positionSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
     const cacheKey = `${opts.symbol}:${positionSide}`;
     const position = this.store.positions.find(
       (p) => p.symbol === opts.symbol && p.side === positionSide && p.contracts > 0,
     );
-    if (!position || position.info?.positionId || this.positionIdCache.get(cacheKey)) {
+
+    if (!position) {
       return;
     }
 
-    const freshPositions = await this.fetchPositions();
-    this.store.update({ positions: freshPositions });
+    if (!position.info?.positionId && !this.positionIdCache.get(cacheKey)) {
+      const freshPositions = await this.fetchPositions();
+      this.store.update({ positions: freshPositions });
+    }
+
+    if (isFullPositionTpsl) {
+      const freshOrders = await this.fetchOrders();
+      this.store.update({ orders: freshOrders });
+    }
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
@@ -1749,7 +1926,6 @@ export class BitunixExchange extends BaseExchange {
         (o) =>
           (o.type === OrderType.TakeProfit || o.type === OrderType.StopLoss) &&
           o.symbol === opts.symbol &&
-          o.side === opts.side &&
           o.info?.positionId === resolvedPositionId,
       );
 

@@ -49,6 +49,8 @@ export const ENDPOINTS = {
   MODIFY_ORDER: '/api/v1/futures/trade/modify_order',
   TP_SL_ORDER: '/api/v1/futures/tpsl/place_order',
   POSITION_TP_SL_ORDER: '/api/v1/futures/tpsl/position/place_order',
+  MODIFY_TP_SL_ORDER: '/api/v1/futures/tpsl/modify_order',
+  MODIFY_POSITION_TP_SL_ORDER: '/api/v1/futures/tpsl/position/modify_order',
   BATCH_ORDERS: '/api/v1/futures/trade/batch_order',
   CANCEL_ORDER_TP_SL: '/api/v1/futures/tpsl/cancel_order',
   CANCEL_ORDER: '/api/v1/futures/trade/cancel_orders',
@@ -63,6 +65,8 @@ export const PUBLIC_ENDPOINTS = [ENDPOINTS.MARKETS, ENDPOINTS.TICKERS, ENDPOINTS
 export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.ORDER,
   ENDPOINTS.BATCH_ORDERS,
+  ENDPOINTS.MODIFY_TP_SL_ORDER,
+  ENDPOINTS.MODIFY_POSITION_TP_SL_ORDER,
   ENDPOINTS.SET_LEVERAGE,
   ENDPOINTS.HEDGE_MODE,
 ];
