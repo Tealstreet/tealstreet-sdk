@@ -82,6 +82,8 @@ const LIGHTER_INITIAL_TICK_MAX_DELAY_MS = 2_000;
 const LIGHTER_DEFAULT_QUOTE = 'USDC';
 const LIGHTER_KNOWN_QUOTES = ['USDT', LIGHTER_DEFAULT_QUOTE];
 const LIGHTER_MARGIN_FRACTION_TICK = 10_000;
+const LIGHTER_DEFAULT_STOP_SLIPPAGE_PCT = 1;
+const LIGHTER_MAX_STOP_SLIPPAGE_PCT = 50;
 const LIGHTER_STANDARD_RATE_LIMIT_GUIDANCE_MESSAGE =
   'Lighter Standard account rate limit temporarily active. Standard accounts have very small API limits; please wait before retrying or switch the Lighter account tier to Plus or Premium if this persists.';
 const LIGHTER_ACCOUNT_RATE_LIMIT_GUIDANCE_MESSAGE =
@@ -167,6 +169,15 @@ const parseLighterMarginFractionRatio = (value: unknown): number | undefined => 
     return parsed / 100;
   }
   return parsed;
+};
+
+const normalizeLighterStopSlippagePct = (value: unknown): number | undefined => {
+  const parsed = Number.parseFloat(String(value ?? '').trim());
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+
+  return Math.min(parsed, LIGHTER_MAX_STOP_SLIPPAGE_PCT);
 };
 
 export class LighterExchange extends BaseExchange {
@@ -2194,6 +2205,20 @@ export class LighterExchange extends BaseExchange {
     return referencePrice;
   };
 
+  private resolveStopSlippagePct = (opts: PlaceOrderOpts): number => {
+    return (
+      normalizeLighterStopSlippagePct(opts.maxSlippagePct) ??
+      normalizeLighterStopSlippagePct(this.options.extra?.lighterStopSlippagePct) ??
+      LIGHTER_DEFAULT_STOP_SLIPPAGE_PCT
+    );
+  };
+
+  private resolveConditionalExecutionPrice = (triggerPrice: number, side: OrderSide, opts: PlaceOrderOpts): number => {
+    const slippagePct = this.resolveStopSlippagePct(opts);
+    const multiplier = side === OrderSide.Buy ? 1 + slippagePct / 100 : 1 - slippagePct / 100;
+    return adjust(triggerPrice * multiplier, this.store.marketsBySymbol[opts.symbol].precision.price);
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
     const signerAdapter = await this.ensureSignerAdapter();
 
@@ -2235,7 +2260,7 @@ export class LighterExchange extends BaseExchange {
           pPrice,
         )
       : isConditionalOrderType
-        ? conditionalTriggerPrice!
+        ? this.resolveConditionalExecutionPrice(conditionalTriggerPrice!, opts.side, opts)
         : price!;
 
     // Keep minimum guardrails for limit-style orders, but allow market orders
@@ -2534,6 +2559,8 @@ export class LighterExchange extends BaseExchange {
       amount: order.amount,
       reduceOnly: order.reduceOnly || false,
     };
+    const existingMaxSlippagePct = (order as Partial<PlaceOrderOpts>).maxSlippagePct;
+    if (existingMaxSlippagePct !== undefined) newOrder.maxSlippagePct = existingMaxSlippagePct;
 
     if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
     if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;

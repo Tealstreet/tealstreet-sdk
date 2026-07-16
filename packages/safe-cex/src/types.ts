@@ -115,6 +115,8 @@ export type ExchangeOptions = {
     lighterBuilderFeeMode?: 'dynamic' | 'static';
     // Optional override for Lighter integrator account index.
     lighterIntegratorAccountIndex?: string;
+    // Lighter TP/SL allowed execution slippage, as a percentage from trigger price.
+    lighterStopSlippagePct?: number;
   };
 
   /** Delegates request signing to a signer outside this exchange runtime. */
@@ -595,6 +597,7 @@ export type PlaceOrderOpts = {
   readonly timeInForce?: OrderTimeInForce;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
+  readonly maxSlippagePct?: number;
   readonly close?: boolean;
 };
 

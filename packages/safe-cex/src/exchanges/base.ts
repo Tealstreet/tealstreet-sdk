@@ -760,6 +760,7 @@ export class BaseExchange implements Exchange {
           price: o.stopLoss,
           amount: o.amount,
           slTriggerType: o.slTriggerType,
+          maxSlippagePct: o.maxSlippagePct,
         });
       }
       if (o.takeProfit) {
@@ -770,6 +771,7 @@ export class BaseExchange implements Exchange {
           price: o.takeProfit,
           amount: o.amount,
           tpTriggerType: o.tpTriggerType,
+          maxSlippagePct: o.maxSlippagePct,
         });
       }
     }

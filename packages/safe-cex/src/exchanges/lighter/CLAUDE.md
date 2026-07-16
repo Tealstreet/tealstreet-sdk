@@ -333,7 +333,7 @@ Client-side IDs: `(BigInt(Date.now()) * 100n + random 0..99) % maxClientOrderInd
 1. Validate signer adapter is available
 2. Resolve market and its precision/limits
 3. Adjust amount and price to market precision via `adjust()`
-4. For market-style orders: choose a positive live reference price before applying 2% slippage. Prefer side BBO (`ask` for buys, `bid` for sells), then `mark`, `last`, `index`, midpoint, and opposite-side BBO. Never sign a market-style order from a zero/missing mark price.
+4. For market-style orders: choose a positive live reference price before applying 2% slippage. Prefer side BBO (`ask` for buys, `bid` for sells), then `mark`, `last`, `index`, midpoint, and opposite-side BBO. Never sign a market-style order from a zero/missing mark price. For stop-loss/take-profit orders, Lighter's docs define `price` as the worst acceptable execution price after `triggerPrice`; apply the configured stop slippage percent from trigger (`sell = trigger * (1 - pct)`, `buy = trigger * (1 + pct)`) rather than sending `price === triggerPrice`.
 5. Normalize conditional stop-loss/take-profit market variants to IOC
 6. Enforce Lighter minimums for non-market orders (`min_base_amount`, `min_quote_amount`)
 7. Build `orderParams` with orderId, marketId, isBuy, scaled price/amount, order type, TIF, trigger price, postOnly, reduceOnly, and optional builder fee attrs
@@ -584,7 +584,7 @@ When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets 
 
 6. **Both CANCELLED and CANCELED spellings**: The code handles both `CANCELLED` and `CANCELED` status strings and both `USER_CANCELLED` and `USER_CANCELED` cancel reasons.
 
-7. **Market order slippage**: Market orders are executed as slippage-bounded orders. Use a positive live reference price before applying 2% slippage; `mark` may lag initial ticker/orderbook data after startup, so fall back to side BBO, last, index, midpoint, or opposite-side BBO rather than signing price `0`.
+7. **Market and stop-order slippage**: Market orders are executed as slippage-bounded orders. Use a positive live reference price before applying 2% slippage; `mark` may lag initial ticker/orderbook data after startup, so fall back to side BBO, last, index, midpoint, or opposite-side BBO rather than signing price `0`. Lighter stop-loss/take-profit orders also require a `price` guard: official docs state that this price is the allowed slippage/worst acceptable execution price after the trigger. The web Margin module exposes `lighterStopSlippagePct` (default 1%, max 50%) and `lighter.exchange.ts` converts it into the conditional order `price`.
 
 8. **CORS forbidden**: The exchange metadata sets `forbidCors: true` and all REST traffic is routed through the Tealstreet exchange proxy.
 

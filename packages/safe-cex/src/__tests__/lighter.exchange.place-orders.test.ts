@@ -182,6 +182,27 @@ describe('LighterExchange batched placeOrders', () => {
     expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ price: 970n }));
   });
 
+  it('applies configured max slippage to conditional order execution price', async () => {
+    const exchange = createExchange();
+
+    await exchange.placeOrder({
+      symbol: 'BTC/USDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      amount: 1,
+      price: 100,
+      maxSlippagePct: 5,
+    });
+
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderType: 'stop_loss',
+        price: 950n,
+        triggerPrice: 1000n,
+      }),
+    );
+  });
+
   it('refreshes stale Lighter margin state after invalid margin mode order rejection', async () => {
     const exchange = createExchange();
     exchange.store.update({
@@ -469,7 +490,7 @@ describe('LighterExchange batched placeOrders', () => {
       expect.objectContaining({
         orderType: 'stop_loss',
         reduceOnly: true,
-        price: 880n,
+        price: 871n,
         triggerPrice: 880n,
       }),
     );
@@ -629,7 +650,7 @@ describe('LighterExchange batched placeOrders', () => {
       expect.objectContaining({
         orderType: 'stop_loss',
         reduceOnly: true,
-        price: 900n,
+        price: 891n,
         triggerPrice: 900n,
       }),
     );
