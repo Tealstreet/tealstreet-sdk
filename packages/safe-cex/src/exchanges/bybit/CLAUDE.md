@@ -523,6 +523,11 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
 
 - Orders: 50 per page, recursive cursor-based fetch (`bybit.exchange.ts:526-527`)
 - Positions: 200 per page, recursively follows `nextPageCursor` for both full-account and symbol queries
+- Position pagination can return duplicate flat rows for the same symbol and
+  `positionIdx`. In particular, a real updated flat row may be followed by an
+  empty placeholder row (`seq: -1`, blank `updatedTime` / `positionStatus`) with
+  default leverage. Deduplicate mapped positions by internal position id and
+  prefer rows with real update metadata before writing to the store.
 - Executions: 100 per page, max 5 recursion depth (`bybit.exchange.ts:826-829`)
 - Income history: 50 per page default, max 10 pages safety limit (`bybit.exchange.ts:923`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
@@ -752,7 +757,10 @@ Spot `getOrderPositionIdx` always returns `0` regardless of options (`bybitspot.
 
 ### Position Fetch Limitation
 
-All variants have `// TODO: fetch recursively to handle > 200 positions` comments. Currently limited to 200 positions per settleCoin per request.
+Linear and inverse position snapshots follow cursors. Do not collapse them back
+to a single 200-row request. Linear snapshots also deduplicate duplicate rows by
+internal position id; keep this guard in place so Bybit placeholder rows from
+later pages cannot overwrite fresher leverage or position metadata.
 
 ### Public WS hot-path conventions
 

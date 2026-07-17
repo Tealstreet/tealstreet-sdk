@@ -658,6 +658,61 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
+  private getPositionUpdatedTime = (position: Position): number => {
+    const updatedTime = Number(position.info?.updatedTime ?? 0);
+    return Number.isFinite(updatedTime) ? updatedTime : 0;
+  };
+
+  private getPositionReliabilityScore = (position: Position): number => {
+    const info = position.info as Record<string, any> | undefined;
+    const seq = Number(info?.seq);
+    const positionStatus = typeof info?.positionStatus === 'string' ? info.positionStatus.trim() : '';
+    const avgPrice = info?.avgPrice;
+
+    let score = 0;
+    if (Number.isFinite(position.contracts) && position.contracts !== 0) score += 1000;
+    if (this.getPositionUpdatedTime(position) > 0) score += 100;
+    if (Number.isFinite(seq) && seq >= 0) score += 50;
+    if (positionStatus) score += 20;
+    if (avgPrice !== undefined && avgPrice !== null && `${avgPrice}`.trim() !== '') score += 5;
+
+    return score;
+  };
+
+  private dedupePositionsById = (positions: Position[]): Position[] => {
+    if (positions.length < 2) {
+      return positions;
+    }
+
+    const ids: string[] = [];
+    const positionsById = new Map<
+      string,
+      {
+        position: Position;
+        score: number;
+        updatedTime: number;
+      }
+    >();
+
+    for (const position of positions) {
+      const score = this.getPositionReliabilityScore(position);
+      const updatedTime = this.getPositionUpdatedTime(position);
+      const existing = positionsById.get(position.id);
+
+      if (!existing) {
+        ids.push(position.id);
+        positionsById.set(position.id, { position, score, updatedTime });
+        continue;
+      }
+
+      if (score > existing.score || (score === existing.score && updatedTime > existing.updatedTime)) {
+        positionsById.set(position.id, { position, score, updatedTime });
+      }
+    }
+
+    return ids.map((id) => positionsById.get(id)!.position);
+  };
+
   fetchPositionsHelper = async (symbols?: string[], category?: string, settleCoin?: string) => {
     const fetchAllPages = async (
       params: Record<string, unknown>,
@@ -690,12 +745,12 @@ export class BybitExchange extends BaseExchange {
           { symbol, category: this.getCategoryForSymbol(symbol) },
           true,
         );
-        return bybitPositions.map(this.mapPosition.bind(this));
+        return this.dedupePositionsById(bybitPositions.map(this.mapPosition.bind(this)));
       });
       return positions.flat();
     } else {
       const bybitPositions = await fetchAllPages({ category, settleCoin }, false);
-      return bybitPositions.map(this.mapPosition.bind(this));
+      return this.dedupePositionsById(bybitPositions.map(this.mapPosition.bind(this)));
     }
   };
 
