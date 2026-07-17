@@ -825,6 +825,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | `"accountType only support UNIFIED."`             | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
 | Account margin-mode failure                       | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
 | `"order not modified"`                            | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
+| `110043` / `"leverage not modified"`              | Treated as success (desired leverage is already active); refresh positions afterward    | `setLeverage`                      |
 | `"Partial symbols switched successfully..."`      | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
 | `"All symbols switched successfully."`            | Silent success                                                                         | `bybit.exchange.ts:1786`           |
 | Network errors                                    | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:49-52`               |
@@ -843,6 +844,10 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 ### Error-as-Success Patterns
 
 - **"order not modified"**: Returned when `REPLACE_ORDER` is called but nothing actually changed. Treated as success in all three contexts (virtual SL/TP update, limit order update, position-bound TP/SL update).
+- **"leverage not modified" / `110043`**: Returned when `SET_LEVERAGE` is called
+  with the already-active leverage. Treat as a successful no-op and refresh the
+  symbol's positions instead of surfacing an error toast. This applies to demo
+  accounts too because `BybitDemoExchange` inherits `BybitExchange.setLeverage`.
 - **Empty cancel results**: Individual cancel errors within a batch cancel are collected but the overall operation may still partially succeed.
 
 ## Exchange Variant Differences

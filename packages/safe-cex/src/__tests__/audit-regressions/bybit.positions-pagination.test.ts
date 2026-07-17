@@ -4,6 +4,7 @@ import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { DefaultStore } from '../../store/store.base';
+import { MarginType, PositionMode, PositionSide } from '../../types';
 
 describe('Bybit position pagination', () => {
   it('follows nextPageCursor for linear and inverse account snapshots', async () => {
@@ -129,5 +130,58 @@ describe('Bybit position pagination', () => {
         cursor: 'ARBUSDT%2C1784321341079%2C0',
       },
     });
+  });
+
+  it('treats Bybit leverage-not-modified as a successful no-op', async () => {
+    const store = new DefaultStore();
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, store);
+    const refreshedPosition = {
+      id: 'BTCUSDT',
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      entryPrice: 0,
+      notional: 0,
+      leverage: 10,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      contracts: 0,
+      liquidationPrice: 0,
+      positionMode: PositionMode.OneWay,
+      marginType: MarginType.Cross,
+      info: {},
+      lastUpdate: 1,
+    };
+    store.update({
+      markets: [
+        {
+          id: 'BTCUSDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          info: {},
+        },
+      ],
+      positions: [{ ...refreshedPosition, leverage: 5 }],
+    });
+    exchange.xhr = {
+      post: vi.fn().mockResolvedValue({
+        data: { retCode: 110043, retMsg: 'leverage not modified', result: {}, retExtInfo: {} },
+      }),
+    } as any;
+    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([refreshedPosition]);
+
+    await expect(exchange.setLeverage('BTCUSDT', 10)).resolves.toBeUndefined();
+
+    expect(exchange.xhr.post).toHaveBeenCalledWith(ENDPOINTS.SET_LEVERAGE, {
+      category: 'linear',
+      symbol: 'BTCUSDT',
+      buyLeverage: '10',
+      sellLeverage: '10',
+    });
+    expect(exchange.fetchPositions).toHaveBeenCalledWith(['BTCUSDT']);
+    expect(store.positions[0].leverage).toBe(10);
   });
 });

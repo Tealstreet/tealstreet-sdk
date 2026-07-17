@@ -83,8 +83,18 @@ const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
+const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
+
+const isBybitLeverageNotModified = (data: Record<string, any>) => {
+  const retCode = Number(v(data, 'retCode'));
+  const retMsg = `${v(data, 'retMsg') || ''}`.toLowerCase();
+  return (
+    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE ||
+    (retMsg.includes('leverage') && retMsg.includes('not modified'))
+  );
+};
 
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
@@ -2192,7 +2202,7 @@ export class BybitExchange extends BaseExchange {
         sellLeverage: `${leverage}`,
       });
 
-      if (v(data, 'retMsg') !== 'OK') {
+      if (v(data, 'retMsg') !== 'OK' && !isBybitLeverageNotModified(data)) {
         this.emitAndLogError(v(data, 'retMsg'));
         throw new Error(v(data, 'retMsg'));
       }
