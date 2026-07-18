@@ -93,7 +93,7 @@ A few cases where the web CLI is the wrong tool:
 | Want                                                            | Use                                                                      |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Watch a TWAP from a `wp --all` panel without leaving your shell | Standalone, `wp --all`                                                   |
-| Receive a TradingView webhook                                   | Standalone (see [Hooks & webhooks](../operations/hooks-and-webhooks.md)) |
+| Check current TradingView webhook status                        | [Hooks & webhooks](../operations/hooks-and-webhooks.md)                  |
 | Record an L2 orderbook to SQLite                                | Standalone (see [Recording](../operations/recording.md))                 |
 | Leave the listener up overnight while the browser is asleep     | Standalone — pair it with the web tab                                    |
 
