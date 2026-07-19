@@ -91,6 +91,11 @@ yarn test           # Vitest
   by a shorter-deadline request, it may elect a new attempt rather than inherit
   the other request's `TradeTunnelTimeoutError` context. Non-timeout refresh
   failures remain shared and propagate to every joined caller.
+- TradeTunnel can auto-authenticate backend-whitelisted client IPs by sending an
+  unsolicited successful `rpc.auth` frame after connect. The Axios adapter must
+  honor an already-`Good` socket before fetching a JWT; otherwise trusted
+  headless tools block on token acquisition even though the server already
+  admitted them. Non-whitelisted connections retain the normal JWT flow.
 - Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
   constructor path that accepts headers.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
