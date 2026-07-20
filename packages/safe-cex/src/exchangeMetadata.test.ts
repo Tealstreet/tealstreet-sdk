@@ -125,6 +125,13 @@ describe('exchangeMetadata', () => {
     it('should have pretty name for Bybit', () => {
       expect(exchangePrettyNames.bybit).toBe('Bybit');
     });
+
+    it('advertises opening trigger orders for implemented Bybit derivatives variants only', () => {
+      expect(exchangeMetadata.bybit.supportsOpeningTriggerOrders).toBe(true);
+      expect(exchangeMetadata.bybitdemo.supportsOpeningTriggerOrders).toBe(true);
+      expect(exchangeMetadata.bybitinverse.supportsOpeningTriggerOrders).toBe(true);
+      expect(exchangeMetadata.bybitspot.supportsOpeningTriggerOrders).toBe(false);
+    });
   });
 
   describe('latencyDomainToExchanges', () => {

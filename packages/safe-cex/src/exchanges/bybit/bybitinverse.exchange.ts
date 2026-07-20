@@ -78,6 +78,22 @@ import { BybitInversePrivateWebsocket } from './bybitinverse.ws-private';
 import { BybitInversePublicWebsocket } from './bybitinverse.ws-public';
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
+const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
+
+const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
+
+const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
+  if (opts.type === OrderType.Conditional) {
+    return 'MarkPrice';
+  }
+  if (opts.type === OrderType.StopLoss) {
+    return opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'LastPrice' : 'MarkPrice';
+  }
+  if (opts.type === OrderType.TakeProfit) {
+    return opts.tpTriggerType === OrderStopTriggerType.MarkPrice ? 'MarkPrice' : 'LastPrice';
+  }
+  return undefined;
+};
 
 export class BybitInverseExchange extends BaseExchange {
   xhr: Axios;
@@ -1197,7 +1213,8 @@ export class BybitInverseExchange extends BaseExchange {
       throw new Error(`Market ${opts.symbol} not found`);
     }
 
-    const positionIdx = await this.getOrderPositionIdx(opts);
+    const orderPositionOpts = opts.type === OrderType.Conditional ? { ...opts, reduceOnly: false } : opts;
+    const positionIdx = await this.getOrderPositionIdx(orderPositionOpts);
 
     const maxSize = market.limits.amount.max;
     const pPrice = market.precision.price;
@@ -1253,6 +1270,14 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     let type = opts.type;
+    if (opts.type === OrderType.Conditional) {
+      if (!triggerPrice) {
+        const message = `Trigger price is required for conditional Bybit inverse orders (${opts.symbol})`;
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      type = price ? OrderType.Limit : OrderType.Market;
+    }
     if (triggerPrice && (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)) {
       type = OrderType.Market;
     }
@@ -1263,22 +1288,17 @@ export class BybitInverseExchange extends BaseExchange {
       side: inverseObj(ORDER_SIDE)[opts.side],
       orderType: inverseObj(ORDER_TYPE)[type],
       qty: market.isInverse ? `${Math.floor(amount)}` : `${amount}`, // Ensure integer for inverse
-      price: opts.type === OrderType.Limit && orderExecutionParams.bboSideType === undefined ? `${price}` : undefined,
+      price:
+        orderExecutionParams.bboSideType === undefined &&
+        (opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price))
+          ? `${price}`
+          : undefined,
       stopLoss: opts.stopLoss ? `${stopLoss}` : undefined,
       takeProfit: opts.takeProfit ? `${takeProfit}` : undefined,
-      reduceOnly: opts.reduceOnly || false,
+      reduceOnly: opts.type === OrderType.Conditional ? false : opts.reduceOnly || false,
       triggerPrice: opts.triggerPrice ? `${triggerPrice}` : undefined,
       triggerDirection: triggerDirection ? `${triggerDirection}` : undefined,
-      triggerBy:
-        opts.type === OrderType.StopLoss
-          ? opts.slTriggerType === OrderStopTriggerType.LastPrice
-            ? 'LastPrice'
-            : 'MarkPrice'
-          : opts.type === OrderType.TakeProfit
-            ? opts.tpTriggerType === OrderStopTriggerType.MarkPrice
-              ? 'MarkPrice'
-              : 'LastPrice'
-            : undefined,
+      triggerBy: getBybitTriggerBy(opts),
       slTriggerBy: opts.stopLoss
         ? opts.slTriggerType === OrderStopTriggerType.LastPrice
           ? 'LastPrice'
@@ -1289,7 +1309,8 @@ export class BybitInverseExchange extends BaseExchange {
           ? 'MarkPrice'
           : 'LastPrice'
         : undefined,
-      timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
+      timeInForce:
+        opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
       closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
       positionIdx,
       ...orderExecutionParams,
@@ -1593,7 +1614,8 @@ export class BybitInverseExchange extends BaseExchange {
         return null;
       }
 
-      const positionIdx = await this.getOrderPositionIdx(opts);
+      const orderPositionOpts = opts.type === OrderType.Conditional ? { ...opts, reduceOnly: false } : opts;
+      const positionIdx = await this.getOrderPositionIdx(orderPositionOpts);
 
       const pPrice = market.precision.price;
       const pAmount = market.precision.amount;
@@ -1626,7 +1648,7 @@ export class BybitInverseExchange extends BaseExchange {
       const price = opts.price ? adjust(opts.price, pPrice) : null;
       const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
       const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+      const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
       const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
       let triggerDirection: number | undefined = undefined;
@@ -1645,6 +1667,12 @@ export class BybitInverseExchange extends BaseExchange {
       }
 
       let type = opts.type;
+      if (opts.type === OrderType.Conditional) {
+        if (!triggerPrice) {
+          throw new Error(`Trigger price is required for conditional Bybit inverse orders (${opts.symbol})`);
+        }
+        type = price ? OrderType.Limit : OrderType.Market;
+      }
       if (triggerPrice && (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)) {
         type = OrderType.Market;
       }
@@ -1654,22 +1682,13 @@ export class BybitInverseExchange extends BaseExchange {
         side: inverseObj(ORDER_SIDE)[opts.side],
         orderType: inverseObj(ORDER_TYPE)[type],
         qty: market.isInverse ? `${Math.floor(amount)}` : `${amount}`, // Ensure integer for inverse
-        price: opts.type === OrderType.Limit ? `${price}` : undefined,
+        price: opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? `${price}` : undefined,
         stopLoss: opts.stopLoss ? `${stopLoss}` : undefined,
         takeProfit: opts.takeProfit ? `${takeProfit}` : undefined,
-        reduceOnly: opts.reduceOnly || false,
+        reduceOnly: opts.type === OrderType.Conditional ? false : opts.reduceOnly || false,
         triggerPrice: opts.triggerPrice ? `${triggerPrice}` : undefined,
         triggerDirection: triggerDirection ? `${triggerDirection}` : undefined,
-        triggerBy:
-          opts.type === OrderType.StopLoss
-            ? opts.slTriggerType === OrderStopTriggerType.LastPrice
-              ? 'LastPrice'
-              : 'MarkPrice'
-            : opts.type === OrderType.TakeProfit
-              ? opts.tpTriggerType === OrderStopTriggerType.MarkPrice
-                ? 'MarkPrice'
-                : 'LastPrice'
-              : undefined,
+        triggerBy: getBybitTriggerBy(opts),
         slTriggerBy: opts.stopLoss
           ? opts.slTriggerType === OrderStopTriggerType.LastPrice
             ? 'LastPrice'
@@ -1680,7 +1699,8 @@ export class BybitInverseExchange extends BaseExchange {
             ? 'MarkPrice'
             : 'LastPrice'
           : undefined,
-        timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
+        timeInForce:
+          opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
         closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
         positionIdx,
       });
@@ -1707,7 +1727,8 @@ export class BybitInverseExchange extends BaseExchange {
     if (
       !isVirtualSLorTP &&
       (order.type === OrderType.TakeProfit || order.type === OrderType.StopLoss) &&
-      'price' in update
+      'price' in update &&
+      isBybitPositionTpslMode(order.info?.tpslMode)
     ) {
       const mark = this.store.tickersBySymbol[order.symbol]?.mark;
       if (mark) {
@@ -1768,8 +1789,10 @@ export class BybitInverseExchange extends BaseExchange {
     // likely placed outside of tealstreet?
     const isConditionalOrder =
       !isVirtualSLorTP &&
-      (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) &&
-      Boolean(order.info?.triggerPrice);
+      (order.type === OrderType.StopLoss ||
+        order.type === OrderType.TakeProfit ||
+        order.type === OrderType.Conditional) &&
+      !isBybitPositionTpslMode(order.info?.tpslMode);
 
     // If we want to update the price or amount of a limit order
     // we can do it directly on the order
@@ -2089,12 +2112,24 @@ export class BybitInverseExchange extends BaseExchange {
   }
 
   mapOrder(o: Record<string, any>) {
-    const isStop = o.stopOrderType !== 'UNKNOWN' && o.stopOrderType !== '';
+    const stopOrderType = v(o, 'stopOrderType');
+    const isStop = Boolean(stopOrderType && stopOrderType !== 'UNKNOWN');
 
-    const oPrice = isStop ? v(o, 'triggerPrice') : o.price;
-    const oType = isStop ? v(o, 'stopOrderType') : v(o, 'orderType');
+    const triggerPrice = v(o, 'triggerPrice');
+    const oPrice = isStop ? triggerPrice || o.price : o.price;
+    const oType = isStop ? stopOrderType : v(o, 'orderType');
 
-    const type = ORDER_TYPE[oType];
+    const reduceOnly = v(o, 'reduceOnly') === true || v(o, 'reduceOnly') === 'true';
+    const closeOnTrigger = v(o, 'closeOnTrigger') === true || v(o, 'closeOnTrigger') === 'true';
+    const tpslMode = v(o, 'tpslMode');
+    const isPositionTpslMode = isBybitPositionTpslMode(tpslMode);
+    const isOpeningTriggerOrder =
+      isStop &&
+      !reduceOnly &&
+      !closeOnTrigger &&
+      !isPositionTpslMode &&
+      (parseFloat(triggerPrice ?? '0') > 0 || v(o, 'createType') === 'CreateByStopOrder');
+    const type = isOpeningTriggerOrder ? OrderType.Conditional : ORDER_TYPE[oType];
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
 
     let remaining = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
@@ -2119,10 +2154,10 @@ export class BybitInverseExchange extends BaseExchange {
           remainingNative,
         },
         price,
-        amount: (oType === 'StopLoss' || oType === 'TakeProfit') && o.tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
+        amount: (oType === 'StopLoss' || oType === 'TakeProfit') && tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
         filled: parseFloat(v(o, 'cumExecQty') ?? 0),
-        reduceOnly: v(o, 'reduceOnly') || false,
-        close: v(o, 'closeOnTrigger') || false,
+        reduceOnly,
+        close: closeOnTrigger,
         info: o,
         timeInForce,
         lastUpdate: virtualClock.getCurrentTimeMs(),

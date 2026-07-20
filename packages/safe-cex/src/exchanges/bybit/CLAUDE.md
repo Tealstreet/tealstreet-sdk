@@ -314,7 +314,7 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 
 3. **Trigger direction** (`bybit.exchange.ts:1071-1084`): For conditional orders, computes `triggerDirection` (1 = price above current, 2 = price below). Compares trigger price against mark or last depending on the trigger type setting.
 
-4. **Type conversion for conditional stops** (`bybit.exchange.ts:1086-1089`): When a SL/TP has a `triggerPrice`, the `orderType` is sent as `Market` (not StopLoss/TakeProfit), because Bybit's conditional market orders use `triggerPrice` + `orderType: Market`.
+4. **Type conversion for conditional stops and opening triggers**: When a SL/TP has a `triggerPrice`, the `orderType` is sent as `Market` (not StopLoss/TakeProfit), because Bybit's conditional market orders use `triggerPrice` + `orderType: Market`. Linear and inverse also map `OrderType.Conditional` opening triggers to Bybit `Market` or `Limit` requests based on whether an execution `price` is present, force `reduceOnly: false`, and keep `closeOnTrigger: false`.
 
 5. **Order size splitting** (`bybit.exchange.ts:1128-1141`): Orders exceeding `market.limits.amount.max` are split into multiple lots. Only the first lot carries TP/SL; subsequent lots have TP/SL stripped to avoid duplicates.
 
@@ -663,10 +663,13 @@ The `updateOrder` method distinguishes between:
 2. **Position-bound TP/SL** (has `tpslMode` in `order.info`): Cancel + recreate via `SET_TRADING_STOP`
 3. **Free-floating conditional stops** (no `tpslMode`, has `triggerPrice` in info for inverse/spot, or lacks `tpslMode` for linear): Updated via `REPLACE_ORDER` directly
 
-**Note**: The detection of free-floating conditionals differs between variants:
+**Note**: The detection of free-floating conditionals differs between supported
+derivatives and spot:
 
-- Linear (`bybit.exchange.ts:1565-1568`): Checks `!order.info?.tpslMode`
-- Inverse/Spot: Checks `Boolean(order.info?.triggerPrice)`
+- Linear and inverse: check for the absence of position TP/SL mode (`Full` /
+  `Partial`), so websocket sentinel values such as `UNKNOWN` do not turn
+  opening triggers into protective stops.
+- Spot: checks `Boolean(order.info?.triggerPrice)`.
 
 ### TP/SL as Position Stops
 

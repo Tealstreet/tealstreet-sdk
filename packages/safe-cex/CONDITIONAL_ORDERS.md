@@ -36,8 +36,8 @@ supportsOpeningTriggerOrders: true,
 ```
 
 Only set this on variants that have been implemented and tested. For example,
-Bybit linear and demo support opening trigger orders, while spot and inverse
-were intentionally left unsupported during the first migration.
+Bybit linear, inverse, and demo support opening trigger orders, while spot
+remains unsupported.
 
 The metadata flag controls UI availability and tab wording. It does not fix
 order mapping. The exchange integration still must map, place, update, and
@@ -207,4 +207,3 @@ Before enabling `supportsOpeningTriggerOrders` for an exchange variant:
 - Existing limit, market, TP/SL, trailing stop, and virtual bracket tests still
   pass.
 - Unsupported variants keep `supportsOpeningTriggerOrders: false`.
-

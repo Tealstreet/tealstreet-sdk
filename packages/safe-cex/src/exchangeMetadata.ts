@@ -405,7 +405,7 @@ const BybitInverseMetadata: ExchangeMetadata = {
   darkLogo: '/static/exchanges/logos/BYBITINVERSE/dark.png',
   refImage: '/static/exchanges/reflinks/bybitinverse/ref.png',
   requiresTickersForMarketsLoaded: true,
-  supportsOpeningTriggerOrders: false,
+  supportsOpeningTriggerOrders: true,
 };
 
 const BinanceMetadata: ExchangeMetadata = {
