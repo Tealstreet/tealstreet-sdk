@@ -1,9 +1,20 @@
 // @ts-check
+// Note: type annotations allow type checking and IDEs autocompletion
 
 import { themes } from 'prism-react-renderer';
+import versions from './versions.json';
+// import VersionsArchived from './versionsArchived.json';
 const lightCodeTheme = themes.github; // light theme
 const darkCodeTheme = themes.dracula; // dark theme
 const defaultLocale = 'en';
+
+// function isPrerelease(version: string) {
+// }
+
+function getLastVersion() {
+  const firstStableVersion = versions.find((version) => !version.includes('2.0.0') && !version.includes('3.0.0'));
+  return firstStableVersion;
+}
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -21,7 +32,7 @@ const config = {
     faster: {
       swcJsLoader: true,
       swcJsMinimizer: true,
-      swcHtmlMinimizer: true,
+      swcHtmlMinimizer: false,
       lightningCssMinimizer: true,
       rspackBundler: true,
       mdxCrossCompilerCache: false,
@@ -305,7 +316,7 @@ const config = {
               },
               {
                 label: 'GitHub',
-                href: 'https://github.com/tealstreet/',
+                href: 'https://github.com/tealstreetio/',
               },
               {
                 label: 'Twitch',
@@ -357,10 +368,10 @@ const config = {
                 label: 'Bybit',
                 href: 'https://teal.link/bybit1',
               },
-              // {
-              //   label: 'BitMEX',
-              //   href: 'https://teal.link/BitMEX',
-              // },
+              {
+                label: 'BitMEX',
+                href: 'https://teal.link/BitMEX',
+              },
               {
                 label: 'BloFin',
                 href: 'https://teal.link/blofin',
@@ -403,8 +414,8 @@ const config = {
                 href: 'https://teal.link/woo',
               },
               {
-                label: 'Crypto.com',
-                href: 'https://teal.link/cryptocom',
+                label: 'Bitrue',
+                href: 'https://teal.link/bitrue',
               },
               {
                 label: 'Breakout',
@@ -454,6 +465,10 @@ const config = {
               {
                 label: 'Bitunix',
                 href: 'https://teal.link/bitunix',
+              },
+              {
+                label: 'SalsaDex',
+                href: 'https://teal.link/salsadex',
               },
               {
                 label: 'GRVT',

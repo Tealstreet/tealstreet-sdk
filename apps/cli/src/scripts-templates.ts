@@ -39,16 +39,7 @@ const TYPES_HEADER = `// AUTO-GENERATED on every CLI launch — do not edit. Edi
 //   export default async function (args: ScriptArgs, api: CoreApi) { ... }
 `;
 
-/**
- * The three tiers as one string. Single definition on purpose: the MCP server
- * hands this to an agent as `get_api_types`, and `TYPES_TEMPLATE` below seeds
- * the same text into `~/.tealstreet/scripts/types.d.ts`. If the two composed
- * it separately they could silently diverge, and an agent would write against
- * a surface the user's editor doesn't have.
- */
-export const SCRIPT_TYPES_BUNDLE = [CORE_TYPES_DTS, CLI_TYPES_DTS, WEB_TYPES_DTS].join('\n');
-
-export const TYPES_TEMPLATE = [TYPES_HEADER, SCRIPT_TYPES_BUNDLE].join('\n');
+export const TYPES_TEMPLATE = [TYPES_HEADER, CORE_TYPES_DTS, CLI_TYPES_DTS, WEB_TYPES_DTS].join('\n');
 
 export const TSCONFIG_TEMPLATE = `{
   "compilerOptions": {

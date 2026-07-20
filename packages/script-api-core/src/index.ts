@@ -91,7 +91,7 @@ export { CORE_UTILS } from './utils';
 // The `@internal` JSDoc tags below remain as repo-internal markers
 // for contributors reading the source. They were also valuable when
 // the user bundle still leaked these symbols; today's bundle drift
-// test (`packages/script-authoring/src/script-types-bundle.test.ts`) enforces that
+// test (`apps/cli/src/script-types-bundle.test.ts`) enforces that
 // host symbols never re-appear in the seeded `types.d.ts`.
 // ─────────────────────────────────────────────────────────────────────
 

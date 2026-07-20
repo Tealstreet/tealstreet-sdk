@@ -174,17 +174,10 @@ describe('routing table / resolver (Epic 1 net)', () => {
   });
 
   it('variant exchanges inherit their parent class WS routing', () => {
-    // okxeu extends OKXExchange {} -> same okx ws classes, but tunnels to the EEA
-    // entity's hosts (wseea.okx.com) via dedicated okxeu/* proxy paths — EEA
-    // credentials do not authenticate on the global ws host.
-    expect(resolveExchangeRouting('okxeu', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private',
-    );
+    // okxeu extends OKXExchange {} -> same okx ws classes.
+    expect(resolveExchangeRouting('okxeu', proxy).wsPrivate).toEqual(resolveExchangeRouting('okx', proxy).wsPrivate);
     expect(resolveExchangeRouting('okxeu', proxy).wsBusiness.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business',
-    );
-    expect(resolveExchangeRouting('okx', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okx/private',
+      'wss://fsjnpy143pbz.asia.tealstreet.io/okx/business',
     );
     // bitget{inverse,usdc} extend BitgetExchange -> same fallback hosts.
     for (const v of ['bitgetinverse', 'bitgetusdc'] as ExchangeName[]) {

@@ -63,27 +63,6 @@ import { BitgetPrivateWebsocket } from './bitget.ws-private';
 import { BitgetPublicWebsocket } from './bitget.ws-public';
 import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
 
-export const BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE =
-  'This Bitget API key belongs to a Unified Trading Account (UTA), but Tealstreet currently uses Bitget Classic API endpoints for this adapter. Please use a Classic-mode Bitget account/sub-account until the Bitget v3 migration is complete.';
-
-const isBitgetSuccessCode = (code: unknown): boolean => parseInt(`${code ?? 0}`, 10) === 0;
-
-const isBitgetUtaClassicUnsupported = (payload?: { code?: string | number; msg?: string }): boolean => {
-  const code = `${payload?.code ?? ''}`;
-  const message = payload?.msg?.toLowerCase() ?? '';
-  return (
-    code === '40085' ||
-    (message.includes('unified account mode') && message.includes('classic account api is not supported'))
-  );
-};
-
-const getBitgetApiErrorMessage = (payload: { code?: string | number; msg?: string } | undefined, fallback: string) => {
-  if (isBitgetUtaClassicUnsupported(payload)) {
-    return BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE;
-  }
-  return payload?.msg || fallback;
-};
-
 export class BitgetExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -119,9 +98,6 @@ export class BitgetExchange extends BaseExchange {
   > = {};
   private _positioningInflight: Record<string, Promise<{ positionMode?: PositionMode; marginType?: MarginType }>> = {};
   private static POSITIONING_CACHE_TTL_MS = 5_000;
-
-  private _planTypePositionsCache: { at: number; value: Position[] } | null = null;
-  private _planTypePositionsInflight: Promise<Position[]> | null = null;
 
   // private leverageHash: Record<string, number> = {};
 
@@ -216,7 +192,7 @@ export class BitgetExchange extends BaseExchange {
       const balance = await this.fetchBalance();
       return { error: '', balance };
     } catch (err: any) {
-      const errorMsg = getBitgetApiErrorMessage(err?.response?.data, err?.message || 'Invalid API key or secret');
+      const errorMsg = err?.response?.data?.msg || err?.message;
 
       // Detect environment mismatch and provide helpful message
       if (errorMsg?.toLowerCase().includes('environment is incorrect')) {
@@ -373,19 +349,12 @@ export class BitgetExchange extends BaseExchange {
 
   fetchBalance = async ({ preferFast = false }: { preferFast?: boolean } = {}) => {
     const client = preferFast ? this.unlimitedXHR : this.xhr;
-    const { data: response } = await client.get<{
-      code?: string | number;
-      msg?: string;
-      data: Array<Record<string, any>> | null;
-    }>(ENDPOINTS.BALANCE, {
+    const {
+      data: { data },
+    } = await client.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.BALANCE, {
       params: { productType: this.apiProductType },
     });
 
-    if (!isBitgetSuccessCode(response.code)) {
-      throw new Error(getBitgetApiErrorMessage(response, 'Bitget account balance request failed'));
-    }
-
-    const data = Array.isArray(response.data) ? response.data : [];
     const usdt = data.find((b) => b.marginCoin === this.apiMarginCoin);
     if (!usdt) return this.store.balance;
 
@@ -569,7 +538,7 @@ export class BitgetExchange extends BaseExchange {
       },
     });
 
-    if (!isBitgetSuccessCode(data.code)) {
+    if (parseInt(data.code || '0') !== 0) {
       // Detect environment mismatch and provide helpful message
       if (data.msg?.toLowerCase().includes('environment is incorrect')) {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';
@@ -578,7 +547,7 @@ export class BitgetExchange extends BaseExchange {
           `API key environment mismatch: Your API key is for ${suggestedMode}, but configured for ${currentMode}. Check Testnet setting.`,
         );
       } else {
-        this.emitAndLogError(getBitgetApiErrorMessage(data, 'Bitget positions request failed'));
+        this.emitAndLogError(data.msg);
       }
       return [];
     }
@@ -1247,7 +1216,7 @@ export class BitgetExchange extends BaseExchange {
     const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => o.size > 0);
 
     // const derivedAlgoOrders = this.deriveAlgoOrdersFromNormalOrdersOpts(orders);
-    const algoOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatAlgoOrder(o)));
+    const algoOrdersOpts = algoOrders.map(this.formatAlgoOrder);
 
     return [...(await this.placeOrderBatch(normalOrdersOpts)), ...(await this.placeAlgoOrders(algoOrdersOpts))];
   };
@@ -1341,9 +1310,9 @@ export class BitgetExchange extends BaseExchange {
       const price = adjust(opts.price, market.precision.price);
       payload.triggerPrice = `${price}`;
       payload.holdSide = this.getAlgoOrderSide(opts, positionMode);
-      const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
+      const [planType, amount] = this.getOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
       // Bitget V2 API: mark_price (default) or fill_price (last price)
       payload.triggerType = opts.tpTriggerType === OrderStopTriggerType.LastPrice ? 'fill_price' : 'mark_price';
     }
@@ -1352,9 +1321,9 @@ export class BitgetExchange extends BaseExchange {
       const price = adjust(opts.price, market.precision.price);
       payload.triggerPrice = `${price}`;
       payload.holdSide = this.getAlgoOrderSide(opts, positionMode);
-      const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
+      const [planType, amount] = this.getOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
       // Bitget V2 API: mark_price (default) or fill_price (last price)
       payload.triggerType = opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'fill_price' : 'mark_price';
     }
@@ -1970,157 +1939,35 @@ export class BitgetExchange extends BaseExchange {
       };
       if (planTypeMap[rawPlanType]) return planTypeMap[rawPlanType];
     }
-    // Fallback to computed planType. Stays synchronous on purpose: the position
-    // is often already closed by cancel time, so a REST refetch would report
-    // flat and produce pos_loss for an order that was placed as loss_plan.
-    const [planType] = this.selectPlanTypeAndAmount(order, this.store.positions);
+    // Fallback to computed planType
+    const [planType] = this.getOrderPlanTypeAndAmount(order);
     return planType;
   };
 
-  // Positions used to decide sized-vs-position-level stops. The store is empty
-  // on the never-started main-thread mirror that executes hosted-mode order
-  // writes (see quirk 22), which silently downgraded every sized stop to a
-  // position-level one. Fall back to a short-lived REST snapshot there.
-  //
-  // The store short-circuit asks the exact question the caller needs answered —
-  // "is there a position on this symbol AND this side big enough to size the
-  // stop?" — rather than the weaker "does the store know this symbol?". A
-  // symbol-only check still downgraded stops whenever the store held some other
-  // row for the symbol (e.g. a stale/zeroed long while the open position is
-  // short): the answer looked available but the row that would justify a sized
-  // stop was absent. Observed live as 4 buy-side stops going out as pos_loss
-  // while sell-side ones on the same symbol were correctly sized.
-  //
-  // Only non-empty snapshots are cached, so a fetch taken while flat (the
-  // entry+bracket flow formats algo payloads before the entry fills) cannot
-  // pin an empty result for the rest of the TTL.
-  // Deliberately NOT committed to the store — this is a read for one decision,
-  // and writing it would pollute the mirror's streamed state.
-  protected resolvePositionsForPlanType = async (symbol: string, side: PositionSide): Promise<Position[]> => {
-    // Any open position on the protected side is enough — the stop is clamped
-    // to it, so a store row smaller than the request no longer needs a REST
-    // round-trip to confirm.
-    const storeAnswers = this.store.positions.some((p) => p.symbol === symbol && p.side === side && p.contracts > 0);
-    if (storeAnswers) return this.store.positions;
-
-    const cached = this._planTypePositionsCache;
-    if (cached && Date.now() - cached.at < BitgetExchange.POSITIONING_CACHE_TTL_MS) return cached.value;
-    if (this._planTypePositionsInflight) return this._planTypePositionsInflight;
-
-    const promise = (async () => {
-      try {
-        const positions = await this.fetchOpenPositions();
-        if (positions.length > 0) {
-          this._planTypePositionsCache = { at: Date.now(), value: positions };
-        }
-        return positions;
-      } catch (err: any) {
-        // Degrade to the pre-fix behavior (position-level stop) rather than
-        // throwing: formatAlgoOrder runs inside placeOrders' Promise.all, so a
-        // throw here would also block the unrelated entry order in a bracket.
-        // Emit so the downgrade is visible instead of silent.
-        this.emitAndLogError(
-          `Could not load positions to size the ${symbol} stop — placing it as a full-position stop: ${
-            err?.response?.data?.msg || err?.message
-          }`,
-        );
-        return [];
-      }
-    })();
-
-    this._planTypePositionsInflight = promise;
-    try {
-      return await promise;
-    } finally {
-      this._planTypePositionsInflight = null;
-    }
-  };
-
-  // Compare against the size that will actually be POSTed, not the raw request.
-  // formatAlgoOrder sends adjust(amount, precision.amount), so a "close the
-  // whole position" stop derived from a percentage (e.g. 30.34 on a 30-contract
-  // position with a lot size of 1) overshoots `contracts` by a fraction of a lot
-  // and would silently downgrade to a position-level stop — the sent size is 30,
-  // which fits perfectly. Observed live: 4 stops protecting a long went out as
-  // pos_loss for exactly this reason.
-  private planTypeComparableAmount = (opts: PlaceOrderOpts | Order): number => {
-    const market = this.store.marketsBySymbol[opts.symbol];
-    if (!market?.precision?.amount) return opts.amount;
-    return adjust(opts.amount, market.precision.amount);
-  };
-
-  // `adjust` rounds to NEAREST, so it can land above the position it is meant to
-  // bound. Step back one lot when it does, rather than `Math.floor(value / step)`
-  // — that inherits IEEE division error and drops a whole lot on fractional
-  // steps (0.29 / 0.01 = 28.999999999999996 → 0.28).
-  private floorToLot = (symbol: string, value: number): number => {
-    const step = this.store.marketsBySymbol[symbol]?.precision?.amount;
-    if (!step) return value;
-    const rounded = adjust(value, step);
-    return rounded > value ? adjust(rounded - step, step) : rounded;
-  };
-
-  // amount === 0 is the product's "full position" sentinel (isFullStop) and must
-  // keep mapping to pos_loss/pos_profit — do not size it from the position.
-  protected selectPlanTypeAndAmount = (opts: PlaceOrderOpts | Order, positions: Position[]): [string, number] => {
+  private getOrderPlanTypeAndAmount = (opts: PlaceOrderOpts): [string, number] => {
     if (opts.type === OrderType.TrailingStopLoss) return ['track_plan', opts.amount];
 
-    let sizedAmount: number | undefined;
+    let infiniteStop = true;
     if (opts.amount !== 0) {
-      const foundPosition = positions.find(
+      const foundPosition = this.store.positions.find(
         (p) =>
           p.symbol === opts.symbol &&
           p.side === (opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-          p.contracts > 0,
+          p.contracts >= opts.amount,
       );
       if (foundPosition) {
-        // Clamp rather than downgrade: price drift routinely overshoots the
-        // position by a fraction of a lot, and silently converting a stop the
-        // user sized into a whole-position one is the worse failure.
-        const clamped = Math.min(
-          this.planTypeComparableAmount(opts),
-          this.floorToLot(opts.symbol, foundPosition.contracts),
-        );
-        if (clamped > 0) sizedAmount = clamped;
+        infiniteStop = false;
       }
     }
 
-    if (sizedAmount === undefined) {
-      // Downgrading a sized stop is a real behavior change for the user: the
-      // stop they sized closes the whole position instead. Say so, with the
-      // numbers that drove the decision — a silent downgrade is what made this
-      // take three rounds to pin down.
-      if (opts.amount !== 0) {
-        const candidates = positions
-          .filter((p) => p.symbol === opts.symbol)
-          .map((p) => `${p.side}:${p.contracts}`)
-          .join(', ');
-        this.emitAndLogError(
-          `Sized ${opts.symbol} stop became a full-position stop: no open ${
-            opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long
-          } position to size ${this.planTypeComparableAmount(opts)} (requested ${opts.amount}) against, ` +
-            `positions seen [${candidates || 'none'}]`,
-        );
-      }
+    if (infiniteStop) {
       if (opts.type === OrderType.StopLoss) return ['pos_loss', 0];
       if (opts.type === OrderType.TakeProfit) return ['pos_profit', 0];
     } else {
-      if (opts.type === OrderType.StopLoss) return ['loss_plan', sizedAmount];
-      if (opts.type === OrderType.TakeProfit) return ['profit_plan', sizedAmount];
+      if (opts.type === OrderType.StopLoss) return ['loss_plan', opts.amount];
+      if (opts.type === OrderType.TakeProfit) return ['profit_plan', opts.amount];
     }
 
     throw new Error(`Unknown order type: ${opts.type}`);
-  };
-
-  protected getOrderPlanTypeAndAmount = async (opts: PlaceOrderOpts | Order): Promise<[string, number]> => {
-    const positions =
-      opts.amount === 0 || opts.type === OrderType.TrailingStopLoss
-        ? this.store.positions
-        : await this.resolvePositionsForPlanType(
-            opts.symbol,
-            opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long,
-          );
-
-    return this.selectPlanTypeAndAmount(opts, positions);
   };
 }

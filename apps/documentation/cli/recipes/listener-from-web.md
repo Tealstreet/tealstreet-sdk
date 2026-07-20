@@ -98,4 +98,4 @@ the standalone's account list.
 - [Operations → Pairing](../operations/pairing.md) — the approval UX
 - [Operations → Trusted clients](../operations/trusted-clients.md) — revoke / list
 - [Web CLI subset](../reference/web-cli.md) — what runs where
-- [Recipe: Webhook from TradingView](./webhook-from-tradingview.md) — current hosted webhook status
+- [Recipe: Webhook from TradingView](./webhook-from-tradingview.md) — same listener, HTTP entry point

@@ -262,8 +262,9 @@ WooX uses **two different HMAC-SHA256 signature methods** depending on API versi
 1. Serialize params alphabetically with `qs.stringify` (sorted via `localeCompare`)
 2. Concatenate: `serialized_params|timestamp` (pipe separator)
 3. Sign: `HMAC-SHA256(concatenated_string, secret) -> hex`
-4. For POST/DELETE/PUT: data stays in the `application/x-www-form-urlencoded` request body
+4. For POST/DELETE/PUT: data is moved to query string, body is set to empty string `''`
 5. Content-Type for mutations: `application/x-www-form-urlencoded`
+6. **Exception**: `POSITION_MODE` endpoint body is NOT cleared
 
 ### V3 Signature (`signV3` in `woo.api.ts`)
 
@@ -508,7 +509,6 @@ Note: WooX uses `MARKET_PRICE` (not `LAST_PRICE`) to refer to the last/contract 
 2. For limit/market orders:
    - Resolves position side via `getPositionSideForOrder()` (undefined for one-way, `'LONG'`/`'SHORT'` for hedged)
    - Maps PostOnly TIF to `type: 'POST_ONLY'` (not a separate TIF parameter)
-   - Maps Tealstreet `OrderType.Market` to a crossing WOO `IOC` order using current ticker bid/ask/last plus a bounded slippage price. Plain WOO `MARKET` futures buys can be accepted and then immediately canceled with zero fill, `ASK`/`BID` require a price and can reject asynchronously, and futures-mode `order_amount` is rejected by WOO.
    - Splits into lots if amount exceeds `market.limits.amount.max`
    - Each payload sent via POST to `/v1/order`
 3. After main order placement, if `opts.stopLoss` or `opts.takeProfit` are set, places positional algo order with inverted side
@@ -746,7 +746,7 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 
 1. **Dual signature methods**: V1 endpoints use `params|timestamp` format, V3 endpoints use `timestamp+METHOD+url+body` format. The request interceptor auto-selects based on URL.
 2. **POST_ONLY as order type**: WooX treats `POST_ONLY` as a separate order type rather than a time-in-force value. Code maps PostOnly TIF to `type: 'POST_ONLY'` when placing orders, and maps `POST_ONLY` type back to `OrderTimeInForce.PostOnly` when reading.
-3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are signed as a sorted form string and sent in the request body. Do not move mutation params into the URL with an empty body; WOO can reject that before application-level order validation with `411 Length Required`.
+3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are moved to the query string and body is set to empty string `''`, except for the `POSITION_MODE` endpoint.
 4. **No uPNL in account endpoint**: WooX does not provide unrealized PnL in the account endpoint. uPNL is computed from positions polling and added to balance. This causes a timing issue where `fetchBalance()` alone returns stale `upnl`.
 5. **Historical kline from separate domain**: Historical legacy kline data uses `https://api-pub.woox.io` via `_proxyEnforcedXhr`, while recent kline data uses the main API. `fetchOHLCV` selects it when the requested candle is more than 100 intervals old.
 6. **Kline secondary trades topic**: For sub-minute/sub-second candle intervals, `listenOHLCV` subscribes to both `@kline` and `@trades`. Trade data constructs real-time candles when the kline topic is too sparse. The trades topic is used only outside `publicDataOnly` mode.
@@ -756,7 +756,7 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 10. **Trailing stop**: Uses `callbackValue` (price distance from last to stop) and uses the full position size. Uses cancel-and-replace for updates.
 11. **Paginated order fetching**: `fetchOrdersRecursively` handles pagination for both limit and algo orders, recursively fetching until all pages are loaded.
 12. **Large order splitting**: Orders exceeding `market.limits.amount.max` are automatically split into multiple lots.
-13. **Update order supported for limits**: Direct PUT to `/v3/order/{orderId}` for limit orders (no cancel-and-replace needed). Trailing stops use cancel-and-replace. Algo orders use PUT to `/v3/algo/order/{parentId}`. **`quantity` is mandatory on every edit, even a price-only one** — WOO's edit schema requires either `quantity` or `amount`. A price-only body is not rejected synchronously: it returns `200 {"status":"EDIT_SENT"}` and then fails asynchronously, **cancelling the order** a few seconds later. `updateOrder` therefore always sends `update.amount ?? order.amount`. Symptom if this regresses: an amended order silently disappears with no `DELETE` anywhere in the request log. Partial-fill amend semantics (total vs. remaining) are still unproven — see `partialFillAmendQuantitySemantics` in `woo.v3.regular-writes.ts`; the zero-filled case, where total equals remaining, is the one this covers.
+13. **Update order supported for limits**: Direct PUT to `/v3/order/{orderId}` for limit orders (no cancel-and-replace needed). Trailing stops use cancel-and-replace. Algo orders use PUT to `/v3/algo/order/{parentId}`.
 14. **Public data only mode**: If `publicDataOnly` is true or no API keys, skips private WS and sets all private data as loaded.
 15. **Typo in class name**: Private WebSocket class is named `WooPrivateWebscoket` (missing 'k' in "Socket").
 16. **Leverage always sends BOTH/CROSS**: Regardless of actual position mode, leverage requests always use `position_side: 'BOTH'` and `margin_mode: 'CROSS'` due to WooX API behavior.

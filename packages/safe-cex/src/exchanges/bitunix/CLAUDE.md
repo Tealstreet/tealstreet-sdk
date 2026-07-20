@@ -13,15 +13,15 @@
 
 ## File Structure
 
-| File                    | Description                                                             |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `bitunix.api.ts`        | REST API client with double-SHA256 signature scheme, axios interceptors |
-| `bitunix.exchange.ts`   | Main exchange class extending `BaseExchange`                            |
-| `bitunix.types.ts`      | Type definitions, endpoint constants, type mapping objects              |
-| `bitunix.utils.ts`      | SHA256 hex hashing utility (uses `@noble/hashes`)                       |
-| `bitunix.ws-futures.ts` | Futures-specific WebSocket for klines and orderbook (gzip-compressed)   |
-| `bitunix.ws-private.ts` | Private WebSocket for orders, positions, TP/SL, balance (login auth)    |
-| `bitunix.ws-public.ts`  | Public WebSocket for tickers, mark prices, depth_book1                  |
+| File                       | Description                                                             |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `bitunix.api.ts`           | REST API client with double-SHA256 signature scheme, axios interceptors |
+| `bitunix.exchange.ts`      | Main exchange class extending `BaseExchange`                            |
+| `bitunix.types.ts`         | Type definitions, endpoint constants, type mapping objects              |
+| `bitunix.utils.ts`         | SHA256 hex hashing utility (uses `@noble/hashes`)                       |
+| `bitunix.ws-futures.ts`    | Futures-specific WebSocket for klines and orderbook (gzip-compressed)   |
+| `bitunix.ws-private.ts`    | Private WebSocket for orders, positions, TP/SL, balance (login auth)    |
+| `bitunix.ws-public.ts`     | Public WebSocket for tickers, mark prices, depth_book1                  |
 
 ## Authentication
 
@@ -183,11 +183,11 @@ All WS classes use `BaseWebSocket.onClose()` which handles reconnection. On clos
 
 ### Ping/Pong
 
-| WebSocket | Ping Format                  | Interval | Pong Behavior                                                                                                                       |
-| --------- | ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Public    | `{ "ping": <timestamp_ms> }` | 15s      | Normal pong expected                                                                                                                |
+| WebSocket | Ping Format                  | Interval | Pong Behavior                                                                                                                                   |
+| --------- | ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public    | `{ "ping": <timestamp_ms> }` | 15s      | Normal pong expected                                                                                                                            |
 | Private   | `{ "op": "ping" }`           | 15s      | Current docs describe a pong; the client still handles the ping optimistically for compatibility with historically silent sessions. |
-| Futures   | `{ "ping": <timestamp_ms> }` | 15s      | Normal pong expected                                                                                                                |
+| Futures   | `{ "ping": <timestamp_ms> }` | 15s      | Normal pong expected                                                                                                                            |
 
 ### Public WebSocket Channels
 
@@ -337,11 +337,6 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   upstream `LIMIT` type, and a raw boolean `reduceOnly` value matching the
   normalized order. The endpoint does not accept side, trade side, TIF, or
   reduce-only fields, so those attributes remain attached to the same order.
-- Bitunix's private order channel omits `reduceOnly` and can omit other
-  immutable/protection fields on `UPDATE`. Tealstreet caches submitted
-  reduce-only state by `clientId`, and WS updates merge onto the existing raw
-  snapshot instead of replacing it, so repeated chart drags retain
-  reconciliation provenance.
 - Quantity is the requested total base-asset quantity, including after partial
   fills, rounded to market precision. It must remain above the already-filled
   quantity.
@@ -349,15 +344,9 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   `orderId`. The request carries both reconciled protection legs, trigger
   types, execution types, and any required limit execution prices so editing
   one leg cannot drop its sibling. A virtual-leg quantity edit is rejected.
-- The request includes `symbol` as shown in Bitunix's official example, in
-  addition to the documented identity, price, and quantity fields. A
-  successful HTTP response must have `code: 0`; when it returns a different
-  `orderId`, that replacement parent ID is propagated rather than treated as a
-  post-mutation error. Attached virtual edits rebuild their `__tp` / `__sl`
-  display ID on that acknowledged parent so optimistic UI state cannot overlay
-  a protection row onto the regular order. Bitunix explicitly says HTTP
-  acknowledgement is not authoritative, so the existing private order-channel
-  refresh still owns final state reconciliation.
+- A successful HTTP response must have `code: 0` and echo the same `orderId`.
+  Bitunix explicitly says HTTP acknowledgement is not authoritative; the
+  existing private order-channel refresh owns final state reconciliation.
 
 There is no cancel/recreate fallback. Market orders, missing or inconsistent
 raw order metadata, and malformed prices or quantities reject before any
@@ -528,23 +517,23 @@ Similarly, TP/SL orders may be direct arrays or wrapped in `orderList`.
 
 6. **Private pong compatibility**: Current docs describe a server pong. Historical sessions were silent, so the private socket still calls `handlePongEvent()` and updates `lastReceived` optimistically after ping. Do not remove that compatibility path without an authenticated capture.
 
-7. **HTTP 200 for errors**: Bitunix returns HTTP 200 even for API errors. `validateAccount` must reject every `data.code !== 0` envelope before fetching the balance, using `data.msg` or the stable truthy fallback `Bitunix account validation failed`; the response interceptor only logs these errors and does not throw.
+8. **HTTP 200 for errors**: Bitunix returns HTTP 200 even for API errors. `validateAccount` must reject every `data.code !== 0` envelope before fetching the balance, using `data.msg` or the stable truthy fallback `Bitunix account validation failed`; the response interceptor only logs these errors and does not throw.
 
-8. **Position side inconsistency**: API returns `side` as `BUY`/`SELL` or `LONG`/`SHORT` depending on endpoint version. Code handles both.
+9. **Position side inconsistency**: API returns `side` as `BUY`/`SELL` or `LONG`/`SHORT` depending on endpoint version. Code handles both.
 
-9. **`fetchPositionMode` reuses `ACCOUNT`, NOT `HEDGE_MODE`**: Bitunix's `GET /account/change_position_mode` (the `HEDGE_MODE` constant) now returns `{code:1, msg:"Network Error"}` and would surface as a startup toast. `fetchPositionMode` instead calls `GET /account?marginCoin=USDT` and classifies any non-`ONE_WAY` value as Hedged (`positionMode !== 'ONE_WAY'`), matching `fetchBalance`'s default so the two helpers can't disagree when the field is missing or returns unexpected casing. `HEDGE_MODE` is still used by `changePositionMode` (POST). Don't switch the fetch back without verifying GET is accepted again.
+10. **`fetchPositionMode` reuses `ACCOUNT`, NOT `HEDGE_MODE`**: Bitunix's `GET /account/change_position_mode` (the `HEDGE_MODE` constant) now returns `{code:1, msg:"Network Error"}` and would surface as a startup toast. `fetchPositionMode` instead calls `GET /account?marginCoin=USDT` and classifies any non-`ONE_WAY` value as Hedged (`positionMode !== 'ONE_WAY'`), matching `fetchBalance`'s default so the two helpers can't disagree when the field is missing or returns unexpected casing. `HEDGE_MODE` is still used by `changePositionMode` (POST). Don't switch the fetch back without verifying GET is accepted again.
 
-10. **Position mode detection from balance**: `accountPositionMode` is updated from `fetchBalance()` response (`data.positionMode`), not from `fetchPositionMode()` directly during the tick loop.
+11. **Position mode detection from balance**: `accountPositionMode` is updated from `fetchBalance()` response (`data.positionMode`), not from `fetchPositionMode()` directly during the tick loop.
 
-11. **Futures WS uses different domain**: Public/private use `fapi.bitunix.com`, but futures uses `api.bitunix.com`.
+12. **Futures WS uses different domain**: Public/private use `fapi.bitunix.com`, but futures uses `api.bitunix.com`.
 
-12. **Missing `listenOHLCV` on public WS**: The public WebSocket's `listenOHLCV` throws "Not implemented". Klines are handled by the futures WebSocket instead.
+13. **Missing `listenOHLCV` on public WS**: The public WebSocket's `listenOHLCV` throws "Not implemented". Klines are handled by the futures WebSocket instead.
 
-13. **Order clientId prefix**: All orders get client IDs prefixed with `ts_`.
+14. **Order clientId prefix**: All orders get client IDs prefixed with `ts_`.
 
-14. **Margin mode values**: `ISOLATION` (not `ISOLATED`) for isolated margin, `CROSS` for cross margin.
+15. **Margin mode values**: `ISOLATION` (not `ISOLATED`) for isolated margin, `CROSS` for cross margin.
 
-15. **Multi-assets / joint-margin visibility**: Bitunix help docs describe multi-assets/joint-margin as eligible collateral assets backing USDT-M margin through discount-rate conversion, not as a separate positions endpoint. Keep using `/api/v1/futures/account?marginCoin=USDT` and `/api/v1/futures/position/get_pending_positions`, but parse account `data` as object-or-array and positions through the flexible wrapper/alias extractor. Do not expand this exchange to USDC-M/Coin-M support without separately auditing market discovery, margin coin selection, order sizing, and settlement semantics.
+16. **Multi-assets / joint-margin visibility**: Bitunix help docs describe multi-assets/joint-margin as eligible collateral assets backing USDT-M margin through discount-rate conversion, not as a separate positions endpoint. Keep using `/api/v1/futures/account?marginCoin=USDT` and `/api/v1/futures/position/get_pending_positions`, but parse account `data` as object-or-array and positions through the flexible wrapper/alias extractor. Do not expand this exchange to USDC-M/Coin-M support without separately auditing market discovery, margin coin selection, order sizing, and settlement semantics.
 
 ## Error Handling
 
@@ -588,35 +577,3 @@ Every pre-flight rejection in `formatTPSLOrder` follows the same emit-before-thr
 Fresh deterministic regressions belong in the package-level
 `src/__tests__/audit-regressions/` directory, derived from current runtime
 contracts and verified upstream behavior.
-
-## Private WS auth must go through the remote signer
-
-`sendLogin` signs `sha256(sha256(nonce + timestamp + apiKey) + secret)` — note
-this is **plain concatenation, not an HMAC**, which is why it needs its own
-`bitunix-double-sha256` output format rather than reusing `hex`.
-
-It used to compute that inline from `options.secret`. **Hosted
-exchange-server runs with `secret: ''` by design** (the secret never leaves the
-client), so the signature was taken over an empty secret and bitunix rejected
-the handshake with _"Bitunix private ws login failed, double check your key and
-secret"_ — which reads like bad credentials and is not. It reproduces **only**
-in hosted mode: local dev and `yarn keys audit` both hold the real secret and
-authenticate fine, so the key audits as valid while e2e reports it dead.
-
-The signer branch lives in `BaseExchange.signWsAuth` and is locked by a golden
-vector in `__tests__/base.ws-auth-signing.test.ts` generated with Node's
-built-in crypto. See `../CLAUDE.md` → "Remote-signer WS auth" for the general
-rule; bitunix is the fourth venue to hit it after kraken, blofin and apexomni.
-
-**Verified in e2e run 31351139247**: 18 successful `[bitunix login] success` frames
-against 11 failures, where every failure — and every REST `10003 Token invalid` —
-falls inside the 24-second window of the _Bad API Key_ test, which registers a
-deliberately bad key. Reading a raw count of "login failed" lines without
-bucketing them by time makes a working handshake look broken; that test
-guarantees a nonzero failure count on every run. Check for the success frames.
-
-**A remote-signer WS auth change is a two-target deploy.** The request half runs
-on the exchange-server, but `signWsAuth` runs in the **browser**, so the fix is
-not live until the web bundle ships too. Dispatching e2e after only the server
-redeploy yields `Unsupported WS auth outputFormat: bitunix-double-sha256` from
-the still-old browser — a real symptom of a stale deploy, not of a broken fix.

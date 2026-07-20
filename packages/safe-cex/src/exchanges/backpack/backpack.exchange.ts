@@ -321,34 +321,29 @@ export class BackpackExchange extends BaseExchange {
         markPriceMap.set(mp.symbol, mp);
       }
 
-      // Include ALL markets. Perps carry mark/index/funding from the mark-price
-      // endpoint; spot markets have no mark price, so they fall back to last
-      // price for mark/index and carry no funding. Previously this filtered to
-      // `markPriceMap.has(t.symbol)`, which dropped every spot ticker — so spot
-      // markets never appeared in the screener / market dropdown (both iterate
-      // store.tickers, and the WS ticker handler bails when the ticker is
-      // missing from the store).
-      return tickers.map((t) => {
-        const markPrice = markPriceMap.get(t.symbol);
-        const last = parseFloat(t.lastPrice);
+      // Filter to only include PERP markets (those with mark price data)
+      return tickers
+        .filter((t) => markPriceMap.has(t.symbol))
+        .map((t) => {
+          const markPrice = markPriceMap.get(t.symbol)!;
 
-        return {
-          id: `${t.symbol}-${virtualClock.getCurrentTimeMs()}`,
-          symbol: t.symbol,
-          bid: 0, // Will be updated from WebSocket
-          ask: 0, // Will be updated from WebSocket
-          last,
-          mark: markPrice ? parseFloat(markPrice.markPrice) : last,
-          index: markPrice ? parseFloat(markPrice.indexPrice) : last,
-          percentage: parseFloat(t.priceChangePercent) * 100,
-          fundingRate: markPrice ? parseFloat(markPrice.fundingRate) : 0,
-          fundingTime: markPrice ? markPrice.nextFundingTimestamp : 0,
-          volume: parseFloat(t.volume),
-          quoteVolume: parseFloat(t.quoteVolume),
-          openInterest: 0,
-          info: markPrice ? { ...t, ...markPrice } : { ...t },
-        };
-      });
+          return {
+            id: `${t.symbol}-${virtualClock.getCurrentTimeMs()}`,
+            symbol: t.symbol,
+            bid: 0, // Will be updated from WebSocket
+            ask: 0, // Will be updated from WebSocket
+            last: parseFloat(t.lastPrice),
+            mark: parseFloat(markPrice.markPrice),
+            index: parseFloat(markPrice.indexPrice),
+            percentage: parseFloat(t.priceChangePercent) * 100,
+            fundingRate: parseFloat(markPrice.fundingRate),
+            fundingTime: markPrice.nextFundingTimestamp,
+            volume: parseFloat(t.volume),
+            quoteVolume: parseFloat(t.quoteVolume),
+            openInterest: 0,
+            info: { ...t, ...markPrice },
+          };
+        });
     } catch (err) {
       this.log(`Error fetching tickers: ${err}`, LogSeverity.Error);
       throw err;

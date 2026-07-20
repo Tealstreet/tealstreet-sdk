@@ -19,7 +19,6 @@ import { BASE_WS_URL, ORDER_STATUS, TIME_IN_FORCE } from './phemex.types';
 export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
   requestId: number = 1200;
   private positionsAndBalanceSyncTimeout?: NodeJS.Timeout;
-  private readonly positionsAndBalanceSyncSymbols = new Set<string>();
   private readonly positionsAndBalanceSyncDebounceMs = 1_000;
 
   dispose() {
@@ -27,30 +26,18 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
       clearTimeout(this.positionsAndBalanceSyncTimeout);
       this.positionsAndBalanceSyncTimeout = undefined;
     }
-    this.positionsAndBalanceSyncSymbols.clear();
     super.dispose();
   }
 
   private syncPositionsAndBalance = async () => {
     this.positionsAndBalanceSyncTimeout = undefined;
-    const symbols = [...this.positionsAndBalanceSyncSymbols];
-    this.positionsAndBalanceSyncSymbols.clear();
     if (this.isDisposed) return;
 
     try {
       const { balance, positions } = await this.parent.fetchPositionsAndBalance();
       if (this.isDisposed) return;
 
-      const symbolPositions = (
-        await Promise.allSettled(symbols.map((symbol) => this.parent.fetchPositions([symbol])))
-      ).flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
-      const symbolPositionIds = new Set(symbolPositions.map((position) => position.id));
-      const mergedPositions = uniqBy(
-        [...positions.filter((position) => !symbolPositionIds.has(position.id)), ...symbolPositions],
-        'id',
-      );
-
-      this.store.addOrUpdatePositionsFull(mergedPositions);
+      this.store.addOrUpdatePositionsFull(positions);
       this.store.update({
         balance,
         loaded: {
@@ -64,9 +51,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
     }
   };
 
-  private schedulePositionsAndBalanceSync = (symbols: string[] = []) => {
-    symbols.forEach((symbol) => this.positionsAndBalanceSyncSymbols.add(symbol));
-
+  private schedulePositionsAndBalanceSync = () => {
     if (this.positionsAndBalanceSyncTimeout) {
       clearTimeout(this.positionsAndBalanceSyncTimeout);
     }
@@ -241,21 +226,12 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           // "userID":932867
 
           const orders = json?.orders_p;
-          const terminalOrderSymbols: string[] =
-            json?.type !== 'snapshot'
-              ? Array.from(
-                  new Set<string>(
-                    orders
-                      .filter((order: any) => {
-                        const rawOrderStatus = `${order?.ordStatus || ''}`.toLowerCase();
-                        return ['filled', 'triggered', 'canceled', 'rejected'].includes(rawOrderStatus);
-                      })
-                      .map((order: any) => this.parent.formatSymbolIn(order.symbol) as string)
-                      .filter(Boolean),
-                  ),
-                )
-              : [];
-          const shouldSyncPositionsAfterOrderEvent = json?.type !== 'snapshot' && terminalOrderSymbols.length > 0;
+          const shouldSyncPositionsAfterOrderEvent =
+            json?.type !== 'snapshot' &&
+            orders.some((order: any) => {
+              const rawOrderStatus = `${order?.ordStatus || ''}`.toLowerCase();
+              return ['filled', 'triggered', 'canceled', 'rejected'].includes(rawOrderStatus);
+            });
           this.recordMessageHandlerStats('order');
 
           // mapOrder = (o: Record<string, any>) => {
@@ -593,7 +569,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             // Terminal order events (filled/canceled/etc.) often imply position changes.
             // Debounce REST sync to avoid waiting for slow tick intervals.
             if (shouldSyncPositionsAfterOrderEvent) {
-              this.schedulePositionsAndBalanceSync(terminalOrderSymbols);
+              this.schedulePositionsAndBalanceSync();
             }
           }
         }
@@ -611,8 +587,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             .filter((position: Position | undefined) => Boolean(position));
 
           const upsertablePositions = parsedPositions.filter(
-            (position) =>
-              position.contracts > 0 || this.store.positions.some((existing) => existing.id === position.id),
+            (position) => position.contracts > 0 || this.store.positions.some((existing) => existing.id === position.id),
           );
 
           if (upsertablePositions.length > 0) {
@@ -624,8 +599,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           this.recordMessageHandlerStats('account');
           if (!Array.isArray(json.accounts_p)) return;
           const currencies: NonNullable<Balance['currencies']> = { ...(this.store.balance.currencies || {}) };
-          const accounts =
-            this.store.balance.info && !Array.isArray(this.store.balance.info) ? { ...this.store.balance.info } : {};
+          const accounts = this.store.balance.info && !Array.isArray(this.store.balance.info) ? { ...this.store.balance.info } : {};
 
           for (const account of json.accounts_p) {
             const currency = account?.currency;
@@ -633,11 +607,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
 
             const currencyPositions = this.store.positions.filter((position) => {
               const market = this.store.marketsBySymbol[position.symbol];
-              return (
-                market?.quote === currency ||
-                market?.info?.settleCurrency === currency ||
-                position.info?.currency === currency
-              );
+              return market?.quote === currency || market?.info?.settleCurrency === currency || position.info?.currency === currency;
             });
             const total = parseFloat(account.accountBalanceRv);
             const used = parseFloat(account.totalUsedBalanceRv);

@@ -178,16 +178,6 @@ export const createPublicExchange = async (
  * Account-based exchange creation
  */
 export { normalizeExchangeAccountConfig } from './accounts/normalizeExchangeAccountConfig';
-export {
-  buildExchangeAccountConfig,
-  getExchangeAccountCredentialSchema,
-  getSupportedExchangeAccountCredentialSchemas,
-  getSupportedExchangeAccountNames,
-  ExchangeAccountConfigError,
-  type ExchangeAccountCredentialField,
-  type ExchangeAccountCredentialInput,
-  type ExchangeAccountCredentialSchema,
-} from './accounts/buildExchangeAccountConfig';
 export { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
 export type { ExchangeAccountConfig, PublicExchangeOptions } from './types';
 export type {
@@ -214,6 +204,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+
 
 export type {
   BuilderFeeApprovalResult,
@@ -269,7 +260,6 @@ export {
   buildLighterApproveIntegratorL1Message,
   checkLighterBuilderApproved,
   createLighterL1SignatureHelperUrl,
-  DEFAULT_LIGHTER_APPROVAL_FEE_CAPS,
   DEFAULT_LIGHTER_APPROVAL_FEE_VALUE,
   prepareLighterBuilderApprovalContext,
   signLighterApproveIntegratorWithBrowserWallet,
@@ -279,7 +269,6 @@ export {
 export type {
   LighterBuilderApprovalCheckResult,
   LighterBuilderApprovalContext,
-  LighterBuilderApprovalFeeCaps,
   LighterBuilderApprovalResult,
 } from './exchanges/lighter/lighter.builder-approval';
 

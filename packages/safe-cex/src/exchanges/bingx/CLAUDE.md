@@ -134,8 +134,7 @@ Each step checks `this.isDisposed` to allow early exit.
 | `MARGIN_MODE`          | `/openApi/swap/v2/trade/marginType`    | GET/POST    | Get/set margin type                |
 | `OPEN_ORDERS`          | `/openApi/swap/v2/trade/openOrders`    | GET         | Fetch open orders                  |
 | `ORDER`                | `/openApi/swap/v2/trade/order`         | POST/DELETE | Place/cancel single order          |
-| `AMEND_ORDER`          | `/openApi/swap/v1/trade/amend`         | POST        | Stable-ID LIMIT quantity amendment |
-| `CANCEL_REPLACE_ORDER` | `/openApi/swap/v1/trade/cancelReplace` | POST        | Atomic LIMIT price replacement     |
+| `AMEND_ORDER`          | `/openApi/swap/v1/trade/amend`          | POST        | Stable-ID LIMIT quantity amendment |
 | `BATCH_ORDERS`         | `/openApi/swap/v2/trade/batchOrders`   | POST        | Batch order placement              |
 | `CANCEL_SYMBOL_ORDERS` | `/openApi/swap/v2/trade/allOpenOrders` | DELETE      | Cancel all orders for a symbol     |
 | `KLINE`                | `/openApi/swap/v3/quote/klines`        | GET         | Kline/candlestick data             |
@@ -267,9 +266,7 @@ Implementation behavior:
 - Events are deduped by `orderId` using cumulative filled quantity (`o.z`)
 - Incremental fill is derived from delta of cumulative filled (fallback to `o.l` when cumulative is unavailable)
 - Fill events are emitted only on terminal `FILLED` status to avoid duplicate toasts
-- `NEW`/`OPEN`/`PENDING`/`WORKING`: adds non-market orders to store. Live
-  placement acknowledgements can report `PENDING`, while private WS order
-  updates can report `WORKING`; both are active resting orders.
+- `NEW`: adds non-market orders to store
 - `CANCELED/EXPIRED`: marks order canceled and clears dedupe state
 - `FILLED`: marks order closed and immediately drops its cumulative-fill dedupe entry
 - Any positive fill delta schedules throttled immediate position reconciliation
@@ -309,9 +306,6 @@ Implementation behavior:
 | BingX Status       | Internal Status |
 | ------------------ | --------------- |
 | `NEW`              | Open            |
-| `OPEN`             | Open            |
-| `PENDING`          | Open            |
-| `WORKING`          | Open            |
 | `PARTIALLY_FILLED` | Open            |
 | `FILLED`           | Closed          |
 | `CANCELED`         | Canceled        |
@@ -333,54 +327,28 @@ Implementation behavior:
 
 **Note**: There is a legacy `placeOrderBatchOld()` method that used actual batch placement, but it is no longer in use.
 
-### Order Update (Native Amend / Atomic Replacement, Fail-Closed)
+### Order Update (Native Amend, Fail-Closed)
 
 `updateOrder()` uses BingX's stable-ID `POST /openApi/swap/v1/trade/amend`
-only for amount changes to exactly reconciled, provably unfilled LIMIT rows.
-LIMIT price moves use BingX's atomic
-`POST /openApi/swap/v1/trade/cancelReplace` endpoint and return the replacement
-order id for chart-line aliasing. Price-only STOP/TP trigger moves cancel the
-old trigger through the proven cancel endpoint and place a replacement trigger:
+only for amount changes to exactly reconciled, provably unfilled LIMIT rows:
 
 - The raw pending row must reconcile order id, symbol, LIMIT type, side,
   position side, reduce-only, TIF/post-only, original quantity, zero executed
-  quantity, and NEW/OPEN/PENDING/WORKING status.
-  Cancel-replace rejects raw contradictions but can fall back to normalized
-  order fields when private-WS or optimistic snapshots lack REST aliases or
-  omit reduce-only flags. If the current store row lacks time-in-force because a
-  `WORKING` WS frame won the startup race, cancel-replace performs a one-shot
-  `fetchOrders()` reconciliation before validating and sending the replacement.
+  quantity, and NEW/PENDING status.
 - Both the internal and raw row must prove `filled === 0` and
   `amount === remaining`. BingX allows amendments after partial fills but does
   not define whether `quantity` means the new total or the new remaining size,
-  so partially filled rows fail before either write path.
-- BingX currently documents quantity-only amendment. Combined price/quantity
-  edits, trigger amount edits, close-position LIMIT replacements, attached
-  TP/SL with non-zero protected size/price, no-op normalized quantities/prices,
-  and incomplete rows fail before a write. BingX REST rows can include
-  zero-valued TP/SL placeholder objects; those are not treated as attached
-  protection.
-- Cancel-replace uses `cancelClientOrderId`, not `cancelOrderId`, because BingX
-  order ids are int64-sized and cannot be sent as JSON numbers from JavaScript
-  without precision loss.
-- STOP/TP trigger price moves preserve side, size, close/reduce-only intent,
-  and mark/last trigger type from the normalized order. If the raw BingX row
-  still carries `STOP_MARKET` / `TAKE_PROFIT_MARKET`, that raw trigger type is
-  authoritative during replacement, so stale or invalid ticker data cannot
-  accidentally turn a stop-loss move into a take-profit move.
-- BingX does not assign client order ids to these trigger payloads, and its
-  cancel-replace endpoint requires `cancelOrderId` as a JSON int64, so
-  JavaScript cannot safely submit those oversized ids through the JSON body
-  without precision loss.
-- Live cancel-replace responses can return string booleans
-  (`cancelResult: "true"`, `replaceResult: "true"`) plus
-  `newOrderResponse`, rather than the documented `SUCCESS` / `newOrderId`
-  shape. Treat both as successful replacement acknowledgements.
+  so partially filled rows fail before a write.
+- BingX currently documents quantity-only amendment. Price edits, combined
+  price/quantity edits, trigger orders, close-position orders, attached TP/SL,
+  no-op normalized quantities, and incomplete rows fail before a write.
 - The response must confirm the same order id, symbol, and amended quantity.
   Existing private-WS/REST reconciliation remains authoritative; no
-  optimistic local mutation is made for native quantity amendments. Successful
-  cancel-replace marks the old id canceled, seeds the replacement LIMIT row, and
-  returns the new id.
+  optimistic local mutation is made.
+- There is deliberately no `cancelReplace` or cancel/recreate fallback.
+  `cancelReplace` returns a new identity and current readback cannot reconstruct
+  every immutable attribute safely; price editing remains gated until BingX
+  supports it in-place or the missing provenance becomes authoritative.
 
 ### Order Cancellation
 
@@ -399,9 +367,7 @@ When placing TP/SL orders, the code checks if a corresponding position exists:
 
 ### StopLoss Reclassification
 
-After fetching orders, `StopLoss` orders are reclassified as `TakeProfit` only
-when a finite positive mark price is available and the stop price is on the
-wrong side of that mark price:
+After fetching orders, `StopLoss` orders are reclassified as `TakeProfit` if the stop price is on the wrong side of the mark price:
 
 - Buy side with `price < mark` -> reclassified as TakeProfit
 - Sell side with `price > mark` -> reclassified as TakeProfit
@@ -491,7 +457,7 @@ BingX relies primarily on REST polling for state reconciliation:
 ### WS Order Updates
 
 - `ORDER_TRADE_UPDATE` and `TRADE_UPDATE` events are both supported
-- **NEW/OPEN/PENDING/WORKING** status: Adds order to store (except `OrderType.Market` which is transient)
+- **NEW** status: Adds order to store (except `OrderType.Market` which is transient)
 - **CANCELED/EXPIRED**: Marks order as Canceled in store
 - **FILLED**: Marks order as Closed in store
 - Fill events are deduped by cumulative quantity and emitted on terminal `FILLED`
@@ -559,7 +525,7 @@ Position mode (hedge/one-way) is cached in `_accountPositionMode` to avoid repea
 
 8. **`TRIGGER_MARKET` type**: Used instead of `STOP_MARKET`/`TAKE_PROFIT_MARKET` when no corresponding position exists (position isn't open yet).
 
-9. **Update order**: Native stable-ID `amend` is restricted to exactly reconciled, unfilled LIMIT quantity changes. LIMIT price moves use atomic `cancelReplace` and return the replacement order id. STOP/TP price moves cancel the old trigger and place a replacement because BingX trigger rows have empty client order ids and the cancel-replace JSON body rejects string int64 order ids. Trigger replacement preserves the raw BingX trigger type when present and rejects replacement prices that would immediately execute against a reliable current mark. Partial-fill sizing, trigger amount edits, combined price/quantity edits, close-position LIMIT replacements, and non-zero attached TP/SL fail closed.
+9. **Update order**: Native stable-ID `amend` is restricted to exactly reconciled, unfilled LIMIT quantity changes. Partial-fill sizing and every price/trigger edit fail closed; no `cancelReplace` fallback is retained.
 
 10. **Trailing stop contract**: Resolves the internal symbol through `marketsBySymbol`, sends the exchange market id, and derives BingX's fractional `priceRate` (`0.05` means 5%). Missing market/ticker/position inputs fail before submission and emit an exchange error.
 

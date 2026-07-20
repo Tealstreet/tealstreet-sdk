@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import {
-  BITMEX_EXCHANGE_CLOSURE_MS,
-  BITMEX_REDUCE_ONLY_START_MS,
-  BitmexExchange,
-} from '../exchanges/bitmex/bitmex.exchange';
+import { BitmexExchange } from '../exchanges/bitmex/bitmex.exchange';
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../types';
 
 const createExchangeLike = (extra: Record<string, unknown> = {}) => {
@@ -58,14 +54,6 @@ const createExchangeLike = (extra: Record<string, unknown> = {}) => {
 };
 
 describe('BitmexExchange order payload formatting', () => {
-  beforeEach(() => {
-    vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 6, 24, 4, 0, 0));
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('omits empty execInst and defaults plain limit orders to GTC', () => {
     const exchange = createExchangeLike();
 
@@ -353,59 +341,6 @@ describe('BitmexExchange order payload formatting', () => {
     // convertToMicroValue is mocked as identity; the linear branch adjusts the
     // base amount to precision (0.001) before/after micro conversion.
     expect(payload.orderQty).toBe('1');
-  });
-
-  it('blocks non-reduce-only BitMEX orders during the wind-down reduce-only window', () => {
-    vi.mocked(Date.now).mockReturnValue(BITMEX_REDUCE_ONLY_START_MS);
-    const exchange = createExchangeLike();
-
-    expect(() =>
-      (exchange as any).formatCreateOrder({
-        symbol: 'XBTUSDT',
-        type: OrderType.Limit,
-        side: OrderSide.Buy,
-        amount: 1,
-        price: 50000,
-      }),
-    ).toThrow('BitMEX is in reduce-only wind-down mode');
-
-    const [payload] = (exchange as any).formatCreateOrder({
-      symbol: 'XBTUSDT',
-      type: OrderType.Market,
-      side: OrderSide.Sell,
-      amount: 1,
-      reduceOnly: true,
-    });
-
-    expect(payload.execInst).toBe('ReduceOnly');
-  });
-
-  it('blocks BitMEX order amendments after exchange closure', async () => {
-    vi.mocked(Date.now).mockReturnValue(BITMEX_EXCHANGE_CLOSURE_MS);
-    const exchange = createExchangeLike();
-    exchange.unlimitedXHR = {
-      put: vi.fn().mockResolvedValue({ data: {} }),
-    } as any;
-
-    await expect(
-      exchange.updateOrder({
-        order: {
-          id: 'order-closed',
-          symbol: 'XBTUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          status: OrderStatus.Open,
-          price: 50000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          lastUpdate: 0,
-        },
-        update: { price: 49900 },
-      }),
-    ).rejects.toThrow('BitMEX exchange services ended');
-    expect(exchange.unlimitedXHR.put).not.toHaveBeenCalled();
   });
 
   it('maps ETHUSD quanto position quantities back to base ETH', () => {

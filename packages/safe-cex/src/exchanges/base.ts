@@ -2,8 +2,6 @@ import type { Axios, AxiosInstance } from 'axios';
 import type { Store } from '../store/store.interface';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 
-import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import createHmac from 'create-hmac';
 import uniq from 'lodash/uniq';
 import { nanoid } from 'nanoid';
@@ -72,55 +70,6 @@ const normalizeSymbols = (symbols: string[]): string[] => {
 
   return Array.from(deduped);
 };
-
-/** Minimal shape of the reconnect diagnostics a socket exposes. */
-interface SocketDiagnosticsSource {
-  lastCloseCode?: number;
-  lastCloseAt?: number;
-  lifetimeCloseCount?: number;
-  onCloseCount?: number;
-  isReconnectPauseActive?: boolean;
-}
-
-export const summarizeSocketDiagnostics = <K extends 'public' | 'private'>(
-  sockets: readonly SocketDiagnosticsSource[],
-  kind: K,
-) => {
-  let closeCode: number | undefined;
-  let closeAt = -1;
-  let closeCountTotal = 0;
-  let closeStreak = 0;
-  let paused = false;
-
-  for (const socket of sockets) {
-    if (!socket) continue;
-
-    closeCountTotal += socket.lifetimeCloseCount ?? 0;
-    closeStreak += socket.onCloseCount ?? 0;
-    if (socket.isReconnectPauseActive) paused = true;
-
-    // Most-recent close wins; a socket that never closed has lastCloseAt 0.
-    const at = socket.lastCloseAt ?? 0;
-    if (socket.lastCloseCode !== undefined && at > closeAt) {
-      closeAt = at;
-      closeCode = socket.lastCloseCode;
-    }
-  }
-
-  return {
-    [`${kind}CloseCode`]: closeCode,
-    [`${kind}CloseCountTotal`]: closeCountTotal,
-    [`${kind}CloseStreak`]: closeStreak,
-    [`${kind}ReconnectPaused`]: paused,
-  } as Record<`${K}CloseCode`, number | undefined> &
-    Record<`${K}CloseCountTotal` | `${K}CloseStreak`, number> &
-    Record<`${K}ReconnectPaused`, boolean>;
-};
-
-// 7 doublings caps a 500ms tick at 60s; the streak stops growing there so a
-// long outage can't push recovery latency past a minute.
-const AUTH_FAILURE_MAX_STREAK = 7;
-const AUTH_FAILURE_MAX_TICK_INTERVAL = 60_000;
 
 /**
  * BaseExchange supplies a few deliberately inert fallbacks so that older
@@ -419,8 +368,6 @@ export class BaseExchange implements Exchange {
     return !!this.options.key && (!!this.options.secret || !!this.options.remoteSigner);
   }
 
-  private _authFailureStreak = 0;
-
   /**
    * Per-exchange REST tick interval. Metadata is the source of truth;
    * `options.extra.tickInterval` is an explicit override (the web wrapper's
@@ -431,38 +378,11 @@ export class BaseExchange implements Exchange {
    * If metadata is missing and there is no override, returns undefined and
    * `loop()` warns at the use site. The fix is to set `tickInterval` on the
    * exchange's metadata entry — not to add another fallback here.
-   *
-   * Scaled by `_authFailureStreak` so a rejected key stops hammering the venue.
    */
   protected getTickInterval(): number | undefined {
     const override = this.options.extra?.tickInterval;
-    const base = override && override > 0 ? override : getExchangeMetadata(this._exchangeName).tickInterval;
-    if (!base || this._authFailureStreak === 0) return base;
-
-    return Math.min(base * 2 ** this._authFailureStreak, AUTH_FAILURE_MAX_TICK_INTERVAL);
-  }
-
-  /**
-   * Exponential tick backoff for an account whose credentials the venue keeps
-   * rejecting. A bad key otherwise polls forever at the metadata tick interval
-   * — bybit at 500ms emitted 120 errors in a 30s window, and nothing anywhere
-   * backed off. Backoff rather than a hard stop, so fixing the key or riding
-   * out venue maintenance still recovers on its own.
-   *
-   * Call from the transport layer, which is the only place that sees the HTTP
-   * status; classification from an error *message* is unreliable.
-   */
-  recordAuthFailure() {
-    if (this._authFailureStreak < AUTH_FAILURE_MAX_STREAK) this._authFailureStreak += 1;
-  }
-
-  recordAuthSuccess() {
-    this._authFailureStreak = 0;
-  }
-
-  /** Test/diagnostic accessor — not part of the consumer contract. */
-  get authFailureStreak() {
-    return this._authFailureStreak;
+    if (override && override > 0) return override;
+    return getExchangeMetadata(this._exchangeName).tickInterval;
   }
 
   /**
@@ -1538,18 +1458,6 @@ export class BaseExchange implements Exchange {
   };
 
   /** Internal method to sync health without starting watchdog (used by audit) */
-  /**
-   * Collapses per-socket reconnect diagnostics into scalars for the store.
-   *
-   * An exchange can hold several sockets of the same kind, so: the close code
-   * comes from the most-recently-closed one (`lastCloseAt`), counts are summed,
-   * and the pause flag is true if ANY socket has given up — that is the state
-   * worth surfacing, since it means nothing is retrying.
-   *
-   * Not covered: `ExternalPublicDataProvider` is not a `BaseWebSocket` and is
-   * absent from `getPublicSockets()`, so gateway-mode accounts report no close
-   * code even though the gateway drives `publicHealthy`.
-   */
   private syncSocketHealthToStoreInternal = () => {
     const publicSockets = this.getPublicSockets();
     const privateSockets = this.getPrivateSockets();
@@ -1585,8 +1493,6 @@ export class BaseExchange implements Exchange {
       privateInitialized,
       publicLastMessage,
       privateLastMessage,
-      ...summarizeSocketDiagnostics(publicSockets, 'public'),
-      ...summarizeSocketDiagnostics(privateSockets, 'private'),
     });
   };
 
@@ -1638,55 +1544,18 @@ export class BaseExchange implements Exchange {
 
   /**
    * Sign a remote WS auth request.
-   *
-   * Every branch must match its venue's local (non-remoteSigner) signing
-   * expression byte for byte, or the private feed authenticates as garbage and
-   * dies silently — no error, just no fills. The `never` default makes adding an
-   * outputFormat without a signer a compile error rather than a silent
-   * degradation to plain hex, which is exactly how Kraken broke.
-   *
-   * Exchanges whose WS auth is not HMAC-SHA256 over the secret (Kraken's
-   * challenge, dexes, wallet-based) override this method instead.
+   * Default: HMAC-SHA256 with the exchange's secret. Exchanges with non-HMAC
+   * WS auth (dexes, wallet-based) should override this method.
    */
   public signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
-    const { toSign, outputFormat } = request.wsAuth ?? {};
-    if (!toSign || !outputFormat) {
-      return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
-    }
+    const { toSign, outputFormat } = request.wsAuth!;
     const secret = this.options.secret;
     if (!secret) {
       return { id: request.id, error: 'No secret available for WS auth signing' };
     }
-
-    switch (outputFormat) {
-      case 'hex':
-        return { id: request.id, wsAuthSignature: createHmac('sha256', secret).update(toSign).digest('hex') };
-      case 'base64':
-        return { id: request.id, wsAuthSignature: createHmac('sha256', secret).update(toSign).digest('base64') };
-      case 'hex-base64': {
-        // blofin: base64 of the hex digest string, not of the raw digest.
-        const hex = createHmac('sha256', secret).update(toSign).digest('hex');
-        return { id: request.id, wsAuthSignature: Buffer.from(hex).toString('base64') };
-      }
-      case 'apexomni-base64': {
-        // apexomni: the HMAC key is the base64 of the secret, not the secret.
-        const key = Buffer.from(secret).toString('base64');
-        return { id: request.id, wsAuthSignature: createHmac('sha256', key).update(toSign).digest('base64') };
-      }
-      case 'bitunix-double-sha256': {
-        // bitunix is NOT HMAC: sha256(sha256(nonce+timestamp+apiKey) + secret),
-        // with the secret concatenated as a plain string. `toSign` carries the
-        // inner digest input.
-        const inner = bytesToHex(sha256(utf8ToBytes(toSign)));
-        return { id: request.id, wsAuthSignature: bytesToHex(sha256(utf8ToBytes(inner + secret))) };
-      }
-      case 'kraken-challenge':
-        return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
-      default: {
-        const unhandled: never = outputFormat;
-        return { id: request.id, error: `Unsupported WS auth outputFormat: ${String(unhandled)}` };
-      }
-    }
+    const digestFormat = outputFormat === 'hex' || outputFormat === 'base64' ? outputFormat : 'hex';
+    const signature = createHmac('sha256', secret).update(toSign).digest(digestFormat);
+    return { id: request.id, wsAuthSignature: signature };
   };
 
   // Whether order is TP/SL or trailing stop

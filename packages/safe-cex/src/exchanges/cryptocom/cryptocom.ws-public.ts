@@ -1,4 +1,4 @@
-import { LogSeverity, type Candle, type OHLCVOptions, type OrderBook, type Ticker } from '../../types';
+import type { Candle, OHLCVOptions, OrderBook, Ticker } from '../../types';
 import type {
   CryptocomWsBookUpdate,
   CryptocomWsCandlestickUpdate,
@@ -15,18 +15,9 @@ import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { CryptocomExchange } from './cryptocom.exchange';
-import {
-  CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS,
-  CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS,
-  mapCandlestickInterval,
-  WSS_URLS,
-} from './cryptocom.types';
+import { mapCandlestickInterval, WSS_URLS } from './cryptocom.types';
 
 const SUBSCRIBE_CHUNK_SIZE = 100;
-const CRYPTOCOM_PUBLIC_SESSION_LIMIT = 400;
-// Crypto.com rejects market-data sockets above 400 subscriptions. Keep enough
-// headroom for the active chart's orderbook/candle streams and reconnect churn.
-const MAX_PUBLIC_SUBSCRIPTIONS_PER_CONNECTION = 350;
 
 export type CryptocomMarketDataSubscription = {
   instrumentName: string;
@@ -34,7 +25,6 @@ export type CryptocomMarketDataSubscription = {
 };
 
 export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
-  protected override treatAnyMessageAsPong = true;
   private subscriptions: Set<string> = new Set();
   private marketIdsByIndexInstrument = new Map<string, Set<string>>();
   private messageId = 1;
@@ -66,14 +56,6 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
       }
     }
   };
-
-  protected shouldEnforcePongMissReconnect = (): boolean => false;
-
-  getWatchdogStaleThresholdMs = (): number => CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS;
-
-  getWatchdogPingThresholdMs = (): number => CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS;
-
-  ping = (): void => {};
 
   private resubscribe = () => {
     if (this.subscriptions.size > 0) {
@@ -140,64 +122,22 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
 
   // Batched subscribe used at startup. 100 channels is a conservative local
   // frame size; Crypto.com documents a 100 market-data request/second limit,
-  // and a 400-subscription per-session cap.
+  // but does not document a per-frame channel count or total connection cap.
   subscribeToTickers = (symbols: string[]) => {
     this.registerAndSubscribe(symbols.map((symbol) => `ticker.${symbol}`));
   };
 
   subscribeToMarketData = (markets: CryptocomMarketDataSubscription[]) => {
-    const channels: string[] = [];
-    let skippedTickerChannels = 0;
-    let skippedValuationChannels = 0;
-    let skippedInvalidIndexChannels = 0;
+    const channels = markets.flatMap(({ instrumentName, indexInstrumentName }) => {
+      const marketChannels = [`ticker.${instrumentName}`, `mark.${instrumentName}`, `funding.${instrumentName}`];
+      if (!indexInstrumentName) return marketChannels;
 
-    const queueChannel = (channel: string, optional = false) => {
-      if (this.subscriptions.has(channel) || channels.includes(channel)) return true;
-      if (this.subscriptions.size + channels.length >= MAX_PUBLIC_SUBSCRIPTIONS_PER_CONNECTION) {
-        if (optional) {
-          skippedValuationChannels += 1;
-        } else {
-          skippedTickerChannels += 1;
-        }
-        return false;
-      }
-
-      channels.push(channel);
-      return true;
-    };
-
-    // Tickers keep the market list live and have first claim on the session cap.
-    for (const { instrumentName } of markets) {
-      queueChannel(`ticker.${instrumentName}`);
-    }
-
-    // Mark/index/funding are useful enrichments, but subscribing all three for
-    // every perpetual can exceed Crypto.com's 400-subscription session limit.
-    for (const { instrumentName, indexInstrumentName } of markets) {
-      queueChannel(`mark.${instrumentName}`, true);
-
-      if (indexInstrumentName?.endsWith('-INDEX')) {
-        if (queueChannel(`index.${indexInstrumentName}`, true)) {
-          const marketIds = this.marketIdsByIndexInstrument.get(indexInstrumentName) || new Set<string>();
-          marketIds.add(instrumentName);
-          this.marketIdsByIndexInstrument.set(indexInstrumentName, marketIds);
-        }
-      } else if (indexInstrumentName) {
-        skippedInvalidIndexChannels += 1;
-      }
-
-      queueChannel(`funding.${instrumentName}`, true);
-    }
-
-    if (skippedTickerChannels > 0 || skippedValuationChannels > 0 || skippedInvalidIndexChannels > 0) {
-      const skippedSummary =
-        `${skippedTickerChannels} ticker / ${skippedValuationChannels} valuation / ` +
-        `${skippedInvalidIndexChannels} invalid index`;
-      this.parent.log(
-        `Crypto.com public WS cap ${MAX_PUBLIC_SUBSCRIPTIONS_PER_CONNECTION}/${CRYPTOCOM_PUBLIC_SESSION_LIMIT}; skipped ${skippedSummary} channels`,
-        LogSeverity.Warning,
-      );
-    }
+      const marketIds = this.marketIdsByIndexInstrument.get(indexInstrumentName) || new Set<string>();
+      marketIds.add(instrumentName);
+      this.marketIdsByIndexInstrument.set(indexInstrumentName, marketIds);
+      marketChannels.splice(2, 0, `index.${indexInstrumentName}`);
+      return marketChannels;
+    });
 
     this.registerAndSubscribe(channels);
   };
@@ -257,7 +197,6 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         // every data frame because Crypto.com now embeds `code: 0` on data
         // frames as well. Dispatch first, then fall back to the response path.
         if (json.result && json.result.channel) {
-          this.recordMessageHandlerStats(json.result.channel);
           switch (json.result.channel) {
             case 'ticker':
               this.handleTickerUpdate(json.result as CryptocomWsTickerUpdate);

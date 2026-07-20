@@ -5,10 +5,10 @@ sidebar_position: 2
 
 # Quickstart
 
-Seven runnable recipes plus the current webhook status. Pick the one
-closest to what you're doing and paste it. Every trading recipe assumes
-you already have a focused symbol and an account selected — run
-[`status`](./reference/commands.md#status) to confirm.
+Eight runnable recipes. Pick the one closest to what you're doing and
+paste it. Every recipe assumes you already have a focused symbol and an
+account selected — run [`status`](./reference/commands.md#status) to
+confirm.
 
 > **First-timer?** Flip simulation on for the first hour:
 > `sim on`. Every write-op short-circuits without hitting the exchange.
@@ -164,27 +164,25 @@ that every command you type in the web CLI runs in the standalone process
 
 ---
 
-## 8. TradingView webhooks — not hosted yet
+## 8. Webhook from TradingView
 
-TradingView-to-CLI webhooks are not currently available as a hosted
-Tealstreet feature. The standalone CLI has local listener and hook
-building blocks, but Tealstreet does not yet run the public relay that
-would accept TradingView alerts and route them into a user's local CLI.
-
-Do not rely on TradingView alerts to trigger CLI trades through
-Tealstreet today. Advanced users can experiment with their own public
-tunnel to the local listener, but that is self-managed and not the
-supported hosted path.
-
-This is separate from exchange geo-restrictions. If the CLI can execute a
-command but Bybit returns a 403 geo-block, use a VPN or add the account
-with Tealstreet proxy routing:
+Inside the standalone REPL:
 
 ```text
-> accounts add -n mybybit -e bybit -k <KEY> -s <SECRET> --tealstreet-proxy --proxy-region SG
+> hook create alert "chase sell %all% 20% reduce"
+Created hook alert
+POST https://your.tunnel/hook/<id>
+X-Hook-Token: <secret>
 ```
 
-→ [Current hook/listener status](./operations/hooks-and-webhooks.md)
+In the TradingView alert dialog, paste the URL into "Webhook URL" and
+the header into "Headers" (one per line). TradingView fires → the CLI
+executes the command on the account the hook is scoped to. The hook
+fires on the listener, not the exchange — see
+[Hooks & webhooks](./operations/hooks-and-webhooks.md) for the full
+fire shape and the `listener.remoteExec` kill switch.
+
+→ [Deep dive: Webhook from TradingView](./recipes/webhook-from-tradingview.md)
 
 ---
 

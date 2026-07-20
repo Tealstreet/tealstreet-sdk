@@ -14,20 +14,6 @@ import { BaseExchange } from '../base';
 import { getBybitResponseMeta } from './bybit.response';
 import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.types';
 
-// Credential failures that will not self-heal on retry, so the tick backoff
-// should treat them like a 401. Deliberately excludes 10004 ("error sign"),
-// which is usually clock drift and is already retried.
-const BYBIT_AUTH_RET_CODES = new Set([
-  10003, // API key is invalid
-  10005, // permission denied for current apikey
-  10010, // unmatched IP
-  33004, // api key has expired
-]);
-
-// KLINE is fetched unsigned (headers are stripped below) and shares this
-// client, so header presence is what distinguishes a credential-proving call.
-const isSignedRequest = (config: { headers?: any } | undefined) => Boolean(config?.headers?.['X-BAPI-SIGN']);
-
 const isErrorSignature = (error: any) => {
   const isNetwork = isNetworkError(error);
   const isErrSign =
@@ -116,43 +102,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   xhr.interceptors.response.use(async (response) => {
     const responseMeta = getBybitResponseMeta(response.data);
-
-    // The HOW adapter resolves non-2xx without axios' settle(), so an auth
-    // failure arrives here as a *success* carrying `{"raw_response":""}` — no
-    // retCode, no retMsg. Callers then hit `v(data,'retMsg') !== 'OK'` and
-    // emitAndLogError(undefined), which base.ts renders as the contentless
-    // 'Unknown Exchange Error' (89 of them in one 30s e2e window). Synthesize
-    // the status so every caller reports something real and the health
-    // monitor's auth_invalid classification can actually match.
-    if (!responseMeta.hasExplicitStatus && response.status >= 400) {
-      const isAuthStatus = response.status === 401 || response.status === 403;
-      // Spell out the reason rather than a bare `HTTP 401`: the tunnel frame
-      // carries no statusText, and both the health monitor's `auth_invalid`
-      // patterns and the e2e toast assertion match on words like
-      // "unauthorized"/"api key", not on the numeric status.
-      const reason = isAuthStatus
-        ? `${response.status === 401 ? 'Unauthorized' : 'Forbidden'} — API key rejected`
-        : response.statusText;
-      response.data = {
-        ...(response.data ?? {}),
-        retCode: response.status,
-        retMsg: `HTTP ${response.status}${reason ? ` ${reason}` : ''}`,
-      };
-      if (isAuthStatus) exchange.recordAuthFailure();
-      return response;
-    }
-
-    // Bybit also returns credential failures inside a normal envelope, both on
-    // 4xx and on HTTP 200, so status alone under-counts the streak.
-    if (responseMeta.retCode !== undefined && BYBIT_AUTH_RET_CODES.has(responseMeta.retCode)) {
-      exchange.recordAuthFailure();
-    } else if (responseMeta.isSuccess && isSignedRequest(response.config)) {
-      // Only a signed request proves the credentials work — KLINE is
-      // deliberately unsigned and shares this client, so a chart fetch during
-      // backoff must not reset the streak.
-      exchange.recordAuthSuccess();
-    }
-
     if (response.data && responseMeta.hasExplicitStatus && !responseMeta.isSuccess) {
       const retMsg = responseMeta.retMsg || '';
       if (retMsg.includes('recv')) {

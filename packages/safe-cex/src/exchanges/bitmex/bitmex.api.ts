@@ -29,8 +29,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         serialize: (params) => qs.stringify(params, { arrayFormat: 'repeat' }),
       },
       headers: {
+        'api-key': options.key,
         'Content-Type': 'application/json',
-        ...(options.key ? { 'api-key': options.key } : {}),
       },
     },
     options,

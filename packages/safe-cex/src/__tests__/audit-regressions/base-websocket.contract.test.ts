@@ -18,11 +18,6 @@ const createParent = (isDisposed = false) =>
   }) as unknown as BaseExchange;
 
 describe('BaseWebSocket documented runtime contracts', () => {
-  class RelaxedWatchdogSocket extends BaseWebSocket<BaseExchange> {
-    getWatchdogStaleThresholdMs = (): number => 90_000;
-    getWatchdogPingThresholdMs = (): number => 30_000;
-  }
-
   test('a disposed exchange cannot send or trigger socket resurrection', () => {
     const socket = new BaseWebSocket(createParent(true));
     const send = vi.fn();
@@ -69,26 +64,6 @@ describe('BaseWebSocket documented runtime contracts', () => {
 
     socket.send(JSON.stringify({ op: 'subscribe', args: ['SPONGEUSDT'] }));
 
-    expect(reconnect).toHaveBeenCalledTimes(1);
-  });
-
-  test('checkLastReceived respects exchange-specific idle thresholds', () => {
-    const socket = new RelaxedWatchdogSocket(createParent());
-    const reconnect = vi.spyOn(socket, 'reconnect').mockResolvedValue();
-    const ping = vi.spyOn(socket, 'ping').mockImplementation(() => undefined);
-
-    socket.lastReceived = Date.now() - WS_RECONNECT_THRESHOLD_MS - 1;
-    socket.checkLastReceived();
-    expect(reconnect).not.toHaveBeenCalled();
-    expect(ping).not.toHaveBeenCalled();
-
-    socket.lastReceived = Date.now() - 31_000;
-    socket.checkLastReceived();
-    expect(ping).toHaveBeenCalledTimes(1);
-    expect(reconnect).not.toHaveBeenCalled();
-
-    socket.lastReceived = Date.now() - 91_000;
-    socket.checkLastReceived();
     expect(reconnect).toHaveBeenCalledTimes(1);
   });
 

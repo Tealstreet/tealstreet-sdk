@@ -8,11 +8,7 @@ import { BaseHandler } from './BaseHandler';
 interface SymbolSub {
   unsub: () => void;
   throttleFn: any;
-  // subIds.size IS the refcount. A separate counter desyncs the moment the same
-  // subId subscribes twice — Set.add is a no-op but the counter still climbs, and
-  // the matching unsubscribe then leaves it stuck above zero, so the venue
-  // subscription never tears down. Clients replay subscriptions after a reconnect,
-  // which makes duplicate subIds routine rather than exotic.
+  refCount: number;
   subIds: Set<string>;
 }
 
@@ -62,7 +58,8 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         const existing = this._subsBySymbol.get(symbol);
 
         if (existing) {
-          // Already subscribed to this symbol — just track the extra subscriber
+          // Already subscribed to this symbol — just bump refcount
+          existing.refCount++;
           existing.subIds.add(subId);
           return;
         }
@@ -80,6 +77,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         this._subsBySymbol.set(symbol, {
           unsub,
           throttleFn: f,
+          refCount: 1,
           subIds: new Set([subId]),
         });
         break;
@@ -91,8 +89,9 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         for (const [symbol, sub] of this._subsBySymbol) {
           if (sub.subIds.has(subId)) {
             sub.subIds.delete(subId);
+            sub.refCount--;
 
-            if (sub.subIds.size === 0) {
+            if (sub.refCount <= 0) {
               // Last subscriber — actually unsubscribe from exchange
               try {
                 sub.unsub();

@@ -35,10 +35,10 @@ describe('lighter.builder-approval utilities', () => {
       accountIndex: 718895n,
       apiKeyIndex: 2,
       integratorAccountIndex: 158385n,
-      maxPerpsTakerFee: 250,
-      maxPerpsMakerFee: 0,
-      maxSpotTakerFee: 250,
-      maxSpotMakerFee: 0,
+      maxPerpsTakerFee: 300,
+      maxPerpsMakerFee: 300,
+      maxSpotTakerFee: 300,
+      maxSpotMakerFee: 300,
       approvalExpiryMs: 1777588355553n,
       chainId: 304,
     });
@@ -47,8 +47,6 @@ describe('lighter.builder-approval utilities', () => {
     expect(message).toContain('nonce: 0x0000000000000397');
     expect(message).toContain('account index: 0x00000000000af82f');
     expect(message).toContain('integrator account index: 0x0000000000026ab1');
-    expect(message).toContain('max perps taker fee: 0x00000000000000fa');
-    expect(message).toContain('max perps maker fee: 0x0000000000000000');
     expect(message).toContain('chainId: 0x0000000000000130');
     expect(message).toContain('Only sign this message for a trusted client!');
   });
@@ -62,10 +60,10 @@ describe('lighter.builder-approval utilities', () => {
       chainId: 304,
       expectedWalletAddress: '0x22b270B95599989A3D2A54BdcCbb75e21e772630',
       integratorAccountIndex: 158385n,
-      maxPerpsMakerFee: 0,
-      maxPerpsTakerFee: 250,
-      maxSpotMakerFee: 0,
-      maxSpotTakerFee: 250,
+      maxPerpsMakerFee: 300,
+      maxPerpsTakerFee: 300,
+      maxSpotMakerFee: 300,
+      maxSpotTakerFee: 300,
       nonce: 919n,
       testnet: false,
     });
@@ -79,7 +77,7 @@ describe('lighter.builder-approval utilities', () => {
     expect(url).toContain('chainId=304');
   });
 
-  it('treats an unexpired approval below the default taker fee cap as not approved', async () => {
+  it('treats an unexpired approval below the required fee cap as not approved', async () => {
     lighterApiGetMock.mockResolvedValueOnce({
       accounts: [
         {
@@ -100,6 +98,7 @@ describe('lighter.builder-approval utilities', () => {
 
     const result = await checkLighterBuilderApproved({
       accountIdentifier: '718895',
+      requiredFeeValue: 300,
     });
 
     expect(result.approved).toBe(false);
@@ -107,34 +106,7 @@ describe('lighter.builder-approval utilities', () => {
     expect(result.maxPerpsTakerFee).toBe(200);
   });
 
-  it('approves when maker caps are zero and taker caps cover the default fee value', async () => {
-    lighterApiGetMock.mockResolvedValueOnce({
-      accounts: [
-        {
-          l1_address: '0x22b270B95599989A3D2A54BdcCbb75e21e772630',
-          approved_integrators: [
-            {
-              account_index: 158385,
-              approval_expiry: Date.now() + 60_000,
-              max_perps_taker_fee: 250,
-              max_perps_maker_fee: 0,
-              max_spot_taker_fee: 250,
-              max_spot_maker_fee: 0,
-            },
-          ],
-        },
-      ],
-    });
-
-    const result = await checkLighterBuilderApproved({
-      accountIdentifier: '718895',
-    });
-
-    expect(result.approved).toBe(true);
-    expect(result.approvalStatus).toBe('approved');
-  });
-
-  it('preserves flat requiredFeeValue compatibility for callers that pass it explicitly', async () => {
+  it('approves when all fee caps cover the required fee value', async () => {
     lighterApiGetMock.mockResolvedValueOnce({
       accounts: [
         {

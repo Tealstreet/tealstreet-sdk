@@ -358,7 +358,7 @@ export class BitgetInverseExchange extends BitgetExchange {
     for (const order of orders) {
       try {
         const marginCoin = this.getMarginCoinForSymbol(order.symbol);
-        const [planType] = this.selectPlanTypeAndAmount(order, this.store.positions);
+        const [planType] = this.getInverseOrderPlanTypeAndAmount(order);
         await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ALGO_ORDER, {
           orderId: order.id,
           symbol: `${order.symbol}`,
@@ -399,18 +399,18 @@ export class BitgetInverseExchange extends BitgetExchange {
       const price = adjust(opts.price, market.precision.price);
       payload.triggerPrice = `${price}`;
       payload.holdSide = this.getInverseAlgoOrderSide(opts, positionMode);
-      const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
+      const [planType, amount] = this.getInverseOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
     }
 
     if (opts.type === OrderType.StopLoss && opts.price) {
       const price = adjust(opts.price, market.precision.price);
       payload.triggerPrice = `${price}`;
       payload.holdSide = this.getInverseAlgoOrderSide(opts, positionMode);
-      const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
+      const [planType, amount] = this.getInverseOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
     }
 
     if (opts.type === OrderType.TrailingStopLoss && opts.price) {
@@ -687,6 +687,39 @@ export class BitgetInverseExchange extends BitgetExchange {
       }
     }
     return orders;
+  };
+
+  /**
+   * Helper method to get order plan type and amount for inverse
+   */
+  private getInverseOrderPlanTypeAndAmount = (opts: PlaceOrderOpts | Order): [string, number] => {
+    const amount = 'amount' in opts ? opts.amount : 0;
+    const type = opts.type;
+
+    if (type === OrderType.TrailingStopLoss) return ['track_plan', amount];
+
+    let infiniteStop = true;
+    if (amount !== 0) {
+      const foundPosition = this.store.positions.find(
+        (p) =>
+          p.symbol === opts.symbol &&
+          p.side === (opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
+          p.contracts >= amount,
+      );
+      if (foundPosition) {
+        infiniteStop = false;
+      }
+    }
+
+    if (infiniteStop) {
+      if (type === OrderType.StopLoss) return ['pos_loss', 0];
+      if (type === OrderType.TakeProfit) return ['pos_profit', 0];
+    } else {
+      if (type === OrderType.StopLoss) return ['loss_plan', amount];
+      if (type === OrderType.TakeProfit) return ['profit_plan', amount];
+    }
+
+    throw new Error(`Unknown order type: ${type}`);
   };
 
   /**

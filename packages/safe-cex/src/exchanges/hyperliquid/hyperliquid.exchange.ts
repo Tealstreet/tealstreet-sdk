@@ -52,13 +52,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
 import { checkBuilderFeeApproved } from './hyperliquid.builderFee';
-import {
-  getBuilderAddress,
-  PERP_MAX_PRICE_DECIMALS,
-  SPOT_ASSET_INDEX_OFFSET,
-  SPOT_MAX_PRICE_DECIMALS,
-  TEALSTREET_BUILDER_FEE,
-} from './hyperliquid.constants';
+import { getBuilderAddress, TEALSTREET_BUILDER_FEE } from './hyperliquid.constants';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
   fetchCoreMetaAndAssetCtxsWithFallback,
@@ -82,11 +76,8 @@ import {
   Meta,
   PerpDex,
   PerpDexs,
-  ScheduleCancelAction,
-  SpotAssetCtx,
   SpotClearinghouseState,
-  SpotMeta,
-  SpotToken,
+  ScheduleCancelAction,
 } from './hyperliquid.types';
 import { calculatePricePrecision, symbolToCoin } from './hyperliquid.utils';
 import { HyperliquidPrivateWebSocket } from './hyperliquid.ws-private';
@@ -110,7 +101,6 @@ export class HyperliquidExchange extends BaseExchange {
   private static readonly BUILDER_FEE_APPROVAL_TIMEOUT_MS = 8_000;
   private static readonly HIP3_DEX_DISCOVERY_TIMEOUT_MS = 6_000;
   private static readonly HIP3_MARKETS_LOAD_TIMEOUT_MS = 8_000;
-  private static readonly SPOT_MARKETS_LOAD_TIMEOUT_MS = 6_000;
   private static readonly USER_ROLE_RESOLVE_TIMEOUT_MS = 6_000;
   private static readonly USER_ABSTRACTION_RESOLVE_TIMEOUT_MS = 6_000;
   private static readonly SPOT_COLLATERAL_REFRESH_INTERVAL_MS = 10_000;
@@ -241,34 +231,6 @@ export class HyperliquidExchange extends BaseExchange {
     getCrossCache().removePendingOrder(orderId);
   }
 
-  // ============================================================================
-  // TIME-IN-FORCE PRESERVATION
-  // `orderUpdates` carries no `tif` for ANY market (core perps included — the
-  // field is absent from the WS frame, not just from HIP-3 ones), and `tick()`
-  // only re-fetches orders when HIP-3 dexes are configured. So for core perps
-  // the placement-time value is the only lasting source of truth.
-  // ============================================================================
-  private _placedLimitOrderTif = new Map<string, OrderTimeInForce>();
-  private readonly PLACED_TIF_CACHE_LIMIT = 500;
-
-  public rememberLimitOrderTimeInForce(orderId: string, timeInForce: OrderTimeInForce): void {
-    this._placedLimitOrderTif.delete(orderId);
-    this._placedLimitOrderTif.set(orderId, timeInForce);
-    while (this._placedLimitOrderTif.size > this.PLACED_TIF_CACHE_LIMIT) {
-      const oldest = this._placedLimitOrderTif.keys().next();
-      if (oldest.done) break;
-      this._placedLimitOrderTif.delete(oldest.value);
-    }
-  }
-
-  public getPlacedLimitOrderTimeInForce(orderId: string): OrderTimeInForce | undefined {
-    return this._placedLimitOrderTif.get(orderId);
-  }
-
-  public forgetLimitOrderTimeInForce(orderId: string): void {
-    this._placedLimitOrderTif.delete(orderId);
-  }
-
   // Cache for fake positions - invalidated when markets change
   private _fakePositionsCache: Position[] | null = null;
 
@@ -347,19 +309,8 @@ export class HyperliquidExchange extends BaseExchange {
   public shouldUseSpotCollateralBalance = (): boolean =>
     this.userAbstractionMode === 'unifiedAccount' || this.userAbstractionMode === 'portfolioMargin';
 
-  public shouldRequestPortfolioMarginSpotState = (): boolean => this.userAbstractionMode === 'portfolioMargin';
-
-  /**
-   * Whether to fetch `spotClearinghouseState` at all.
-   *
-   * Unified/portfolio-margin accounts need it because spot IS their collateral.
-   * Standard-abstraction accounts need it too once they opt into spot markets —
-   * otherwise the merged connection lists spot pairs the user can trade while
-   * `balance.coins` stays empty and the margin panel's Spot tab reads zero.
-   * The separate spot exchange this supersedes fetched it unconditionally.
-   */
-  public shouldTrackSpotHoldings = (): boolean =>
-    this.shouldUseSpotCollateralBalance() || Boolean(this.options.enableSpotMarkets);
+  public shouldRequestPortfolioMarginSpotState = (): boolean =>
+    this.userAbstractionMode === 'portfolioMargin';
 
   private resolveUserAbstractionMode = async (): Promise<void> => {
     const user = this.options.vault || this.options.applicationId;
@@ -417,37 +368,12 @@ export class HyperliquidExchange extends BaseExchange {
       return 1;
     }
 
-    // Prefer the real spot pair. Before spot markets were loaded into this
-    // store, the only reachable price was the coin's *perp* ticker, so any
-    // spot-only token (no perp listing) priced at 0 and silently contributed
-    // 0 notional to a unified-account user's balance. Perp remains the
-    // fallback for tokens with no spot pair.
-    // USDC first, then the other ~$1 stables Hyperliquid quotes spot pairs in
-    // (a live check found USDH/USDT0/USDE pairs), then the coin's perp.
-    const candidates = [
-      this.store.tickersBySymbol[`${normalizedCoin}/USDC`],
-      this.store.tickersBySymbol[`${upperCoin}/USDC`],
-      this.store.tickersBySymbol[`${upperCoin}/USDH`],
-      this.store.tickersBySymbol[`${upperCoin}/USDT0`],
-      this.store.tickersBySymbol[`${upperCoin}/USDE`],
-      this.store.tickersById[normalizedCoin],
-      this.store.tickersById[upperCoin],
-      this.store.tickersBySymbol[`${upperCoin}-PERP`],
-    ];
-
-    // Field preference stays `mark -> last -> index`, matching the behaviour
-    // before spot markets existed here. Only the SOURCE ladder above is new
-    // (prefer the real spot pair over the coin's perp). Re-ordering the fields
-    // would quietly re-value collateral for unified/portfolio-margin accounts
-    // that never opted into spot, since that balance path is not gated by
-    // `enableSpotMarkets`.
-    for (const ticker of candidates) {
-      if (!ticker) continue;
-      const price = Number(ticker.mark ?? ticker.last ?? ticker.index);
-      if (Number.isFinite(price) && price > 0) return price;
-    }
-
-    return 0;
+    const ticker =
+      this.store.tickersById[normalizedCoin] ||
+      this.store.tickersById[upperCoin] ||
+      this.store.tickersBySymbol[`${upperCoin}-PERP`];
+    const markPrice = Number(ticker?.mark ?? ticker?.last ?? ticker?.index);
+    return Number.isFinite(markPrice) && markPrice > 0 ? markPrice : 0;
   };
 
   private buildUnifiedSpotCollateralSnapshot = (
@@ -556,27 +482,15 @@ export class HyperliquidExchange extends BaseExchange {
     const accountValue = this.latestCorePerpsAccountValue;
     const used = this.latestCorePerpsUsedMargin;
     const upnl = this.latestCorePerpsUpnl;
-
-    // Standard abstraction: spot is a SEPARATE wallet from perp collateral, so
-    // total/used/free stay perp-only exactly as before. But when the account
-    // opted into spot we still surface the holdings, or the margin panel's
-    // Spot tab renders zeros for balances the user demonstrably has.
-    const spotSnapshot =
-      !this.shouldUseSpotCollateralBalance() && this.hasSpotCollateralSnapshot
-        ? this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralState.balances)
-        : null;
-
     this.store.update({
       balance: {
         total: accountValue - upnl,
         used,
         free: accountValue - used,
         upnl,
-        ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
         info: {
           userAbstractionMode: this.userAbstractionMode,
-          source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
-          ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
+          source: 'clearinghouseState',
         },
       },
     });
@@ -604,9 +518,7 @@ export class HyperliquidExchange extends BaseExchange {
     state: SpotClearinghouseState,
     source: 'rest' | 'websocket' | 'legacy' = 'legacy',
   ): void => {
-    // Spot-opted-in standard accounts also ingest this — they use it for
-    // holdings only, not collateral (see `applyBalanceFromCurrentMode`).
-    if (!this.shouldTrackSpotHoldings()) {
+    if (!this.shouldUseSpotCollateralBalance()) {
       return;
     }
 
@@ -649,7 +561,7 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   private refreshUnifiedSpotCollateralBalance = async (force = false): Promise<void> => {
-    if (!this.shouldTrackSpotHoldings()) {
+    if (!this.shouldUseSpotCollateralBalance()) {
       return;
     }
 
@@ -896,6 +808,7 @@ export class HyperliquidExchange extends BaseExchange {
         `Core-perp account state fetched (${summary.sourceField}): total=${summary.accountValue.toFixed(2)}, used=${used.toFixed(2)}, free=${free.toFixed(2)}`,
         LogSeverity.Info,
       );
+
     };
 
     try {
@@ -936,36 +849,6 @@ export class HyperliquidExchange extends BaseExchange {
     return undefined;
   };
 
-  /**
-   * Hyperliquid reads are unauthenticated — `/info` takes the wallet address as
-   * a parameter — so a saved account whose private key no longer matches its API
-   * wallet loads looking perfectly healthy and only fails when the user tries to
-   * trade. `validateAccount` catches this, but it only runs on the add-key form,
-   * never for an account restored from storage. Warn once at startup instead of
-   * letting the first rejected order be the notification.
-   *
-   * Deliberately non-fatal: public data and read-only use still work, and the
-   * pair can legitimately be unset for wallet-based connections.
-   */
-  private warnOnMismatchedApiWallet = (explicitPublicDataOnly: boolean) => {
-    if (explicitPublicDataOnly) return;
-    const { applicationId, key, secret, vault } = this.options;
-    const wallet = key || vault || applicationId;
-    if (!wallet || !secret) return;
-    // A malformed secret makes ethers throw rather than return false. That is
-    // still invalid credentials, and startup must never fail on the diagnostic.
-    try {
-      if (validateWalletAndPrivateKey(secret, wallet)) return;
-    } catch {
-      // fall through to the warning
-    }
-
-    this.emitAndLogError(
-      `Hyperliquid credentials are invalid: the saved private key does not match API wallet ${wallet}. ` +
-        `Orders will be rejected until the account is re-added.`,
-    );
-  };
-
   start = async () => {
     const useExternalPublicData = await this.initExternalPublicData();
     const explicitPublicDataOnly = this.options.publicDataOnly === true;
@@ -976,8 +859,6 @@ export class HyperliquidExchange extends BaseExchange {
       await this.resolveApplicationIdFromKey();
       if (this.isDisposed) return;
     }
-
-    this.warnOnMismatchedApiWallet(explicitPublicDataOnly);
 
     const shouldStartPrivateData = !explicitPublicDataOnly && this.hasPrivateSessionIdentity;
     const shouldMarkPrivateLoaded = explicitPublicDataOnly || shouldStartPrivateData;
@@ -1064,7 +945,7 @@ export class HyperliquidExchange extends BaseExchange {
       if (this.isDisposed) return;
 
       this.privateWebsocket.connectAndSubscribe();
-      if (this.shouldTrackSpotHoldings()) {
+      if (this.shouldUseSpotCollateralBalance()) {
         this.requestUnifiedSpotCollateralRefresh(true);
       }
     }
@@ -1202,7 +1083,6 @@ export class HyperliquidExchange extends BaseExchange {
 
   dispose = () => {
     this._fetchOrdersInFlight = null;
-    this._placedLimitOrderTif.clear();
 
     // Clear any pending debounced order refresh
     if (this._orderRefreshDebounceTimer) {
@@ -1511,10 +1391,7 @@ export class HyperliquidExchange extends BaseExchange {
 
     // Fetch core startup data in parallel.
     // HIP-3 discovery is best-effort and bounded by a startup timeout to avoid blocking core perps.
-    // Spot rides along in the same parallel batch rather than running after the
-    // HIP-3 loop — sequencing it there would add its whole timeout budget on
-    // top of HIP-3's, lengthening worst-case startup for every account.
-    const [coreMetaAndAssets, fees, hip3Dexs, spot] = await Promise.all([
+    const [coreMetaAndAssets, fees, hip3Dexs] = await Promise.all([
       fetchCoreMetaAndAssetCtxs(),
       this.fetchFee(),
       this.withStartupTimeout(
@@ -1522,12 +1399,6 @@ export class HyperliquidExchange extends BaseExchange {
         HyperliquidExchange.HIP3_DEX_DISCOVERY_TIMEOUT_MS,
         'HIP-3 DEX discovery',
         [],
-      ),
-      this.withStartupTimeout<{ markets: Market[]; tickers: Ticker[] }>(
-        this.fetchSpotMarketsAndTickers(),
-        HyperliquidExchange.SPOT_MARKETS_LOAD_TIMEOUT_MS,
-        'spot markets loading',
-        { markets: [], tickers: [] },
       ),
     ]);
 
@@ -1585,207 +1456,7 @@ export class HyperliquidExchange extends BaseExchange {
       }
     }
 
-    // Spot is best-effort and never blocks perps: `fetchSpotMarketsAndTickers`
-    // swallows its own errors and the timeout above falls back to empty.
-    if (spot.markets.length > 0) {
-      markets.push(...spot.markets);
-      tickers.push(...spot.tickers);
-      this.log(`Loaded ${spot.markets.length} Hyperliquid spot markets`, LogSeverity.Info);
-    }
-
     return [markets, tickers];
-  };
-
-  /**
-   * Display name for a spot token, matching what Hyperliquid's own UI shows.
-   *
-   * HyperCore has no native BTC/ETH/SOL — those are bridged by Unit and carry
-   * a `U` prefix on-chain (`UBTC`, `UETH`). The API only ever returns the
-   * prefixed name; Hyperliquid's frontend strips it for display, which is why
-   * their UI reads `ETH/USDC` while `spotMeta` says `UETH`. We mirror that so
-   * users see the same market names in both apps.
-   *
-   * Two guards make this safe rather than a blind prefix strip:
-   *
-   * - Only tokens whose `fullName` is `Unit <asset>` are considered, so a
-   *   token legitimately named `UNI`/`USDC` is never mangled.
-   * - The stripped name is rejected if it collides with a real, distinct token.
-   *   `UPUMP` (Unit Pump Fun), `UMON` and `UANSEM` each have an unrelated
-   *   natively-issued token already using the bare name, so those keep their
-   *   prefix. Aliasing them would present two different assets under one name.
-   *
-   * Display only — `symbol`, `base` and `id` keep the venue's real names, so
-   * routing, the order wire, and `marketsBySymbol` are untouched.
-   */
-  private resolveSpotDisplayName = (token: SpotToken, tokenNames: Set<string>): string => {
-    const isUnitBridged = typeof token.fullName === 'string' && token.fullName.startsWith('Unit ');
-    if (!isUnitBridged || !/^U[A-Z0-9]/.test(token.name)) return token.name;
-
-    const stripped = token.name.slice(1);
-    return stripped && !tokenNames.has(stripped) ? stripped : token.name;
-  };
-
-  /**
-   * Load Hyperliquid spot pairs into the same store as perps.
-   *
-   * Safe to merge because the namespaces are disjoint by construction:
-   * spot symbols are `TOKEN/{QUOTE}` (perps are `BASE-PERP`, HIP-3 are
-   * `DEX|ASSET-PERP`) and spot asset indices are offset by
-   * `SPOT_ASSET_INDEX_OFFSET`. Markets carry `isSpot: true`, which is what
-   * every downstream consumer (order forms, margin widget, position
-   * synthesis) branches on — do not reintroduce a class-level spot flag.
-   */
-  private fetchSpotMarketsAndTickers = async (): Promise<{ markets: Market[]; tickers: Ticker[] }> => {
-    const markets: Market[] = [];
-    const tickers: Ticker[] = [];
-
-    // Opt-in per account. Default-off keeps a perp trader's market list and
-    // request volume byte-identical to before the merge — spot costs an extra
-    // startup REST call and roughly doubles the market count, and most users
-    // never touch it. The toggle lives on the account form.
-    if (!this.options.enableSpotMarkets) {
-      return { markets, tickers };
-    }
-
-    try {
-      const { data } = await this.infoXhr.post<[SpotMeta, SpotAssetCtx[]]>(
-        ENDPOINTS.INFO,
-        { type: INFO_TYPES.SPOT_META_AND_ASSET_CTXS },
-        { headers: { 'Content-Type': 'application/json' } },
-      );
-
-      const [meta, assets] = data ?? [];
-      if (!meta?.universe || !Array.isArray(assets)) {
-        this.log('Malformed spotMetaAndAssetCtxs response; skipping spot markets', LogSeverity.Warning);
-        return { markets, tickers };
-      }
-
-      const tokenByIndex: Record<number, SpotToken> = {};
-      for (let i = 0; i < meta.tokens.length; i++) {
-        tokenByIndex[meta.tokens[i].index] = meta.tokens[i];
-      }
-
-      // Join asset contexts by `coin`, NOT positionally. Unlike the perp
-      // `metaAndAssetCtxs` (where `assets[i]` lines up with `universe[i]`),
-      // the spot response returns more contexts than universe entries
-      // (316 universe vs 707 ctxs as of 2026-07-27) and they are not in
-      // universe order — a positional join mismatched 245 of 316 pairs in a
-      // live check, i.e. it would silently price most spot markets off the
-      // wrong asset. Build the index once rather than a linear `find` per pair.
-      const assetCtxByCoin: Record<string, SpotAssetCtx> = {};
-      for (let i = 0; i < assets.length; i++) {
-        const coin = assets[i]?.coin;
-        if (coin) assetCtxByCoin[coin] = assets[i];
-      }
-
-      const tokenNames = new Set<string>();
-      for (let i = 0; i < meta.tokens.length; i++) tokenNames.add(meta.tokens[i].name);
-
-      for (let i = 0; i < meta.universe.length; i++) {
-        const sourceMarket = meta.universe[i];
-        const token = tokenByIndex[sourceMarket.tokens?.[0]];
-        // `tokens` is [base, quote]. The quote is NOT always USDC — a live
-        // check found USDH (11), USDT0 (5) and USDE (1) alongside USDC (299).
-        // Hardcoding USDC produced FIVE duplicate symbols (`HYPE/USDC` three
-        // times, from the real HYPE/USDC plus HYPE/USDH and HYPE/USDT0), and
-        // `marketsBySymbol` is symbol-keyed, so the collisions silently
-        // dropped markets. Always read the real quote token.
-        const quoteToken = tokenByIndex[sourceMarket.tokens?.[1]];
-        if (!token || !quoteToken) continue;
-
-        const sourceTicker = assetCtxByCoin[sourceMarket.name];
-        // `midPx` is null for delisted/dead pairs — skip rather than
-        // publishing a market that can never be priced.
-        if (!sourceTicker?.midPx) continue;
-
-        const quoteAsset = quoteToken.name;
-        // szDecimals lives on the token, not the universe entry.
-        const amountPrecisionStr = safeString(token, 'szDecimals');
-        const amountPrecision = parseInt(amountPrecisionStr as string);
-
-        const midPx = parseFloat(v(sourceTicker, 'midPx'));
-        const pricePrecision = calculatePricePrecision(midPx, amountPrecision, SPOT_MAX_PRICE_DECIMALS);
-        const pricePrecisionStr = numberToString(pricePrecision);
-
-        // `sourceMarket.name` is the API coin handle (`@107`, `PURR/USDC`);
-        // the display symbol is built from the token name so it reads as a
-        // normal pair. Both stay disjoint from the perp namespace.
-        const id = sourceMarket.name;
-        const symbol = `${token.name}/${quoteAsset}`;
-        // Hyperliquid's UI shows `ETH/USDC` for the `UETH` token. Mirror that
-        // on `base` + `prettySymbol` — the two fields every list surface reads
-        // — while `symbol` stays the venue-true `UETH/USDC`.
-        //
-        // `symbol` is deliberately NOT aliased: it is the routing key behind
-        // saved favourites, layouts, TradingView symbols and the candle cache,
-        // and the alias is data-dependent (it backs off if Hyperliquid ever
-        // lists a real `ETH` token). Aliasing it would make every saved
-        // reference break the day that happens.
-        const displayBase = this.resolveSpotDisplayName(token, tokenNames);
-        const displaySymbol = `${displayBase}/${quoteAsset}`;
-        const prevDayPx = parseFloat(v(sourceTicker, 'prevDayPx'));
-        const dayNtlVlm = parseFloat(v(sourceTicker, 'dayNtlVlm'));
-
-        markets.push({
-          id,
-          symbol,
-          ...(displaySymbol !== symbol ? { prettySymbol: displaySymbol } : {}),
-          base: displayBase,
-          quote: quoteAsset,
-          isSpot: true,
-          active: true,
-          precision: {
-            amount: +(parsePrecision(amountPrecisionStr) || 0),
-            price: +(parsePrecision(pricePrecisionStr) || 0),
-          },
-          limits: {
-            amount: {
-              min: +(parsePrecision(amountPrecisionStr) || 0),
-              max: Number.MAX_SAFE_INTEGER,
-            },
-            leverage: { min: 1, max: 1 },
-          },
-          info: {
-            hyperliquidId: sourceMarket.index + SPOT_ASSET_INDEX_OFFSET,
-            isSpot: true,
-            // The venue's real token identity, preserved because `base` may
-            // carry the de-prefixed display alias (`UBTC` -> `BTC`). The UI
-            // surfaces these so a user can see that a bridged asset is a claim
-            // on Unit's custody, not the native coin.
-            hlTokenName: token.name,
-            hlTokenFullName: token.fullName ?? undefined,
-            ...sourceMarket,
-          },
-        });
-
-        tickers.push({
-          id,
-          symbol,
-          bid: 0,
-          ask: 0,
-          last: midPx,
-          mark: parseFloat(v(sourceTicker, 'markPx')) || midPx,
-          // Spot has no oracle/funding/OI. Zero on the fields below means "not
-          // published by the venue", per the Ticker contract — consumers must
-          // not read it as a real zero.
-          index: 0,
-          midPrice: midPx,
-          percentage: prevDayPx > 0 ? ((midPx - prevDayPx) / prevDayPx) * 100 : 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: dayNtlVlm,
-          quoteVolume: dayNtlVlm * midPx,
-          openInterest: 0,
-          info: sourceTicker,
-        });
-      }
-    } catch (err: any) {
-      // Never fail startup over spot — perps must still come up.
-      this.log(`Failed to load Hyperliquid spot markets: ${err?.message ?? err}`, LogSeverity.Warning);
-      return { markets: [], tickers: [] };
-    }
-
-    return { markets, tickers };
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
@@ -1993,13 +1664,7 @@ export class HyperliquidExchange extends BaseExchange {
   }
 
   private generateFakePositionsFromMarkets = (markets: Market[]) => {
-    // Spot markets are deliberately excluded. Spot exposure is a coin balance
-    // (`Balance.coins`), not a Position — synthesizing zero-size spot rows
-    // here would pollute the positions table and, worse, feed
-    // `DisplayedMarginPostprocessor`, whose long/short exposure sums are
-    // defined over derivatives notional only.
     const fakePositions = markets.map((market) => {
-      if (market.isSpot) return [];
       const marketConfig = this._getSymbolConfigurationFromAssetData(market.id);
       return marketConfig.positionMode === PositionMode.OneWay
         ? [
@@ -2801,11 +2466,6 @@ export class HyperliquidExchange extends BaseExchange {
     // Use O(1) hashmap lookup instead of O(n) find
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market ${symbol} not found`);
-    // Spot is always 1x. `updateLeverage` on a spot asset index is not a
-    // meaningful action — silently no-op rather than signing and posting a
-    // request the venue has no use for. (The retired standalone spot class
-    // did send it, copied verbatim from the perp path.)
-    if (market.isSpot) return;
     const coin = market.id;
     const activeAssetData = this.activeAssetData.get(coin);
     const timestamp = virtualClock.getCurrentTimeMs();
@@ -2815,13 +2475,19 @@ export class HyperliquidExchange extends BaseExchange {
       isCross: activeAssetData?.leverage.type === 'cross',
       leverage: +inputLeverage,
     };
-    const signature = await this.signActionOrDefer(action, timestamp);
+    const signature = await signL1Action(
+      createWalletFromPrivateKey(this.options.secret),
+      action,
+      this.options.vault || null,
+      timestamp,
+      !this.options.testnet,
+    );
     await this.xhr.post(
       ENDPOINTS.EXCHANGE,
       {
         action,
         nonce: timestamp,
-        ...(signature ? { signature } : {}),
+        signature,
         ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
       },
       {
@@ -2839,8 +2505,6 @@ export class HyperliquidExchange extends BaseExchange {
     // Use O(1) hashmap lookup instead of O(n) find
     const market = this.store.marketsBySymbol[symbol!];
     if (!market) throw new Error(`Market ${symbol} not found`);
-    // Spot has no margin mode — see the `setLeverage` note above.
-    if (market.isSpot) return;
     const coin = market.id;
     const activeAssetData = this.activeAssetData.get(coin);
     const timestamp = virtualClock.getCurrentTimeMs();
@@ -2850,13 +2514,19 @@ export class HyperliquidExchange extends BaseExchange {
       isCross: !isolated,
       leverage: activeAssetData?.leverage.value,
     };
-    const signature = await this.signActionOrDefer(action, timestamp);
+    const signature = await signL1Action(
+      createWalletFromPrivateKey(this.options.secret),
+      action,
+      this.options.vault || null,
+      timestamp,
+      !this.options.testnet,
+    );
     await this.xhr.post(
       ENDPOINTS.EXCHANGE,
       {
         action,
         nonce: timestamp,
-        ...(signature ? { signature } : {}),
+        signature,
         ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
       },
       {
@@ -3029,7 +2699,7 @@ export class HyperliquidExchange extends BaseExchange {
             tif: opts.timeInForce === OrderTimeInForce.PostOnly ? 'Alo' : 'Gtc',
           },
         },
-        reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
+        reduce_only: Boolean(opts.reduceOnly),
       },
       assetIndex,
     );
@@ -3064,7 +2734,7 @@ export class HyperliquidExchange extends BaseExchange {
                 triggerPx: +this.priceToPrecision(market.symbol, opts.stopLoss),
               },
             },
-            reduce_only: this.resolveReduceOnly(market, true),
+            reduce_only: true,
           },
           assetIndex,
         ),
@@ -3086,7 +2756,7 @@ export class HyperliquidExchange extends BaseExchange {
                 triggerPx: +this.priceToPrecision(market.symbol, opts.takeProfit),
               },
             },
-            reduce_only: this.resolveReduceOnly(market, true),
+            reduce_only: true,
           },
           assetIndex,
         ),
@@ -3137,16 +2807,6 @@ export class HyperliquidExchange extends BaseExchange {
 
     const orderIds = this.validateResponseAndExtractOrderIds(data);
 
-    // orderWires[0] is always the main limit wire; any extras are TP/SL triggers,
-    // which have no time-in-force of their own.
-    const [limitOrderId] = orderIds;
-    if (limitOrderId) {
-      this.rememberLimitOrderTimeInForce(
-        limitOrderId,
-        opts.timeInForce === OrderTimeInForce.PostOnly ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
-      );
-    }
-
     // For HIP-3 limit orders, add optimistic order immediately
     if (market?.id.includes(':')) {
       for (const orderId of orderIds) {
@@ -3177,31 +2837,6 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     return orderIds;
-  };
-
-  /**
-   * Single chokepoint for the reduce-only wire flag.
-   *
-   * Spot markets have no positions, so there is nothing to reduce — every
-   * spot wire must send `r: false`, including the TP/SL legs, which are
-   * unconditionally reduce-only on perps. Keep every `reduce_only:` site
-   * routed through here so the spot rule can't be missed when a new order
-   * shape is added.
-   */
-  private resolveReduceOnly = (market: Market, requested: boolean): boolean => (market.isSpot ? false : requested);
-
-  // The exchange-server holds no secret, so it cannot sign here. Send the action
-  // unsigned and let the browser's replay fill the signature in — see
-  // hyperliquid.api.ts `addSigningInterceptor`.
-  private signActionOrDefer = async (action: any, nonce: number) => {
-    if (!this.options.secret) return undefined;
-    return await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      nonce,
-      !this.options.testnet,
-    );
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
@@ -3253,14 +2888,7 @@ export class HyperliquidExchange extends BaseExchange {
 
       // For market orders, use mark price (closer to oracle) to avoid "price too far from oracle" errors
       // This is especially important for HIP-3 markets with thin liquidity where last price can diverge significantly
-      // Spot prefers `last`: only `allMids` is guaranteed to carry spot coins
-      // and it updates `last`/`midPrice` only, so a spot ticker's `mark` is
-      // frozen at the startup snapshot. Being truthy-but-stale, it would win
-      // this `||` chain and anchor the +/-5% marketable band to an hours-old
-      // price — a spot market order on a pair that has moved more than 5%
-      // would rest as a limit instead of crossing. Perps keep mark-first
-      // (closer to oracle, avoids "price too far from oracle" rejections).
-      const basePrice = (market.isSpot ? ticker?.last || ticker?.mark : ticker?.mark || ticker?.last) || 0;
+      const basePrice = ticker?.mark || ticker?.last || 0;
 
       const orderWire = orderRequestToOrderWire(
         {
@@ -3273,7 +2901,7 @@ export class HyperliquidExchange extends BaseExchange {
               tif: 'Gtc' as any,
             },
           },
-          reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
+          reduce_only: Boolean(opts.reduceOnly),
         },
         assetIndex,
       );
@@ -3300,9 +2928,6 @@ export class HyperliquidExchange extends BaseExchange {
       });
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
-
-      // A market order is a Gtc limit at 5% slippage, so an unfilled remainder rests.
-      if (orderIds[0]) this.rememberLimitOrderTimeInForce(orderIds[0], OrderTimeInForce.GoodTillCancel);
 
       return orderIds;
     } else if (opts.type === OrderType.Limit) {
@@ -3413,14 +3038,7 @@ export class HyperliquidExchange extends BaseExchange {
       const ticker = this.store.tickersBySymbol[market.symbol];
 
       // Use mark price for limit_px to avoid "price too far from oracle" errors
-      // Spot prefers `last`: only `allMids` is guaranteed to carry spot coins
-      // and it updates `last`/`midPrice` only, so a spot ticker's `mark` is
-      // frozen at the startup snapshot. Being truthy-but-stale, it would win
-      // this `||` chain and anchor the +/-5% marketable band to an hours-old
-      // price — a spot market order on a pair that has moved more than 5%
-      // would rest as a limit instead of crossing. Perps keep mark-first
-      // (closer to oracle, avoids "price too far from oracle" rejections).
-      const basePrice = (market.isSpot ? ticker?.last || ticker?.mark : ticker?.mark || ticker?.last) || 0;
+      const basePrice = ticker?.mark || ticker?.last || 0;
 
       // Adjust size to market precision (matches CCXT approach)
       const orderSize = opts.amount === 0 ? 0 : adjust(opts.amount, market.precision.amount);
@@ -3438,7 +3056,7 @@ export class HyperliquidExchange extends BaseExchange {
               triggerPx: +this.priceToPrecision(market.symbol, opts.price || 0),
             },
           },
-          reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
+          reduce_only: Boolean(opts.reduceOnly),
         },
         assetIndex,
       );
@@ -3637,11 +3255,17 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     const nonce = this.generateNonce();
-    const signature = await this.signActionOrDefer(action, nonce);
+    const signature = await signL1Action(
+      createWalletFromPrivateKey(this.options.secret),
+      action,
+      this.options.vault || null,
+      nonce,
+      !this.options.testnet,
+    );
     const payload = {
       action,
       nonce,
-      ...(signature ? { signature } : {}),
+      signature,
       ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
     };
 
@@ -3662,9 +3286,6 @@ export class HyperliquidExchange extends BaseExchange {
       price: order.price,
       amount: order.amount,
       reduceOnly: order.reduceOnly || false,
-      // Cancel+replace rebuilds the wire from scratch, so without this an Alo
-      // order silently comes back as Gtc after a price edit.
-      timeInForce: order.timeInForce,
     };
 
     if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
@@ -3772,13 +3393,9 @@ export class HyperliquidExchange extends BaseExchange {
     const integerPart = priceStr.split('.')[0];
     const significantDigits = Math.max(5, integerPart.length);
     const result = decimalToPrecision(price, ROUND, significantDigits, SIGNIFICANT_DIGITS, NO_PADDING);
+    const maxDecimals = 6;
     // Use O(1) hashmap lookup instead of O(n) find
-    const market = this.store.marketsBySymbol[symbol];
-    // Hyperliquid accepts 8 price decimals on spot but only 6 on perps.
-    // Sending a perp-capped price for a spot pair silently truncates the
-    // order price, so this must be per-market now that both live in one store.
-    const maxDecimals = market?.isSpot ? SPOT_MAX_PRICE_DECIMALS : PERP_MAX_PRICE_DECIMALS;
-    const prAmount = market?.precision.amount;
+    const prAmount = this.store.marketsBySymbol[symbol]?.precision.amount;
     const subtractedValue = maxDecimals - precisionFromString(prAmount ? String(prAmount) : '1');
     return decimalToPrecision(result, ROUND, subtractedValue, DECIMAL_PLACES, NO_PADDING);
   };

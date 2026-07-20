@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { ENDPOINTS } from '../../exchanges/phemex/phemex.types';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType, PositionMode, PositionSide } from '../../types';
 
 const createAccountResponse = (currency: 'USDT' | 'USDC', balance: string, used: string, positions: any[]) => ({
   data: {
@@ -20,137 +19,6 @@ const createAccountResponse = (currency: 'USDT' | 'USDC', balance: string, used:
 });
 
 describe('Phemex positions and balance audit regression', () => {
-  it('maps one-way Buy positions from lowercase side and ignores zero-size rows', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', info: { symbol: 'ADAUSDT' } }] as any,
-      tickers: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', last: 0.189 }] as any,
-    });
-    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
-
-    const position = exchange.mapPosition({
-      symbol: 'ADAUSDT',
-      side: 'Buy',
-      posSide: 'Merged',
-      posMode: 'OneWay',
-      size: '53.02',
-      avgEntryPriceRp: '0.1887',
-      leverageRr: '10',
-      liquidationPriceRp: '0.1',
-    } as any);
-
-    expect(position).toMatchObject({
-      symbol: 'ADAUSDT',
-      side: PositionSide.Long,
-      positionMode: PositionMode.OneWay,
-      contracts: 53.02,
-    });
-    expect(
-      exchange.mapPosition({
-        symbol: 'ADAUSDT',
-        side: 'Buy',
-        posSide: 'Merged',
-        posMode: 'OneWay',
-        size: '0',
-        avgEntryPriceRp: '0.1887',
-        leverageRr: '10',
-        liquidationPriceRp: '0.1',
-      } as any),
-    ).toBeUndefined();
-  });
-
-  it('maps nonzero positions from raw mark price when the ticker cache is missing', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', info: { symbol: 'ADAUSDT' } }] as any,
-      tickers: [],
-    });
-    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
-
-    const position = exchange.mapPosition({
-      symbol: 'ADAUSDT',
-      side: 'Buy',
-      posSide: 'Merged',
-      posMode: 'OneWay',
-      size: '106.02',
-      avgEntryPriceRp: '0.188749962',
-      markPriceRp: '0.1887',
-      leverageRr: '-10',
-      liquidationPriceRp: '0.0001',
-    } as any);
-
-    expect(position).toMatchObject({
-      symbol: 'ADAUSDT',
-      side: PositionSide.Long,
-      contracts: 106.02,
-      positionMode: PositionMode.OneWay,
-    });
-    expect(position?.unrealizedPnl).toBeCloseTo((0.1887 - 0.188749962) * 106.02);
-  });
-
-  it('maps one-way Sell positions from symbol-scoped recovery even when market indexes lag', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [], tickers: [] });
-    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
-
-    const position = exchange.mapPosition({
-      symbol: 'ADAUSDT',
-      side: 'Sell',
-      posSide: 'Merged',
-      posMode: 'OneWay',
-      size: '52.91',
-      avgEntryPrice: '0.189',
-      avgEntryPriceRp: '0.189',
-      markPriceRp: '0.1891',
-      leverageRr: '-10',
-      liquidationPriceRp: '1.8436',
-    } as any);
-
-    expect(position).toMatchObject({
-      id: 'ADAUSDT',
-      symbol: 'ADAUSDT',
-      side: PositionSide.Short,
-      positionMode: PositionMode.OneWay,
-      contracts: 52.91,
-      entryPrice: 0.189,
-      leverage: 10,
-    });
-    expect(position?.unrealizedPnl).toBeCloseTo((0.189 - 0.1891) * 52.91);
-  });
-
-  it('uses zero-size raw one-way position rows to choose merged order position side', async () => {
-    const store = new DefaultStore();
-    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
-    const get = vi.fn().mockResolvedValue(
-      createAccountResponse('USDT', '88', '0', [
-        {
-          symbol: 'ADAUSDT',
-          side: 'None',
-          posSide: 'Merged',
-          posMode: 'OneWay',
-          size: '0',
-          avgEntryPriceRp: '0',
-          markPriceRp: '0.1885',
-          leverageRr: '-10',
-          liquidationPriceRp: '0',
-        },
-      ]),
-    );
-    exchange.xhr = { get } as any;
-
-    await expect(
-      (exchange as any).getOrderPositionSide({
-        symbol: 'ADAUSDT',
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        reduceOnly: false,
-      }),
-    ).resolves.toBe('Merged');
-    expect(get).toHaveBeenCalledWith(ENDPOINTS.POSITIONS, {
-      params: { currency: 'USDT', symbol: 'ADAUSDT' },
-    });
-  });
-
   it('merges USDT and USDC account snapshots before the full position-store replacement', async () => {
     const store = new DefaultStore();
     store.update({
@@ -208,15 +76,8 @@ describe('Phemex positions and balance audit regression', () => {
     expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT, { params: { currency: 'USDT' } });
     expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT, { params: { currency: 'USDC' } });
     expect(addOrUpdatePositionsFull).toHaveBeenCalledTimes(1);
-    expect(addOrUpdatePositionsFull.mock.calls[0][0].map(({ symbol }) => symbol).sort()).toEqual([
-      'BTCUSDC',
-      'BTCUSDT',
-    ]);
-    expect(
-      store.positions
-        .map(({ symbol, contracts }) => ({ symbol, contracts }))
-        .sort((a, b) => a.symbol.localeCompare(b.symbol)),
-    ).toEqual([
+    expect(addOrUpdatePositionsFull.mock.calls[0][0].map(({ symbol }) => symbol).sort()).toEqual(['BTCUSDC', 'BTCUSDT']);
+    expect(store.positions.map(({ symbol, contracts }) => ({ symbol, contracts })).sort((a, b) => a.symbol.localeCompare(b.symbol))).toEqual([
       { symbol: 'BTCUSDC', contracts: 3 },
       { symbol: 'BTCUSDT', contracts: 2 },
     ]);
@@ -293,11 +154,7 @@ describe('Phemex positions and balance audit regression', () => {
 
     await exchange.tick();
 
-    expect(
-      store.positions
-        .map(({ symbol, contracts }) => ({ symbol, contracts }))
-        .sort((a, b) => a.symbol.localeCompare(b.symbol)),
-    ).toEqual([
+    expect(store.positions.map(({ symbol, contracts }) => ({ symbol, contracts })).sort((a, b) => a.symbol.localeCompare(b.symbol))).toEqual([
       { symbol: 'BTCUSDC', contracts: 3 },
       { symbol: 'BTCUSDT', contracts: 2 },
     ]);

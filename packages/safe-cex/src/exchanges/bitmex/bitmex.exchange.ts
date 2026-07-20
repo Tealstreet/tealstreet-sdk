@@ -63,14 +63,6 @@ import { BitmexPublicWebsocket } from './bitmex.ws-public';
 import { BITMEX_EXECUTION, BITMEX_MARKET, BITMEX_ORDER, BITMEX_POSITION, SupportedTimeframes } from './types';
 
 export const SATOSHI_PER_BTC = 100000000;
-export const BITMEX_REDUCE_ONLY_START_MS = Date.UTC(2026, 7, 26, 4, 0, 0);
-export const BITMEX_EXCHANGE_CLOSURE_MS = Date.UTC(2026, 8, 23, 4, 0, 0);
-
-const BITMEX_REDUCE_ONLY_MESSAGE =
-  'BitMEX is in reduce-only wind-down mode. Only reduce-only orders are allowed in Tealstreet; close positions and withdraw funds before 2026-09-23 04:00 UTC.';
-const BITMEX_CLOSURE_MESSAGE =
-  'BitMEX exchange services ended on 2026-09-23 at 04:00 UTC. Tealstreet will not connect trading streams or send BitMEX trading requests; log in to BitMEX directly to view history and withdraw remaining funds.';
-
 type BitmexPlaceOrderOpts = PlaceOrderOpts & {
   maxSlippagePct?: number;
 };
@@ -89,7 +81,6 @@ export class BitmexExchange extends BaseExchange {
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
   private currencies: { [code: string]: Currency } = {};
-  private bitmexLifecycleWarningLogged = false;
   private lastExecutionHistorySignatureWarningAt = 0;
   private maxSlippagePct?: number;
 
@@ -127,11 +118,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
-    if (this.isBitmexExchangeClosed()) {
-      this.log(BITMEX_CLOSURE_MESSAGE, LogSeverity.Warning);
-      return { error: BITMEX_CLOSURE_MESSAGE };
-    }
-
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT);
       if ((data as any)?.error) {
@@ -149,12 +135,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   start = async () => {
-    this.warnBitmexLifecycleIfNeeded();
-    if (this.isBitmexExchangeClosed()) {
-      await this._startBitmexClosed();
-      return;
-    }
-
     const useExternalPublicData = await this.initExternalPublicData();
 
     // Always fetch currencies — needed for balance precision conversion (satoshi→BTC)
@@ -194,22 +174,6 @@ export class BitmexExchange extends BaseExchange {
     } else {
       await this._startPublicDataOnly();
     }
-  };
-
-  private _startBitmexClosed = async () => {
-    if (this.isDisposed) return;
-
-    this.store.update({
-      orders: [],
-      positions: [],
-      balance: {
-        used: 0,
-        free: 0,
-        total: 0,
-        upnl: 0,
-      },
-      loaded: { ...this.store.loaded, markets: true, tickers: true, orders: true, balance: true, positions: true },
-    });
   };
 
   _startPrivate = async () => {
@@ -1395,8 +1359,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   setLeverage = async (symbol: string, inputLeverage: number) => {
-    this.assertBitmexExchangeOpenForTrading();
-
     const market = this.store.marketsBySymbol[symbol];
     const position = this.store.positions.find((p) => p.symbol === symbol);
 
@@ -1426,8 +1388,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
-    this.assertBitmexExchangeOpenForTrading();
-
     if (!symbol) {
       this.emitAndLogError('Symbol is required');
       throw new Error('Symbol is required');
@@ -1451,8 +1411,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
-    this.assertBitmexExchangeOpenForTrading();
-
     try {
       const groupedBySymbol = groupBy(orders, 'symbol');
       const requests = Object.entries(groupedBySymbol).map(([symbol, symbolOrders]) => ({
@@ -1501,8 +1459,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    this.assertBitmexExchangeOpenForTrading();
-
     try {
       const { data } = await this.xhr.delete(ENDPOINTS.ORDER, {
         params: { symbol },
@@ -1521,8 +1477,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    this.assertBitmexOrderAmendAllowed(order);
-
     const market = this.store.marketsBySymbol[order.symbol];
     if (!market) throw new Error(`Market ${order.symbol} not found`);
 
@@ -1579,8 +1533,6 @@ export class BitmexExchange extends BaseExchange {
   };
 
   private formatCreateOrder = (opts: BitmexPlaceOrderOpts) => {
-    this.assertBitmexOrderPlacementAllowed(opts);
-
     const market = this.store.marketsBySymbol[opts.symbol];
 
     if (!market) {
@@ -1837,56 +1789,6 @@ export class BitmexExchange extends BaseExchange {
   private formatCoin(coin: string) {
     return coin.replace('XBT', 'BTC');
   }
-
-  private getBitmexLifecycleNowMs = () => virtualClock.getCurrentTimeMs();
-
-  private isBitmexExchangeClosed = () => this.getBitmexLifecycleNowMs() >= BITMEX_EXCHANGE_CLOSURE_MS;
-
-  private isBitmexReduceOnlyActive = () =>
-    this.getBitmexLifecycleNowMs() >= BITMEX_REDUCE_ONLY_START_MS &&
-    this.getBitmexLifecycleNowMs() < BITMEX_EXCHANGE_CLOSURE_MS;
-
-  private warnBitmexLifecycleIfNeeded = () => {
-    if (this.bitmexLifecycleWarningLogged) {
-      return;
-    }
-
-    this.bitmexLifecycleWarningLogged = true;
-    if (this.isBitmexExchangeClosed()) {
-      this.log(BITMEX_CLOSURE_MESSAGE, LogSeverity.Warning);
-      return;
-    }
-
-    this.log(
-      'BitMEX has stopped new account registrations and is winding down exchange services. Normal trading ends on 2026-08-26 at 04:00 UTC, then BitMEX becomes reduce-only until closure on 2026-09-23 at 04:00 UTC.',
-      LogSeverity.Warning,
-    );
-  };
-
-  private throwBitmexLifecycleError = (message: string): never => {
-    this.log(message, LogSeverity.Warning);
-    throw new Error(message);
-  };
-
-  private assertBitmexExchangeOpenForTrading = () => {
-    if (this.isBitmexExchangeClosed()) {
-      this.throwBitmexLifecycleError(BITMEX_CLOSURE_MESSAGE);
-    }
-  };
-
-  private assertBitmexOrderPlacementAllowed = (opts: Pick<PlaceOrderOpts, 'reduceOnly'>) => {
-    this.assertBitmexExchangeOpenForTrading();
-    if (this.isBitmexReduceOnlyActive() && !opts.reduceOnly) {
-      this.throwBitmexLifecycleError(BITMEX_REDUCE_ONLY_MESSAGE);
-    }
-  };
-
-  private assertBitmexOrderAmendAllowed = (order: Pick<Order, 'reduceOnly'>) => {
-    this.assertBitmexExchangeOpenForTrading();
-    if (this.isBitmexReduceOnlyActive() && !order.reduceOnly) {
-      this.throwBitmexLifecycleError(BITMEX_REDUCE_ONLY_MESSAGE);
-    }
-  };
 
   private isBitmexAuthError = (err: unknown): boolean => {
     const msg = String(err || '').toLowerCase();

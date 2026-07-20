@@ -210,41 +210,6 @@ describe('OrderBookSubscriptionsHandler', () => {
         expect(mockUnsubscribe).toHaveBeenCalled();
       });
 
-      it('should unsubscribe after a duplicate subId re-subscribes', () => {
-        // Clients replay subscriptions after a reconnect, re-sending the same
-        // subId. A separate refcount would climb while Set.add no-ops, leaving
-        // the venue subscription stranded forever.
-        const subPayload: StoreWorkerPayload = {
-          op: 'subscribeOrderBook',
-          data: { subId: 'sub-dup', symbol: 'BTCUSDT' },
-        };
-        handler.handle(subPayload);
-        handler.handle(subPayload);
-
-        expect(mockListenOrderBook).toHaveBeenCalledTimes(1);
-
-        handler.handle({ op: 'unsubscribeOrderBook', data: { subId: 'sub-dup' } } as StoreWorkerPayload);
-
-        expect(mockUnsubscribe).toHaveBeenCalled();
-      });
-
-      it('should keep the subscription alive while another subId remains', () => {
-        handler.handle({
-          op: 'subscribeOrderBook',
-          data: { subId: 'sub-a', symbol: 'BTCUSDT' },
-        } as StoreWorkerPayload);
-        handler.handle({
-          op: 'subscribeOrderBook',
-          data: { subId: 'sub-b', symbol: 'BTCUSDT' },
-        } as StoreWorkerPayload);
-
-        handler.handle({ op: 'unsubscribeOrderBook', data: { subId: 'sub-a' } } as StoreWorkerPayload);
-        expect(mockUnsubscribe).not.toHaveBeenCalled();
-
-        handler.handle({ op: 'unsubscribeOrderBook', data: { subId: 'sub-b' } } as StoreWorkerPayload);
-        expect(mockUnsubscribe).toHaveBeenCalled();
-      });
-
       it('should handle unsubscribe for non-existent subscription', () => {
         const payload: StoreWorkerPayload = {
           op: 'unsubscribeOrderBook',

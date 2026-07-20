@@ -21,17 +21,3 @@ export const getBuilderAddress = (testnet: boolean): string =>
 
 // Builder fee in tenths of basis points (10 = 1bp = 0.01%)
 export const TEALSTREET_BUILDER_FEE = 10;
-
-/**
- * Hyperliquid addresses spot pairs from the same asset-index space as perps,
- * shifted by 10000. Core perps occupy `0..N`; HIP-3 dexes start at 110000
- * (see `HIP3_ASSET_INDEX_BASE` usage in the exchange class). Because the three
- * ranges are disjoint, a single exchange instance can carry perp, spot, and
- * HIP-3 markets in one store and still build a correct order wire from
- * `market.info.hyperliquidId`.
- */
-export const SPOT_ASSET_INDEX_OFFSET = 10000;
-
-/** Max decimal places Hyperliquid accepts in a price wire, per market kind. */
-export const PERP_MAX_PRICE_DECIMALS = 6;
-export const SPOT_MAX_PRICE_DECIMALS = 8;

@@ -51,7 +51,7 @@ import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 - First, make sure you are logged into your [BingX](https://teal.link/bingx20) account.
 
 :::note
-Consider supporting Tealstreet by using the [BingX Referral Link](https://teal.link/bingx20).
+Consider supporting Tealstreet by using the referral _[link](https://teal.link/bingx20)._
 :::
 
 <IntroTealstreet exchangeName="BingX" />
@@ -61,7 +61,7 @@ Consider supporting Tealstreet by using the [BingX Referral Link](https://teal.l
 ### Creating the key
 
 - Now you are ready to generate the API Keys within your BingX Account. Head on over to the [BingX](https://teal.link/bingx20) tab and:
-  - Click on the User Icon.
+    - Click on the User Icon.
     - Select **API Management** from the dropdown menu.
 
 <div class="text--center">
@@ -105,7 +105,7 @@ You can get to this page directly by navigating to **[this link](https://bingx.c
 </div>
 
 - Copy these IP addresses to your clipboard with the clip button
-  - paste them into the restricted IP's box on the BingX API page.
+    - paste them into the restricted IP's box on the BingX API page.
 
 <div class="text--center">
     <img src={ApiCreation3} alt="API Creation3" style={{ width: 500 }} />
@@ -118,7 +118,7 @@ You can get to this page directly by navigating to **[this link](https://bingx.c
 ### Activating Futures on the account
 
 - Now we need to activate the derivatives futures on the account:
-  - Go to the derivatives section and click the green activate button
+    - Go to the derivatives section and click the green activate button
 
 <div class="text--center">
     <img src={ActivateFuts} alt="Activate Futures" style={{ width: 500 }} />
@@ -164,11 +164,11 @@ Now let us proceed back to where we left the Tealstreet API page:
 - During May 2022 **BingX** deprecated their old API. If you are receiving an error about inability to decrypt the password and the API stopped working please switch to the V3 release of Tealstreet. Read more about [v3 here](/docs/about/version-3).
 
 - I am seeing a message about insufficient margin when trying to place an order?
-  - This is likely to have occurred if you have not transferred any funds to your **Perpetual Futures** account.
-    - By default funds transfer into the **Standard Futures** account.
+    - This is likely to have occurred if you have not transferred any funds to your **Perpetual Futures** account.
+        - By default funds transfer into the **Standard Futures** account.
 
 - I am seeing a message about "risk forbidden" in my order window?
-  - Please double check your API key permissions you used when making the API.
+    - Please double check your API key permissions you used when making the API.
         - Some users have reported they fixed it by remaking their API with the correct permissions.
 
 ---
@@ -177,22 +177,22 @@ Now let us proceed back to where we left the Tealstreet API page:
 
 - I can't use BingX coin-m? \* Coin-M is not currently supported on V3 of Tealstreet.
 
-- Can I trade all of BingX's perpetual tickers in Tealstreet? \* Unfortunately around Aug 23 2024 BingX started restricting certain pairs for trading via the api to encourage users to use the website. Can read more about it at [Bingx support article](https://bingx.com/en/support/articles/36745491595801/)
+- Can I trade all of BingX's perpetual tickers in Tealstreet? \* Unfortunately around Aug 23 2024 BingX started restricting certain pairs for trading via the api to encourage users to use the website. Can read more about it [here](https://bingx.com/en/support/articles/36745491595801/)
 
 - I am getting a generic error trying to link my API key on BingX it keeps saying refresh browser? \* Around July 2024 BingX upgraded their API which broke support for V2 of Tealstreet. Please switch to [V3](https://preview.tealstreet.io/trade)
 
 - Can users trade BingX's Standard Futures like Stocks, Forex, and Indices through Tealstreet?
-  - No. At the time of this writing **BingX** does not offer a open API for their Standard Futures. Tealstreet users can only trade BingX's Perpetuals.
+    - No. At the time of this writing **BingX** does not offer a open API for their Standard Futures. Tealstreet users can only trade BingX's Perpetuals.
 
 - Am I limited in the amount of leverage I can use in perp futures?
-  - Yes. BingX has certain restrictions for users who do not KYC when trading on certain pairs. (BTC and ETH are generally exempt from this restriction)
+    - Yes. BingX has certain restrictions for users who do not KYC when trading on certain pairs. (BTC and ETH are generally exempt from this restriction)
 
     :::note
     For more info please check out the [BingX Documentation](https://bingx.com/en-us/support/articles/360045899754-PerpetualFuturesPasanganPerdaganganLeveragedanLimit/)
     :::
 
 - Can I change my margin from Isolated to Cross?
-  - Yes. BingX defaults users to isolated but you can change it to cross. In the top right corner of the perp trading page you will see a button called Margin next to the Leverage indicator. Click it.
+    - Yes. BingX defaults users to isolated but you can change it to cross. In the top right corner of the perp trading page you will see a button called Margin next to the Leverage indicator. Click it.
 
 <div class="text--center">
     <img src={CrossMargin} alt="Margin Selector" style={{ width: 400 }} />
@@ -205,4 +205,4 @@ Now let us proceed back to where we left the Tealstreet API page:
 </div>
 
 - Can I use One-Way mode for trading instead of hedged?
-  - Yes you can use One-Way mode.
+    - Yes you can use One-Way mode.

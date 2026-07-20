@@ -137,8 +137,7 @@ describe('OKX remaining July audit regressions', () => {
     ]);
 
     expect(get.mock.calls.map(([endpoint]) => endpoint)).toEqual([ENDPOINTS.KLINE, ENDPOINTS.KLINE_HISTORY]);
-    const historyRequest = get.mock.calls[1][1] as { params: { limit: number } };
-    expect(historyRequest.params.limit).toBe(100);
+    expect(get.mock.calls[1][1]?.params.limit).toBe(100);
   });
 
   it('uses history-candles for a requested window older than the recent retention window', async () => {

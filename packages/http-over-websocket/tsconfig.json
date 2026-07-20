@@ -2,16 +2,17 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": "./src",
     "target": "ESNext",
     "lib": ["dom", "dom.iterable", "esnext"],
     "module": "ESNext",
     "incremental": true,
     "types": ["node", "vitest/globals"],
     "paths": {
-      "@tealstreet/json-parse/*": ["../json-parse/*"],
-      "@tealstreet/sleep/*": ["../sleep/*"],
-      "@tealstreet/logging/*": ["../logging/*"],
-      "@tealstreet/reconnecting-websocket/*": ["../../thirdparty/reconnecting-websocket/*"]
+      "@tealstreet/json-parse/*": ["../../json-parse/*"],
+      "@tealstreet/sleep/*": ["../../sleep/*"],
+      "@tealstreet/logging/*": ["../../logging/*"],
+      "@tealstreet/reconnecting-websocket/*": ["../../reconnecting-websocket/*"]
     }
   },
   "exclude": ["**/node_modules", "**/.*/*", "dist"],

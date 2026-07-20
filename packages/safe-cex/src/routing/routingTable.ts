@@ -23,8 +23,6 @@ const WS = {
   grvt: `${JP}/grvt`,
   okxPrivate: `${ASIA}/okx/private`,
   okxBusiness: `${ASIA}/okx/business`,
-  okxeuPrivate: `${ASIA}/okxeu/private`,
-  okxeuBusiness: `${ASIA}/okxeu/business`,
   blofin: `${ASIA}/blofin/private`,
   coinbase: `${ASIA}/coinbase/private`,
   apex: `${ASIA}/apex/private`,
@@ -57,12 +55,6 @@ const okxWs: WsGroup = {
   private: { kind: 'proxyConditional', host: WS.okxPrivate },
   business: { kind: 'proxyConditional', host: WS.okxBusiness },
 };
-// okxeu shares the OKX ws classes but must terminate on the EEA entity's hosts
-// (wseea.okx.com) — EEA credentials do not authenticate on the global ws host.
-const okxeuWs: WsGroup = {
-  private: { kind: 'proxyConditional', host: WS.okxeuPrivate },
-  business: { kind: 'proxyConditional', host: WS.okxeuBusiness },
-};
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
   public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic },
@@ -77,7 +69,7 @@ const bitmexWs: WsGroup = {
 const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
   grvt: { private: { kind: 'alwaysProxy', host: WS.grvt } },
   okx: okxWs,
-  okxeu: okxeuWs, // OKXEUExchange extends OKXExchange {} but tunnels to wseea.okx.com
+  okxeu: okxWs, // OKXEUExchange extends OKXExchange {}
   blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
   coinbase: coinbaseWs,
   coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "es6",
     "module": "commonjs",
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "lib": ["dom", "dom.iterable", "esnext"],
     "declaration": true,
     "removeComments": false,

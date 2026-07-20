@@ -682,10 +682,10 @@ This section supersedes older notes that reference direct `transactionClient` us
   - `attrFp5 = poseidon2HashFp5(l2AttributesPreimage)`
   - `aggregatedPreimage = baseFp5 + attrFp5`
   - `sig = schnorrSign(aggregatedPreimage, privateKey)`
-- Current default runtime attribution is maker-free and taker-priced:
-  - `IntegratorMakerFee = 0` (`0 bps`)
-  - `IntegratorTakerFee = 250` (`2.5 bps`)
-- `options.extra.lighterBuilderFeeMode` is retained as a legacy compatibility knob, but both current modes resolve to the same maker/taker fee split.
+- Current fee mode switch is config-driven via `options.extra.lighterBuilderFeeMode`:
+  - `dynamic` -> `300` (`3 bps`)
+  - `static` -> `200` (`2 bps`)
+- Default runtime mode is `dynamic` (`300`, `3 bps`) unless `lighterBuilderFeeMode` is explicitly set to `static`.
 - Integrator index can be provided either:
   - globally via constants in `lighter.builder-fee.ts`, or
   - per-account via `options.extra.lighterIntegratorAccountIndex`.
@@ -693,7 +693,7 @@ This section supersedes older notes that reference direct `transactionClient` us
 - `ApproveIntegrator` flow now has local SDK signing + transport support (`tx_type = 45`).
 - Existing/legacy saved Lighter accounts may predate Tealstreet's builder-fee approval flow. Do not assume an account is approved just because it can trade or has an API key.
 - Lighter rejects attributed create-order transactions with `21149 integrator is not approved` when `L2TxAttributes` are present but the account has no valid approval for the configured integrator/fee caps.
-- Approval checks must validate expiry and each fee cap against the runtime maker/taker fee requirements, not merely that any non-zero approval exists. Existing approvals capped at `300` still cover the current `0` maker / `250` taker split.
+- Approval checks must validate both expiry and fee caps against the runtime fee value (`300` in default dynamic mode), not merely that any non-zero approval exists.
 
 ### Account-form approval wiring
 

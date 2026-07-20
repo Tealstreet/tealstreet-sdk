@@ -188,17 +188,6 @@ extend `downSizeReduceOrder` to stops, note its orders-ahead logic was
 written for price-laddered _limit_ reduce orders and needs review for the
 trigger-order path first.
 
-**Carve-out — bitget's plan-type selection.** `selectPlanTypeAndAmount` in
-`bitget/bitget.exchange.ts` clamps a sized stop to the protected position. That
-is **not** a violation of the rule above and must not be "cleaned up" into the
-flag path. Bitget's wire format forces a choice the flag cannot express: a stop
-is either `loss_plan` **with** a size or `pos_loss` **with the size field
-omitted**, so declining to clamp does not mean "send the requested size" — it
-means silently converting a deliberately-sized stop into a whole-position one.
-The two things `downSizeReduceOrder` adds over a bare `Math.min` are already
-handled or moot there (side matching is exact; orders-ahead is meaningless for
-trigger orders). See `bitget/CLAUDE.md` → "Plan Type Determination".
-
 Each exchange does exactly one of:
 
 - **Set `autoDownSizeReduceOrders: true`** if it does _not_ auto-cap
@@ -268,27 +257,6 @@ healthy-traffic point). Don't turn them back into lifetime counters — long-liv
 sessions (flaky networks, 24h WS session limits) legitimately accumulate 100+
 closes, and a lifetime cap silently kills the socket forever.
 
-**`lifetimeCloseCount` exists precisely because those counters reset.** Any
-observer that samples _after_ recovery — an error reporter, a support bundle —
-reads `onCloseCount`/`reconnectCount` as 0 and concludes the socket was fine.
-`BaseWebSocket.lifetimeCloseCount` is monotonic and never reset, alongside
-`lastCloseCode` / `lastCloseAt`, which survive reconnect. Don't "tidy" these
-into the streak counters; they answer a different question.
-
-These surface to consumers through `store.socketHealth` (aggregated by
-`summarizeSocketDiagnostics` in `base.ts`), which already crosses the worker and
-exchange-server boundaries. **That is deliberately the only channel** — safe-cex
-ships in the `tealstreet-sdk` OSS mirror, so it must not gain a dependency on
-any app's telemetry. Add fields to the existing struct; do not import a
-reporting client here.
-
-Two shape notes: `*ReconnectPaused` is a boolean, not a remaining-ms countdown,
-because a countdown would mutate `socketHealth` on every watchdog tick and
-manufacture store deltas for the whole pause — and because hosted mode stamps
-these on the server's clock. `ExternalPublicDataProvider` is not a
-`BaseWebSocket` and is absent from `getPublicSockets()`, so gateway-mode
-accounts report no close code even though the gateway drives `publicHealthy`.
-
 Native-WebSocket reconnects use close-code-scoped exponential backoff. A
 different close code or a failure-free window longer than twice the maximum
 delay resets growth to the base delay. Eight consecutive non-normal close
@@ -339,50 +307,6 @@ Don't use `Date.now()` for request timestamps. Use
 `packages/safe-cex/src/utils/virtualClock.ts`) — it accounts for clock drift
 between the client and the exchange server, which is critical for HMAC
 signatures with strict `recvWindow` enforcement.
-
-### Remote-signer WS auth — a new `outputFormat` MUST ship a signer
-
-Private-WS auth under a remote signer has two halves that live in different
-files:
-
-1. the **request**, in `<name>.ws-private.ts`, which names an `outputFormat`
-   from the union in `types.ts` (`RemoteSignerRequest.wsAuth`);
-2. the **signer**, `BaseExchange.signWsAuth`, which actually produces the
-   signature.
-
-`signWsAuth` used to narrow anything that wasn't `'hex'` or `'base64'` down to
-hex HMAC-SHA256, so adding a union member and using it compiled cleanly, passed
-review, and produced a wrong signature at runtime — no error, the venue just
-rejects the subscription and the private feed (fills, orders, positions) stays
-dead while REST polling keeps the UI looking healthy. Kraken shipped that way;
-so did blofin (`hex-base64`) and apexomni (`apexomni-base64`).
-
-It is now an exhaustive `switch` ending in `const unhandled: never =
-outputFormat`, so **adding a member to the union without a signer is a compile
-error.** Implement the new branch there, and make it match the venue's local
-(non-`remoteSigner`) expression byte for byte, then add a case to
-`base.ws-auth-signing.test.ts`. Its expectations are golden vectors generated
-with Node's built-in `crypto` rather than re-derived with the implementation's
-own expression, so a shared misreading of a venue's convention cannot pass.
-
-Override `signWsAuth` on the exchange class only when the scheme is not
-HMAC-SHA256 over the secret at all. Kraken is the worked example —
-`kraken.exchange.ts` implements
-`base64(HMAC_SHA512(SHA256(challenge), base64Decode(secret)))`, mirroring both
-`performAuth()`'s local path and the REST scheme in `kraken.api.ts`. Reaching
-the base signer with `kraken-challenge` now returns an explicit error rather
-than a plausible-looking wrong signature.
-
-Two related traps in the same area:
-
-- **Don't gate the auth handshake on `options.secret`.** Hosted mode runs with
-  `secret: ''` by design (the secret never leaves the client), so a
-  `if (!options.secret) return` guard makes the remote-signer path unreachable
-  and kills the private feed with only a warning. Gate on
-  `secret || remoteSigner`, and only where the secret is genuinely required.
-- **This class of bug is hosted-mode-only**, so it does not reproduce in local
-  web dev, where a real Worker holds the actual secret. Verify private-WS
-  changes against exchange-server, not just `yarn dev`.
 
 ### Big-Integer JSON Parsing
 
@@ -489,42 +413,6 @@ venue regression before replacing working code. Never infer compatibility
 from `seqId`/`prevSeqId` field names alone. OKX and BloFin keep their audited
 venue-specific implementations until this review is done; BitMEX's current
 price-keyed Aggregated feed has no verified compatible predecessor contract.
-
-### `messageHandlerStats` checks SUBSCRIPTIONS, not the connection
-
-**Read this before removing anything from the topic watchdog.**
-
-Connection liveness is already owned by safe-cex — ping/pong, `checkLastReceived`,
-the reconnect backoff in `base.ws.ts`. Per-topic stats are not a second copy of
-that and must never be reasoned about as one.
-
-They exist to catch **a subscription that has silently stopped delivering while
-the socket is perfectly healthy**: a subscribe dropped on reconnect, a venue that
-ignores subscribes sent too fast, a frame lost in flight, an ack that never came.
-The socket is up, the pong is fresh, every other feed is flowing — and one topic
-is dead. That is the exact scenario this exists for, and it is invisible to every
-connection-level check.
-
-So these arguments are always wrong:
-
-- "the pong is fresh, so the socket is fine, so dropping this topic costs
-  nothing" — a fresh pong is the _precondition_ for the failure, not a refutation
-  of it
-- "other topics on the same socket are updating, so this one doesn't matter" —
-  same error, per-socket instead of per-connection
-- "this topic is event-driven so silence is normal" — true for a small number of
-  topics, and **nearly all topics poll**. Establish it per topic, from observed
-  behaviour or venue docs, for that exact topic. Do not infer it from the
-  topic's name, from a neighbouring constant that groups it with others, or from
-  a category you assembled yourself. A topic that has genuinely never sent
-  anything has no stats entry at all and is already harmless; the failure mode is
-  a topic that delivered and then stopped.
-
-If a topic legitimately goes quiet, the fix is to make the _expectation_
-conditional on whatever state governs its traffic — or to clear its entry via
-`cleanupMessageHandlerStats` when that state goes away, which returns it to the
-harmless never-recorded case. The fix is not to stop watching it, because then a
-failed subscribe for that topic can never be detected again.
 
 ### Reconnect-banner stats are append-only — never walk the full map
 

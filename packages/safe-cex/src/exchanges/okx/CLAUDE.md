@@ -1,17 +1,15 @@
 # OKX Exchange Integration
 
-This directory contains the OKX exchange integration for Tealstreet. Regular OKX supports **linear and inverse perpetual swaps**. OKX EU additionally supports **X-Perps**, which OKX exposes as `FUTURES` instruments with `ruleType === 'xperp'`. Spot instruments are not requested.
+This directory contains the OKX exchange integration for Tealstreet. It supports **linear and inverse perpetual swaps**. Spot instruments are not requested.
 
 ## Exchange Information
 
 - **Exchange**: OKX (formerly OKEx)
 - **Type**: Centralized Exchange (CEX)
-- **Supported products**: Linear and inverse perpetual swaps (`ctType === 'linear' || ctType === 'inverse'`); OKX EU also includes X-Perp `FUTURES` rows where `ruleType === 'xperp'`
+- **Supported products**: Linear and inverse perpetual swaps (`ctType === 'linear' || ctType === 'inverse'`)
 - **API version**: v5
 - **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported.
 - **Latency domain**: `www.okx.com` (`okxeu`: `eea.okx.com`)
-- **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. Keep `okxeu.requiresCors = true`; regular `okx` remains direct-capable by metadata.
-- **okxeu WS tunnel paths**: private/business sockets tunnel via dedicated `okxeu/private` / `okxeu/business` paths (see `routing/routingTable.ts`), which the python ws-proxy terminates on `wss://wseea.okx.com:8443`. Do NOT reuse the global `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
 
 ## API Documentation
 
@@ -97,8 +95,8 @@ Promise.all([
 ])
 ```
 
-- **Markets** (`/api/v5/public/instruments?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetches supported instruments, keeps linear/inverse contracts, and stores them. For OKX EU, regular dated futures are ignored unless `ruleType === 'xperp'`.
-- **Tickers** (`/api/v5/market/tickers?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetched in parallel with markets
+- **Markets** (`/api/v5/public/instruments?instType=SWAP`): Fetches SWAP instruments, keeps linear and inverse contracts, and stores them
+- **Tickers** (`/api/v5/market/tickers?instType=SWAP`): Fetched in parallel with markets
 
 ### Phase 2: Parse & Connect Public WS (sequential)
 
@@ -122,7 +120,7 @@ If `publicDataOnly` or missing key/secret, log and return. No private connection
 1. Connect private WebSocket (`privateWebsocket.connectAndSubscribe()`)
 2. In parallel:
    - `fetchBalanceAndPositions()` -- fetches balance + positions, stores with `loaded.balance: true, loaded.positions: true`
-   - `fetchOrders()` -- fetches all order types (normal + 4 algo types), stores with `loaded.orders: true`
+   - `fetchOrders()` -- fetches all order types (normal + 3 algo types), stores with `loaded.orders: true`
 
 ### Phase 6: Start Tick Loop
 
@@ -157,7 +155,7 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | `PLACE_ALGO_ORDER`     | `/api/v5/trade/order-algo`              | POST   | Place single algo order                                                       |
 | `UPDATE_ORDER`         | `/api/v5/trade/amend-order`             | POST   | Amend an existing order                                                       |
 | `CANCEL_ORDERS`        | `/api/v5/trade/cancel-batch-orders`     | POST   | Cancel batch orders (up to 20 per batch)                                      |
-| `CANCEL_ALGO_ORDERS`   | `/api/v5/trade/cancel-algos`            | POST   | Cancel algo orders (up to 10 per batch)                                       |
+| `CANCEL_ALGO_ORDERS`   | `/api/v5/trade/cancel-algos`            | POST   | Cancel algo orders (up to 20 per batch)                                       |
 | `SET_LEVERAGE`         | `/api/v5/account/set-leverage`          | POST   | Set leverage for an instrument                                                |
 | `LEVERAGE`             | `/api/v5/account/leverage-info`         | GET    | Get leverage info (supports comma-separated instIds, batched in groups of 20) |
 | `SET_POSITION_MODE`    | `/api/v5/account/set-position-mode`     | POST   | Switch position mode (`long_short_mode` or `net_mode`)                        |
@@ -240,47 +238,8 @@ tuple. Public order books use `books.{instId}`; business candle wire channels
 (`candle1m`, `candle1H`, etc.) reverse-map through `INTERVAL` to the internal
 `candle.{timeframe}.{instId}` handler key. Algo-order channels are matched by
 their exact `arg.channel`. Handler stats are updated only when that exact key
-has callbacks; payload fields outside `arg` never influence dispatch.
-
-**Order channels record ONE collapsed stats topic, `orders`.** `orders`,
-`orders-algo` and `algo-advance` all record under that single key. OKX pushes an
-order channel only for a category the account currently holds orders in, so
-tracking them separately produced up to three entries that went quiet
-independently as categories emptied — `algo-advance` was measured at 1199s while
-every other feed on the same socket stayed 1s fresh, which marked the account
-delayed in the reconnect banner and, past the error threshold, fed
-`requestReload` in `exchangeAccountController`.
-
-The other half of the fix is in the client: `getGroupedMessageTopicStats` skips
-staleness for order topics when the account holds no open orders, since
-flattening is what stops the traffic. Do NOT instead stop recording these
-channels — that is a subscription-completeness check and silencing it would hide
-a failed order subscribe permanently. See `../CLAUDE.md` → "`messageHandlerStats`
-checks SUBSCRIPTIONS, not the connection".
-
-**The two halves must be deployed together, and only one of them ships with the
-client.** The client half is a substring test — `isOrderEventTopic` matches
-`'order'` and excludes `'book'` — run against a topic key it did not create.
-`messageHandlerStats` is part of the serialized store (`store/store.base.ts`), so
-for any venue the client cannot reach directly the keys are produced by whichever
-build runs the socket. OKX is `requiresCors: true`, so that is the
-exchange-server.
-
-`algo-advance` does not contain the substring `order`. So a client carrying the
-gate, talking to an exchange-server that predates the collapse, reads a key the
-gate cannot match and warns exactly as before — with the fix visibly present in
-source, present in the bundle, and doing nothing. There is no error and no log
-line; the only symptom is the banner you were trying to remove. Observed
-2026-08-08: the fix landed at 08:20, a mobile bundle rebuilt from it at 13:40
-still showed `algo-advance` as the warned topic at 13:47, and current safe-cex
-has no code path that can produce that key. The exchange-server had not been
-redeployed. Redeploying it is the expected remedy; that had not yet been
-confirmed when this was written.
-
-If this ever recurs, check the deployed exchange-server build before re-reading
-the client code. Do not "fix" it by broadening the substring match to catch
-`algo-*` — that hides the version skew instead of surfacing it, and the skew
-affects every other collapsed-topic gate the same way.
+has callbacks (or an exact dedicated algo-order channel is handled); payload
+fields outside `arg` never influence dispatch.
 
 ### Private WebSocket Channels (`okx.ws-private.ts`)
 
@@ -353,18 +312,16 @@ Similar on-demand pattern:
 
 | Internal Type                | OKX `ordType`     | Notes                                               |
 | ---------------------------- | ----------------- | --------------------------------------------------- |
-| `OrderType.Conditional`      | `trigger`         | Opening trigger order; uses `triggerPx` + `orderPx` |
 | `OrderType.StopLoss`         | `conditional`     | Uses `slTriggerPx`, `slOrdPx=-1` (market execution) |
 | `OrderType.TakeProfit`       | `conditional`     | Uses `tpTriggerPx`, `tpOrdPx=-1` (market execution) |
 | `OrderType.TrailingStopLoss` | `move_order_stop` | Uses `callbackSpread`, `closeFraction=1`            |
 
 ### Fetched Algo Order Types
 
-When fetching orders, four algo types are queried separately:
+When fetching orders, three algo types are queried separately:
 
 - `oco` -- One-cancels-other orders
 - `conditional` -- Stop loss / take profit orders
-- `trigger` -- Opening conditional trigger orders
 - `move_order_stop` -- Trailing stop loss orders
 
 ### Time in Force
@@ -382,21 +339,6 @@ Supported trigger types for TP/SL (defined in metadata `supportedTPSLTriggerType
 - `OrderStopTriggerType.MarkPrice` (default for SL)
 
 OKX API trigger type values: `'last'`, `'mark'`, `'index'`.
-
-Opening conditional orders (`OrderType.Conditional`) are deliberately separate
-from TP/SL. They use OKX `ordType: "trigger"` with `triggerPx`,
-`orderPx` (`-1` for market execution), and `triggerPxType`. Do not route these
-through OKX `ordType: "conditional"`; that OKX value is reserved here for
-protective TP/SL-style algos using `tpTriggerPx` / `slTriggerPx`.
-
-Reduce-only `ordType: "trigger"` rows are classified as TP/SL only when the
-selected trigger source can be trusted. Startup tickers seed OKX `mark` and
-`index` from `last` until the public websocket sends real `mark-price` /
-`index-tickers` updates, so mark/index reduce-only triggers stay mapped as
-neutral conditional orders until that source has arrived. Authenticated OKX
-instances that use in-process public data consult the OKX source exchange's
-loaded-source flags; websocket gateway snapshots are trusted only when their
-mark/index value is finite and differs from the seeded `last` placeholder.
 
 **Trigger type mapping**:
 
@@ -429,9 +371,8 @@ mark/index value is finite and differs from the seeded `last` placeholder.
 | ---------------------------- | ----------------- |
 | `OrderType.Market`           | `market`          |
 | `OrderType.Limit`            | `limit`           |
-| `OrderType.Conditional`      | `trigger`         |
-| `OrderType.StopLoss`         | `conditional`     |
-| `OrderType.TakeProfit`       | `conditional`     |
+| `OrderType.StopLoss`         | `trigger`         |
+| `OrderType.TakeProfit`       | `trigger`         |
 | `OrderType.TrailingStopLoss` | `move_order_stop` |
 
 ### Order Side (`ORDER_SIDE`)
@@ -501,18 +442,10 @@ A single OKX `oco` or `conditional` order can produce **two** internal orders:
 - If `slTriggerPx` is set: creates a StopLoss order with `_sl` suffix
 - If `tpTriggerPx` is set: creates a TakeProfit order with `_tp` suffix
 
-An OKX `trigger` algo order maps to one internal `OrderType.Conditional` when
-it is not reduce-only. Its internal `price` is the trigger price, and its
-execution limit price is preserved as `order.extra.conditionalOrderPrice`
-when OKX returns a positive `ordPx` / `orderPx`. Reduce-only `trigger` rows
-created outside Tealstreet are treated as protective TP/SL based on side and
-reference price rather than as opening conditionals.
-
 ### Order Update (Amend)
 
 - **Limit orders**: Amended in-place via `ENDPOINTS.UPDATE_ORDER` with `newPx` and/or `newSz`
-- **Opening trigger algos** (`OrderType.Conditional` / OKX `ordType: "trigger"`): Amended in-place via `ENDPOINTS.UPDATE_ALGO_ORDER` (`/api/v5/trade/amend-algos`) with `newTriggerPx`, `newOrdPx`, and `newTriggerPxType` on every amend; amount edits add `newSz`
-- **Protective/trailing algo orders**: Still cancel-replaced by `updateAlgoOrder()` because they can map to multiple internal orders or unsupported amend fields:
+- **Algo orders**: Cannot be amended in-place. The `updateAlgoOrder()` method:
   1. Finds all related orders sharing the same base algo ID
   2. Cancels them all
   3. Re-places with updated parameters
@@ -539,7 +472,7 @@ automatically split by `formatCreateOrder`:
 - **Regular orders**: Placed in batches of up to 20 via `PLACE_ORDERS`, processed sequentially between batches (`mapSeries`)
 - **Algo orders**: Placed sequentially one at a time via `PLACE_ALGO_ORDER`
 - **Cancel normal**: Batched in groups of 20, processed sequentially
-- **Cancel algo**: Batched in groups of 10, processed sequentially; suffix stripped from ID
+- **Cancel algo**: Batched in groups of 20, processed sequentially; suffix stripped from ID
 
 ### Algo Order Special Handling
 
@@ -556,12 +489,11 @@ automatically split by `formatCreateOrder`:
 
 ## Symbol Format
 
-- **OKX instrument ID (`instId`)**: `BTC-USDT-SWAP`, `ETH-USDT-SWAP`; OKX EU X-Perps use IDs like `ETH-USD_UM_XPERP-310404`
+- **OKX instrument ID (`instId`)**: `BTC-USDT-SWAP`, `ETH-USDT-SWAP`
 - **Internal symbol**: `BTCUSDT`, `ETHUSDT` (derived by stripping `-SWAP` and removing all `-` from `instId`)
-- **X-Perp internal symbol**: Keeps the venue's `_UM_XPERP` identity and expiry while removing dashes (for example `ETHUSD_UM_XPERP310404`) so it does not collide with `ETHUSD` SWAP markets.
-- **Market filter**: Linear and inverse SWAP contracts are included; OKX EU also includes `FUTURES` X-Perps. Spot is not requested.
-- **Index ticker subscription**: Uses the market `uly` when available (e.g. `BTC-USDT`, `ETH-USD`), falling back to `instId` without `-SWAP`
-- **Index ticker response mapping**: Updates every stored market whose index source matches the received `instId`; this allows `ETH-USD` to feed both `ETH-USD-SWAP` and `ETH-USD_UM_XPERP-...`
+- **Market filter**: Linear and inverse SWAP contracts are included; spot is not requested
+- **Index ticker subscription**: Uses `instId` without `-SWAP` suffix (e.g., `BTC-USDT`)
+- **Index ticker response mapping**: Re-appends `-SWAP` to match stored ticker IDs
 
 ## Data Precision & Conversion
 
@@ -619,7 +551,7 @@ OKX candle timestamps are in **milliseconds**. They are divided by 1000 for inte
 - Regular orders: Up to 20 per batch
 - Algo orders: One at a time, processed sequentially
 - Cancel normal orders: Up to 20 per batch
-- Cancel algo orders: Up to 10 per batch
+- Cancel algo orders: Up to 20 per batch
 
 ## State Reconciliation
 
@@ -695,10 +627,7 @@ Key metadata values from `exchangeMetadata.ts`:
 | `defaultTPTriggerType`            | `LastPrice`                                                           |
 | `defaultSLTriggerType`            | `MarkPrice`                                                           |
 | `privateProxyIps`                 | `privateProxyIpsTokyo`                                                |
-| `requiresCors`                    | okx=false; okxeu=true                                                 |
-
-`okxeu.requiresCors` is intentionally true because browser private REST to
-`eea.okx.com` fails CORS preflight before OKX can process signed requests.
+| `requiresCors`                    | inherited default                                                     |
 
 ### Account Levels (`_accountLevel`)
 
@@ -773,7 +702,7 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 - **Margin type**: Hardcoded to cross only; attempting to change emits an error.
 - **Position mode change**: Requires all positions to be closed first; checked client-side before API call.
 - **Account config caching**: Position mode and account level are cached in `_accountPositionMode` and `_accountLevel`; use `force = true` parameter to re-fetch. Both are fetched from a single endpoint call (`getOrFetchPositionModeAndAccLevel`).
-- **Algo order updates**: Opening trigger algos amend in-place; protective/trailing algos are cancelled and re-created.
+- **Algo order updates**: Cannot amend algo orders in-place; they are cancelled and re-created.
 - **Order book filtering**: Bids above last price and asks below last price are filtered out after each update.
 - **Recursive order fetching**: Both regular and algo order fetches use recursive pagination (when exactly 100 results are returned, fetch next page using `after` cursor).
 - **Business WebSocket inheritance**: `OKXBusinessWebsocket` extends `OKXPrivateWebsocket` to reuse `auth()` and `handleOrderTopic()` methods. However, it overrides `connectAndSubscribe`, `onOpen`, `onMessage`, `ping`, `auth`, and `subscribe` -- meaning most of the parent's methods are replaced.
@@ -810,7 +739,6 @@ Most methods follow the same error handling pattern:
 | `formatBalanceUsedAvail`            | Any calculation error                               | Emits error, returns current `store.balance`                   |
 | `placeOrderBatch`                   | Batch response with `sMsg`                          | Throws error with the message                                  |
 | `placeAlgoOrderBatch`               | Response without `algoId`                           | Throws error with `sMsg`                                       |
-| `updateTriggerAlgoOrder`            | Amend row with non-zero `sCode` or `sMsg`           | Emits error and throws so the edit is not accepted             |
 | `cancelNormalOrders`                | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
 | `cancelAlgoOrders`                  | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
 | `setLeverage`                       | Any error                                           | Emits error, re-fetches positions, re-throws                   |

@@ -8,13 +8,13 @@
 - **Position Mode**: Hedged only (`PositionMode.Hedged`) -- both long and short positions can coexist
 - **Margin Types**: Cross and Isolated upstream; the selector is hidden until
   per-order `ISOLATED_MARGIN` / `isolation_id` creation is implemented.
-- **Status**: Disabled in production (`enabled: false`), enabled in dev (`enabledInDev: true`), enabled on preview (`enableInPreview: true`)
+- **Status**: Disabled in production (`enabled: false`), enabled in dev (`enabledInDev: true`)
 
 ## API Documentation
 
-- **Exchange API v1**: <https://exchange-developer.crypto.com/exchange/v1/>
-- **CCXT REST Reference**: <https://github.com/ccxt/ccxt/blob/master/ts/src/cryptocom.ts>
-- **CCXT WebSocket Reference**: <https://github.com/ccxt/ccxt/blob/master/ts/src/pro/cryptocom.ts>
+- **Exchange API v1**: https://exchange-developer.crypto.com/exchange/v1/
+- **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/cryptocom.ts
+- **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/cryptocom.ts
 
 ## File Structure
 
@@ -69,12 +69,6 @@ Authenticated request body format:
 }
 ```
 
-The REST signing interceptor is idempotent for already-signed envelopes because
-axios may re-enter request interceptors during transport retries. Private write
-endpoints (`create/amend/cancel/close/change-leverage`) are not retried on
-network/CORS errors: the exchange may have accepted the mutation even if the
-browser could not read the response.
-
 ### WebSocket Authentication
 
 1. Generate auth message via `generateWsAuthMessage()` with method `'public/auth'` and empty params
@@ -88,38 +82,6 @@ browser could not read the response.
 
 Only enabled when `options.tealstreetTunnel` is true. Unlike many other
 exchanges, this is not unconditionally applied.
-
-### REST Proxy Routing
-
-`CryptocomMetadata.requiresCors` forces browser REST calls through Tealstreet's
-exchange proxy. `supportsTunnel` and `supportsWsRoute` are false today, so
-Crypto.com does not use the HTTP-over-WebSocket tunnel or TradeTunnel WS route
-for normal browser validation.
-
-The metadata declares both private proxy regions explicitly:
-
-- `JA` → `privateProxyIpsTokyo`
-- `SG` → `privateProxyIpsSingapore`
-
-`JA` is intentionally listed first so dev-only account setup defaults to the
-Tokyo REST pool while infra wires and health-checks Crypto.com on the Asia pool.
-Before production enablement, both proxy pools should forward
-`https://api.crypto.com/exchange/v1` and
-`https://uat-api.3ona.co/exchange/v1` with correct SNI/Host handling.
-
-For local UAT while proxy routes are being wired, the web app has a
-non-production developer override:
-
-```js
-localStorage.setItem(
-  'dev-overrides',
-  JSON.stringify({ ...JSON.parse(localStorage.getItem('dev-overrides') || '{}'), cryptocomDirectRestInDev: true }),
-);
-location.reload();
-```
-
-This forces Crypto.com REST direct from the browser so georestriction/CORS
-failures can be observed directly. Do not use it as production behavior.
 
 ## Startup Sequence
 
@@ -136,10 +98,8 @@ failures can be observed directly. Do not use it as production behavior.
 9. Connect the private WebSocket and enqueue `user.order`,
    `user.advance.order`, `user.positions`, and `user.balance` before auth.
 10. Wait one second for the connection-rate window.
-11. Batch-subscribe ticker channels for all markets, then mark, index, and
-    current-funding channels while staying under the local 350-subscription
-    public-session cap; order books, trades, and candles remain lazy per
-    consumer.
+11. Batch-subscribe ticker, mark, index, and current-funding channels in chunks
+    of 100; order books, trades, and candles remain lazy per consumer.
 12. Run the first REST position/balance/order reconciliation.
 
 External public data mode does not open the market WebSocket. Public-only mode
@@ -167,25 +127,25 @@ signed POST requests with JSON bodies. Endpoint constants live in
 
 ### Private Endpoints
 
-| Constant                 | Method Path                           | Purpose                                 |
-| ------------------------ | ------------------------------------- | --------------------------------------- |
-| `CREATE_ORDER`           | `/private/create-order`               | Place new order                         |
-| `ADVANCED_CREATE_ORDER`  | `/private/advanced/create-order`      | Place standalone TP/SL trigger order    |
-| `ADVANCED_AMEND_ORDER`   | `/private/advanced/amend-order`       | Amend standalone TP/SL trigger order    |
-| `ADVANCED_CANCEL_ORDER`  | `/private/advanced/cancel-order`      | Cancel standalone TP/SL trigger order   |
-| `ADVANCED_OPEN_ORDERS`   | `/private/advanced/get-open-orders`   | Fetch open TP/SL trigger orders         |
-| `AMEND_ORDER`            | `/private/amend-order`                | Modify existing order                   |
-| `CANCEL_ORDER`           | `/private/cancel-order`               | Cancel specific order                   |
-| `CANCEL_ALL_ORDERS`      | `/private/cancel-all-orders`          | Cancel all (optional instrument filter) |
-| `CLOSE_POSITION`         | `/private/close-position`             | Close position                          |
-| `ORDER_DETAIL`           | `/private/get-order-detail`           | Single order details                    |
-| `OPEN_ORDERS`            | `/private/get-open-orders`            | All open orders                         |
-| `ORDER_HISTORY`          | `/private/get-order-history`          | Historical orders                       |
-| `TRADES_HISTORY`         | `/private/get-trades`                 | Trade history                           |
-| `POSITIONS`              | `/private/get-positions`              | Open positions                          |
-| `CHANGE_LEVERAGE`        | `/private/change-account-leverage`    | Set instrument leverage                 |
-| `BALANCE`                | `/private/user-balance`               | Account balances                        |
-| `ACCOUNTS`               | `/private/get-accounts`               | Current account identity                |
+| Constant             | Method Path                        | Purpose                                 |
+| -------------------- | ---------------------------------- | --------------------------------------- |
+| `CREATE_ORDER`       | `/private/create-order`            | Place new order                         |
+| `ADVANCED_CREATE_ORDER` | `/private/advanced/create-order` | Place standalone TP/SL trigger order    |
+| `ADVANCED_AMEND_ORDER` | `/private/advanced/amend-order`   | Amend standalone TP/SL trigger order    |
+| `ADVANCED_CANCEL_ORDER` | `/private/advanced/cancel-order` | Cancel standalone TP/SL trigger order   |
+| `ADVANCED_OPEN_ORDERS` | `/private/advanced/get-open-orders` | Fetch open TP/SL trigger orders       |
+| `AMEND_ORDER`        | `/private/amend-order`             | Modify existing order                   |
+| `CANCEL_ORDER`       | `/private/cancel-order`            | Cancel specific order                   |
+| `CANCEL_ALL_ORDERS`  | `/private/cancel-all-orders`       | Cancel all (optional instrument filter) |
+| `CLOSE_POSITION`     | `/private/close-position`          | Close position                          |
+| `ORDER_DETAIL`       | `/private/get-order-detail`        | Single order details                    |
+| `OPEN_ORDERS`        | `/private/get-open-orders`         | All open orders                         |
+| `ORDER_HISTORY`      | `/private/get-order-history`       | Historical orders                       |
+| `TRADES_HISTORY`     | `/private/get-trades`              | Trade history                           |
+| `POSITIONS`          | `/private/get-positions`           | Open positions                          |
+| `CHANGE_LEVERAGE`    | `/private/change-account-leverage` | Set instrument leverage                 |
+| `BALANCE`            | `/private/user-balance`            | Account balances                        |
+| `ACCOUNTS`           | `/private/get-accounts`            | Current account identity                |
 
 **Response unwrapping**: The response interceptor unwraps `data.result` so
 callers receive the inner result object directly, not the full API envelope.
@@ -203,11 +163,6 @@ Both market and user sockets immediately answer `public/heartbeat` with
 that do not respond within five seconds. All subscription nonces use the
 synchronized virtual clock.
 
-Crypto.com heartbeat traffic is server-initiated. The client does not send an
-active ping frame; instead both sockets treat any inbound message as liveness
-and use a relaxed quiet-session watchdog (30s idle ping marker, 90s reconnect)
-so quiet or geo-degraded direct routes do not churn every base 20 seconds.
-
 **On Open**:
 
 - Waits one second for Crypto.com's pro-rated connection rate limit to reset,
@@ -219,9 +174,8 @@ so quiet or geo-degraded direct routes do not churn every base 20 seconds.
 - Subscriptions use incrementing `messageId` counter
 - Format: `{ id, method: 'subscribe', params: { channels: [...] }, nonce }`
 - Startup and reconnect frames use a conservative local limit of 100 channels.
-  The socket keeps a local 350-subscription cap to stay below Crypto.com's
-  400-subscription market-data session limit while leaving room for active
-  chart orderbook/candle streams.
+  Crypto.com documents 100 market-data request commands per second, but does
+  not document either a per-frame channel limit or a total connection cap.
 
 **Channel Naming**:
 
@@ -243,11 +197,6 @@ so quiet or geo-degraded direct routes do not churn every base 20 seconds.
   - `book` / `book.update` -> `handleBookUpdate()` (throttled to 100ms)
   - `candlestick` -> `handleCandlestickUpdate()`
   - `mark` / `index` / `funding` -> finite guarded ticker updates
-
-Data frames record channel-level `messageHandlersStats` (`ticker`, `mark`,
-`funding`, `user.order`, etc.) for the connection status popover. Do not remove
-these stats updates even though Crypto.com mostly routes through store updates
-rather than per-topic callbacks.
 
 Crypto.com's `funding` value is the decimal rate settling at the end of the
 current hour, so it maps to `Ticker.fundingRate` without scaling. The distinct
@@ -394,8 +343,7 @@ the auth acknowledgement.
    only valid for MARKET BUY by cost.
 4. Send `price` for LIMIT orders.
 5. Add `REDUCE_ONLY` to `exec_inst` when requested.
-6. Add `time_in_force` only for LIMIT orders; omit UI default TIF on MARKET
-   orders.
+6. Add `time_in_force` if specified.
 7. POST to `/private/create-order` and return `[data.order_id]`.
 
 Standalone stop-loss and take-profit orders use
@@ -462,8 +410,7 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
   method/IP, while private limits are per method/API key (create/cancel 15 per
   100ms, most other private methods 3 per 100ms, and trade/order history 1 per
   second).
-- Network error retry: 3 retries via `axios-retry` on network errors for reads;
-  private write endpoints are deliberately not retried
+- Network error retry: 3 retries via `axios-retry` on network errors
 - Request timeout: `options.extra.recvWindow` or **30 seconds** default.
 - WebSocket ticker throttle: 1000ms
 - WebSocket orderbook throttle: 100ms
@@ -582,13 +529,12 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
    market precision; `placeOrder()` does not call `adjust()`.
 6. **Sequential batch cancellation**: `cancelOrders()` intentionally continues
    one order at a time after individual failures.
-7. **Ticker valuations use dedicated public streams**: startup always
-   batch-subscribes `ticker` for all markets, then adds `mark`, `index`, and
-   current `funding` as capacity allows under the local 350-subscription cap.
-   Invalid or non-positive price values are ignored; funding may be negative or
-   zero. Index topics use each market's distinct `underlying_symbol` when it
-   matches the documented `*-INDEX` shape (for example, `BTCUSD-INDEX`).
-   `estimatedfunding` is deliberately not mapped onto the current-rate field.
+7. **Ticker valuations use dedicated public streams**: startup batch-subscribes
+   `mark`, `index`, and current `funding` beside ticker channels. Invalid or
+   non-positive price values are ignored; funding may be negative or zero.
+   Index topics use each market's distinct `underlying_symbol` (for example,
+   `BTCUSD-INDEX`). `estimatedfunding` is deliberately not mapped onto the
+   current-rate field.
 8. **Account identity**: `getAccount()` uses the current
    `private/get-accounts` endpoint and returns `this_account.uuid`; the removed
    `private/get-account-summary` path must not be restored.

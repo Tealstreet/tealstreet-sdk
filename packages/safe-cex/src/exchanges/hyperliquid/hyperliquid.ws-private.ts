@@ -134,9 +134,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       );
     }
 
-    // Opt-in standard accounts need this too — they use spot state for the
-    // holdings display, not as collateral.
-    if (this.parent.shouldTrackSpotHoldings()) {
+    if (this.parent.shouldUseSpotCollateralBalance()) {
       this.send(
         JSON.stringify({
           method: 'subscribe',
@@ -224,8 +222,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
   /**
    * Subscribe to activeAssetData for all markets (leverage/margin info)
-   * Skips HIP-3 and spot markets as they may not be supported or could exceed
-   * subscription limits
+   * Skips HIP-3 markets as they may not be supported or could exceed subscription limits
    */
   private subscribeAllActiveAssetData = () => {
     const user = this.parent.options.vault || this.parent.options.applicationId;
@@ -233,13 +230,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
     for (const market of markets) {
       const coin = market.id;
-      // Skip spot: activeAssetData carries leverage/margin-mode, which is
-      // meaningless for spot (always 1x, no margin mode). Spot roughly
-      // doubles the market count, so subscribing would burn ~300 channels
-      // against the 1000 limit for data we'd discard. Note this must be an
-      // `isSpot` check, NOT a name heuristic — the canonical spot pair is
-      // literally named `PURR/USDC` and would slip past the HIP-3 ':' guard.
-      if (market.isSpot) continue;
       // Skip HIP-3 markets (contain ':') to avoid exceeding 1000 channel limit
       if (coin.includes(':')) continue;
       this.send(
@@ -584,7 +574,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     // Hyperliquid includes the complete rejected subscription in its error
     // text, including the public wallet address. Keep diagnostics useful
     // without forwarding account identifiers or raw protocol frames.
-    const subscriptionType = typeof data === 'string' ? data.match(/"type"\s*:\s*"([^\"]+)"/)?.[1] : undefined;
+    const subscriptionType =
+      typeof data === 'string' ? data.match(/"type"\s*:\s*"([^\"]+)"/)?.[1] : undefined;
     this.parent.log(
       `Hyperliquid WebSocket server error${subscriptionType ? `: rejected ${subscriptionType} subscription` : ''}`,
       LogSeverity.Warning,
@@ -851,23 +842,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       market = this.parent.marketsLowerCaseMap.get(fill.coin.toLowerCase());
     }
     if (!market || market.id.includes(':')) return;
-    // Spot fills arrive on this same non-dex-scoped `userFills` channel with a
-    // finite `startPosition`, so every guard above passes for them now that
-    // spot markets resolve in `marketsById`. Synthesizing a Position from one
-    // would invent a phantom long: it pollutes the positions table, feeds
-    // `syncBalanceFromLivePositions` (corrupting `balance.upnl` / `free`, i.e.
-    // order sizing) and `DisplayedMarginPostprocessor` exposure, and persists
-    // until the next authoritative clearinghouse snapshot because the
-    // streaming path merges incrementally. Spot exposure is a coin balance,
-    // never a Position — same invariant as `generateFakePositionsFromMarkets`.
-    if (market.isSpot) {
-      // Spot never becomes a Position, but the fill DID change the wallet, and
-      // nothing else on this channel would refresh it — spot holdings would
-      // sit stale until reconnect/reload. The refresh is cooldown-throttled
-      // and collapses in-flight calls, so firing per fill is safe.
-      this.parent.requestUnifiedSpotCollateralRefresh();
-      return;
-    }
 
     let nextSignedPosition = startPosition + signedFillSize;
     if (Math.abs(nextSignedPosition) < HyperliquidPrivateWebSocket.CORE_FILL_POSITION_EPSILON) {
@@ -956,7 +930,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     isSnapshot: boolean;
     user: string;
   }) => {
-    if (!this.parent.shouldTrackSpotHoldings()) return;
+    if (!this.parent.shouldUseSpotCollateralBalance()) return;
     this.parent.requestUnifiedSpotCollateralRefresh();
   };
 
@@ -1029,7 +1003,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         status === 'reduceOnlyRejected'
       ) {
         this.parent.store.removeOrder({ id: orderId });
-        this.parent.forgetLimitOrderTimeInForce(orderId);
         continue;
       }
 
@@ -1128,23 +1101,14 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         const isUnconfirmedPlaceholder = inferenceSource === 'hip3-unconfirmed-placeholder';
         const orderStatus = isUnconfirmedPlaceholder ? OrderStatus.Creating : OrderStatus.Open;
 
-        // Determine timeInForce: use WS data if present, otherwise preserve.
-        // `orderUpdates` omits tif for EVERY market, not just HIP-3 ones, so
-        // without this fallback each update wipes the value REST/placement set.
+        // Determine timeInForce: use WS data if present, otherwise preserve from store.
+        // HIP-3 orderUpdates may omit tif, so we fall back to the existing order's value
+        // (set by optimistic add or REST frontendOpenOrders).
         let inferredTimeInForce = parseHyperliquidOrderTimeInForce(orderData.tif);
-        if (!inferredTimeInForce) {
-          // Store first (O(1) via the pre-built map), then the placement-time
-          // record — core perps are never REST-reconciled after startup, so for
-          // them the placement record is the only source.
-          inferredTimeInForce =
-            existingOrdersById[orderId]?.timeInForce ?? this.parent.getPlacedLimitOrderTimeInForce(orderId);
-        }
-
-        // In hosted mode the order was placed on the browser mirror, so this
-        // instance never saw the placement and REST is its only tif source.
-        // Debounced + rate-limited, so a burst of orders costs one fetch.
-        if (!inferredTimeInForce && inferredType === OrderType.Limit) {
-          this.parent.scheduleOrderRefresh();
+        if (!inferredTimeInForce && isHip3) {
+          // HIP-3 WS may omit tif — preserve from existing order in store
+          // (O(1) via the pre-built map).
+          inferredTimeInForce = existingOrdersById[orderId]?.timeInForce;
         }
 
         const order: Order = {

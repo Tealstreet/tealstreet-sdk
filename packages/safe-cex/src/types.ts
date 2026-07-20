@@ -87,8 +87,6 @@ export type ExchangeOptions = {
   readonly applicationId?: string;
   readonly apiKeyIndex?: string;
   readonly testnet?: boolean;
-  /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
-  readonly enableSpotMarkets?: boolean;
   readonly publicDataOnly?: boolean;
   readonly privateOnly?: boolean;
   readonly tealstreetProxy?: boolean;
@@ -209,15 +207,6 @@ export interface ExchangeAccountConfig {
   secondary_apiKey?: string;
   secondary_apiSecret?: string;
   secondary_passphrase?: string;
-
-  /**
-   * Opt this account into the exchange's spot markets, for venues that serve
-   * spot and derivatives from one connection (`supportsSpotToggle` metadata).
-   *
-   * Default-off is deliberate: a perp trader's market list and request volume
-   * must be unchanged unless they explicitly ask for spot.
-   */
-  enableSpotMarkets?: boolean;
 
   // Exchange-specific authentication fields
   applicationId?: string;
@@ -432,7 +421,6 @@ export type Order = {
   readonly info?: any;
   readonly timeInForce?: OrderTimeInForce;
   readonly lastUpdate: number;
-  readonly triggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
   readonly takeProfit?: number;
@@ -441,7 +429,6 @@ export type Order = {
     // actual remaining size in contracts considering contract size, inverse, quanto, etc
     readonly remainingNative?: number;
     readonly remainingNotional?: number;
-    readonly conditionalOrderPrice?: number;
     readonly rejectReason?: OrderRejectReason;
     // Chaser-related fields
     readonly isFromChaser?: boolean;
@@ -608,7 +595,6 @@ export type PlaceOrderOpts = {
   readonly takeProfit?: number;
   readonly reduceOnly?: boolean;
   readonly timeInForce?: OrderTimeInForce;
-  readonly triggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
   readonly maxSlippagePct?: number;
@@ -778,30 +764,6 @@ export type StoreData = {
     privateInitialized: boolean;
     publicLastMessage?: number;
     privateLastMessage?: number;
-    /**
-     * Reconnect diagnostics. All optional so every existing construction site
-     * and the OSS-mirror slice keep compiling untouched.
-     *
-     * `*CloseCode` is the last WebSocket close code — the single most
-     * diagnostic reconnect field (1006 network/middlebox, 1000 clean,
-     * 4xxx app/auth). `*CloseCountTotal` is monotonic; `*CloseStreak` is the
-     * streak-scoped counter that resets on healthy traffic, so it reads 0
-     * after recovery and only the total survives.
-     *
-     * `*ReconnectPaused` is a boolean rather than a remaining-ms countdown on
-     * purpose: a live countdown would mutate socketHealth on every watchdog
-     * tick, manufacturing store deltas throughout a pause. It is also
-     * clock-free, which matters because hosted exchange-server stamps these
-     * on the server's clock.
-     */
-    publicCloseCode?: number;
-    privateCloseCode?: number;
-    publicCloseCountTotal?: number;
-    privateCloseCountTotal?: number;
-    publicCloseStreak?: number;
-    privateCloseStreak?: number;
-    publicReconnectPaused?: boolean;
-    privateReconnectPaused?: boolean;
   };
 };
 
@@ -901,7 +863,7 @@ export interface RemoteSignerRequest {
   // For WS auth: exchange-specific auth data
   wsAuth?: {
     toSign: string;
-    outputFormat: 'hex' | 'base64' | 'hex-base64' | 'kraken-challenge' | 'apexomni-base64' | 'bitunix-double-sha256';
+    outputFormat: 'hex' | 'base64' | 'hex-base64' | 'kraken-challenge' | 'apexomni-base64';
     extraData?: unknown;
   };
 }

@@ -108,7 +108,7 @@ describe('LighterExchange builder fee order wiring', () => {
     createOrderMock.mockResolvedValue('tx-hash');
   });
 
-  it('uses maker-free and taker 2.5 bps fee config by default', async () => {
+  it('uses dynamic 3bps fee config by default', async () => {
     const exchange = createExchange();
 
     await exchange.placeOrder({
@@ -125,13 +125,13 @@ describe('LighterExchange builder fee order wiring', () => {
     expect(createOrderMock).toHaveBeenCalledWith(
       expect.objectContaining({
         integratorAccountIndex: 158385n,
-        integratorMakerFee: 0,
-        integratorTakerFee: 250,
+        integratorMakerFee: 300,
+        integratorTakerFee: 300,
       }),
     );
   });
 
-  it('uses maker-free and taker 2.5 bps fee config when dynamic mode is explicitly selected', async () => {
+  it('uses 3bps fee config when dynamic mode is explicitly selected', async () => {
     const exchange = createExchange({
       extra: {
         lighterBuilderFeeMode: 'dynamic',
@@ -152,8 +152,8 @@ describe('LighterExchange builder fee order wiring', () => {
     expect(createOrderMock).toHaveBeenCalledWith(
       expect.objectContaining({
         integratorAccountIndex: 158385n,
-        integratorMakerFee: 0,
-        integratorTakerFee: 250,
+        integratorMakerFee: 300,
+        integratorTakerFee: 300,
       }),
     );
   });

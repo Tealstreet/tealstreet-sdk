@@ -13,8 +13,7 @@
     "test": "run-s test-unit",
     "test-unit": "vitest run",
     "test-unit-watch": "vitest watch --ui",
-    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit",
-    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
+    "typecheck": "tsc --project ./tsconfig.json --noEmit"
   },
   "dependencies": {
     "dequal": "^2.0.3"
@@ -29,12 +28,12 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^18.3.6",
     "@vitejs/plugin-react": "^6.0.3",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.9",
     "@vitest/ui": "^4.1.9",
     "cross-env": "^7.0.3",
     "eslint": "^9.28.0",
     "npm-run-all2": "^9.0.2",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "rimraf": "^6.1.3",

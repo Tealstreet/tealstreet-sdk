@@ -1,7 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
-import type { OkxInstrumentType, OkxRegion } from './okx.types';
+import type { OkxRegion } from './okx.types';
 
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
@@ -80,18 +80,6 @@ export const findTickerMarkForCurrency = (
   return ticker && typeof ticker.mark === 'number' ? ticker.mark : 1;
 };
 
-const getOKXTriggerPxType = (triggerType?: OrderStopTriggerType) => {
-  if (triggerType === OrderStopTriggerType.IndexPrice) return 'index';
-  if (triggerType === OrderStopTriggerType.MarkPrice) return 'mark';
-  return 'last';
-};
-
-const parseOKXTriggerPxType = (triggerPxType?: string) => {
-  if (triggerPxType === 'index') return OrderStopTriggerType.IndexPrice;
-  if (triggerPxType === 'mark') return OrderStopTriggerType.MarkPrice;
-  return OrderStopTriggerType.LastPrice;
-};
-
 export class OKXExchange extends BaseExchange {
   xhr: Axios;
   region: OkxRegion;
@@ -112,10 +100,6 @@ export class OKXExchange extends BaseExchange {
   // 4: Portfolio margin
   _accountLevel: number | null = null;
 
-  private readonly markPriceMarketIds = new Set<string>();
-
-  private readonly indexPriceMarketIds = new Set<string>();
-
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
@@ -126,49 +110,6 @@ export class OKXExchange extends BaseExchange {
     this.privateWebsocket = new OKXPrivateWebsocket(this);
     this.businessWebsocket = new OKXBusinessWebsocket(this);
   }
-
-  getInstrumentTypes(): OkxInstrumentType[] {
-    return ['SWAP'];
-  }
-
-  isSupportedMarketInstrument(market: Record<string, any>): boolean {
-    return (
-      this.getInstrumentTypes().includes(market.instType) && (market.ctType === 'linear' || market.ctType === 'inverse')
-    );
-  }
-
-  getMarketInstrumentType(market: { info?: any; instType?: unknown }): OkxInstrumentType {
-    const instType = String(market.info?.instType || market.instType || 'SWAP');
-    return instType === 'FUTURES' ? 'FUTURES' : 'SWAP';
-  }
-
-  getIndexTickerInstId(market: Market): string {
-    const underlying = String(market.info?.uly || '');
-    if (underlying) return underlying;
-    return market.id.replace(/-SWAP$/, '');
-  }
-
-  getMarketsForIndexTickerInstId(instId: string): Market[] {
-    return this.store.markets.filter((market) => this.getIndexTickerInstId(market) === instId);
-  }
-
-  private formatMarketSymbol = (market: Record<string, any>) => {
-    if (market.instType === 'FUTURES' && market.ruleType === 'xperp') {
-      return String(market.instId || '').replace(/-/g, '');
-    }
-
-    return String(market.instId || '')
-      .replace(/-SWAP$/, '')
-      .replace(/-/g, '');
-  };
-
-  private formatMarketPrettySymbol = (market: Record<string, any>, base: string, quote: string) => {
-    if (market.instType === 'FUTURES' && market.ruleType === 'xperp') {
-      return `${base}/${quote} XPERP`;
-    }
-
-    return undefined;
-  };
 
   validateAccount = async () => {
     try {
@@ -270,33 +211,14 @@ export class OKXExchange extends BaseExchange {
     }
   };
 
-  markPriceLoaded = (marketId: string) => {
-    this.markPriceMarketIds.add(marketId);
-  };
-
-  indexPriceLoaded = (marketId: string) => {
-    this.indexPriceMarketIds.add(marketId);
-  };
-
-  hasMarkPriceLoaded = (marketId: string) => {
-    return this.markPriceMarketIds.has(marketId);
-  };
-
-  hasIndexPriceLoaded = (marketId: string) => {
-    return this.indexPriceMarketIds.has(marketId);
-  };
-
   fetchMarkets = async () => {
     try {
-      const responses = await Promise.all(
-        this.getInstrumentTypes().map((instType) =>
-          this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS, { params: { instType } }),
-        ),
-      );
-      const data = responses.flatMap(({ data }) => data.data);
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS, { params: { instType: 'SWAP' } });
 
       return data
-        .filter((m) => this.isSupportedMarketInstrument(m))
+        .filter((m) => m.ctType === 'linear' || m.ctType === 'inverse')
         .map((m) => {
           const isInverse = m.ctType === 'inverse';
           const [ulyBase, ulyQuote] = String(m.uly || m.instFamily || '')
@@ -313,12 +235,9 @@ export class OKXExchange extends BaseExchange {
           const base = (m.baseCcy || (isInverse ? m.settleCcy : m.ctValCcy) || ulyBase || '').toUpperCase();
           const quote = (m.quoteCcy || (isInverse ? m.ctValCcy : m.settleCcy) || ulyQuote || '').toUpperCase();
 
-          const prettySymbol = this.formatMarketPrettySymbol(m, base, quote);
-
           return {
             id: m.instId,
-            symbol: this.formatMarketSymbol(m),
-            ...(prettySymbol ? { prettySymbol } : {}),
+            symbol: m.instId.replace(/-SWAP$/, '').replace(/-/g, ''),
             base,
             quote,
             isInverse,
@@ -354,16 +273,13 @@ export class OKXExchange extends BaseExchange {
 
   fetchTickersRaw = async () => {
     try {
-      const responses = await Promise.all(
-        this.getInstrumentTypes().map((instType) =>
-          this.xhr.get(ENDPOINTS.TICKERS, {
-            params: {
-              instType,
-            },
-          }),
-        ),
-      );
-      const data = responses.flatMap(({ data }) => data.data);
+      const {
+        data: { data },
+      } = await this.xhr.get(ENDPOINTS.TICKERS, {
+        params: {
+          instType: 'SWAP',
+        },
+      });
 
       return data;
     } catch (err: any) {
@@ -486,16 +402,13 @@ export class OKXExchange extends BaseExchange {
         },
       } = await this.xhr.get<{
         data: Array<Record<string, Array<Record<string, any>>>>;
-      }>(ENDPOINTS.BALANCE, { params: { instType: this.getInstrumentTypes()[0] } });
+      }>(ENDPOINTS.BALANCE, { params: { instType: 'SWAP' } });
 
-      const positionResponses = await Promise.all(
-        this.getInstrumentTypes().map((instType) =>
-          this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS, {
-            params: { instType },
-          }),
-        ),
-      );
-      const pData = positionResponses.flatMap(({ data }) => data.data);
+      const {
+        data: { data: pData },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS, {
+        params: { instType: 'SWAP' },
+      });
 
       const positions: Position[] = this.mapPositions(pData);
       const balance = await this.formatBalanceUsedAvail(bal, positions, this.store.orders || []);
@@ -665,9 +578,8 @@ export class OKXExchange extends BaseExchange {
       const orders = await this.fetchNormalOrders();
       const ocoOrders = await this.fetchAlgoOrders('oco');
       const conditionalOrders = await this.fetchAlgoOrders('conditional');
-      const triggerOrders = await this.fetchAlgoOrders('trigger');
       const trailingOrders = await this.fetchAlgoOrders('move_order_stop');
-      return [...orders, ...ocoOrders, ...trailingOrders, ...conditionalOrders, ...triggerOrders];
+      return [...orders, ...ocoOrders, ...trailingOrders, ...conditionalOrders];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return this.store.orders;
@@ -675,53 +587,47 @@ export class OKXExchange extends BaseExchange {
   };
 
   fetchNormalOrders = async () => {
-    const recursiveFetch = async (
-      orders: Array<Record<string, any>> = [],
-      instType: OkxInstrumentType,
-    ): Promise<Array<Record<string, any>>> => {
+    const recursiveFetch = async (orders: Array<Record<string, any>> = []): Promise<Array<Record<string, any>>> => {
       const {
         data: { data },
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.UNFILLED_ORDERS, {
         params: {
-          instType,
+          instType: 'SWAP',
           after: orders.length ? orders[orders.length - 1].ordId : undefined,
         },
       });
 
       if (data.length === 100) {
-        return recursiveFetch([...orders, ...data], instType);
+        return recursiveFetch([...orders, ...data]);
       }
 
       return [...orders, ...data];
     };
 
-    const okxOrders = flatten(await map(this.getInstrumentTypes(), (instType) => recursiveFetch([], instType)));
+    const okxOrders = await recursiveFetch();
     return this.mapOrders(okxOrders);
   };
 
-  fetchAlgoOrders = async (type: 'conditional' | 'trigger' | 'move_order_stop' | 'oco') => {
-    const recursiveFetch = async (
-      orders: Array<Record<string, any>> = [],
-      instType: OkxInstrumentType,
-    ): Promise<Array<Record<string, any>>> => {
+  fetchAlgoOrders = async (type: 'conditional' | 'move_order_stop' | 'oco') => {
+    const recursiveFetch = async (orders: Array<Record<string, any>> = []): Promise<Array<Record<string, any>>> => {
       const {
         data: { data },
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.UNFILLED_ALGO_ORDERS, {
         params: {
-          instType,
+          instType: 'SWAP',
           ordType: type,
           after: orders.length ? orders[orders.length - 1].algoId : undefined,
         },
       });
 
       if (data.length === 100) {
-        return recursiveFetch([...orders, ...data], instType);
+        return recursiveFetch([...orders, ...data]);
       }
 
       return [...orders, ...data];
     };
 
-    const okxOrders = flatten(await map(this.getInstrumentTypes(), (instType) => recursiveFetch([], instType)));
+    const okxOrders = await recursiveFetch();
     return this.mapOrders(okxOrders);
   };
 
@@ -818,7 +724,7 @@ export class OKXExchange extends BaseExchange {
 
     const fetchByEndpoint = async (endpoint: string) => {
       const params = omitUndefined({
-        instType: this.getMarketInstrumentType(market),
+        instType: 'SWAP',
         instId: market.id,
         ordId: orderId,
         begin: fromMilliseconds,
@@ -961,91 +867,23 @@ export class OKXExchange extends BaseExchange {
   };
 
   updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
-    if (order.type === OrderType.Conditional) {
-      return this.updateTriggerAlgoOrder({ order, update });
-    }
-
     const orders = this.store.orders.filter((o) => o.id.startsWith(order.id.replace(/_[a-zA-Z]+$/, '')));
 
-    const amount = 'amount' in update ? update.amount : order.amount;
-    const price = 'price' in update ? update.price : order.price;
-
-    const baseOrder = {
+    const newOrder = {
       ...order,
       symbol: order.symbol,
       type: order.type,
       side: order.side,
-      amount,
+      price: order.price,
+      amount: order.amount,
       reduceOnly: order.reduceOnly || false,
     };
 
-    const newOrder: PlaceOrderOpts = {
-      ...baseOrder,
-      price,
-    };
+    if ('price' in update) newOrder.price = update.price;
+    else if ('amount' in update) newOrder.amount = update.amount;
 
     await this.cancelAlgoOrders(orders);
     return await this.placeOrder(newOrder);
-  };
-
-  private updateTriggerAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
-    const market = this.store.marketsBySymbol[order.symbol];
-    if (!market) throw new Error(`Market ${order.symbol} not found on OKX`);
-
-    const payload: Record<string, any> = {
-      instId: market.id,
-      algoId: order.id.replace(/_[a-zA-Z]+$/, ''),
-    };
-
-    const triggerPrice = adjust('price' in update ? update.price : order.price, market.precision.price);
-    if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
-      const message = 'Trigger price is required for OKX opening conditional orders';
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
-    const conditionalOrderPrice = this.toFiniteNumber(order.extra?.conditionalOrderPrice);
-    payload.newTriggerPx = `${triggerPrice}`;
-    payload.newOrdPx = conditionalOrderPrice > 0 ? `${adjust(conditionalOrderPrice, market.precision.price)}` : '-1';
-    payload.newTriggerPxType = getOKXTriggerPxType(order.triggerType);
-
-    if ('amount' in update && +order.amount !== 0) {
-      const amount = adjust(update.amount, market.precision.amount);
-
-      if (amount === 0) {
-        const message = 'Order amount is too small';
-        this.emitAndLogError(message);
-        throw new Error(message);
-      }
-
-      payload.newSz = `${amount}`;
-    }
-
-    let responseBody: Record<string, any> | undefined;
-    try {
-      const response = await this.xhr.post(ENDPOINTS.UPDATE_ALGO_ORDER, payload);
-      responseBody = response.data;
-    } catch (err: any) {
-      const message = err?.response?.data?.msg || err?.message || 'OKX trigger order amend failed';
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
-    if (responseBody?.code && responseBody.code !== '0') {
-      const message = responseBody.msg || responseBody.code || 'OKX trigger order amend failed';
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
-    const data = responseBody?.data;
-    const failed = data?.find?.((d: Record<string, any>) => (d.sCode && d.sCode !== '0') || d.sMsg);
-    if (failed) {
-      const message = failed.sMsg || failed.sCode || 'OKX trigger order amend failed';
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
-    return [order.id];
   };
 
   cancelOrders = async (orders: Order[]) => {
@@ -1201,7 +1039,7 @@ export class OKXExchange extends BaseExchange {
     const fromReference = this.toFiniteNumber(referencePrice);
     if (fromReference > 0) return fromReference;
 
-    const ticker = this.getTicker(market);
+    const ticker = this.store.tickersById[market.id] || this.store.tickersBySymbol[market.symbol];
     const fromMark = this.toFiniteNumber(ticker?.mark);
     if (fromMark > 0) return fromMark;
 
@@ -1209,51 +1047,6 @@ export class OKXExchange extends BaseExchange {
     if (fromLast > 0) return fromLast;
 
     return 0;
-  };
-
-  private getTicker = (market: Market): Ticker | undefined => {
-    return this.store.tickersById[market.id] || this.store.tickersBySymbol[market.symbol];
-  };
-
-  private hasExternalTriggerReferencePrice = (market: Market, source: 'mark' | 'index', ticker: Ticker | undefined) => {
-    const config = this.options.externalPublicData;
-
-    if (config?.type === 'in-process') {
-      const methodName = source === 'mark' ? 'hasMarkPriceLoaded' : 'hasIndexPriceLoaded';
-      const sourceExchange = config.source as Partial<Record<typeof methodName, (marketId: string) => boolean>>;
-      if (sourceExchange[methodName]?.(market.id)) return true;
-    }
-
-    if (!config) return false;
-
-    const sourcePrice = this.toFiniteNumber(ticker?.[source]);
-    const last = this.toFiniteNumber(ticker?.last);
-    return sourcePrice > 0 && last > 0 && sourcePrice !== last;
-  };
-
-  private resolveTriggerReferencePrice = (market: Market, triggerPxType?: string, fallbackPrice?: number) => {
-    const ticker = this.getTicker(market);
-    const fallback = this.toFiniteNumber(fallbackPrice);
-
-    if (triggerPxType === 'index') {
-      if (!this.indexPriceMarketIds.has(market.id) && !this.hasExternalTriggerReferencePrice(market, 'index', ticker)) {
-        return 0;
-      }
-      const fromIndex = this.toFiniteNumber(ticker?.index);
-      return fromIndex > 0 ? fromIndex : 0;
-    }
-
-    if (triggerPxType === 'mark') {
-      if (!this.markPriceMarketIds.has(market.id) && !this.hasExternalTriggerReferencePrice(market, 'mark', ticker)) {
-        return 0;
-      }
-      const fromMark = this.toFiniteNumber(ticker?.mark);
-      return fromMark > 0 ? fromMark : 0;
-    }
-
-    const fromLast = this.toFiniteNumber(ticker?.last);
-    if (fromLast > 0) return fromLast;
-    return this.resolveReferencePrice(market, fallback);
   };
 
   convertMarginValueToUsd = (
@@ -1325,49 +1118,6 @@ export class OKXExchange extends BaseExchange {
       const market = this.store.marketsById[o.instId];
       if (!market) return acc;
 
-      if (o.ordType === 'trigger') {
-        const amount = parseFloat(o.sz || '0');
-        const size = Math.abs(amount);
-        const triggerPrice = parseFloat(o.triggerPx || '0');
-        const orderPrice = parseFloat(o.ordPx || o.orderPx || '0');
-        const referencePrice = parseFloat(o.last || o.px || o.ordPx || o.orderPx || o.triggerPx || '0');
-        const sizeInBase = this.contractsToBase(size, market, referencePrice);
-        const isReduceOnly = o.reduceOnly === 'true' || o.reduceOnly === true;
-        const type = isReduceOnly ? this.getReduceOnlyTriggerOrderType(o, market) : OrderType.Conditional;
-        const triggerType = parseOKXTriggerPxType(o.triggerPxType);
-        const suffix = type === OrderType.StopLoss ? '_sl' : type === OrderType.TakeProfit ? '_tp' : '';
-        const triggerTypeFields =
-          type === OrderType.StopLoss
-            ? { slTriggerType: triggerType }
-            : type === OrderType.TakeProfit
-              ? { tpTriggerType: triggerType }
-              : { triggerType };
-
-        return [
-          ...acc,
-          {
-            id: `${o.algoId}${suffix}`,
-            status: OrderStatus.Open,
-            symbol: market.symbol,
-            type,
-            side: ORDER_SIDE[o.side],
-            price: triggerPrice,
-            amount: size,
-            filled: 0,
-            remaining: sizeInBase,
-            extra: {
-              remainingNative: size,
-              conditionalOrderPrice: Number.isFinite(orderPrice) && orderPrice > 0 ? orderPrice : undefined,
-            },
-            reduceOnly: isReduceOnly,
-            lastUpdate: virtualClock.getCurrentTimeMs(),
-            ...triggerTypeFields,
-            timeInForce: OrderTimeInForce.GoodTillCancel,
-            info: o,
-          },
-        ];
-      }
-
       if (o.ordType === 'oco' || o.ordType === 'conditional') {
         const newOrders: Order[] = [];
 
@@ -1393,7 +1143,12 @@ export class OKXExchange extends BaseExchange {
             },
             reduceOnly: o.reduceOnly == 'true',
             lastUpdate: virtualClock.getCurrentTimeMs(),
-            slTriggerType: parseOKXTriggerPxType(o.slTriggerPxType),
+            slTriggerType:
+              o.slTriggerPxType === 'index'
+                ? OrderStopTriggerType.IndexPrice
+                : o.slTriggerPxType === 'mark'
+                  ? OrderStopTriggerType.MarkPrice
+                  : OrderStopTriggerType.LastPrice,
             timeInForce: OrderTimeInForce.GoodTillCancel,
             info: o,
           });
@@ -1415,7 +1170,12 @@ export class OKXExchange extends BaseExchange {
             },
             reduceOnly: o.reduceOnly == 'true',
             lastUpdate: virtualClock.getCurrentTimeMs(),
-            tpTriggerType: parseOKXTriggerPxType(o.tpTriggerPxType),
+            tpTriggerType:
+              o.tpTriggerPxType === 'index'
+                ? OrderStopTriggerType.IndexPrice
+                : o.tpTriggerPxType === 'mark'
+                  ? OrderStopTriggerType.MarkPrice
+                  : OrderStopTriggerType.LastPrice,
             timeInForce: OrderTimeInForce.GoodTillCancel,
             info: o,
           });
@@ -1575,32 +1335,8 @@ export class OKXExchange extends BaseExchange {
       tag: BROKER_ID,
       side: inverseObj(ORDER_SIDE)[opts.side],
       posSide: this.getPositionSide(opts),
-      ordType:
-        opts.type === OrderType.Conditional
-          ? 'trigger'
-          : opts.type === OrderType.TrailingStopLoss
-            ? 'move_order_stop'
-            : 'conditional',
+      ordType: opts.type === OrderType.TrailingStopLoss ? 'move_order_stop' : 'conditional',
     });
-
-    if (opts.type === OrderType.Conditional) {
-      const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : 0;
-      if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
-        const message = 'Trigger price is required for OKX opening conditional orders';
-        this.emitAndLogError(message);
-        throw new Error(message);
-      }
-      if (!Number.isFinite(amount) || amount <= 0) {
-        const message = 'Order amount is too small';
-        this.emitAndLogError(message);
-        throw new Error(message);
-      }
-
-      req.sz = `${amount}`;
-      req.triggerPx = `${triggerPrice}`;
-      req.orderPx = price ? `${price}` : '-1';
-      req.triggerPxType = getOKXTriggerPxType(opts.triggerType);
-    }
 
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
       if (+amount !== 0) {
@@ -1615,13 +1351,23 @@ export class OKXExchange extends BaseExchange {
     if (opts.type === OrderType.StopLoss) {
       req.slTriggerPx = `${price}`;
       req.slOrdPx = '-1';
-      req.slTriggerPxType = getOKXTriggerPxType(opts.slTriggerType ?? OrderStopTriggerType.MarkPrice);
+      req.slTriggerPxType =
+        opts.slTriggerType === OrderStopTriggerType.IndexPrice
+          ? 'index'
+          : opts.slTriggerType === OrderStopTriggerType.LastPrice
+            ? 'last'
+            : 'mark';
     }
 
     if (opts.type === OrderType.TakeProfit) {
       req.tpTriggerPx = `${price}`;
       req.tpOrdPx = '-1';
-      req.tpTriggerPxType = getOKXTriggerPxType(opts.tpTriggerType);
+      req.tpTriggerPxType =
+        opts.tpTriggerType === OrderStopTriggerType.IndexPrice
+          ? 'index'
+          : opts.tpTriggerType === OrderStopTriggerType.MarkPrice
+            ? 'mark'
+            : 'last';
     }
 
     if (opts.type === OrderType.TrailingStopLoss) {
@@ -1794,7 +1540,7 @@ export class OKXExchange extends BaseExchange {
         return [...acc, { instId: market.id, algoId: o.id.replace(/_[a-zA-Z]+$/, '') }];
       }, []);
 
-    await forEachSeries(chunk(batches, 10), async (batch) => {
+    await forEachSeries(chunk(batches, 20), async (batch) => {
       const {
         data: { data },
       } = await this.xhr.post(ENDPOINTS.CANCEL_ALGO_ORDERS, batch);
@@ -1807,10 +1553,7 @@ export class OKXExchange extends BaseExchange {
 
   private isAlgoOrder = (orderType: OrderType) => {
     return (
-      orderType === OrderType.Conditional ||
-      orderType === OrderType.StopLoss ||
-      orderType === OrderType.TakeProfit ||
-      orderType === OrderType.TrailingStopLoss
+      orderType === OrderType.StopLoss || orderType === OrderType.TakeProfit || orderType === OrderType.TrailingStopLoss
     );
   };
 
@@ -1834,31 +1577,11 @@ export class OKXExchange extends BaseExchange {
       opts.type === OrderType.StopLoss ||
       opts.type === OrderType.TakeProfit ||
       opts.type === OrderType.TrailingStopLoss ||
-      (opts.type !== OrderType.Conditional && opts.reduceOnly)
+      opts.reduceOnly
     ) {
       side = side === 'long' ? 'short' : 'long';
     }
 
     return side;
-  };
-
-  private getReduceOnlyTriggerOrderType = (order: Record<string, any>, market: Market) => {
-    const side = ORDER_SIDE[order.side];
-    const triggerPrice = parseFloat(order.triggerPx || '0');
-    const referencePrice = this.resolveTriggerReferencePrice(
-      market,
-      order.triggerPxType,
-      parseFloat(order.last || '0'),
-    );
-
-    if (!Number.isFinite(triggerPrice) || triggerPrice <= 0 || !referencePrice) {
-      return OrderType.Conditional;
-    }
-
-    if (side === OrderSide.Sell) {
-      return triggerPrice > referencePrice ? OrderType.TakeProfit : OrderType.StopLoss;
-    }
-
-    return triggerPrice < referencePrice ? OrderType.TakeProfit : OrderType.StopLoss;
   };
 }

@@ -3,7 +3,6 @@ import type { CommandContext } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 
 /**
  * Base class for trading commands with utility methods for size/price processing
@@ -149,8 +148,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       if (!ticker?.last) {
         throw new Error(`Price not available for ${symbol}`);
       }
-      // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / ticker.last), market.precision.amount);
+      return adjust(notional / ticker.last, market.precision.amount);
     }
 
     if (this.looksLikeSize(trimmed)) {
@@ -199,11 +197,8 @@ export abstract class TradingBaseCommand extends BaseCommand {
     if (!lastPrice) {
       throw new Error('Price data is not available yet for a symbol');
     }
-    // Linear is NOT always 1 contract = 1 base coin — OKX publishes a real ctVal
-    // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
-    // divided by it to get the native contract count.
-    const baseAmount = notional / lastPrice;
-    return adjust(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
+    const unadjustedNotional = notional / lastPrice;
+    return adjust(unadjustedNotional, amountPrecision);
   }
 
   /**

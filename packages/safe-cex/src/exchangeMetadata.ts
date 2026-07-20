@@ -47,24 +47,6 @@ export type ExchangeMetadata = {
   enabledInDev: boolean;
   /** Whether this exchange is enabled in preview/staging environment */
   enableInPreview?: boolean;
-  /**
-   * Hide this exchange from the "add API key" picker while keeping it fully
-   * runnable for accounts already saved against it.
-   *
-   * This is deliberately NOT `enabled: false`. Availability gates
-   * (`isExchangeAvailableInCurrentEnv`) also decide whether a *saved* account
-   * is allowed to register at startup, so disabling a superseded venue would
-   * silently break every existing user account on it. Use this flag when a
-   * venue has been folded into another one and should no longer be offered
-   * for new connections.
-   */
-  hiddenFromNewAccountPicker?: boolean;
-  /**
-   * Whether this exchange serves spot markets alongside derivatives from one
-   * connection, and therefore should offer a per-account "also trade spot"
-   * toggle in the add-account form (`ExchangeAccountConfig.enableSpotMarkets`).
-   */
-  supportsSpotToggle?: boolean;
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
   /** Whether the exchange API supports fetching trade history */
@@ -785,7 +767,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: false,
   enabledInDev: true,
-  enableInPreview: true,
+  enableInPreview: false,
   supportsTestnet: true,
   supportsTradesHistory: false,
   orderbookTickDelay: 100,
@@ -797,11 +779,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   tvIntraDayMultipliers: ['1', '5', '15', '30', '60', '240'],
   tvMaxGetBarFetches: 10,
   candleApiCountLimit: 500,
-  privateProxyIps: privateProxyIpsTokyo,
-  privateProxyRegions: {
-    JA: privateProxyIpsTokyo,
-    SG: privateProxyIpsSingapore,
-  },
+  privateProxyIps: privateProxyIpsSingapore,
   tickInterval: 2000,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,
@@ -904,12 +882,8 @@ const BitrueMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/bitrue/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  // Removed from supported exchanges (hidden from add-account everywhere). Code
-  // is kept in place; flip these back to re-enable. Same soft-disable pattern as
-  // dydx/arkham/salsadex — gated by isExchangeAvailableInCurrentEnv.
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
+  enabled: true,
+  enabledInDev: true,
   supportsTestnet: false,
   supportsTradesHistory: true,
   supportsExecutionsHistory: true,
@@ -1070,7 +1044,6 @@ const OkxMetadata: ExchangeMetadata = {
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsTrailingStopLoss: false,
-  supportsOpeningTriggerOrders: true,
   hasEmptyPositions: false,
   positionModeIsGlobal: true,
   unifiedMargin: false,
@@ -1089,7 +1062,6 @@ const OkxEUMetadata: ExchangeMetadata = {
   ...OkxMetadata,
   exchangeName: 'okxeu' as ExchangeName,
   prettyName: 'OKX EU',
-  requiresCors: true,
   latencyDomain: 'eea.okx.com',
 };
 
@@ -1270,12 +1242,8 @@ const SalsaDEXMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/salsadex/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: true,
-  // Removed from supported exchanges (hidden from add-account everywhere). Code
-  // is kept in place; flip these back to re-enable. Same soft-disable pattern as
-  // dydx/arkham — gated by isExchangeAvailableInCurrentEnv.
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
+  enabled: true,
+  enabledInDev: true,
   supportsTestnet: false,
   supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
@@ -1383,8 +1351,6 @@ const HyperliquidMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquid' as ExchangeName,
-  // One connection serves perps + spot; spot is opt-in per account.
-  supportsSpotToggle: true,
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   positionModes: [PositionMode.OneWay],
   hidePositionModeSelector: true,
@@ -1412,9 +1378,6 @@ const HyperliquidMetadata: ExchangeMetadata = {
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: true,
-  // Hyperliquid rests a reduce-only order at whatever size it was sent, so the
-  // client has to cap it to the open position itself.
-  autoDownSizeReduceOrders: true,
   forbidCors: true,
   supportsVault: true,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
@@ -1435,10 +1398,6 @@ const HyperliquidSpotMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquidspot' as ExchangeName,
-  // Superseded by the `hyperliquid` connection's spot toggle. Kept enabled so
-  // existing saved accounts keep loading; hidden from the picker so nobody
-  // creates a new split account.
-  hiddenFromNewAccountPicker: true,
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   logo: '/static/exchanges/logos/HYPERLIQUIDSPOT/logo.svg',
   lightLogo: '/static/exchanges/logos/HYPERLIQUIDSPOT/light.png',

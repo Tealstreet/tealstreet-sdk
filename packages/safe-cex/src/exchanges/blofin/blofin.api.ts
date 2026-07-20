@@ -11,10 +11,6 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL } from './blofin.types';
 
-// 152401 = access key does not exist, 152406 = IP not in the key's whitelist.
-// Both are configuration faults that retrying cannot fix.
-const BLOFIN_AUTH_ERROR_CODES = new Set(['152401', '152406']);
-
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const { passphrase } = options;
 
@@ -86,23 +82,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     });
 
     return { ...nextConfig, headers };
-  });
-
-  // Credential problems never resolve by retrying, so let the exchange back its
-  // tick loop off instead of hammering a dead key at full rate forever. Only a
-  // SIGNED success clears the streak — public endpoints keep returning code 0
-  // with no credentials at all and would otherwise mask a rejected key.
-  xhr.interceptors.response.use((response) => {
-    if (!response.config?.headers?.['ACCESS-SIGN']) return response;
-
-    const code = String(response.data?.code ?? '');
-    if (BLOFIN_AUTH_ERROR_CODES.has(code)) {
-      exchange.recordAuthFailure();
-    } else if (code === '0') {
-      exchange.recordAuthSuccess();
-    }
-
-    return response;
   });
 
   return xhr;

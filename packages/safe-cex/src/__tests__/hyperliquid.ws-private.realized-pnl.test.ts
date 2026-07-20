@@ -28,10 +28,10 @@ const createParentMock = () => {
     addOrUpdatePositionsFull: vi.fn(),
   };
 
-  const parent = {
+  return {
     name: 'hyperliquid',
     isDisposed: false,
-    options: { testnet: false } as Record<string, unknown>,
+    options: { testnet: false },
     store,
     hip3DexNames: [],
     marketsLowerCaseMap: new Map<string, typeof market>(),
@@ -44,14 +44,7 @@ const createParentMock = () => {
     shouldUseSpotCollateralBalance: vi.fn(() => false),
     shouldRequestPortfolioMarginSpotState: vi.fn(() => false),
     handleSpotClearinghouseStateUpdate: vi.fn(),
-    // Derived exactly as the exchange derives it, so a test that flips either
-    // input gets the real behaviour instead of a hardcoded answer.
-    shouldTrackSpotHoldings: vi.fn(
-      (): boolean => parent.shouldUseSpotCollateralBalance() || Boolean(parent.options.enableSpotMarkets),
-    ),
   };
-
-  return parent;
 };
 
 const createSampleFill = () => ({

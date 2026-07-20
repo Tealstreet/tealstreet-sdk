@@ -2,8 +2,9 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": "./src",
     "paths": {
-      "@tealstreet/sleep/*": ["../sleep/*"]
+      "@tealstreet/sleep/*": ["../../sleep/*"]
     },
     "target": "ESNext",
     "lib": ["dom", "dom.iterable", "esnext"],

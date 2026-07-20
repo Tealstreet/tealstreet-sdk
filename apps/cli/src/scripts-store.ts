@@ -26,7 +26,7 @@ import { pathToFileURL } from 'url';
 import type { ScriptFn, ScriptMeta, ScriptRecord } from '@tealstreet/script-api-core';
 
 import { logger } from './logger';
-import { HELLO_TEMPLATE, TSCONFIG_TEMPLATE, TYPES_TEMPLATE } from '@tealstreet/script-authoring/src/scripts-templates';
+import { HELLO_TEMPLATE, TSCONFIG_TEMPLATE, TYPES_TEMPLATE } from './scripts-templates';
 
 const CONFIG_DIR = path.join(os.homedir(), '.tealstreet');
 export const SCRIPTS_DIR = path.join(CONFIG_DIR, 'scripts');
@@ -45,7 +45,7 @@ const HELLO_FILE = path.join(SCRIPTS_DIR, 'hello.ts');
  * to load `buy.ts`, `tasks.ts`, etc. — that guard is gone since the
  * prefix-only model means `script:buy` is always unambiguous.
  */
-export const VALID_SCRIPT_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
+const VALID_SCRIPT_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
 
 /**
  * A `ScriptRecord` plus the on-disk file path. The host keeps this
@@ -243,80 +243,4 @@ export function lookupScript(name: string): LoadedScript | undefined {
 export function clearScriptsCache(): void {
   cache = [];
   loadInFlight = null;
-}
-
-/**
- * Write a script file and refresh the in-memory registry.
- *
- * Lives here rather than in the caller so `VALID_SCRIPT_NAME` stays
- * single-sourced with the loader — a name this accepts but `scanEntries`
- * rejects would produce a file that silently never loads.
- *
- * Callers are expected to have VALIDATED the source first. The CLI loads this
- * directory at startup, so writing source that fails to parse degrades the
- * user's next REPL session, not just the current call.
- */
-export async function writeScript(name: string, source: string): Promise<string> {
-  if (!VALID_SCRIPT_NAME.test(name)) {
-    throw new Error(
-      `invalid script name '${name}': must match ${String(VALID_SCRIPT_NAME)} (letters, digits, _ and -; no dots, no spaces)`,
-    );
-  }
-  ensureScriptsDir();
-  const filePath = path.join(SCRIPTS_DIR, `${name}.ts`);
-  fs.writeFileSync(filePath, source, 'utf8');
-  // Re-scan rather than clearScriptsCache(): loadScripts() rebuilds the cache
-  // AND republishes loadInFlight, and its reload counter cache-busts import().
-  await loadScripts();
-  return filePath;
-}
-
-export type DeleteScriptResult = 'deleted' | 'absent' | 'reseeded';
-
-/**
- * Delete a script and refresh the registry.
- *
- * Returns `'reseeded'` for the seeded `hello` example: the refresh runs
- * `ensureScriptsDir()`, which rewrites `hello.ts` only-if-missing, so deleting
- * it puts a fresh copy straight back. Reporting `'deleted'` there would be a
- * lie the user discovers on their next `script reload`.
- */
-export async function deleteScript(name: string): Promise<DeleteScriptResult> {
-  if (!VALID_SCRIPT_NAME.test(name)) return 'absent';
-  const filePath = path.join(SCRIPTS_DIR, `${name}.ts`);
-  if (!fs.existsSync(filePath)) return 'absent';
-  fs.unlinkSync(filePath);
-  await loadScripts();
-  return fs.existsSync(filePath) ? 'reseeded' : 'deleted';
-}
-
-/**
- * Every `.ts` file in the scripts directory, whether or not it loads.
- *
- * `listScripts()` reflects the loader's cache, and the loader SKIPS any file
- * that throws at import. That makes a broken script invisible — precisely the
- * script someone asks an agent to fix. Tooling that needs to see or repair
- * what is actually on disk must use this instead.
- */
-export function listScriptFiles(): { name: string; filePath: string }[] {
-  if (!fs.existsSync(SCRIPTS_DIR)) return [];
-  return fs
-    .readdirSync(SCRIPTS_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && entry.name !== 'types.d.ts')
-    .map((entry) => entry.name.replace(/\.ts$/, ''))
-    .filter((name) => VALID_SCRIPT_NAME.test(name))
-    .sort()
-    .map((name) => ({ name, filePath: path.join(SCRIPTS_DIR, `${name}.ts`) }));
-}
-
-/** Source of a script by name, read from disk. `undefined` when absent. */
-export function readScriptSource(name: string): string | undefined {
-  if (!VALID_SCRIPT_NAME.test(name)) return undefined;
-  const filePath = path.join(SCRIPTS_DIR, `${name}.ts`);
-  return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : undefined;
-}
-
-/** Absolute path for a script name, without requiring it to exist. */
-export function scriptPath(name: string): string {
-  return path.join(SCRIPTS_DIR, `${name}.ts`);
 }

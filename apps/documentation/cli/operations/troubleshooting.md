@@ -68,22 +68,6 @@ with an empty file.
 
 ---
 
-## "Why is Bybit returning a 403 geo-block?"
-
-That error means the CLI reached Bybit directly from a restricted
-network route. Use a VPN, or add the account with Tealstreet proxy
-routing from inside the REPL:
-
-```text
-> accounts add -n mybybit -e bybit -k <KEY> -s <SECRET> --tealstreet-proxy --proxy-region SG
-```
-
-This only changes how the CLI reaches Bybit. It does not make
-TradingView webhooks reach the CLI; the hosted TradingView-to-CLI relay
-is not live yet.
-
----
-
 ## "Why did my typo do something weird?"
 
 The REPL has one bit of magic: a single token that matches a market on

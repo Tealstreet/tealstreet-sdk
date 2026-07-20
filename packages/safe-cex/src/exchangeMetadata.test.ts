@@ -126,13 +126,11 @@ describe('exchangeMetadata', () => {
       expect(exchangePrettyNames.bybit).toBe('Bybit');
     });
 
-    it('advertises opening trigger orders for implemented derivatives variants only', () => {
+    it('advertises opening trigger orders for implemented Bybit derivatives variants only', () => {
       expect(exchangeMetadata.bybit.supportsOpeningTriggerOrders).toBe(true);
       expect(exchangeMetadata.bybitdemo.supportsOpeningTriggerOrders).toBe(true);
       expect(exchangeMetadata.bybitinverse.supportsOpeningTriggerOrders).toBe(true);
       expect(exchangeMetadata.bybitspot.supportsOpeningTriggerOrders).toBe(false);
-      expect(exchangeMetadata.okx.supportsOpeningTriggerOrders).toBe(true);
-      expect(exchangeMetadata.okxeu.supportsOpeningTriggerOrders).toBe(true);
     });
   });
 
@@ -205,12 +203,6 @@ describe('exchangeMetadata', () => {
       const hl = exchangeMetadata.hyperliquid;
       expect(hl.exchangeName).toBe('hyperliquid');
       expect(hl.prettyName).toBe('Hyperliquid');
-    });
-
-    it('should require proxy routing for OKX EU without changing global OKX', () => {
-      expect(exchangeMetadata.okx.requiresCors).toBe(false);
-      expect(exchangeMetadata.okxeu.requiresCors).toBe(true);
-      expect(exchangeMetadata.okxeu.privateProxyIps.length).toBeGreaterThan(0);
     });
 
     it('should have bitmex testnet metadata', () => {

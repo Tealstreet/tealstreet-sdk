@@ -66,9 +66,6 @@ const createContext = () => {
     emitAndLogError: vi.fn(),
     formatSymbolIn: (symbol?: string) => symbol?.toUpperCase() || '',
     mapPosition: vi.fn(),
-    fetchPositions: vi
-      .fn()
-      .mockResolvedValue([{ id: 'BTCUSDT:Short', symbol: 'BTCUSDT', side: 'Short', contracts: 2 }]),
     fetchPositionsAndBalance: vi.fn().mockResolvedValue({
       balance: { used: 1, free: 2, total: 3, upnl: 0 },
       positions: [{ id: 'BTCUSDT:Long', symbol: 'BTCUSDT', side: 'Long', contracts: 1 }],
@@ -151,7 +148,7 @@ describe('Phemex private websocket reconciliation', () => {
     expect(store.addOrUpdatePositions).toHaveBeenCalledWith([parsedPosition]);
   });
 
-  it('debounces REST sync and explicitly reconciles terminal order symbols', async () => {
+  it('debounces one REST positions+balance sync for terminal order events', async () => {
     const { ws, store, parent } = createContext();
     const payload = JSON.stringify({
       type: 'incremental',
@@ -166,13 +163,7 @@ describe('Phemex private websocket reconciliation', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(parent.fetchPositionsAndBalance).toHaveBeenCalledTimes(1);
-    expect(parent.fetchPositions).toHaveBeenCalledTimes(1);
-    expect(parent.fetchPositions).toHaveBeenCalledWith(['BTCUSDT']);
     expect(store.addOrUpdatePositionsFull).toHaveBeenCalledTimes(1);
-    expect(store.addOrUpdatePositionsFull).toHaveBeenCalledWith([
-      { id: 'BTCUSDT:Long', symbol: 'BTCUSDT', side: 'Long', contracts: 1 },
-      { id: 'BTCUSDT:Short', symbol: 'BTCUSDT', side: 'Short', contracts: 2 },
-    ]);
     expect(store.update).toHaveBeenCalledWith({
       balance: { used: 1, free: 2, total: 3, upnl: 0 },
       loaded: {

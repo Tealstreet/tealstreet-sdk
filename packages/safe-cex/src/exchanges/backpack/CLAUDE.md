@@ -100,7 +100,7 @@ Defined by `BackpackExchange.start()`:
 
 1. **`fetchMarkets()`** (sequential) -- fetches `/api/v1/markets`, filters for symbols containing `_` with `visible !== false`, maps to `Market[]`
 2. **Store update**: markets + `loaded.markets = true`
-3. **`fetchTickers()`** (sequential) -- fetches `/api/v1/tickers` and `/api/v1/markPrices` in parallel (`Promise.all`). **All** markets are included: perps carry mark/index/funding from the mark-price endpoint, spot markets (no mark price) fall back to `last` for mark/index and carry `fundingRate: 0`/`fundingTime: 0`. (Previously spot was filtered out via `markPriceMap.has(t.symbol)`, which made spot markets invisible in the screener / market dropdown since both iterate `store.tickers`.)
+3. **`fetchTickers()`** (sequential) -- fetches `/api/v1/tickers` and `/api/v1/markPrices` in parallel (`Promise.all`). Only PERP markets (those with mark price data) are included
 4. **Store update**: tickers + `loaded.tickers = true`
 5. Open the public WebSocket and schedule lightweight all-market subscriptions after a two-second connection delay.
 6. Public-data-only instances mark account state loaded and stop here.
@@ -366,7 +366,7 @@ Symbols use an underscore-separated format: `{BASE}_{QUOTE}_{TYPE}`
 
 Markets are parsed by splitting on `_`. The first segment is the base asset, the second is the quote asset. Markets with `marketType === 'PERP'` are treated as perpetual swaps; all others are spot.
 
-Only markets containing `_` and with `visible !== false` are loaded. **Both** spot and perpetual markets are included in the ticker list (spot tickers use `last` for mark/index and carry no funding).
+Only markets containing `_` and with `visible !== false` are loaded. Only perpetual markets (those with mark price data) are included in the ticker list.
 
 **Default symbol**: `BTC_USDC_PERP` | **Default quote**: `USDC`
 

@@ -71,14 +71,12 @@ describe('audit regression: Crypto.com public valuation streams', () => {
       expect(initialFrames).toHaveLength(2);
       expect(initialFrames.map((frame) => frame.params.channels.length)).toEqual([100, 4]);
       expect(initialFrames.flatMap((frame) => frame.params.channels)).toEqual(
-        [
-          ...markets.map(({ instrumentName }) => `ticker.${instrumentName}`),
-          ...markets.flatMap(({ instrumentName, indexInstrumentName }) => [
-            `mark.${instrumentName}`,
-            `index.${indexInstrumentName}`,
-            `funding.${instrumentName}`,
-          ]),
-        ],
+        markets.flatMap(({ instrumentName, indexInstrumentName }) => [
+          `ticker.${instrumentName}`,
+          `mark.${instrumentName}`,
+          `index.${indexInstrumentName}`,
+          `funding.${instrumentName}`,
+        ]),
       );
       expect(
         initialFrames
@@ -101,24 +99,6 @@ describe('audit regression: Crypto.com public valuation streams', () => {
     }
   });
 
-  it('keeps startup market-data subscriptions under the Crypto.com session cap', () => {
-    const exchange = createExchange();
-    const send = vi.fn();
-    exchange.publicWebsocket.ws = { readyState: WebSocket.OPEN, send } as unknown as WebSocket;
-    const markets = Array.from({ length: 120 }, (_, index) => ({
-      instrumentName: `COIN${index}USD-PERP`,
-      indexInstrumentName: `COIN${index}USD-INDEX`,
-    }));
-
-    exchange.publicWebsocket.subscribeToMarketData(markets);
-
-    const channels = send.mock.calls.flatMap(([payload]) => JSON.parse(payload).params.channels);
-    expect(channels).toHaveLength(350);
-    expect(send.mock.calls.map(([payload]) => JSON.parse(payload).params.channels.length)).toEqual([100, 100, 100, 50]);
-    expect(markets.every(({ instrumentName }) => channels.includes(`ticker.${instrumentName}`))).toBe(true);
-    expect(channels.some((channel: string) => channel.startsWith('estimatedfunding.'))).toBe(false);
-  });
-
   it('maps finite positive prices and the current settling funding rate into the ticker', () => {
     const exchange = createExchange();
 
@@ -126,9 +106,6 @@ describe('audit regression: Crypto.com public valuation streams', () => {
     exchange.publicWebsocket.onMessage(valuationFrame('index', '60120.25', 'BTCUSD-INDEX') as MessageEvent);
     exchange.publicWebsocket.onMessage(valuationFrame('funding', '-0.00025') as MessageEvent);
 
-    expect(exchange.publicWebsocket.messageHandlersStats.mark).toBeDefined();
-    expect(exchange.publicWebsocket.messageHandlersStats.index).toBeDefined();
-    expect(exchange.publicWebsocket.messageHandlersStats.funding).toBeDefined();
     expect(exchange.store.tickersBySymbol['BTCUSD-PERP']).toMatchObject({
       mark: 60_123.45,
       index: 60_120.25,

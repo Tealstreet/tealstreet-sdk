@@ -92,11 +92,6 @@ export class BitunixExchange extends BaseExchange {
   // Cache order TIFs by clientId — Bitunix REST API bug: get_pending_orders always returns effect:"GTC"
   orderTifCache: Map<string, OrderTimeInForce> = new Map();
 
-  // The private order channel does not publish reduceOnly. Retain the value
-  // submitted with a Tealstreet clientId so freshly-created orders are
-  // amendable before the first REST reconciliation.
-  orderReduceOnlyCache: Map<string, boolean> = new Map();
-
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
@@ -243,21 +238,7 @@ export class BitunixExchange extends BaseExchange {
     if (raw === 'LAST' || raw === 'LAST_PRICE') {
       return 'LAST_PRICE';
     }
-    return triggerType === OrderStopTriggerType.LastPrice ? 'LAST_PRICE' : 'MARK_PRICE';
-  };
-
-  getBitunixReduceOnly = (rawReduceOnly: unknown, clientId: unknown, fallback = false) => {
-    if (typeof rawReduceOnly === 'boolean') {
-      return rawReduceOnly;
-    }
-    if (typeof rawReduceOnly === 'string') {
-      if (rawReduceOnly.toLowerCase() === 'true') return true;
-      if (rawReduceOnly.toLowerCase() === 'false') return false;
-    }
-
-    const cached =
-      clientId === undefined || clientId === null ? undefined : this.orderReduceOnlyCache.get(String(clientId));
-    return cached ?? fallback;
+    return triggerType === OrderStopTriggerType.MarkPrice ? 'MARK_PRICE' : 'LAST_PRICE';
   };
 
   private getTpslLegSnapshot = (order: Order, leg: 'tp' | 'sl') => {
@@ -780,8 +761,6 @@ export class BitunixExchange extends BaseExchange {
         const cachedTif = this.orderTifCache.get(o.clientId);
         const restTif = TIME_IN_FORCE[o.effect?.toUpperCase()] || OrderTimeInForce.GoodTillCancel;
         const timeInForce = cachedTif || restTif;
-        const reduceOnly = this.getBitunixReduceOnly(o.reduceOnly, o.clientId);
-        const orderInfo = { ...o, reduceOnly };
 
         const baseOrder = {
           id: v(o, 'orderId'),
@@ -791,14 +770,14 @@ export class BitunixExchange extends BaseExchange {
           side: ORDER_SIDE[o.side],
           price: parseFloat(o.price), // || parseFloat(v(o, 'stopPrice')),
           amount: parseFloat(v(o, 'qty')),
-          reduceOnly,
+          reduceOnly: v(o, 'reduceOnly') || false,
           filled: parseFloat(v(o, 'tradeQty')),
           lastUpdate: v(o, 'mtime'),
           remaining: subtract(v(o, 'qty'), v(o, 'tradeQty')),
           takeProfitPrice: parseFloat(v(o, 'tpOrderPrice')),
           stopLossPrice: parseFloat(v(o, 'slOrderPrice')),
           timeInForce,
-          info: orderInfo,
+          info: o,
           // Bitunix omits stop type when it's MarkPrice (the default)
           tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpStopType')] || OrderStopTriggerType.MarkPrice,
           slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slStopType')] || OrderStopTriggerType.MarkPrice,
@@ -823,7 +802,7 @@ export class BitunixExchange extends BaseExchange {
             takeProfitPrice: 0,
             stopLossPrice: 0,
             timeInForce: OrderTimeInForce.GoodTillCancel,
-            info: orderInfo,
+            info: o,
             tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpStopType')] || OrderStopTriggerType.MarkPrice,
             slTriggerType: OrderStopTriggerType.MarkPrice,
           });
@@ -845,7 +824,7 @@ export class BitunixExchange extends BaseExchange {
             takeProfitPrice: 0,
             stopLossPrice: 0,
             timeInForce: OrderTimeInForce.GoodTillCancel,
-            info: orderInfo,
+            info: o,
             tpTriggerType: OrderStopTriggerType.MarkPrice,
             slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slStopType')] || OrderStopTriggerType.MarkPrice,
           });
@@ -1595,7 +1574,6 @@ export class BitunixExchange extends BaseExchange {
 
     const payload: Record<string, string> = {
       orderId: targetOrder.id,
-      symbol: targetOrder.symbol,
       qty: `${adjustedQty}`,
       price: `${adjustedPrice}`,
     };
@@ -1613,14 +1591,14 @@ export class BitunixExchange extends BaseExchange {
       const stopTypeKey = `${prefix}StopType`;
       const orderTypeKey = `${prefix}OrderType`;
       const orderPriceKey = `${prefix}OrderPrice`;
-      const stopType = this.getBitunixTriggerType(
-        prefix === 'tp' ? targetOrder.tpTriggerType : targetOrder.slTriggerType,
-        info?.[stopTypeKey],
-      );
+      const stopType = String(info?.[stopTypeKey] || 'MARK_PRICE').toUpperCase();
       // The modify-order schema documents MARKET as the default when the
       // attached protection's execution type is omitted.
       const protectionOrderType = String(info?.[orderTypeKey] || 'MARKET').toUpperCase();
 
+      if (stopType !== 'MARK_PRICE' && stopType !== 'LAST_PRICE') {
+        return rejectPreflight(`Bitunix ${prefix.toUpperCase()} trigger type is not reconciled`);
+      }
       if (protectionOrderType !== 'MARKET' && protectionOrderType !== 'LIMIT') {
         return rejectPreflight(`Bitunix ${prefix.toUpperCase()} execution type is not reconciled`);
       }
@@ -1649,18 +1627,15 @@ export class BitunixExchange extends BaseExchange {
         throw new Error(response?.data?.msg || `Bitunix modify order failed with code ${response?.data?.code}`);
       }
 
-      // Bitunix documents the private WebSocket update as authoritative.
-      // Its response may identify a replacement order rather than echoing the
-      // submitted id, so return that id to the chart alias layer when present.
       const responseOrderId = response?.data?.data?.orderId;
-      const acknowledgedParentId =
-        responseOrderId === undefined || responseOrderId === null || responseOrderId === ''
-          ? targetOrder.id
-          : String(responseOrderId);
-      // The API modifies the parent, but the caller is updating a child chart
-      // row. Preserve that child identity so the optimistic order layer never
-      // overlays a TP/SL row onto the regular parent order.
-      return [isVirtualTpSl ? `${acknowledgedParentId}__${virtualTpslLeg}` : acknowledgedParentId];
+      if (responseOrderId === undefined || responseOrderId === null || String(responseOrderId) !== targetOrder.id) {
+        throw new Error(`Bitunix modify order response did not confirm order ${targetOrder.id}`);
+      }
+
+      // Bitunix documents the private WebSocket update as authoritative.
+      // Keep the stable id and let the existing order-channel reconciliation
+      // apply the accepted state instead of mutating the store optimistically.
+      return [targetOrder.id];
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message || 'Bitunix modify order failed';
       this.emitAndLogError(message);
@@ -1882,9 +1857,6 @@ export class BitunixExchange extends BaseExchange {
     // Cache TIF by clientId for REST API workaround
     if (req.clientId && opts.timeInForce) {
       this.orderTifCache.set(req.clientId, opts.timeInForce);
-    }
-    if (req.clientId) {
-      this.orderReduceOnlyCache.set(req.clientId, reduceOnly);
     }
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;

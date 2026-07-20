@@ -2,23 +2,15 @@
 title: Webhook from TradingView
 ---
 
-TradingView-to-CLI webhooks are not currently available as a hosted
-Tealstreet feature.
+Wire a TradingView alert to fire a fixed CLI command on your standalone
+listener. The command is locked to the hook definition — TradingView's
+JSON body is ignored — so you can't be coerced into running a different
+command by a malformed alert payload. Each hook gets a 32-hex token sent
+as `X-Hook-Token`; verification is constant-time after a length guard.
 
-The CLI has local listener and hook primitives, but Tealstreet does not
-yet run the public relay needed to receive TradingView alerts and route
-them into a user's local CLI session:
+## Minimum viable
 
-```text
-TradingView -> Tealstreet public relay -> user's local CLI listener
-```
-
-Until that relay is live, do not rely on TradingView alerts to trigger CLI
-trades through Tealstreet.
-
-## What exists today
-
-The standalone listener can register a fixed local hook command:
+In the standalone REPL:
 
 ```text
 hook create alert "chase sell %all% 20% reduce"
@@ -27,20 +19,21 @@ hook create alert "chase sell %all% 20% reduce"
 Output:
 
 ```text
-Created hook 'alert' (<prefix>...). Fire with:
-  POST http://127.0.0.1:53219/hook/<id>
-  X-Hook-Token: <secret>
+Created hook alert
+POST https://your.tunnel/hook/<id>
+X-Hook-Token: <secret>
 ```
 
-The command is locked to the hook definition — request bodies are ignored
-— so a malformed alert payload cannot coerce the CLI into running a
-different command. Each hook gets a 32-hex token sent as `X-Hook-Token`;
-verification is constant-time after a length guard.
+In TradingView's alert dialog:
 
-The missing piece is the public route from TradingView to the user's local
-listener. Advanced users can experiment with a self-managed tunnel to
-`127.0.0.1:53219`, but that is not the Tealstreet-hosted path and is not
-covered by support guarantees.
+- **Webhook URL** — the printed POST URL (through your tunnel, see gotchas).
+- **Headers** — `X-Hook-Token: <secret>` (one header per line).
+- **Message** — anything. The body is ignored.
+
+TradingView fires → the listener accepts, returns 200 immediately, then
+executes the stored command. Output streams to any subscribed web client
+as `cmd:output` frames and to the standalone REPL as `[hook:alert]`-prefixed
+lines.
 
 ## Variations
 
@@ -69,8 +62,8 @@ curl -X POST -H "X-Hook-Token: <secret>" http://127.0.0.1:53219/hook/<id>
 # → 200 { "ok": true, "runId": "...", "command": "...", "account": "..." }
 ```
 
-Verify a hook locally before experimenting with any self-managed public
-tunnel. The hosted Tealstreet relay is not live yet.
+Verify a hook works locally before pointing TradingView at it. From the
+public side you'd use the tunnel URL.
 
 ```text
 hook create cancel-stops "set ec; cancel; close"
@@ -82,17 +75,19 @@ The hook body accepts the full CLI chain grammar — `;`, `&`, `set ec`,
 ## Gotchas
 
 - **The listener is loopback-only.** TradingView's servers can't reach
-  `127.0.0.1:53219` directly, and the hosted Tealstreet relay for that
-  route is not live yet.
+  `127.0.0.1:53219` directly. You need a public-facing tunnel — Cloudflare
+  Tunnel is a common pick, but ngrok / Tailscale Funnel / ssh -R / a
+  reverse proxy on a VPS all work. Whatever you use must forward to
+  loopback on the machine running the standalone CLI.
 - The token check **short-circuits on length mismatch** before
   `crypto.timingSafeEqual` — an unequal-length call would throw a
   `RangeError` and return HTTP 500 instead of a clean 401. Don't strip this
   guard if you're patching the verifier.
-- Hook fires return **200 immediately** — an external sender treats it as
-  success the moment the request lands, before the command runs. If the
-  command errors out, you see it in `[hook:<name>]` output in the REPL and
-  via the `hook-output` topic on connected web clients. There's no way to
-  surface command failure back through the HTTP response.
+- Hook fires return **200 immediately** — TradingView treats it as success
+  the moment the request lands, before the command runs. If the command
+  errors out, you see it in `[hook:<name>]` output in the REPL and via the
+  `hook-output` topic on connected web clients. There's no way to surface
+  failure back to TradingView.
 - **Kill switches** in `~/.tealstreet/config.json`:
   - `listener.enabled: false` → 503 on all hooks (listener doesn't bind).
   - `listener.remoteExec: false` → 423 on all hooks (binds but rejects).

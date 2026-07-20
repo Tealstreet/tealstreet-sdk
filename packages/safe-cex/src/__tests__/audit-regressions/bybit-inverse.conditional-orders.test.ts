@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode } from '../../types';
+import { OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
 
 const createStore = () => {
   const market = {
@@ -114,7 +114,7 @@ describe('audit regression: Bybit inverse opening conditional orders', () => {
       reduceOnly: false,
       triggerPrice: '30500',
       triggerDirection: '1',
-      triggerBy: 'LastPrice',
+      triggerBy: 'MarkPrice',
       closeOnTrigger: false,
       positionIdx: 1,
     });
@@ -143,52 +143,11 @@ describe('audit regression: Bybit inverse opening conditional orders', () => {
       reduceOnly: false,
       triggerPrice: '29500',
       triggerDirection: '2',
-      triggerBy: 'LastPrice',
+      triggerBy: 'MarkPrice',
       timeInForce: 'PostOnly',
       closeOnTrigger: false,
       positionIdx: 2,
     });
-  });
-
-  it('places an opening conditional trigger order with mark-price trigger source when requested', async () => {
-    const { exchange, post } = createExchange();
-
-    await exchange.placeOrder({
-      symbol: 'BTCUSD',
-      type: OrderType.Conditional,
-      side: OrderSide.Buy,
-      amount: 25,
-      triggerPrice: 30500,
-      triggerType: OrderStopTriggerType.MarkPrice,
-    });
-
-    expect(post).toHaveBeenCalledWith(
-      ENDPOINTS.CREATE_ORDER,
-      expect.objectContaining({
-        triggerBy: 'MarkPrice',
-      }),
-    );
-  });
-
-  it('places an opening conditional trigger order with index-price trigger source when requested', async () => {
-    const { exchange, post } = createExchange();
-
-    await exchange.placeOrder({
-      symbol: 'BTCUSD',
-      type: OrderType.Conditional,
-      side: OrderSide.Buy,
-      amount: 25,
-      triggerPrice: 30005,
-      triggerType: OrderStopTriggerType.IndexPrice,
-    });
-
-    expect(post).toHaveBeenCalledWith(
-      ENDPOINTS.CREATE_ORDER,
-      expect.objectContaining({
-        triggerDirection: '1',
-        triggerBy: 'IndexPrice',
-      }),
-    );
   });
 
   it('places batch opening conditional trigger orders', async () => {
@@ -223,43 +182,10 @@ describe('audit regression: Bybit inverse opening conditional orders', () => {
           reduceOnly: false,
           triggerPrice: '30500',
           triggerDirection: '1',
-          triggerBy: 'LastPrice',
+          triggerBy: 'MarkPrice',
           closeOnTrigger: false,
           positionIdx: 1,
         },
-      ],
-    });
-  });
-
-  it('places batch opening conditional trigger orders with index-price trigger source', async () => {
-    const { exchange, post } = createExchange();
-    post.mockResolvedValueOnce({
-      data: {
-        retMsg: 'OK',
-        result: { list: [{ orderId: 'batch-conditional-index' }] },
-        retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
-      },
-    });
-
-    const ids = await exchange.placeOrders([
-      {
-        symbol: 'BTCUSD',
-        type: OrderType.Conditional,
-        side: OrderSide.Buy,
-        amount: 25,
-        triggerPrice: 30005,
-        triggerType: OrderStopTriggerType.IndexPrice,
-      },
-    ]);
-
-    expect(ids).toEqual(['batch-conditional-index']);
-    expect(post).toHaveBeenCalledWith(ENDPOINTS.CREATE_BATCH_ORDER, {
-      category: 'inverse',
-      request: [
-        expect.objectContaining({
-          triggerDirection: '1',
-          triggerBy: 'IndexPrice',
-        }),
       ],
     });
   });
@@ -281,7 +207,6 @@ describe('audit regression: Bybit inverse opening conditional orders', () => {
     expect(restOrder.price).toBe(30500);
     expect(restOrder.reduceOnly).toBe(false);
     expect(restOrder.close).toBe(false);
-    expect(restOrder.triggerType).toBe(OrderStopTriggerType.MarkPrice);
     expect(wsOrder.type).toBe(OrderType.Conditional);
   });
 

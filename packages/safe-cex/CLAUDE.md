@@ -110,17 +110,16 @@ grep, and do not add a second capability manifest that duplicates metadata.
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.
 
-**Routing source of truth (`src/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. Behavior is locked by `src/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`.
+**Routing source of truth (`src/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. Behavior is locked by `src/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (okxeu→okx, bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
-Canonical saved account construction lives in
-`src/accounts/buildExchangeAccountConfig.ts`, with routing normalization in
+Canonical saved account shaping lives in
 `src/accounts/normalizeExchangeAccountConfig.ts`. Web, CLI, key-audit, and
-other "add API key" flows should build or validate new credentials through that
-shared account contract before persisting/testing/passing the account to
-`createExchangeFromAccount()`. Do not reimplement exchange credential fields or
-`tealstreetProxy` / `proxyRegion` account defaults in app code.
+other "add API key" flows should produce an `ExchangeAccountConfig`, normalize
+that account, then persist/test/pass it to `createExchangeFromAccount()`.
+Do not reimplement `tealstreetProxy` / `proxyRegion` account defaults in app
+code.
 
 Exchange API factories must install HOW and other transport adapters through
 `setInnerAdapterForRemoteSigning(instance, adapter)`, never by assigning
@@ -226,24 +225,6 @@ follow-up, not an oversight.
 | `requiresCors`    | `false` | REST calls go through Tealstreet IP proxy servers   |
 | `supportsTunnel`  | `false` | Exchange supports HTTP-over-WebSocket (HOW) adapter |
 | `enforceWsTunnel` | `false` | Force HOW adapter on (overrides `supportsTunnel`)   |
-
-### Other metadata flags
-
-| Flag                         | Default | Purpose                                                               |
-| ---------------------------- | ------- | --------------------------------------------------------------------- |
-| `hiddenFromNewAccountPicker` | `false` | Hide from the add-API-key picker while keeping saved accounts running |
-| `supportsSpotToggle`         | `false` | Venue serves spot + derivatives from one connection; offer the opt-in |
-
-`hiddenFromNewAccountPicker` is deliberately **not** `enabled: false`:
-availability gates also decide whether a _saved_ account may register at
-startup, so disabling a superseded venue stops every existing user account on
-it from loading. Set on `hyperliquidspot`, now served by `hyperliquid`'s spot
-toggle.
-
-`supportsSpotToggle` drives `ExchangeAccountConfig.enableSpotMarkets` →
-`ExchangeOptions.enableSpotMarkets` (forwarded in `createExchangeFromAccount`
-only when the venue advertises the toggle). Default-off, and the exchange must
-return **before** issuing any request when off, so opting out costs nothing.
 
 ### Decision Flow
 

@@ -81,8 +81,6 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 - `tick()` runs on a configurable interval via `options.extra.tickInterval`
 - Each tick calls `fetchPositionsAndBalance()`, which fetches both `currency=USDT` and `currency=USDC`, merges their positions and balances, then returns one complete snapshot for the full store write. If one settlement-account request fails or returns an invalid payload, a successful sibling snapshot still refreshes and the failed currency's last-known balance/positions are retained until its next successful poll. With no prior slice, the unavailable currency is represented as zero so per-market margin lookup fails closed rather than falling back to the sibling aggregate.
-- Position row mapping intentionally does not require a populated `marketsBySymbol` index. Full account snapshots filter to known markets before committing the store, while symbol-scoped recovery may need to preserve a valid nonzero REST row during hosted startup or stale-index windows.
-- Order formatting reads zero-size symbol-scoped raw position rows when mapped positions are empty, because Phemex reports one-way mode as `posMode: "OneWay", posSide: "Merged"` even when there is no open position. Dropping those zero rows from the store is correct, but opening orders must still send `posSide: "Merged"` for one-way accounts.
 - On error, logs the error and continues the loop
 - Uses `loop()` utility for scheduling
 
@@ -166,7 +164,6 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 4. After snapshot arrives, filter buffered updates by `sequence` number (discard updates older than snapshot)
 5. Apply buffered updates, then process subsequent updates incrementally
 6. `processOrderBookUpdate` applies each delta through shared `updateOrderBookByPrice`: bids stay descending, asks stay ascending, and zero-amount updates for absent levels are ignored.
-7. If the REST snapshot request fails or times out, the failure is caught locally, logged with a cooldown, and the buffered deltas are cleared so the next WS delta can retry snapshot loading without surfacing an unhandled promise rejection. Late snapshots after unsubscribe/disposal are ignored.
 
 **OHLCV streaming**: Kline topic format is `kline_p.subscribe|||{symbol}|||{resolution}`. Message handler key uses interval and symbol: `kline_p.{interval}.{symbol}`. Each kline message contains up to 2 rows (current and previous candle). The handler processes both and filters by matching interval. Kline data format: `[timestamp, interval, lastClose, open, high, low, close, volume, turnover]`.
 
@@ -207,13 +204,13 @@ After authentication, subscribes to `aop_p.subscribe` (Account/Order/Position).
 
 Defined in `ORDER_TYPE` mapping:
 
-| Internal Type      | Phemex `ordType`                                                     |
-| ------------------ | -------------------------------------------------------------------- |
-| `Market`           | `Market`                                                             |
-| `Limit`            | `Limit`                                                              |
-| `StopLoss`         | `Stop`                                                               |
-| `TakeProfit`       | `MarketIfTouched`                                                    |
-| `TrailingStopLoss` | `MarketIfTouched` (with `pegPriceType: TrailingStopPeg`)             |
+| Internal Type      | Phemex `ordType`                                         |
+| ------------------ | -------------------------------------------------------- |
+| `Market`           | `Market`                                                 |
+| `Limit`            | `Limit`                                                  |
+| `StopLoss`         | `Stop`                                                   |
+| `TakeProfit`       | `MarketIfTouched`                                        |
+| `TrailingStopLoss` | `MarketIfTouched` (with `pegPriceType: TrailingStopPeg`) |
 | `Conditional`      | Disabled; fails closed until `stopPxRp` + `triggerType` are verified |
 
 **Order status mapping** (`ORDER_STATUS`):
@@ -374,13 +371,12 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - **Zero-contract guard**: Brand-new zero-contract WS positions are ignored unless they already exist in the store; full cleanup is handled by periodic/full REST sync (`addOrUpdatePositionsFull`)
 - **Filtering**: Only positions for markets present in the store are processed (both REST and WS)
 - **Full replacement on tick**: `tick()` uses `store.addOrUpdatePositionsFull(positions)` which replaces all positions
-- **Terminal-order fast follow**: Filled/canceled/rejected order WS events enqueue their symbols for the debounced sync. The sync fetches the full positions+balance snapshot, then fetches those symbols with `fetchPositions([symbol])` and merges them before the full replacement so just-filled symbols are not lost when the account sweep lags.
 
 ### Balance
 
 - **REST polling**: Fetched alongside positions in `tick()` from both settlement accounts; `balance.currencies` is authoritative for per-market margin. Aggregate totals are the nominal USD-stable sum of USDT and USDC, not a conversion-rate feed.
 - **WebSocket updates**: `accounts_p` messages merge every received account by its `currency` into `balance.currencies`, preserving the sibling settlement slice until its own update arrives.
-- **Fast-follow sync**: Terminal order events trigger the same debounced positions+balance reconciliation described above.
+- **Fast-follow sync**: Terminal order events trigger the same debounced `fetchPositionsAndBalance()` reconciliation used for positions
 - **WS balance total calculation**: each updated currency uses `total = accountBalanceRv - currency upnl` (different from REST which uses just `accountBalanceRv`); aggregate fields sum the currency slices.
 
 ## Exchange Metadata
@@ -402,70 +398,11 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - Uses PUT method on `/g-positions/leverage`
 - `prepLeverage()` helper clamps to market min/max and preserves margin type sign unless `allowChangingMarginType` is true
 
-#### Pre-flight throws must emit — this venue hid a failure behind it
-
-`changeMarginType` and `setLeverageHelper` need the symbol's current leverage
-and margin mode, because Phemex encodes margin type as the _sign_ of leverage.
-Their `!position` / `!market` / `!ticker` guards used to be raw
-`throw new Error(...)` with no `emitAndLogError` first — the exact pattern
-`../CLAUDE.md` prohibits.
-
-That is not cosmetic. A raw throw bypasses `BaseExchange.emitter`, so it reaches
-**no** diagnostic surface: not the toast pipeline, not
-`exchangeAccountController.on('error')`, and not the Cypress requests-log
-artifact (which records only _emitted_ errors). The e2e margin-type step failed
-with `expected 'Isolated' to equal 'Cross'` and **1551 logged requests contained
-no negative `leverageRr` and no error at all** — the switch simply never
-happened, invisibly.
-
-Adding the emits is what found the actual bug on the next run: the log then
-carried `14x Position ADAUSDT not found — open a position before changing
-margin type`. Keep the emits; they are what makes this venue debuggable.
-
-#### Never read leverage state through `getOrFetchPositionsForSymbol`
-
-Use **`resolveLeverageContext(symbol)`**. Both callers previously read the
-current leverage/margin mode off `getOrFetchPositionsForSymbol`, which is wrong
-twice over:
-
-- it early-returns `[]` whenever `store.loaded.positions` is false — the
-  permanent state of the never-`start()`ed main-thread mirror that executes
-  hosted-mode order writes (the same trap documented as bitget quirks 22/23);
-- **`mapPosition` drops size-0 rows on purpose**, so a *flat* symbol has no
-  store position even on a fully loaded worker — and changing margin type
-  while flat is the normal case.
-
-Both guards then threw "Position not found" before issuing any request. Two
-distinct user-visible failures came out of that: the margin switch silently
-never happened, and `setLeverage` fell through to a **positive** `leverageRr`,
-which flips a cross account to isolated as a side effect.
-
-`resolveLeverageContext` prefers the store row (only when it carries both
-`marginType` and `positionMode` — guessing a default is what flips the mode)
-and otherwise reads the raw `accountPositions` row, which is present at size 0
-with `leverageRr` and `crossMargin` populated. Read that row **raw**, not via
-`mapPosition`, which would discard it.
-
-#### A leverage change on a flat symbol must record `fetchedLeverage`
-
-`mapPosition` drops size-0 rows, so after `setLeverage` on a symbol with no open
-position there is nothing in `store.positions` for the place-order % slider to
-read, and it falls back to **1x** — order sizes then come out `leverage` times
-too small. The e2e margin-slider step catches this as `expected 5.45 to be close
-to 55.5675` (22.23 available x 10x x 0.25).
-
-`setLeverageHelper` therefore writes `store.fetchedLeverage[symbol]` after a
-confirmed success, which is the app's documented no-position fallback (blofin's
-`fetchLeverageForSymbol` is the reference implementation). The response code is
-checked **before** any store mutation, so a rejected change cannot record a
-leverage the exchange never applied.
-
 #### Margin Type (`changeMarginType`)
 
 - Implemented by toggling leverage sign via `setLeverageHelper` with `allowChangingMarginType = true`
 - Cross margin: negative leverage; Isolated margin: positive leverage
-- Current leverage comes from `resolveLeverageContext`, which works on a flat
-  symbol — it does **not** require an open position
+- Requires an existing position to determine current leverage
 
 #### Position Mode (`changePositionMode`)
 

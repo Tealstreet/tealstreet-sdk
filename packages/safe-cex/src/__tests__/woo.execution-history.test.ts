@@ -69,7 +69,7 @@ describe('WOOXExchange execution history mapping', () => {
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith(ENDPOINTS.TRANSACTION_HISTORY, {
-      params: { symbol: 'PERP_BTC_USDT', limit: 500 },
+      params: { symbol: 'PERP_BTC_USDT', limit: 1000 },
     });
     expect(executions).toEqual([
       {
@@ -221,7 +221,7 @@ describe('WOOXExchange execution history mapping', () => {
     const trades = await exchange.fetchHistoricalTrades({ symbol: 'BTCUSDT' });
 
     expect(get).toHaveBeenCalledWith(ENDPOINTS.TRANSACTION_HISTORY, {
-      params: { symbol: 'PERP_BTC_USDT', limit: 500 },
+      params: { symbol: 'PERP_BTC_USDT', limit: 1000 },
     });
     expect(trades).toEqual([
       {
@@ -341,7 +341,7 @@ describe('WOOXExchange execution history mapping', () => {
       orderId: undefined,
       from: undefined,
       to: undefined,
-      limit: 500,
+      limit: 1000,
     });
     expect(executions).toEqual([
       {

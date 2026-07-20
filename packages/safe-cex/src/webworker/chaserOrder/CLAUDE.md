@@ -44,12 +44,6 @@ that queued check and runs immediately. Do not restore recursive
 `runPriceCheck` calls from the pending pass's `finally`; they can chain
 cancel/replace work without a bound during update storms.
 
-Increment `ChaserOrderInstance.attempts` only when the supervisor actually
-enters the cancel/reprice branch. Initial placement is attempt zero; no-op price
-checks where the current order is still at an acceptable price must not bump the
-counter. The UI uses this count to show whether the chaser is truly replacing
-orders.
-
 ```ts
 const onUpdate = async (data: StoreData) => {
   if (instance.isStopped) { ...; return; }
@@ -76,28 +70,13 @@ bump on bulk replacement".
 
 ## Missing-order snapshots require confirmation
 
-After `placeOrder` returns IDs, those IDs must become visible in `store.orders`
-before the supervisor relies on normal ticker/order updates. Bybit demo can miss
-private order frames while an early REST snapshot also predates the just-placed
-order, leaving the UI with a pending chaser that has `currentOrderIds` but no
-tracked order row. The manager therefore waits after each placement, forces a
-bounded sequence of private snapshots while the IDs are missing, and only starts
-or resumes normal monitoring once at least one tracked row is visible. If the
-IDs still never appear, it emits a warning, marks the chase failed, and cancels
-the last-known IDs by ID so the user is not left with a silent orphan.
-
 Once a tracked order has appeared, a single wholesale snapshot that omits it
 does not complete the chase. REST snapshots can be fetched before placement and
 applied after the private WS frame. The manager requires two consecutive,
 distinct order-updateId changes with the tracked IDs absent; ticker-only
 notifications do not count, and seeing the order again resets the confirmation.
 On confirmed loss it uses `cleanupInstance`, so the last known IDs are cancelled
-instead of leaving a resting order without a supervisor — and it emits a
-user-visible `warning`. That stop was silent for months, which is how the Bybit
-demo bug (REST snapshots wiping just-placed orders → chaser self-terminating
-and cancelling its own order) went unreported so long. The same rule applies to
-`processInstance`'s could-not-start tail: a chaser dying without a stop reason
-must emit, never vanish. Keep both loud.
+instead of leaving a resting order without a supervisor.
 
 ## Supervisor failures are contained locally
 
@@ -115,16 +94,6 @@ shapes vary, channel names vary, dedup logic varies. The store is
 the canonical normalized view, and the `'update'` event is
 exchange-agnostic. The chaser doesn't need to know how Bybit
 reports a fill vs how Hyperliquid does.
-
-## Bybit demo non-reduce completion can come from positions
-
-For Bybit demo non-reduce chasers, record the same-side starting position size
-in `ChaserOrderInstance` and treat `startingContracts + chaserSize` as the
-target. This lets demo complete when private WS is unavailable: the order-status
-fill event may never arrive, but the REST position snapshot can still prove the
-target was reached. Keep this scoped to `bybitdemo`; healthy private-WS venues
-should continue to rely on order/fill lifecycle events so manual same-side
-position changes do not complete an unrelated chaser.
 
 ## Hold-steady window after partial fills
 
@@ -162,7 +131,7 @@ now mirror cumulative fill onto the store row on `PARTIALLY_FILLED`
 Before that fix, partial fills didn't bump `updateIds.orders` for
 Binance, so the chaser never saw a per-partial-fill order-update
 edge; it only re-evaluated on the ticker throttle. With the partial
-fills now visible, we _must_ hold steady — otherwise the chaser
+fills now visible, we *must* hold steady — otherwise the chaser
 re-evaluates and tries to cancel inside the fill window.
 
 ## Fill-based tracking (Hyperliquid and GRVT)
@@ -171,10 +140,6 @@ For Hyperliquid and GRVT, the chaser also subscribes to the `'fill'` event
 (`useFillBasedTracking`) — an order-status lifecycle can lag behind the actual
 fill, and we want to mark the chase complete as soon as the fill event arrives
 instead of waiting for the order to be marked `Filled` in the next snapshot.
-Bybit demo also uses the cancel/replacement REST reconciliation part of this
-path because private WS may be geo/policy blocked; it does not rely on direct
-fill events, but it must prove fills through `fetchFillsForOrderIds()` before
-placing a replacement after cancel.
 
 Other exchanges rely on the order status transition.
 
@@ -199,7 +164,7 @@ coming back":
 1. **`tryPlaceOrders` ignored `isStopped`.** A `placeOrder` await
    that resolved AFTER the user cancelled would still hand its
    new ID back to the caller, which then reassigned
-   `instance.currentOrderIds` _after_ `cleanupInstance` had
+   `instance.currentOrderIds` *after* `cleanupInstance` had
    already read the stale value and spliced the instance. The
    new resting order became orphan. `tryPlaceOrders` now checks
    `instance.isStopped` at entry, after `placeOrder`, and after

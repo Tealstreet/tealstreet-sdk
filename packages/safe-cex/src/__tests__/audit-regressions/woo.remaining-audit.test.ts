@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
 import { ENDPOINTS } from '../../exchanges/woo/woo.types';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import {
+  OrderSide,
+  OrderStatus,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
 
 const makeExchange = () => {
   const store = new DefaultStore();
@@ -64,62 +70,6 @@ describe('WooX remaining July audit regressions', () => {
       expect.objectContaining({ algoType: 'STOP', triggerPrice: 90, quantity: 1 }),
     );
     expect(ids).toEqual(['101', '102']);
-  });
-
-  it('emulates market buys with a crossing IOC order', async () => {
-    const { exchange } = makeExchange();
-    const post = vi.fn().mockResolvedValue({
-      data: { success: true, order_id: 301 },
-    });
-    exchange.xhr = { post } as any;
-
-    const ids = await exchange.placeOrder({
-      symbol: 'BTCUSDT',
-      side: OrderSide.Buy,
-      type: OrderType.Market,
-      amount: 2,
-    });
-
-    expect(post).toHaveBeenCalledWith(
-      ENDPOINTS.PLACE_ORDER,
-      expect.objectContaining({
-        symbol: 'PERP_BTC_USDT',
-        order_type: 'IOC',
-        order_price: 100.5,
-        side: 'BUY',
-        order_quantity: 2,
-      }),
-    );
-    expect(post.mock.calls[0]?.[1]).not.toHaveProperty('order_amount');
-    expect(ids).toEqual(['301']);
-  });
-
-  it('emulates market sells with a crossing IOC order', async () => {
-    const { exchange } = makeExchange();
-    const post = vi.fn().mockResolvedValue({
-      data: { success: true, order_id: 302 },
-    });
-    exchange.xhr = { post } as any;
-
-    const ids = await exchange.placeOrder({
-      symbol: 'BTCUSDT',
-      side: OrderSide.Sell,
-      type: OrderType.Market,
-      amount: 2,
-    });
-
-    expect(post).toHaveBeenCalledWith(
-      ENDPOINTS.PLACE_ORDER,
-      expect.objectContaining({
-        symbol: 'PERP_BTC_USDT',
-        order_type: 'IOC',
-        order_price: 99.5,
-        side: 'SELL',
-        order_quantity: 2,
-      }),
-    );
-    expect(post.mock.calls[0]?.[1]).not.toHaveProperty('order_amount');
-    expect(ids).toEqual(['302']);
   });
 
   it('returns camelCase algo order IDs for trailing-stop placement', async () => {
@@ -186,7 +136,9 @@ describe('WooX remaining July audit regressions', () => {
     expect(remove).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith(`${ENDPOINTS.ALGO_ORDER}/bracket-parent`);
     expect(placePositional).toHaveBeenCalledTimes(1);
-    expect(placePositional).toHaveBeenCalledWith(expect.objectContaining({ stopLoss: 92, takeProfit: 120 }));
+    expect(placePositional).toHaveBeenCalledWith(
+      expect.objectContaining({ stopLoss: 92, takeProfit: 120 }),
+    );
     expect(ids).toEqual(['new-parent']);
   });
 
@@ -222,7 +174,9 @@ describe('WooX remaining July audit regressions', () => {
     } as any);
 
     expect(remove).toHaveBeenCalledWith(`${ENDPOINTS.ALGO_ORDER}/long-parent`);
-    expect(placePositional).toHaveBeenCalledWith(expect.objectContaining({ stopLoss: 92, takeProfit: 120 }));
+    expect(placePositional).toHaveBeenCalledWith(
+      expect.objectContaining({ stopLoss: 92, takeProfit: 120 }),
+    );
   });
 
   it('rejects when replacement bracket placement fails after cancellation', async () => {
@@ -259,7 +213,10 @@ describe('WooX remaining July audit regressions', () => {
     ).rejects.toBe(replacementError);
 
     expect(remove).toHaveBeenCalledWith(`${ENDPOINTS.ALGO_ORDER}/bracket-parent`);
-    expect(post).toHaveBeenCalledWith(ENDPOINTS.ALGO_ORDER, expect.objectContaining({ algoType: 'POSITIONAL_TP_SL' }));
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.ALGO_ORDER,
+      expect.objectContaining({ algoType: 'POSITIONAL_TP_SL' }),
+    );
     expect(emitError.mock.calls[0]?.[0]).toBe('replacement rejected');
   });
 

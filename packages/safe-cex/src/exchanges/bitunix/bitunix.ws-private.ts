@@ -1,7 +1,5 @@
 import type { BitunixExchange } from './bitunix.exchange';
 
-import { nanoid } from 'nanoid';
-
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_PWS_LOG } from '../../config/config';
@@ -162,10 +160,6 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
             case 'CREATE':
               // Handle newly created order
               const orderData = json?.data;
-              const reduceOnly = this.parent.getBitunixReduceOnly(
-                orderData.reduceOnly ?? orderData.reductionOnly,
-                orderData.clientId,
-              );
 
               // Create a new order object based on the websocket data
               const newOrder: Writable<Order> = {
@@ -176,12 +170,12 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                 side: ORDER_SIDE[orderData.side?.toUpperCase()],
                 price: parseFloat(orderData.price || '0'),
                 amount: parseFloat(v(orderData, 'qty') || '0'),
-                reduceOnly,
+                reduceOnly: v(orderData, 'reductionOnly') || false,
                 filled: parseFloat(v(orderData, 'dealAmount') || '0'),
                 lastUpdate: new Date(v(orderData, 'mtime') || v(orderData, 'ctime')).getTime(),
                 remaining: subtract(v(orderData, 'qty') || '0', v(orderData, 'dealAmount') || '0'),
                 timeInForce: TIME_IN_FORCE[orderData.effect?.toUpperCase()] || OrderTimeInForce.GoodTillCancel,
-                info: { ...orderData, reduceOnly },
+                info: orderData,
                 ...(v(orderData, 'tpStopType') && { tpTriggerType: ORDER_TRIGGER_TYPE[v(orderData, 'tpStopType')] }),
                 ...(v(orderData, 'slStopType') && { slTriggerType: ORDER_TRIGGER_TYPE[v(orderData, 'slStopType')] }),
                 ...(v(orderData, 'tpPrice') && { takeProfitPrice: parseFloat(v(orderData, 'tpPrice')) }),
@@ -208,11 +202,6 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
               const existingOrder = this.parent.store.orders.find((o) => o.id === updatedOrderData.orderId);
 
               if (existingOrder) {
-                const reduceOnly = this.parent.getBitunixReduceOnly(
-                  updatedOrderData.reduceOnly ?? updatedOrderData.reductionOnly,
-                  updatedOrderData.clientId ?? existingOrder.info?.clientId,
-                  existingOrder.reduceOnly,
-                );
                 const updatedOrder: Writable<Order> = {
                   ...existingOrder,
                   price: parseFloat(updatedOrderData.price || existingOrder.price.toString()),
@@ -225,16 +214,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   lastUpdate:
                     new Date(v(updatedOrderData, 'mtime') || v(updatedOrderData, 'ctime')).getTime() ||
                     existingOrder.lastUpdate,
-                  reduceOnly,
-                  // UPDATE frames omit immutable fields such as reduceOnly
-                  // and can omit attached protection metadata. Preserve the
-                  // reconciled snapshot so a second chart drag remains safe.
-                  info: {
-                    ...(existingOrder.info || {}),
-                    ...updatedOrderData,
-                    orderId: updatedOrderData.orderId || existingOrder.id,
-                    reduceOnly,
-                  },
+                  info: updatedOrderData,
                 };
 
                 // Update the order in the store
@@ -483,45 +463,23 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
   sendLogin = async () => {
     const timestamp = +virtualClock.getCurrentTime();
     const nonce = uuid();
-    const apiKey = this.parent.options.key.trim();
 
     await virtualClock.syncBybitClientServerTime();
     await sleep(25);
 
-    // Hosted exchange-server runs with secret: '' by design — the secret never
-    // leaves the client — so signing inline produced a signature over an empty
-    // secret and the venue rejected the handshake with "double check your key
-    // and secret". Reproduces only in hosted mode; local dev holds the real
-    // secret and works. See ../CLAUDE.md → "Remote-signer WS auth".
-    const sign = await (async () => {
-      const remoteSigner = this.parent.options.remoteSigner;
-      if (!remoteSigner) return sha256Hex(sha256Hex(nonce + timestamp + apiKey) + this.parent.options.secret.trim());
-
-      const result = await remoteSigner.sign({
-        id: nanoid(),
-        type: 'ws-auth',
-        exchangeName: 'bitunix',
-        accountName: remoteSigner.accountName,
-        wsAuth: {
-          toSign: `${nonce}${timestamp}${apiKey}`,
-          outputFormat: 'bitunix-double-sha256',
-          extraData: { timestamp, nonce },
-        },
-      });
-
-      if (result.error || !result.wsAuthSignature) {
-        this.parent.emitAndLogError(`Bitunix remote WS auth failed: ${result.error ?? 'no signature returned'}`);
-        return undefined;
-      }
-      return result.wsAuthSignature;
-    })();
-
-    if (!sign) return;
-
     this.send(
       JSON.stringify({
         op: 'login',
-        args: [{ apiKey, timestamp, nonce, sign }],
+        args: [
+          {
+            apiKey: this.parent.options.key.trim(),
+            timestamp,
+            nonce,
+            sign: sha256Hex(
+              sha256Hex(nonce + timestamp + this.parent.options.key.trim()) + this.parent.options.secret.trim(),
+            ),
+          },
+        ],
       }),
     );
   };

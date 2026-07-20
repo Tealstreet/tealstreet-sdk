@@ -37,10 +37,10 @@ override. Mix and match — size + range can each be absolute or relative.
 scale sell $10000 into 25 from 50000 to 48500 reduce taker
 ```
 
-`reduce` makes every rung reduce-only. `taker` drops the default post-only
-TIF on every rung. Use this when you want the ladder to be **immediately
-fillable** if price walks through it (e.g. a panic-exit ladder) rather than
-rejecting at exchange-side post-only checks.
+`taker` drops the default post-only TIF on every rung. Use this when you
+want the ladder to be **immediately fillable** if price walks through it
+(e.g. a panic-exit ladder) rather than rejecting at exchange-side post-only
+checks.
 
 ```text
 scale buy $500 into 5 from $bid -0.1% to $bid -0.5%
@@ -59,9 +59,9 @@ fan-out.
 
 ## Gotchas
 
-- Distribution is linear-only. `cubic`, `icubic`, and other distribution
-  modifiers are not implemented; the parser rejects them with
-  `modifier '<x>' is not implemented; supported: reduce, taker`.
+- `cubic` and `icubic` are accepted by the parser as distribution modifiers,
+  but **distribution today is still even** — they're no-ops. Don't rely on
+  them for weighted ladders.
 - Default TIF is **post-only**. If any rung would cross the book at placement
   time the exchange rejects it. Add `taker` to drop post-only.
 - The ladder errors **before placing any order** if rounding would shrink any

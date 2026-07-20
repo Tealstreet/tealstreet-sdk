@@ -747,9 +747,6 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
   };
 
   protected onClose = (event?: any): void => {
-    // This override does not delegate to the base onClose, so the shared close
-    // diagnostics have to be recorded explicitly.
-    this.recordCloseDiagnostics(Number.isFinite(Number(event?.code)) ? Number(event?.code) : undefined, { syntheticIfNoSocket: true });
     this.stopDiagnosticsLoop();
     this.clearStreamRecoveryReconnectTimeout();
     this.clearRateLimitResubscribeTimeout();

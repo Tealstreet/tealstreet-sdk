@@ -1,4 +1,4 @@
-import type { Candle, OHLCVOptions, OrderBook, Ticker } from '../../types';
+import type { Candle, OHLCVOptions, OrderBook } from '../../types';
 import type { PhemexExchange } from './phemex.exchange';
 
 import { nanoid } from 'nanoid';
@@ -18,9 +18,7 @@ type MessageHandlers = {
 export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
   private static readonly MAX_SUBSCRIPTIONS = 20;
   private static readonly SUBSCRIPTION_WARNING_THRESHOLD = 18;
-  private static readonly ORDERBOOK_SNAPSHOT_ERROR_LOG_INTERVAL_MS = 30_000;
   private hasWarnedSubscriptionLimit = false;
-  private orderBookSnapshotErrorLogAt: Record<string, number> = {};
   messageHandlers: MessageHandlers = {
     'perp_market24h_pack_p.update': [(d: Data) => this.handleTickerStreamEvents(d)],
   };
@@ -186,86 +184,24 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
           const symbol = this.parent.formatSymbolIn(rawSymbol);
 
           const ticker = this.parent.store.tickersBySymbol[symbol];
-          const tickerChanges = this.mapPackedTickerChanges({
-            ask,
-            bid,
-            fundingRateRr,
-            indexRp,
-            lastRp,
-            markRp,
-            openInterestRv,
-            openRp,
-            volumeRq,
-          });
           if (ticker) {
-            this.store.updateTicker(ticker, tickerChanges);
-          } else {
-            const market = this.parent.store.marketsBySymbol[symbol];
-            if (!market) continue;
-
-            this.store.update({
-              tickers: [
-                ...this.store.tickers.filter((existingTicker) => existingTicker.symbol !== symbol),
-                {
-                  id: market.id,
-                  symbol,
-                  bid: tickerChanges.bid ?? tickerChanges.last,
-                  ask: tickerChanges.ask ?? tickerChanges.last,
-                  last: tickerChanges.last,
-                  mark: tickerChanges.mark,
-                  index: tickerChanges.index,
-                  percentage: tickerChanges.percentage,
-                  openInterest: tickerChanges.openInterest,
-                  fundingRate: tickerChanges.fundingRate,
-                  fundingTime: 0,
-                  volume: tickerChanges.volume,
-                  quoteVolume: tickerChanges.quoteVolume,
-                } as Ticker,
-              ],
+            const last = parseFloat(lastRp);
+            this.store.updateTicker(ticker, {
+              last,
+              volume: parseFloat(volumeRq),
+              quoteVolume: parseFloat(volumeRq) * parseFloat(lastRp),
+              percentage: ((parseFloat(lastRp) - parseFloat(openRp)) / parseFloat(openRp)) * 100,
+              fundingRate: parseFloat(fundingRateRr),
+              mark: parseFloat(markRp),
+              index: parseFloat(indexRp),
+              openInterest: parseFloat(openInterestRv),
+              ...(bid ? { bid: parseFloat(bid) } : {}),
+              ...(ask ? { ask: parseFloat(ask) } : {}),
             });
           }
         }
       }
     });
-  };
-
-  private mapPackedTickerChanges = ({
-    ask,
-    bid,
-    fundingRateRr,
-    indexRp,
-    lastRp,
-    markRp,
-    openInterestRv,
-    openRp,
-    volumeRq,
-  }: {
-    ask?: string;
-    bid?: string;
-    fundingRateRr: string;
-    indexRp: string;
-    lastRp: string;
-    markRp: string;
-    openInterestRv: string;
-    openRp: string;
-    volumeRq: string;
-  }): Partial<Ticker> & Pick<Ticker, 'fundingRate' | 'index' | 'last' | 'mark' | 'openInterest' | 'percentage' | 'quoteVolume' | 'volume'> => {
-    const last = parseFloat(lastRp);
-    const volume = parseFloat(volumeRq);
-    const open = parseFloat(openRp);
-
-    return {
-      last,
-      volume,
-      quoteVolume: volume * last,
-      percentage: ((last - open) / open) * 100,
-      fundingRate: parseFloat(fundingRateRr),
-      mark: parseFloat(markRp),
-      index: parseFloat(indexRp),
-      openInterest: parseFloat(openInterestRv),
-      ...(bid ? { bid: parseFloat(bid) } : {}),
-      ...(ask ? { ask: parseFloat(ask) } : {}),
-    };
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
@@ -336,8 +272,6 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
     let timeoutId: NodeJS.Timeout | null = null;
-    let isActive = true;
-    let snapshotRequestId = 0;
 
     const topic = `orderbook_p.subscribe|||${symbol}`;
     const handler = `orderbook_p.${symbol}`;
@@ -354,38 +288,14 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
 
     const innerState = this.orderBookInnerState[innerId];
 
-    const logSnapshotFailure = (error: unknown) => {
-      const now = Date.now();
-      const lastLogAt = this.orderBookSnapshotErrorLogAt[symbol];
-      if (
-        lastLogAt !== undefined &&
-        now - lastLogAt < BinancePublicWebsocket.ORDERBOOK_SNAPSHOT_ERROR_LOG_INTERVAL_MS
-      ) {
-        return;
-      }
-
-      this.orderBookSnapshotErrorLogAt[symbol] = now;
-      const message = error instanceof Error ? error.message : String(error);
-      this.parent.log(
-        `[Phemex] Orderbook snapshot request failed for ${symbol}; waiting for next delta to retry: ${message}`,
-        LogSeverity.Warning,
-      );
-    };
-
     const fetchSnapshot = async () => {
-      const currentSnapshotRequestId = ++snapshotRequestId;
+      const { data } = await this.parent.xhr.get(ENDPOINTS.ORDERBOOK, {
+        params: { symbol, limit: 1000 },
+      });
 
-      try {
-        const { data } = await this.parent.xhr.get(ENDPOINTS.ORDERBOOK, {
-          params: { symbol, limit: 1000 },
-        });
+      const { orderbook_p, sequence } = data.result;
 
-        const { orderbook_p, sequence } = data.result;
-
-        if (!isActive || this.isDisposed || currentSnapshotRequestId !== snapshotRequestId) {
-          return;
-        }
-
+      if (!this.isDisposed) {
         // save snapshot into orderBook object
         orderBook.bids = orderbook_p.bids.map(([price, amount]: string[]) => ({
           price: parseFloat(price),
@@ -413,14 +323,6 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         innerState.updates = [];
 
         callback(orderBook);
-      } catch (error) {
-        if (!isActive || this.isDisposed || currentSnapshotRequestId !== snapshotRequestId) {
-          return;
-        }
-
-        innerState.updates = [];
-        innerState.isSnapshotLoaded = false;
-        logSnapshotFailure(error);
       }
     };
 
@@ -466,8 +368,6 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
-      isActive = false;
-      snapshotRequestId += 1;
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
       orderBook.asks = [];
       orderBook.bids = [];

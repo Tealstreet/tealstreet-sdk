@@ -2,7 +2,6 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
-import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
 import axios from 'axios';
 import rateLimit from 'axios-rate-limit';
@@ -34,7 +33,6 @@ import {
   Order,
   OrderBook,
   OrderSide,
-  OrderStatus,
   OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
@@ -56,6 +54,8 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
+
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
@@ -82,34 +82,23 @@ import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFro
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
-// How long a just-placed order is shielded from wholesale REST order-snapshot
-// replacement while no REST/WS sighting has confirmed it. Covers api-demo's
-// order-indexing lag with margin; short enough that a phantom row for an order
-// that filled before its first sighting cannot linger.
-const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
 
-const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
-  const normalized = `${message || ''}`.toLowerCase();
-  return normalized.includes('order not exists') || normalized.includes('too late to cancel');
-};
-
 const isBybitLeverageNotModified = (data: Record<string, any>) => {
   const retCode = Number(v(data, 'retCode'));
   const retMsg = `${v(data, 'retMsg') || ''}`.toLowerCase();
   return (
-    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE || (retMsg.includes('leverage') && retMsg.includes('not modified'))
+    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE ||
+    (retMsg.includes('leverage') && retMsg.includes('not modified'))
   );
 };
 
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
-    if (opts.triggerType === OrderStopTriggerType.MarkPrice) return 'MarkPrice';
-    if (opts.triggerType === OrderStopTriggerType.IndexPrice) return 'IndexPrice';
-    return 'LastPrice';
+    return 'MarkPrice';
   }
   if (opts.type === OrderType.StopLoss) {
     return opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'LastPrice' : 'MarkPrice';
@@ -118,21 +107,6 @@ const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
     return opts.tpTriggerType === OrderStopTriggerType.MarkPrice ? 'MarkPrice' : 'LastPrice';
   }
   return undefined;
-};
-
-const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => {
-  if (opts.type === OrderType.Conditional) {
-    if (opts.triggerType === OrderStopTriggerType.MarkPrice) return ticker.mark;
-    if (opts.triggerType === OrderStopTriggerType.IndexPrice) return ticker.index;
-    return ticker.last;
-  }
-  if (opts.type === OrderType.StopLoss) {
-    return opts.slTriggerType === OrderStopTriggerType.LastPrice ? ticker.last : ticker.mark;
-  }
-  if (opts.type === OrderType.TakeProfit) {
-    return opts.tpTriggerType === OrderStopTriggerType.LastPrice ? ticker.last : ticker.mark;
-  }
-  return ticker.last;
 };
 
 export class BybitExchange extends BaseExchange {
@@ -273,78 +247,12 @@ export class BybitExchange extends BaseExchange {
     return ws.isReconnectPauseActive || (ws.isInitialized && !ws.isHealthy);
   };
 
-  private scheduleDegradedPrivateSnapshotRefresh = (force = false) => {
-    if (!force && !this.shouldUseDegradedPrivateRestFastPath()) {
+  private scheduleDegradedPrivateSnapshotRefresh = () => {
+    if (!this.shouldUseDegradedPrivateRestFastPath()) {
       return;
     }
 
     this.debouncedDegradedSnapshotRefresh();
-  };
-
-  private scheduleOrderMutationPrivateSnapshotRefresh = () => {
-    // Bybit demo can keep the private WS connected enough to look healthy while
-    // still missing order events. Once orders have loaded, force the same
-    // debounced REST backstop used by cancel / SET_TRADING_STOP flows.
-    this.scheduleDegradedPrivateSnapshotRefresh(this.isDemo && this.store.loaded?.orders === true);
-  };
-
-  /**
-   * Orders placed moments ago that no REST snapshot or private-WS frame has
-   * confirmed yet. `/v5/order/realtime` lags order creation (worst on
-   * `api-demo`), so the forced snapshot backstop above could fetch a list
-   * WITHOUT an order placed 250ms earlier and wholesale-replace it out of the
-   * store — the chaser supervisor then saw its live order "disappear", stopped
-   * itself, and cancelled the order on the exchange (the demo "quick chaser
-   * does nothing" bug). An id leaves this map on its FIRST sighting anywhere
-   * (REST snapshot, private-WS order frame, or our own cancel) or after
-   * `RECENTLY_PLACED_ORDER_GRACE_MS` — once an order has been seen, its later
-   * absence means filled/cancelled and MUST be honored, or the chaser would
-   * re-place on top of a fill.
-   */
-  private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
-
-  /** First sighting via private WS or an explicit cancel — stop protecting the id. */
-  markOrderSeen = (orderId: string) => {
-    this.recentlyPlacedOrders.delete(orderId);
-  };
-
-  private recordRecentlyPlacedOrder = (order: Order) => {
-    this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
-    // Demo's private WS drops order events, so without this the row may never
-    // reach the store at all: the UI shows nothing and the chaser supervisor
-    // idles with an unmanaged resting order (a second click would then place a
-    // DUPLICATE). Live bybit keeps its WS-driven flow untouched.
-    if (this.isDemo) {
-      this.store.addOrUpdateOrders([order]);
-    }
-  };
-
-  /**
-   * Re-add not-yet-sighted recent orders that a REST snapshot omitted. Runs on
-   * the successful `fetchOrders` result so every wholesale replacement
-   * (startup reinit, degraded tick, demo mutation backstop) honors it.
-   */
-  private preserveRecentlyPlacedOrders = (fetched: Order[]): Order[] => {
-    if (this.recentlyPlacedOrders.size === 0) return fetched;
-
-    const now = virtualClock.getCurrentTimeMs();
-    const fetchedIds = new Set(fetched.map((o) => o.id));
-    const preserved: Order[] = [];
-
-    for (const [id, entry] of this.recentlyPlacedOrders) {
-      if (fetchedIds.has(id)) {
-        // REST has indexed it — normal reconciliation owns it from here on.
-        this.recentlyPlacedOrders.delete(id);
-        continue;
-      }
-      if (now - entry.placedAt > RECENTLY_PLACED_ORDER_GRACE_MS) {
-        this.recentlyPlacedOrders.delete(id);
-        continue;
-      }
-      preserved.push(this.store.orders.find((o) => o.id === id) ?? entry.order);
-    }
-
-    return preserved.length > 0 ? [...fetched, ...preserved] : fetched;
   };
 
   getAccount = async () => {
@@ -706,9 +614,7 @@ export class BybitExchange extends BaseExchange {
     const orders = await mapSeries(settleCoins, async (settleCoin) => {
       return this.fetchOrdersHelper('linear', settleCoin);
     });
-    // Every consumer of this result wholesale-replaces store.orders, so shield
-    // just-placed orders REST hasn't indexed yet (worst on api-demo).
-    return this.preserveRecentlyPlacedOrders(orders.flat());
+    return orders.flat();
   };
 
   fetchOrdersHelper = async (category: string, settleCoin?: string) => {
@@ -845,7 +751,10 @@ export class BybitExchange extends BaseExchange {
 
     if (symbols && symbols.length > 0) {
       const positions: Position[][] = await mapSeries(symbols, async (symbol) => {
-        const bybitPositions = await fetchAllPages({ symbol, category: this.getCategoryForSymbol(symbol) }, true);
+        const bybitPositions = await fetchAllPages(
+          { symbol, category: this.getCategoryForSymbol(symbol) },
+          true,
+        );
         return this.dedupePositionsById(bybitPositions.map(this.mapPosition.bind(this)));
       });
       return positions.flat();
@@ -1407,60 +1316,6 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
-  fetchFillsForOrderIds = async (orderIds: string[]): Promise<Map<string, number>> => {
-    const fillsByOrderId = new Map<string, number>();
-    if (orderIds.length === 0) {
-      return fillsByOrderId;
-    }
-
-    const requestedOrderIds = new Set(orderIds.map((orderId) => String(orderId)));
-    const symbolByOrderId = new Map<string, string>();
-    for (const order of this.store.orders) {
-      if (requestedOrderIds.has(order.id)) {
-        symbolByOrderId.set(order.id, order.symbol);
-      }
-    }
-
-    try {
-      await mapSeries([...requestedOrderIds], async (orderId) => {
-        const symbol = symbolByOrderId.get(orderId);
-        if (!symbol) {
-          return;
-        }
-
-        const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, {
-          params: {
-            category: this.getCategoryForSymbol(symbol),
-            symbol,
-            orderId,
-            limit: 50,
-          },
-        });
-        const retMsg = `${v(data, 'retMsg') || 'UNKNOWN'}`;
-        if (retMsg !== 'OK') {
-          throw new Error(retMsg);
-        }
-
-        const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
-        for (const exec of executionsList) {
-          if (`${exec.orderId ?? ''}` !== orderId) {
-            continue;
-          }
-
-          const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
-          if (Number.isFinite(qty) && qty > 0) {
-            fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + qty);
-          }
-        }
-      });
-
-      return fillsByOrderId;
-    } catch (error: any) {
-      this.log(`Error fetching fills for order IDs: ${error.message}`, LogSeverity.Warning);
-      throw error;
-    }
-  };
-
   /**
    * Fetch income/transaction history from Bybit.
    * Maps Bybit transaction log to the generic IncomeRecord format.
@@ -1660,7 +1515,11 @@ export class BybitExchange extends BaseExchange {
     let triggerDirection: number | undefined = undefined;
     if (triggerPrice) {
       const ticker = this.store.tickersBySymbol[opts.symbol]!;
-      const priceToCompare = getBybitTriggerDirectionPrice(opts, ticker);
+      const priceToCompare =
+        (opts.type === OrderType.StopLoss && opts.slTriggerType === OrderStopTriggerType.LastPrice) ||
+        (opts.type === OrderType.TakeProfit && opts.tpTriggerType === OrderStopTriggerType.LastPrice)
+          ? ticker.last
+          : ticker.mark;
       if (triggerPrice > priceToCompare) {
         triggerDirection = 1;
       } else {
@@ -1731,20 +1590,20 @@ export class BybitExchange extends BaseExchange {
     const responses = await mapSeries(payloads, async (p) => {
       try {
         const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, p);
-        return { data, payload: p };
+        return data;
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.retMsg || err.message);
         return undefined;
       }
     });
 
-    const fullfilled = responses.filter((r): r is NonNullable<(typeof responses)[number]> => r !== undefined);
+    const fullfilled = responses.filter((r) => r !== undefined);
 
     let errMsg = '';
     fullfilled.forEach((resp) => {
-      if (v(resp.data, 'retMsg') !== 'OK') {
-        this.emitAndLogError(v(resp.data, 'retMsg'));
-        errMsg = v(resp.data, 'retMsg');
+      if (v(resp, 'retMsg') !== 'OK') {
+        this.emitAndLogError(v(resp, 'retMsg'));
+        errMsg = v(resp, 'retMsg');
       }
     });
 
@@ -1752,29 +1611,8 @@ export class BybitExchange extends BaseExchange {
       throw new Error(errMsg);
     }
 
-    const placedAt = virtualClock.getCurrentTimeMs();
-    const orderIds = fullfilled.map((resp) => {
-      const orderId = resp.data.result.orderId;
-      if (orderId) {
-        const qty = parseFloat(resp.payload.qty as string) || 0;
-        this.recordRecentlyPlacedOrder({
-          id: orderId,
-          status: OrderStatus.Open,
-          symbol: opts.symbol,
-          type,
-          side: opts.side,
-          price: price ?? triggerPrice ?? 0,
-          amount: qty,
-          filled: 0,
-          remaining: qty,
-          reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
-          timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
-          lastUpdate: placedAt,
-        });
-      }
-      return orderId;
-    });
-    this.scheduleOrderMutationPrivateSnapshotRefresh();
+    const orderIds = fullfilled.map((resp) => resp.result.orderId);
+    this.scheduleDegradedPrivateSnapshotRefresh();
     return orderIds;
   };
 
@@ -1822,10 +1660,9 @@ export class BybitExchange extends BaseExchange {
       throw new Error(data.retMsg);
     }
 
-    // SET_TRADING_STOP returns no orderId. Force an order snapshot so partial
-    // TP/SL rows from /v5/order/realtime can replace optimistic UI rows even
-    // when private WS looks healthy but is degraded or geo-flaky.
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
+    // SET_TRADING_STOP endpoint doesn't return an orderId
+    // Return an empty array as the order is directly applied to the position
+    this.scheduleDegradedPrivateSnapshotRefresh();
     return [];
   };
 
@@ -1856,8 +1693,9 @@ export class BybitExchange extends BaseExchange {
       throw new Error(data.retMsg);
     }
 
-    // SET_TRADING_STOP returns no orderId; see placeStopLossOrTakeProfit.
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
+    // SET_TRADING_STOP endpoint doesn't return an orderId
+    // Return an empty array as the order is directly applied to the position
+    this.scheduleDegradedPrivateSnapshotRefresh();
     return [];
   };
 
@@ -1909,7 +1747,7 @@ export class BybitExchange extends BaseExchange {
       allOrderIds.push(...batchOrderIds);
     }
 
-    this.scheduleOrderMutationPrivateSnapshotRefresh();
+    this.scheduleDegradedPrivateSnapshotRefresh();
     return allOrderIds;
   };
 
@@ -2040,13 +1878,17 @@ export class BybitExchange extends BaseExchange {
       const price = opts.price ? adjust(opts.price, pPrice) : null;
       const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
       const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-      const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
       const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
       let triggerDirection: number | undefined = undefined;
       if (triggerPrice) {
         const ticker = this.store.tickersBySymbol[opts.symbol]!;
-        const priceToCompare = getBybitTriggerDirectionPrice(opts, ticker);
+        const priceToCompare =
+          (opts.type === OrderType.StopLoss && opts.slTriggerType === OrderStopTriggerType.LastPrice) ||
+          (opts.type === OrderType.TakeProfit && opts.tpTriggerType === OrderStopTriggerType.LastPrice)
+            ? ticker.last
+            : ticker.mark;
         if (triggerPrice > priceToCompare) {
           triggerDirection = 1;
         } else {
@@ -2255,7 +2097,7 @@ export class BybitExchange extends BaseExchange {
       }
     }
 
-    this.scheduleOrderMutationPrivateSnapshotRefresh();
+    this.scheduleDegradedPrivateSnapshotRefresh();
     return updatedOrderIds;
   };
 
@@ -2266,9 +2108,6 @@ export class BybitExchange extends BaseExchange {
     // fields hang off the parent limit order, so the parent's cancellation
     // already drops them. Without this filter, batch cancels containing
     // bracket-attached limits throw entirely on UNIFIED accounts.
-    // An explicit cancel counts as a sighting: the snapshot-preserve grace
-    // window must never resurrect an order we deliberately cancelled.
-    for (const order of orders) this.markOrderSeen(order.id);
     const filteredOrders = orders.filter((o) => !o.id.endsWith('__stop_loss') && !o.id.endsWith('__take_profit'));
     if (filteredOrders.length === 0) return;
 
@@ -2287,7 +2126,7 @@ export class BybitExchange extends BaseExchange {
       await this.cancelOrdersHelper(orders, category);
     });
 
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
+    this.scheduleDegradedPrivateSnapshotRefresh();
   };
 
   cancelOrdersHelper = async (orders: Order[], category: string) => {
@@ -2303,15 +2142,10 @@ export class BybitExchange extends BaseExchange {
         request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
       });
       if (data.retMsg !== 'OK') {
-        if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
-          return;
-        }
         this.emitAndLogError(data.retMsg);
         throw new Error(data.retMsg);
       }
-      const foundErr = data.retExtInfo?.list.find(
-        (l: any) => l.code !== 0 && !isBybitOrderAlreadyGoneCancelMessage(l.msg),
-      );
+      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);
@@ -2344,7 +2178,7 @@ export class BybitExchange extends BaseExchange {
       this.emitAndLogError(v(data, 'retMsg'));
     }
 
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
+    this.scheduleDegradedPrivateSnapshotRefresh();
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {
@@ -2423,10 +2257,7 @@ export class BybitExchange extends BaseExchange {
 
     const reasons = Array.isArray(data?.result?.reasons) ? data.result.reasons : [];
     if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0 || reasons.length > 0) {
-      const reasonMessage = reasons
-        .map((reason: any) => reason?.reasonMsg)
-        .filter(Boolean)
-        .join(', ');
+      const reasonMessage = reasons.map((reason: any) => reason?.reasonMsg).filter(Boolean).join(', ');
       const errorMsg = reasonMessage || v(data, 'retMsg') || 'Failed to switch margin type';
       this.emitAndLogError(errorMsg);
       throw new Error(errorMsg);
@@ -2545,7 +2376,6 @@ export class BybitExchange extends BaseExchange {
         info: o,
         timeInForce,
         lastUpdate: virtualClock.getCurrentTimeMs(),
-        ...(type === OrderType.Conditional && { triggerType: ORDER_TRIGGER_TYPE[v(o, 'triggerBy')] }),
         ...(type === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'triggerBy')] }),
         ...(type === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'triggerBy')] }),
       },

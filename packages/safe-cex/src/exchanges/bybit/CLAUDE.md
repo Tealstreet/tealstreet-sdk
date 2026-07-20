@@ -26,20 +26,20 @@ When working with Bybit exchange integration, consult the official API documenta
 
 ### Core (Linear USDT/USDC Perpetual) - `BybitExchange`
 
-| File                    | Description                                                                                                                                                                                                                                                                |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bybit.exchange.ts`     | Main exchange class extending `BaseExchange`. Handles linear perpetual futures (USDT and USDC settled). Contains order placement, position management, balance calculation, and all trading operations.                                                                    |
-| `bybit.api.ts`          | REST API client factory. Creates Axios instance with HMAC-SHA256 signing, retry logic, recv_window handling, and virtual clock time synchronization.                                                                                                                       |
-| `bybit.order-params.ts` | Validates and serializes shared `maxSlippagePct` plus adapter-only typed BBO and TickSize execution controls.                                                                                                                                                              |
-| `bybit.types.ts`        | Type definitions, endpoint constants, type mapping objects (`ORDER_TYPE`, `ORDER_SIDE`, `ORDER_STATUS`, `ORDER_TIME_IN_FORCE`, `ORDER_TRIGGER_TYPE`, `POSITION_SIDE`), WebSocket URL constants, interval mappings, `BybitApiKeyInfo` interface, and transaction log types. |
-| `bybit.rateLimits.ts`   | VIP-level rate limit table. Defines `BybitVipLevel` (No VIP through PRO-6), `BybitProductType` (Futures/Option/Spot), and `BybitAccountType` (Classic+UTA / UTA Pro). Used to dynamically adjust batch order limits.                                                       |
-| `bybit.ws-public.ts`    | Public WebSocket (`BybitPublicWebsocket`). Handles ticker updates, kline/OHLCV streaming, orderbook snapshot+delta, and public trade data for linear markets.                                                                                                              |
-| `bybit.ws-private.ts`   | Private WebSocket (`BybitPrivateWebsocket`). Handles order updates, position updates, authentication, and time sync. Subscribes to `order` and `position` topics.                                                                                                          |
+| File                  | Description                                                                                                                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bybit.exchange.ts`   | Main exchange class extending `BaseExchange`. Handles linear perpetual futures (USDT and USDC settled). Contains order placement, position management, balance calculation, and all trading operations.                                                                    |
+| `bybit.api.ts`        | REST API client factory. Creates Axios instance with HMAC-SHA256 signing, retry logic, recv_window handling, and virtual clock time synchronization.                                                                                                                       |
+| `bybit.order-params.ts` | Validates and serializes shared `maxSlippagePct` plus adapter-only typed BBO and TickSize execution controls.                                                                                                                                                                      |
+| `bybit.types.ts`      | Type definitions, endpoint constants, type mapping objects (`ORDER_TYPE`, `ORDER_SIDE`, `ORDER_STATUS`, `ORDER_TIME_IN_FORCE`, `ORDER_TRIGGER_TYPE`, `POSITION_SIDE`), WebSocket URL constants, interval mappings, `BybitApiKeyInfo` interface, and transaction log types. |
+| `bybit.rateLimits.ts` | VIP-level rate limit table. Defines `BybitVipLevel` (No VIP through PRO-6), `BybitProductType` (Futures/Option/Spot), and `BybitAccountType` (Classic+UTA / UTA Pro). Used to dynamically adjust batch order limits.                                                       |
+| `bybit.ws-public.ts`  | Public WebSocket (`BybitPublicWebsocket`). Handles ticker updates, kline/OHLCV streaming, orderbook snapshot+delta, and public trade data for linear markets.                                                                                                              |
+| `bybit.ws-private.ts` | Private WebSocket (`BybitPrivateWebsocket`). Handles order updates, position updates, authentication, and time sync. Subscribes to `order` and `position` topics.                                                                                                          |
 
 ### Demo Trading - `BybitDemoExchange`
 
-| File                    | Description                                                                                                                                                                                                                                        |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File                    | Description                                                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bybitdemo.exchange.ts` | Minimal subclass of `BybitExchange` that sets `isDemo = true` and restricts to `['linear']` category. Uses demo-specific REST and private WebSocket URLs (`api-demo.bybit.com`, `stream-demo.bybit.com`); public data stays on the mainnet stream. |
 
 ### Inverse Perpetual - `BybitInverseExchange`
@@ -141,42 +141,31 @@ Follow the same pattern with minor differences:
 
 All endpoints use the V5 API prefix. Defined in `bybit.types.ts`:
 
-| Constant               | Path                          | Method | Description                            |
-| ---------------------- | ----------------------------- | ------ | -------------------------------------- |
-| `ACCOUNT_MARGIN`       | `/v5/account/info`            | GET    | Account margin mode and unified status |
-| `ACCOUNT`              | `/v5/user/query-api`          | GET    | API key info, VIP level, user ID       |
-| `BALANCE`              | `/v5/account/wallet-balance`  | GET    | Wallet balance (params: `accountType`) |
-| `FEE_RATE`             | `/v5/account/fee-rate`        | GET    | Maker/taker fee rates per symbol       |
-| `UNFILLED_ORDERS`      | `/v5/order/realtime`          | GET    | Open orders (paginated with cursor)    |
-| `TICKERS`              | `/v5/market/tickers`          | GET    | Market tickers                         |
-| `MARKETS`              | `/v5/market/instruments-info` | GET    | Instrument info (markets)              |
-| `CANCEL_ORDER`         | `/v5/order/cancel`            | POST   | Cancel single order                    |
-| `CANCEL_ORDERS`        | `/v5/order/cancel-batch`      | POST   | Batch cancel (UNIFIED accounts only)   |
-| `CANCEL_SYMBOL_ORDERS` | `/v5/order/cancel-all`        | POST   | Cancel all orders for a symbol         |
-| `POSITIONS`            | `/v5/position/list`           | GET    | Position list                          |
-| `KLINE`                | `/v5/market/kline`            | GET    | OHLCV candle data                      |
-| `SET_LEVERAGE`         | `/v5/position/set-leverage`   | POST   | Set buy/sell leverage                  |
-| `SET_TRADING_STOP`     | `/v5/position/trading-stop`   | POST   | Set TP/SL/trailing stop on position    |
-| `CREATE_ORDER`         | `/v5/order/create`            | POST   | Place single order                     |
-| `CREATE_BATCH_ORDER`   | `/v5/order/create-batch`      | POST   | Place batch orders (up to 20)          |
-| `REPLACE_ORDER`        | `/v5/order/amend`             | POST   | Amend existing order                   |
-| `SET_POSITION_MODE`    | `/v5/position/switch-mode`    | POST   | Switch one-way/hedge mode              |
-| `SET_MARGIN_MODE`      | `/v5/account/set-margin-mode` | POST   | Switch account-wide UTA margin mode    |
-| `USER_ORDERS`          | `/v5/order/history`           | GET    | Historical orders                      |
-| `USER_TRADES`          | `/v5/execution/list`          | GET    | Execution/fill history                 |
-| `USER_CLOSED_PNL`      | `/v5/position/closed-pnl`     | GET    | Closed PnL records                     |
-| `TRANSACTION_LOG`      | `/v5/account/transaction-log` | GET    | Transaction log (funding, PnL, etc.)   |
-
-### Opening conditional trigger source
-
-Bybit linear and inverse opening conditionals (`OrderType.Conditional`) map
-`PlaceOrderOpts.triggerType` directly to V5 `triggerBy`: `LastPrice`,
-`MarkPrice`, or `IndexPrice`. The same source price must be used when deriving
-`triggerDirection`; otherwise Bybit can accept a conditional order whose trigger
-source differs from the price used to decide rise-vs-fall direction.
-
-Do not reuse this mapping for TP/SL without auditing those legacy paths first:
-they still use their separate `tpTriggerType` / `slTriggerType` behavior.
+| Constant               | Path                           | Method | Description                            |
+| ---------------------- | ------------------------------ | ------ | -------------------------------------- |
+| `ACCOUNT_MARGIN`       | `/v5/account/info`             | GET    | Account margin mode and unified status |
+| `ACCOUNT`              | `/v5/user/query-api`           | GET    | API key info, VIP level, user ID       |
+| `BALANCE`              | `/v5/account/wallet-balance`   | GET    | Wallet balance (params: `accountType`) |
+| `FEE_RATE`             | `/v5/account/fee-rate`         | GET    | Maker/taker fee rates per symbol       |
+| `UNFILLED_ORDERS`      | `/v5/order/realtime`           | GET    | Open orders (paginated with cursor)    |
+| `TICKERS`              | `/v5/market/tickers`           | GET    | Market tickers                         |
+| `MARKETS`              | `/v5/market/instruments-info`  | GET    | Instrument info (markets)              |
+| `CANCEL_ORDER`         | `/v5/order/cancel`             | POST   | Cancel single order                    |
+| `CANCEL_ORDERS`        | `/v5/order/cancel-batch`       | POST   | Batch cancel (UNIFIED accounts only)   |
+| `CANCEL_SYMBOL_ORDERS` | `/v5/order/cancel-all`         | POST   | Cancel all orders for a symbol         |
+| `POSITIONS`            | `/v5/position/list`            | GET    | Position list                          |
+| `KLINE`                | `/v5/market/kline`             | GET    | OHLCV candle data                      |
+| `SET_LEVERAGE`         | `/v5/position/set-leverage`    | POST   | Set buy/sell leverage                  |
+| `SET_TRADING_STOP`     | `/v5/position/trading-stop`    | POST   | Set TP/SL/trailing stop on position    |
+| `CREATE_ORDER`         | `/v5/order/create`             | POST   | Place single order                     |
+| `CREATE_BATCH_ORDER`   | `/v5/order/create-batch`       | POST   | Place batch orders (up to 20)          |
+| `REPLACE_ORDER`        | `/v5/order/amend`              | POST   | Amend existing order                   |
+| `SET_POSITION_MODE`    | `/v5/position/switch-mode`     | POST   | Switch one-way/hedge mode              |
+| `SET_MARGIN_MODE`      | `/v5/account/set-margin-mode`  | POST   | Switch account-wide UTA margin mode    |
+| `USER_ORDERS`          | `/v5/order/history`            | GET    | Historical orders                      |
+| `USER_TRADES`          | `/v5/execution/list`           | GET    | Execution/fill history                 |
+| `USER_CLOSED_PNL`      | `/v5/position/closed-pnl`      | GET    | Closed PnL records                     |
+| `TRANSACTION_LOG`      | `/v5/account/transaction-log`  | GET    | Transaction log (funding, PnL, etc.)   |
 
 ### Base URLs
 
@@ -323,45 +312,13 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
    - Hedged Buy/Long: `1`, Sell/Short: `2`
    - If `reduceOnly`, the index is flipped (1 <-> 2)
 
-3. **Trigger direction** (`bybit.exchange.ts:1071-1084`): For conditional orders, computes `triggerDirection` (1 = price above current, 2 = price below). Compares trigger price against mark or last depending on the trigger type setting. Opening conditionals use `PlaceOrderOpts.triggerType`, defaulting to Last Price when omitted; TP/SL still use `tpTriggerType` / `slTriggerType`.
+3. **Trigger direction** (`bybit.exchange.ts:1071-1084`): For conditional orders, computes `triggerDirection` (1 = price above current, 2 = price below). Compares trigger price against mark or last depending on the trigger type setting.
 
 4. **Type conversion for conditional stops and opening triggers**: When a SL/TP has a `triggerPrice`, the `orderType` is sent as `Market` (not StopLoss/TakeProfit), because Bybit's conditional market orders use `triggerPrice` + `orderType: Market`. Linear and inverse also map `OrderType.Conditional` opening triggers to Bybit `Market` or `Limit` requests based on whether an execution `price` is present, force `reduceOnly: false`, and keep `closeOnTrigger: false`.
 
 5. **Order size splitting** (`bybit.exchange.ts:1128-1141`): Orders exceeding `market.limits.amount.max` are split into multiple lots. Only the first lot carries TP/SL; subsequent lots have TP/SL stripped to avoid duplicates.
 
 6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
-
-7. **Demo reconciliation**: After initial orders are loaded, successful create /
-   batch / amend mutations on `BybitDemoExchange` force a debounced
-   order-inclusive REST snapshot. Demo private WS can remain generically healthy
-   while missing order topic events, so do not gate this backstop solely on
-   `privateWebsocket.isHealthy`.
-
-8. **Recently-placed orders are shielded from snapshot replacement until first
-   sighting.** `/v5/order/realtime` lags order creation (worst on `api-demo`),
-   so the forced backstop above could fetch a snapshot WITHOUT an order placed
-   250ms earlier and wholesale-replace it out of the store — the chaser
-   supervisor then saw its live order "disappear", stopped itself, and
-   **cancelled the order on the exchange** (the Aug 2026 "quick chaser does
-   nothing on demo" bug). `placeOrder` records each created id in
-   `recentlyPlacedOrders`; `fetchOrders` re-adds a recorded order a snapshot
-   omitted via `preserveRecentlyPlacedOrders`. Protection ends on the FIRST
-   sighting anywhere — REST snapshot inclusion, any private-WS order frame
-   (`handleOrderTopic` calls `markOrderSeen`), or our own `cancelOrders` — or
-   after `RECENTLY_PLACED_ORDER_GRACE_MS` (8s). **Never widen this to
-   already-sighted orders**: once seen, absence means filled/cancelled and must
-   be honored, or the chaser would re-place on top of a fill (overfill). On
-   demo only, `recordRecentlyPlacedOrder` also adds the constructed row to the
-   store optimistically, because demo's WS may never deliver it — without that
-   the UI shows nothing and the chaser idles with an unmanaged resting order
-   (a second click then places a duplicate).
-
-9. **Demo chaser fill reconciliation is REST-backed.** `BybitDemoExchange` uses
-   the chaser manager's fill-based reconciliation path because private WS can be
-   unavailable in geo/policy-blocked environments. `fetchFillsForOrderIds`
-   queries `/v5/execution/list` by current order id and fails closed on malformed
-   or non-OK responses, so the manager will not replace after a cancel if fill
-   state is unknowable.
 
 ### Native Market Slippage Protection
 
@@ -459,23 +416,11 @@ The update path depends on the order type:
 
 6. **Fallback path** (`bybit.exchange.ts:1601-1638`): For position-bound TP/SL when cancel+replace could not run (e.g., mark price unavailable), falls through to `SET_TRADING_STOP` with `tpslMode` and size parameters
 
-7. **Demo reconciliation**: Plain limit / conditional amend success uses the
-   same demo-only debounced order snapshot backstop as order creation. This is
-   intentionally narrower than live Bybit, where private WS order events should
-   remain the primary reconciliation path.
-
 ### Cancel Order Logic
 
 - **UNIFIED accounts** (`bybit.exchange.ts:1668-1681`): Use batch cancel (`CANCEL_ORDERS`) with up to 10 orders per batch. Uses `unlimitedXHR` (no rate limiting). Checks `retExtInfo.list` for individual order errors.
 - **CONTRACT accounts** (`bybit.exchange.ts:1682-1698`): Fall back to individual `CANCEL_ORDER` calls via `forEachSeries`. Errors are collected and thrown as a joined string.
 - **Cancel all for symbol** (`cancelSymbolOrders` at `bybit.exchange.ts:1702-1726`): When `cancelTpSl=false`, preserves TP/SL orders by saving them, canceling all, then re-placing the TP/SL orders with flipped sides.
-- Successful cancels force an order-inclusive REST snapshot so stale TP/SL rows
-  do not linger when Bybit demo/private WS is degraded.
-- Treat `"order not exists or too late to cancel"` batch-cancel rows as
-  already-gone success. Demo can have optimistic/preserved rows for orders whose
-  post-only create was accepted and then immediately rejected/cancelled by the
-  venue; canceling such a row during chase reprice or cleanup must not kill the
-  supervisor.
 - **Inter-batch delay**: 1000ms between cancel batches (`bybit.exchange.ts:1666`)
 
 ## Symbol Format
@@ -733,9 +678,6 @@ When a full-sized position exists on the opposite side, `StopLoss` and `TakeProf
 - Does NOT return an `orderId` (returns empty array)
 - Supports `tpslMode: 'Full'` (entire position) or `'Partial'` (specific size)
 - Uses `slSize`/`tpSize` for partial stops
-- Forces an order-inclusive REST snapshot after success so `/v5/order/realtime`
-  can surface the real TP/SL row IDs even when private WS is degraded or
-  geo-flaky. Do not gate this refresh solely on WebSocket health.
 
 ### Trailing Stop Loss
 
@@ -879,20 +821,20 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 
 ### REST API Error Codes and Patterns
 
-| Error Message / Code                          | Handling                                                                               | Location                           |
-| --------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
-| `"error sign!"`                               | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:17-22`               |
-| `"timestamp and recv_window param"`           | Auto time sync via `virtualClock.syncBybitClientServerTime()`                          | `bybit.api.ts:92-96`               |
-| `"accountType only support UNIFIED."`         | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
-| Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
-| `"order not modified"`                        | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
-| `110043` / `"leverage not modified"`          | Treated as success (desired leverage is already active); refresh positions afterward   | `setLeverage`                      |
-| `"Partial symbols switched successfully..."`  | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
-| `"All symbols switched successfully."`        | Silent success                                                                         | `bybit.exchange.ts:1786`           |
-| Network errors                                | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:49-52`               |
-| `"too much traffic or a configuration error"` | Logged as "Server was unavailable", no automatic retry beyond axios-retry              | `bybit.api.ts:98-100`              |
-| Batch order partial failures                  | Individual errors reported via `retExtInfo.list[].code`, successful IDs still returned | `bybit.exchange.ts:1376-1401`      |
-| Batch placement failure                       | Falls back to individual `placeOrder()` per order in the failed batch                  | `bybit.exchange.ts:1336-1346`      |
+| Error Message / Code                              | Handling                                                                               | Location                           |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
+| `"error sign!"`                                   | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:17-22`               |
+| `"timestamp and recv_window param"`               | Auto time sync via `virtualClock.syncBybitClientServerTime()`                          | `bybit.api.ts:92-96`               |
+| `"accountType only support UNIFIED."`             | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
+| Account margin-mode failure                       | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
+| `"order not modified"`                            | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
+| `110043` / `"leverage not modified"`              | Treated as success (desired leverage is already active); refresh positions afterward    | `setLeverage`                      |
+| `"Partial symbols switched successfully..."`      | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
+| `"All symbols switched successfully."`            | Silent success                                                                         | `bybit.exchange.ts:1786`           |
+| Network errors                                    | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:49-52`               |
+| `"too much traffic or a configuration error"`     | Logged as "Server was unavailable", no automatic retry beyond axios-retry              | `bybit.api.ts:98-100`              |
+| Batch order partial failures                      | Individual errors reported via `retExtInfo.list[].code`, successful IDs still returned | `bybit.exchange.ts:1376-1401`      |
+| Batch placement failure                           | Falls back to individual `placeOrder()` per order in the failed batch                  | `bybit.exchange.ts:1336-1346`      |
 
 ### WebSocket Error Handling
 
@@ -901,37 +843,6 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | Auth failure (`success === false`)  | Log error, retry up to 3 times with `sendReconnectSequence()` | `bybit.ws-private.ts:72-87`   |
 | PartiallyFilled with price/amount 0 | Ignored as false positive (occurs during order replacement)   | `bybit.ws-private.ts:105-109` |
 | Reject reasons                      | Logged unless `EC_PerCancelRequest` or `EC_NoError`           | `bybit.ws-private.ts:129-136` |
-
-### Auth failures resolve as successes, and used to poll forever
-
-**The HOW adapter resolves non-2xx without axios' `settle()`**, so a 401 reaches
-the response interceptor as a _success_ carrying `{"raw_response":""}` — no
-`retCode`, no `retMsg`. `getBybitResponseMeta` reports `hasExplicitStatus:
-false`, the existing branch skips it, and every
-`emitAndLogError(v(data,'retMsg'))` caller then emits `undefined`, which
-`base.ts` renders as the contentless **`Unknown Exchange Error`**. A bad key
-produced 89 of those in a single 30-second e2e window.
-
-The interceptor now synthesizes `retCode`/`retMsg` from the HTTP status. Spell
-the reason out (`HTTP 401 Unauthorized — API key rejected`) rather than emitting
-a bare `HTTP 401`: **the tunnel frame carries no `statusText`**, and both
-`health/errorPatterns.ts`'s `auth_invalid` set and the e2e toast assertion match
-on words like "unauthorized" / "api key", never on the numeric status.
-
-Nothing backed off either — the tick loop re-armed unconditionally at the 500ms
-metadata interval, so the error count was purely a function of how long you
-watched (120 errors vs a bound of 100). `BaseExchange.recordAuthFailure()` /
-`recordAuthSuccess()` drive an exponential backoff inside `getTickInterval()`.
-Two rules for calling them:
-
-- **Record failure from the transport layer**, which is the only place that sees
-  the HTTP status. Also record on the `BYBIT_AUTH_RET_CODES` set, because bybit
-  returns credential failures inside a normal envelope too — sometimes on HTTP
-  200 — so status alone under-counts. `10004` ("error sign") is deliberately
-  excluded: it is usually clock drift and is already retried.
-- **Only a signed request may record success.** `KLINE` is fetched unsigned and
-  shares the same client, so a chart fetch would otherwise reset the streak
-  while the credentials are still rejected.
 
 ### Error-as-Success Patterns
 
@@ -944,25 +855,25 @@ Two rules for calling them:
 
 ## Exchange Variant Differences
 
-| Feature               | `BybitExchange` (Linear)       | `BybitInverseExchange`              | `BybitSpotExchange`                 | `BybitDemoExchange`          |
-| --------------------- | ------------------------------ | ----------------------------------- | ----------------------------------- | ---------------------------- |
-| Base class            | `BaseExchange`                 | `BaseExchange`                      | `BaseExchange`                      | `BybitExchange`              |
-| Category              | `linear`                       | `inverse`                           | `spot`                              | `linear`                     |
-| Settle coins          | USDT (+ USDC for UNIFIED)      | `[undefined]` (coin-settled)        | N/A                                 | USDT (+ USDC for UNIFIED)    |
-| Position tracking     | Yes                            | Yes (USD->BTC conversion)           | No (`fetchPositions` returns `[]`)  | Yes                          |
-| Batch orders          | Yes (`CREATE_BATCH_ORDER`)     | Yes (`CREATE_BATCH_ORDER`)          | No                                  | Yes                          |
-| isSpot                | false                          | false                               | true                                | false                        |
-| isDemo                | false                          | false                               | false                               | true                         |
-| REST URL              | `api.bybit.com`                | `api.bybit.com`                     | `api.bybit.com`                     | `api-demo.bybit.com`         |
+| Feature               | `BybitExchange` (Linear)       | `BybitInverseExchange`              | `BybitSpotExchange`                 | `BybitDemoExchange`       |
+| --------------------- | ------------------------------ | ----------------------------------- | ----------------------------------- | ------------------------- |
+| Base class            | `BaseExchange`                 | `BaseExchange`                      | `BaseExchange`                      | `BybitExchange`           |
+| Category              | `linear`                       | `inverse`                           | `spot`                              | `linear`                  |
+| Settle coins          | USDT (+ USDC for UNIFIED)      | `[undefined]` (coin-settled)        | N/A                                 | USDT (+ USDC for UNIFIED) |
+| Position tracking     | Yes                            | Yes (USD->BTC conversion)           | No (`fetchPositions` returns `[]`)  | Yes                       |
+| Batch orders          | Yes (`CREATE_BATCH_ORDER`)     | Yes (`CREATE_BATCH_ORDER`)          | No                                  | Yes                       |
+| isSpot                | false                          | false                               | true                                | false                     |
+| isDemo                | false                          | false                               | false                               | true                      |
+| REST URL              | `api.bybit.com`                | `api.bybit.com`                     | `api.bybit.com`                     | `api-demo.bybit.com`      |
 | Public WS             | `v5/public/linear`             | `v5/public/inverse`                 | `v5/public/spot`                    | `v5/public/linear` (mainnet) |
-| Orderbook depth       | 1000 levels                    | 1000 levels                         | 200 levels                          | 1000 levels                  |
-| Leverage range        | From market info               | From market info                    | Fixed 1x                            | From market info             |
-| Amount handling       | Precision-adjusted float       | Integer USD contracts               | Precision-adjusted float            | Precision-adjusted float     |
-| Fee rates fetched     | Yes                            | Yes                                 | No                                  | Yes                          |
-| Dynamic ticker topics | No (subscribes all on connect) | Yes (`activeTickerSymbols:changed`) | Yes (`activeTickerSymbols:changed`) | No                           |
-| Income history        | Yes (UNIFIED only)             | No                                  | No                                  | Yes (inherited)              |
-| Execution queries     | Yes                            | Yes                                 | No                                  | Yes (inherited)              |
-| Market fetch parallel | Yes (PreLaunch in parallel)    | No (sequential)                     | No (single request, no PreLaunch)   | Yes (inherited)              |
+| Orderbook depth       | 1000 levels                    | 1000 levels                         | 200 levels                          | 1000 levels               |
+| Leverage range        | From market info               | From market info                    | Fixed 1x                            | From market info          |
+| Amount handling       | Precision-adjusted float       | Integer USD contracts               | Precision-adjusted float            | Precision-adjusted float  |
+| Fee rates fetched     | Yes                            | Yes                                 | No                                  | Yes                       |
+| Dynamic ticker topics | No (subscribes all on connect) | Yes (`activeTickerSymbols:changed`) | Yes (`activeTickerSymbols:changed`) | No                        |
+| Income history        | Yes (UNIFIED only)             | No                                  | No                                  | Yes (inherited)           |
+| Execution queries     | Yes                            | Yes                                 | No                                  | Yes (inherited)           |
+| Market fetch parallel | Yes (PreLaunch in parallel)    | No (sequential)                     | No (single request, no PreLaunch)   | Yes (inherited)           |
 
 ## Testing / Validation
 

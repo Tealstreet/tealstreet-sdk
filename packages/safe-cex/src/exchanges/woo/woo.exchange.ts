@@ -64,8 +64,6 @@ import { normalizeSymbol, reverseSymbol } from './woo.utils';
 import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
 
-const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.5;
-
 export class WOOXExchange extends BaseExchange {
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
   private static readonly FILL_POSITION_REFRESH_BASE_DELAY_MS = 150;
@@ -667,7 +665,11 @@ export class WOOXExchange extends BaseExchange {
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return {
-        error: err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'Invalid API key or secret',
+        error:
+          err?.response?.data?.message ||
+          err?.response?.data?.msg ||
+          err?.message ||
+          'Invalid API key or secret',
       };
     }
   };
@@ -1101,12 +1103,12 @@ export class WOOXExchange extends BaseExchange {
       return [];
     }
 
-    const { symbol, orderId, from, to, limit = 500 } = opts;
+    const { symbol, orderId, from, to, limit = 1000 } = opts;
     const normalizedRequestedSymbol = this.normalizeRequestedSymbol(symbol);
     const normalizedOrderId = orderId ? String(orderId) : undefined;
     const fromSeconds = this.normalizeTimestampSeconds(from);
     const toSeconds = this.normalizeTimestampSeconds(to);
-    const maxLimit = Math.min(Math.max(limit, 1), 500);
+    const maxLimit = Math.min(Math.max(limit, 1), 1000);
     const fromMilliseconds = this.normalizeTimestampMilliseconds(from);
     const toMilliseconds = this.normalizeTimestampMilliseconds(to);
 
@@ -1159,7 +1161,7 @@ export class WOOXExchange extends BaseExchange {
           orderId: normalizedOrderId,
           from,
           to,
-          limit: maxLimit,
+          limit: Math.max(maxLimit, 1000),
         });
 
         if (historicalTrades.length > 0) {
@@ -1193,13 +1195,13 @@ export class WOOXExchange extends BaseExchange {
       return [];
     }
 
-    const { symbol, orderId, from, to, limit = 500 } = opts;
+    const { symbol, orderId, from, to, limit = 1000 } = opts;
     const normalizedRequestedSymbol = this.normalizeRequestedSymbol(symbol);
     if (!normalizedRequestedSymbol) {
       return [];
     }
     const normalizedOrderId = orderId ? String(orderId) : undefined;
-    const maxLimit = Math.min(Math.max(limit, 1), 500);
+    const maxLimit = Math.min(Math.max(limit, 1), 1000);
     const fromMilliseconds = this.normalizeTimestampMilliseconds(from);
     const toMilliseconds = this.normalizeTimestampMilliseconds(to);
 
@@ -1322,11 +1324,9 @@ export class WOOXExchange extends BaseExchange {
       return this.updateAlgoOrder({ order, update });
     }
 
-    // WOO requires quantity (or amount) on every edit — a price-only body is
-    // accepted as EDIT_SENT and then fails asynchronously, cancelling the order.
     const payload: Record<string, any> = { orderId: order.id };
     if ('price' in update) payload.price = `${update.price}`;
-    payload.quantity = `${'amount' in update ? update.amount : order.amount}`;
+    if ('amount' in update) payload.quantity = `${update.amount}`;
 
     try {
       await this.xhr.put(`${ENDPOINTS.UPDATE_ORDER}/${order.id}`, payload);
@@ -1588,37 +1588,15 @@ export class WOOXExchange extends BaseExchange {
 
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     let type = inverseObj(ORDER_TYPE)[opts.type];
-    let orderPrice = opts.type === OrderType.Limit ? price : undefined;
 
     if (opts.timeInForce === OrderTimeInForce.PostOnly && opts.type === OrderType.Limit) {
       type = 'POST_ONLY';
-    } else if (opts.type === OrderType.Market) {
-      const ticker = this.store.tickersBySymbol[opts.symbol];
-      const referencePrice =
-        opts.side === OrderSide.Buy
-          ? ticker?.ask || ticker?.last || ticker?.mark || ticker?.index || ticker?.bid
-          : ticker?.bid || ticker?.last || ticker?.mark || ticker?.index || ticker?.ask;
-
-      if (!referencePrice || !Number.isFinite(referencePrice) || referencePrice <= 0) {
-        throw new Error(`Ticker ${opts.symbol} missing valid price for WOO market IOC order`);
-      }
-
-      const slippagePct =
-        typeof opts.maxSlippagePct === 'number' && Number.isFinite(opts.maxSlippagePct)
-          ? opts.maxSlippagePct
-          : DEFAULT_MARKET_IOC_SLIPPAGE_PCT;
-      const slippageFactor = Math.max(0, slippagePct) / 100;
-      orderPrice = adjust(
-        referencePrice * (opts.side === OrderSide.Buy ? 1 + slippageFactor : 1 - slippageFactor),
-        pPrice,
-      );
-      type = 'IOC';
     }
 
     const req = omitUndefined({
       symbol: reverseSymbol(opts.symbol),
       order_type: type,
-      order_price: orderPrice,
+      order_price: opts.type === OrderType.Limit ? price : undefined,
       reduce_only: opts.reduceOnly,
       side: inverseObj(ORDER_SIDE)[opts.side],
       position_side: await this.getPositionSideForOrder(opts),
@@ -1628,11 +1606,11 @@ export class WOOXExchange extends BaseExchange {
     const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
-    const payloads = times(lots, () => ({ ...req, order_quantity: lotSize }));
+    const payloads = times(lots, () => {
+      return { ...req, order_quantity: lotSize };
+    });
 
-    if (rest) {
-      payloads.push({ ...req, order_quantity: rest });
-    }
+    if (rest) payloads.push({ ...req, order_quantity: rest });
 
     try {
       const orderIds = await mapSeries(payloads, async (payload) => {

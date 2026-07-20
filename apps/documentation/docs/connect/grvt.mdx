@@ -152,7 +152,7 @@ After adding your GRVT key in Tealstreet, you may see an **Authorize Builder Fee
 - Click **Authorize Builder Fee**
 - Connect your browser wallet when prompted
 - Approve network switch/add request in your wallet
-  - **GRVT Mainnet**: Chain ID `325` (RPC: `https://rpc.grvt.io`)
+    - **GRVT Mainnet**: Chain ID `325` (RPC: `https://rpc.grvt.io`)
     - **GRVT Testnet**: Chain ID `326` (RPC: `https://rpc.testnet.grvt.io`)
 - Sign the EIP-712 authorization message
 
@@ -224,7 +224,7 @@ If you want to test without risking real funds:
 ## Frequently Asked Questions
 
 - **What is GRVT?**
-  - GRVT is a hybrid exchange combining CEX efficiency with DEX transparency. It offers crypto perpetual futures with up to 50x leverage, ultra-low fees, and self-custodial trading.
+    - GRVT is a hybrid exchange combining CEX efficiency with DEX transparency. It offers crypto perpetual futures with up to 50x leverage, ultra-low fees, and self-custodial trading.
 
 <!-- * **Why do I need an Ethereum private key?**
   * GRVT uses EIP-712 signing for order authentication. Your private key signs each order, and GRVT verifies the signature matches your tagged signer address.
@@ -233,22 +233,22 @@ If you want to test without risking real funds:
   * Your private key is stored locally and encrypted. We recommend using a dedicated trading wallet rather than your main wallet. Never share your private key with anyone. -->
 
 - **I get an error creating the API key saying access from this location is not allowed?**
-  - GRVT Has geolocational restrictions, Some users may be blocked from trading from certain countries.
+    - GRVT Has geolocational restrictions, Some users may be blocked from trading from certain countries.
 
 - **What builder fee rate does Tealstreet use for GRVT?**
   - Tealstreet's GRVT builder fee rate is **0.03% (3 bps)** on trades routed through Tealstreet.
   - This is approved through the one-time **Authorize Builder Fee** flow in the account form.
 
 - **My wallet asks me to switch/add a chain when I approve builder fee. Is that normal?**
-  - Yes. GRVT builder authorization uses GRVT EVM chain IDs and must match your selected network:
+    - Yes. GRVT builder authorization uses GRVT EVM chain IDs and must match your selected network:
         - Mainnet uses chain ID `325`
         - Testnet uses chain ID `326`
 
 - **What if I reject the chain switch or signature request?**
-  - The authorization will fail and your builder fee remains unapproved. Re-open the account settings and run **Authorize Builder Fee** again.
+    - The authorization will fail and your builder fee remains unapproved. Re-open the account settings and run **Authorize Builder Fee** again.
 
 - **Where can I get more help?**
-  - Visit the [GRVT Help Center](https://help.grvt.io/en) for comprehensive documentation and support.
+    - Visit the [GRVT Help Center](https://help.grvt.io/en) for comprehensive documentation and support.
 
 ---
 

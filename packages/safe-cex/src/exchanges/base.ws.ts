@@ -66,11 +66,9 @@ const getNodeWebSocket = (): typeof WebSocket | undefined => {
   // does not add a browser bundle import, and lets the ESM artifact resolve
   // the installed `ws` package. Keep the CJS/Bun path for those runtimes.
   try {
-    const module = (
-      process as typeof process & {
-        getBuiltinModule?: (name: string) => ModuleWithCreateRequire | undefined;
-      }
-    ).getBuiltinModule?.('module');
+    const module = (process as typeof process & {
+      getBuiltinModule?: (name: string) => ModuleWithCreateRequire | undefined;
+    }).getBuiltinModule?.('module');
     if (module?.createRequire) {
       return module.createRequire(import.meta.url)('ws') as typeof WebSocket;
     }
@@ -163,17 +161,6 @@ export class BaseWebSocket<T extends BaseExchange> {
   lastCloseTime = 0;
   onCloseCount = 0;
   reconnectCount = 0;
-  /**
-   * Monotonic close counter — deliberately NOT reset by the healthy-traffic
-   * path that clears `onCloseCount`/`reconnectCount`. Those two are
-   * streak-scoped so their `> 100` caps bound one unhealthy streak rather than
-   * the socket's lifetime; that makes them read 0 for any observer sampling
-   * after recovery. Diagnostics need the durable count, so it lives separately.
-   */
-  lifetimeCloseCount = 0;
-  /** Last close code seen, and when. Survives reconnect for post-hoc reads. */
-  lastCloseCode: number | undefined;
-  lastCloseAt = 0;
   lastReceived = 0;
   /** Timestamp of the most recent successful open event for this socket. */
   lastConnectedAt = 0;
@@ -265,12 +252,6 @@ export class BaseWebSocket<T extends BaseExchange> {
    * Return undefined to use BaseExchange default threshold.
    */
   getWatchdogStaleThresholdMs = (): number | undefined => undefined;
-
-  /**
-   * Allows exchange-specific sockets to opt into a custom idle ping threshold.
-   * Return undefined to use the BaseWebSocket default threshold.
-   */
-  getWatchdogPingThresholdMs = (): number | undefined => undefined;
 
   handlePongEvent = (nextPingTime = 5_000) => {
     this.recordMessageHandlerStats('pong');
@@ -673,33 +654,6 @@ export class BaseWebSocket<T extends BaseExchange> {
   /**
    * Process the close event logic
    */
-  /**
-   * Records the durable close diagnostics that `store.socketHealth` publishes.
-   *
-   * Separate from `processClose` because several exchanges (lighter,
-   * polymarket) replace `onClose` wholesale instead of delegating to the base
-   * implementation, and run their own reconnect loops. Without an explicit call
-   * from those overrides they would report `closeCount: 0` — indistinguishable
-   * from a healthy socket, which is worse than reporting nothing at all.
-   *
-   * Pure instrumentation: safe to call from any close path, changes no
-   * reconnect behavior.
-   */
-  protected recordCloseDiagnostics = (closeCode?: number, options?: { syntheticIfNoSocket?: boolean }): void => {
-    // `reconnect()` calls `onClose()` directly when there is no socket, to drive
-    // the reconnect path. Nothing actually closed, so counting it would inflate
-    // the total that diagnostics present as real churn.
-    if (options?.syntheticIfNoSocket && !this.ws) return;
-
-    this.lifetimeCloseCount += 1;
-    // Some paths invoke onClose() with no event (asterdex, polymarket), so the
-    // code is unknown — don't clobber a known previous code with undefined.
-    if (closeCode !== undefined) {
-      this.lastCloseCode = closeCode;
-      this.lastCloseAt = Date.now();
-    }
-  };
-
   private processClose = (closeCode: number | undefined, closeReason: string, closeCodeDescription: string): void => {
     this.lastReceived = 0;
     if (this.lastReceivedTimer) {
@@ -707,13 +661,9 @@ export class BaseWebSocket<T extends BaseExchange> {
       this.lastReceivedTimer = undefined;
     }
 
-    this.recordCloseDiagnostics(closeCode, { syntheticIfNoSocket: true });
-
-    // registerCloseResult BEFORE the sync, otherwise the pause/failure state
-    // published to the store lags one close behind until the next watchdog tick.
-    this.registerCloseResult(closeCode);
     // Notify parent that socket health changed
     this.parent.syncSocketHealthToStore?.();
+    this.registerCloseResult(closeCode);
 
     // Log close event for non-trivial closes (don't emit error toast - too noisy).
     // In reconnect storms, dedupe repeated signatures within cooldown windows.
@@ -1001,11 +951,9 @@ export class BaseWebSocket<T extends BaseExchange> {
     const now = Date.now();
     const diff = now - this.lastReceived;
     const lastReceivedTime = new Date(this.lastReceived).toISOString();
-    const reconnectThresholdMs = this.getWatchdogStaleThresholdMs() ?? WS_RECONNECT_THRESHOLD_MS;
-    const pingThresholdMs = this.getWatchdogPingThresholdMs() ?? WS_PING_THRESHOLD_MS;
 
     // Check reconnect threshold FIRST (larger value)
-    if (diff > reconnectThresholdMs) {
+    if (diff > WS_RECONNECT_THRESHOLD_MS) {
       this.parent.log(
         `[trackLastReceived] ${this.parent.name} last received message ${diff}ms ago (at ${lastReceivedTime}), reconnecting`,
         LogSeverity.Error,
@@ -1015,7 +963,7 @@ export class BaseWebSocket<T extends BaseExchange> {
       this.lastReceived = 0;
       this.pingSent = false;
       this.reconnect();
-    } else if (diff > pingThresholdMs && !this.pingSent) {
+    } else if (diff > WS_PING_THRESHOLD_MS && !this.pingSent) {
       this.parent.log(
         `[trackLastReceived] ${this.parent.name} last received message ${diff}ms ago (at ${lastReceivedTime}), sending ping`,
         LogSeverity.Info,
@@ -1024,7 +972,7 @@ export class BaseWebSocket<T extends BaseExchange> {
         this.ping();
         this.pingSent = true;
       } catch (_e) {}
-    } else if (diff <= pingThresholdMs) {
+    } else if (diff <= WS_PING_THRESHOLD_MS) {
       // Reset pingSent when connection is healthy
       this.pingSent = false;
     }
