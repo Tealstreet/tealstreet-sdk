@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
-import { OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../types';
+import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../types';
 
 const createStore = () =>
   ({
@@ -121,7 +121,7 @@ describe('Bybit conditional orders', () => {
       reduceOnly: false,
       triggerPrice: '30500',
       triggerDirection: '1',
-      triggerBy: 'MarkPrice',
+      triggerBy: 'LastPrice',
       closeOnTrigger: false,
       positionIdx: 1,
     });
@@ -150,14 +150,55 @@ describe('Bybit conditional orders', () => {
       reduceOnly: false,
       triggerPrice: '29500',
       triggerDirection: '2',
-      triggerBy: 'MarkPrice',
+      triggerBy: 'LastPrice',
       timeInForce: 'PostOnly',
       closeOnTrigger: false,
       positionIdx: 2,
     });
   });
 
-  it('places batch opening conditional trigger orders with mark-price trigger source', async () => {
+  it('places an opening conditional trigger order with mark-price trigger source when requested', async () => {
+    const { exchange, post } = createExchange();
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Conditional,
+      side: OrderSide.Buy,
+      amount: 0.5,
+      triggerPrice: 30500,
+      triggerType: OrderStopTriggerType.MarkPrice,
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      '/v5/order/create',
+      expect.objectContaining({
+        triggerBy: 'MarkPrice',
+      }),
+    );
+  });
+
+  it('places an opening conditional trigger order with index-price trigger source when requested', async () => {
+    const { exchange, post } = createExchange();
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Conditional,
+      side: OrderSide.Buy,
+      amount: 0.5,
+      triggerPrice: 30005,
+      triggerType: OrderStopTriggerType.IndexPrice,
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      '/v5/order/create',
+      expect.objectContaining({
+        triggerDirection: '1',
+        triggerBy: 'IndexPrice',
+      }),
+    );
+  });
+
+  it('places batch opening conditional trigger orders with last-price trigger source', async () => {
     const { exchange, post } = createExchange();
     post.mockResolvedValueOnce({
       data: {
@@ -189,10 +230,43 @@ describe('Bybit conditional orders', () => {
           reduceOnly: false,
           triggerPrice: '30500',
           triggerDirection: '1',
-          triggerBy: 'MarkPrice',
+          triggerBy: 'LastPrice',
           closeOnTrigger: false,
           positionIdx: 1,
         },
+      ],
+    });
+  });
+
+  it('places batch opening conditional trigger orders with index-price trigger source', async () => {
+    const { exchange, post } = createExchange();
+    post.mockResolvedValueOnce({
+      data: {
+        retMsg: 'OK',
+        result: { list: [{ orderId: 'batch-conditional-index' }] },
+        retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
+      },
+    });
+
+    const ids = await exchange.placeOrders([
+      {
+        symbol: 'BTCUSDT',
+        type: OrderType.Conditional,
+        side: OrderSide.Buy,
+        amount: 0.5,
+        triggerPrice: 30005,
+        triggerType: OrderStopTriggerType.IndexPrice,
+      },
+    ]);
+
+    expect(ids).toEqual(['batch-conditional-index']);
+    expect(post).toHaveBeenCalledWith('/v5/order/create-batch', {
+      category: 'linear',
+      request: [
+        expect.objectContaining({
+          triggerDirection: '1',
+          triggerBy: 'IndexPrice',
+        }),
       ],
     });
   });
@@ -206,6 +280,7 @@ describe('Bybit conditional orders', () => {
     expect(order.price).toBe(30500);
     expect(order.reduceOnly).toBe(false);
     expect(order.close).toBe(false);
+    expect(order.triggerType).toBe(OrderStopTriggerType.MarkPrice);
   });
 
   it('maps opening Bybit trigger limit orders to conditional with trigger price as display price', () => {

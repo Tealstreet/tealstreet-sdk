@@ -27,6 +27,10 @@ display text:
 - `OrderType.TrailingStopLoss` remains a protective trailing exit.
 - `OrderType.Limit` / `OrderType.Market` remain non-trigger entry orders.
 
+If an exchange supports selectable trigger sources for opening conditionals,
+use `PlaceOrderOpts.triggerType`. Keep `tpTriggerType` and `slTriggerType`
+reserved for protective TP/SL orders.
+
 ## Metadata
 
 Enable explicit support in `src/exchangeMetadata.ts`:
