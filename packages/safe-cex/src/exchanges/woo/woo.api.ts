@@ -14,6 +14,8 @@ import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW, TESTNET_BROKER_ID } from '
 
 const signV1 = (config: AxiosRequestConfig, options: ExchangeOptions) => {
   const nextConfig = { ...config };
+  const method = nextConfig.method?.toUpperCase?.() || 'GET';
+  const isMutation = method === 'DELETE' || method === 'POST' || method === 'PUT';
 
   // proxy use with non base url
   if (nextConfig?.url?.startsWith('http')) {
@@ -28,7 +30,7 @@ const signV1 = (config: AxiosRequestConfig, options: ExchangeOptions) => {
     sort: (a, b) => a.localeCompare(b),
   });
 
-  if (asString) {
+  if (asString && !isMutation) {
     nextConfig.url = `${nextConfig.url}?${asString}`;
     delete nextConfig.params;
   }
@@ -42,14 +44,9 @@ const signV1 = (config: AxiosRequestConfig, options: ExchangeOptions) => {
     'x-api-signature': signature,
   });
 
-  if (
-    nextConfig.method?.toUpperCase?.() === 'DELETE' ||
-    nextConfig.method?.toUpperCase?.() === 'POST' ||
-    nextConfig.method?.toUpperCase?.() === 'PUT'
-  ) {
-    if (config?.url !== ENDPOINTS.POSITION_MODE) {
-      nextConfig.data = '';
-    }
+  if (isMutation) {
+    nextConfig.data = asString;
+    delete nextConfig.params;
     headers.setContentType('application/x-www-form-urlencoded');
   }
 
