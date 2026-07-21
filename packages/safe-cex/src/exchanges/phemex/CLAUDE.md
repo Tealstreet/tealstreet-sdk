@@ -164,6 +164,7 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 4. After snapshot arrives, filter buffered updates by `sequence` number (discard updates older than snapshot)
 5. Apply buffered updates, then process subsequent updates incrementally
 6. `processOrderBookUpdate` applies each delta through shared `updateOrderBookByPrice`: bids stay descending, asks stay ascending, and zero-amount updates for absent levels are ignored.
+7. If the REST snapshot request fails or times out, the failure is caught locally, logged with a cooldown, and the buffered deltas are cleared so the next WS delta can retry snapshot loading without surfacing an unhandled promise rejection. Late snapshots after unsubscribe/disposal are ignored.
 
 **OHLCV streaming**: Kline topic format is `kline_p.subscribe|||{symbol}|||{resolution}`. Message handler key uses interval and symbol: `kline_p.{interval}.{symbol}`. Each kline message contains up to 2 rows (current and previous candle). The handler processes both and filters by matching interval. Kline data format: `[timestamp, interval, lastClose, open, high, low, close, volume, turnover]`.
 
