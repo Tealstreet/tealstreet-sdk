@@ -84,7 +84,9 @@ const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && B
 
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
-    return 'MarkPrice';
+    if (opts.triggerType === OrderStopTriggerType.MarkPrice) return 'MarkPrice';
+    if (opts.triggerType === OrderStopTriggerType.IndexPrice) return 'IndexPrice';
+    return 'LastPrice';
   }
   if (opts.type === OrderType.StopLoss) {
     return opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'LastPrice' : 'MarkPrice';
@@ -93,6 +95,21 @@ const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
     return opts.tpTriggerType === OrderStopTriggerType.MarkPrice ? 'MarkPrice' : 'LastPrice';
   }
   return undefined;
+};
+
+const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => {
+  if (opts.type === OrderType.Conditional) {
+    if (opts.triggerType === OrderStopTriggerType.MarkPrice) return ticker.mark;
+    if (opts.triggerType === OrderStopTriggerType.IndexPrice) return ticker.index;
+    return ticker.last;
+  }
+  if (opts.type === OrderType.StopLoss) {
+    return opts.slTriggerType === OrderStopTriggerType.LastPrice ? ticker.last : ticker.mark;
+  }
+  if (opts.type === OrderType.TakeProfit) {
+    return opts.tpTriggerType === OrderStopTriggerType.LastPrice ? ticker.last : ticker.mark;
+  }
+  return ticker.last;
 };
 
 export class BybitInverseExchange extends BaseExchange {
@@ -1257,11 +1274,7 @@ export class BybitInverseExchange extends BaseExchange {
     let triggerDirection: number | undefined = undefined;
     if (triggerPrice) {
       const ticker = this.store.tickersBySymbol[opts.symbol]!;
-      const priceToCompare =
-        (opts.type === OrderType.StopLoss && opts.slTriggerType === OrderStopTriggerType.LastPrice) ||
-        (opts.type === OrderType.TakeProfit && opts.tpTriggerType === OrderStopTriggerType.LastPrice)
-          ? ticker.last
-          : ticker.mark;
+      const priceToCompare = getBybitTriggerDirectionPrice(opts, ticker);
       if (triggerPrice > priceToCompare) {
         triggerDirection = 1;
       } else {
@@ -1654,11 +1667,7 @@ export class BybitInverseExchange extends BaseExchange {
       let triggerDirection: number | undefined = undefined;
       if (triggerPrice) {
         const ticker = this.store.tickersBySymbol[opts.symbol]!;
-        const priceToCompare =
-          (opts.type === OrderType.StopLoss && opts.slTriggerType === OrderStopTriggerType.LastPrice) ||
-          (opts.type === OrderType.TakeProfit && opts.tpTriggerType === OrderStopTriggerType.LastPrice)
-            ? ticker.last
-            : ticker.mark;
+        const priceToCompare = getBybitTriggerDirectionPrice(opts, ticker);
         if (triggerPrice > priceToCompare) {
           triggerDirection = 1;
         } else {
@@ -2161,6 +2170,7 @@ export class BybitInverseExchange extends BaseExchange {
         info: o,
         timeInForce,
         lastUpdate: virtualClock.getCurrentTimeMs(),
+        ...(type === OrderType.Conditional && { triggerType: ORDER_TRIGGER_TYPE[v(o, 'triggerBy')] }),
         ...(type === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'triggerBy')] }),
         ...(type === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'triggerBy')] }),
       },

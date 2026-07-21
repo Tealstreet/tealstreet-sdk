@@ -167,6 +167,17 @@ All endpoints use the V5 API prefix. Defined in `bybit.types.ts`:
 | `USER_CLOSED_PNL`      | `/v5/position/closed-pnl`      | GET    | Closed PnL records                     |
 | `TRANSACTION_LOG`      | `/v5/account/transaction-log`  | GET    | Transaction log (funding, PnL, etc.)   |
 
+### Opening conditional trigger source
+
+Bybit linear and inverse opening conditionals (`OrderType.Conditional`) map
+`PlaceOrderOpts.triggerType` directly to V5 `triggerBy`: `LastPrice`,
+`MarkPrice`, or `IndexPrice`. The same source price must be used when deriving
+`triggerDirection`; otherwise Bybit can accept a conditional order whose trigger
+source differs from the price used to decide rise-vs-fall direction.
+
+Do not reuse this mapping for TP/SL without auditing those legacy paths first:
+they still use their separate `tpTriggerType` / `slTriggerType` behavior.
+
 ### Base URLs
 
 | Environment | REST                            | Public WS (Linear)                                | Public WS (Inverse)                                | Private WS                                  |
@@ -312,7 +323,7 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
    - Hedged Buy/Long: `1`, Sell/Short: `2`
    - If `reduceOnly`, the index is flipped (1 <-> 2)
 
-3. **Trigger direction** (`bybit.exchange.ts:1071-1084`): For conditional orders, computes `triggerDirection` (1 = price above current, 2 = price below). Compares trigger price against mark or last depending on the trigger type setting.
+3. **Trigger direction** (`bybit.exchange.ts:1071-1084`): For conditional orders, computes `triggerDirection` (1 = price above current, 2 = price below). Compares trigger price against mark or last depending on the trigger type setting. Opening conditionals use `PlaceOrderOpts.triggerType`, defaulting to Last Price when omitted; TP/SL still use `tpTriggerType` / `slTriggerType`.
 
 4. **Type conversion for conditional stops and opening triggers**: When a SL/TP has a `triggerPrice`, the `orderType` is sent as `Market` (not StopLoss/TakeProfit), because Bybit's conditional market orders use `triggerPrice` + `orderType: Market`. Linear and inverse also map `OrderType.Conditional` opening triggers to Bybit `Market` or `Limit` requests based on whether an execution `price` is present, force `reduceOnly: false`, and keep `closeOnTrigger: false`.
 

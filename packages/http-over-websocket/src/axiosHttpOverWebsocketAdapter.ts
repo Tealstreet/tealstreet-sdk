@@ -481,12 +481,17 @@ const createAxiosHttpOverWebsocketAdapter = (
           await sleepWithinDeadline(25);
         }
 
-        // Get proxy token from SharedWorker (handles all fetching centrally)
-        // Wait for a valid token before proceeding
-        let token = await getValidToken();
+        // IP-whitelisted connections are authenticated by TradeTunnel itself,
+        // which sends rpc.auth success immediately after the WebSocket opens.
+        // Only fetch/send a JWT when the server has not already authenticated
+        // this connection.
+        let token = '';
+        if (howWebSocket.authState !== HOWWebSocketAuthState.Good) {
+          token = await getValidToken();
 
-        if (!howWebSocket.isTokenSent && token) {
-          await safeSendToken(token);
+          if (!howWebSocket.isTokenSent && token) {
+            await safeSendToken(token);
+          }
         }
 
         while (howWebSocket.authState !== HOWWebSocketAuthState.Good) {

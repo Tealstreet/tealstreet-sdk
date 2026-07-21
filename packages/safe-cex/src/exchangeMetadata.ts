@@ -882,8 +882,12 @@ const BitrueMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/bitrue/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  enabled: true,
-  enabledInDev: true,
+  // Removed from supported exchanges (hidden from add-account everywhere). Code
+  // is kept in place; flip these back to re-enable. Same soft-disable pattern as
+  // dydx/arkham/salsadex — gated by isExchangeAvailableInCurrentEnv.
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
   supportsTestnet: false,
   supportsTradesHistory: true,
   supportsExecutionsHistory: true,
@@ -1242,8 +1246,12 @@ const SalsaDEXMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/salsadex/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: true,
-  enabled: true,
-  enabledInDev: true,
+  // Removed from supported exchanges (hidden from add-account everywhere). Code
+  // is kept in place; flip these back to re-enable. Same soft-disable pattern as
+  // dydx/arkham — gated by isExchangeAvailableInCurrentEnv.
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
   supportsTestnet: false,
   supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],

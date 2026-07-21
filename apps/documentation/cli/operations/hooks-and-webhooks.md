@@ -5,12 +5,25 @@ sidebar_position: 2
 
 # Hooks & webhooks
 
+:::caution Hosted webhook relay is not live
+
+TradingView-to-CLI webhooks are not currently available as a hosted
+Tealstreet feature. The CLI has local listener and hook primitives, but
+Tealstreet does not yet run the public relay that would receive a
+TradingView alert and route it into a user's local CLI session.
+
+The details below describe the local building blocks and are useful for
+development or self-managed tunnels. They should not be treated as a
+supported Tealstreet-hosted webhook path.
+
+:::
+
 A hook is a registered command body that fires over HTTP when the local
-listener receives a `POST /hook/<id>` with a matching `X-Hook-Token`. Use
-hooks to wire TradingView alerts, external scripts, or your own automation
-to the same command grammar you type at the REPL. Standalone-only — hooks
-live inside the listener subsystem, see [Listener](./listener.md) for the
-underlying transport.
+listener receives a `POST /hook/<id>` with a matching `X-Hook-Token`. The
+listener is local to the machine running the standalone CLI, so external
+senders need a route to that machine before the hook can fire.
+Standalone-only — hooks live inside the listener subsystem, see
+[Listener](./listener.md) for the underlying transport.
 
 ---
 
@@ -104,14 +117,18 @@ $ curl -X POST http://127.0.0.1:53219/hook/4f3a1c8e... \
 
 ## TradingView (and other senders)
 
-`127.0.0.1` is unreachable from the public internet, so TradingView (or any
-external sender) needs a tunnel that terminates on your loopback address.
-Any tunnel works — Cloudflare Tunnel, ngrok, an SSH reverse forward — point
-it at `127.0.0.1:53219` and use the public hostname in the TradingView
-webhook URL. Keep the `X-Hook-Token` header on the public side; without the
-tunnel the listener would refuse the inbound origin anyway.
+The supported Tealstreet-hosted route is not live yet:
 
-End-to-end walkthrough: [Webhook from TradingView](../recipes/webhook-from-tradingview.md).
+```text
+TradingView -> Tealstreet public relay -> user's local CLI listener
+```
+
+`127.0.0.1` is unreachable from the public internet, so TradingView (or any
+external sender) cannot hit the standalone listener directly. Advanced
+users can run their own public tunnel to `127.0.0.1:53219`, but that
+tunnel, auth boundary, and operational risk are self-managed.
+
+Current status: [Webhook from TradingView](../recipes/webhook-from-tradingview.md).
 
 ---
 

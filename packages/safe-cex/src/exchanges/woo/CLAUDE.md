@@ -262,9 +262,8 @@ WooX uses **two different HMAC-SHA256 signature methods** depending on API versi
 1. Serialize params alphabetically with `qs.stringify` (sorted via `localeCompare`)
 2. Concatenate: `serialized_params|timestamp` (pipe separator)
 3. Sign: `HMAC-SHA256(concatenated_string, secret) -> hex`
-4. For POST/DELETE/PUT: data is moved to query string, body is set to empty string `''`
+4. For POST/DELETE/PUT: data stays in the `application/x-www-form-urlencoded` request body
 5. Content-Type for mutations: `application/x-www-form-urlencoded`
-6. **Exception**: `POSITION_MODE` endpoint body is NOT cleared
 
 ### V3 Signature (`signV3` in `woo.api.ts`)
 
@@ -746,7 +745,7 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 
 1. **Dual signature methods**: V1 endpoints use `params|timestamp` format, V3 endpoints use `timestamp+METHOD+url+body` format. The request interceptor auto-selects based on URL.
 2. **POST_ONLY as order type**: WooX treats `POST_ONLY` as a separate order type rather than a time-in-force value. Code maps PostOnly TIF to `type: 'POST_ONLY'` when placing orders, and maps `POST_ONLY` type back to `OrderTimeInForce.PostOnly` when reading.
-3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are moved to the query string and body is set to empty string `''`, except for the `POSITION_MODE` endpoint.
+3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are signed as a sorted form string and sent in the request body. Do not move mutation params into the URL with an empty body; WOO can reject that before application-level order validation with `411 Length Required`.
 4. **No uPNL in account endpoint**: WooX does not provide unrealized PnL in the account endpoint. uPNL is computed from positions polling and added to balance. This causes a timing issue where `fetchBalance()` alone returns stale `upnl`.
 5. **Historical kline from separate domain**: Historical legacy kline data uses `https://api-pub.woox.io` via `_proxyEnforcedXhr`, while recent kline data uses the main API. `fetchOHLCV` selects it when the requested candle is more than 100 intervals old.
 6. **Kline secondary trades topic**: For sub-minute/sub-second candle intervals, `listenOHLCV` subscribes to both `@kline` and `@trades`. Trade data constructs real-time candles when the kline topic is too sparse. The trades topic is used only outside `publicDataOnly` mode.

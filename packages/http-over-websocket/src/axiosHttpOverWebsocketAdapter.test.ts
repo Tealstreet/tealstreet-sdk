@@ -319,6 +319,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       isTokenExpired: () => false,
     });
     mockWs.isTokenSent = false;
+    mockWs.authState = 'Unknown';
 
     const adapter = createAxiosHttpOverWebsocketAdapter();
     const callerConfig: any = {
@@ -329,6 +330,31 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     };
 
     await expect(adapter(callerConfig)).rejects.toThrow('proxy token unavailable');
+  });
+
+  it('uses TradeTunnel IP auto-auth without fetching or sending a token', async () => {
+    const getProxyToken = vi.fn(async () => {
+      throw new Error('proxy token should not be requested');
+    });
+    configureHOW({ getProxyToken, isTokenExpired: () => false });
+    mockWs.isTokenSent = false;
+    mockWs.authState = 'Good';
+    mockWs.replyTo = (sent) => {
+      mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+    };
+
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    await expect(
+      adapter({
+        url: '/api/path',
+        method: 'GET',
+        baseURL: 'https://example.com',
+        headers: {},
+      } as any),
+    ).resolves.toMatchObject({ data: { ok: true } });
+
+    expect(getProxyToken).not.toHaveBeenCalled();
+    expect(mockWs.sendToken).not.toHaveBeenCalled();
   });
 
   it('coalesces concurrent Bad-auth refreshes into one token fetch and rpc.auth frame', async () => {

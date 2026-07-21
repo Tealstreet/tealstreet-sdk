@@ -421,6 +421,7 @@ export type Order = {
   readonly info?: any;
   readonly timeInForce?: OrderTimeInForce;
   readonly lastUpdate: number;
+  readonly triggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
   readonly takeProfit?: number;
@@ -595,6 +596,7 @@ export type PlaceOrderOpts = {
   readonly takeProfit?: number;
   readonly reduceOnly?: boolean;
   readonly timeInForce?: OrderTimeInForce;
+  readonly triggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
   readonly maxSlippagePct?: number;

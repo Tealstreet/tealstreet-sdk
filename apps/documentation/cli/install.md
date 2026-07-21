@@ -74,6 +74,20 @@ exchange and the credential fields each one needs:
 tealstreet account exchanges
 ```
 
+### Restricted regions and Bybit 403s
+
+If a direct Bybit connection returns a 403 geo-restriction error, the CLI
+needs a different route before exchange requests can succeed. Use a VPN,
+or add the account from inside the REPL with Tealstreet proxy routing:
+
+```text
+> accounts add -n mybybit -e bybit -k <KEY> -s <SECRET> --tealstreet-proxy --proxy-region SG
+```
+
+This only changes how the CLI reaches the exchange. It does not make
+TradingView webhooks reach the CLI; the hosted TradingView-to-CLI relay is
+not live yet.
+
 ---
 
 ## Logging in

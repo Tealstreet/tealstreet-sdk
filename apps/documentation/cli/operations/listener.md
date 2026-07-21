@@ -10,8 +10,9 @@ on `127.0.0.1:53219`. It exposes three things to localhost: a health endpoint,
 a per-hook webhook fire endpoint, and a WebSocket upgrade that lets the web
 app drive the standalone CLI as a remote target. Standalone-only — there is no
 listener in the web CLI runtime. Relevant when you want to pair the web tab to
-a running CLI, receive webhooks from TradingView (or anything else), or keep
-accounts streaming on a dedicated host while you switch browsers.
+a running CLI or keep accounts streaming on a dedicated host while you switch
+browsers. The hosted TradingView-to-CLI webhook relay is not live yet; see
+[Hooks & webhooks](./hooks-and-webhooks.md) for current status.
 
 ---
 
@@ -183,5 +184,5 @@ load, the gate flips on and the pairing flow runs as documented in
 takes over and the worker stays live across reloads.
 
 For the end-to-end web ↔ standalone setup, see [Pairing](./pairing.md). For
-the webhook HTTP variant of `cmd:exec`, see
+the current webhook status and local hook primitives, see
 [Hooks & webhooks](./hooks-and-webhooks.md).

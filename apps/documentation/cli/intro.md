@@ -6,9 +6,8 @@ sidebar_position: 0
 
 # The Tealstreet CLI
 
-A typing-first trading interface. Place orders, build chains, run TWAPs,
-and listen for webhooks — all from a prompt that feels like a shell and
-trades like a terminal.
+A typing-first trading interface. Place orders, build chains, and run
+TWAPs from a prompt that feels like a shell and trades like a terminal.
 
 ```text
 :hltest [BTC-PERP $81,284.5] > buy $100 stop -1%
@@ -18,15 +17,26 @@ trades like a terminal.
 
 The CLI ships in two runtimes:
 
-| Runtime            | Where                               | Best for                                                                              |
-| ------------------ | ----------------------------------- | ------------------------------------------------------------------------------------- |
-| **Web CLI**        | A panel inside the trading terminal | Quick fire-and-forget trades with the terminal already up                             |
-| **Standalone CLI** | `tealstreet` binary on your machine | Watch modes, recording, hooks, TradingView webhooks, leaving things running overnight |
+| Runtime            | Where                               | Best for                                                  |
+| ------------------ | ----------------------------------- | --------------------------------------------------------- |
+| **Web CLI**        | A panel inside the trading terminal | Quick fire-and-forget trades with the terminal already up |
+| **Standalone CLI** | `tealstreet` binary on your machine | Watch modes, recording, leaving things running overnight  |
 
 Same grammar, same commands, same constants. The web CLI is a strict
 subset — every standalone command except watch modes, hooks, recording,
 and a few host-process commands also works in the web CLI. See
 [Web CLI vs standalone](./reference/web-cli.md).
+
+:::caution Webhook status
+
+TradingView-to-CLI webhooks are not available as a hosted Tealstreet
+feature yet. The standalone CLI has local listener/hook building blocks,
+but the public relay that would route TradingView alerts through
+Tealstreet into a user's local CLI is not live. Treat CLI webhooks as
+unsupported unless you are deliberately running and securing your own
+public tunnel to the local listener.
+
+:::
 
 ---
 
@@ -45,8 +55,9 @@ and a few host-process commands also works in the web CLI. See
    for high/low-water marks.
 4. **Aliases for whole chains**. `alias z "cancel; close"` lets you bind a
    common cleanup to one keystroke.
-5. **Listener mode** turns the standalone CLI into a webhook target — pair
-   it with the web terminal or with TradingView alerts.
+5. **Listener mode** lets the web terminal drive a trusted standalone CLI
+   running on the same machine. Hosted TradingView webhook routing is not
+   live yet.
 
 ---
 
@@ -60,7 +71,7 @@ and a few host-process commands also works in the web CLI. See
 | Understand `$entry`, `$bid`, math, offsets      | [Variables & constants](./reference/variables.md)      |
 | Master `;`, `&`, loops, `wait`, `if`, retry     | [Workflow](./reference/workflow.md)                    |
 | Customize the status footer / where output goes | [Output](./reference/output.md)                        |
-| Send a TradingView alert into the CLI           | [Hooks & webhooks](./operations/hooks-and-webhooks.md) |
+| Check current webhook support                   | [Hooks & webhooks](./operations/hooks-and-webhooks.md) |
 | Pair the web terminal to a standalone listener  | [Pairing](./operations/pairing.md)                     |
 
 ---
