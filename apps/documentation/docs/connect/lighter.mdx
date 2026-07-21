@@ -39,8 +39,8 @@ import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 ### Creating the key
 
 - Now we are ready to generate the API Key. Head on over to [Lighter](https://teal.link/lighter) and:
-    - Login or connect your wallet when the window pops up
-        - If a window did not automatically pop up click the connect button at the top right of the page
+  - Login or connect your wallet when the window pops up
+    - If a window did not automatically pop up click the connect button at the top right of the page
 
 :::note
 Lighter's main website may be unavailable in restricted jurisdictions. If you cannot access it, review Lighter's Terms and regional availability requirements before continuing.
@@ -74,8 +74,8 @@ Lighter's main website may be unavailable in restricted jurisdictions. If you ca
 
 - At the time of this writing there is no IP Whitelist option.
 - Input an API Key Index and click the **Generate** button.
-    - Keys 0 through 3 are usually used by Lighter. So you should start with index 4 and up.
-    - Lighter suports making **maker-only** keys. For most users this is not recommended.
+  - Keys 0 through 3 are usually used by Lighter. So you should start with index 4 and up.
+  - Lighter suports making **maker-only** keys. For most users this is not recommended.
 
 <div class="text--center">
     <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 600 }} />
@@ -120,7 +120,7 @@ Lighter usually reserves API Key Indices 0 through 3 for their own use and they 
 - **What is a builder fee, and does Lighter charge one?**
   - A builder fee is an integrator fee configured through Lighter's [Partner Attribution Program](https://docs.lighter.xyz/integrations/partner-attribution). It allows a partner frontend, such as Tealstreet, to charge trading fees on orders routed through that frontend after the user approves the fee configuration.
   - Lighter currently charges no maker or taker fees for Standard Accounts, as described in Lighter's [Trading Fees](https://docs.lighter.xyz/trading/trading-fees) docs.
-  - Tealstreet's Lighter API form does not charge a fee just for linking your key. During the link flow, you approve Tealstreet as a builder partner to charge **0.03% (3 bps)** maker/taker fees on trades routed through Tealstreet.
+  - Tealstreet's Lighter API form does not charge a fee just for linking your key. During the link flow, you approve Tealstreet as a builder partner to charge **0% maker** and **0.025% (2.5 bps) taker** fees on trades routed through Tealstreet.
 
 - **What are Lighter account tiers?**
   - Lighter has Standard, Premium, and Plus account tiers. These can affect fees, latency, rate limits, and official competition eligibility.

@@ -1,7 +1,8 @@
 import { LighterApiClient, TransactionClient } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
 import {
-  LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE,
+  LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+  LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
   TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET,
   TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET,
 } from './lighter.builder-fee';
@@ -56,7 +57,21 @@ export type LighterBuilderApprovalCheckResult = {
   maxSpotTakerFee?: number;
 };
 
-export const DEFAULT_LIGHTER_APPROVAL_FEE_VALUE = LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE;
+export type LighterBuilderApprovalFeeCaps = {
+  maxPerpsMakerFee: number;
+  maxPerpsTakerFee: number;
+  maxSpotMakerFee: number;
+  maxSpotTakerFee: number;
+};
+
+export const DEFAULT_LIGHTER_APPROVAL_FEE_CAPS: LighterBuilderApprovalFeeCaps = {
+  maxPerpsMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+  maxPerpsTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
+  maxSpotMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+  maxSpotTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
+};
+
+export const DEFAULT_LIGHTER_APPROVAL_FEE_VALUE = LIGHTER_INTEGRATOR_TAKER_FEE_VALUE;
 
 export type LighterBuilderApprovalResult = {
   message: string;
@@ -103,6 +118,26 @@ const toHex10 = (value: bigint | number, fieldName: string): string => {
     throw new Error(`${fieldName} exceeds uint64 range`);
   }
   return `0x${normalized.toString(16).padStart(16, '0')}`;
+};
+
+const resolveApprovalFeeCaps = (params: {
+  feeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
+  feeValue?: number;
+}): LighterBuilderApprovalFeeCaps => {
+  const baseCaps =
+    typeof params.feeValue === 'number' && Number.isFinite(params.feeValue)
+      ? {
+          maxPerpsMakerFee: params.feeValue,
+          maxPerpsTakerFee: params.feeValue,
+          maxSpotMakerFee: params.feeValue,
+          maxSpotTakerFee: params.feeValue,
+        }
+      : DEFAULT_LIGHTER_APPROVAL_FEE_CAPS;
+
+  return {
+    ...baseCaps,
+    ...params.feeCaps,
+  };
 };
 
 const getDefaultIntegratorAccountIndex = (testnet: boolean): bigint => {
@@ -310,6 +345,7 @@ export const checkLighterBuilderApproved = async (params: {
   accountIdentifier: string;
   baseUrl?: string;
   integratorAccountIndex?: bigint;
+  requiredFeeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
   requiredFeeValue?: number;
   testnet?: boolean;
 }): Promise<LighterBuilderApprovalCheckResult> => {
@@ -328,13 +364,16 @@ export const checkLighterBuilderApproved = async (params: {
 
   const integrator = snapshot.approvedIntegrators.find((item) => item.accountIndex === integratorAccountIndex);
   const now = Date.now();
-  const requiredFeeValue = params.requiredFeeValue ?? DEFAULT_LIGHTER_APPROVAL_FEE_VALUE;
+  const requiredFeeCaps = resolveApprovalFeeCaps({
+    feeCaps: params.requiredFeeCaps,
+    feeValue: params.requiredFeeValue,
+  });
   const hasSufficientFeeCap = Boolean(
     integrator &&
-    integrator.maxPerpsTakerFee >= requiredFeeValue &&
-    integrator.maxPerpsMakerFee >= requiredFeeValue &&
-    integrator.maxSpotTakerFee >= requiredFeeValue &&
-    integrator.maxSpotMakerFee >= requiredFeeValue,
+    integrator.maxPerpsTakerFee >= requiredFeeCaps.maxPerpsTakerFee &&
+    integrator.maxPerpsMakerFee >= requiredFeeCaps.maxPerpsMakerFee &&
+    integrator.maxSpotTakerFee >= requiredFeeCaps.maxSpotTakerFee &&
+    integrator.maxSpotMakerFee >= requiredFeeCaps.maxSpotMakerFee,
   );
   const approvalStatus = !integrator
     ? 'missing'
@@ -365,6 +404,7 @@ export const prepareLighterBuilderApprovalContext = async (params: {
   approvalWindowMs?: number;
   baseUrl?: string;
   integratorAccountIndex?: bigint;
+  maxFeeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
   maxFeeValue?: number;
   testnet?: boolean;
 }): Promise<LighterBuilderApprovalContext> => {
@@ -375,7 +415,10 @@ export const prepareLighterBuilderApprovalContext = async (params: {
     testnet,
   });
   const integratorAccountIndex = params.integratorAccountIndex ?? getDefaultIntegratorAccountIndex(testnet);
-  const maxFeeValue = params.maxFeeValue ?? DEFAULT_LIGHTER_APPROVAL_FEE_VALUE;
+  const maxFeeCaps = resolveApprovalFeeCaps({
+    feeCaps: params.maxFeeCaps,
+    feeValue: params.maxFeeValue,
+  });
   const approvalWindowMs = params.approvalWindowMs ?? DEFAULT_APPROVAL_WINDOW_MS;
   const approvalExpiryMs = Date.now() + approvalWindowMs;
   const nonce = await getNextNonce({
@@ -396,10 +439,10 @@ export const prepareLighterBuilderApprovalContext = async (params: {
     approvalExpiryMs,
     integratorAccountIndex,
     l1Address: snapshot.l1Address,
-    maxPerpsMakerFee: maxFeeValue,
-    maxPerpsTakerFee: maxFeeValue,
-    maxSpotMakerFee: maxFeeValue,
-    maxSpotTakerFee: maxFeeValue,
+    maxPerpsMakerFee: maxFeeCaps.maxPerpsMakerFee,
+    maxPerpsTakerFee: maxFeeCaps.maxPerpsTakerFee,
+    maxSpotMakerFee: maxFeeCaps.maxSpotMakerFee,
+    maxSpotTakerFee: maxFeeCaps.maxSpotTakerFee,
     nonce,
     testnet,
   };
@@ -563,6 +606,7 @@ export const approveLighterBuilderFeeWithBrowserWallet = async (params: {
   approvalWindowMs?: number;
   baseUrl?: string;
   integratorAccountIndex?: bigint;
+  maxFeeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
   maxFeeValue?: number;
   testnet?: boolean;
 }): Promise<LighterBuilderApprovalResult> => {
@@ -572,6 +616,7 @@ export const approveLighterBuilderFeeWithBrowserWallet = async (params: {
     approvalWindowMs: params.approvalWindowMs,
     baseUrl: params.baseUrl,
     integratorAccountIndex: params.integratorAccountIndex,
+    maxFeeCaps: params.maxFeeCaps,
     maxFeeValue: params.maxFeeValue,
     testnet: params.testnet,
   });
