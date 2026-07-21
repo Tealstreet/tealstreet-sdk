@@ -1,0 +1,113 @@
+---
+title: Crypto.com - Draft
+description: Draft guide for connecting your Crypto.com Exchange API to Tealstreet.
+sidebar_position: 24
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+---
+
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+## Connecting [Crypto.com](https://teal.link/cdc) to Tealstreet
+
+---
+
+## API Creation Process
+
+- First, make sure you are logged into your [Crypto.com Exchange](https://teal.link/cdc) account.
+- Make sure two-factor authentication is enabled before creating an API key.
+
+:::note
+Consider supporting Tealstreet by using the [referral link](https://teal.link/cdc).
+:::
+
+<IntroTealstreet exchangeName="Crypto.com" />
+
+---
+
+### Crypto.com API Creation
+
+- Now you are ready to generate the API keys within your Crypto.com Exchange account. Head on over to Crypto.com Exchange and:
+    1. Click the **User Center** or profile menu.
+    2. Select **API** or **API Keys** from the account settings area.
+
+:::tip
+Crypto.com describes API key generation in their official Exchange API docs under **User Center** > **API**.
+:::
+
+- On the API page, click **Create a new API key** to start the key creation process.
+- Enter a recognizable label for the API key, such as **Tealstreet**.
+- Complete the required 2FA verification.
+
+:::caution
+Copy and store the **Secret Key** immediately. Crypto.com only shows the secret when the API key is created.
+:::
+
+- Now configure the settings for your Crypto.com API key.
+  - **Can Read**: Enable this permission so Tealstreet can load balances, positions, orders, and account state.
+  - **Enable Trading**: Enable this permission so Tealstreet can place and manage orders.
+  - **IP Whitelist**: Copy the whitelist IP addresses supplied by Tealstreet on the new API key page and paste them into the Crypto.com IP whitelist field.
+  - **Withdraw / Transfer**: Leave withdrawal or transfer permissions disabled.
+
+:::caution
+Never share your API keys with anyone. Tealstreet does not need withdrawal permissions.
+:::
+
+---
+
+### Linking the API to Tealstreet
+
+- Once you have created the API key on Crypto.com's website, you are ready to link it inside Tealstreet.
+- Return to the **API Keys** page inside the Tealstreet terminal.
+- Click the exchange dropdown and select **Crypto.com**.
+  - **Name**: Choose a name for your API key. This is helpful if you use multiple exchanges or sub-accounts.
+  - Choose the color you want your key to use inside the terminal.
+  - Paste the **API Key** provided by Crypto.com.
+  - Paste the **API Secret** provided by Crypto.com.
+  - Click **Done**.
+
+<OutroTealstreet exchangeName="Crypto.com" />
+
+---
+
+## Supported Markets
+
+Crypto.com support in Tealstreet is planned for Crypto.com Exchange markets.
+
+:::note
+This page is a draft for the upcoming integration. Supported market types and any exchange-specific limitations should be confirmed before publishing.
+:::
+
+---
+
+## Troubleshooting
+
+### API key rejected
+
+1. Double check that you did not confuse the API Key and the API Secret.
+2. Confirm the API key is active in Crypto.com Exchange.
+3. Confirm **Can Read** and **Enable Trading** permissions are enabled.
+4. If IP whitelisting is enabled, ensure every IP address listed in Tealstreet was added to the Crypto.com API key.
+
+---
+
+### Zero balance
+
+Tealstreet **Margin Wallet** not showing any balance?
+
+1. Confirm the funds are held on Crypto.com Exchange, not only in the Crypto.com App.
+2. Confirm the API key has **Can Read** permission enabled.
+3. Confirm you have the appropriate Crypto.com market open in Tealstreet.
+
+---
+
+### Can't place orders
+
+1. Confirm **Enable Trading** is enabled on the Crypto.com API key.
+2. Keep withdrawal and transfer permissions disabled.
+3. Confirm your Crypto.com account is allowed to trade the selected market in your region.
+4. If you have issues, please **[contact us](/docs/support/contact-us/)**.
