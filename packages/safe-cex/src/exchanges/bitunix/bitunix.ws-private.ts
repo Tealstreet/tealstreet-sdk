@@ -160,10 +160,6 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
             case 'CREATE':
               // Handle newly created order
               const orderData = json?.data;
-              const reduceOnly = this.parent.getBitunixReduceOnly(
-                orderData.reduceOnly ?? orderData.reductionOnly,
-                orderData.clientId,
-              );
 
               // Create a new order object based on the websocket data
               const newOrder: Writable<Order> = {
@@ -174,12 +170,12 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                 side: ORDER_SIDE[orderData.side?.toUpperCase()],
                 price: parseFloat(orderData.price || '0'),
                 amount: parseFloat(v(orderData, 'qty') || '0'),
-                reduceOnly,
+                reduceOnly: v(orderData, 'reductionOnly') || false,
                 filled: parseFloat(v(orderData, 'dealAmount') || '0'),
                 lastUpdate: new Date(v(orderData, 'mtime') || v(orderData, 'ctime')).getTime(),
                 remaining: subtract(v(orderData, 'qty') || '0', v(orderData, 'dealAmount') || '0'),
                 timeInForce: TIME_IN_FORCE[orderData.effect?.toUpperCase()] || OrderTimeInForce.GoodTillCancel,
-                info: { ...orderData, reduceOnly },
+                info: orderData,
                 ...(v(orderData, 'tpStopType') && { tpTriggerType: ORDER_TRIGGER_TYPE[v(orderData, 'tpStopType')] }),
                 ...(v(orderData, 'slStopType') && { slTriggerType: ORDER_TRIGGER_TYPE[v(orderData, 'slStopType')] }),
                 ...(v(orderData, 'tpPrice') && { takeProfitPrice: parseFloat(v(orderData, 'tpPrice')) }),
@@ -206,11 +202,6 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
               const existingOrder = this.parent.store.orders.find((o) => o.id === updatedOrderData.orderId);
 
               if (existingOrder) {
-                const reduceOnly = this.parent.getBitunixReduceOnly(
-                  updatedOrderData.reduceOnly ?? updatedOrderData.reductionOnly,
-                  updatedOrderData.clientId ?? existingOrder.info?.clientId,
-                  existingOrder.reduceOnly,
-                );
                 const updatedOrder: Writable<Order> = {
                   ...existingOrder,
                   price: parseFloat(updatedOrderData.price || existingOrder.price.toString()),
@@ -223,16 +214,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   lastUpdate:
                     new Date(v(updatedOrderData, 'mtime') || v(updatedOrderData, 'ctime')).getTime() ||
                     existingOrder.lastUpdate,
-                  reduceOnly,
-                  // UPDATE frames omit immutable fields such as reduceOnly
-                  // and can omit attached protection metadata. Preserve the
-                  // reconciled snapshot so a second chart drag remains safe.
-                  info: {
-                    ...(existingOrder.info || {}),
-                    ...updatedOrderData,
-                    orderId: updatedOrderData.orderId || existingOrder.id,
-                    reduceOnly,
-                  },
+                  info: updatedOrderData,
                 };
 
                 // Update the order in the store

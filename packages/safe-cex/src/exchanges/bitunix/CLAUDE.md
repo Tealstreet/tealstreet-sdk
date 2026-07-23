@@ -337,11 +337,6 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   upstream `LIMIT` type, and a raw boolean `reduceOnly` value matching the
   normalized order. The endpoint does not accept side, trade side, TIF, or
   reduce-only fields, so those attributes remain attached to the same order.
-- Bitunix's private order channel omits `reduceOnly` and can omit other
-  immutable/protection fields on `UPDATE`. Tealstreet caches submitted
-  reduce-only state by `clientId`, and WS updates merge onto the existing raw
-  snapshot instead of replacing it, so repeated chart drags retain
-  reconciliation provenance.
 - Quantity is the requested total base-asset quantity, including after partial
   fills, rounded to market precision. It must remain above the already-filled
   quantity.
@@ -349,15 +344,9 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   `orderId`. The request carries both reconciled protection legs, trigger
   types, execution types, and any required limit execution prices so editing
   one leg cannot drop its sibling. A virtual-leg quantity edit is rejected.
-- The request includes `symbol` as shown in Bitunix's official example, in
-  addition to the documented identity, price, and quantity fields. A
-  successful HTTP response must have `code: 0`; when it returns a different
-  `orderId`, that replacement parent ID is propagated rather than treated as a
-  post-mutation error. Attached virtual edits rebuild their `__tp` / `__sl`
-  display ID on that acknowledged parent so optimistic UI state cannot overlay
-  a protection row onto the regular order. Bitunix explicitly says HTTP
-  acknowledgement is not authoritative, so the existing private order-channel
-  refresh still owns final state reconciliation.
+- A successful HTTP response must have `code: 0` and echo the same `orderId`.
+  Bitunix explicitly says HTTP acknowledgement is not authoritative; the
+  existing private order-channel refresh owns final state reconciliation.
 
 There is no cancel/recreate fallback. Market orders, missing or inconsistent
 raw order metadata, and malformed prices or quantities reject before any
