@@ -19,9 +19,21 @@ This directory contains the BitMEX exchange integration for Tealstreet.
 | Unified Margin  | No                                                          |
 | Chaser Support  | Yes                                                         |
 
+## Exchange Wind-Down
+
+BitMEX announced on 2026-07-23 that new account registrations are stopped and the exchange will close on 2026-09-23 at 04:00 UTC.
+
+Tealstreet encodes the official cutoff dates in `bitmex.exchange.ts`:
+
+- `BITMEX_REDUCE_ONLY_START_MS` = 2026-08-26 04:00 UTC. From this time until closure, `formatCreateOrder()` rejects non-`reduceOnly` order placement, and `updateOrder()` rejects amendments to non-reduce-only orders. Reduce-only close orders stay available so users can exit positions.
+- `BITMEX_EXCHANGE_CLOSURE_MS` = 2026-09-23 04:00 UTC. From this time, `start()` short-circuits into a loaded/empty closed state, `validateAccount()` returns a closure error, and trading write paths are blocked with an actionable message.
+
+Do not remove these guards while the official shutdown schedule is still in effect. If BitMEX changes the dates or reopens service, update the constants, docs page (`apps/documentation/docs/connect/bitmex.mdx`), and the lifecycle regression tests together.
+
 ## API Documentation
 
 - **Official API Documentation**: https://www.bitmex.com/api/explorer/
+- **Official Closure Announcement**: [BitMEX Exchange to Sunset on 23 September at 04:00 UTC](https://www.bitmex.com/blog/bitmex-closure)
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/bitmex.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/bitmex.ts
 
