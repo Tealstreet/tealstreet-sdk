@@ -9,6 +9,44 @@ import { BaseExchange } from '../base';
 import { generateAuthenticatedRequest } from './cryptocom.signing';
 import { BASE_URLS, PUBLIC_ENDPOINTS } from './cryptocom.types';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const stringifyResponseBody = (body: unknown): string => {
+  if (typeof body === 'string') return body;
+  try {
+    return JSON.stringify(body);
+  } catch (_err) {
+    return String(body);
+  }
+};
+
+export const formatCryptocomApiError = (error: any): string | undefined => {
+  const status = error?.response?.status;
+  const body = error?.response?.data;
+  if (body === undefined) return undefined;
+
+  if (isRecord(body)) {
+    const code = body.code;
+    const message = typeof body.message === 'string' ? body.message : undefined;
+    if (code !== undefined || message) {
+      let msg = 'Crypto.com API Error';
+      if (code !== undefined && code !== 0) msg += ` ${code}`;
+      if (message) msg += `: ${message}`;
+      return msg;
+    }
+  }
+
+  const bodyString = stringifyResponseBody(body);
+  if (status && status >= 500) {
+    return `Crypto.com proxy/transport error (${status}): ${bodyString}`;
+  }
+  if (status) {
+    return `Crypto.com HTTP error (${status}): ${bodyString}`;
+  }
+  return `Crypto.com API error: ${bodyString}`;
+};
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
 
@@ -86,18 +124,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     },
     async (error) => {
       // Handle axios errors
-      if (error.response?.data) {
-        const errorData = error.response.data as CryptocomApiResponse<unknown>;
-        let msg = 'Crypto.com API Error';
-
-        if (errorData.code !== undefined && errorData.code !== 0) {
-          msg += ` ${errorData.code}`;
-        }
-
-        if (errorData.message) {
-          msg += `: ${errorData.message}`;
-        }
-
+      const msg = formatCryptocomApiError(error);
+      if (msg) {
         exchange.emitAndLogError(msg);
         throw new Error(msg);
       }

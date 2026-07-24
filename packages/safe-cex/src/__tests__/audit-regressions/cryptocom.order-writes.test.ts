@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
+import { formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
@@ -31,6 +33,39 @@ const createExchange = () => {
 };
 
 describe('audit regression: Crypto.com order writes', () => {
+  it('declares explicit proxy regions for production REST routing', () => {
+    const metadata = getExchangeMetadata('cryptocom');
+
+    expect(metadata.privateProxyIps).toEqual(privateProxyIpsTokyo);
+    expect(Object.keys(metadata.privateProxyRegions)).toEqual(['JA', 'SG']);
+    expect(metadata.privateProxyRegions.JA).toEqual(privateProxyIpsTokyo);
+    expect(metadata.privateProxyRegions.SG).toEqual(privateProxyIpsSingapore);
+  });
+
+  it('keeps proxy transport failures distinct from credential errors', () => {
+    expect(
+      formatCryptocomApiError({
+        response: {
+          status: 503,
+          data: '<html><body><h1>503 Service Unavailable</h1>\nNo server is available to handle this request.\n</body></html>',
+        },
+      }),
+    ).toBe(
+      'Crypto.com proxy/transport error (503): <html><body><h1>503 Service Unavailable</h1>\nNo server is available to handle this request.\n</body></html>',
+    );
+  });
+
+  it('preserves Crypto.com credential validation messages from JSON API errors', () => {
+    expect(
+      formatCryptocomApiError({
+        response: {
+          status: 401,
+          data: { code: 40101, message: 'Bad API key, API secret or incorrect IP whitelist.' },
+        },
+      }),
+    ).toBe('Crypto.com API Error 40101: Bad API key, API secret or incorrect IP whitelist.');
+  });
+
   it('hides the dead legacy margin-type switch and fails closed if called directly', async () => {
     const exchange = createExchange();
     const post = vi.fn();
