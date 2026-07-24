@@ -779,7 +779,11 @@ const CryptocomMetadata: ExchangeMetadata = {
   tvIntraDayMultipliers: ['1', '5', '15', '30', '60', '240'],
   tvMaxGetBarFetches: 10,
   candleApiCountLimit: 500,
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyRegions: {
+    JA: privateProxyIpsTokyo,
+    SG: privateProxyIpsSingapore,
+  },
   tickInterval: 2000,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,

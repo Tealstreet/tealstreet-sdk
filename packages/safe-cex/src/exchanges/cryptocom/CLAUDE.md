@@ -83,6 +83,24 @@ Authenticated request body format:
 Only enabled when `options.tealstreetTunnel` is true. Unlike many other
 exchanges, this is not unconditionally applied.
 
+### REST Proxy Routing
+
+`CryptocomMetadata.requiresCors` forces browser REST calls through Tealstreet's
+exchange proxy. `supportsTunnel` and `supportsWsRoute` are false today, so
+Crypto.com does not use the HTTP-over-WebSocket tunnel or TradeTunnel WS route
+for normal browser validation.
+
+The metadata declares both private proxy regions explicitly:
+
+- `JA` → `privateProxyIpsTokyo`
+- `SG` → `privateProxyIpsSingapore`
+
+`JA` is intentionally listed first so dev-only account setup defaults to the
+Tokyo REST pool while infra wires and health-checks Crypto.com on the Asia pool.
+Before production enablement, both proxy pools should forward
+`https://api.crypto.com/exchange/v1` and
+`https://uat-api.3ona.co/exchange/v1` with correct SNI/Host handling.
+
 ## Startup Sequence
 
 `start()` executes **sequentially**:
