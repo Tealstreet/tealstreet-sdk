@@ -69,6 +69,12 @@ Authenticated request body format:
 }
 ```
 
+The REST signing interceptor is idempotent for already-signed envelopes because
+axios may re-enter request interceptors during transport retries. Private write
+endpoints (`create/amend/cancel/close/change-leverage`) are not retried on
+network/CORS errors: the exchange may have accepted the mutation even if the
+browser could not read the response.
+
 ### WebSocket Authentication
 
 1. Generate auth message via `generateWsAuthMessage()` with method `'public/auth'` and empty params
@@ -450,7 +456,8 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
   method/IP, while private limits are per method/API key (create/cancel 15 per
   100ms, most other private methods 3 per 100ms, and trade/order history 1 per
   second).
-- Network error retry: 3 retries via `axios-retry` on network errors
+- Network error retry: 3 retries via `axios-retry` on network errors for reads;
+  private write endpoints are deliberately not retried
 - Request timeout: `options.extra.recvWindow` or **30 seconds** default.
 - WebSocket ticker throttle: 1000ms
 - WebSocket orderbook throttle: 100ms

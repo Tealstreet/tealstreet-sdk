@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
-import { formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
+import { createAPI, formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
@@ -15,6 +15,7 @@ import {
   OrderTimeInForce,
   OrderType,
 } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
 
 const MARKET: Market = {
   id: 'BTCUSD-PERP',
@@ -33,6 +34,10 @@ const createExchange = () => {
 };
 
 describe('audit regression: Crypto.com order writes', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('declares explicit proxy regions for production REST routing', () => {
     const metadata = getExchangeMetadata('cryptocom');
 
@@ -64,6 +69,59 @@ describe('audit regression: Crypto.com order writes', () => {
         },
       }),
     ).toBe('Crypto.com API Error 40101: Bad API key, API secret or incorrect IP whitelist.');
+  });
+
+  it('does not re-sign a serialized private envelope when axios retries a request', async () => {
+    const exchange = createExchange();
+    const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
+    const adapter = vi.fn(async () => ({
+      data: { code: 0, result: {} },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    }));
+    api.defaults.adapter = adapter as any;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(1_785_019_621_981);
+
+    const params = {
+      instrument_name: MARKET.id,
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '1',
+    };
+    await api.post(ENDPOINTS.CREATE_ORDER, params);
+    const adapterCalls = adapter.mock.calls as unknown as Array<[any]>;
+    const firstRequest = adapterCalls[0]?.[0];
+    expect(firstRequest).toBeDefined();
+    const firstPayload = JSON.parse(firstRequest.data);
+
+    await api.post(ENDPOINTS.CREATE_ORDER, JSON.stringify(firstPayload));
+    const retryRequest = adapterCalls[1]?.[0];
+    expect(retryRequest).toBeDefined();
+    const retryPayload = JSON.parse(retryRequest.data);
+
+    expect(retryPayload).toEqual(firstPayload);
+    expect(retryPayload.params).toEqual(params);
+  });
+
+  it('does not retry ambiguous private order writes after network errors', async () => {
+    const exchange = createExchange();
+    const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
+    const adapter = vi.fn(async (config) =>
+      Promise.reject(Object.assign(new Error('Network Error'), { config, request: {}, isAxiosError: true })),
+    );
+    api.defaults.adapter = adapter as any;
+
+    await expect(
+      api.post(ENDPOINTS.CREATE_ORDER, {
+        instrument_name: MARKET.id,
+        side: 'BUY',
+        type: 'MARKET',
+        quantity: '1',
+      }),
+    ).rejects.toThrow('Network connection failed');
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
   it('hides the dead legacy margin-type switch and fails closed if called directly', async () => {

@@ -7,7 +7,7 @@ import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttp
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { generateAuthenticatedRequest } from './cryptocom.signing';
-import { BASE_URLS, PUBLIC_ENDPOINTS } from './cryptocom.types';
+import { BASE_URLS, ENDPOINTS, PUBLIC_ENDPOINTS } from './cryptocom.types';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -20,6 +20,41 @@ const stringifyResponseBody = (body: unknown): string => {
     return String(body);
   }
 };
+
+const parseJsonObject = (value: string): Record<string, unknown> | undefined => {
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch (_err) {
+    return undefined;
+  }
+};
+
+const isAuthenticatedEnvelope = (value: unknown, method: string, apiKey: string): value is Record<string, unknown> => {
+  if (!isRecord(value)) return false;
+  return (
+    value.method === method &&
+    value.api_key === apiKey &&
+    isRecord(value.params) &&
+    typeof value.sig === 'string' &&
+    typeof value.nonce === 'number'
+  );
+};
+
+const NON_RETRYABLE_PRIVATE_WRITE_ENDPOINTS = [
+  ENDPOINTS.CREATE_ORDER,
+  ENDPOINTS.ADVANCED_CREATE_ORDER,
+  ENDPOINTS.AMEND_ORDER,
+  ENDPOINTS.ADVANCED_AMEND_ORDER,
+  ENDPOINTS.CANCEL_ORDER,
+  ENDPOINTS.ADVANCED_CANCEL_ORDER,
+  ENDPOINTS.CANCEL_ALL_ORDERS,
+  ENDPOINTS.CLOSE_POSITION,
+  ENDPOINTS.CHANGE_LEVERAGE,
+];
+
+const isNonRetryablePrivateWrite = (url = ''): boolean =>
+  NON_RETRYABLE_PRIVATE_WRITE_ENDPOINTS.some((endpoint) => url.includes(endpoint));
 
 export const formatCryptocomApiError = (error: any): string | undefined => {
   const status = error?.response?.status;
@@ -62,8 +97,13 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  // Retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  // Retry read requests on network errors. Do not retry private writes because
+  // a network/CORS failure is ambiguous: the exchange may have accepted the
+  // mutation even though the browser could not read the response.
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) => isNetworkError(error) && !isNonRetryablePrivateWrite(error.config?.url),
+  });
 
   // Only use HTTP-over-WebSocket adapter when tealstreetTunnel is enabled (browser/production)
   if (options.tealstreetTunnel) {
@@ -78,12 +118,18 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     const requiresAuth = !isPublicEndpoint(endpoint);
 
     const method = endpoint.replace('/', '');
-    const params = config.data || {};
+    const rawParams = typeof config.data === 'string' ? (parseJsonObject(config.data) ?? config.data) : config.data || {};
 
     if (requiresAuth && options.key && options.secret) {
       // Private: POST with signed JSON envelope
       nextConfig.method = 'POST';
       try {
+        if (isAuthenticatedEnvelope(rawParams, method, options.key)) {
+          nextConfig.data = rawParams;
+          return nextConfig;
+        }
+
+        const params = isRecord(rawParams) ? rawParams : {};
         const authenticatedRequest = generateAuthenticatedRequest(method, params, options.key, options.secret);
 
         nextConfig.data = authenticatedRequest;
@@ -97,7 +143,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // 500 / code 50001 — only GET is accepted now.
       nextConfig.method = 'GET';
       nextConfig.data = undefined;
-      nextConfig.params = params && typeof params === 'object' ? params : {};
+      nextConfig.params = isRecord(rawParams) ? rawParams : {};
     }
 
     return nextConfig;
