@@ -107,6 +107,8 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
     await vi.waitFor(() => expect(exchange.store.positions).toHaveLength(2));
     expect(exchange.store.orders).toHaveLength(2);
     expect(exchange.store.orders[1]).toMatchObject({ id: 'order-1', reduceOnly: true });
+    expect(exchange.privateWebsocket.messageHandlersStats['user.order']).toBeDefined();
+    expect(exchange.privateWebsocket.messageHandlersStats['user.positions']).toBeDefined();
     expect(exchange.store.positions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ symbol: 'BTCUSD-PERP', leverage: 12, liquidationPrice: 54_000 }),

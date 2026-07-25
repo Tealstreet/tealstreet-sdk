@@ -244,6 +244,11 @@ so quiet or geo-degraded direct routes do not churn every base 20 seconds.
   - `candlestick` -> `handleCandlestickUpdate()`
   - `mark` / `index` / `funding` -> finite guarded ticker updates
 
+Data frames record channel-level `messageHandlersStats` (`ticker`, `mark`,
+`funding`, `user.order`, etc.) for the connection status popover. Do not remove
+these stats updates even though Crypto.com mostly routes through store updates
+rather than per-topic callbacks.
+
 Crypto.com's `funding` value is the decimal rate settling at the end of the
 current hour, so it maps to `Ticker.fundingRate` without scaling. The distinct
 `estimatedfunding` channel is a next-interval estimate; safe-cex has no

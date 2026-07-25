@@ -183,6 +183,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
         // `'code' in json` (the previous shape) silently drops all updates.
         if (json.result && json.result.channel) {
           const channel = json.result.channel;
+          this.recordMessageHandlerStats(channel);
           if (channel.startsWith('user.order') || channel.startsWith('user.advance.order')) {
             this.handleOrderUpdate(json.result as CryptocomWsOrderUpdate);
           } else if (channel === 'user.positions') {

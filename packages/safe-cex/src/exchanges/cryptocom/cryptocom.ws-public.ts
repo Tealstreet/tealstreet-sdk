@@ -257,6 +257,7 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         // every data frame because Crypto.com now embeds `code: 0` on data
         // frames as well. Dispatch first, then fall back to the response path.
         if (json.result && json.result.channel) {
+          this.recordMessageHandlerStats(json.result.channel);
           switch (json.result.channel) {
             case 'ticker':
               this.handleTickerUpdate(json.result as CryptocomWsTickerUpdate);

@@ -126,6 +126,9 @@ describe('audit regression: Crypto.com public valuation streams', () => {
     exchange.publicWebsocket.onMessage(valuationFrame('index', '60120.25', 'BTCUSD-INDEX') as MessageEvent);
     exchange.publicWebsocket.onMessage(valuationFrame('funding', '-0.00025') as MessageEvent);
 
+    expect(exchange.publicWebsocket.messageHandlersStats.mark).toBeDefined();
+    expect(exchange.publicWebsocket.messageHandlersStats.index).toBeDefined();
+    expect(exchange.publicWebsocket.messageHandlersStats.funding).toBeDefined();
     expect(exchange.store.tickersBySymbol['BTCUSD-PERP']).toMatchObject({
       mark: 60_123.45,
       index: 60_120.25,
