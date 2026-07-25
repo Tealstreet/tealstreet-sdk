@@ -12,9 +12,9 @@
 
 ## API Documentation
 
-- **Exchange API v1**: https://exchange-developer.crypto.com/exchange/v1/
-- **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/cryptocom.ts
-- **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/cryptocom.ts
+- **Exchange API v1**: <https://exchange-developer.crypto.com/exchange/v1/>
+- **CCXT REST Reference**: <https://github.com/ccxt/ccxt/blob/master/ts/src/cryptocom.ts>
+- **CCXT WebSocket Reference**: <https://github.com/ccxt/ccxt/blob/master/ts/src/pro/cryptocom.ts>
 
 ## File Structure
 
@@ -101,6 +101,20 @@ Before production enablement, both proxy pools should forward
 `https://api.crypto.com/exchange/v1` and
 `https://uat-api.3ona.co/exchange/v1` with correct SNI/Host handling.
 
+For local UAT while proxy routes are being wired, the web app has a
+non-production developer override:
+
+```js
+localStorage.setItem(
+  'dev-overrides',
+  JSON.stringify({ ...JSON.parse(localStorage.getItem('dev-overrides') || '{}'), cryptocomDirectRestInDev: true }),
+);
+location.reload();
+```
+
+This forces Crypto.com REST direct from the browser so georestriction/CORS
+failures can be observed directly. Do not use it as production behavior.
+
 ## Startup Sequence
 
 `start()` executes **sequentially**:
@@ -145,25 +159,25 @@ signed POST requests with JSON bodies. Endpoint constants live in
 
 ### Private Endpoints
 
-| Constant             | Method Path                        | Purpose                                 |
-| -------------------- | ---------------------------------- | --------------------------------------- |
-| `CREATE_ORDER`       | `/private/create-order`            | Place new order                         |
-| `ADVANCED_CREATE_ORDER` | `/private/advanced/create-order` | Place standalone TP/SL trigger order    |
-| `ADVANCED_AMEND_ORDER` | `/private/advanced/amend-order`   | Amend standalone TP/SL trigger order    |
-| `ADVANCED_CANCEL_ORDER` | `/private/advanced/cancel-order` | Cancel standalone TP/SL trigger order   |
-| `ADVANCED_OPEN_ORDERS` | `/private/advanced/get-open-orders` | Fetch open TP/SL trigger orders       |
-| `AMEND_ORDER`        | `/private/amend-order`             | Modify existing order                   |
-| `CANCEL_ORDER`       | `/private/cancel-order`            | Cancel specific order                   |
-| `CANCEL_ALL_ORDERS`  | `/private/cancel-all-orders`       | Cancel all (optional instrument filter) |
-| `CLOSE_POSITION`     | `/private/close-position`          | Close position                          |
-| `ORDER_DETAIL`       | `/private/get-order-detail`        | Single order details                    |
-| `OPEN_ORDERS`        | `/private/get-open-orders`         | All open orders                         |
-| `ORDER_HISTORY`      | `/private/get-order-history`       | Historical orders                       |
-| `TRADES_HISTORY`     | `/private/get-trades`              | Trade history                           |
-| `POSITIONS`          | `/private/get-positions`           | Open positions                          |
-| `CHANGE_LEVERAGE`    | `/private/change-account-leverage` | Set instrument leverage                 |
-| `BALANCE`            | `/private/user-balance`            | Account balances                        |
-| `ACCOUNTS`           | `/private/get-accounts`            | Current account identity                |
+| Constant                 | Method Path                           | Purpose                                 |
+| ------------------------ | ------------------------------------- | --------------------------------------- |
+| `CREATE_ORDER`           | `/private/create-order`               | Place new order                         |
+| `ADVANCED_CREATE_ORDER`  | `/private/advanced/create-order`      | Place standalone TP/SL trigger order    |
+| `ADVANCED_AMEND_ORDER`   | `/private/advanced/amend-order`       | Amend standalone TP/SL trigger order    |
+| `ADVANCED_CANCEL_ORDER`  | `/private/advanced/cancel-order`      | Cancel standalone TP/SL trigger order   |
+| `ADVANCED_OPEN_ORDERS`   | `/private/advanced/get-open-orders`   | Fetch open TP/SL trigger orders         |
+| `AMEND_ORDER`            | `/private/amend-order`                | Modify existing order                   |
+| `CANCEL_ORDER`           | `/private/cancel-order`               | Cancel specific order                   |
+| `CANCEL_ALL_ORDERS`      | `/private/cancel-all-orders`          | Cancel all (optional instrument filter) |
+| `CLOSE_POSITION`         | `/private/close-position`             | Close position                          |
+| `ORDER_DETAIL`           | `/private/get-order-detail`           | Single order details                    |
+| `OPEN_ORDERS`            | `/private/get-open-orders`            | All open orders                         |
+| `ORDER_HISTORY`          | `/private/get-order-history`          | Historical orders                       |
+| `TRADES_HISTORY`         | `/private/get-trades`                 | Trade history                           |
+| `POSITIONS`              | `/private/get-positions`              | Open positions                          |
+| `CHANGE_LEVERAGE`        | `/private/change-account-leverage`    | Set instrument leverage                 |
+| `BALANCE`                | `/private/user-balance`               | Account balances                        |
+| `ACCOUNTS`               | `/private/get-accounts`               | Current account identity                |
 
 **Response unwrapping**: The response interceptor unwraps `data.result` so
 callers receive the inner result object directly, not the full API envelope.
