@@ -71,12 +71,14 @@ describe('audit regression: Crypto.com public valuation streams', () => {
       expect(initialFrames).toHaveLength(2);
       expect(initialFrames.map((frame) => frame.params.channels.length)).toEqual([100, 4]);
       expect(initialFrames.flatMap((frame) => frame.params.channels)).toEqual(
-        markets.flatMap(({ instrumentName, indexInstrumentName }) => [
-          `ticker.${instrumentName}`,
-          `mark.${instrumentName}`,
-          `index.${indexInstrumentName}`,
-          `funding.${instrumentName}`,
-        ]),
+        [
+          ...markets.map(({ instrumentName }) => `ticker.${instrumentName}`),
+          ...markets.flatMap(({ instrumentName, indexInstrumentName }) => [
+            `mark.${instrumentName}`,
+            `index.${indexInstrumentName}`,
+            `funding.${instrumentName}`,
+          ]),
+        ],
       );
       expect(
         initialFrames
@@ -97,6 +99,24 @@ describe('audit regression: Crypto.com public valuation streams', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps startup market-data subscriptions under the Crypto.com session cap', () => {
+    const exchange = createExchange();
+    const send = vi.fn();
+    exchange.publicWebsocket.ws = { readyState: WebSocket.OPEN, send } as unknown as WebSocket;
+    const markets = Array.from({ length: 120 }, (_, index) => ({
+      instrumentName: `COIN${index}USD-PERP`,
+      indexInstrumentName: `COIN${index}USD-INDEX`,
+    }));
+
+    exchange.publicWebsocket.subscribeToMarketData(markets);
+
+    const channels = send.mock.calls.flatMap(([payload]) => JSON.parse(payload).params.channels);
+    expect(channels).toHaveLength(350);
+    expect(send.mock.calls.map(([payload]) => JSON.parse(payload).params.channels.length)).toEqual([100, 100, 100, 50]);
+    expect(markets.every(({ instrumentName }) => channels.includes(`ticker.${instrumentName}`))).toBe(true);
+    expect(channels.some((channel: string) => channel.startsWith('estimatedfunding.'))).toBe(false);
   });
 
   it('maps finite positive prices and the current settling funding rate into the ticker', () => {

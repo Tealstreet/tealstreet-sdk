@@ -130,8 +130,10 @@ failures can be observed directly. Do not use it as production behavior.
 9. Connect the private WebSocket and enqueue `user.order`,
    `user.advance.order`, `user.positions`, and `user.balance` before auth.
 10. Wait one second for the connection-rate window.
-11. Batch-subscribe ticker, mark, index, and current-funding channels in chunks
-    of 100; order books, trades, and candles remain lazy per consumer.
+11. Batch-subscribe ticker channels for all markets, then mark, index, and
+    current-funding channels while staying under the local 350-subscription
+    public-session cap; order books, trades, and candles remain lazy per
+    consumer.
 12. Run the first REST position/balance/order reconciliation.
 
 External public data mode does not open the market WebSocket. Public-only mode
@@ -206,8 +208,9 @@ synchronized virtual clock.
 - Subscriptions use incrementing `messageId` counter
 - Format: `{ id, method: 'subscribe', params: { channels: [...] }, nonce }`
 - Startup and reconnect frames use a conservative local limit of 100 channels.
-  Crypto.com documents 100 market-data request commands per second, but does
-  not document either a per-frame channel limit or a total connection cap.
+  The socket keeps a local 350-subscription cap to stay below Crypto.com's
+  400-subscription market-data session limit while leaving room for active
+  chart orderbook/candle streams.
 
 **Channel Naming**:
 
@@ -561,12 +564,13 @@ Not a true batch API call -- orders are placed sequentially in a `for` loop. Ind
    market precision; `placeOrder()` does not call `adjust()`.
 6. **Sequential batch cancellation**: `cancelOrders()` intentionally continues
    one order at a time after individual failures.
-7. **Ticker valuations use dedicated public streams**: startup batch-subscribes
-   `mark`, `index`, and current `funding` beside ticker channels. Invalid or
-   non-positive price values are ignored; funding may be negative or zero.
-   Index topics use each market's distinct `underlying_symbol` (for example,
-   `BTCUSD-INDEX`). `estimatedfunding` is deliberately not mapped onto the
-   current-rate field.
+7. **Ticker valuations use dedicated public streams**: startup always
+   batch-subscribes `ticker` for all markets, then adds `mark`, `index`, and
+   current `funding` as capacity allows under the local 350-subscription cap.
+   Invalid or non-positive price values are ignored; funding may be negative or
+   zero. Index topics use each market's distinct `underlying_symbol` when it
+   matches the documented `*-INDEX` shape (for example, `BTCUSD-INDEX`).
+   `estimatedfunding` is deliberately not mapped onto the current-rate field.
 8. **Account identity**: `getAccount()` uses the current
    `private/get-accounts` endpoint and returns `this_account.uuid`; the removed
    `private/get-account-summary` path must not be restored.
