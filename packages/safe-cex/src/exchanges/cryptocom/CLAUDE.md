@@ -389,7 +389,8 @@ the auth acknowledgement.
    only valid for MARKET BUY by cost.
 4. Send `price` for LIMIT orders.
 5. Add `REDUCE_ONLY` to `exec_inst` when requested.
-6. Add `time_in_force` if specified.
+6. Add `time_in_force` only for LIMIT orders; omit UI default TIF on MARKET
+   orders.
 7. POST to `/private/create-order` and return `[data.order_id]`.
 
 Standalone stop-loss and take-profit orders use

@@ -490,7 +490,7 @@ export class CryptocomExchange extends BaseExchange {
 
       if (opts.reduceOnly) orderRequest.exec_inst = ['REDUCE_ONLY'];
 
-      if (opts.timeInForce) {
+      if (opts.timeInForce && opts.type === OrderType.Limit) {
         orderRequest.time_in_force = this.mapTimeInForce(opts.timeInForce);
       }
 

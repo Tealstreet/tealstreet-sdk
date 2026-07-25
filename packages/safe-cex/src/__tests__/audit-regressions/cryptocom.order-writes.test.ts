@@ -175,6 +175,27 @@ describe('audit regression: Crypto.com order writes', () => {
     expect(post.mock.calls[0][1]).not.toHaveProperty('notional');
   });
 
+  it('omits time_in_force from MARKET orders even when the UI passes a default TIF', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { order_id: '123' } });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: MARKET.symbol,
+      type: OrderType.Market,
+      side: OrderSide.Buy,
+      amount: 5,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.CREATE_ORDER, {
+      instrument_name: MARKET.id,
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '5',
+    });
+  });
+
   it('always sends both documented amend fields and backfills the unchanged value', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { order_id: '124' } });
