@@ -197,6 +197,11 @@ Both market and user sockets immediately answer `public/heartbeat` with
 that do not respond within five seconds. All subscription nonces use the
 synchronized virtual clock.
 
+Crypto.com heartbeat traffic is server-initiated. The client does not send an
+active ping frame; instead both sockets treat any inbound message as liveness
+and use a relaxed quiet-session watchdog (30s idle ping marker, 90s reconnect)
+so quiet or geo-degraded direct routes do not churn every base 20 seconds.
+
 **On Open**:
 
 - Waits one second for Crypto.com's pro-rated connection rate limit to reset,

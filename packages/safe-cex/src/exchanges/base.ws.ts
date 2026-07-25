@@ -253,6 +253,12 @@ export class BaseWebSocket<T extends BaseExchange> {
    */
   getWatchdogStaleThresholdMs = (): number | undefined => undefined;
 
+  /**
+   * Allows exchange-specific sockets to opt into a custom idle ping threshold.
+   * Return undefined to use the BaseWebSocket default threshold.
+   */
+  getWatchdogPingThresholdMs = (): number | undefined => undefined;
+
   handlePongEvent = (nextPingTime = 5_000) => {
     this.recordMessageHandlerStats('pong');
     if (this.pingAt) {
@@ -951,9 +957,11 @@ export class BaseWebSocket<T extends BaseExchange> {
     const now = Date.now();
     const diff = now - this.lastReceived;
     const lastReceivedTime = new Date(this.lastReceived).toISOString();
+    const reconnectThresholdMs = this.getWatchdogStaleThresholdMs() ?? WS_RECONNECT_THRESHOLD_MS;
+    const pingThresholdMs = this.getWatchdogPingThresholdMs() ?? WS_PING_THRESHOLD_MS;
 
     // Check reconnect threshold FIRST (larger value)
-    if (diff > WS_RECONNECT_THRESHOLD_MS) {
+    if (diff > reconnectThresholdMs) {
       this.parent.log(
         `[trackLastReceived] ${this.parent.name} last received message ${diff}ms ago (at ${lastReceivedTime}), reconnecting`,
         LogSeverity.Error,
@@ -963,7 +971,7 @@ export class BaseWebSocket<T extends BaseExchange> {
       this.lastReceived = 0;
       this.pingSent = false;
       this.reconnect();
-    } else if (diff > WS_PING_THRESHOLD_MS && !this.pingSent) {
+    } else if (diff > pingThresholdMs && !this.pingSent) {
       this.parent.log(
         `[trackLastReceived] ${this.parent.name} last received message ${diff}ms ago (at ${lastReceivedTime}), sending ping`,
         LogSeverity.Info,
@@ -972,7 +980,7 @@ export class BaseWebSocket<T extends BaseExchange> {
         this.ping();
         this.pingSent = true;
       } catch (_e) {}
-    } else if (diff <= WS_PING_THRESHOLD_MS) {
+    } else if (diff <= pingThresholdMs) {
       // Reset pingSent when connection is healthy
       this.pingSent = false;
     }

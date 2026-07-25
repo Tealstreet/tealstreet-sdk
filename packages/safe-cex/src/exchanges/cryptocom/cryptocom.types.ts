@@ -39,6 +39,9 @@ export const WSS_URLS = {
   },
 };
 
+export const CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS = 30_000;
+export const CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS = 90_000;
+
 export const ENDPOINTS = {
   // Public endpoints
   INSTRUMENTS: '/public/get-instruments',

@@ -15,7 +15,12 @@ import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { CryptocomExchange } from './cryptocom.exchange';
-import { mapCandlestickInterval, WSS_URLS } from './cryptocom.types';
+import {
+  CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS,
+  CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS,
+  mapCandlestickInterval,
+  WSS_URLS,
+} from './cryptocom.types';
 
 const SUBSCRIBE_CHUNK_SIZE = 100;
 const CRYPTOCOM_PUBLIC_SESSION_LIMIT = 400;
@@ -29,6 +34,7 @@ export type CryptocomMarketDataSubscription = {
 };
 
 export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
+  protected override treatAnyMessageAsPong = true;
   private subscriptions: Set<string> = new Set();
   private marketIdsByIndexInstrument = new Map<string, Set<string>>();
   private messageId = 1;
@@ -60,6 +66,14 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
       }
     }
   };
+
+  protected shouldEnforcePongMissReconnect = (): boolean => false;
+
+  getWatchdogStaleThresholdMs = (): number => CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS;
+
+  getWatchdogPingThresholdMs = (): number => CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS;
+
+  ping = (): void => {};
 
   private resubscribe = () => {
     if (this.subscriptions.size > 0) {

@@ -22,9 +22,14 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { CryptocomExchange } from './cryptocom.exchange';
 import { generateWsAuthMessage } from './cryptocom.signing';
-import { WSS_URLS } from './cryptocom.types';
+import {
+  CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS,
+  CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS,
+  WSS_URLS,
+} from './cryptocom.types';
 
 export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> {
+  protected override treatAnyMessageAsPong = true;
   private subscriptions: Set<string> = new Set();
   private messageId = 1;
   private isAuthenticated = false;
@@ -55,6 +60,14 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
       }, 1000);
     }
   };
+
+  protected shouldEnforcePongMissReconnect = (): boolean => false;
+
+  getWatchdogStaleThresholdMs = (): number => CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS;
+
+  getWatchdogPingThresholdMs = (): number => CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS;
+
+  ping = (): void => {};
 
   private authenticate = async () => {
     try {
