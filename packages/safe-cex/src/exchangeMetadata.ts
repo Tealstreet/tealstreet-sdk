@@ -1070,6 +1070,7 @@ const OkxEUMetadata: ExchangeMetadata = {
   ...OkxMetadata,
   exchangeName: 'okxeu' as ExchangeName,
   prettyName: 'OKX EU',
+  requiresCors: true,
   latencyDomain: 'eea.okx.com',
 };
 
