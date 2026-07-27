@@ -1,20 +1,9 @@
 // @ts-check
-// Note: type annotations allow type checking and IDEs autocompletion
 
 import { themes } from 'prism-react-renderer';
-// import versions from './versions.json';
-// import VersionsArchived from './versionsArchived.json';
 const lightCodeTheme = themes.github; // light theme
 const darkCodeTheme = themes.dracula; // dark theme
 const defaultLocale = 'en';
-
-// function isPrerelease(version: string) {
-// }
-
-// function getLastVersion() {
-//   const firstStableVersion = versions.find((version) => !version.includes('2.0.0') && !version.includes('3.0.0'));
-//   return firstStableVersion;
-// }
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
