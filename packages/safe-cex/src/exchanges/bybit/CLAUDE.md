@@ -689,6 +689,9 @@ When a full-sized position exists on the opposite side, `StopLoss` and `TakeProf
 - Does NOT return an `orderId` (returns empty array)
 - Supports `tpslMode: 'Full'` (entire position) or `'Partial'` (specific size)
 - Uses `slSize`/`tpSize` for partial stops
+- Forces an order-inclusive REST snapshot after success so `/v5/order/realtime`
+  can surface the real TP/SL row IDs even when private WS is degraded or
+  geo-flaky. Do not gate this refresh solely on WebSocket health.
 
 ### Trailing Stop Loss
 

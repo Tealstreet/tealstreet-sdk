@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   BybitBboOrderOpts,
@@ -53,6 +53,11 @@ const createStore = (symbol: string, quote: string, isInverse = false) => {
 const mockPositionMode = (exchange: BybitExchange | BybitDemoExchange | BybitInverseExchange) => {
   (exchange as any).fetchPositionMode = vi.fn().mockResolvedValue(PositionMode.OneWay);
 };
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('Bybit adapter-only advanced order parameters', () => {
   it('serializes explicit TickSize and BBO intent without defaults', () => {
@@ -282,5 +287,43 @@ describe('Bybit adapter-only advanced order parameters', () => {
       ]),
     ).rejects.toThrow('Bybit TickSize slippage must be an integer from 1 to 10000');
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('forces an order snapshot after position-bound TP/SL placement returns no order id', async () => {
+    vi.useFakeTimers();
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
+    mockPositionMode(exchange);
+    const post = vi.fn().mockResolvedValue({ data: { retMsg: 'OK', result: {} } });
+    const fetchAndSetPrivateSnapshotHelper = vi
+      .spyOn(exchange, 'fetchAndSetPrivateSnapshotHelper')
+      .mockResolvedValue(undefined);
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeStopLossOrTakeProfit({
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 65_000,
+        amount: 0.03,
+        reduceOnly: true,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.SET_TRADING_STOP,
+      expect.objectContaining({
+        category: 'linear',
+        symbol: 'BTCUSDT',
+        tpslMode: 'Partial',
+        stopLoss: '65000',
+        slSize: '0.03',
+      }),
+    );
+    expect(fetchAndSetPrivateSnapshotHelper).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(251);
+
+    expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
   });
 });
