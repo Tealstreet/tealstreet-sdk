@@ -32,7 +32,7 @@ const config = {
     faster: {
       swcJsLoader: true,
       swcJsMinimizer: true,
-      swcHtmlMinimizer: false,
+      swcHtmlMinimizer: true,
       lightningCssMinimizer: true,
       rspackBundler: true,
       mdxCrossCompilerCache: false,
