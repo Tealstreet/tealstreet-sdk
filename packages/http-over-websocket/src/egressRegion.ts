@@ -31,4 +31,9 @@ export const TOKYO_EGRESS_PATTERN = new RegExp(TOKYO_EGRESS_EXCHANGES.join('|'),
 
 // Does this key (an exchange name OR a request baseURL) egress via Tokyo (vs
 // Singapore)? The one predicate every egress decision routes through.
-export const isTokyoEgress = (key: string): boolean => TOKYO_EGRESS_PATTERN.test(key);
+export const isTokyoEgress = (key: unknown): boolean => {
+  // Avoid RegExp.test() coercing unexpected runtime values. In Firefox, a
+  // pathological object/stringifier can surface as "too much recursion" here.
+  if (typeof key !== 'string') return false;
+  return TOKYO_EGRESS_PATTERN.test(key);
+};
