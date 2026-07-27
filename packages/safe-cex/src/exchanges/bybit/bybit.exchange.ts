@@ -2135,7 +2135,7 @@ export class BybitExchange extends BaseExchange {
       await this.cancelOrdersHelper(orders, category);
     });
 
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleDegradedPrivateSnapshotRefresh(true);
   };
 
   cancelOrdersHelper = async (orders: Order[], category: string) => {
@@ -2187,7 +2187,7 @@ export class BybitExchange extends BaseExchange {
       this.emitAndLogError(v(data, 'retMsg'));
     }
 
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleDegradedPrivateSnapshotRefresh(true);
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {

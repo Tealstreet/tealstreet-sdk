@@ -326,4 +326,38 @@ describe('Bybit adapter-only advanced order parameters', () => {
 
     expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
   });
+
+  it('forces an order snapshot after cancellation so stale TP/SL rows do not linger without WS', async () => {
+    vi.useFakeTimers();
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        retMsg: 'OK',
+        retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
+      },
+    });
+    const fetchAndSetPrivateSnapshotHelper = vi
+      .spyOn(exchange, 'fetchAndSetPrivateSnapshotHelper')
+      .mockResolvedValue(undefined);
+    exchange.unlimitedXHR = { post } as any;
+
+    await exchange.cancelOrders([
+      {
+        id: 'stop-order-1',
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+      } as any,
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.CANCEL_ORDERS, {
+      category: 'linear',
+      request: [{ symbol: 'BTCUSDT', orderId: 'stop-order-1' }],
+    });
+    expect(fetchAndSetPrivateSnapshotHelper).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(251);
+
+    expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
+  });
 });
