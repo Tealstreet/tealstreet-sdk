@@ -305,7 +305,7 @@ const config = {
               },
               {
                 label: 'GitHub',
-                href: 'https://github.com/tealstreetio/',
+                href: 'https://github.com/tealstreet/',
               },
               {
                 label: 'Twitch',
@@ -357,10 +357,10 @@ const config = {
                 label: 'Bybit',
                 href: 'https://teal.link/bybit1',
               },
-              {
-                label: 'BitMEX',
-                href: 'https://teal.link/BitMEX',
-              },
+              // {
+              //   label: 'BitMEX',
+              //   href: 'https://teal.link/BitMEX',
+              // },
               {
                 label: 'BloFin',
                 href: 'https://teal.link/blofin',
