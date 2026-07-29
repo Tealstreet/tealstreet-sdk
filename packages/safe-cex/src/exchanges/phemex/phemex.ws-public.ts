@@ -18,7 +18,9 @@ type MessageHandlers = {
 export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
   private static readonly MAX_SUBSCRIPTIONS = 20;
   private static readonly SUBSCRIPTION_WARNING_THRESHOLD = 18;
+  private static readonly ORDERBOOK_SNAPSHOT_ERROR_LOG_INTERVAL_MS = 30_000;
   private hasWarnedSubscriptionLimit = false;
+  private orderBookSnapshotErrorLogAt: Record<string, number> = {};
   messageHandlers: MessageHandlers = {
     'perp_market24h_pack_p.update': [(d: Data) => this.handleTickerStreamEvents(d)],
   };
@@ -272,6 +274,8 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
     let timeoutId: NodeJS.Timeout | null = null;
+    let isActive = true;
+    let snapshotRequestId = 0;
 
     const topic = `orderbook_p.subscribe|||${symbol}`;
     const handler = `orderbook_p.${symbol}`;
@@ -288,14 +292,38 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
 
     const innerState = this.orderBookInnerState[innerId];
 
+    const logSnapshotFailure = (error: unknown) => {
+      const now = Date.now();
+      const lastLogAt = this.orderBookSnapshotErrorLogAt[symbol];
+      if (
+        lastLogAt !== undefined &&
+        now - lastLogAt < BinancePublicWebsocket.ORDERBOOK_SNAPSHOT_ERROR_LOG_INTERVAL_MS
+      ) {
+        return;
+      }
+
+      this.orderBookSnapshotErrorLogAt[symbol] = now;
+      const message = error instanceof Error ? error.message : String(error);
+      this.parent.log(
+        `[Phemex] Orderbook snapshot request failed for ${symbol}; waiting for next delta to retry: ${message}`,
+        LogSeverity.Warning,
+      );
+    };
+
     const fetchSnapshot = async () => {
-      const { data } = await this.parent.xhr.get(ENDPOINTS.ORDERBOOK, {
-        params: { symbol, limit: 1000 },
-      });
+      const currentSnapshotRequestId = ++snapshotRequestId;
 
-      const { orderbook_p, sequence } = data.result;
+      try {
+        const { data } = await this.parent.xhr.get(ENDPOINTS.ORDERBOOK, {
+          params: { symbol, limit: 1000 },
+        });
 
-      if (!this.isDisposed) {
+        const { orderbook_p, sequence } = data.result;
+
+        if (!isActive || this.isDisposed || currentSnapshotRequestId !== snapshotRequestId) {
+          return;
+        }
+
         // save snapshot into orderBook object
         orderBook.bids = orderbook_p.bids.map(([price, amount]: string[]) => ({
           price: parseFloat(price),
@@ -323,6 +351,14 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         innerState.updates = [];
 
         callback(orderBook);
+      } catch (error) {
+        if (!isActive || this.isDisposed || currentSnapshotRequestId !== snapshotRequestId) {
+          return;
+        }
+
+        innerState.updates = [];
+        innerState.isSnapshotLoaded = false;
+        logSnapshotFailure(error);
       }
     };
 
@@ -368,6 +404,8 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
+      isActive = false;
+      snapshotRequestId += 1;
       this.messageHandlers[handler] = [...(this.messageHandlers[handler] || []).filter((f) => f !== parser)];
       orderBook.asks = [];
       orderBook.bids = [];

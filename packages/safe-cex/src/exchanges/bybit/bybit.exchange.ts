@@ -264,8 +264,8 @@ export class BybitExchange extends BaseExchange {
     return ws.isReconnectPauseActive || (ws.isInitialized && !ws.isHealthy);
   };
 
-  private scheduleDegradedPrivateSnapshotRefresh = () => {
-    if (!this.shouldUseDegradedPrivateRestFastPath()) {
+  private scheduleDegradedPrivateSnapshotRefresh = (force = false) => {
+    if (!force && !this.shouldUseDegradedPrivateRestFastPath()) {
       return;
     }
 
@@ -1673,9 +1673,10 @@ export class BybitExchange extends BaseExchange {
       throw new Error(data.retMsg);
     }
 
-    // SET_TRADING_STOP endpoint doesn't return an orderId
-    // Return an empty array as the order is directly applied to the position
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    // SET_TRADING_STOP returns no orderId. Force an order snapshot so partial
+    // TP/SL rows from /v5/order/realtime can replace optimistic UI rows even
+    // when private WS looks healthy but is degraded or geo-flaky.
+    this.scheduleDegradedPrivateSnapshotRefresh(true);
     return [];
   };
 
@@ -1706,9 +1707,8 @@ export class BybitExchange extends BaseExchange {
       throw new Error(data.retMsg);
     }
 
-    // SET_TRADING_STOP endpoint doesn't return an orderId
-    // Return an empty array as the order is directly applied to the position
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    // SET_TRADING_STOP returns no orderId; see placeStopLossOrTakeProfit.
+    this.scheduleDegradedPrivateSnapshotRefresh(true);
     return [];
   };
 
@@ -2135,7 +2135,7 @@ export class BybitExchange extends BaseExchange {
       await this.cancelOrdersHelper(orders, category);
     });
 
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleDegradedPrivateSnapshotRefresh(true);
   };
 
   cancelOrdersHelper = async (orders: Order[], category: string) => {
@@ -2187,7 +2187,7 @@ export class BybitExchange extends BaseExchange {
       this.emitAndLogError(v(data, 'retMsg'));
     }
 
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleDegradedPrivateSnapshotRefresh(true);
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {

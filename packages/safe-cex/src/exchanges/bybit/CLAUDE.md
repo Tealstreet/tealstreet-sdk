@@ -432,6 +432,8 @@ The update path depends on the order type:
 - **UNIFIED accounts** (`bybit.exchange.ts:1668-1681`): Use batch cancel (`CANCEL_ORDERS`) with up to 10 orders per batch. Uses `unlimitedXHR` (no rate limiting). Checks `retExtInfo.list` for individual order errors.
 - **CONTRACT accounts** (`bybit.exchange.ts:1682-1698`): Fall back to individual `CANCEL_ORDER` calls via `forEachSeries`. Errors are collected and thrown as a joined string.
 - **Cancel all for symbol** (`cancelSymbolOrders` at `bybit.exchange.ts:1702-1726`): When `cancelTpSl=false`, preserves TP/SL orders by saving them, canceling all, then re-placing the TP/SL orders with flipped sides.
+- Successful cancels force an order-inclusive REST snapshot so stale TP/SL rows
+  do not linger when Bybit demo/private WS is degraded.
 - **Inter-batch delay**: 1000ms between cancel batches (`bybit.exchange.ts:1666`)
 
 ## Symbol Format
@@ -689,6 +691,9 @@ When a full-sized position exists on the opposite side, `StopLoss` and `TakeProf
 - Does NOT return an `orderId` (returns empty array)
 - Supports `tpslMode: 'Full'` (entire position) or `'Partial'` (specific size)
 - Uses `slSize`/`tpSize` for partial stops
+- Forces an order-inclusive REST snapshot after success so `/v5/order/realtime`
+  can surface the real TP/SL row IDs even when private WS is degraded or
+  geo-flaky. Do not gate this refresh solely on WebSocket health.
 
 ### Trailing Stop Loss
 

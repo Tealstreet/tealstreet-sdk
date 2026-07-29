@@ -467,10 +467,6 @@ const config = {
                 href: 'https://teal.link/bitunix',
               },
               {
-                label: 'SalsaDex',
-                href: 'https://teal.link/salsadex',
-              },
-              {
                 label: 'GRVT',
                 href: 'https://teal.link/grvt',
               },
