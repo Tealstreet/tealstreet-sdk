@@ -767,7 +767,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: false,
   enabledInDev: true,
-  enableInPreview: false,
+  enableInPreview: true,
   supportsTestnet: true,
   supportsTradesHistory: false,
   orderbookTickDelay: 100,

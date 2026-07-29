@@ -8,7 +8,7 @@
 - **Position Mode**: Hedged only (`PositionMode.Hedged`) -- both long and short positions can coexist
 - **Margin Types**: Cross and Isolated upstream; the selector is hidden until
   per-order `ISOLATED_MARGIN` / `isolation_id` creation is implemented.
-- **Status**: Disabled in production (`enabled: false`), enabled in dev (`enabledInDev: true`)
+- **Status**: Disabled in production (`enabled: false`), enabled in dev (`enabledInDev: true`), enabled on preview (`enableInPreview: true`)
 
 ## API Documentation
 
