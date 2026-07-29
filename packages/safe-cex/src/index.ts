@@ -260,6 +260,7 @@ export {
   buildLighterApproveIntegratorL1Message,
   checkLighterBuilderApproved,
   createLighterL1SignatureHelperUrl,
+  DEFAULT_LIGHTER_APPROVAL_FEE_CAPS,
   DEFAULT_LIGHTER_APPROVAL_FEE_VALUE,
   prepareLighterBuilderApprovalContext,
   signLighterApproveIntegratorWithBrowserWallet,
@@ -269,6 +270,7 @@ export {
 export type {
   LighterBuilderApprovalCheckResult,
   LighterBuilderApprovalContext,
+  LighterBuilderApprovalFeeCaps,
   LighterBuilderApprovalResult,
 } from './exchanges/lighter/lighter.builder-approval';
 

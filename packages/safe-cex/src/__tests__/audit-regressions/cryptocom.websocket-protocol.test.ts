@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
+import { CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS } from '../../exchanges/cryptocom/cryptocom.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
@@ -106,6 +107,8 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
     await vi.waitFor(() => expect(exchange.store.positions).toHaveLength(2));
     expect(exchange.store.orders).toHaveLength(2);
     expect(exchange.store.orders[1]).toMatchObject({ id: 'order-1', reduceOnly: true });
+    expect(exchange.privateWebsocket.messageHandlersStats['user.order']).toBeDefined();
+    expect(exchange.privateWebsocket.messageHandlersStats['user.positions']).toBeDefined();
     expect(exchange.store.positions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ symbol: 'BTCUSD-PERP', leverage: 12, liquidationPrice: 54_000 }),
@@ -247,6 +250,22 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
     } as MessageEvent);
     expect(JSON.parse(privateSend.mock.calls[0][0])).toMatchObject({ nonce: 1_750_000_000_123 });
   });
+
+  it.each(['publicWebsocket', 'privateWebsocket'] as const)(
+    'does not reconnect quiet %s sessions at the base 20s threshold',
+    (socketName) => {
+      const websocket = createExchange()[socketName];
+      const reconnect = vi.spyOn(websocket, 'reconnect').mockResolvedValue();
+
+      websocket.lastReceived = Date.now() - 21_000;
+      websocket.checkLastReceived();
+      expect(reconnect).not.toHaveBeenCalled();
+
+      websocket.lastReceived = Date.now() - CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS - 1;
+      websocket.checkLastReceived();
+      expect(reconnect).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('maps daily candles to the case-sensitive wire interval and dispatches by subscription', () => {
     const exchange = createExchange();

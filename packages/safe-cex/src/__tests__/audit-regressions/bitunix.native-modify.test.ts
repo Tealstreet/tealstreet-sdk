@@ -103,13 +103,12 @@ describe('Bitunix native modify-order safety boundary', () => {
     const cancelOrders = vi.spyOn(exchange, 'cancelOrders');
     const placeOrder = vi.spyOn(exchange, 'placeOrder');
 
-    await expect(exchange.updateOrder({ order, update: { price: 50_100.04 } })).resolves.toEqual([
-      'bitunix-order-1',
-    ]);
+    await expect(exchange.updateOrder({ order, update: { price: 50_100.04 } })).resolves.toEqual(['bitunix-order-1']);
 
     expect(post).toHaveBeenCalledOnce();
     expect(post).toHaveBeenCalledWith(ENDPOINTS.MODIFY_ORDER, {
       orderId: 'bitunix-order-1',
+      symbol: MARKET.symbol,
       qty: '1.25',
       price: '50100',
       tpPrice: '51000',
@@ -131,12 +130,11 @@ describe('Bitunix native modify-order safety boundary', () => {
       info: { ...createParentOrder().info, reduceOnly: true, tpPrice: null, slPrice: null },
     });
 
-    await expect(exchange.updateOrder({ order, update: { amount: 0.7504 } })).resolves.toEqual([
-      'bitunix-order-1',
-    ]);
+    await expect(exchange.updateOrder({ order, update: { amount: 0.7504 } })).resolves.toEqual(['bitunix-order-1']);
 
     expect(post).toHaveBeenCalledWith(ENDPOINTS.MODIFY_ORDER, {
       orderId: 'bitunix-order-1',
+      symbol: MARKET.symbol,
       qty: '0.75',
       price: '50000',
     });
@@ -151,13 +149,14 @@ describe('Bitunix native modify-order safety boundary', () => {
     exchange.store.update({ orders: [parent, takeProfit, stopLoss] });
 
     await expect(exchange.updateOrder({ order: takeProfit, update: { price: 51_250.08 } })).resolves.toEqual([
-      parent.id,
+      takeProfit.id,
     ]);
 
     expect(post).toHaveBeenCalledWith(
       ENDPOINTS.MODIFY_ORDER,
       expect.objectContaining({
         orderId: parent.id,
+        symbol: MARKET.symbol,
         qty: '1.25',
         price: '50000',
         tpPrice: '51250.1',
@@ -168,6 +167,20 @@ describe('Bitunix native modify-order safety boundary', () => {
         slOrderPrice: '48950',
       }),
     );
+  });
+
+  it('keeps an attached virtual leg on a replacement parent acknowledgement', async () => {
+    const { exchange, post } = createExchange();
+    const parent = createParentOrder();
+    const takeProfit = createVirtualOrder(parent, 'tp');
+    exchange.store.update({ orders: [parent, takeProfit] });
+    post.mockResolvedValue({
+      data: { code: 0, data: { orderId: 'replacement-parent' }, msg: 'Success' },
+    });
+
+    await expect(exchange.updateOrder({ order: takeProfit, update: { price: 51_250 } })).resolves.toEqual([
+      'replacement-parent__tp',
+    ]);
   });
 
   it('rejects a malformed combined price-and-amount virtual TP update instead of ignoring its quantity', async () => {
@@ -181,6 +194,48 @@ describe('Bitunix native modify-order safety boundary', () => {
     ).rejects.toThrow('attached TP/SL quantity cannot be amended independently');
 
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('normalizes private-WebSocket trigger spellings before amending attached protection', async () => {
+    const { exchange, post } = createExchange();
+    const order = createParentOrder({
+      info: {
+        ...createParentOrder().info,
+        tpStopType: 'Mark',
+        slStopType: 'Last',
+      },
+    });
+
+    await exchange.updateOrder({ order, update: { price: 50_100 } });
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.MODIFY_ORDER,
+      expect.objectContaining({
+        tpStopType: 'MARK_PRICE',
+        slStopType: 'LAST_PRICE',
+      }),
+    );
+  });
+
+  it('keeps Bitunix default mark-price protection when a private-WebSocket row omits the trigger type', async () => {
+    const { exchange, post } = createExchange();
+    const order = createParentOrder({
+      info: {
+        ...createParentOrder().info,
+        tpStopType: undefined,
+        slPrice: null,
+      },
+      tpTriggerType: undefined,
+    });
+
+    await exchange.updateOrder({ order, update: { price: 50_100 } });
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.MODIFY_ORDER,
+      expect.objectContaining({
+        tpStopType: 'MARK_PRICE',
+      }),
+    );
   });
 
   it('updates a standalone partial TP/SL display leg through the raw Bitunix TP/SL id', async () => {
@@ -323,29 +378,106 @@ describe('Bitunix native modify-order safety boundary', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it.each([
-    {
-      name: 'HTTP-200 exchange rejection',
-      response: { data: { code: 10005, data: null, msg: 'Order does not exist' } },
-      error: 'Order does not exist',
-    },
-    {
-      name: 'mismatched acknowledgement id',
-      response: { data: { code: 0, data: { orderId: 'different-order' }, msg: 'Success' } },
-      error: 'did not confirm order bitunix-order-1',
-    },
-  ])('surfaces $name without canceling or placing a replacement', async ({ response, error }) => {
+  it('surfaces an HTTP-200 exchange rejection without canceling or placing a replacement', async () => {
     const { exchange, post } = createExchange();
-    post.mockResolvedValue(response);
+    post.mockResolvedValue({ data: { code: 10005, data: null, msg: 'Order does not exist' } });
     const cancelOrders = vi.spyOn(exchange, 'cancelOrders');
     const placeOrder = vi.spyOn(exchange, 'placeOrder');
 
-    await expect(
-      exchange.updateOrder({ order: createParentOrder(), update: { price: 50_100 } }),
-    ).rejects.toThrow(error);
+    await expect(exchange.updateOrder({ order: createParentOrder(), update: { price: 50_100 } })).rejects.toThrow(
+      'Order does not exist',
+    );
 
     expect(post).toHaveBeenCalledOnce();
     expect(cancelOrders).not.toHaveBeenCalled();
     expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('returns a replacement order id acknowledged by Bitunix', async () => {
+    const { exchange, post } = createExchange();
+    post.mockResolvedValue({
+      data: { code: 0, data: { orderId: 'replacement-order' }, msg: 'Success' },
+    });
+
+    await expect(exchange.updateOrder({ order: createParentOrder(), update: { price: 50_100 } })).resolves.toEqual([
+      'replacement-order',
+    ]);
+  });
+
+  it('keeps the submitted order id when a successful acknowledgement omits data', async () => {
+    const { exchange, post } = createExchange();
+    post.mockResolvedValue({ data: { code: 0, data: null, msg: 'Success' } });
+
+    await expect(exchange.updateOrder({ order: createParentOrder(), update: { price: 50_100 } })).resolves.toEqual([
+      'bitunix-order-1',
+    ]);
+  });
+
+  it('preserves amend provenance when a private-WebSocket UPDATE omits immutable fields', () => {
+    const { exchange } = createExchange();
+    const order = createParentOrder();
+    exchange.store.update({ orders: [order] });
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        ch: 'order',
+        data: {
+          event: 'UPDATE',
+          orderId: order.id,
+          symbol: order.symbol,
+          type: 'LIMIT',
+          price: '50100',
+          qty: '1.25',
+          dealAmount: '0.25',
+          clientId: 'stable-client-id',
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders[0]).toEqual(
+      expect.objectContaining({
+        price: 50_100,
+        reduceOnly: false,
+        info: expect.objectContaining({
+          orderId: order.id,
+          reduceOnly: false,
+          tpPrice: '51000.04',
+          slPrice: '49000.04',
+        }),
+      }),
+    );
+  });
+
+  it('hydrates reduce-only provenance for a fresh private-WebSocket CREATE from its client id', () => {
+    const { exchange } = createExchange();
+    exchange.orderReduceOnlyCache.set('reduce-client-id', true);
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        ch: 'order',
+        data: {
+          event: 'CREATE',
+          orderId: 'reduce-order-id',
+          clientId: 'reduce-client-id',
+          symbol: MARKET.symbol,
+          type: 'LIMIT',
+          side: 'SELL',
+          price: '51000',
+          qty: '0.25',
+          dealAmount: '0',
+          effect: 'GTC',
+          ctime: '2026-07-23T17:00:00.000Z',
+          mtime: '2026-07-23T17:00:00.000Z',
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders[0]).toEqual(
+      expect.objectContaining({
+        id: 'reduce-order-id',
+        reduceOnly: true,
+        info: expect.objectContaining({ reduceOnly: true }),
+      }),
+    );
   });
 });

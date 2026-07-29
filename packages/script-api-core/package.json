@@ -5,7 +5,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit",
+    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --noEmit",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/script-api-core.eslintcache",
     "test": "vitest",
     "test-ci": "vitest run"

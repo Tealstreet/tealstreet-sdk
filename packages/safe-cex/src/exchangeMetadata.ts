@@ -767,7 +767,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: false,
   enabledInDev: true,
-  enableInPreview: false,
+  enableInPreview: true,
   supportsTestnet: true,
   supportsTradesHistory: false,
   orderbookTickDelay: 100,
@@ -779,7 +779,11 @@ const CryptocomMetadata: ExchangeMetadata = {
   tvIntraDayMultipliers: ['1', '5', '15', '30', '60', '240'],
   tvMaxGetBarFetches: 10,
   candleApiCountLimit: 500,
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyRegions: {
+    JA: privateProxyIpsTokyo,
+    SG: privateProxyIpsSingapore,
+  },
   tickInterval: 2000,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,
@@ -1066,6 +1070,7 @@ const OkxEUMetadata: ExchangeMetadata = {
   ...OkxMetadata,
   exchangeName: 'okxeu' as ExchangeName,
   prettyName: 'OKX EU',
+  requiresCors: true,
   latencyDomain: 'eea.okx.com',
 };
 

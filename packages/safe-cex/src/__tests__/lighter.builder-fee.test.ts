@@ -3,8 +3,8 @@ import type { ExchangeOptions } from '../types';
 import { describe, expect, it } from 'vitest';
 
 import {
-  LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE,
-  LIGHTER_STATIC_INTEGRATOR_FEE_VALUE,
+  LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+  LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
   resolveLighterBuilderFeeConfig,
 } from '../exchanges/lighter/lighter.builder-fee';
 
@@ -20,8 +20,8 @@ describe('resolveLighterBuilderFeeConfig', () => {
     const config = resolveLighterBuilderFeeConfig(createOptions());
     expect(config).toEqual({
       integratorAccountIndex: 158385n,
-      integratorMakerFee: LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE,
-      integratorTakerFee: LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE,
+      integratorMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+      integratorTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
       mode: 'dynamic',
     });
   });
@@ -35,7 +35,7 @@ describe('resolveLighterBuilderFeeConfig', () => {
     expect(config).toBeUndefined();
   });
 
-  it('uses dynamic mode with 3 bps fee value', () => {
+  it('uses dynamic mode with maker-free and taker 2.5 bps fee values', () => {
     const config = resolveLighterBuilderFeeConfig(
       createOptions({
         extra: {
@@ -47,13 +47,13 @@ describe('resolveLighterBuilderFeeConfig', () => {
 
     expect(config).toEqual({
       integratorAccountIndex: 1234n,
-      integratorMakerFee: LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE,
-      integratorTakerFee: LIGHTER_DYNAMIC_INTEGRATOR_FEE_VALUE,
+      integratorMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+      integratorTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
       mode: 'dynamic',
     });
   });
 
-  it('uses static mode with 2 bps fee value', () => {
+  it('keeps static mode compatibility while using current maker/taker fee values', () => {
     const config = resolveLighterBuilderFeeConfig(
       createOptions({
         extra: {
@@ -65,8 +65,8 @@ describe('resolveLighterBuilderFeeConfig', () => {
 
     expect(config).toEqual({
       integratorAccountIndex: 1234n,
-      integratorMakerFee: LIGHTER_STATIC_INTEGRATOR_FEE_VALUE,
-      integratorTakerFee: LIGHTER_STATIC_INTEGRATOR_FEE_VALUE,
+      integratorMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+      integratorTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
       mode: 'static',
     });
   });

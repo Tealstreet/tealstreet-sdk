@@ -10,6 +10,8 @@ This directory contains the OKX exchange integration for Tealstreet. It supports
 - **API version**: v5
 - **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported.
 - **Latency domain**: `www.okx.com` (`okxeu`: `eea.okx.com`)
+- **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. Keep `okxeu.requiresCors = true`; regular `okx` remains direct-capable by metadata.
+- **okxeu WS tunnel paths**: private/business sockets tunnel via dedicated `okxeu/private` / `okxeu/business` paths (see `routing/routingTable.ts`), which the python ws-proxy terminates on `wss://wseea.okx.com:8443`. Do NOT reuse the global `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
 
 ## API Documentation
 
@@ -627,7 +629,10 @@ Key metadata values from `exchangeMetadata.ts`:
 | `defaultTPTriggerType`            | `LastPrice`                                                           |
 | `defaultSLTriggerType`            | `MarkPrice`                                                           |
 | `privateProxyIps`                 | `privateProxyIpsTokyo`                                                |
-| `requiresCors`                    | inherited default                                                     |
+| `requiresCors`                    | okx=false; okxeu=true                                                 |
+
+`okxeu.requiresCors` is intentionally true because browser private REST to
+`eea.okx.com` fails CORS preflight before OKX can process signed requests.
 
 ### Account Levels (`_accountLevel`)
 

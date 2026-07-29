@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
+import { createAPI, formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
@@ -13,6 +15,7 @@ import {
   OrderTimeInForce,
   OrderType,
 } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
 
 const MARKET: Market = {
   id: 'BTCUSD-PERP',
@@ -31,6 +34,96 @@ const createExchange = () => {
 };
 
 describe('audit regression: Crypto.com order writes', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('declares explicit proxy regions for production REST routing', () => {
+    const metadata = getExchangeMetadata('cryptocom');
+
+    expect(metadata.privateProxyIps).toEqual(privateProxyIpsTokyo);
+    expect(Object.keys(metadata.privateProxyRegions)).toEqual(['JA', 'SG']);
+    expect(metadata.privateProxyRegions.JA).toEqual(privateProxyIpsTokyo);
+    expect(metadata.privateProxyRegions.SG).toEqual(privateProxyIpsSingapore);
+  });
+
+  it('keeps proxy transport failures distinct from credential errors', () => {
+    expect(
+      formatCryptocomApiError({
+        response: {
+          status: 503,
+          data: '<html><body><h1>503 Service Unavailable</h1>\nNo server is available to handle this request.\n</body></html>',
+        },
+      }),
+    ).toBe(
+      'Crypto.com proxy/transport error (503): <html><body><h1>503 Service Unavailable</h1>\nNo server is available to handle this request.\n</body></html>',
+    );
+  });
+
+  it('preserves Crypto.com credential validation messages from JSON API errors', () => {
+    expect(
+      formatCryptocomApiError({
+        response: {
+          status: 401,
+          data: { code: 40101, message: 'Bad API key, API secret or incorrect IP whitelist.' },
+        },
+      }),
+    ).toBe('Crypto.com API Error 40101: Bad API key, API secret or incorrect IP whitelist.');
+  });
+
+  it('does not re-sign a serialized private envelope when axios retries a request', async () => {
+    const exchange = createExchange();
+    const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
+    const adapter = vi.fn(async () => ({
+      data: { code: 0, result: {} },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    }));
+    api.defaults.adapter = adapter as any;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(1_785_019_621_981);
+
+    const params = {
+      instrument_name: MARKET.id,
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '1',
+    };
+    await api.post(ENDPOINTS.CREATE_ORDER, params);
+    const adapterCalls = adapter.mock.calls as unknown as Array<[any]>;
+    const firstRequest = adapterCalls[0]?.[0];
+    expect(firstRequest).toBeDefined();
+    const firstPayload = JSON.parse(firstRequest.data);
+
+    await api.post(ENDPOINTS.CREATE_ORDER, JSON.stringify(firstPayload));
+    const retryRequest = adapterCalls[1]?.[0];
+    expect(retryRequest).toBeDefined();
+    const retryPayload = JSON.parse(retryRequest.data);
+
+    expect(retryPayload).toEqual(firstPayload);
+    expect(retryPayload.params).toEqual(params);
+  });
+
+  it('does not retry ambiguous private order writes after network errors', async () => {
+    const exchange = createExchange();
+    const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
+    const adapter = vi.fn(async (config) =>
+      Promise.reject(Object.assign(new Error('Network Error'), { config, request: {}, isAxiosError: true })),
+    );
+    api.defaults.adapter = adapter as any;
+
+    await expect(
+      api.post(ENDPOINTS.CREATE_ORDER, {
+        instrument_name: MARKET.id,
+        side: 'BUY',
+        type: 'MARKET',
+        quantity: '1',
+      }),
+    ).rejects.toThrow('Network connection failed');
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
   it('hides the dead legacy margin-type switch and fails closed if called directly', async () => {
     const exchange = createExchange();
     const post = vi.fn();
@@ -80,6 +173,27 @@ describe('audit regression: Crypto.com order writes', () => {
       exec_inst: ['REDUCE_ONLY'],
     });
     expect(post.mock.calls[0][1]).not.toHaveProperty('notional');
+  });
+
+  it('omits time_in_force from MARKET orders even when the UI passes a default TIF', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { order_id: '123' } });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: MARKET.symbol,
+      type: OrderType.Market,
+      side: OrderSide.Buy,
+      amount: 5,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.CREATE_ORDER, {
+      instrument_name: MARKET.id,
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '5',
+    });
   });
 
   it('always sends both documented amend fields and backfills the unchanged value', async () => {

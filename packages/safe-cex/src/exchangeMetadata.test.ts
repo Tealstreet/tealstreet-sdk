@@ -205,6 +205,12 @@ describe('exchangeMetadata', () => {
       expect(hl.prettyName).toBe('Hyperliquid');
     });
 
+    it('should require proxy routing for OKX EU without changing global OKX', () => {
+      expect(exchangeMetadata.okx.requiresCors).toBe(false);
+      expect(exchangeMetadata.okxeu.requiresCors).toBe(true);
+      expect(exchangeMetadata.okxeu.privateProxyIps.length).toBeGreaterThan(0);
+    });
+
     it('should have bitmex testnet metadata', () => {
       const bitmexTestnet = exchangeMetadata.bitmextestnet;
       expect(bitmexTestnet.exchangeName).toBe('bitmextestnet');

@@ -49,7 +49,7 @@ import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 ### Creating the key
 
 - Now we are ready to generate the API Key. Head on over to [Hyperliquid](https://teal.link/hyperliquid) and:
-    - Login or connect your wallet when the window pops up
+  - Login or connect your wallet when the window pops up
         - If a window did not automatically pop up click the connect button at the top right of the page
 
 :::note
@@ -75,7 +75,7 @@ You can get to this page directly by navigating to **[this link](https://app.hyp
 :::
 
 - Name your key and click the **Generate** button to begin the process. This will provide you the **Agent Wallet API** we will need later.
-    - This is 1 of the 3 pieces of information we need to link our Hyperliquid account to Tealstreet.
+  - This is 1 of the 3 pieces of information we need to link our Hyperliquid account to Tealstreet.
 
 - Next click on the **Generate API Wallet** Button to continue the key creation process.
 
@@ -86,7 +86,7 @@ You can get to this page directly by navigating to **[this link](https://app.hyp
 - Choose how long you want your key to be active for. Up to a maximum of 180 days as of this writing.
 
 - Securely store your Private Key. You can copy it to clipboard by clicking the button highlighted in the image below.
-    - This is the 2nd of the 3 pieces of information we need to link our Hyperliquid account to Tealstreet.
+  - This is the 2nd of the 3 pieces of information we need to link our Hyperliquid account to Tealstreet.
     - When done click the **Authorize** button and sign the transaction with your wallet.
 
 <div class="text--center">
@@ -108,7 +108,7 @@ You will need to have deposited funds before you can finalize the **API Key** cr
 </div>
 
 - This is your **Master Account** address make sure to securely store it.
-    - This will be the 3rd and final piece of information we need to link our Hyperliquid account to Tealstreet.
+  - This will be the 3rd and final piece of information we need to link our Hyperliquid account to Tealstreet.
 
 - Now lets return to Tealstreet to resume the API Linking process now that we have the 3 pieces of information we need.
 
@@ -209,13 +209,11 @@ If your vault appears empty after linking:
     -   Network/tunnel: Hyperliquid requires a working private WebSocket; allow connections and try again
     -   Quick API check: query HL’s info endpoint with your vault address
 
-    ```bash
-
+```bash
 curl -sX POST <https://api.hyperliquid.xyz/info> \
  -H 'content-type: application/json' \
  -d '{"type":"clearinghouseState","user":"0xYourVaultAddress"}'
-
-```
+ ```
 
     -   If this returns marginSummary/assetPositions, the vault is valid. If it returns an empty result, the address is likely incorrect.
     -   Note: Some historical endpoints (e.g., userFills) may be empty when queried with the EOA while trading via a vault. Positions, orders, and balances will still update correctly via webData2.
@@ -228,23 +226,23 @@ Helpful references:
 ## Frequently Asked Questions
 
 - I see a banner pop-up sometimes when trading on Hyperliquid asking if I want to enable builder-fee support?
-    - This approval is now required to link and use Hyperliquid on Tealstreet.
+  - This approval is now required to link and use Hyperliquid on Tealstreet.
     - You must sign it with your Ethereum wallet (the same address used as your **Main Wallet Address** in Tealstreet).
     - If you are prompted to switch networks, switch to the required Arbitrum network and try again.
     - The approved Tealstreet builder fee rate is **0.01% (1 bps)**.
 
 - Hyperliquid says I'm from a restricted jurisdiction?
-    - Hyperliquid has restrictions on users from certain jurisdictions such as the United States. Please see their [Terms of Service](https://app.hyperliquid.xyz/terms) for more info.
+  - Hyperliquid has restrictions on users from certain jurisdictions such as the United States. Please see their [Terms of Service](https://app.hyperliquid.xyz/terms) for more info.
 
 - How do I enable trading on Hyperliquid?
-    - Hyperliquid requires you to enable trading on your account before you can use it. To enable trading, go to the [Hyperliquid](https://teal.link/hyperliquid) website and click the **Enable Trading** button after you have signed in with your wallet.
+  - Hyperliquid requires you to enable trading on your account before you can use it. To enable trading, go to the [Hyperliquid](https://teal.link/hyperliquid) website and click the **Enable Trading** button after you have signed in with your wallet.
 
 <div class="text--center">
     <img src={EnableTrading} alt="Enable Trading" style={{ width: 500 }} />
 </div>
 
 - I'm getting an error that my API Wallet doesn't exist?
-    - If an account was previously linked and now shows `User or API Wallet does not exist`, the Hyperliquid key has most likely expired.
+  - If an account was previously linked and now shows `User or API Wallet does not exist`, the Hyperliquid key has most likely expired.
     - Hyperliquid keys can be set for up to 180 days, but shorter durations (often around 30 days) are common.
     - Revisit your Hyperliquid API page, verify key status, and create a new API key if needed, then relink/update it in Tealstreet.
 

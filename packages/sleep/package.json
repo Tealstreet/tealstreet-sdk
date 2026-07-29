@@ -11,7 +11,8 @@
     "fix-all-files": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --fix",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/sleep.eslintcache",
     "test": "vitest run",
-    "typecheck": "tsc --project ./tsconfig.json --noEmit"
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit",
+    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@tealstreet/prettierrc": "*",
