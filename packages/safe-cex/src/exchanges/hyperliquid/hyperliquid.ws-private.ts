@@ -134,7 +134,9 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       );
     }
 
-    if (this.parent.shouldUseSpotCollateralBalance()) {
+    // Opt-in standard accounts need this too — they use spot state for the
+    // holdings display, not as collateral.
+    if (this.parent.shouldTrackSpotHoldings()) {
       this.send(
         JSON.stringify({
           method: 'subscribe',
@@ -222,7 +224,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
   /**
    * Subscribe to activeAssetData for all markets (leverage/margin info)
-   * Skips HIP-3 markets as they may not be supported or could exceed subscription limits
+   * Skips HIP-3 and spot markets as they may not be supported or could exceed
+   * subscription limits
    */
   private subscribeAllActiveAssetData = () => {
     const user = this.parent.options.vault || this.parent.options.applicationId;
@@ -230,6 +233,13 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
     for (const market of markets) {
       const coin = market.id;
+      // Skip spot: activeAssetData carries leverage/margin-mode, which is
+      // meaningless for spot (always 1x, no margin mode). Spot roughly
+      // doubles the market count, so subscribing would burn ~300 channels
+      // against the 1000 limit for data we'd discard. Note this must be an
+      // `isSpot` check, NOT a name heuristic — the canonical spot pair is
+      // literally named `PURR/USDC` and would slip past the HIP-3 ':' guard.
+      if (market.isSpot) continue;
       // Skip HIP-3 markets (contain ':') to avoid exceeding 1000 channel limit
       if (coin.includes(':')) continue;
       this.send(
@@ -574,8 +584,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     // Hyperliquid includes the complete rejected subscription in its error
     // text, including the public wallet address. Keep diagnostics useful
     // without forwarding account identifiers or raw protocol frames.
-    const subscriptionType =
-      typeof data === 'string' ? data.match(/"type"\s*:\s*"([^\"]+)"/)?.[1] : undefined;
+    const subscriptionType = typeof data === 'string' ? data.match(/"type"\s*:\s*"([^\"]+)"/)?.[1] : undefined;
     this.parent.log(
       `Hyperliquid WebSocket server error${subscriptionType ? `: rejected ${subscriptionType} subscription` : ''}`,
       LogSeverity.Warning,
@@ -842,6 +851,23 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       market = this.parent.marketsLowerCaseMap.get(fill.coin.toLowerCase());
     }
     if (!market || market.id.includes(':')) return;
+    // Spot fills arrive on this same non-dex-scoped `userFills` channel with a
+    // finite `startPosition`, so every guard above passes for them now that
+    // spot markets resolve in `marketsById`. Synthesizing a Position from one
+    // would invent a phantom long: it pollutes the positions table, feeds
+    // `syncBalanceFromLivePositions` (corrupting `balance.upnl` / `free`, i.e.
+    // order sizing) and `DisplayedMarginPostprocessor` exposure, and persists
+    // until the next authoritative clearinghouse snapshot because the
+    // streaming path merges incrementally. Spot exposure is a coin balance,
+    // never a Position — same invariant as `generateFakePositionsFromMarkets`.
+    if (market.isSpot) {
+      // Spot never becomes a Position, but the fill DID change the wallet, and
+      // nothing else on this channel would refresh it — spot holdings would
+      // sit stale until reconnect/reload. The refresh is cooldown-throttled
+      // and collapses in-flight calls, so firing per fill is safe.
+      this.parent.requestUnifiedSpotCollateralRefresh();
+      return;
+    }
 
     let nextSignedPosition = startPosition + signedFillSize;
     if (Math.abs(nextSignedPosition) < HyperliquidPrivateWebSocket.CORE_FILL_POSITION_EPSILON) {
@@ -930,7 +956,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     isSnapshot: boolean;
     user: string;
   }) => {
-    if (!this.parent.shouldUseSpotCollateralBalance()) return;
+    if (!this.parent.shouldTrackSpotHoldings()) return;
     this.parent.requestUnifiedSpotCollateralRefresh();
   };
 

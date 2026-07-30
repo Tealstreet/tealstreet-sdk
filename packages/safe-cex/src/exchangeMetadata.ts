@@ -47,6 +47,24 @@ export type ExchangeMetadata = {
   enabledInDev: boolean;
   /** Whether this exchange is enabled in preview/staging environment */
   enableInPreview?: boolean;
+  /**
+   * Hide this exchange from the "add API key" picker while keeping it fully
+   * runnable for accounts already saved against it.
+   *
+   * This is deliberately NOT `enabled: false`. Availability gates
+   * (`isExchangeAvailableInCurrentEnv`) also decide whether a *saved* account
+   * is allowed to register at startup, so disabling a superseded venue would
+   * silently break every existing user account on it. Use this flag when a
+   * venue has been folded into another one and should no longer be offered
+   * for new connections.
+   */
+  hiddenFromNewAccountPicker?: boolean;
+  /**
+   * Whether this exchange serves spot markets alongside derivatives from one
+   * connection, and therefore should offer a per-account "also trade spot"
+   * toggle in the add-account form (`ExchangeAccountConfig.enableSpotMarkets`).
+   */
+  supportsSpotToggle?: boolean;
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
   /** Whether the exchange API supports fetching trade history */
@@ -1364,6 +1382,8 @@ const HyperliquidMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquid' as ExchangeName,
+  // One connection serves perps + spot; spot is opt-in per account.
+  supportsSpotToggle: true,
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   positionModes: [PositionMode.OneWay],
   hidePositionModeSelector: true,
@@ -1411,6 +1431,10 @@ const HyperliquidSpotMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquidspot' as ExchangeName,
+  // Superseded by the `hyperliquid` connection's spot toggle. Kept enabled so
+  // existing saved accounts keep loading; hidden from the picker so nobody
+  // creates a new split account.
+  hiddenFromNewAccountPicker: true,
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   logo: '/static/exchanges/logos/HYPERLIQUIDSPOT/logo.svg',
   lightLogo: '/static/exchanges/logos/HYPERLIQUIDSPOT/light.png',

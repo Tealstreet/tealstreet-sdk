@@ -507,6 +507,12 @@ export class BybitSpotExchange extends BaseExchange {
             },
           },
           isInverse: category === 'inverse',
+          // Stamp `isSpot` on the Market, not just the class field. The
+          // class-level `BaseExchange.isSpot` has no consumers — every
+          // spot check in web and safe-cex reads `market.isSpot` — so
+          // without this, spot guards (leverage/margin rows, size
+          // rounding, TP/SL preview) silently fail open on this venue.
+          isSpot: true,
           // isReadOnly: category === 'inverse',
           isExpiring: false,
           info: market,
