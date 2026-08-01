@@ -331,6 +331,12 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 
 6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
 
+7. **Demo reconciliation**: After initial orders are loaded, successful create /
+   batch / amend mutations on `BybitDemoExchange` force a debounced
+   order-inclusive REST snapshot. Demo private WS can remain generically healthy
+   while missing order topic events, so do not gate this backstop solely on
+   `privateWebsocket.isHealthy`.
+
 ### Native Market Slippage Protection
 
 All Bybit variants map `PlaceOrderOpts.maxSlippagePct` to V5
@@ -426,6 +432,11 @@ The update path depends on the order type:
 5. **Limit orders**: Updated via `REPLACE_ORDER` with `price` and/or `qty` fields
 
 6. **Fallback path** (`bybit.exchange.ts:1601-1638`): For position-bound TP/SL when cancel+replace could not run (e.g., mark price unavailable), falls through to `SET_TRADING_STOP` with `tpslMode` and size parameters
+
+7. **Demo reconciliation**: Plain limit / conditional amend success uses the
+   same demo-only debounced order snapshot backstop as order creation. This is
+   intentionally narrower than live Bybit, where private WS order events should
+   remain the primary reconciliation path.
 
 ### Cancel Order Logic
 

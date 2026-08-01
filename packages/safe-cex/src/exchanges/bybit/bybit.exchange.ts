@@ -272,6 +272,13 @@ export class BybitExchange extends BaseExchange {
     this.debouncedDegradedSnapshotRefresh();
   };
 
+  private scheduleOrderMutationPrivateSnapshotRefresh = () => {
+    // Bybit demo can keep the private WS connected enough to look healthy while
+    // still missing order events. Once orders have loaded, force the same
+    // debounced REST backstop used by cancel / SET_TRADING_STOP flows.
+    this.scheduleDegradedPrivateSnapshotRefresh(this.isDemo && this.store.loaded?.orders === true);
+  };
+
   getAccount = async () => {
     const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT);
 
@@ -1625,7 +1632,7 @@ export class BybitExchange extends BaseExchange {
     }
 
     const orderIds = fullfilled.map((resp) => resp.result.orderId);
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleOrderMutationPrivateSnapshotRefresh();
     return orderIds;
   };
 
@@ -1760,7 +1767,7 @@ export class BybitExchange extends BaseExchange {
       allOrderIds.push(...batchOrderIds);
     }
 
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleOrderMutationPrivateSnapshotRefresh();
     return allOrderIds;
   };
 
@@ -2106,7 +2113,7 @@ export class BybitExchange extends BaseExchange {
       }
     }
 
-    this.scheduleDegradedPrivateSnapshotRefresh();
+    this.scheduleOrderMutationPrivateSnapshotRefresh();
     return updatedOrderIds;
   };
 
