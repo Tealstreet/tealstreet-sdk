@@ -87,6 +87,8 @@ export type ExchangeOptions = {
   readonly applicationId?: string;
   readonly apiKeyIndex?: string;
   readonly testnet?: boolean;
+  /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
+  readonly enableSpotMarkets?: boolean;
   readonly publicDataOnly?: boolean;
   readonly privateOnly?: boolean;
   readonly tealstreetProxy?: boolean;
@@ -207,6 +209,15 @@ export interface ExchangeAccountConfig {
   secondary_apiKey?: string;
   secondary_apiSecret?: string;
   secondary_passphrase?: string;
+
+  /**
+   * Opt this account into the exchange's spot markets, for venues that serve
+   * spot and derivatives from one connection (`supportsSpotToggle` metadata).
+   *
+   * Default-off is deliberate: a perp trader's market list and request volume
+   * must be unchanged unless they explicitly ask for spot.
+   */
+  enableSpotMarkets?: boolean;
 
   // Exchange-specific authentication fields
   applicationId?: string;
@@ -430,6 +441,7 @@ export type Order = {
     // actual remaining size in contracts considering contract size, inverse, quanto, etc
     readonly remainingNative?: number;
     readonly remainingNotional?: number;
+    readonly conditionalOrderPrice?: number;
     readonly rejectReason?: OrderRejectReason;
     // Chaser-related fields
     readonly isFromChaser?: boolean;

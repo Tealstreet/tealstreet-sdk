@@ -31,7 +31,7 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), builder fee amount (10 tenths bps = 1bp = 0.01%).                                                                                                                 |
 | `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`). |
 | `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                |
-| `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                              |
+| `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                               |
 | `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                |
 | `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                   |
 | `hyperliquid.rateLimiter.ts` | Token bucket rate limiter (1200 tokens/minute capacity).                                                                                                                                                                                                                                                      |
@@ -47,7 +47,6 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquidspot.api.ts`         | Spot REST API client (same base pattern as perps).                                     |
 | `hyperliquidspot.types.ts`       | Spot-specific type definitions and constants.                                          |
 | `hyperliquidspot.constants.ts`   | Spot constants.                                                                        |
-| `hyperliquidspot.signing.ts`     | Spot request signing (same EIP-712 pattern).                                           |
 | `hyperliquidspot.errors.ts`      | Spot error handling.                                                                   |
 | `hyperliquidspot.rateLimiter.ts` | Spot rate limiter.                                                                     |
 | `hyperliquidspot.ws-public.ts`   | Spot public WebSocket.                                                                 |
@@ -348,13 +347,13 @@ HIP-3 (per dex):
 
 ### Public WebSocket Channels
 
-| Channel   | Subscription                                      | Data                                              |
-| --------- | ------------------------------------------------- | ------------------------------------------------- |
-| `allMids` | `{ type: "allMids" }`                             | Mid prices for all coins (ticker updates)         |
-| `fastAssetCtxs` | `{ type: "fastAssetCtxs" }`                   | Raw-DEFLATE base64 mark/mid snapshot and diffs    |
-| `l2Book`  | `{ type: "l2Book", coin: "BTC" }`                 | Standard 20-level orderbook depth, on demand      |
-| `bbo`     | `{ type: "bbo", coin: "BTC" }`                    | Fresh best bid/ask overlay for each active ladder |
-| `candle`  | `{ type: "candle", coin: "BTC", interval: "1m" }` | OHLCV candles (per coin+interval, on-demand)      |
+| Channel         | Subscription                                      | Data                                              |
+| --------------- | ------------------------------------------------- | ------------------------------------------------- |
+| `allMids`       | `{ type: "allMids" }`                             | Mid prices for all coins (ticker updates)         |
+| `fastAssetCtxs` | `{ type: "fastAssetCtxs" }`                       | Raw-DEFLATE base64 mark/mid snapshot and diffs    |
+| `l2Book`        | `{ type: "l2Book", coin: "BTC" }`                 | Standard 20-level orderbook depth, on demand      |
+| `bbo`           | `{ type: "bbo", coin: "BTC" }`                    | Fresh best bid/ask overlay for each active ladder |
+| `candle`        | `{ type: "candle", coin: "BTC", interval: "1m" }` | OHLCV candles (per coin+interval, on-demand)      |
 
 **Ping**: Every 15 seconds via `{ method: "ping" }` (`HyperliquidPublicWebSocket.PING_INTERVAL_MS`). Ping is not sent immediately on connect — first scheduled ping fires after 15s delay to avoid issues with premature pings before subscription responses.
 
@@ -395,7 +394,7 @@ Subscribed for the user (or vault address):
 | ----------------------------- | ----------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `allMids`                     | No                                        | Yes (with `dex` param)          | HIP-3 published mid-price updates                                                                                 |
 | `clearinghouseState`          | Yes                                       | Yes (with `dex` param)          | Positions + margin (real-time, primary for positions)                                                             |
-| `spotState`                   | Conditional (unified/portfolio mode only) | No                              | Nested spot state; token 0 `tokenToAvailableAfterMaintenance` is authoritative unified free margin               |
+| `spotState`                   | Conditional (unified/portfolio mode only) | No                              | Nested spot state; token 0 `tokenToAvailableAfterMaintenance` is authoritative unified free margin                |
 | `activeAssetData`             | Yes (per coin)                            | No (subscription limit concern) | Leverage, margin info per market                                                                                  |
 | `orderUpdates`                | Yes                                       | Yes (with `dex` param)          | Order status: open, filled, canceled, triggered, rejected, marginCanceled, reduceOnlyCanceled, reduceOnlyRejected |
 | `userFills`                   | Yes                                       | Yes (with `dex` param)          | Fill notifications with deduplication                                                                             |
@@ -531,6 +530,50 @@ directly discarding `fetchOrders()` remains forbidden by the package lint rule.
 The pipe `|` separator is used instead of colon `:` to avoid TradingView conflicts.
 
 **Conversion**: `symbolToCoin("VNTLS|VKRAKEN-PERP")` returns `"vntls:VKRAKEN"` (lowercase dex, uppercase asset; the asset is uppercased during market creation).
+
+### Spot Markets (loaded into the perp container)
+
+`HyperliquidExchange` loads spot pairs into the **same store** as perps via `fetchSpotMarketsAndTickers()`. This is safe because Hyperliquid addresses all three market kinds from **one asset-index space**, and the symbol namespaces are disjoint:
+
+**Spot is opt-in per account and default-OFF** (`ExchangeAccountConfig.enableSpotMarkets` → `ExchangeOptions.enableSpotMarkets`, surfaced as the "Also trade spot" checkbox on the account form; the venue advertises the toggle via `supportsSpotToggle` metadata). With it off, `fetchSpotMarketsAndTickers` returns early **before issuing the request**, so a perp-only account's market list and request volume are byte-identical to before the merge. Keep that early return ahead of the fetch — the whole justification for merging without a rate-limit regression is that opting out costs literally nothing. The account form's toggle also feeds `getExchangeRuntimeAccountFingerprint` in `apps/web/src/hooks/exchange/useExchanges.ts` so flipping it reloads the connection; both sides of that comparison must coerce to `Boolean` (the account persists `false`, the options omit the key, and `JSON.stringify` drops `undefined` — comparing raw reports a phantom change and reloads every account on the first hook run).
+
+`hyperliquidspot` is **superseded but still registered**: existing saved accounts keep loading against it, while `hiddenFromNewAccountPicker` removes it from the add-account picker so nobody creates a new split account. Do **not** retire it with `enabled: false` — availability gates also decide whether a _saved_ account may register at startup, so that would break every existing user account on it.
+
+| Field                       | Format                                       | Example           |
+| --------------------------- | -------------------------------------------- | ----------------- |
+| `market.id`                 | API coin handle from `universe[].name`       | `@1`, `PURR/USDC` |
+| `market.symbol`             | `{TOKEN}/{QUOTE}` (both from the `tokens` table) | `HFUN/USDH` |
+| `market.info.hyperliquidId` | `universe[].index + SPOT_ASSET_INDEX_OFFSET` | `10001`           |
+| `market.isSpot`             | `true`                                       | —                 |
+
+Asset-index ranges: **perps `0..N`**, **spot `10000+`**, **HIP-3 `110000+`**. Disjoint by construction, so one instance builds a correct order wire from `market.info.hyperliquidId` for any of them.
+
+**`isSpot` is per-market, never a class field.** Consumers (order forms, margin widget, `generateFakePositionsFromMarkets`, `priceToPrecision`) must branch on `market.isSpot`. Do not reintroduce an exchange-level spot flag — that is exactly the assumption the merge removes.
+
+**Unit-bridged tokens display without their `U` prefix.** HyperCore has no native BTC/ETH/SOL — there is no token named `ETH` anywhere in `spotMeta` (checked across all 477). Those assets are bridged by Unit and issued as `UBTC`/`UETH`/`USOL`. Hyperliquid's own UI shows them as `ETH/USDC`, but **that alias exists only in their frontend** — `spotMeta` and `tokenDetails` both return `UETH`, and `fullName` is `Unit Ethereum`, not `ETH`. `resolveSpotDisplayName` mirrors the alias into `prettySymbol` so our market list matches theirs.
+
+Two guards keep it from being a blind prefix strip, and both are load-bearing:
+
+- Only tokens whose `fullName` starts with `Unit ` qualify, so a token legitimately named `UNI` (fullName `Uniswap`) is never rendered as `NI`.
+- The stripped name is rejected when a **distinct** token already owns it. Live data has three: `UPUMP` (Unit Pump Fun) vs a natively-issued `PUMP`, plus `UMON`/`MON` and `UANSEM`/`ANSEM`. Aliasing those would show two unrelated assets under one name. They keep the prefix.
+
+The alias lands on **`base` and `prettySymbol`**; `symbol` and `id` keep the venue's real names, and the raw token is preserved at `info.hlTokenName`. So routing, the order wire, `marketsBySymbol` and the candle cache are untouched.
+
+**`base` must carry the alias — `prettySymbol` alone is not enough.** The market dropdown renders `base || prettySymbol || symbol`, so a raw `base` short-circuits the fallback and the row reads `UBTC` no matter what `prettySymbol` says. Setting `base` also makes spot and perp share a base (`BTC`), which is what lets `computeAmbiguousQuoteBases` detect the clash and render `BTC/USDC` vs `BTC-PERP`; see `apps/web/src/components/marketDropdown/CLAUDE.md`. `base` is safe to alias here because `getMarginCurrency` returns `''` for spot, and coin icons resolve either way (`app.hyperliquid.xyz/coins/UBTC.svg` and `/BTC.svg` both 200).
+
+**`symbol` is deliberately NOT aliased.** It backs saved favourites, layouts, TradingView symbols and the candle cache, and the alias is data-dependent — it backs off the day Hyperliquid lists a real `ETH` token. Aliasing `symbol` would silently break every saved reference at that moment.
+
+**The quote is NOT always USDC — read `universe[].tokens[1]`.** `tokens` is `[baseIndex, quoteIndex]` into the top-level `tokens` table. A live probe on 2026-07-27 found 299 USDC pairs but also **11 USDH, 5 USDT0, and 1 USDE**. Hardcoding `USDC` in the display symbol produced **five duplicate symbols** (`HYPE/USDC` three times — the real one plus `HYPE/USDH` and `HYPE/USDT0`), and because `store.marketsBySymbol` is symbol-keyed, the duplicates silently clobbered each other and made markets unreachable. Reading the real quote token yields 284 live pairs with **zero** collisions. Skip any pair whose base or quote token is missing from the table.
+
+**The asset-context join is by `coin`, NOT positional.** This is the single most dangerous difference from the perp path. `metaAndAssetCtxs` returns `assetCtxs[i]` aligned with `universe[i]`, so the perp code indexes positionally. `spotMetaAndAssetCtxs` does **not**: a live probe on 2026-07-27 returned **316 universe entries against 707 asset contexts**, out of universe order. A positional join mismatched **245 of 316 pairs** — i.e. it silently prices most spot markets off an unrelated asset, with no error. Join on `SpotAssetCtx.coin`. Locked by `__tests__/audit-regressions/hyperliquid.spot-markets-merge.test.ts`.
+
+Other spot invariants worth keeping:
+
+- **Spot never generates fake positions.** Spot exposure is a coin balance (`Balance.coins`), not a `Position`. Synthesizing zero-size spot rows would also corrupt `DisplayedMarginPostprocessor`, whose long/short exposure is defined over derivatives notional only.
+- **Price decimals differ by kind** — 8 for spot, 6 for perps (`SPOT_MAX_PRICE_DECIMALS` / `PERP_MAX_PRICE_DECIMALS`). `priceToPrecision` reads the market to pick; a perp-capped price on a spot pair silently truncates the order price.
+- **Pairs with a null `midPx`, or with no matching asset context at all, are skipped** (`if (!sourceTicker?.midPx) continue`) rather than published as unpriceable markets. The no-context case is the likelier one given the 316-universe-vs-707-contexts shape.
+- **Spot loading is best-effort**, bounded by `SPOT_MARKETS_LOAD_TIMEOUT_MS` and swallowing its own errors. A slow or failing spot call must never delay or break perp startup.
+- `getSpotCollateralMarkPrice()` now prefers the real `{COIN}/USDC` spot ticker and falls back to the perp ticker, fixing spot-only tokens that previously contributed **0 notional** to a unified-account balance. Note this only helps accounts that opted into spot — with the toggle off no spot tickers exist, so the 0-notional gap remains for them. The field preference within a ticker is deliberately unchanged (`mark -> last -> index`), because this balance path is NOT gated by `enableSpotMarkets` and re-ordering would re-value collateral for users who never opted in.
 
 ### Case-Insensitive Lookup
 

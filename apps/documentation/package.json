@@ -29,7 +29,7 @@
     "@docusaurus/faster": "^3.10.2",
     "@docusaurus/plugin-client-redirects": "^3.10.2",
     "@docusaurus/preset-classic": "^3.10.2",
-    "@easyops-cn/docusaurus-search-local": "^0.55.2",
+    "@easyops-cn/docusaurus-search-local": "^0.55.3",
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.14.0",
     "@mdx-js/react": "^3.1.1",

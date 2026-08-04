@@ -226,6 +226,24 @@ follow-up, not an oversight.
 | `supportsTunnel`  | `false` | Exchange supports HTTP-over-WebSocket (HOW) adapter |
 | `enforceWsTunnel` | `false` | Force HOW adapter on (overrides `supportsTunnel`)   |
 
+### Other metadata flags
+
+| Flag                         | Default | Purpose                                                              |
+| ---------------------------- | ------- | -------------------------------------------------------------------- |
+| `hiddenFromNewAccountPicker` | `false` | Hide from the add-API-key picker while keeping saved accounts running |
+| `supportsSpotToggle`         | `false` | Venue serves spot + derivatives from one connection; offer the opt-in |
+
+`hiddenFromNewAccountPicker` is deliberately **not** `enabled: false`:
+availability gates also decide whether a *saved* account may register at
+startup, so disabling a superseded venue stops every existing user account on
+it from loading. Set on `hyperliquidspot`, now served by `hyperliquid`'s spot
+toggle.
+
+`supportsSpotToggle` drives `ExchangeAccountConfig.enableSpotMarkets` →
+`ExchangeOptions.enableSpotMarkets` (forwarded in `createExchangeFromAccount`
+only when the venue advertises the toggle). Default-off, and the exchange must
+return **before** issuing any request when off, so opting out costs nothing.
+
 ### Decision Flow
 
 ```

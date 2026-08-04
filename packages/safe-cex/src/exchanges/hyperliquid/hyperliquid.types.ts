@@ -72,12 +72,7 @@ export const WEBSOCKET = {
 };
 
 export type HyperliquidUserAbstractionMode =
-  | 'unifiedAccount'
-  | 'portfolioMargin'
-  | 'disabled'
-  | 'default'
-  | 'dexAbstraction'
-  | 'standard';
+  'unifiedAccount' | 'portfolioMargin' | 'disabled' | 'default' | 'dexAbstraction' | 'standard';
 
 export type Tif = 'Alo' | 'Ioc' | 'Gtc';
 export type Tpsl = 'tp' | 'sl';
@@ -426,11 +421,26 @@ export interface SpotToken {
   index: number;
   tokenId: string;
   isCanonical: boolean;
+  /**
+   * Human-readable name, e.g. `Unit Bitcoin` for `UBTC`. Null for some older
+   * tokens (`PURR`). The `Unit ` prefix is the marker for a bridged asset,
+   * which is what `resolveSpotDisplayName` keys off — HyperCore has no native
+   * BTC/ETH, so those trade as Unit-bridged `UBTC`/`UETH`.
+   */
+  fullName?: string | null;
+  evmContract?: { address: string; evm_extra_wei_decimals: number } | null;
+  deployerTradingFeeShare?: string;
 }
 
 export interface SpotMarket {
   name: string;
   tokens: [number, number]; // Indices of base and quote tokens
+  /**
+   * Spot asset ordinal. The order-wire asset id is `index +
+   * SPOT_ASSET_INDEX_OFFSET` (10000). Perps occupy `0..N` and HIP-3 dexes
+   * start at 110000, so the three ranges are disjoint and a single exchange
+   * instance can carry all of them in one store.
+   */
   index: number;
   isCanonical: boolean;
 }
@@ -443,8 +453,20 @@ export interface SpotMeta {
 export interface SpotAssetCtx {
   dayNtlVlm: string;
   markPx: string;
-  midPx: string;
+  /** Null/absent for delisted or never-traded pairs. */
+  midPx: string | null;
   prevDayPx: string;
+  /**
+   * The universe entry's `name` this context belongs to (`@1`, `PURR/USDC`).
+   * Load-bearing: the spot response returns MORE contexts than universe
+   * entries and not in universe order, so consumers must join on this field.
+   * Do not switch to a positional `assets[i]` join the way the perp
+   * `metaAndAssetCtxs` path does.
+   */
+  coin?: string;
+  circulatingSupply?: string;
+  totalSupply?: string;
+  dayBaseVlm?: string;
 }
 
 export interface SpotMetaAndAssetCtxs {

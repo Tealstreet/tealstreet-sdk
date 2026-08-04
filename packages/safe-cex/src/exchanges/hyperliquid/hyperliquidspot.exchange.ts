@@ -44,14 +44,14 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './hyperliquid.api';
-import { ENDPOINTS } from './hyperliquid.types';
-import { calculatePricePrecision } from './hyperliquid.utils';
 import {
   orderRequestToOrderWire,
   orderWiresToNormalTPSLAction,
   orderWiresToOrderAction,
   signL1Action,
-} from './hyperliquidspot.signing';
+} from './hyperliquid.signing';
+import { ENDPOINTS } from './hyperliquid.types';
+import { calculatePricePrecision } from './hyperliquid.utils';
 import {
   AssetCtx,
   GRAFANA_ENDPOINTS_EVERY,
