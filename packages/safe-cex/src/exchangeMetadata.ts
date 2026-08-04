@@ -1070,6 +1070,7 @@ const OkxMetadata: ExchangeMetadata = {
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsTrailingStopLoss: false,
+  supportsOpeningTriggerOrders: true,
   hasEmptyPositions: false,
   positionModeIsGlobal: true,
   unifiedMargin: false,

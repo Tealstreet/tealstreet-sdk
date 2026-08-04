@@ -64,6 +64,7 @@ export const ENDPOINTS = {
   UNFILLED_ALGO_ORDERS: '/api/v5/trade/orders-algo-pending',
   CANCEL_ORDERS: '/api/v5/trade/cancel-batch-orders',
   CANCEL_ALGO_ORDERS: '/api/v5/trade/cancel-algos',
+  UPDATE_ALGO_ORDER: '/api/v5/trade/amend-algos',
   PLACE_ORDERS: '/api/v5/trade/batch-orders',
   PLACE_ALGO_ORDER: '/api/v5/trade/order-algo',
   SET_LEVERAGE: '/api/v5/account/set-leverage',
@@ -76,6 +77,7 @@ export const ENDPOINTS = {
 export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.CANCEL_ORDERS,
   ENDPOINTS.CANCEL_ALGO_ORDERS,
+  ENDPOINTS.UPDATE_ALGO_ORDER,
   ENDPOINTS.PLACE_ORDERS,
   ENDPOINTS.PLACE_ALGO_ORDER,
   ENDPOINTS.UPDATE_ORDER,

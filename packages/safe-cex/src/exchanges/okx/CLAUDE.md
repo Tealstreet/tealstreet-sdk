@@ -122,7 +122,7 @@ If `publicDataOnly` or missing key/secret, log and return. No private connection
 1. Connect private WebSocket (`privateWebsocket.connectAndSubscribe()`)
 2. In parallel:
    - `fetchBalanceAndPositions()` -- fetches balance + positions, stores with `loaded.balance: true, loaded.positions: true`
-   - `fetchOrders()` -- fetches all order types (normal + 3 algo types), stores with `loaded.orders: true`
+   - `fetchOrders()` -- fetches all order types (normal + 4 algo types), stores with `loaded.orders: true`
 
 ### Phase 6: Start Tick Loop
 
@@ -157,7 +157,7 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | `PLACE_ALGO_ORDER`     | `/api/v5/trade/order-algo`              | POST   | Place single algo order                                                       |
 | `UPDATE_ORDER`         | `/api/v5/trade/amend-order`             | POST   | Amend an existing order                                                       |
 | `CANCEL_ORDERS`        | `/api/v5/trade/cancel-batch-orders`     | POST   | Cancel batch orders (up to 20 per batch)                                      |
-| `CANCEL_ALGO_ORDERS`   | `/api/v5/trade/cancel-algos`            | POST   | Cancel algo orders (up to 20 per batch)                                       |
+| `CANCEL_ALGO_ORDERS`   | `/api/v5/trade/cancel-algos`            | POST   | Cancel algo orders (up to 10 per batch)                                       |
 | `SET_LEVERAGE`         | `/api/v5/account/set-leverage`          | POST   | Set leverage for an instrument                                                |
 | `LEVERAGE`             | `/api/v5/account/leverage-info`         | GET    | Get leverage info (supports comma-separated instIds, batched in groups of 20) |
 | `SET_POSITION_MODE`    | `/api/v5/account/set-position-mode`     | POST   | Switch position mode (`long_short_mode` or `net_mode`)                        |
@@ -314,16 +314,18 @@ Similar on-demand pattern:
 
 | Internal Type                | OKX `ordType`     | Notes                                               |
 | ---------------------------- | ----------------- | --------------------------------------------------- |
+| `OrderType.Conditional`      | `trigger`         | Opening trigger order; uses `triggerPx` + `orderPx` |
 | `OrderType.StopLoss`         | `conditional`     | Uses `slTriggerPx`, `slOrdPx=-1` (market execution) |
 | `OrderType.TakeProfit`       | `conditional`     | Uses `tpTriggerPx`, `tpOrdPx=-1` (market execution) |
 | `OrderType.TrailingStopLoss` | `move_order_stop` | Uses `callbackSpread`, `closeFraction=1`            |
 
 ### Fetched Algo Order Types
 
-When fetching orders, three algo types are queried separately:
+When fetching orders, four algo types are queried separately:
 
 - `oco` -- One-cancels-other orders
 - `conditional` -- Stop loss / take profit orders
+- `trigger` -- Opening conditional trigger orders
 - `move_order_stop` -- Trailing stop loss orders
 
 ### Time in Force
@@ -341,6 +343,21 @@ Supported trigger types for TP/SL (defined in metadata `supportedTPSLTriggerType
 - `OrderStopTriggerType.MarkPrice` (default for SL)
 
 OKX API trigger type values: `'last'`, `'mark'`, `'index'`.
+
+Opening conditional orders (`OrderType.Conditional`) are deliberately separate
+from TP/SL. They use OKX `ordType: "trigger"` with `triggerPx`,
+`orderPx` (`-1` for market execution), and `triggerPxType`. Do not route these
+through OKX `ordType: "conditional"`; that OKX value is reserved here for
+protective TP/SL-style algos using `tpTriggerPx` / `slTriggerPx`.
+
+Reduce-only `ordType: "trigger"` rows are classified as TP/SL only when the
+selected trigger source can be trusted. Startup tickers seed OKX `mark` and
+`index` from `last` until the public websocket sends real `mark-price` /
+`index-tickers` updates, so mark/index reduce-only triggers stay mapped as
+neutral conditional orders until that source has arrived. Authenticated OKX
+instances that use in-process public data consult the OKX source exchange's
+loaded-source flags; websocket gateway snapshots are trusted only when their
+mark/index value is finite and differs from the seeded `last` placeholder.
 
 **Trigger type mapping**:
 
@@ -373,8 +390,9 @@ OKX API trigger type values: `'last'`, `'mark'`, `'index'`.
 | ---------------------------- | ----------------- |
 | `OrderType.Market`           | `market`          |
 | `OrderType.Limit`            | `limit`           |
-| `OrderType.StopLoss`         | `trigger`         |
-| `OrderType.TakeProfit`       | `trigger`         |
+| `OrderType.Conditional`      | `trigger`         |
+| `OrderType.StopLoss`         | `conditional`     |
+| `OrderType.TakeProfit`       | `conditional`     |
 | `OrderType.TrailingStopLoss` | `move_order_stop` |
 
 ### Order Side (`ORDER_SIDE`)
@@ -444,10 +462,18 @@ A single OKX `oco` or `conditional` order can produce **two** internal orders:
 - If `slTriggerPx` is set: creates a StopLoss order with `_sl` suffix
 - If `tpTriggerPx` is set: creates a TakeProfit order with `_tp` suffix
 
+An OKX `trigger` algo order maps to one internal `OrderType.Conditional` when
+it is not reduce-only. Its internal `price` is the trigger price, and its
+execution limit price is preserved as `order.extra.conditionalOrderPrice`
+when OKX returns a positive `ordPx` / `orderPx`. Reduce-only `trigger` rows
+created outside Tealstreet are treated as protective TP/SL based on side and
+reference price rather than as opening conditionals.
+
 ### Order Update (Amend)
 
 - **Limit orders**: Amended in-place via `ENDPOINTS.UPDATE_ORDER` with `newPx` and/or `newSz`
-- **Algo orders**: Cannot be amended in-place. The `updateAlgoOrder()` method:
+- **Opening trigger algos** (`OrderType.Conditional` / OKX `ordType: "trigger"`): Amended in-place via `ENDPOINTS.UPDATE_ALGO_ORDER` (`/api/v5/trade/amend-algos`) with `newTriggerPx`, `newOrdPx`, and `newTriggerPxType` on every amend; amount edits add `newSz`
+- **Protective/trailing algo orders**: Still cancel-replaced by `updateAlgoOrder()` because they can map to multiple internal orders or unsupported amend fields:
   1. Finds all related orders sharing the same base algo ID
   2. Cancels them all
   3. Re-places with updated parameters
@@ -474,7 +500,7 @@ automatically split by `formatCreateOrder`:
 - **Regular orders**: Placed in batches of up to 20 via `PLACE_ORDERS`, processed sequentially between batches (`mapSeries`)
 - **Algo orders**: Placed sequentially one at a time via `PLACE_ALGO_ORDER`
 - **Cancel normal**: Batched in groups of 20, processed sequentially
-- **Cancel algo**: Batched in groups of 20, processed sequentially; suffix stripped from ID
+- **Cancel algo**: Batched in groups of 10, processed sequentially; suffix stripped from ID
 
 ### Algo Order Special Handling
 
@@ -553,7 +579,7 @@ OKX candle timestamps are in **milliseconds**. They are divided by 1000 for inte
 - Regular orders: Up to 20 per batch
 - Algo orders: One at a time, processed sequentially
 - Cancel normal orders: Up to 20 per batch
-- Cancel algo orders: Up to 20 per batch
+- Cancel algo orders: Up to 10 per batch
 
 ## State Reconciliation
 
@@ -707,7 +733,7 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 - **Margin type**: Hardcoded to cross only; attempting to change emits an error.
 - **Position mode change**: Requires all positions to be closed first; checked client-side before API call.
 - **Account config caching**: Position mode and account level are cached in `_accountPositionMode` and `_accountLevel`; use `force = true` parameter to re-fetch. Both are fetched from a single endpoint call (`getOrFetchPositionModeAndAccLevel`).
-- **Algo order updates**: Cannot amend algo orders in-place; they are cancelled and re-created.
+- **Algo order updates**: Opening trigger algos amend in-place; protective/trailing algos are cancelled and re-created.
 - **Order book filtering**: Bids above last price and asks below last price are filtered out after each update.
 - **Recursive order fetching**: Both regular and algo order fetches use recursive pagination (when exactly 100 results are returned, fetch next page using `after` cursor).
 - **Business WebSocket inheritance**: `OKXBusinessWebsocket` extends `OKXPrivateWebsocket` to reuse `auth()` and `handleOrderTopic()` methods. However, it overrides `connectAndSubscribe`, `onOpen`, `onMessage`, `ping`, `auth`, and `subscribe` -- meaning most of the parent's methods are replaced.
@@ -744,6 +770,7 @@ Most methods follow the same error handling pattern:
 | `formatBalanceUsedAvail`            | Any calculation error                               | Emits error, returns current `store.balance`                   |
 | `placeOrderBatch`                   | Batch response with `sMsg`                          | Throws error with the message                                  |
 | `placeAlgoOrderBatch`               | Response without `algoId`                           | Throws error with `sMsg`                                       |
+| `updateTriggerAlgoOrder`            | Amend row with non-zero `sCode` or `sMsg`            | Emits error and throws so the edit is not accepted              |
 | `cancelNormalOrders`                | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
 | `cancelAlgoOrders`                  | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
 | `setLeverage`                       | Any error                                           | Emits error, re-fetches positions, re-throws                   |

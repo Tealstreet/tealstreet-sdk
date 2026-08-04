@@ -229,11 +229,14 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
   };
 
   handleMarkPriceEvents = ({ data: [update] }: Data) => {
+    this.parent.markPriceLoaded(update.instId);
     this.store.updateTicker({ id: update.instId }, { mark: parseFloat(update.markPx) });
   };
 
   handleIndexTickerEvents = ({ data: [update] }: Data) => {
-    this.store.updateTicker({ id: `${update.instId}-SWAP` }, { index: parseFloat(update.idxPx) });
+    const marketId = `${update.instId}-SWAP`;
+    this.parent.indexPriceLoaded(marketId);
+    this.store.updateTicker({ id: marketId }, { index: parseFloat(update.idxPx) });
   };
 
   handleOpenInterestEvents = ({ data: [update] }: Data) => {

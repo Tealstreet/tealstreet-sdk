@@ -441,6 +441,7 @@ export type Order = {
     // actual remaining size in contracts considering contract size, inverse, quanto, etc
     readonly remainingNative?: number;
     readonly remainingNotional?: number;
+    readonly conditionalOrderPrice?: number;
     readonly rejectReason?: OrderRejectReason;
     // Chaser-related fields
     readonly isFromChaser?: boolean;
