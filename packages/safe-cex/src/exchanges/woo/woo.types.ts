@@ -75,6 +75,8 @@ export const ORDER_TYPE: Record<string, OrderType> = {
   POST_ONLY: OrderType.Limit,
   LIMIT: OrderType.Limit,
   MARKET: OrderType.Market,
+  ASK: OrderType.Market,
+  BID: OrderType.Market,
   TAKE_PROFIT: OrderType.TakeProfit,
   STOP_LOSS: OrderType.StopLoss,
   TRAILING_STOP: OrderType.TrailingStopLoss,

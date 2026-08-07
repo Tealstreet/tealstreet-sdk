@@ -81,6 +81,8 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 - `tick()` runs on a configurable interval via `options.extra.tickInterval`
 - Each tick calls `fetchPositionsAndBalance()`, which fetches both `currency=USDT` and `currency=USDC`, merges their positions and balances, then returns one complete snapshot for the full store write. If one settlement-account request fails or returns an invalid payload, a successful sibling snapshot still refreshes and the failed currency's last-known balance/positions are retained until its next successful poll. With no prior slice, the unavailable currency is represented as zero so per-market margin lookup fails closed rather than falling back to the sibling aggregate.
+- Position row mapping intentionally does not require a populated `marketsBySymbol` index. Full account snapshots filter to known markets before committing the store, while symbol-scoped recovery may need to preserve a valid nonzero REST row during hosted startup or stale-index windows.
+- Order formatting reads zero-size symbol-scoped raw position rows when mapped positions are empty, because Phemex reports one-way mode as `posMode: "OneWay", posSide: "Merged"` even when there is no open position. Dropping those zero rows from the store is correct, but opening orders must still send `posSide: "Merged"` for one-way accounts.
 - On error, logs the error and continues the loop
 - Uses `loop()` utility for scheduling
 
@@ -205,13 +207,13 @@ After authentication, subscribes to `aop_p.subscribe` (Account/Order/Position).
 
 Defined in `ORDER_TYPE` mapping:
 
-| Internal Type      | Phemex `ordType`                                         |
-| ------------------ | -------------------------------------------------------- |
-| `Market`           | `Market`                                                 |
-| `Limit`            | `Limit`                                                  |
-| `StopLoss`         | `Stop`                                                   |
-| `TakeProfit`       | `MarketIfTouched`                                        |
-| `TrailingStopLoss` | `MarketIfTouched` (with `pegPriceType: TrailingStopPeg`) |
+| Internal Type      | Phemex `ordType`                                                     |
+| ------------------ | -------------------------------------------------------------------- |
+| `Market`           | `Market`                                                             |
+| `Limit`            | `Limit`                                                              |
+| `StopLoss`         | `Stop`                                                               |
+| `TakeProfit`       | `MarketIfTouched`                                                    |
+| `TrailingStopLoss` | `MarketIfTouched` (with `pegPriceType: TrailingStopPeg`)             |
 | `Conditional`      | Disabled; fails closed until `stopPxRp` + `triggerType` are verified |
 
 **Order status mapping** (`ORDER_STATUS`):
@@ -372,12 +374,13 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - **Zero-contract guard**: Brand-new zero-contract WS positions are ignored unless they already exist in the store; full cleanup is handled by periodic/full REST sync (`addOrUpdatePositionsFull`)
 - **Filtering**: Only positions for markets present in the store are processed (both REST and WS)
 - **Full replacement on tick**: `tick()` uses `store.addOrUpdatePositionsFull(positions)` which replaces all positions
+- **Terminal-order fast follow**: Filled/canceled/rejected order WS events enqueue their symbols for the debounced sync. The sync fetches the full positions+balance snapshot, then fetches those symbols with `fetchPositions([symbol])` and merges them before the full replacement so just-filled symbols are not lost when the account sweep lags.
 
 ### Balance
 
 - **REST polling**: Fetched alongside positions in `tick()` from both settlement accounts; `balance.currencies` is authoritative for per-market margin. Aggregate totals are the nominal USD-stable sum of USDT and USDC, not a conversion-rate feed.
 - **WebSocket updates**: `accounts_p` messages merge every received account by its `currency` into `balance.currencies`, preserving the sibling settlement slice until its own update arrives.
-- **Fast-follow sync**: Terminal order events trigger the same debounced `fetchPositionsAndBalance()` reconciliation used for positions
+- **Fast-follow sync**: Terminal order events trigger the same debounced positions+balance reconciliation described above.
 - **WS balance total calculation**: each updated currency uses `total = accountBalanceRv - currency upnl` (different from REST which uses just `accountBalanceRv`); aggregate fields sum the currency slices.
 
 ## Exchange Metadata

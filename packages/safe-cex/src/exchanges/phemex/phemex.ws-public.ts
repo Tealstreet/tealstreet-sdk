@@ -1,4 +1,4 @@
-import type { Candle, OHLCVOptions, OrderBook } from '../../types';
+import type { Candle, OHLCVOptions, OrderBook, Ticker } from '../../types';
 import type { PhemexExchange } from './phemex.exchange';
 
 import { nanoid } from 'nanoid';
@@ -186,24 +186,86 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
           const symbol = this.parent.formatSymbolIn(rawSymbol);
 
           const ticker = this.parent.store.tickersBySymbol[symbol];
+          const tickerChanges = this.mapPackedTickerChanges({
+            ask,
+            bid,
+            fundingRateRr,
+            indexRp,
+            lastRp,
+            markRp,
+            openInterestRv,
+            openRp,
+            volumeRq,
+          });
           if (ticker) {
-            const last = parseFloat(lastRp);
-            this.store.updateTicker(ticker, {
-              last,
-              volume: parseFloat(volumeRq),
-              quoteVolume: parseFloat(volumeRq) * parseFloat(lastRp),
-              percentage: ((parseFloat(lastRp) - parseFloat(openRp)) / parseFloat(openRp)) * 100,
-              fundingRate: parseFloat(fundingRateRr),
-              mark: parseFloat(markRp),
-              index: parseFloat(indexRp),
-              openInterest: parseFloat(openInterestRv),
-              ...(bid ? { bid: parseFloat(bid) } : {}),
-              ...(ask ? { ask: parseFloat(ask) } : {}),
+            this.store.updateTicker(ticker, tickerChanges);
+          } else {
+            const market = this.parent.store.marketsBySymbol[symbol];
+            if (!market) continue;
+
+            this.store.update({
+              tickers: [
+                ...this.store.tickers.filter((existingTicker) => existingTicker.symbol !== symbol),
+                {
+                  id: market.id,
+                  symbol,
+                  bid: tickerChanges.bid ?? tickerChanges.last,
+                  ask: tickerChanges.ask ?? tickerChanges.last,
+                  last: tickerChanges.last,
+                  mark: tickerChanges.mark,
+                  index: tickerChanges.index,
+                  percentage: tickerChanges.percentage,
+                  openInterest: tickerChanges.openInterest,
+                  fundingRate: tickerChanges.fundingRate,
+                  fundingTime: 0,
+                  volume: tickerChanges.volume,
+                  quoteVolume: tickerChanges.quoteVolume,
+                } as Ticker,
+              ],
             });
           }
         }
       }
     });
+  };
+
+  private mapPackedTickerChanges = ({
+    ask,
+    bid,
+    fundingRateRr,
+    indexRp,
+    lastRp,
+    markRp,
+    openInterestRv,
+    openRp,
+    volumeRq,
+  }: {
+    ask?: string;
+    bid?: string;
+    fundingRateRr: string;
+    indexRp: string;
+    lastRp: string;
+    markRp: string;
+    openInterestRv: string;
+    openRp: string;
+    volumeRq: string;
+  }): Partial<Ticker> & Pick<Ticker, 'fundingRate' | 'index' | 'last' | 'mark' | 'openInterest' | 'percentage' | 'quoteVolume' | 'volume'> => {
+    const last = parseFloat(lastRp);
+    const volume = parseFloat(volumeRq);
+    const open = parseFloat(openRp);
+
+    return {
+      last,
+      volume,
+      quoteVolume: volume * last,
+      percentage: ((last - open) / open) * 100,
+      fundingRate: parseFloat(fundingRateRr),
+      mark: parseFloat(markRp),
+      index: parseFloat(indexRp),
+      openInterest: parseFloat(openInterestRv),
+      ...(bid ? { bid: parseFloat(bid) } : {}),
+      ...(ask ? { ask: parseFloat(ask) } : {}),
+    };
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
