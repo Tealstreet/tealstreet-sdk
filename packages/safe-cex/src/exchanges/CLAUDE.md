@@ -311,31 +311,35 @@ signatures with strict `recvWindow` enforcement.
 ### Remote-signer WS auth — a new `outputFormat` MUST ship a signer
 
 Private-WS auth under a remote signer has two halves that live in different
-files and are **not** linked by the type system:
+files:
 
 1. the **request**, in `<name>.ws-private.ts`, which names an `outputFormat`
    from the union in `types.ts` (`RemoteSignerRequest.wsAuth`);
 2. the **signer**, `BaseExchange.signWsAuth`, which actually produces the
    signature.
 
-`signWsAuth` only implements `'hex'` and `'base64'`. **Every other value in
-that union silently degrades to hex HMAC-SHA256:**
+`signWsAuth` used to narrow anything that wasn't `'hex'` or `'base64'` down to
+hex HMAC-SHA256, so adding a union member and using it compiled cleanly, passed
+review, and produced a wrong signature at runtime — no error, the venue just
+rejects the subscription and the private feed (fills, orders, positions) stays
+dead while REST polling keeps the UI looking healthy. Kraken shipped that way;
+so did blofin (`hex-base64`) and apexomni (`apexomni-base64`).
 
-```ts
-const digestFormat = outputFormat === 'hex' || outputFormat === 'base64' ? outputFormat : 'hex';
-```
+It is now an exhaustive `switch` ending in `const unhandled: never =
+outputFormat`, so **adding a member to the union without a signer is a compile
+error.** Implement the new branch there, and make it match the venue's local
+(non-`remoteSigner`) expression byte for byte, then add a case to
+`base.ws-auth-signing.test.ts`. Its expectations are golden vectors generated
+with Node's built-in `crypto` rather than re-derived with the implementation's
+own expression, so a shared misreading of a venue's convention cannot pass.
 
-So adding a member to the union and using it compiles cleanly, passes review,
-and produces a wrong signature at runtime. There is no error — the venue just
-rejects the subscription, and the private feed (fills, orders, positions) stays
-dead while REST polling keeps the UI looking healthy.
-
-**Rule: if your venue's WS auth is not plain HMAC-SHA256, override
-`signWsAuth` on the exchange class in the same change that introduces the
-`outputFormat`.** Kraken is the worked example — `kraken.exchange.ts`
-implements `base64(HMAC_SHA512(SHA256(challenge), base64Decode(secret)))`,
-mirroring both `performAuth()`'s local path and the REST scheme in
-`kraken.api.ts`.
+Override `signWsAuth` on the exchange class only when the scheme is not
+HMAC-SHA256 over the secret at all. Kraken is the worked example —
+`kraken.exchange.ts` implements
+`base64(HMAC_SHA512(SHA256(challenge), base64Decode(secret)))`, mirroring both
+`performAuth()`'s local path and the REST scheme in `kraken.api.ts`. Reaching
+the base signer with `kraken-challenge` now returns an explicit error rather
+than a plausible-looking wrong signature.
 
 Two related traps in the same area:
 
