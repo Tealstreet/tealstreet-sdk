@@ -1322,9 +1322,11 @@ export class WOOXExchange extends BaseExchange {
       return this.updateAlgoOrder({ order, update });
     }
 
+    // WOO requires quantity (or amount) on every edit — a price-only body is
+    // accepted as EDIT_SENT and then fails asynchronously, cancelling the order.
     const payload: Record<string, any> = { orderId: order.id };
     if ('price' in update) payload.price = `${update.price}`;
-    if ('amount' in update) payload.quantity = `${update.amount}`;
+    payload.quantity = `${'amount' in update ? update.amount : order.amount}`;
 
     try {
       await this.xhr.put(`${ENDPOINTS.UPDATE_ORDER}/${order.id}`, payload);
