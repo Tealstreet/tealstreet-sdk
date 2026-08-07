@@ -72,6 +72,36 @@ describe('audit regression: Phemex dormant orders and public subscription cap', 
     expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('stopPxRp and triggerType'));
   });
 
+  it('hydrates a missing symbol market before formatting a market order', async () => {
+    const store = new DefaultStore();
+    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
+    vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue([
+      {
+        id: 'ADA/USDT:USDT',
+        symbol: 'ADAUSDT',
+        base: 'ADA',
+        quote: 'USDT',
+        active: true,
+        precision: { amount: 0.01, price: 0.0001 },
+        limits: { amount: { min: 0.01, max: 10_000 }, leverage: { min: 1, max: 100 } },
+        info: { symbol: 'ADAUSDT' },
+      } as any,
+    ]);
+    vi.spyOn(exchange as any, 'getOrderPositionSide').mockResolvedValue('Merged');
+    vi.spyOn(exchange as any, 'getOrFetchPositionsForSymbol').mockResolvedValue([]);
+
+    const [payload] = await (exchange as any).formatCreateOrder({
+      symbol: 'ADAUSDT',
+      type: OrderType.Market,
+      side: OrderSide.Buy,
+      amount: 52.85,
+    });
+
+    expect(exchange.fetchMarkets).toHaveBeenCalledTimes(1);
+    expect(store.marketsBySymbol.ADAUSDT?.symbol).toBe('ADAUSDT');
+    expect(payload).toEqual(expect.objectContaining({ symbol: 'ADAUSDT', orderQtyRq: '52.85', ordType: 'Market' }));
+  });
+
   it('warns once as active public subscriptions approach the 20-topic cap', () => {
     const exchange = createExchange();
     const websocket = exchange.publicWebsocket;

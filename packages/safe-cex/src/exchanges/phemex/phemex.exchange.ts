@@ -334,20 +334,26 @@ export class PhemexExchange extends BaseExchange {
   mapPosition = (p: POSITIONS_RESPONSE['positions'][0]): Position | undefined => {
     const entryPrice = parseFloat(v(p, 'avgEntryPrice') || v(p, 'avgEntryPriceRp'));
     const size = parseFloat(v(p, 'size'));
+    if (!Number.isFinite(size) || size === 0) return undefined;
+    if (!Number.isFinite(entryPrice)) return undefined;
 
     const symbol = this.formatSymbolIn(p.symbol);
-    const market = this.store.marketsBySymbol[symbol];
-    if (!market) return undefined;
-
     const ticker = this.store.tickersBySymbol[symbol];
-    if (!ticker) return undefined;
+    const markPrice = parseFloat(v(p, 'markPriceRp'));
+    const lastPrice = Number.isFinite(ticker?.last)
+      ? ticker!.last
+      : Number.isFinite(markPrice)
+        ? markPrice
+        : entryPrice;
 
     // we probably need this for COIN-M, but USD-M is not contracts based
     //const contracts = size ? multiply1(size, market.precision.amount) : 0;
     const contracts = size;
-    const pSide = v(p, 'posSide') === 'Long' || v(p, 'Side') === 'Buy' ? PositionSide.Long : PositionSide.Short;
+    const rawPosSide = v(p, 'posSide');
+    const rawSide = v(p, 'side') || v(p, 'Side');
+    const pSide = rawPosSide === 'Long' || rawSide === 'Buy' ? PositionSide.Long : PositionSide.Short;
     //const upnl = multiply1(contracts, this.calculatePriceDiff(entryPrice, parseFloat(v(p, 'markPriceRp')), pSide));
-    const upnl = multiply1(contracts, this.calculatePriceDiff(entryPrice, ticker.last, pSide));
+    const upnl = multiply1(contracts, this.calculatePriceDiff(entryPrice, lastPrice, pSide));
 
     // If account is not on hedge mode,
     // we need to define the side of the position with the contracts amount
@@ -429,7 +435,9 @@ export class PhemexExchange extends BaseExchange {
         const response = responses[i];
         if (response.status === 'rejected') {
           failedCurrencies.add(currency);
-          this.emitAndLogError(response.reason?.response?.data?.msg || response.reason?.message || String(response.reason));
+          this.emitAndLogError(
+            response.reason?.response?.data?.msg || response.reason?.message || String(response.reason),
+          );
           continue;
         }
 
@@ -475,7 +483,11 @@ export class PhemexExchange extends BaseExchange {
         parsedPositions.push(
           ...this.store.positions.filter((position) => {
             const market = this.store.marketsBySymbol[position.symbol];
-            return market?.quote === currency || market?.info?.settleCurrency === currency || position.info?.currency === currency;
+            return (
+              market?.quote === currency ||
+              market?.info?.settleCurrency === currency ||
+              position.info?.currency === currency
+            );
           }),
         );
       }
@@ -1012,6 +1024,21 @@ export class PhemexExchange extends BaseExchange {
     return orderIds;
   };
 
+  private getOrFetchMarketForSymbol = async (symbol: string): Promise<Market | undefined> => {
+    const cachedMarket = this.store.marketsBySymbol[symbol];
+    if (cachedMarket) return cachedMarket;
+
+    const markets = await this.fetchMarkets();
+    if (!this.isDisposed && Array.isArray(markets) && markets.length > 0) {
+      this.store.update({
+        markets,
+        loaded: { ...this.store.loaded, markets: true },
+      });
+    }
+
+    return this.store.marketsBySymbol[symbol] || markets.find((market) => market.symbol === symbol);
+  };
+
   private formatCreateOrder = async (opts: PlaceOrderOpts) => {
     if (opts.type === OrderType.TrailingStopLoss) {
       return await this.formatCreateTrailingStopLossOrder(opts);
@@ -1024,7 +1051,7 @@ export class PhemexExchange extends BaseExchange {
       throw new Error(message);
     }
 
-    const market = this.store.marketsBySymbol[opts.symbol];
+    const market = await this.getOrFetchMarketForSymbol(opts.symbol);
 
     if (!market) {
       throw new Error(`Market ${opts.symbol} not found`);
@@ -1189,7 +1216,11 @@ export class PhemexExchange extends BaseExchange {
     let positionSide = 'Merged';
 
     const positions = await this.getOrFetchPositionsForSymbol(opts.symbol);
-    const isOneway = positions.some((p) => p.positionMode === PositionMode.OneWay);
+    let isOneway = positions.some((p) => p.positionMode === PositionMode.OneWay);
+
+    if (!positions.length) {
+      isOneway = (await this.fetchRawPositionModeForSymbol(opts.symbol)) === PositionMode.OneWay;
+    }
 
     // We need to specify side of the position to interract with
     // if we are in hedged mode on the bitmex account
@@ -1208,6 +1239,28 @@ export class PhemexExchange extends BaseExchange {
 
     return positionSide;
   };
+
+  private fetchRawPositionModeForSymbol = async (symbol: string): Promise<PositionMode | undefined> => {
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: POSITIONS_RESPONSE }>(ENDPOINTS.POSITIONS, {
+        params: {
+          currency: symbol?.endsWith('USDC') ? 'USDC' : 'USDT',
+          symbol: this.formatSymbolOut(symbol),
+        },
+      });
+      const rows = data?.positions || [];
+      const row = rows.find((position) => this.formatSymbolIn(position.symbol) === symbol);
+      if (row?.posMode === 'OneWay') return PositionMode.OneWay;
+      if (row?.posMode === 'Hedged') return PositionMode.Hedged;
+      return undefined;
+    } catch (e: any) {
+      this.emitAndLogError(e, e?.response?.data?.msg || e?.message);
+      return undefined;
+    }
+  };
+
   formatSymbolIn = (symbol?: string) => symbol?.toUpperCase() || symbol || '';
   formatSymbolOut = (symbol?: string) =>
     this?.store?.markets.find((m) => m.symbol === symbol)?.info?.symbol || symbol || '';

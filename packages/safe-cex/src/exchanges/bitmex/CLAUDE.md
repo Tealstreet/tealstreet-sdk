@@ -57,7 +57,9 @@ Do not remove these guards while the official shutdown schedule is still in effe
 Uses HMAC-SHA256 signing. The interceptor computes signatures on every request:
 
 - **Headers**:
-  - `api-key`: The API key from `options.key`
+  - `api-key`: The API key from `options.key` when present. Public-data-only
+    clients must omit the header entirely; BitMEX treats an empty `api-key`
+    header as an authenticated request and rejects public startup endpoints.
   - `api-expires`: A nonce generated from `virtualClock.getCurrentTimeMs() * 1000 + counter`
   - `api-signature`: HMAC-SHA256 hex digest
 - **Signature payload**: `METHOD + "/api/v1" + URL_WITH_PARAMS + NONCE + [BODY_JSON]`

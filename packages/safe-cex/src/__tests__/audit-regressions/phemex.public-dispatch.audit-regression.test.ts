@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BinancePublicWebsocket } from '../../exchanges/phemex/phemex.ws-public';
+import { DefaultStore } from '../../store/store.base';
 
 const createWebsocket = () => {
   const parent = {
     emitter: { emit: vi.fn() },
+    formatSymbolIn: (symbol: string) => symbol,
     isDisposed: false,
     options: { testnet: false },
     store: {},
@@ -12,6 +14,33 @@ const createWebsocket = () => {
   } as any;
 
   return new BinancePublicWebsocket(parent);
+};
+
+const createWebsocketWithStore = () => {
+  const store = new DefaultStore();
+  store.update({
+    markets: [
+      {
+        id: 'ADA/USDT:USDT',
+        symbol: 'ADAUSDT',
+        base: 'ADA',
+        quote: 'USDT',
+        active: true,
+        info: { symbol: 'ADAUSDT' },
+      },
+    ] as any,
+  });
+
+  const parent = {
+    emitter: { emit: vi.fn() },
+    formatSymbolIn: (symbol: string) => symbol,
+    isDisposed: false,
+    options: { testnet: false },
+    store,
+    timeframes: { '1m': '60', '5m': '300' },
+  } as any;
+
+  return { store, websocket: new BinancePublicWebsocket(parent) };
 };
 
 describe('Phemex public WebSocket dispatch', () => {
@@ -94,5 +123,48 @@ describe('Phemex public WebSocket dispatch', () => {
     expect(eth).not.toHaveBeenCalled();
     expect(recordStats).toHaveBeenCalledOnce();
     expect(recordStats).toHaveBeenCalledWith('orderbook_p.BTCUSDT');
+  });
+
+  it('seeds a ticker from packed updates when the REST baseline is empty', () => {
+    const { store, websocket } = createWebsocketWithStore();
+
+    websocket.handleTickerStreamEvents([
+      {
+        data: [
+          [
+            'ADAUSDT',
+            '0.18',
+            undefined,
+            undefined,
+            '0.189',
+            '1000',
+            undefined,
+            '2000',
+            '0.1888',
+            '0.1891',
+            '0.0001',
+            undefined,
+            '0.1889',
+            '0.1892',
+          ],
+        ],
+      },
+    ]);
+
+    expect(store.tickersBySymbol.ADAUSDT).toEqual({
+      id: 'ADA/USDT:USDT',
+      symbol: 'ADAUSDT',
+      bid: 0.1889,
+      ask: 0.1892,
+      last: 0.189,
+      mark: 0.1891,
+      index: 0.1888,
+      percentage: 5.000000000000004,
+      openInterest: 2000,
+      fundingRate: 0.0001,
+      fundingTime: 0,
+      volume: 1000,
+      quoteVolume: 189,
+    });
   });
 });
