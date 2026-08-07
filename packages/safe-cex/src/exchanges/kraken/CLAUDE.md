@@ -72,6 +72,21 @@ Challenge/response flow:
 
 **Key detail**: Auth does not use a separate `authenticate` event. Instead, credentials are included in each private feed subscription message.
 
+**Hosted mode signs steps 3-5 remotely.** With a `remoteSigner` the challenge
+goes out as an `outputFormat: 'kraken-challenge'` request and is signed by
+`KrakenExchange.signWsAuth` (`kraken.exchange.ts`), which must stay identical
+to the local path above. It is a real override for a reason: the base
+`signWsAuth` only implements `hex`/`base64` and silently falls back to hex
+HMAC-SHA256, which Kraken rejects with `"Failed to subscribe to authenticated
+feed"` — no exception, just a permanently dead private feed. Step 1 only needs
+`api_key`, so do not gate it on `options.secret`; hosted mode has none.
+
+**Known, deliberate**: the `account_balances` subscription is rejected with
+`"Couldn't subscribe to invalid feed"` and balance arrives via REST polling
+instead. Renaming it to `balances` makes the subscription succeed but
+`handleBalances` mis-parses that payload into a **zero balance** — worse than
+the harmless alert. Fix the parser first if you want the WS feed.
+
 ### Time Sync
 
 Uses `virtualClock.getCurrentTimeMs()` for nonce generation. No explicit server time synchronization endpoint is called.

@@ -308,6 +308,46 @@ Don't use `Date.now()` for request timestamps. Use
 between the client and the exchange server, which is critical for HMAC
 signatures with strict `recvWindow` enforcement.
 
+### Remote-signer WS auth — a new `outputFormat` MUST ship a signer
+
+Private-WS auth under a remote signer has two halves that live in different
+files and are **not** linked by the type system:
+
+1. the **request**, in `<name>.ws-private.ts`, which names an `outputFormat`
+   from the union in `types.ts` (`RemoteSignerRequest.wsAuth`);
+2. the **signer**, `BaseExchange.signWsAuth`, which actually produces the
+   signature.
+
+`signWsAuth` only implements `'hex'` and `'base64'`. **Every other value in
+that union silently degrades to hex HMAC-SHA256:**
+
+```ts
+const digestFormat = outputFormat === 'hex' || outputFormat === 'base64' ? outputFormat : 'hex';
+```
+
+So adding a member to the union and using it compiles cleanly, passes review,
+and produces a wrong signature at runtime. There is no error — the venue just
+rejects the subscription, and the private feed (fills, orders, positions) stays
+dead while REST polling keeps the UI looking healthy.
+
+**Rule: if your venue's WS auth is not plain HMAC-SHA256, override
+`signWsAuth` on the exchange class in the same change that introduces the
+`outputFormat`.** Kraken is the worked example — `kraken.exchange.ts`
+implements `base64(HMAC_SHA512(SHA256(challenge), base64Decode(secret)))`,
+mirroring both `performAuth()`'s local path and the REST scheme in
+`kraken.api.ts`.
+
+Two related traps in the same area:
+
+- **Don't gate the auth handshake on `options.secret`.** Hosted mode runs with
+  `secret: ''` by design (the secret never leaves the client), so a
+  `if (!options.secret) return` guard makes the remote-signer path unreachable
+  and kills the private feed with only a warning. Gate on
+  `secret || remoteSigner`, and only where the secret is genuinely required.
+- **This class of bug is hosted-mode-only**, so it does not reproduce in local
+  web dev, where a real Worker holds the actual secret. Verify private-WS
+  changes against exchange-server, not just `yarn dev`.
+
 ### Big-Integer JSON Parsing
 
 For exchanges with large numeric IDs (Binance, Bybit, etc.), parse responses
