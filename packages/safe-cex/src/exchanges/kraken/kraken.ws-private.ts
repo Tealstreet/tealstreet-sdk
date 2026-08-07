@@ -61,8 +61,12 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
   };
 
   private authenticate = async () => {
-    if (!this.parent.options.key || !this.parent.options.secret) {
-      this.parent.log('Missing API key or secret for authentication', LogSeverity.Warning);
+    // Only the challenge request is sent here (api_key alone). The secret is
+    // needed later in performAuth(), and hosted mode signs there via
+    // remoteSigner instead — so requiring a secret up front would make the
+    // remote-signer path unreachable and silently kill the private feed.
+    if (!this.parent.options.key || (!this.parent.options.secret && !this.parent.options.remoteSigner)) {
+      this.parent.log('Missing API key or secret/remoteSigner for authentication', LogSeverity.Warning);
       return;
     }
     try {
@@ -185,6 +189,10 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       this.send(JSON.stringify({ ...baseSubscription, feed: 'fills' }));
       this.send(JSON.stringify({ ...baseSubscription, feed: 'open_orders' }));
       this.send(JSON.stringify({ ...baseSubscription, feed: 'open_positions' }));
+      // NOTE: Kraken rejects this feed name ("Couldn't subscribe to invalid
+      // feed") so balance arrives via REST polling instead. Do not "fix" it to
+      // `balances` without reworking handleBalances — that feed's payload shape
+      // parses to a zero balance, which is worse than the harmless alert.
       this.send(JSON.stringify({ ...baseSubscription, feed: 'account_balances' }));
     } catch (_e) {}
   };

@@ -1,7 +1,10 @@
 import type { Axios } from 'axios';
 import type { Store } from '../../store/store.interface';
+import type { RemoteSignerRequest, RemoteSignerResponse } from '../../types';
 
 import rateLimit from 'axios-rate-limit';
+import createHash from 'create-hash';
+import createHmac from 'create-hmac';
 
 import {
   Balance,
@@ -68,6 +71,25 @@ export class KrakenExchange extends BaseExchange {
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
     this.unlimitedXHR = createAPI(opts, this);
   }
+
+  /**
+   * Kraken's WS challenge is not plain HMAC-SHA256, so the base implementation
+   * (hex HMAC-SHA256) silently produces a signature Kraken rejects with
+   * "Failed to subscribe to authenticated feed". Mirrors the local-signing path
+   * in kraken.ws-private.ts performAuth() and the REST scheme in kraken.api.ts:
+   * base64(HMAC_SHA512(SHA256(challenge), base64Decode(secret))).
+   */
+  public signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    const toSign = request.wsAuth?.toSign;
+    if (!toSign) return { id: request.id, error: 'Missing challenge to sign' };
+    if (!this.options.secret) return { id: request.id, error: 'No secret available for WS auth signing' };
+
+    const challengeHash = createHash('sha256').update(toSign, 'utf8').digest();
+    const secret = Buffer.from(this.options.secret, 'base64');
+    const wsAuthSignature = createHmac('sha512', secret).update(challengeHash).digest('base64');
+
+    return { id: request.id, wsAuthSignature };
+  };
 
   dispose = () => {
     // Clean up OHLCV polling

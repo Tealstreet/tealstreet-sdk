@@ -1544,18 +1544,48 @@ export class BaseExchange implements Exchange {
 
   /**
    * Sign a remote WS auth request.
-   * Default: HMAC-SHA256 with the exchange's secret. Exchanges with non-HMAC
-   * WS auth (dexes, wallet-based) should override this method.
+   *
+   * Every branch must match its venue's local (non-remoteSigner) signing
+   * expression byte for byte, or the private feed authenticates as garbage and
+   * dies silently — no error, just no fills. The `never` default makes adding an
+   * outputFormat without a signer a compile error rather than a silent
+   * degradation to plain hex, which is exactly how Kraken broke.
+   *
+   * Exchanges whose WS auth is not HMAC-SHA256 over the secret (Kraken's
+   * challenge, dexes, wallet-based) override this method instead.
    */
   public signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
-    const { toSign, outputFormat } = request.wsAuth!;
+    const { toSign, outputFormat } = request.wsAuth ?? {};
+    if (!toSign || !outputFormat) {
+      return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
+    }
     const secret = this.options.secret;
     if (!secret) {
       return { id: request.id, error: 'No secret available for WS auth signing' };
     }
-    const digestFormat = outputFormat === 'hex' || outputFormat === 'base64' ? outputFormat : 'hex';
-    const signature = createHmac('sha256', secret).update(toSign).digest(digestFormat);
-    return { id: request.id, wsAuthSignature: signature };
+
+    switch (outputFormat) {
+      case 'hex':
+        return { id: request.id, wsAuthSignature: createHmac('sha256', secret).update(toSign).digest('hex') };
+      case 'base64':
+        return { id: request.id, wsAuthSignature: createHmac('sha256', secret).update(toSign).digest('base64') };
+      case 'hex-base64': {
+        // blofin: base64 of the hex digest string, not of the raw digest.
+        const hex = createHmac('sha256', secret).update(toSign).digest('hex');
+        return { id: request.id, wsAuthSignature: Buffer.from(hex).toString('base64') };
+      }
+      case 'apexomni-base64': {
+        // apexomni: the HMAC key is the base64 of the secret, not the secret.
+        const key = Buffer.from(secret).toString('base64');
+        return { id: request.id, wsAuthSignature: createHmac('sha256', key).update(toSign).digest('base64') };
+      }
+      case 'kraken-challenge':
+        return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      default: {
+        const unhandled: never = outputFormat;
+        return { id: request.id, error: `Unsupported WS auth outputFormat: ${String(unhandled)}` };
+      }
+    }
   };
 
   // Whether order is TP/SL or trailing stop

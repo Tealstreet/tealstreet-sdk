@@ -7,7 +7,8 @@ import { BaseHandler } from './BaseHandler';
 interface SymbolIntervalSub {
   unsub: () => void;
   throttleFn: any;
-  refCount: number;
+  // subIds.size IS the refcount — see OrderBookSubscriptionsHandler for why a
+  // separate counter desyncs on a duplicate subId and strands the subscription.
   subIds: Set<string>;
   lastCandleTimestamp: number;
 }
@@ -48,8 +49,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         const existing = this._subsByKey.get(key);
 
         if (existing) {
-          // Already subscribed to this symbol:interval — just bump refcount
-          existing.refCount++;
+          // Already subscribed to this symbol:interval — just track the subscriber
           existing.subIds.add(subId);
           return;
         }
@@ -65,7 +65,6 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         const sub: SymbolIntervalSub = {
           unsub: () => {},
           throttleFn: f,
-          refCount: 1,
           subIds: new Set([subId]),
           lastCandleTimestamp: 0,
         };
@@ -93,9 +92,8 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         for (const [key, sub] of this._subsByKey) {
           if (sub.subIds.has(subId)) {
             sub.subIds.delete(subId);
-            sub.refCount--;
 
-            if (sub.refCount <= 0) {
+            if (sub.subIds.size === 0) {
               // Last subscriber — actually unsubscribe from exchange
               try {
                 sub.unsub();
