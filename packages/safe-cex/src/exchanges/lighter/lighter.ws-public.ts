@@ -225,6 +225,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
   protected onClose = (event?: any): void => {
     const closeCodeValue = Number(event?.code);
     const closeCode = Number.isFinite(closeCodeValue) ? closeCodeValue : undefined;
+    // This override does not delegate to the base onClose, so the shared close
+    // diagnostics have to be recorded explicitly.
+    this.recordCloseDiagnostics(closeCode);
     const closeReason = typeof event?.reason === 'string' ? event.reason : '';
     const now = virtualClock.getCurrentTimeMs();
     const timeSinceConnect = this.connectStartedAt > 0 ? now - this.connectStartedAt : Number.POSITIVE_INFINITY;
@@ -955,7 +958,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
 
   private toOrderBookLevel = (level: any) => {
     const price = parseFloat(level.price ?? level[0]);
-    const amount = parseFloat(level.remaining_base_amount ?? level.remainingBaseAmount ?? level.size ?? level.quantity ?? level[1]);
+    const amount = parseFloat(
+      level.remaining_base_amount ?? level.remainingBaseAmount ?? level.size ?? level.quantity ?? level[1],
+    );
     if (!Number.isFinite(price) || !Number.isFinite(amount) || price <= 0 || amount < 0) {
       return undefined;
     }
@@ -991,8 +996,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     mode: 'snapshot' | 'delta',
   ) => {
     if (mode === 'snapshot') {
-      orderBook[side] = this.aggregateOrderBookSnapshotLevels(levels)
-        .sort((left, right) => (side === 'bids' ? right.price - left.price : left.price - right.price));
+      orderBook[side] = this.aggregateOrderBookSnapshotLevels(levels).sort((left, right) =>
+        side === 'bids' ? right.price - left.price : left.price - right.price,
+      );
       return;
     }
 

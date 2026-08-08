@@ -778,6 +778,30 @@ export type StoreData = {
     privateInitialized: boolean;
     publicLastMessage?: number;
     privateLastMessage?: number;
+    /**
+     * Reconnect diagnostics. All optional so every existing construction site
+     * and the OSS-mirror slice keep compiling untouched.
+     *
+     * `*CloseCode` is the last WebSocket close code — the single most
+     * diagnostic reconnect field (1006 network/middlebox, 1000 clean,
+     * 4xxx app/auth). `*CloseCountTotal` is monotonic; `*CloseStreak` is the
+     * streak-scoped counter that resets on healthy traffic, so it reads 0
+     * after recovery and only the total survives.
+     *
+     * `*ReconnectPaused` is a boolean rather than a remaining-ms countdown on
+     * purpose: a live countdown would mutate socketHealth on every watchdog
+     * tick, manufacturing store deltas throughout a pause. It is also
+     * clock-free, which matters because hosted exchange-server stamps these
+     * on the server's clock.
+     */
+    publicCloseCode?: number;
+    privateCloseCode?: number;
+    publicCloseCountTotal?: number;
+    privateCloseCountTotal?: number;
+    publicCloseStreak?: number;
+    privateCloseStreak?: number;
+    publicReconnectPaused?: boolean;
+    privateReconnectPaused?: boolean;
   };
 };
 
