@@ -69,6 +69,18 @@ const isCoinbaseUnsignedDecimal = (value: unknown): value is string =>
 const isCoinbaseZeroDecimal = (value: unknown): value is string =>
   typeof value === 'string' && COINBASE_ZERO_DECIMAL.test(value);
 
+const isRegularCoinbaseOrder = (opts: PlaceOrderOpts) =>
+  (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+  opts.triggerPrice === undefined &&
+  opts.stopLoss === undefined &&
+  opts.takeProfit === undefined;
+
+const getCoinbaseClientOrderId = (opts: PlaceOrderOpts) => {
+  if (!isRegularCoinbaseOrder(opts) || opts.clientOrderId === undefined) return 'tealstreet-' + uuid();
+  if (!opts.clientOrderId) throw new Error('Coinbase clientOrderId must be non-empty');
+  return opts.clientOrderId;
+};
+
 export class CoinbaseExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -1408,7 +1420,7 @@ export class CoinbaseExchange extends BaseExchange {
     }
 
     const req: PLACE_ORDER_REQUEST = {
-      client_order_id: 'tealstreet-' + uuid(),
+      client_order_id: getCoinbaseClientOrderId(opts),
       product_id: opts.symbol,
       side: opts.side === OrderSide.Buy ? 'BUY' : 'SELL',
       // TODO. leverage setting?

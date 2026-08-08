@@ -547,7 +547,7 @@ it never calls a parameterized INTX endpoint without a portfolio UUID.
 
 ### Order Format (`coinbase.exchange.ts`)
 
-- **Client order ID**: `"tealstreet-" + uuid()` (`coinbase.exchange.ts`)
+- **Client order ID**: regular single native limit/market orders use caller `clientOrderId` as Coinbase `client_order_id` when provided. Stop and bracket paths keep generated `"tealstreet-" + uuid()` IDs.
 - **Leverage**: Always `"10"` (hardcoded)
 - **Market orders**: Uses `market_market_ioc` with `base_size` only
 - **Limit orders**: Uses `limit_limit_gtc` with `base_size`, `limit_price`, and `post_only` (when `timeInForce === OrderTimeInForce.PostOnly`)
