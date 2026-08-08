@@ -66,6 +66,7 @@ export { ChasersCommand } from './ChasersCommand';
 
 // TWAP command
 export { TwapCommand } from './TwapCommand';
+export { twapTaskParamsToOptions } from './twapOptions';
 
 // Utility commands
 export { EchoCommand } from './EchoCommand';
