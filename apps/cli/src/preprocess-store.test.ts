@@ -37,6 +37,15 @@ function file(name: string): string {
   return join(CONFIG_DIR, name);
 }
 
+/**
+ * Every case calls `makeStore`, which does `vi.resetModules()` and then a
+ * dynamic `import()` — so each one re-transforms the module graph. That is
+ * cheap when this package runs alone and can exceed the 5s default when the
+ * whole repo's tasks are running concurrently, which is exactly what CI does.
+ * The filesystem is mocked, so this budget is for transform cost, not I/O.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 describe('FilePreprocessStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();

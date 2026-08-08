@@ -17,9 +17,17 @@ import {
 import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
 import { fireCheckin } from './checkin';
+import { installStdoutGuard, isMcpInvocation } from './mcp/stdoutGuard';
+
+// MCP stdio frames JSON-RPC over stdout, so nothing else may touch it. Detect
+// the mode from argv here — the noisy writers below run at module top level,
+// long before commander has parsed anything.
+const RUNNING_AS_MCP = isMcpInvocation();
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+if (RUNNING_AS_MCP) installStdoutGuard();
 
 // Announce this process to the web app so the web's CliListenerWorker
 // gate knows there's a CLI on this platform. Fire-and-forget — no
@@ -82,8 +90,11 @@ import { registerCrossTradeCommand } from './commands/cross-trade';
 // Dynamic import for repl to avoid circular dependency issues with safe-cex
 const getRepl = async () => import('./repl');
 
-// Check for updates in background (non-blocking)
-checkForUpdatesBackground();
+// Check for updates in background (non-blocking).
+// Skipped under MCP: it is setImmediate-based and prints a chalk box via
+// console.log, which would land on stdout mid-session and corrupt the
+// JSON-RPC stream.
+if (!RUNNING_AS_MCP) checkForUpdatesBackground();
 
 const program = new Command();
 
@@ -791,6 +802,17 @@ tradingCommands.forEach(({ name, desc }) => {
       runSingleCommand(commandString, options.account, options.symbol);
     });
 });
+
+// ============ MCP Server ============
+program
+  .command('mcp')
+  .description('Run as an MCP server over stdio (for Claude Code and other MCP clients)')
+  .action(async () => {
+    // Lazy import: pulls in the TypeScript compiler via
+    // @tealstreet/script-authoring, which no other CLI path needs at runtime.
+    const { startMcpServer } = await import('./mcp/server');
+    await startMcpServer();
+  });
 
 // ============ Default Action ============
 // Handle top-level flags before parsing

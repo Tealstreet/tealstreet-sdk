@@ -694,12 +694,116 @@ REPL. With a subcommand, it runs one-shot.
 | `record` (group)                                                                      | —          | `start` / `stop` / `list` / `stats`                                                  |
 | `update`                                                                              | —          | `-c` / `--check` for check-only                                                      |
 | `logs`                                                                                | `log`      | `-c` / `--clear`, `-n <N>` lines                                                     |
+| `mcp`                                                                                 | —          | Run as an MCP server over stdio — see [MCP server](#mcp-server) below                |
 
 > **`tealstreet tasks` is different from REPL `tasks`.** Top-level reads
 > persisted task records from `~/.tealstreet/tasks.json`. REPL `tasks` lists
 > live chasers + TWAPs from memory. Don't conflate them.
 
 Source: `apps/cli/src/index.ts`.
+
+---
+
+## MCP server &nbsp; _(standalone-only)_ {#mcp-server}
+
+`tealstreet mcp` runs the CLI as an [MCP](https://modelcontextprotocol.io)
+server over stdio, so an AI assistant (Claude Code, Claude Desktop, …) can
+read, write, and validate your scripts directly.
+
+Register it with your MCP client — for Claude Code:
+
+```bash
+claude mcp add tealstreet-scripts -- tealstreet mcp
+```
+
+**You must be logged in.** Start the CLI (`tealstreet`) and run `login` at the
+prompt — `login` is a REPL command, there is no top-level `tealstreet login`.
+The MCP server exits immediately with `not logged in` on stderr rather than
+starting and letting each tool fail separately, since an assistant would
+otherwise keep retrying instead of telling you to log in. If your MCP client
+reports the server as failed, check your login first — tokens expire.
+
+### Tools
+
+| Tool                                                          | Purpose                                                                             |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `list_scripts`                                                | Every script on disk, including ones that currently fail to load                    |
+| `read_script`                                                 | One script's source — works even when the script is broken                          |
+| `get_api_types`                                               | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `all`)  |
+| `validate_script`                                             | Typecheck + capability check without writing. Fast, local, free                     |
+| `write_script`                                                | Create or replace a script. **Validates first and refuses to write invalid source** |
+| `delete_script`                                               | Delete a script                                                                     |
+| `export_scripts`                                              | Export your own scripts as a portable JSON bundle (backup / moving machines)        |
+| `list_accounts`                                               | Configured accounts — names and exchanges only, never credentials                   |
+| `get_positions` / `get_orders` / `get_balance` / `get_ticker` | Live reads for an account                                                           |
+| `run_script`                                                  | **Dry run only** — see below                                                        |
+
+### What it will refuse
+
+`write_script` runs the same checks as `validate_script` and will not write a
+file that fails any of them:
+
+- **Value imports.** `import { OrderSide } from '@tealstreet/script-api-core'`
+  typechecks but fails at load, because scripts run from a directory with no
+  `node_modules`. Use `import type` for types and `api.constants.*` for values.
+- **Undeclared capabilities.** Every `api.exchange.*` method the body calls
+  must appear in `meta.capabilities.writes`. `closePosition` additionally
+  requires `placeOrder`.
+- **Top-level calls.** Code outside the default-exported function runs when the
+  CLI loads the scripts directory, not when the script is invoked. Declarations
+  (types, helper functions, `const` config) are fine.
+
+This is stricter than editing a file by hand on purpose: a script an assistant
+wrote is code you have not read.
+
+### `run_script` is dry-run only
+
+`run_script` executes a script against **live market data** but every write —
+`placeOrder`, `cancelOrder`, `runCommand`, everything — is _recorded and
+returned as an intent_ rather than executed. Nothing this server can do places a
+real order.
+
+You get back the full list of what the script would have done, which is the
+useful part; a mechanism that simply refused at the first write would tell you
+about one action and nothing else.
+
+To actually run a script, run `script:<name>` yourself in the REPL.
+
+Two caveats worth knowing:
+
+- Dry run bounds a script's `api.*` calls. It is **not a sandbox** — scripts
+  execute with full runtime globals, so a script that reaches outside the API
+  entirely is unaffected. `run_script` therefore refuses to run source that
+  doesn't validate.
+- The server connects accounts on demand and **never writes `active` back to
+  your config**, so it cannot disturb a REPL running alongside it.
+
+### There is no import tool, on purpose
+
+`export_scripts` exists; a matching import does not. Exporting your own scripts
+is a backup. **Installing scripts written by someone else is a different
+proposition entirely**: scripts currently run on the same boundary as code you
+wrote yourself, reaching `fetch`, `localStorage` and your session. Third-party
+scripts wait for the worker sandbox.
+
+If you want to move a bundle to another machine, paste each script through
+`write_script` — it validates first, and you see what it declares before it
+lands.
+
+### Notes
+
+- **Local only.** stdio transport, no network listener. It does not expose your
+  accounts to anything but the MCP client you launched it from.
+- **Credentials are never exposed.** `list_accounts` returns an explicit
+  allowlist (name, exchange, testnet, connected) — never the stored keys.
+- Script writes, deletions, **and dry runs** are recorded in the audit log
+  tagged `[mcp]`, so agent activity is distinguishable from your own after the
+  fact. A dry-run entry carries the number of write intents the script
+  attempted — that count is what makes a run worth reviewing later.
+- Scripts are not executed by this server — write them here, run them from the
+  REPL with `script:<name>`.
+
+Source: `apps/cli/src/mcp/`.
 
 ---
 

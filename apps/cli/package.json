@@ -43,11 +43,13 @@
     "postinstall": "node scripts/install-binary.cjs --optional"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tealstreet/cli-core": "*",
     "@tealstreet/safe-cex": "*",
     "@tealstreet/script-api-cli": "*",
     "@tealstreet/script-api-core": "*",
     "@tealstreet/script-api-web": "*",
+    "@tealstreet/script-authoring": "*",
     "@tealstreet/utils": "*",
     "chalk": "^5.3.0",
     "commander": "^15.0.0",
@@ -55,7 +57,8 @@
     "open": "^11.0.0",
     "ora": "^9.4.1",
     "tcp-websocket": "^1.0.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
