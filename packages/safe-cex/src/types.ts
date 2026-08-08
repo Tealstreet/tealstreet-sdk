@@ -611,6 +611,8 @@ export type PlaceOrderOpts = {
   readonly triggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
+  // Optional exchange-native client order ID for supported regular orders.
+  readonly clientOrderId?: string;
   readonly maxSlippagePct?: number;
   readonly close?: boolean;
 };

@@ -36,6 +36,20 @@ yarn test-ci       # Run all tests (deterministic, no network)
 yarn test          # Watch mode
 ```
 
+## Client order ID contract
+
+`PlaceOrderOpts.clientOrderId` is the shared caller-supplied identifier for
+exchange-native client order ID fields on supported regular orders only
+(for example Binance `newClientOrderId`, OKX `clOrdId`, Bybit `orderLinkId`,
+Bitget/KuCoin `clientOid`). Do not infer stop/algo/bracket support from this
+field unless the venue adapter implements and documents that path explicitly.
+
+Adapters that support `clientOrderId` must preserve existing generated IDs when
+it is omitted. If one safe-cex order is split into multiple native order
+payloads, the adapter must not send the same caller ID on more than one native
+order; either apply the caller ID only when exactly one payload is emitted or
+reject the request with a deterministic error.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual
