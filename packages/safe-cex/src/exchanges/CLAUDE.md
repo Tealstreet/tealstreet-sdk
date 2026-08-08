@@ -458,6 +458,42 @@ from `seqId`/`prevSeqId` field names alone. OKX and BloFin keep their audited
 venue-specific implementations until this review is done; BitMEX's current
 price-keyed Aggregated feed has no verified compatible predecessor contract.
 
+### `messageHandlerStats` checks SUBSCRIPTIONS, not the connection
+
+**Read this before removing anything from the topic watchdog.**
+
+Connection liveness is already owned by safe-cex — ping/pong, `checkLastReceived`,
+the reconnect backoff in `base.ws.ts`. Per-topic stats are not a second copy of
+that and must never be reasoned about as one.
+
+They exist to catch **a subscription that has silently stopped delivering while
+the socket is perfectly healthy**: a subscribe dropped on reconnect, a venue that
+ignores subscribes sent too fast, a frame lost in flight, an ack that never came.
+The socket is up, the pong is fresh, every other feed is flowing — and one topic
+is dead. That is the exact scenario this exists for, and it is invisible to every
+connection-level check.
+
+So these arguments are always wrong:
+
+- "the pong is fresh, so the socket is fine, so dropping this topic costs
+  nothing" — a fresh pong is the _precondition_ for the failure, not a refutation
+  of it
+- "other topics on the same socket are updating, so this one doesn't matter" —
+  same error, per-socket instead of per-connection
+- "this topic is event-driven so silence is normal" — true for a small number of
+  topics, and **nearly all topics poll**. Establish it per topic, from observed
+  behaviour or venue docs, for that exact topic. Do not infer it from the
+  topic's name, from a neighbouring constant that groups it with others, or from
+  a category you assembled yourself. A topic that has genuinely never sent
+  anything has no stats entry at all and is already harmless; the failure mode is
+  a topic that delivered and then stopped.
+
+If a topic legitimately goes quiet, the fix is to make the _expectation_
+conditional on whatever state governs its traffic — or to clear its entry via
+`cleanupMessageHandlerStats` when that state goes away, which returns it to the
+harmless never-recorded case. The fix is not to stop watching it, because then a
+failed subscribe for that topic can never be detected again.
+
 ### Reconnect-banner stats are append-only — never walk the full map
 
 `base.ws.ts → recordMessageHandlerStats(topic)` is called on every

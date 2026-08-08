@@ -1,3 +1,5 @@
+import type { Candle, OHLCVOptions, Timeframe } from '../../types';
+
 import createHmac from 'create-hmac';
 import flatten from 'lodash/flatten';
 import { nanoid } from 'nanoid';
@@ -5,7 +7,6 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import type { Candle, OHLCVOptions, Timeframe } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
 import { OKXPrivateWebsocket } from './okx.ws-private';
@@ -20,6 +21,8 @@ const TIMEFRAME_BY_CANDLE_CHANNEL = Object.fromEntries(
 ) as Record<string, Timeframe>;
 
 const ORDER_CHANNELS = new Set(['orders', 'orders-algo', 'algo-advance']);
+// Single stats topic for all three; see the record call below.
+const ORDER_STATS_TOPIC = 'orders';
 
 export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   topics: SubscribedTopics = {};
@@ -158,7 +161,13 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
       if (!channel) return;
 
       if (ORDER_CHANNELS.has(channel)) {
-        this.recordMessageHandlerStats(channel);
+        // All three collapse to one stats topic. OKX pushes an order channel
+        // only for a category the account currently holds orders in, so tracking
+        // them separately produced up to three entries that each went quiet
+        // independently as categories emptied. One entry, kept fresh by any
+        // order traffic, matches how the client gates it: on whether the account
+        // holds any open orders at all.
+        this.recordMessageHandlerStats(ORDER_STATS_TOPIC);
         this.handleOrderTopic(json);
         return;
       }

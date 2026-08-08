@@ -240,8 +240,23 @@ tuple. Public order books use `books.{instId}`; business candle wire channels
 (`candle1m`, `candle1H`, etc.) reverse-map through `INTERVAL` to the internal
 `candle.{timeframe}.{instId}` handler key. Algo-order channels are matched by
 their exact `arg.channel`. Handler stats are updated only when that exact key
-has callbacks (or an exact dedicated algo-order channel is handled); payload
-fields outside `arg` never influence dispatch.
+has callbacks; payload fields outside `arg` never influence dispatch.
+
+**Order channels record ONE collapsed stats topic, `orders`.** `orders`,
+`orders-algo` and `algo-advance` all record under that single key. OKX pushes an
+order channel only for a category the account currently holds orders in, so
+tracking them separately produced up to three entries that went quiet
+independently as categories emptied — `algo-advance` was measured at 1199s while
+every other feed on the same socket stayed 1s fresh, which marked the account
+delayed in the reconnect banner and, past the error threshold, fed
+`requestReload` in `exchangeAccountController`.
+
+The other half of the fix is in the client: `getGroupedMessageTopicStats` skips
+staleness for order topics when the account holds no open orders, since
+flattening is what stops the traffic. Do NOT instead stop recording these
+channels — that is a subscription-completeness check and silencing it would hide
+a failed order subscribe permanently. See `../CLAUDE.md` → "`messageHandlerStats`
+checks SUBSCRIPTIONS, not the connection".
 
 ### Private WebSocket Channels (`okx.ws-private.ts`)
 
@@ -770,7 +785,7 @@ Most methods follow the same error handling pattern:
 | `formatBalanceUsedAvail`            | Any calculation error                               | Emits error, returns current `store.balance`                   |
 | `placeOrderBatch`                   | Batch response with `sMsg`                          | Throws error with the message                                  |
 | `placeAlgoOrderBatch`               | Response without `algoId`                           | Throws error with `sMsg`                                       |
-| `updateTriggerAlgoOrder`            | Amend row with non-zero `sCode` or `sMsg`            | Emits error and throws so the edit is not accepted              |
+| `updateTriggerAlgoOrder`            | Amend row with non-zero `sCode` or `sMsg`           | Emits error and throws so the edit is not accepted             |
 | `cancelNormalOrders`                | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
 | `cancelAlgoOrders`                  | Response with `sMsg` per item                       | Emits error per failed cancellation (does not throw)           |
 | `setLeverage`                       | Any error                                           | Emits error, re-fetches positions, re-throws                   |
