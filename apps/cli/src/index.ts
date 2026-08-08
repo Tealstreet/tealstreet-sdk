@@ -146,6 +146,9 @@ accountCmd
   .option('--private-key <key>', 'Private key (for DEX exchanges)')
   .option('--wallet-address <address>', 'Wallet address (for DEX exchanges)')
   .option('-t, --testnet', 'Use testnet')
+  .option('--tealstreet-proxy', 'Route REST through the Tealstreet proxy (required for IP-whitelisted keys)')
+  .option('--tealstreet-tunnel', 'Route REST through the Tealstreet tradetunnel')
+  .option('--proxy-region <region>', 'Pin the proxy egress region')
   .option('--default', 'Set as default account')
   .action((options) => {
     const exchangeInfo = getExchangeInfo(options.exchange);
@@ -180,6 +183,11 @@ accountCmd
       apiSecret: isWalletBased ? options.privateKey || '' : options.apiSecret || '',
       passphrase: options.passphrase,
       testnet: options.testnet || false,
+      // Routing was already honored by platform-adapter but unsettable here, so a
+      // CLI-added account always egressed direct — which an IP-whitelisted key rejects.
+      ...(options.tealstreetProxy ? { tealstreetProxy: true } : {}),
+      ...(options.tealstreetTunnel ? { tealstreetTunnel: true } : {}),
+      ...(options.proxyRegion ? { proxyRegion: options.proxyRegion } : {}),
     };
 
     addAccount(account);
