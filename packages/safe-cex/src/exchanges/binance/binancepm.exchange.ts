@@ -41,6 +41,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { assertBinanceNewClientOrderId, getPlaceOrderClientOrderId } from './binance.client-order-id';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
 import {
   ENDPOINTS,
@@ -748,7 +749,12 @@ export class BinancePMExchange extends BaseExchange {
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
+    const clientOrderId = getPlaceOrderClientOrderId(opts);
+
     if (opts.type === OrderType.TrailingStopLoss) {
+      if (clientOrderId !== undefined) {
+        throw new Error('Binance PM clientOrderId is only supported for a single native regular order');
+      }
       return this.formatCreateTrailingStopLossOrder(opts);
     }
 
@@ -836,11 +842,17 @@ export class BinancePMExchange extends BaseExchange {
       });
     }
 
-    // We need to set orderId for each order
-    // otherwise Binance will duplicate the IDs
-    // when its sent in batches
-    for (const payload of payloads) {
-      payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+    if (clientOrderId !== undefined) {
+      assertBinanceNewClientOrderId(clientOrderId, 32);
+      if (payloads.length !== 1 || opts.stopLoss || opts.takeProfit || isStopOrTP) {
+        throw new Error('Binance PM clientOrderId is only supported for a single native regular order');
+      }
+      payloads[0].newClientOrderId = clientOrderId;
+    } else {
+      // Otherwise Binance will duplicate the IDs when sent in batches.
+      for (const payload of payloads) {
+        payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+      }
     }
 
     return payloads;

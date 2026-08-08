@@ -51,6 +51,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI, createPublicAPI } from './binance.api';
+import { assertBinanceNewClientOrderId, getPlaceOrderClientOrderId } from './binance.client-order-id';
 import {
   BinanceIncomeRecord,
   ENDPOINTS,
@@ -1535,11 +1536,6 @@ export class BinanceExchange extends BaseExchange {
         payloads.push({ ...req, quantity: `${rest}` });
       }
 
-      // Set orderId for each regular order
-      for (const payload of payloads) {
-        payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
-      }
-
       regularPayloads.push(...payloads);
     }
 
@@ -1594,6 +1590,19 @@ export class BinanceExchange extends BaseExchange {
           clientAlgoId: 'x-s3vFFRQp' + uuid(),
         }),
       );
+    }
+
+    const clientOrderId = getPlaceOrderClientOrderId(opts);
+    if (clientOrderId !== undefined) {
+      assertBinanceNewClientOrderId(clientOrderId, 36);
+      if (regularPayloads.length !== 1 || algoPayloads.length !== 0) {
+        throw new Error('Binance clientOrderId is only supported for a single native regular order');
+      }
+      regularPayloads[0].newClientOrderId = clientOrderId;
+    } else {
+      for (const payload of regularPayloads) {
+        payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+      }
     }
 
     return { regular: regularPayloads, algo: algoPayloads };

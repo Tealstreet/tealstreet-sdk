@@ -80,6 +80,20 @@ export const findTickerMarkForCurrency = (
   return ticker && typeof ticker.mark === 'number' ? ticker.mark : 1;
 };
 
+type PlaceOrderOptsWithClientOrderId = PlaceOrderOpts & {
+  readonly clientOrderId?: string;
+};
+
+const getPlaceOrderClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+  return (opts as PlaceOrderOptsWithClientOrderId).clientOrderId;
+};
+
+const assertOKXClientOrderId = (clientOrderId: string) => {
+  if (!/^[A-Za-z0-9]{1,32}$/.test(clientOrderId)) {
+    throw new Error('OKX clientOrderId must be 1 to 32 case-sensitive alphanumeric characters');
+  }
+};
+
 const getOKXTriggerPxType = (triggerType?: OrderStopTriggerType) => {
   if (triggerType === OrderStopTriggerType.IndexPrice) return 'index';
   if (triggerType === OrderStopTriggerType.MarkPrice) return 'mark';
@@ -1612,6 +1626,13 @@ export class OKXExchange extends BaseExchange {
     }
 
     const price = opts.price ? adjust(opts.price, pPrice) : null;
+    const clientOrderId = getPlaceOrderClientOrderId(opts);
+    if (clientOrderId !== undefined) {
+      assertOKXClientOrderId(clientOrderId);
+      if (opts.stopLoss || opts.takeProfit) {
+        throw new Error('OKX clientOrderId is only supported for a single native regular order');
+      }
+    }
 
     const req = omitUndefined({
       instId: market.id,
@@ -1625,14 +1646,18 @@ export class OKXExchange extends BaseExchange {
       posSide: this.getPositionSide(opts),
     });
 
-    const createPayload = (size: BigNumber) => ({
+    const createPayload = (size: BigNumber, clOrdId = `${BROKER_ID}${uuid()}`.slice(0, 32)) => ({
       ...req,
-      clOrdId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      clOrdId,
       sz: size.toFixed(),
     });
 
     if (amount <= maxSize) {
-      return [createPayload(new BigNumber(amount))];
+      return [createPayload(new BigNumber(amount), clientOrderId)];
+    }
+
+    if (clientOrderId !== undefined) {
+      throw new Error('OKX clientOrderId is only supported for a single native regular order');
     }
 
     const amountStep = new BigNumber(pAmount);

@@ -86,6 +86,83 @@ describe('OKX oversized order regression', () => {
     expect(payloads.every((payload) => !('qty' in payload))).toBe(true);
   });
 
+  it('uses caller clientOrderId for a single regular native order', async () => {
+    const market = createMarket(1, 10);
+    const store = new DefaultStore();
+    store.update({ markets: [market] });
+
+    const exchange = new OKXExchange('okx', options, store);
+    exchange._accountPositionMode = PositionMode.OneWay;
+    exchange._accountLevel = 2;
+
+    const post = vi.fn().mockResolvedValue({ data: { data: [{ ordId: 'native-order' }] } });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: market.symbol,
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 5,
+      price: 50_000,
+      clientOrderId: 'CallerId1',
+    });
+
+    const payloads = post.mock.calls[0][1] as Array<Record<string, unknown>>;
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].clOrdId).toBe('CallerId1');
+  });
+
+  it('rejects caller clientOrderId when a regular order splits into multiple native orders', async () => {
+    const market = createMarket(1, 10);
+    const store = new DefaultStore();
+    store.update({ markets: [market] });
+
+    const exchange = new OKXExchange('okx', options, store);
+    exchange._accountPositionMode = PositionMode.OneWay;
+    exchange._accountLevel = 2;
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: market.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 25,
+        price: 50_000,
+        clientOrderId: 'CallerId1',
+      }),
+    ).rejects.toThrow(/single native regular order/);
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('rejects caller clientOrderId on OKX bracket orders before deriving algos', async () => {
+    const market = createMarket(1, 10);
+    const store = new DefaultStore();
+    store.update({ markets: [market] });
+
+    const exchange = new OKXExchange('okx', options, store);
+    exchange._accountPositionMode = PositionMode.OneWay;
+    exchange._accountLevel = 2;
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: market.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 5,
+        price: 50_000,
+        stopLoss: 49_000,
+        clientOrderId: 'CallerId1',
+      }),
+    ).rejects.toThrow(/single native regular order/);
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it.each([
     { name: 'NaN maximum size', maxAmount: NaN, amountStep: 1, errorField: 'maximum order size' },
     { name: 'infinite maximum size', maxAmount: Infinity, amountStep: 1, errorField: 'maximum order size' },
