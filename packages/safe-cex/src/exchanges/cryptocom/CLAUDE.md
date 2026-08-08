@@ -396,7 +396,10 @@ the auth acknowledgement.
 5. Add `REDUCE_ONLY` to `exec_inst` when requested.
 6. Add `time_in_force` only for LIMIT orders; omit UI default TIF on MARKET
    orders.
-7. POST to `/private/create-order` and return `[data.order_id]`.
+7. Regular limit/market orders use caller `clientOrderId` as Crypto.com
+   `client_oid` when provided; values must be 1-36 characters. Advanced
+   stop/TP paths omit caller IDs.
+8. POST to `/private/create-order` and return `[data.order_id]`.
 
 Standalone stop-loss and take-profit orders use
 `/private/advanced/create-order` with `ref_price` and `ref_price_type`; their

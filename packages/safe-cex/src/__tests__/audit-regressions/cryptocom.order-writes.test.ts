@@ -1,20 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
+import { getExchangeMetadata } from '../../exchangeMetadata';
 import { createAPI, formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
-import { getExchangeMetadata } from '../../exchangeMetadata';
 import { DefaultStore } from '../../store/store.base';
-import {
-  Market,
-  Order,
-  OrderSide,
-  OrderStatus,
-  OrderStopTriggerType,
-  OrderTimeInForce,
-  OrderType,
-} from '../../types';
+import { Market, Order, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 
 const MARKET: Market = {
@@ -195,6 +187,69 @@ describe('audit regression: Crypto.com order writes', () => {
       quantity: '5',
     });
   });
+
+  it('sends caller client_oid only on regular create-order requests', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { order_id: '123' } });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: MARKET.symbol,
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 60_000,
+      clientOrderId: 'caller-client-id',
+    });
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.CREATE_ORDER, {
+      instrument_name: MARKET.id,
+      side: 'BUY',
+      type: 'LIMIT',
+      quantity: '1',
+      price: '60000',
+      client_oid: 'caller-client-id',
+    });
+
+    post.mockClear();
+    await exchange.placeOrder({
+      symbol: MARKET.symbol,
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      amount: 1,
+      price: 59_000,
+      clientOrderId: 'ignored-client-id',
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.ADVANCED_CREATE_ORDER,
+      expect.not.objectContaining({ client_oid: expect.anything() }),
+    );
+  });
+
+  it.each(['', 'x'.repeat(37)])(
+    'rejects Crypto.com regular client_oid value %j outside 1-36 characters before writing',
+    async (clientOrderId) => {
+      const exchange = createExchange();
+      const post = vi.fn();
+      const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+      exchange.xhr = { post } as any;
+
+      await expect(
+        exchange.placeOrder({
+          symbol: MARKET.symbol,
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 1,
+          price: 60_000,
+          clientOrderId,
+        }),
+      ).rejects.toThrow('Crypto.com clientOrderId must be 1-36 characters');
+
+      expect(emitAndLogError).toHaveBeenCalledWith('Crypto.com clientOrderId must be 1-36 characters');
+      expect(post).not.toHaveBeenCalled();
+    },
+  );
 
   it('always sends both documented amend fields and backfills the unchanged value', async () => {
     const exchange = createExchange();

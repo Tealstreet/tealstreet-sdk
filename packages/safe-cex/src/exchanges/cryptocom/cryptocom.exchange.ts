@@ -493,6 +493,20 @@ export class CryptocomExchange extends BaseExchange {
       if (opts.timeInForce && opts.type === OrderType.Limit) {
         orderRequest.time_in_force = this.mapTimeInForce(opts.timeInForce);
       }
+      const useClientOrderId =
+        !isTrigger &&
+        (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+        opts.stopLoss === undefined &&
+        opts.takeProfit === undefined &&
+        opts.triggerPrice === undefined &&
+        opts.clientOrderId !== undefined;
+      if (useClientOrderId) {
+        if (!opts.clientOrderId || opts.clientOrderId.length > 36) {
+          this.emitAndLogError('Crypto.com clientOrderId must be 1-36 characters');
+          throw new Error('Crypto.com clientOrderId must be 1-36 characters');
+        }
+        orderRequest.client_oid = opts.clientOrderId;
+      }
 
       const endpoint = isTrigger ? ENDPOINTS.ADVANCED_CREATE_ORDER : ENDPOINTS.CREATE_ORDER;
       const { data } = await this.xhr.post<{ order_id: string }>(endpoint, orderRequest);
