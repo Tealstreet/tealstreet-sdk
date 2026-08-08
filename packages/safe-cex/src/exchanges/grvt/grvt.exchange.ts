@@ -66,6 +66,12 @@ type GrvtBuilderAuthState =
 
 type GrvtInstrumentSigningMetadata = Required<Pick<GrvtInstrumentLite, 'ih' | 'bd' | 'qd'>>;
 
+const isGrvtRegularClientOrderPath = (opts: PlaceOrderOpts) =>
+  (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+  opts.triggerPrice === undefined &&
+  opts.stopLoss === undefined &&
+  opts.takeProfit === undefined;
+
 export class GrvtExchange extends BaseExchange {
   xhr: Axios; // Market Data Gateway (public)
   edgeXhr: Axios; // Edge Gateway (authentication)
@@ -1484,7 +1490,16 @@ export class GrvtExchange extends BaseExchange {
       // Convert to API format (NOT the EIP-712 format - that's only for signing!)
       // API uses regular decimal values as strings, NOT multiplied
       // Generate unique client order ID (simple uint32 like Python SDK) and create time
-      const clientOrderId = nonce.toString(); // Use nonce as client_order_id (uint32)
+      const generatedClientOrderId = nonce.toString();
+      const clientOrderId =
+        isGrvtRegularClientOrderPath(opts) && opts.clientOrderId !== undefined
+          ? opts.clientOrderId
+          : generatedClientOrderId;
+      if (clientOrderId.length === 0) {
+        const message = 'GRVT clientOrderId must be a non-empty string';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
       const createTime = (Date.now() * 1_000_000).toString(); // Current time in nanoseconds
 
       // Prepare trigger for TP/SL if provided
@@ -1609,28 +1624,26 @@ export class GrvtExchange extends BaseExchange {
       }
 
       // GRVT returns oi="0x00" for new orders — the real order_id is assigned
-      // asynchronously. Use the nonce (= client_order_id) as the canonical ID
-      // since it's consistent across REST placement, WS updates (metadata.co),
-      // and REST fetches (metadata.client_order_id).
-      const nonceStr = String(nonce);
-      this.log(`Order created successfully: nonce=${nonceStr}`, LogSeverity.Info);
+      // asynchronously. Use client_order_id as the canonical ID since it's
+      // consistent across REST placement, WS updates, and REST fetches.
+      this.log(`Order created successfully: client_order_id=${clientOrderId}`, LogSeverity.Info);
 
       // Record the locally-created canonical nonce even while GRVT has not
       // assigned a real ID, so later reconciliation reaches its true start.
       const grvtOrderId =
         response.result?.order_id || response.r?.oi || response.order_id || response.data?.result?.order_id;
-      this.recordNonce(nonceStr, grvtOrderId, Date.now());
+      this.recordNonce(clientOrderId, grvtOrderId, Date.now());
 
       // Emit builder fee event so the UI can show a toast
       const responseOrder = response.result?.order || response.result || response.r;
       const builderFeeFromResponse = responseOrder?.builder_fee || responseOrder?.bf || builderInfo.builderFee;
       this.emitter.emit('builderFee', {
-        orderId: nonceStr,
+        orderId: clientOrderId,
         builderFee: builderFeeFromResponse,
         builder: builderInfo.builder,
       });
 
-      return [nonceStr];
+      return [clientOrderId];
     } catch (err: any) {
       // Builder authorization errors are typed and consumed by the UI to prompt
       // for re-authorization — preserve the instance instead of wrapping it in a

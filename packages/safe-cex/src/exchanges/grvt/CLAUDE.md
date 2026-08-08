@@ -381,6 +381,9 @@ Order type is determined by checking trigger metadata first:
 2. Read `instrument_hash`, `base_decimals`, and `quote_decimals` from the current market snapshot's `info`; fail closed if the cached signing metadata is missing or invalid
 3. Round price and size to market precision via `adjust()`
 4. Generate nonce (random up to 1e9) and expiration (1 hour in nanoseconds)
+   - Regular limit/market orders use caller `clientOrderId` as GRVT
+     `metadata.client_order_id` when provided. Empty IDs reject; trigger and
+     TP/SL paths keep the generated decimal nonce/client-order ID.
 5. Build EIP-712 message with contract-level values:
    - `contractSize = size * 10^baseDecimals`
    - `limitPrice = price * 1e9` (PRICE_MULTIPLIER)
@@ -449,8 +452,10 @@ cancellation rather than silently recreate it as a non-split trigger.
 
 ### Chaser REST Fill Verification
 
-`placeOrder()` returns the decimal nonce/client-order ID as the canonical
-safe-cex order ID; GRVT assigns the hex `order_id` asynchronously. The chaser
+`placeOrder()` returns the GRVT client-order ID as the canonical safe-cex order
+ID; by default this is the generated decimal nonce, but caller `clientOrderId`
+can replace it for regular orders. GRVT assigns the hex `order_id`
+asynchronously. The chaser
 therefore passes canonical nonces to `fetchFillsForOrderIds()` when it checks
 for a fill that private WS has not delivered yet. Match a fill's `co` /
 `client_order_id` first, and only use `_nonceToOrderId` to translate a fill
