@@ -283,7 +283,8 @@ ioc -> ImmediateOrCancel
 1. **Normal orders** are formatted via `formatCreateOrder()` (`bitget.exchange.ts:1027-1083`):
    - Position mode is fetched to determine `side`/`tradeSide` fields
    - Orders exceeding `maxSize` are split into multiple lots
-   - Each payload gets a unique `clientOid` via `uuid()`
+   - Plain single-payload limit/market orders use caller `clientOrderId` as `clientOid` when provided
+   - Split orders and attached TP/SL brackets keep generated unique `clientOid` values; caller IDs on splits reject
    - Placed via `placeOrderBatch()` using `BATCH_ORDERS` endpoint (up to 50 per symbol per batch)
 2. **Algo orders** are formatted via `formatAlgoOrder()` (`bitget.exchange.ts:1085-1148`):
    - Placed one at a time via `placeAlgoOrders()`

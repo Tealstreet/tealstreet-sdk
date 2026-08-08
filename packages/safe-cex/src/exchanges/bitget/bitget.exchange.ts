@@ -63,6 +63,24 @@ import { BitgetPrivateWebsocket } from './bitget.ws-private';
 import { BitgetPublicWebsocket } from './bitget.ws-public';
 import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
 
+const BITGET_CLIENT_ORDER_ID_RE = /^[.A-Z:/a-z0-9_-]{1,32}$/;
+
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!BITGET_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
+    throw new Error('Bitget clientOrderId must match /^[.A-Z:/a-z0-9_-]{1,32}$/');
+  }
+  return opts.clientOrderId;
+};
+
 export class BitgetExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -1281,8 +1299,16 @@ export class BitgetExchange extends BaseExchange {
       payloads.push({ ...req, size: `${rest}` });
     }
 
+    const clientOrderId = getRegularOrderClientOrderId(opts);
+
+    if (clientOrderId && payloads.length !== 1) {
+      const msg = 'Bitget clientOrderId is only supported when one safe-cex order creates one native order';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
     for (const payload of payloads) {
-      payload.clientOid = uuid();
+      payload.clientOid = clientOrderId || uuid();
     }
 
     return payloads;
