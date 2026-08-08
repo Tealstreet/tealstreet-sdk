@@ -65,6 +65,24 @@ import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
 
 const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.5;
+const WOO_CLIENT_ORDER_ID = /^(?:0|[1-9]\d*)$/;
+
+const parseWooClientOrderId = (clientOrderId: string): number => {
+  if (!WOO_CLIENT_ORDER_ID.test(clientOrderId)) {
+    throw new Error('WOO clientOrderId must be a decimal integer string');
+  }
+  const numericClientOrderId = Number(clientOrderId);
+  if (!Number.isSafeInteger(numericClientOrderId)) {
+    throw new Error('WOO clientOrderId must be a JavaScript-safe integer');
+  }
+  return numericClientOrderId;
+};
+
+const isWooRegularClientOrderPath = (opts: PlaceOrderOpts) =>
+  (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+  opts.triggerPrice === undefined &&
+  opts.stopLoss === undefined &&
+  opts.takeProfit === undefined;
 
 export class WOOXExchange extends BaseExchange {
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
@@ -1626,12 +1644,28 @@ export class WOOXExchange extends BaseExchange {
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
     const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
+    let clientOrderId: number | undefined;
+    if (opts.clientOrderId !== undefined && isWooRegularClientOrderPath(opts)) {
+      if (lots > 1) {
+        const message = 'WOO clientOrderId cannot be reused across split native order payloads';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      try {
+        clientOrderId = parseWooClientOrderId(opts.clientOrderId);
+      } catch (error: any) {
+        this.emitAndLogError(error?.message || String(error));
+        throw error;
+      }
+    }
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
-    const payloads = times(lots, () => ({ ...req, order_quantity: lotSize }));
+    const payloads = times(lots, () =>
+      omitUndefined({ ...req, client_order_id: clientOrderId, order_quantity: lotSize }),
+    );
 
     if (rest) {
-      payloads.push({ ...req, order_quantity: rest });
+      payloads.push(omitUndefined({ ...req, client_order_id: clientOrderId, order_quantity: rest }));
     }
 
     try {

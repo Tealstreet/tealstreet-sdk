@@ -510,6 +510,7 @@ Note: WooX uses `MARKET_PRICE` (not `LAST_PRICE`) to refer to the last/contract 
    - Maps PostOnly TIF to `type: 'POST_ONLY'` (not a separate TIF parameter)
    - Maps Tealstreet `OrderType.Market` to a crossing WOO `IOC` order using current ticker bid/ask/last plus a bounded slippage price. Plain WOO `MARKET` futures buys can be accepted and then immediately canceled with zero fill, `ASK`/`BID` require a price and can reject asynchronously, and futures-mode `order_amount` is rejected by WOO.
    - Splits into lots if amount exceeds `market.limits.amount.max`
+   - Regular single-native limit/market orders use caller `clientOrderId` as numeric WOO `client_order_id` when provided. Caller IDs must be decimal integer strings representable as JavaScript-safe integers; split and algo paths reject/omit rather than duplicate them.
    - Each payload sent via POST to `/v1/order`
 3. After main order placement, if `opts.stopLoss` or `opts.takeProfit` are set, places positional algo order with inverted side
 
