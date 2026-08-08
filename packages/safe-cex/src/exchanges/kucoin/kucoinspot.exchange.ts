@@ -53,6 +53,20 @@ import { KucoinSpotPublicWebsocket } from './kucoinspot.ws-public';
 const KUCOIN_SPOT_OPEN_ORDERS_PAGE_SIZE = 50;
 const KUCOIN_SPOT_OPEN_ORDERS_MAX_PAGES = 100;
 
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!opts.clientOrderId) throw new Error('KuCoin Spot clientOrderId must be non-empty');
+  return opts.clientOrderId;
+};
+
 export class KucoinSpotExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -430,7 +444,7 @@ export class KucoinSpotExchange extends BaseExchange {
           : 'GTC';
 
     const payload = omitUndefined({
-      clientOid: uuid(),
+      clientOid: getRegularOrderClientOrderId(opts) || uuid(),
       symbol: market.id,
       type: opts.type === OrderType.Market ? 'market' : 'limit',
       side: opts.side === OrderSide.Sell ? 'sell' : 'buy',

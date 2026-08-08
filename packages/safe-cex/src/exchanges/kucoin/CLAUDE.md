@@ -428,6 +428,8 @@ KuCoin uses descriptive side names that encode position direction:
 
 **Normal orders** are placed individually despite the batch endpoint existing (`kucoin.exchange.ts:949-972`). Uses `unlimitedXHR` (no rate limit) for order placement.
 
+Plain regular limit/market orders use caller `clientOrderId` as KuCoin `clientOid` when provided. Attached TP/SL and standalone stop paths keep generated `clientOid` values.
+
 Orders with attached TP/SL are posted to `PLACE_ALGO_ORDER` (`/api/v1/st-orders`) with `triggerStopUpPrice` / `triggerStopDownPrice`. Standalone TP/SL uses the regular stop-flagged order path. Trailing stops fail closed because the current adapter does not support them.
 
 ### Order Fetch — two books, partial-failure preservation

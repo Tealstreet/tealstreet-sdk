@@ -52,6 +52,20 @@ import {
 import { KucoinPrivateWebsocket } from './kucoin.ws-private';
 import { createKucoinSnapshotWebsockets, KucoinPublicWebsocket } from './kucoin.ws-public';
 
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!opts.clientOrderId) throw new Error('KuCoin clientOrderId must be non-empty');
+  return opts.clientOrderId;
+};
+
 export class KucoinExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -910,7 +924,7 @@ export class KucoinExchange extends BaseExchange {
       marginMode: this.getKucoinMarginMode(position),
       positionSide: this.getKucoinPositionSide(opts, position),
       timeInForce: orderType === 'limit' ? timeInForce : undefined,
-      clientOid: uuid(),
+      clientOid: getRegularOrderClientOrderId(opts) || uuid(),
       triggerStopUpPrice: triggerStopUpPrice ? `${adjust(triggerStopUpPrice, pPrice)}` : undefined,
       triggerStopDownPrice: triggerStopDownPrice ? `${adjust(triggerStopDownPrice, pPrice)}` : undefined,
       stopPriceType: hasAttachedStop ? this.mapStopPriceType(opts.tpTriggerType || opts.slTriggerType) : undefined,
