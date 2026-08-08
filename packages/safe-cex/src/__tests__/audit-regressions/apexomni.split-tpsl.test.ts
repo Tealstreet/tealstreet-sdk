@@ -9,7 +9,7 @@ const { createApiMock, initSdkMock, signContractMock, signer } = vi.hoisted(() =
   const signer = {
     initZklinkSigner: vi.fn(),
   };
-  const signContractMock = vi.fn(async (_signer: unknown, payload: { size: string }) => ({
+  const signContractMock = vi.fn(async (_signer: unknown, payload: { nonce?: number; size: string; slotId?: number }) => ({
     tx: { signature: { signature: `signature-${payload.size}` } },
   }));
 

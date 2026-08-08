@@ -37,7 +37,7 @@ const createExchange = () => {
     builderFee: '0.03',
     builderFeeInt: 300,
   }));
-  const createOrder = vi.fn(async () => ({ r: { oi: '0x00' } }));
+  const createOrder = vi.fn(async (_request: any) => ({ r: { oi: '0x00' } }));
   exchange.grvtClient = {
     authenticatedEndpoint: vi.fn(async () => 'authenticated-endpoint'),
     tdgClient: { createOrder },

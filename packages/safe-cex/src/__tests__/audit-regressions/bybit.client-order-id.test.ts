@@ -4,7 +4,7 @@ import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
-import { OrderSide, OrderType, PositionMode } from '../../types';
+import { OrderSide, OrderType, PlaceOrderOpts, PositionMode } from '../../types';
 
 const createStore = (symbol: string, quote: string, max = 100, isInverse = false) => {
   const market = {
@@ -31,7 +31,7 @@ const mockPositionMode = (exchange: BybitExchange | BybitInverseExchange) => {
   (exchange as any).fetchPositionMode = vi.fn().mockResolvedValue(PositionMode.OneWay);
 };
 
-const limitOrder = (symbol = 'BTCUSDT', amount = 1, overrides = {}) => ({
+const limitOrder = (symbol = 'BTCUSDT', amount = 1, overrides: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
   symbol,
   type: OrderType.Limit,
   side: OrderSide.Buy,
