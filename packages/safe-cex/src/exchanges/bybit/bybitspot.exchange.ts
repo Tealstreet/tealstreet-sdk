@@ -66,6 +66,23 @@ import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
+const BYBIT_CLIENT_ORDER_ID_RE = /^[A-Za-z0-9_-]{1,36}$/;
+
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!BYBIT_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
+    throw new Error('Bybit spot clientOrderId must match /^[A-Za-z0-9_-]{1,36}$/');
+  }
+  return opts.clientOrderId;
+};
 
 export class BybitSpotExchange extends BaseExchange {
   xhr: Axios;
@@ -659,6 +676,8 @@ export class BybitSpotExchange extends BaseExchange {
       type = OrderType.Market;
     }
 
+    const clientOrderId = getRegularOrderClientOrderId(opts);
+
     const req = omitUndefined({
       category: 'spot',
       symbol: opts.symbol,
@@ -694,6 +713,7 @@ export class BybitSpotExchange extends BaseExchange {
       timeInForce: opts.type === OrderType.Limit ? timeInForce : undefined,
       closeOnTrigger: false,
       positionIdx,
+      orderLinkId: clientOrderId,
       ...orderExecutionParams,
     });
 
@@ -711,6 +731,12 @@ export class BybitSpotExchange extends BaseExchange {
     });
 
     if (rest) payloads.push({ ...req, qty: `${rest}` });
+
+    if (clientOrderId && payloads.length !== 1) {
+      const msg = 'Bybit spot clientOrderId is only supported when one safe-cex order creates one native order';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
 
     const responses = await mapSeries(payloads, async (p) => {
       try {

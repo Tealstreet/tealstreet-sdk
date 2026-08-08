@@ -79,8 +79,25 @@ import { BybitInversePublicWebsocket } from './bybitinverse.ws-public';
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
+const BYBIT_CLIENT_ORDER_ID_RE = /^[A-Za-z0-9_-]{1,36}$/;
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
+
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!BYBIT_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
+    throw new Error('Bybit inverse clientOrderId must match /^[A-Za-z0-9_-]{1,36}$/');
+  }
+  return opts.clientOrderId;
+};
 
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
@@ -1295,6 +1312,8 @@ export class BybitInverseExchange extends BaseExchange {
       type = OrderType.Market;
     }
 
+    const clientOrderId = getRegularOrderClientOrderId(opts);
+
     const req = omitUndefined({
       category,
       symbol: opts.symbol,
@@ -1326,6 +1345,7 @@ export class BybitInverseExchange extends BaseExchange {
         opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
       closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
       positionIdx,
+      orderLinkId: clientOrderId,
       ...orderExecutionParams,
     });
 
@@ -1353,6 +1373,12 @@ export class BybitInverseExchange extends BaseExchange {
     });
 
     if (rest) payloads.push({ ...req, qty: `${rest}` });
+
+    if (clientOrderId && payloads.length !== 1) {
+      const msg = 'Bybit inverse clientOrderId is only supported when one safe-cex order creates one native order';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
 
     const responses = await mapSeries(payloads, async (p) => {
       try {

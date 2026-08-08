@@ -84,6 +84,7 @@ const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
+const BYBIT_CLIENT_ORDER_ID_RE = /^[A-Za-z0-9_-]{1,36}$/;
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
 
@@ -94,6 +95,22 @@ const isBybitLeverageNotModified = (data: Record<string, any>) => {
     retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE ||
     (retMsg.includes('leverage') && retMsg.includes('not modified'))
   );
+};
+
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!BYBIT_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
+    throw new Error('Bybit clientOrderId must match /^[A-Za-z0-9_-]{1,36}$/');
+  }
+  return opts.clientOrderId;
 };
 
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
@@ -1558,6 +1575,8 @@ export class BybitExchange extends BaseExchange {
       type = OrderType.Market;
     }
 
+    const clientOrderId = getRegularOrderClientOrderId(opts);
+
     const req = omitUndefined({
       category,
       symbol: opts.symbol,
@@ -1589,6 +1608,7 @@ export class BybitExchange extends BaseExchange {
         opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
       closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
       positionIdx,
+      orderLinkId: clientOrderId,
       ...orderExecutionParams,
     });
 
@@ -1606,6 +1626,12 @@ export class BybitExchange extends BaseExchange {
     });
 
     if (rest) payloads.push({ ...req, qty: `${rest}` });
+
+    if (clientOrderId && payloads.length !== 1) {
+      const msg = 'Bybit clientOrderId is only supported when one safe-cex order creates one native order';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
 
     const responses = await mapSeries(payloads, async (p) => {
       try {

@@ -329,6 +329,8 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 
 5. **Order size splitting** (`bybit.exchange.ts:1128-1141`): Orders exceeding `market.limits.amount.max` are split into multiple lots. Only the first lot carries TP/SL; subsequent lots have TP/SL stripped to avoid duplicates.
 
+   Plain single-payload limit/market orders use caller `clientOrderId` as Bybit `orderLinkId` when provided. Split orders and attached TP/SL brackets omit caller IDs; caller IDs on splits reject before any native request is sent.
+
 6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
 
 7. **Demo reconciliation**: After initial orders are loaded, successful create /
