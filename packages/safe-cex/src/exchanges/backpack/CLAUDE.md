@@ -292,6 +292,11 @@ Supported values: `RejectTaker`, `RejectMaker`, `RejectBoth`, `Allow`
 5. For limit orders with TP/SL: place main order, then separate TP/SL trigger orders sequentially
 6. For market orders with TP/SL: use attached `takeProfitTriggerPrice`/`stopLossTriggerPrice` params
 7. Returns array of order IDs
+8. Caller-supplied `PlaceOrderOpts.clientOrderId` maps to Backpack's numeric
+   `clientId` only for regular single-native `LIMIT`/`MARKET` orders. The
+   official body schema defines `clientId` as `uint32`, so safe-cex accepts only
+   decimal strings in the `0..4294967295` range and rejects arbitrary string
+   IDs before sending. Trigger and TP/SL/composite paths keep generated IDs.
 
 `placeOrders()` uses `POST /api/v1/orders` only for adjacent pairs of
 independently placeable ordinary LIMIT orders. Both rows must resolve to active,

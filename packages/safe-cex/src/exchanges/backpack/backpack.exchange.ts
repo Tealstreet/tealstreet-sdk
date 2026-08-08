@@ -967,6 +967,11 @@ export class BackpackExchange extends BaseExchange {
         orderRequest.reduceOnly = true;
       }
 
+      const callerClientId = this.getRegularClientId(opts, { isTriggerOrder, hasTPSL });
+      if (callerClientId !== undefined) {
+        orderRequest.clientId = callerClientId;
+      }
+
       // For limit orders with TP/SL, place separate orders instead of attached params
       // (attached TP/SL only works for orders that fill immediately like market orders)
       if (isLimitOrder && hasTPSL) {
@@ -1038,6 +1043,32 @@ export class BackpackExchange extends BaseExchange {
       this.log(`Error placing order: ${err}`, LogSeverity.Error);
       throw err;
     }
+  };
+
+  private getRegularClientId = (
+    opts: PlaceOrderOpts,
+    context: { isTriggerOrder: boolean; hasTPSL: boolean },
+  ): number | undefined => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return undefined;
+    if (context.isTriggerOrder || context.hasTPSL) return undefined;
+
+    const clientOrderId = opts.clientOrderId;
+    if (clientOrderId === undefined) return undefined;
+
+    if (!/^(0|[1-9]\d{0,9})$/.test(clientOrderId)) {
+      const message = 'Backpack clientOrderId must be a uint32 decimal string';
+      this.log(message, LogSeverity.Error);
+      throw new Error(message);
+    }
+
+    const clientId = Number(clientOrderId);
+    if (!Number.isInteger(clientId) || clientId < 0 || clientId > 0xffff_ffff) {
+      const message = 'Backpack clientOrderId must be a uint32 decimal string';
+      this.log(message, LogSeverity.Error);
+      throw new Error(message);
+    }
+
+    return clientId;
   };
 
   cancelOrder = async (order: Order): Promise<void> => {
