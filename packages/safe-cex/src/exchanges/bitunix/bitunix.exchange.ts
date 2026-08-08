@@ -1672,6 +1672,7 @@ export class BitunixExchange extends BaseExchange {
     try {
       await this.hydratePositionIdBeforeFormatting(opts);
       const payloads = this.formatCreateOrder(opts);
+      this.applyRegularClientOrderId(opts, payloads);
       return await this.placeOrderBatch(payloads);
     } catch (err: any) {
       const errMsg = err?.message || err?.response?.data?.msg || '';
@@ -1695,10 +1696,50 @@ export class BitunixExchange extends BaseExchange {
 
         // Retry — formatTPSLOrder will fall through to position.info.positionId
         const payloads = this.formatCreateOrder(opts);
+        this.applyRegularClientOrderId(opts, payloads);
         return await this.placeOrderBatch(payloads);
       }
       throw err;
     }
+  };
+
+  private getRegularClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+    const clientOrderId = opts.clientOrderId;
+    if (clientOrderId === undefined) return undefined;
+
+    if (clientOrderId.length === 0) {
+      const message = 'Bitunix clientId must be a non-empty string';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return clientOrderId;
+  };
+
+  private applyRegularClientOrderId = (opts: PlaceOrderOpts, payloads: Array<Record<string, any>>) => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return;
+    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined || opts.triggerPrice !== undefined) return;
+
+    const clientOrderId = this.getRegularClientOrderId(opts);
+    if (!clientOrderId) return;
+
+    if (payloads.length !== 1) {
+      const message = 'Bitunix clientId is supported only when one safe-cex order maps to one native order';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    const generatedClientId = payloads[0].clientId;
+    payloads[0].clientId = clientOrderId;
+
+    if (generatedClientId) {
+      this.orderTifCache.delete(generatedClientId);
+      this.orderReduceOnlyCache.delete(generatedClientId);
+    }
+    if (opts.timeInForce) {
+      this.orderTifCache.set(clientOrderId, opts.timeInForce);
+    }
+    this.orderReduceOnlyCache.set(clientOrderId, !!opts.reduceOnly);
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {

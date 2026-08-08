@@ -296,6 +296,13 @@ Position sides from API: `LONG`/`SHORT` or `BUY`/`SELL` (endpoint-dependent, han
 7. **Large orders**: Split into lots if `amount > maxSize`. Each lot is `lotSize`, remainder added as final payload.
 8. **Inline TP/SL**: Limit orders can carry `tpPrice`/`slPrice` parameters for bracket orders.
 9. **TIF caching**: Stores `clientId -> timeInForce` in `orderTifCache` for REST API workaround.
+10. Caller-supplied `PlaceOrderOpts.clientOrderId` replaces the generated
+    `clientId` only for regular single-native `LIMIT`/`MARKET` orders. Bitunix
+    documents `clientId` as an optional customized order ID on
+    `POST /api/v1/futures/trade/place_order` without a published length limit;
+    safe-cex requires a non-empty string and migrates TIF/reduce-only caches to
+    the caller ID. Regular split payloads reject to avoid duplicate IDs; inline
+    TP/SL and trigger paths keep generated IDs.
 
 ### TP/SL Order Placement (`formatTPSLOrder`)
 
