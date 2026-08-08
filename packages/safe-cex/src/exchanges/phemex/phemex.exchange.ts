@@ -59,6 +59,22 @@ import {
 import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
 
+const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+  if (opts.clientOrderId === undefined) return undefined;
+  if (
+    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+    opts.stopLoss ||
+    opts.takeProfit ||
+    opts.triggerPrice
+  ) {
+    return undefined;
+  }
+  if (!opts.clientOrderId || opts.clientOrderId.length > 40) {
+    throw new Error('Phemex clientOrderId must be 1-40 characters');
+  }
+  return opts.clientOrderId;
+};
+
 export class PhemexExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -1085,7 +1101,6 @@ export class PhemexExchange extends BaseExchange {
       : inverseObj(TIME_IN_FORCE)[OrderTimeInForce.GoodTillCancel];
 
     const req = omitUndefined({
-      clOrdID: `${BROKER_ID}_${uuid()}`,
       symbol: this.formatSymbolOut(opts.symbol),
       posSide: pSide,
       side: capitalize(inverseObj(ORDER_SIDE)[opts.side]),
@@ -1157,11 +1172,16 @@ export class PhemexExchange extends BaseExchange {
     //   });
     // }
 
-    // We need to set orderId for each order
-    // otherwise Binance will duplicate the IDs
-    // when its sent in batches
+    const clientOrderId = getRegularOrderClientOrderId(opts);
+
+    if (clientOrderId && payloads.length !== 1) {
+      const msg = 'Phemex clientOrderId is only supported when one safe-cex order creates one native order';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
     for (const payload of payloads) {
-      payload.clOrdID = `${BROKER_ID}_${uuid()}`;
+      payload.clOrdID = clientOrderId || `${BROKER_ID}_${uuid()}`;
     }
 
     return payloads;

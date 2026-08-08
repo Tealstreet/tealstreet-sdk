@@ -247,7 +247,8 @@ Defined in `ORDER_TYPE` mapping:
 2. For standard orders:
    - Resolves position side via `getOrderPositionSide()`
    - Splits into lots if amount exceeds `maxOrderQtyRq`
-   - Each lot gets a unique `clOrdID` (broker prefix + UUID)
+   - Plain single-payload limit/market orders use caller `clientOrderId` as `clOrdID` when provided
+   - Split orders and attached TP/SL brackets keep generated `clOrdID` values (broker prefix + UUID); caller IDs on splits reject
    - Stop/TP orders set `closeOnTrigger: 'true'`
    - Attached TP/SL use `stopLossRp` and `takeProfitRp` fields on the same order payload
 3. Each payload sent via PUT to `/g-orders/create`
