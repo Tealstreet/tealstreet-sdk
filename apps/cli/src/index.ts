@@ -18,6 +18,7 @@ import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
 import { fireCheckin } from './checkin';
 import { installStdoutGuard, isMcpInvocation } from './mcp/stdoutGuard';
+import { initCliSentry, captureCliError, flushCliSentry } from './sentry';
 
 // MCP stdio frames JSON-RPC over stdout, so nothing else may touch it. Detect
 // the mode from argv here — the noisy writers below run at module top level,
@@ -26,6 +27,10 @@ const RUNNING_AS_MCP = isMcpInvocation();
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+// Released binaries only, and opt-out via TEALSTREET_TELEMETRY=0. Must precede
+// the process-level handlers below so an early crash still has a client.
+initCliSentry();
 
 if (RUNNING_AS_MCP) installStdoutGuard();
 
@@ -39,13 +44,17 @@ fireCheckin();
 process.on('uncaughtException', (error: Error) => {
   logger.error(`Uncaught exception: ${error.message}`, error.stack);
   console.error(error.message);
-  process.exit(1);
+  captureCliError(error, { handler: 'uncaughtException' });
+  // Exit is deferred until the event is on the wire, else the crash we most
+  // want to see is the one that never gets reported.
+  void flushCliSentry().finally(() => process.exit(1));
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
   const message = reason instanceof Error ? reason.message : String(reason);
   const stack = reason instanceof Error ? reason.stack : undefined;
   logger.error(`Unhandled rejection: ${message}`, stack);
+  captureCliError(reason, { handler: 'unhandledRejection' });
   // Don't exit on unhandled rejection - let the app continue
   // The error will be logged and a clean message shown to user
 });
@@ -382,10 +391,10 @@ tasksCmd
         task.status === 'running'
           ? chalk.green
           : task.status === 'paused'
-            ? chalk.yellow
-            : task.status === 'completed'
-              ? chalk.blue
-              : chalk.red;
+          ? chalk.yellow
+          : task.status === 'completed'
+          ? chalk.blue
+          : chalk.red;
 
       console.log(`  ${chalk.bold(task.id.slice(0, 12))}...`);
       console.log(`    Type: ${task.type}`);
@@ -426,10 +435,10 @@ tasksCmd.action(async () => {
       task.status === 'running'
         ? chalk.green
         : task.status === 'paused'
-          ? chalk.yellow
-          : task.status === 'completed'
-            ? chalk.blue
-            : chalk.red;
+        ? chalk.yellow
+        : task.status === 'completed'
+        ? chalk.blue
+        : chalk.red;
 
     console.log(`  ${chalk.bold(task.id.slice(0, 12))}...  ${task.type}  ${statusColor(task.status)}`);
   }

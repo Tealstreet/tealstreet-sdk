@@ -18,7 +18,7 @@ Concrete pairings:
 | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd:exec` / `cmd:output` / `cmd:done` wire frames, `hello`/`welcome`, close codes, listener auth, `POST /hook/<id>` shape, kill-switch keys | [`cli/operations/listener.md`](../documentation/cli/operations/listener.md)                                                                                                                                                                    |
 | New / renamed / removed REPL command, new flag, new alias                                                                                    | [`cli/reference/commands.md`](../documentation/cli/reference/commands.md)                                                                                                                                                                      |
-| MCP server — tools, what `write_script` refuses, registration                                                                               | [`cli/reference/commands.md#mcp-server`](../documentation/cli/reference/commands.md#mcp-server)                                                                                                                                                |
+| MCP server — tools, what `write_script` refuses, registration                                                                                | [`cli/reference/commands.md#mcp-server`](../documentation/cli/reference/commands.md#mcp-server)                                                                                                                                                |
 | Logging behaviour — `console.*` routing, operational-noise suppression, severity taxonomy (`log-classify.ts`), `print`-above-prompt          | [`cli/reference/output.md`](../documentation/cli/reference/output.md) + the [Logging](#logging) section below                                                                                                                                  |
 | Output surfaces — top alert bar (`status-line.ts`), bottom footer (`footer.ts` / `footer-segments.ts`), scroll region (`scroll-region.ts`)   | [`cli/reference/output.md`](../documentation/cli/reference/output.md), [`commands.md#footer`](../documentation/cli/reference/commands.md#footer), [`config-files.md`](../documentation/cli/operations/config-files.md)                         |
 | Write-op audit log / command tracing — `audit` command, `runId` grouping, `[fill]` attribution, rotation                                     | [`commands.md#audit`](../documentation/cli/reference/commands.md#audit) + [`config-files.md`](../documentation/cli/operations/config-files.md)                                                                                                 |
@@ -119,6 +119,31 @@ src/
 **REPL mode** (default): Interactive terminal with readline. Watch modes (`wa`/`wp`/`wo`/`wm`) use alt screen + raw mode.
 
 **Listener mode** (passive, always-on by default): The loopback `Bun.serve` on `127.0.0.1:53219` is bound during REPL startup and torn down on REPL exit. Gated by `config.listener.enabled`. See [`operations/listener.md`](../documentation/cli/operations/listener.md).
+
+## Crash reporting (`src/sentry.ts`)
+
+Sentry project `tealstreet-cli`. **Gated on `TEALSTREET_CLI_VERSION` being
+defined**, which `scripts/build.sh` inlines via `--define` — so `bun run
+src/index.ts` never reports and only released binaries do. `TEALSTREET_TELEMETRY=0`
+opts out; `TEALSTREET_FORCE_SENTRY=1` forces it on for local verification.
+
+Load-bearing details:
+
+- **`uncaughtException` must flush before `process.exit`.** The handler in
+  `index.ts` awaits `flushCliSentry()` (2 s cap) before exiting — a bare
+  `process.exit(1)` drops the crash we most want to see.
+- **This binary runs on user machines against their own accounts**, so
+  `sendDefaultPii` is off, `server_name` is deleted, and the HTTP/fetch
+  integrations are filtered out (they would attach exchange request URLs).
+  `beforeSend`/`beforeBreadcrumb` redact key-shaped values (32+ chars of
+  unbroken base64/hex) and any sensitive-looking key name. Don't relax these
+  to "get better context" — the context is exchange API credentials.
+- Uses **`@sentry/bun`**, not `@sentry/node`. The runtime is Bun and the output
+  is a `bun build --compile` binary; `@sentry/node`'s OpenTelemetry
+  auto-instrumentation is not reliable there.
+- Same 2-per-5-minutes throttle as the web/mobile clients.
+
+User-facing doc: [`cli/operations/config-files.md`](../documentation/cli/operations/config-files.md) → "Crash reporting".
 
 ## Config Files
 
@@ -487,7 +512,7 @@ name}` footer segment auto-runs the named script ~1×/sec
   `scripts/generate-script-types-bundle.ts`, a monorepo-root script that
   is **not** in the `tealstreet-sdk` mirror slice. The block loads the
   generator via a Vite partial-dynamic specifier
-  (``import(`../../../scripts/${generatorName}.ts`)``): the glob matches
+  (`` import(`../../../scripts/${generatorName}.ts`) ``): the glob matches
   in the monorepo (gate runs, 0 skipped) and matches nothing in the mirror,
   where the dir is absent (import rejects → `describe.skipIf` skips). The
   template specifier also stops tsc binding the missing module, keeping the
