@@ -34,7 +34,7 @@ Raw contract size (`5`) instead of notional, with an explicit symbol
 override. Mix and match — size + range can each be absolute or relative.
 
 ```text
-scale sell $10000 into 25 from 50000 to 48500 reduce taker
+scale sell $10000 into 25 from 50000 to 48500 taker
 ```
 
 `taker` drops the default post-only TIF on every rung. Use this when you
@@ -59,9 +59,9 @@ fan-out.
 
 ## Gotchas
 
-- `cubic` and `icubic` are accepted by the parser as distribution modifiers,
-  but **distribution today is still even** — they're no-ops. Don't rely on
-  them for weighted ladders.
+- Distribution is linear-only. `cubic`, `icubic`, and other distribution
+  modifiers are not implemented; the parser rejects them with
+  `modifier '<x>' is not implemented; supported: reduce, taker`.
 - Default TIF is **post-only**. If any rung would cross the book at placement
   time the exchange rejects it. Add `taker` to drop post-only.
 - The ladder errors **before placing any order** if rounding would shrink any
