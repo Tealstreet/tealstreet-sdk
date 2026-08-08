@@ -20,9 +20,11 @@ const TIMEFRAME_BY_CANDLE_CHANNEL = Object.fromEntries(
   Object.entries(INTERVAL).map(([timeframe, interval]) => [`candle${interval}`, timeframe]),
 ) as Record<string, Timeframe>;
 
-const ORDER_CHANNELS = new Set(['orders', 'orders-algo', 'algo-advance']);
-// Single stats topic for all three; see the record call below.
-const ORDER_STATS_TOPIC = 'orders';
+export const ORDER_CHANNELS = new Set(['orders', 'orders-algo', 'algo-advance']);
+// Single stats topic for all three; see the record call below. Exported so the
+// routing regression test asserts the real key instead of a literal that can
+// drift away from it.
+export const ORDER_STATS_TOPIC = 'orders';
 
 export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   topics: SubscribedTopics = {};

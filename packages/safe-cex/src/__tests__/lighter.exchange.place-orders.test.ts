@@ -2,6 +2,10 @@ import type { ExchangeOptions } from '../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+  LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
+} from '../exchanges/lighter/lighter.builder-fee';
 import { LighterExchange } from '../exchanges/lighter/lighter.exchange';
 import { DefaultStore } from '../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../types';
@@ -314,8 +318,8 @@ describe('LighterExchange batched placeOrders', () => {
         amount: 100n,
         orderType: 'limit',
         integratorAccountIndex: 158385n,
-        integratorMakerFee: 300,
-        integratorTakerFee: 300,
+        integratorMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+        integratorTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
       }),
       expect.objectContaining({
         marketId: 1,
@@ -325,8 +329,8 @@ describe('LighterExchange batched placeOrders', () => {
         postOnly: true,
         orderType: 'limit',
         integratorAccountIndex: 158385n,
-        integratorMakerFee: 300,
-        integratorTakerFee: 300,
+        integratorMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+        integratorTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
       }),
     ]);
     expect(exchange.privateWebsocket.throttleFetchOrders).toHaveBeenCalledTimes(1);
