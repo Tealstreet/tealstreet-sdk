@@ -165,20 +165,34 @@ export async function checkBuilderFeeApproved(
       }),
     });
 
+    if (!response.ok) {
+      return { approved: false, error: `Hyperliquid returned ${response.status}` };
+    }
+
     const maxFeeRateRaw = await response.text();
     const feeValueTenthsBps = parseFloat(maxFeeRateRaw);
 
+    // An error page or an API shape change parses to NaN. Reporting that as
+    // "not approved" is indistinguishable from a genuine denial, which blocks
+    // already-approved users with no way to tell why.
+    if (isNaN(feeValueTenthsBps)) {
+      return { approved: false, error: 'Unexpected response from Hyperliquid' };
+    }
+
     // Convert from tenths of basis points to percentage string
     // e.g., 10 tenths of bps = 1 bps = 0.01%
-    const feePercentage = !isNaN(feeValueTenthsBps) ? (feeValueTenthsBps / 10 / 100).toFixed(2) + '%' : undefined;
+    const feePercentage = (feeValueTenthsBps / 10 / 100).toFixed(2) + '%';
 
     return {
-      approved: !isNaN(feeValueTenthsBps) && feeValueTenthsBps > 0,
+      approved: feeValueTenthsBps > 0,
       maxFeeRate: feePercentage,
     };
   } catch (error) {
     console.error('Failed to check builder fee approval:', error);
-    return { approved: false };
+    return {
+      approved: false,
+      error: error instanceof Error ? error.message : 'Failed to reach Hyperliquid',
+    };
   }
 }
 

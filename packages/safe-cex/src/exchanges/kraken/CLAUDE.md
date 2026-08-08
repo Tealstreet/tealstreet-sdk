@@ -1,7 +1,6 @@
 # Kraken Exchange Integrations
 
 This directory contains two separate Kraken exchange integrations:
-
 - **Kraken Futures** (`kraken.*`) — Perpetual futures on `futures.kraken.com`
 - **Kraken Spot** (`krakenspot.*`) — Spot trading on `api.kraken.com`
 
@@ -417,10 +416,6 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 
 6. **Cancel-and-recreate for TP/SL**: The `editorder` endpoint does not reliably work for stop and take-profit orders. The implementation always cancels and recreates them, preserving the original `triggerSignal` from normalized order state or the raw REST/WS payload. Kraken's exact wire values are `last`, `mark`, and `spot`; the internal `IndexPrice` enum represents Kraken's `spot` reference and must serialize back to `spot`, never `index`. Missing and newly introduced trigger values fail before cancellation so a protective order cannot silently change trigger semantics. If replacement placement fails after cancellation, the thrown error explicitly warns that the original protective order is already gone.
 
-6b. **`triggerSignal` must be surfaced as a typed field, not left in `info`**: the order mapping in `fetchOrders` sets `slTriggerType` / `tpTriggerType` from `parseTriggerSignal(triggerSignal)`. It previously only kept the raw value inside `info`, which `updateOrder` could dig out but the UI could not — so every Kraken stop rendered as a bare `Stop Loss` with no `[Last]` / `[Mark]` suffix, and the e2e stop-order test failed on `expected 'Stop Loss' to equal 'Stop Loss [Last]'`. Kraken publishes `triggerSignal` on **every** open stop/take-profit, so there is no reason to lose it.
-
-6c. **Post-only is NOT recoverable from `/openorders`**: an order placed with `orderType: 'post'` comes back as `"orderType":"lmt"` once resting, and the payload carries no post-only flag of any kind (fields are `order_id`, `cliOrdId`, `symbol`, `side`, `orderType`, `limitPrice`, `unfilledSize`, `receivedTime`, `status`, `filledSize`, `lastUpdateTime`, `reduceOnly`, plus `stopPrice`/`triggerSignal` on stops). The `typ === 'post'` branch that maps to `OrderTimeInForce.PostOnly` is therefore **dead for REST-sourced orders** — they all fall through to GTC. This is an exchange API limitation, not a parsing bug; don't "fix" it by inventing a flag. Any post-only provenance would have to be tracked locally against `cliOrdId`.
-
 7. **Margin type detection via `maxFixedLeverage`**: If the `maxFixedLeverage` field exists on a position, it is Isolated margin. If undefined, it is Cross margin. This is cached in `marginTypePreferences` Map.
 
 8. **Cross margin leverage**: In cross margin mode, `supportsMaxCrossLeverage: false` means the leverage slider is hidden. Leverage defaults to `market.limits.leverage.max` for cross positions.
@@ -540,32 +535,32 @@ backlog. Run the relevant subset before enabling or releasing Kraken Futures.
 
 ## File Structure
 
-| File                       | Purpose                                                           |
-| -------------------------- | ----------------------------------------------------------------- |
-| `krakenspot.api.ts`        | REST API client with Spot HMAC-SHA512 auth                        |
-| `krakenspot.exchange.ts`   | Main exchange class extending `BaseExchange`                      |
-| `krakenspot.types.ts`      | Endpoint constants, URL definitions, type mappings, asset aliases |
-| `krakenspot.ws-private.ts` | Private WebSocket v2: token auth, executions, balances            |
-| `krakenspot.ws-public.ts`  | Public WebSocket v2: ticker, orderbook, OHLC                      |
+| File                          | Purpose                                                            |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `krakenspot.api.ts`           | REST API client with Spot HMAC-SHA512 auth                         |
+| `krakenspot.exchange.ts`      | Main exchange class extending `BaseExchange`                       |
+| `krakenspot.types.ts`         | Endpoint constants, URL definitions, type mappings, asset aliases  |
+| `krakenspot.ws-private.ts`    | Private WebSocket v2: token auth, executions, balances             |
+| `krakenspot.ws-public.ts`     | Public WebSocket v2: ticker, orderbook, OHLC                      |
 
 ## Key Differences from Kraken Futures
 
-| Aspect            | Kraken Futures (`kraken`)                   | Kraken Spot (`krakenspot`)                     |
-| ----------------- | ------------------------------------------- | ---------------------------------------------- |
-| Base URL          | `futures.kraken.com/derivatives/api`        | `api.kraken.com`                               |
-| WS Protocol       | v1 event-based                              | v2 method/params JSON                          |
-| WS Public URL     | `wss://futures.kraken.com/ws/v1`            | `wss://ws.kraken.com/v2`                       |
-| WS Private URL    | Same as public                              | `wss://ws-auth.kraken.com/v2`                  |
-| WS Auth           | Challenge/response signing                  | Token-based (REST `GetWebSocketsToken`)        |
-| REST Auth Header  | `APIKey` + `Authent` + `Nonce`              | `API-Key` + `API-Sign`                         |
-| REST Auth Signing | `SHA256(postData + nonce + '/api/' + path)` | `SHA256(nonce + postBody)` then HMAC with path |
-| Symbol Format     | `PF_BTCUSD`                                 | `BTC/USD` (wsname)                             |
-| Positions         | Real perpetual positions                    | Fake zero-entries (spot has no positions)      |
-| Leverage          | 1x-100x                                     | 1x only                                        |
-| Funding Rate      | Yes (`relative_funding_rate`)               | No                                             |
-| Mark/Index Price  | From exchange                               | Uses last trade price                          |
-| OHLC via WS       | Not supported (REST polling)                | Supported via WS v2 `ohlc` channel             |
-| Error Format      | `{ result: "error", error: "..." }`         | `{ error: ["EAPI:...", ...], result: {} }`     |
+| Aspect              | Kraken Futures (`kraken`)                    | Kraken Spot (`krakenspot`)                    |
+| ------------------- | -------------------------------------------- | --------------------------------------------- |
+| Base URL            | `futures.kraken.com/derivatives/api`         | `api.kraken.com`                              |
+| WS Protocol         | v1 event-based                               | v2 method/params JSON                         |
+| WS Public URL       | `wss://futures.kraken.com/ws/v1`             | `wss://ws.kraken.com/v2`                      |
+| WS Private URL      | Same as public                               | `wss://ws-auth.kraken.com/v2`                 |
+| WS Auth             | Challenge/response signing                   | Token-based (REST `GetWebSocketsToken`)       |
+| REST Auth Header    | `APIKey` + `Authent` + `Nonce`               | `API-Key` + `API-Sign`                        |
+| REST Auth Signing   | `SHA256(postData + nonce + '/api/' + path)`  | `SHA256(nonce + postBody)` then HMAC with path|
+| Symbol Format       | `PF_BTCUSD`                                  | `BTC/USD` (wsname)                            |
+| Positions           | Real perpetual positions                     | Fake zero-entries (spot has no positions)      |
+| Leverage            | 1x-100x                                      | 1x only                                       |
+| Funding Rate        | Yes (`relative_funding_rate`)                | No                                            |
+| Mark/Index Price    | From exchange                                | Uses last trade price                         |
+| OHLC via WS         | Not supported (REST polling)                 | Supported via WS v2 `ohlc` channel            |
+| Error Format        | `{ result: "error", error: "..." }`          | `{ error: ["EAPI:...", ...], result: {} }`    |
 
 ## Authentication
 
@@ -593,18 +588,18 @@ Token-based auth flow:
 
 ## REST API Endpoints
 
-| Constant       | Path                            | Method | Auth | Purpose                |
-| -------------- | ------------------------------- | ------ | ---- | ---------------------- |
-| `ASSET_PAIRS`  | `/0/public/AssetPairs`          | GET    | No   | Tradeable pairs        |
-| `TICKER`       | `/0/public/Ticker`              | GET    | No   | Ticker data            |
-| `OHLC`         | `/0/public/OHLC`                | GET    | No   | Candlestick data       |
-| `ORDERBOOK`    | `/0/public/Depth`               | GET    | No   | Orderbook snapshot     |
-| `BALANCE`      | `/0/private/Balance`            | POST   | Yes  | Account balances       |
-| `OPEN_ORDERS`  | `/0/private/OpenOrders`         | POST   | Yes  | Open orders            |
-| `ADD_ORDER`    | `/0/private/AddOrder`           | POST   | Yes  | Place order            |
-| `AMEND_ORDER`  | `/0/private/AmendOrder`         | POST   | Yes  | Atomically amend order |
-| `CANCEL_ORDER` | `/0/private/CancelOrder`        | POST   | Yes  | Cancel order           |
-| `WS_TOKEN`     | `/0/private/GetWebSocketsToken` | POST   | Yes  | WebSocket auth token   |
+| Constant          | Path                             | Method | Auth | Purpose               |
+| ----------------- | -------------------------------- | ------ | ---- | --------------------- |
+| `ASSET_PAIRS`     | `/0/public/AssetPairs`           | GET    | No   | Tradeable pairs       |
+| `TICKER`          | `/0/public/Ticker`               | GET    | No   | Ticker data           |
+| `OHLC`            | `/0/public/OHLC`                 | GET    | No   | Candlestick data      |
+| `ORDERBOOK`       | `/0/public/Depth`                | GET    | No   | Orderbook snapshot    |
+| `BALANCE`         | `/0/private/Balance`             | POST   | Yes  | Account balances      |
+| `OPEN_ORDERS`     | `/0/private/OpenOrders`          | POST   | Yes  | Open orders           |
+| `ADD_ORDER`       | `/0/private/AddOrder`            | POST   | Yes  | Place order           |
+| `AMEND_ORDER`     | `/0/private/AmendOrder`          | POST   | Yes  | Atomically amend order |
+| `CANCEL_ORDER`    | `/0/private/CancelOrder`         | POST   | Yes  | Cancel order          |
+| `WS_TOKEN`        | `/0/private/GetWebSocketsToken`  | POST   | Yes  | WebSocket auth token  |
 
 ## WebSocket v2 Channels
 
@@ -632,7 +627,6 @@ Unsupported UI intervals use the nearest lower supported Kraken interval. In par
 ## Asset Name Normalization
 
 Kraken uses non-standard asset codes. The `normalizeAsset()` function in `krakenspot.types.ts` handles:
-
 - `XBT` / `XXBT` -> `BTC`
 - `XETH` -> `ETH`
 - `ZUSD` -> `USD`
@@ -656,7 +650,6 @@ Kraken uses non-standard asset codes. The `normalizeAsset()` function in `kraken
 Kraken Spot returns errors as arrays: `{ error: ["EAPI:Invalid key", ...], result: {} }`
 
 Common error codes:
-
 - `EAPI:Invalid key` — Invalid API key
 - `EAPI:Invalid nonce` — Nonce too low (clock sync issue)
 - `EAPI:Invalid signature` — Wrong API secret
