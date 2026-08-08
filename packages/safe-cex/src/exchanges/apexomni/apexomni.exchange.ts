@@ -120,6 +120,12 @@ const APEX_WS_EXECUTION_CACHE_LIMIT = 500;
 const textEncoder = new TextEncoder();
 const hashClientOrderId = (clientOrderId: string): Uint8Array => sha256(textEncoder.encode(clientOrderId));
 
+const isApexRegularClientOrderPath = (opts: PlaceOrderOpts) =>
+  (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+  opts.triggerPrice === undefined &&
+  opts.stopLoss === undefined &&
+  opts.takeProfit === undefined;
+
 export class ApexOmniExchange extends BaseExchange {
   // Rate-limited xhr (5 RPS) for non-critical operations like balance/positions polling
   xhr: Axios;
@@ -1211,6 +1217,19 @@ export class ApexOmniExchange extends BaseExchange {
       this.emitAndLogError(message);
       throw new Error(message);
     }
+    const useCallerClientOrderId = isApexRegularClientOrderPath(opts) && opts.clientOrderId !== undefined;
+    if (useCallerClientOrderId) {
+      if (opts.clientOrderId!.length === 0) {
+        const message = 'ApeX Omni clientOrderId must be a non-empty string';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      if (amount > maxSize) {
+        const message = 'ApeX Omni clientOrderId cannot be reused across split native order payloads';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+    }
 
     await initSdk();
 
@@ -1285,7 +1304,9 @@ export class ApexOmniExchange extends BaseExchange {
     if (rest) payloads.push({ ...req, size: `${rest}` });
 
     const responses = await mapSeries(payloads, async (p, index) => {
-      const clientOrderId = generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
+      const clientOrderId = useCallerClientOrderId
+        ? opts.clientOrderId!
+        : generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
       const expirationIsoTimestamp = (virtualClock.getCurrentTimeMs() + 30 * 24 * 60 * 60 * 1000) as any;
 
       // if (!this.store.starkConfig) {

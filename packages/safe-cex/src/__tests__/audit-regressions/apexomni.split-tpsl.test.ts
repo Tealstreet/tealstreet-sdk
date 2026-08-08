@@ -190,4 +190,70 @@ describe('Apex Omni order placement regressions', () => {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' } },
     );
   });
+
+  it('uses a caller-provided clientOrderId for one native regular order and signs that ID', async () => {
+    const { exchange, post } = createBracketExchange();
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+        clientOrderId: 'caller-client-id',
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    const params = Object.fromEntries(new URLSearchParams(post.mock.calls[0][1]));
+    expect(params.clientId).toBe('caller-client-id');
+    expect(params.clientOrderId).toBe('caller-client-id');
+    const signedPayload = signContractMock.mock.calls[0][1];
+    expect(signedPayload.nonce).toBeGreaterThanOrEqual(0);
+    expect(signedPayload.slotId).toBeGreaterThanOrEqual(0);
+  });
+
+  it('rejects caller IDs when one safe-cex order would split into multiple native ApeX payloads', async () => {
+    const { exchange, post } = createBracketExchange();
+    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 20,
+        price: 100,
+        clientOrderId: 'caller-client-id',
+      }),
+    ).rejects.toThrow('ApeX Omni clientOrderId cannot be reused across split native order payloads');
+
+    expect(emitError).toHaveBeenCalledWith(
+      'ApeX Omni clientOrderId cannot be reused across split native order payloads',
+    );
+    expect(initSdkMock).not.toHaveBeenCalled();
+    expect(signContractMock).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty caller clientOrderId before signing or writing', async () => {
+    const { exchange, post } = createBracketExchange();
+    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+        clientOrderId: '',
+      }),
+    ).rejects.toThrow('ApeX Omni clientOrderId must be a non-empty string');
+
+    expect(emitError).toHaveBeenCalledWith('ApeX Omni clientOrderId must be a non-empty string');
+    expect(initSdkMock).not.toHaveBeenCalled();
+    expect(signContractMock).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
 });

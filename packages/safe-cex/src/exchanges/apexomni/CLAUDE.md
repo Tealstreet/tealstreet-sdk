@@ -367,7 +367,7 @@ Where `UINT32_MAX = '4294967295'` and `UINT64_MAX = '18446744073709551615'`.
 5. Build the request with the canonical `BROKER_ID` (`'6587'`).
 6. **Order splitting**: If amount exceeds `maxOrderSize`, split into lots. Only the first lot includes TP/SL. Rest amount (modulo) goes in a final lot.
 7. For each lot (sequential via `mapSeries`):
-   - Generate client order ID.
+   - Generate client order ID, unless a regular single-native limit/market order provides `clientOrderId`; then use the caller value as both ApeX `clientId` and `clientOrderId`. Empty caller IDs and split payloads reject before SDK signing.
    - Compute expiration: 30 days from now + 1-week buffer for on-chain validity.
    - Look up `l2PairId` from contract config.
    - Calculate `limitFee`.
