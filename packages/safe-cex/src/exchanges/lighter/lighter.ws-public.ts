@@ -227,7 +227,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     const closeCode = Number.isFinite(closeCodeValue) ? closeCodeValue : undefined;
     // This override does not delegate to the base onClose, so the shared close
     // diagnostics have to be recorded explicitly.
-    this.recordCloseDiagnostics(closeCode);
+    this.recordCloseDiagnostics(closeCode, { syntheticIfNoSocket: true });
     const closeReason = typeof event?.reason === 'string' ? event.reason : '';
     const now = virtualClock.getCurrentTimeMs();
     const timeSinceConnect = this.connectStartedAt > 0 ? now - this.connectStartedAt : Number.POSITIVE_INFINITY;

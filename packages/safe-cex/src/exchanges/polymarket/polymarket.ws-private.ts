@@ -154,7 +154,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
 
   onClose = () => {
     // No close event is available on this path, so only the count is durable.
-    this.recordCloseDiagnostics();
+    this.recordCloseDiagnostics(undefined, { syntheticIfNoSocket: true });
     this.parent.log('Polymarket private WebSocket closed', LogSeverity.Warning);
     this.clearPingInterval();
     this.ws = undefined;
