@@ -242,21 +242,21 @@ tuple. Public order books use `books.{instId}`; business candle wire channels
 their exact `arg.channel`. Handler stats are updated only when that exact key
 has callbacks; payload fields outside `arg` never influence dispatch.
 
-**Known open issue — order channels go stale after flattening.** `orders`,
-`orders-algo` and `algo-advance` record handler stats like any other channel,
-but OKX only pushes an order channel for a category the account actually holds
-orders in. Flatten that category and the channel stops, leaving a stats entry
-that ages indefinitely: measured at 1199s on `algo-advance` while every other
-feed on the same socket stayed 1s fresh. That marks the account delayed in the
-reconnect banner and, past the error threshold, feeds `requestReload` in
-`exchangeAccountController`.
+**Order channels record ONE collapsed stats topic, `orders`.** `orders`,
+`orders-algo` and `algo-advance` all record under that single key. OKX pushes an
+order channel only for a category the account currently holds orders in, so
+tracking them separately produced up to three entries that went quiet
+independently as categories emptied — `algo-advance` was measured at 1199s while
+every other feed on the same socket stayed 1s fresh, which marked the account
+delayed in the reconnect banner and, past the error threshold, fed
+`requestReload` in `exchangeAccountController`.
 
-Do NOT "fix" this by dropping these channels from `messageHandlerStats` — that
-is a subscription-completeness check, and silencing it would permanently hide a
-failed order subscribe. See `../CLAUDE.md` → "`messageHandlerStats` checks
-SUBSCRIPTIONS, not the connection". The fix has to make the expectation
-conditional on the account holding orders in that category, or clear the entry
-via `cleanupMessageHandlerStats` when it empties.
+The other half of the fix is in the client: `getGroupedMessageTopicStats` skips
+staleness for order topics when the account holds no open orders, since
+flattening is what stops the traffic. Do NOT instead stop recording these
+channels — that is a subscription-completeness check and silencing it would hide
+a failed order subscribe permanently. See `../CLAUDE.md` → "`messageHandlerStats`
+checks SUBSCRIPTIONS, not the connection".
 
 ### Private WebSocket Channels (`okx.ws-private.ts`)
 
