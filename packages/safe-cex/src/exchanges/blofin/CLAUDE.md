@@ -344,6 +344,12 @@ Controlled by `USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY` flag (currently `false`, 
 - Distributes evenly with remainder as a final partial lot
 - Each split gets its own `clientOrderId`
 - When TP/SL is requested, payload includes both legacy top-level trigger fields (`slTriggerPrice` / `tpTriggerPrice`) and an `attachAlgoOrders` compatibility object so BloFin schema variants keep attached protection.
+- Caller-supplied `PlaceOrderOpts.clientOrderId` is honored only for regular
+  single-native `LIMIT`/`MARKET` orders, replacing the generated
+  `clientOrderId` after split checks. BloFin documents 1-32 case-sensitive
+  alphanumeric characters for `POST /api/v1/trade/order`; regular split
+  payloads reject instead of duplicating the caller ID. TP/SL and trigger paths
+  keep generated IDs.
 
 ### Combined TP/SL for Position Orders
 

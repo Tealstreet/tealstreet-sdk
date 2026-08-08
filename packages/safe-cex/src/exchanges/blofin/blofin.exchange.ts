@@ -1222,6 +1222,7 @@ export class BlofinExchange extends BaseExchange {
     }
 
     const payloads = await this.formatNormalOrder(opts);
+    this.applyRegularClientOrderId(opts, payloads);
 
     if (payloads.some((o) => parseFloat(o.size) === 0)) {
       this.emitAndLogError(`Order amount is too small`);
@@ -1229,6 +1230,35 @@ export class BlofinExchange extends BaseExchange {
     }
 
     return await this.placeOrderBatch(payloads);
+  };
+
+  private getRegularClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+    const clientOrderId = opts.clientOrderId;
+    if (clientOrderId === undefined) return undefined;
+
+    if (!/^[A-Za-z0-9]{1,32}$/.test(clientOrderId)) {
+      const message = 'BloFin clientOrderId must be 1-32 alphanumeric characters';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return clientOrderId;
+  };
+
+  private applyRegularClientOrderId = (opts: PlaceOrderOpts, payloads: Array<Record<string, any>>) => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return;
+    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined || opts.triggerPrice !== undefined) return;
+
+    const clientOrderId = this.getRegularClientOrderId(opts);
+    if (!clientOrderId) return;
+
+    if (payloads.length !== 1) {
+      const message = 'BloFin clientOrderId is supported only when one safe-cex order maps to one native order';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    payloads[0].clientOrderId = clientOrderId;
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
