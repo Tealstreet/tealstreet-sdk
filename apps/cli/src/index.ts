@@ -17,6 +17,7 @@ import {
 import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
 import { fireCheckin } from './checkin';
+import { login, logout, showAuthStatus } from './auth';
 import { installStdoutGuard, isMcpInvocation } from './mcp/stdoutGuard';
 import { initCliSentry, captureCliError, flushCliSentry } from './sentry';
 
@@ -114,6 +115,30 @@ program
   .option('--update', 'Update CLI to the latest version')
   .option('--check-update', 'Check for updates without installing')
   .option('--disable-all', 'Start with all exchanges disabled (skip auto-connecting)');
+
+// ============ Auth Commands ============
+// Same names the REPL uses (repl.ts processSingleCommand), so the instruction
+// "Run \"login\" first" — which the proxy/tunnel path prints on failure — works
+// whether the reader types it in the REPL or the shell. Without these,
+// `tealstreet login` exits with "unknown command 'login'".
+program
+  .command('login')
+  .description('Authenticate with Tealstreet (required for proxy/tunnel routing)')
+  .action(async () => {
+    const ok = await login();
+    process.exit(ok ? 0 : 1);
+  });
+
+program
+  .command('logout')
+  .description('Clear the stored Tealstreet auth token')
+  .action(() => logout());
+
+program
+  .command('auth')
+  .alias('whoami')
+  .description('Show authentication status')
+  .action(() => showAuthStatus());
 
 // ============ Account Commands ============
 const accountCmd = program.command('account').alias('accounts').description('Manage accounts');

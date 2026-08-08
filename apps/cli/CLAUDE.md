@@ -163,6 +163,18 @@ All in `~/.tealstreet/`:
 - `cli.log` — Log file (cleared on startup)
 - `market-data.db` — SQLite for market data snapshots
 
+### `login` / `logout` / `auth` exist as subcommands AND REPL commands
+
+They were REPL-only (`repl.ts` `processSingleCommand`), so `tealstreet login`
+exited with `unknown command 'login'` — while the proxy/tunnel failure path prints
+exactly `Tealstreet proxy/tunnel requires authentication. Run "login" first.`
+That instruction is unqualified, so a reader naturally tries it in the shell.
+Both surfaces now accept the same three names; keep them in sync if either moves.
+
+`auth` (alias `whoami`) is the fast way to distinguish "never logged in" from
+"token expired" — the proxy rejects both identically, but the second reports
+`Logged in … Token expires in: 0 days`.
+
 ### `account add` must be able to set routing
 
 `platform-adapter.ts` has always honored `tealstreetProxy` / `tealstreetTunnel` /

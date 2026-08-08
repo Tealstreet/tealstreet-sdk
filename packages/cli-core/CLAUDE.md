@@ -208,6 +208,33 @@ reference at `apps/documentation/cli/reference/commands.md` in the same commit.
   bodies splice back into the chain" describe blocks in
   `preprocessIntegration.test.ts`.
 
+## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
+
+`TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide
+the base amount by `market.contractSize` via `baseToNativeContracts`. Both
+handled **inverse** contracts from the start, and both assumed every _linear_
+venue uses 1 contract = 1 base coin. That is true for bitmex / bybit / bitget —
+and false for **OKX**, whose linear swaps publish a real `ctVal`:
+
+```
+DOGE-USDT-SWAP   ctVal 1000 DOGE   $10 → 142.86 base → sent as 142.86 contracts = $10,000
+BTC-USDT-SWAP    ctVal 0.01 BTC    0.0001 base → adjust(_, lotSz 0.01) → 0 → rejected
+```
+
+One bug, opposite symptoms depending on which side of 1 `ctVal` falls: an order
+1000× too large (rejected `51008 Insufficient USDT margin` — on a _healthy_
+account) or one that rounds to zero (`must be finite and positive after
+adjustment`, which is why sub-lot positions could not be closed).
+
+**This function is shared by three runtimes** — the terminal CLI, the **web CLI**
+(`apps/web/src/components/cli/CLI.tsx` imports `cli-core` and runs it in the
+browser), and the worker command executor. It is not CLI-only.
+
+`apps/web/src/order/createMarketOrder.ts` does its own equivalent division, which
+is why the web **order form** was never affected. Don't "unify" by adding the
+conversion inside an exchange's `placeOrder` — the web order path would then
+double-convert. `BuyCommand.test.ts` now covers both linear ctVal directions.
+
 ## Token detection gotcha — `validateSymbols` rejects size-shaped strings
 
 `TradingBaseCommand.transformSymbol` does fuzzy base-prefix matching:
