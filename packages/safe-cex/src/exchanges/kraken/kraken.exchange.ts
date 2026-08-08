@@ -365,6 +365,15 @@ export class KrakenExchange extends BaseExchange {
             (o as any).lastUpdateTime || (o as any).lastUpdateTimestamp || new Date().toISOString(),
           ),
           remaining: parseFloat((o as any).unfilledSize ?? 0),
+          // Kraken publishes triggerSignal on every open stop/take-profit. Surface it
+          // as a typed field, not just inside `info` — the UI reads the typed fields,
+          // so without this a stop renders as bare "Stop Loss" with no trigger suffix.
+          ...(orderType === OrderType.StopLoss && {
+            slTriggerType: parseTriggerSignal((o as any).triggerSignal),
+          }),
+          ...((orderType === OrderType.TakeProfit || orderType === OrderType.TrailingStopLoss) && {
+            tpTriggerType: parseTriggerSignal((o as any).triggerSignal),
+          }),
           info: o,
           timeInForce: tif,
         } as Order;
@@ -530,8 +539,8 @@ export class KrakenExchange extends BaseExchange {
       if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
         const originalTriggerType =
           order.type === OrderType.StopLoss
-            ? order.slTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal'))
-            : order.tpTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal'));
+            ? (order.slTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal')))
+            : (order.tpTriggerType ?? parseTriggerSignal(v(order.info, 'triggerSignal')));
 
         // Kraken publishes triggerSignal for every open stop/take-profit
         // order. If it is absent or a newly introduced enum value, changing
