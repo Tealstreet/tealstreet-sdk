@@ -258,6 +258,30 @@ channels — that is a subscription-completeness check and silencing it would hi
 a failed order subscribe permanently. See `../CLAUDE.md` → "`messageHandlerStats`
 checks SUBSCRIPTIONS, not the connection".
 
+**The two halves must be deployed together, and only one of them ships with the
+client.** The client half is a substring test — `isOrderEventTopic` matches
+`'order'` and excludes `'book'` — run against a topic key it did not create.
+`messageHandlerStats` is part of the serialized store (`store/store.base.ts`), so
+for any venue the client cannot reach directly the keys are produced by whichever
+build runs the socket. OKX is `requiresCors: true`, so that is the
+exchange-server.
+
+`algo-advance` does not contain the substring `order`. So a client carrying the
+gate, talking to an exchange-server that predates the collapse, reads a key the
+gate cannot match and warns exactly as before — with the fix visibly present in
+source, present in the bundle, and doing nothing. There is no error and no log
+line; the only symptom is the banner you were trying to remove. Observed
+2026-08-08: the fix landed at 08:20, a mobile bundle rebuilt from it at 13:40
+still showed `algo-advance` as the warned topic at 13:47, and current safe-cex
+has no code path that can produce that key. The exchange-server had not been
+redeployed. Redeploying it is the expected remedy; that had not yet been
+confirmed when this was written.
+
+If this ever recurs, check the deployed exchange-server build before re-reading
+the client code. Do not "fix" it by broadening the substring match to catch
+`algo-*` — that hides the version skew instead of surfacing it, and the skew
+affects every other collapsed-topic gate the same way.
+
 ### Private WebSocket Channels (`okx.ws-private.ts`)
 
 Subscribed after successful login:

@@ -134,20 +134,6 @@ All in `~/.tealstreet/`:
 - `cli.log` — Log file (cleared on startup)
 - `market-data.db` — SQLite for market data snapshots
 
-### `account add` must be able to set routing
-
-`platform-adapter.ts` has always honored `tealstreetProxy` / `tealstreetTunnel` /
-`proxyRegion` on a saved account (it forwards them through
-`normalizeExchangeAccountConfig`), but `account add` had **no flags to set them** —
-so every CLI-added account was written with routing off and egressed **direct**.
-For an IP-whitelisted key that is an immediate rejection (`OKX 50110 invalid IP`,
-`Binance 401 … request ip: …`), and the symptom looks like a bad key rather than a
-routing gap. `--tealstreet-proxy`, `--tealstreet-tunnel` and `--proxy-region` close
-that. Any future account-creation surface must expose the same fields.
-
-Note the proxy/tunnel path then requires `login` — an account can be added
-non-interactively but not _used_ through the proxy until the OAuth flow has run.
-
 ## Auth Flow
 
 1. CLI opens browser → `{web}/cli-login?callback=http://localhost:9876/callback`
