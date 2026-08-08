@@ -478,6 +478,54 @@ describe('BuyCommand', () => {
       expect(order.amount).toBe(10);
     });
 
+    it('end-to-end: LINEAR with `contractSize=1000` (OKX DOGE-USDT-SWAP)', async () => {
+      // Linear is not always 1 contract = 1 base coin. OKX publishes a real
+      // ctVal on its linear swaps, so the base amount must still be divided by
+      // contractSize. Sending the raw base amount made a $10 order a $10,000
+      // one, which OKX rejected as "Insufficient USDT margin (51008)".
+      const exchange = createMockExchange();
+      exchange.store!.markets = [
+        {
+          symbol: 'DOGEUSDT',
+          base: 'DOGE',
+          quote: 'USDT',
+          precision: { amount: 0.01, price: 0.00001 },
+          isInverse: false,
+          contractSize: 1000,
+        } as never,
+      ];
+      exchange.store!.tickers = [{ symbol: 'DOGEUSDT', last: 0.07 } as never];
+      const ctx = createMockContext(['buy', '10$'], exchange, 'DOGEUSDT');
+      await command.execute(ctx);
+      const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      // $10 / $0.07 = 142.857 DOGE, / 1000 DOGE per contract = 0.142857,
+      // adjusted to the 0.01 lot size = 0.14 contracts (~$9.80 notional).
+      expect(order.amount).toBeCloseTo(0.14, 5);
+    });
+
+    it('end-to-end: LINEAR with `contractSize=0.01` (OKX BTC-USDT-SWAP)', async () => {
+      // The same bug in the other direction: a ctVal below 1 makes the base
+      // amount smaller than the lot size, so it adjusts to zero and the order
+      // is rejected as "must be finite and positive after adjustment".
+      const exchange = createMockExchange();
+      exchange.store!.markets = [
+        {
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          precision: { amount: 0.01, price: 0.1 },
+          isInverse: false,
+          contractSize: 0.01,
+        } as never,
+      ];
+      exchange.store!.tickers = [{ symbol: 'BTCUSDT', last: 65_000 } as never];
+      const ctx = createMockContext(['buy', '650$'], exchange, 'BTCUSDT');
+      await command.execute(ctx);
+      const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      // $650 / $65,000 = 0.01 BTC, / 0.01 BTC per contract = 1 contract.
+      expect(order.amount).toBeCloseTo(1, 5);
+    });
+
     it('end-to-end: `buy 10%bal` on inverse uses notional-as-contracts', async () => {
       const exchange = createMockExchange();
       exchange.store!.markets = [
