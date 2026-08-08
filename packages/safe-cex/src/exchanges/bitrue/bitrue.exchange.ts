@@ -1157,6 +1157,7 @@ export class BitrueExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     const payloads = this.formatCreateOrder(opts);
+    this.applyRegularClientOrderId(opts, payloads);
     const res = await this.placeOrderBatch(payloads);
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit || opts.stopLoss || opts.takeProfit) {
       await (this as any as BaseExchange).callMethodInWorker('fetchAndSetOrders', [opts.symbol]);
@@ -1164,6 +1165,35 @@ export class BitrueExchange extends BaseExchange {
       return [];
     }
     return res;
+  };
+
+  private getRegularClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+    const clientOrderId = opts.clientOrderId;
+    if (clientOrderId === undefined) return undefined;
+
+    if (clientOrderId.length === 0 || clientOrderId.length >= 32) {
+      const message = 'Bitrue clientOrderId must be a non-empty string shorter than 32 characters';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return clientOrderId;
+  };
+
+  private applyRegularClientOrderId = (opts: PlaceOrderOpts, payloads: Array<Record<string, any>>) => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return;
+    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined || opts.triggerPrice !== undefined) return;
+
+    const clientOrderId = this.getRegularClientOrderId(opts);
+    if (!clientOrderId) return;
+
+    if (payloads.length !== 1) {
+      const message = 'Bitrue clientOrderId is supported only when one safe-cex order maps to one native order';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    payloads[0].clientOrderId = clientOrderId;
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {

@@ -274,6 +274,12 @@ If order amount exceeds `market.limits.amount.max`:
 1. Format order(s) via `formatCreateOrder()` (may produce multiple payloads for large orders or attached TP/SL)
 2. Execute via `placeOrderBatch()` which chunks payloads into groups of 5, placing each chunk in parallel
 3. **Special handling for TP/SL orders**: Returns `[]` and triggers `callMethodInWorker('fetchAndSetOrders')` because stop orders return incorrect IDs from the placement API
+4. Caller-supplied `PlaceOrderOpts.clientOrderId` is sent only for regular
+   single-native `LIMIT`/`MARKET` payloads. Bitrue documents optional
+   `clientOrderId` on `POST /fapi/v2/order` as shorter than 32 characters;
+   safe-cex requires a non-empty string with `length < 32`. Regular split
+   payloads reject to avoid duplicate IDs; attached TP/SL and trigger paths keep
+   generated IDs.
 
 ### Order Batch Execution (`placeOrderBatch`, `bitrue.exchange.ts:942-964`)
 
