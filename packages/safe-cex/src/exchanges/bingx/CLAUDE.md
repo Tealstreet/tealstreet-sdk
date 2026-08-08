@@ -324,6 +324,12 @@ Implementation behavior:
    character limit and avoids collisions after BingX lowercases the field.
 5. **All orders are placed sequentially** via `placeOrderBatch()`, sending one at a time to `ENDPOINTS.ORDER`
 6. Attached TP/SL orders (`opts.stopLoss`, `opts.takeProfit`) are added as additional payloads using `TRIGGER_MARKET` type (since position likely isn't open yet). Standalone, attached, and trailing trigger payloads do not receive `clientOrderId`; the current primary reference limits it to `MARKET`/`LIMIT`.
+7. Caller-supplied `PlaceOrderOpts.clientOrderId` is accepted only for regular
+   single-native `LIMIT`/`MARKET` payloads. BingX documents 1-40 characters,
+   uniqueness per order, and system lowercasing; safe-cex rejects non-lowercase
+   caller IDs before sending so the stored/requested ID cannot be mutated by
+   the exchange. Regular split payloads reject to avoid duplicate IDs; TP/SL
+   and trigger paths keep generated IDs.
 
 **Note**: There is a legacy `placeOrderBatchOld()` method that used actual batch placement, but it is no longer in use.
 

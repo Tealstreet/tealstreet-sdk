@@ -1070,6 +1070,7 @@ export class BingxExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     const payloads = await this.formatCreateOrder(opts);
+    this.applyRegularClientOrderId(opts, payloads);
     return await this.placeOrderBatch(payloads);
   };
 
@@ -1219,6 +1220,35 @@ export class BingxExchange extends BaseExchange {
     }
 
     return payloads;
+  };
+
+  private getRegularClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+    const clientOrderId = opts.clientOrderId;
+    if (clientOrderId === undefined) return undefined;
+
+    if (clientOrderId.length < 1 || clientOrderId.length > 40 || clientOrderId !== clientOrderId.toLowerCase()) {
+      const message = 'BingX clientOrderId must be 1-40 lowercase characters';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return clientOrderId;
+  };
+
+  private applyRegularClientOrderId = (opts: PlaceOrderOpts, payloads: Array<Record<string, any>>) => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return;
+    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined || opts.triggerPrice !== undefined) return;
+
+    const clientOrderId = this.getRegularClientOrderId(opts);
+    if (!clientOrderId) return;
+
+    if (payloads.length !== 1) {
+      const message = 'BingX clientOrderId is supported only when one safe-cex order maps to one native order';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    payloads[0].clientOrderId = clientOrderId;
   };
 
   private formatCreateTrailingStopLossOrder = async (opts: PlaceOrderOpts) => {
