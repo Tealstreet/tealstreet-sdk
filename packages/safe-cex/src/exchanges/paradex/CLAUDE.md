@@ -397,7 +397,7 @@ documented trigger variants in those definitions so readback displays
 
 ### Order Placement (`paradex.exchange.ts:845-972`)
 
-1. **Generate identity**: Create one validated `ts_${uuid()}` `client_id` (non-empty suffix, at most 64 characters) before signing
+1. **Generate identity**: Create one validated `ts_${uuid()}` `client_id` (non-empty suffix, at most 64 characters) before signing, unless a regular single-native limit/market order provides `clientOrderId`; then use that caller value as Paradex `client_id` after the same non-empty <=64 character validation.
 2. **Sign order**: `requestSigner.signOrder()` generates typed data signature with timestamp nonce
 3. **Map order type**: Convert internal `OrderType` to Paradex API type; opening conditionals use `STOP_LIMIT`
 4. **Determine prices**: Opening conditionals require separate finite positive `price` (execution) and `triggerPrice`; protective stops keep `opts.price` as the trigger price
@@ -472,6 +472,9 @@ partial cancellation failure.
 Contiguous ordinary `LIMIT` orders use the official `POST /orders/batch`
 boundary in chunks of 1-10. The whole local chunk is preflighted, assigned a
 unique `client_id`, and independently signed before the first network write.
+Caller `clientOrderId` values are honored for regular rows and must be unique
+within the local batch. Trigger, TP/SL, close, and composite paths keep generated
+IDs.
 Successful rows are correlated exclusively by their echoed `client_id`, so a
 reordered response still returns Paradex order IDs in input order.
 

@@ -1,15 +1,15 @@
 import type { Axios } from 'axios';
+import type { PlaceOrderOpts } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
-vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
 
 import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { ENDPOINTS } from '../../exchanges/paradex/paradex.types';
 import { DefaultStore } from '../../store/store.base';
-import type { PlaceOrderOpts } from '../../types';
 import { OrderSide, OrderType } from '../../types';
+
+const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
+vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
 
 const marketOrder = (overrides: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
   symbol: 'BTC-USD-PERP',
@@ -60,6 +60,24 @@ describe('Paradex single-order client identity', () => {
     expect(post).toHaveBeenCalledOnce();
   });
 
+  it('uses a caller-provided client_id for regular single-native orders', async () => {
+    const { exchange, signOrder } = createExchange();
+    const post = vi.fn(async (endpoint: string, payload: any) => {
+      expect(endpoint).toBe(ENDPOINTS.PLACE_ORDER);
+      expect(payload.client_id).toBe('caller-client-id');
+      return { data: { id: 'paradex-order-1', client_id: payload.client_id } };
+    });
+    exchange.xhr = { post } as unknown as Axios;
+
+    await expect(exchange.placeOrder(marketOrder({ clientOrderId: 'caller-client-id' }))).resolves.toEqual([
+      'paradex-order-1',
+    ]);
+
+    expect(uuidMock).not.toHaveBeenCalled();
+    expect(signOrder).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledOnce();
+  });
+
   it.each(['', 'x'.repeat(62)])('rejects invalid generated identity %j before signing or writing', async (value) => {
     const { exchange, signOrder } = createExchange();
     const post = vi.fn();
@@ -67,6 +85,19 @@ describe('Paradex single-order client identity', () => {
     exchange.xhr = { post } as unknown as Axios;
 
     await expect(exchange.placeOrder(marketOrder())).rejects.toThrow('Paradex generated an invalid client_id');
+
+    expect(signOrder).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid caller-provided client IDs before signing or writing', async () => {
+    const { exchange, signOrder } = createExchange();
+    const post = vi.fn();
+    exchange.xhr = { post } as unknown as Axios;
+
+    await expect(exchange.placeOrder(marketOrder({ clientOrderId: '' }))).rejects.toThrow(
+      'Paradex clientOrderId must be a non-empty string of at most 64 characters',
+    );
 
     expect(signOrder).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
@@ -104,7 +135,7 @@ describe('Paradex single-order client identity', () => {
 
     await expect(
       exchange.placeOrder(
-        marketOrder({ type: OrderType.Limit, price: 50_000, takeProfit: 52_000 }),
+        marketOrder({ type: OrderType.Limit, price: 50_000, takeProfit: 52_000, clientOrderId: 'ignored-client-id' }),
       ),
     ).resolves.toEqual(['main-order', 'take-profit-child']);
 

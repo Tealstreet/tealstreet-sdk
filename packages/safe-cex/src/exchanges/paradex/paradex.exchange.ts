@@ -1166,12 +1166,29 @@ export class ParadexExchange extends BaseExchange {
     );
   };
 
+  private isRegularSingleNativeClientIdPath = (opts: PlaceOrderOpts): boolean =>
+    (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+    opts.triggerPrice === undefined &&
+    opts.stopLoss === undefined &&
+    opts.takeProfit === undefined &&
+    opts.close !== true;
+
   private generateClientId = (): string => {
     const clientId = `ts_${uuid()}`;
     if (clientId.length <= 3 || clientId.length > 64) {
       throw new Error('Paradex generated an invalid client_id');
     }
     return clientId;
+  };
+
+  private resolveClientId = (opts: PlaceOrderOpts): string => {
+    if (this.isRegularSingleNativeClientIdPath(opts) && opts.clientOrderId !== undefined) {
+      if (opts.clientOrderId.length === 0 || opts.clientOrderId.length > 64) {
+        throw new Error('Paradex clientOrderId must be a non-empty string of at most 64 characters');
+      }
+      return opts.clientOrderId;
+    }
+    return this.generateClientId();
   };
 
   private buildMainOrderPayload = async (opts: PlaceOrderOpts, clientId?: string) => {
@@ -1252,7 +1269,7 @@ export class ParadexExchange extends BaseExchange {
       }
 
       this.log('Signing order...', LogSeverity.Debug);
-      const clientId = this.generateClientId();
+      const clientId = this.resolveClientId(opts);
       const payload = await this.buildMainOrderPayload(opts, clientId);
 
       this.log(`Placing order: ${JSON.stringify(payload)}`, LogSeverity.Debug);
@@ -1325,7 +1342,7 @@ export class ParadexExchange extends BaseExchange {
       }
       const clientIdSet = new Set<string>();
       for (let index = 0; index < orders.length; index++) {
-        const clientId = this.generateClientId();
+        const clientId = this.resolveClientId(orders[index]);
         if (clientIdSet.has(clientId)) {
           throw new Error(`Paradex batch generated an invalid or duplicate client_id at index ${index}`);
         }
