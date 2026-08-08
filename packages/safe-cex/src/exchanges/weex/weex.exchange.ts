@@ -535,6 +535,7 @@ export class WeexExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     const payload = this.formatOrderPayload(opts);
+    this.applyRegularClientOrderId(opts, payload);
     const endpoint =
       opts.type === OrderType.Conditional
         ? ENDPOINTS.ALGO_ORDER
@@ -565,6 +566,29 @@ export class WeexExchange extends BaseExchange {
     }
 
     return ids;
+  };
+
+  private getRegularClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+    const clientOrderId = opts.clientOrderId;
+    if (clientOrderId === undefined) return undefined;
+
+    if (!/^[\.A-Z\:/a-z0-9_-]{1,36}$/.test(clientOrderId)) {
+      const message = 'WEEX newClientOrderId must be 1-36 characters matching ^[\\.A-Z\\:/a-z0-9_-]{1,36}$';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    return clientOrderId;
+  };
+
+  private applyRegularClientOrderId = (opts: PlaceOrderOpts, payload: Record<string, any>) => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return;
+    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined || opts.triggerPrice !== undefined) return;
+
+    const clientOrderId = this.getRegularClientOrderId(opts);
+    if (!clientOrderId) return;
+
+    payload.newClientOrderId = clientOrderId;
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {

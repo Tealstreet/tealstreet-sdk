@@ -101,6 +101,11 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
   PostOnly rows retain their store provenance even when a sibling row is
   rejected. Conditional/algo, direct or attached TP/SL, close, reduce-only,
   and otherwise exceptional shapes retain their dedicated single-order paths.
+- Caller-supplied `PlaceOrderOpts.clientOrderId` is mapped to
+  `newClientOrderId` only for regular `POST /capi/v3/order` `LIMIT`/`MARKET`
+  orders. WEEX documents `newClientOrderId` as 1-36 characters matching
+  `^[.A-Z:/a-z0-9_-]{1,36}$`; generated `ts...` IDs remain in place when the
+  caller omits it.
 - Normal order amend is not documented in Contract V3. Use cancel-and-replace
   for `updateOrder`, preserving TP/SL fields when present.
 - Direct TP/SL trigger-price edits use `POST /capi/v3/modifyTpSlOrder` with
