@@ -74,6 +74,12 @@ const isTransientOrderlyValidationError = (err: any): boolean => {
   return false; // 4xx (401/403/…) — credentials or request rejected
 };
 
+const isOrderlyRegularClientOrderPath = (opts: PlaceOrderOpts) =>
+  (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+  opts.triggerPrice === undefined &&
+  opts.stopLoss === undefined &&
+  opts.takeProfit === undefined;
+
 export class OrderlyExchange extends BaseExchange {
   xhr: Axios;
 
@@ -1055,13 +1061,27 @@ export class OrderlyExchange extends BaseExchange {
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
     const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
+    let clientOrderId: string | undefined;
+    if (opts.clientOrderId !== undefined && isOrderlyRegularClientOrderPath(opts)) {
+      if (opts.clientOrderId.length === 0) {
+        const message = 'Orderly clientOrderId must be a non-empty string';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      if (lots > 1) {
+        const message = 'Orderly clientOrderId cannot be reused across split native order payloads';
+        this.emitAndLogError(message);
+        throw new Error(message);
+      }
+      clientOrderId = opts.clientOrderId;
+    }
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
     const payloads = times(lots, () => {
-      return { ...req, order_quantity: lotSize };
+      return omitUndefined({ ...req, client_order_id: clientOrderId, order_quantity: lotSize });
     });
 
-    if (rest) payloads.push({ ...req, order_quantity: rest });
+    if (rest) payloads.push(omitUndefined({ ...req, client_order_id: clientOrderId, order_quantity: rest }));
 
     try {
       const orderIds = await mapSeries(payloads, async (payload) => {

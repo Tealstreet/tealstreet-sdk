@@ -236,9 +236,10 @@ Both URLs are appended with `options.applicationId` (the account ID).
 ### Limit/Market Orders
 
 1. **Place**: `POST /v1/order` with `order_type`, `order_quantity`, `order_price` (limit only), `side`, `reduce_only`, explicit `margin_mode`, `order_tag`, and `broker_id`. Reduce-only writes infer the matching open position's mode; if Cross and Isolated rows make the target ambiguous, the write fails before REST.
-2. **Large order splitting** (`OrderlyExchange.placeOrder`): If `amount > market.limits.amount.max`, the order is split into equal lots plus a remainder lot. Uses `mapSeries` for sequential placement.
-3. **Update** (`OrderlyExchange.updateOrder`): Uses the documented native `PUT /v1/order` edit route for exactly reconciled, REST-proven, pending zero-fill ordinary GTC LIMIT rows. The request carries required `order_id`/`symbol`/`order_type`/`side` identity plus only the changed `order_price` or `order_quantity`, requires `success: true` with `data.status: 'EDIT_SENT'`, and returns the unchanged ID. Explicit REST `CROSS` or `ISOLATED` provenance is required; camel-case WS-only provenance, unknown modes, and other missing/ambiguous identity, fill, precision, visibility, reduce-only, time-in-force, or trigger state fail before a write. There is no cancel-and-replace fallback.
-4. **Cancel**: `DELETE /v1/order?order_id=<id>&symbol=<symbol>` - parameters sent as query string
+2. **Client order ID**: regular single-native limit/market orders use caller `clientOrderId` as Orderly `client_order_id` when provided. Empty IDs and split payloads reject before REST.
+3. **Large order splitting** (`OrderlyExchange.placeOrder`): If `amount > market.limits.amount.max`, the order is split into equal lots plus a remainder lot. Uses `mapSeries` for sequential placement.
+4. **Update** (`OrderlyExchange.updateOrder`): Uses the documented native `PUT /v1/order` edit route for exactly reconciled, REST-proven, pending zero-fill ordinary GTC LIMIT rows. The request carries required `order_id`/`symbol`/`order_type`/`side` identity plus only the changed `order_price` or `order_quantity`, requires `success: true` with `data.status: 'EDIT_SENT'`, and returns the unchanged ID. Explicit REST `CROSS` or `ISOLATED` provenance is required; camel-case WS-only provenance, unknown modes, and other missing/ambiguous identity, fill, precision, visibility, reduce-only, time-in-force, or trigger state fail before a write. There is no cancel-and-replace fallback.
+5. **Cancel**: `DELETE /v1/order?order_id=<id>&symbol=<symbol>` - parameters sent as query string
 
 ### Algo Orders (TP/SL)
 
