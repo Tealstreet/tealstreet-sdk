@@ -236,9 +236,11 @@ export class BlofinExchange extends BaseExchange {
         // Don't update orders on complete failure to preserve existing state
       }
 
-      // Schedule next tick after 10 seconds
+      // getTickInterval() is the metadata 10s, backed off exponentially while
+      // the credentials are being rejected. A hardcoded interval here polls a
+      // dead API key forever at full rate.
       if (!this.isDisposed) {
-        loop(() => this.tick(count + 1), 10_000);
+        loop(() => this.tick(count + 1), this.getTickInterval() ?? 10_000);
       }
     }
   };
@@ -675,25 +677,18 @@ export class BlofinExchange extends BaseExchange {
   };
 
   fetchNormalOrders = async () => {
-    return this.mapOrders(
-      await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_ORDERS, 'orderId', 'normal'),
-    );
+    return this.mapOrders(await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_ORDERS, 'orderId', 'normal'));
   };
 
   fetchAlgoOrders = async () => {
-    return this.mapOrders(
-      await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_ALGO_ORDERS, 'tpslId', 'TPSL'),
-    );
+    return this.mapOrders(await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_ALGO_ORDERS, 'tpslId', 'TPSL'));
   };
 
   fetchTriggerOrders = async () => {
     return this.mapOrders(
-      await this.fetchPaginatedOrderRows(
-        ENDPOINTS.UNFILLED_TRIGGER_ORDERS,
-        'algoId',
-        'trigger',
-        { orderType: 'trigger' },
-      ),
+      await this.fetchPaginatedOrderRows(ENDPOINTS.UNFILLED_TRIGGER_ORDERS, 'algoId', 'trigger', {
+        orderType: 'trigger',
+      }),
     );
   };
 
@@ -1556,7 +1551,6 @@ export class BlofinExchange extends BaseExchange {
     //   "marginMode": "isolated"
     // }
     // }
-
   };
 
   afterMethodCalledInWorker = <M extends CallableMethodsInWorker>(

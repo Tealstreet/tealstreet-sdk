@@ -797,17 +797,86 @@ export class PhemexExchange extends BaseExchange {
     }
   };
 
+  // Phemex has no margin-mode endpoint — the SIGN of leverageRr IS the margin
+  // mode — so a leverage change must carry the current margin mode forward or
+  // it silently flips the account, and a margin-type change must carry the
+  // current leverage forward for the same reason.
+  //
+  // Both used to read that state via getOrFetchPositionsForSymbol, which is
+  // wrong twice over: it early-returns [] whenever store.loaded.positions is
+  // false (the hosted-mode mirror's permanent state), and mapPosition drops
+  // size-0 rows on purpose, so a FLAT symbol has no store position even on a
+  // fully loaded worker. Both callers then threw "Position not found" before
+  // issuing any request — the margin switch never happened, and setLeverage
+  // fell through to a positive leverageRr that flipped cross accounts to
+  // isolated. accountPositions returns the flat row with leverageRr and
+  // crossMargin populated, so read it raw rather than through mapPosition.
+  private resolveLeverageContext = async (
+    symbol: string,
+  ): Promise<
+    { marginType: MarginType; positionMode: PositionMode; longLeverage: number; shortLeverage: number } | undefined
+  > => {
+    const stored = this.store.positions.filter((p) => p.symbol === symbol);
+    const storedMarginType = stored[0]?.marginType;
+    const storedPositionMode = stored[0]?.positionMode;
+    // Fall through to the REST row if the store row is missing either field —
+    // guessing a default here is what flips margin mode by accident.
+    if (storedMarginType !== undefined && storedPositionMode !== undefined) {
+      const long = stored.find((p) => p.side === PositionSide.Long) ?? stored[0];
+      const short = stored.find((p) => p.side === PositionSide.Short) ?? stored[0];
+      return {
+        marginType: storedMarginType,
+        positionMode: storedPositionMode,
+        longLeverage: Math.abs(long.leverage),
+        shortLeverage: Math.abs(short.leverage),
+      };
+    }
+
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: POSITIONS_RESPONSE }>(ENDPOINTS.POSITIONS, {
+        params: {
+          currency: symbol?.endsWith('USDC') ? 'USDC' : 'USDT',
+          symbol: this.formatSymbolOut(symbol),
+        },
+      });
+
+      const rows = (data?.positions || []).filter((r: any) => this.formatSymbolIn(r.symbol) === symbol);
+      if (rows.length === 0) return undefined;
+
+      const leverageOf = (row: any) => Math.abs(parseFloat(v(row, 'leverageRr'))) || 0;
+      const long = rows.find((r: any) => v(r, 'posSide') === 'Long') ?? rows[0];
+      const short = rows.find((r: any) => v(r, 'posSide') === 'Short') ?? rows[0];
+      const rawLeverage = parseFloat(v(long, 'leverageRr'));
+
+      return {
+        marginType: rawLeverage < 0 || v(long, 'crossMargin') ? MarginType.Cross : MarginType.Isolated,
+        positionMode: v(long, 'posMode') === 'Hedged' ? PositionMode.Hedged : PositionMode.OneWay,
+        longLeverage: leverageOf(long),
+        shortLeverage: leverageOf(short),
+      };
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
+      return undefined;
+    }
+  };
+
   changeMarginType = async (isolated: boolean, symbol?: string) => {
     if (!symbol) {
       this.emitAndLogError('Symbol is required');
       throw new Error('Symbol is required');
     }
 
-    const positionsForSymbol = await this.getOrFetchPositionsForSymbol(symbol);
-    const position = positionsForSymbol[0];
+    const context = await this.resolveLeverageContext(symbol);
 
-    if (!position) throw new Error(`Position ${symbol} not found`);
-    let inputLeverage = Math.abs(position.leverage);
+    if (!context) {
+      const msg = `Could not read current leverage settings for ${symbol} — margin type unchanged`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    let inputLeverage = context.longLeverage;
     if (!isolated) {
       inputLeverage = -inputLeverage;
     }
@@ -825,16 +894,25 @@ export class PhemexExchange extends BaseExchange {
     allowChangingMarginType = false,
   ) => {
     const market = this.store.marketsBySymbol[symbol];
-    const positionsForSymbol = await this.getOrFetchPositionsForSymbol(symbol);
-    const position = positionsForSymbol[0];
+    const context = await this.resolveLeverageContext(symbol);
 
-    if (!market) throw new Error(`Market ${symbol} not found`);
-    if (!position) throw new Error(`Position ${symbol} not found`);
+    if (!market) {
+      const msg = `Market ${symbol} not found`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+    if (!context) {
+      const msg = `Could not read current leverage settings for ${symbol} — leverage unchanged`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
 
     const prepLeverage = (l: number): number => {
       const safeLev = Math.min(Math.max(Math.abs(l), market.limits.leverage.min), market.limits.leverage.max);
       if (!allowChangingMarginType) {
-        if (position.marginType === MarginType.Cross) {
+        // Carry the existing margin mode forward — a bare positive value here
+        // silently converts a cross account to isolated.
+        if (context.marginType === MarginType.Cross) {
           return safeLev * -1;
         } else {
           return safeLev;
@@ -852,16 +930,14 @@ export class PhemexExchange extends BaseExchange {
       symbol: this.formatSymbolOut(symbol),
     };
 
-    if (position.positionMode === PositionMode.Hedged) {
+    if (context.positionMode === PositionMode.Hedged) {
       if (side) {
         if (side === PositionSide.Long) {
           params.longLeverageRr = prepLeverage(inputLeverage);
-          const shortPosition = positionsForSymbol.find((p) => p.side === PositionSide.Short);
-          params.shortLeverageRr = prepLeverage(shortPosition ? shortPosition.leverage : inputLeverage);
+          params.shortLeverageRr = prepLeverage(context.shortLeverage || inputLeverage);
         } else {
           params.shortLeverageRr = prepLeverage(inputLeverage);
-          const longPosition = positionsForSymbol.find((p) => p.side === PositionSide.Long);
-          params.longLeverageRr = prepLeverage(longPosition ? longPosition.leverage : inputLeverage);
+          params.longLeverageRr = prepLeverage(context.longLeverage || inputLeverage);
         }
       } else {
         params.longLeverageRr = prepLeverage(inputLeverage);
@@ -1054,7 +1130,9 @@ export class PhemexExchange extends BaseExchange {
     const market = await this.getOrFetchMarketForSymbol(opts.symbol);
 
     if (!market) {
-      throw new Error(`Market ${opts.symbol} not found`);
+      const msg = `Market ${opts.symbol} not found`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
     }
 
     const isStopOrTP = opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit;
@@ -1175,11 +1253,20 @@ export class PhemexExchange extends BaseExchange {
 
     const position = this.store.positions.find((p) => p.symbol === opts.symbol && p.side === pSide);
 
-    if (!market) throw new Error(`Market ${opts.symbol} not found`);
-    if (!ticker) throw new Error(`Ticker ${opts.symbol} not found`);
-
+    if (!market) {
+      const msg = `Market ${opts.symbol} not found`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+    if (!ticker) {
+      const msg = `Ticker ${opts.symbol} not found`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
     if (!position) {
-      throw new Error(`Position ${opts.symbol} and side ${pSide} not found`);
+      const msg = `No ${pSide} position open for ${opts.symbol} — nothing to attach a trailing stop to`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
     }
 
     const priceDistance = adjust(
