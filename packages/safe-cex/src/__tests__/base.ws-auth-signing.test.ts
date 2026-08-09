@@ -1,9 +1,8 @@
-import type { ExchangeOptions, RemoteSignerRequest } from '../types';
-
 import { describe, expect, it } from 'vitest';
 
-import { BaseExchange } from '../exchanges/base';
+import type { ExchangeOptions, RemoteSignerRequest } from '../types';
 import { DefaultStore } from '../store/store.base';
+import { BaseExchange } from '../exchanges/base';
 
 // Hosted mode signs WS auth on the client and ships the signature to a server
 // that holds no secret. Each signature below must match the venue's LOCAL
@@ -58,15 +57,6 @@ describe('BaseExchange.signWsAuth output formats', () => {
   it('signs apexomni-base64 keyed by the BASE64 OF THE SECRET', async () => {
     const result = await sign('apexomni-base64', '1700000000GET/ws/accounts');
     expect(result.wsAuthSignature).toBe('7x9rAshqEQ+HDPb4F9rUD1ucPsSesWp7gu6rkIcmEIM=');
-  });
-
-  it('signs bitunix-double-sha256 as sha256(sha256(toSign) + secret), NOT an HMAC', async () => {
-    // bitunix concatenates the secret rather than keying an HMAC with it. Its
-    // ws-private used to sign inline with options.secret, which is '' in hosted
-    // mode, so the handshake failed with "double check your key and secret" —
-    // visible only against exchange-server, never in local dev.
-    const result = await sign('bitunix-double-sha256', 'nonce-abc1700000000api-key-xyz');
-    expect(result.wsAuthSignature).toBe('c99d3e027fcb8cbefc05f7a38dfc710011d07e79dbefd8b0bc7b44347bb0e624');
   });
 
   it('errors instead of mis-signing when kraken-challenge reaches the base signer', async () => {

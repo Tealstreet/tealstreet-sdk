@@ -1,7 +1,5 @@
 import type { BitunixExchange } from './bitunix.exchange';
 
-import { nanoid } from 'nanoid';
-
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_PWS_LOG } from '../../config/config';
@@ -483,45 +481,23 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
   sendLogin = async () => {
     const timestamp = +virtualClock.getCurrentTime();
     const nonce = uuid();
-    const apiKey = this.parent.options.key.trim();
 
     await virtualClock.syncBybitClientServerTime();
     await sleep(25);
 
-    // Hosted exchange-server runs with secret: '' by design — the secret never
-    // leaves the client — so signing inline produced a signature over an empty
-    // secret and the venue rejected the handshake with "double check your key
-    // and secret". Reproduces only in hosted mode; local dev holds the real
-    // secret and works. See ../CLAUDE.md → "Remote-signer WS auth".
-    const sign = await (async () => {
-      const remoteSigner = this.parent.options.remoteSigner;
-      if (!remoteSigner) return sha256Hex(sha256Hex(nonce + timestamp + apiKey) + this.parent.options.secret.trim());
-
-      const result = await remoteSigner.sign({
-        id: nanoid(),
-        type: 'ws-auth',
-        exchangeName: 'bitunix',
-        accountName: remoteSigner.accountName,
-        wsAuth: {
-          toSign: `${nonce}${timestamp}${apiKey}`,
-          outputFormat: 'bitunix-double-sha256',
-          extraData: { timestamp, nonce },
-        },
-      });
-
-      if (result.error || !result.wsAuthSignature) {
-        this.parent.emitAndLogError(`Bitunix remote WS auth failed: ${result.error ?? 'no signature returned'}`);
-        return undefined;
-      }
-      return result.wsAuthSignature;
-    })();
-
-    if (!sign) return;
-
     this.send(
       JSON.stringify({
         op: 'login',
-        args: [{ apiKey, timestamp, nonce, sign }],
+        args: [
+          {
+            apiKey: this.parent.options.key.trim(),
+            timestamp,
+            nonce,
+            sign: sha256Hex(
+              sha256Hex(nonce + timestamp + this.parent.options.key.trim()) + this.parent.options.secret.trim(),
+            ),
+          },
+        ],
       }),
     );
   };
