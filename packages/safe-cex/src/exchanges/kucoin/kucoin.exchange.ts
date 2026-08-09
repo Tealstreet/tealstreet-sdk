@@ -985,16 +985,12 @@ export class KucoinExchange extends BaseExchange {
       try {
         const { data } = await this.unlimitedXHR.post(endpoint, payload);
 
-        // KuCoin returns HTTP 200 with a non-200000 `code` on rejection (same
-        // contract as placeAlgoOrders). Returning without a throw here made a
-        // rejected order resolve "successfully" with no ids, so awaiting
-        // callers couldn't distinguish rejection from success.
-        if (data?.code && data.code !== '200000') {
-          throw new Error(data.msg || `KuCoin order rejected (code ${data.code})`);
-        }
-
-        if (data?.data?.orderId) {
-          newOrderIds.push(data.data.orderId);
+        if (data.code === '200000') {
+          if (data.data && data.data.orderId) {
+            newOrderIds.push(data.data.orderId);
+          }
+        } else {
+          this.emitter.emit('error', data.msg || 'Unknown error placing order');
         }
       } catch (err: any) {
         this.emitter.emit('error', err?.response?.data?.msg || err?.message);

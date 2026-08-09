@@ -227,30 +227,30 @@ Key difference from other exchanges: Markets and tickers are fetched **sequentia
 
 Defined in `ENDPOINTS` object in `kucoin.types.ts`:
 
-| Constant                     | Path                                  | Method | Description                    |
-| ---------------------------- | ------------------------------------- | ------ | ------------------------------ |
-| `ACCOUNT` / `BALANCE`        | `/api/v1/account-overview`            | GET    | Account info and balance       |
-| `MARKETS`                    | `/api/v1/contracts/active`            | GET    | Active markets/contracts       |
-| `TICKERS`                    | `/api/v1/allTickers`                  | GET    | All ticker data                |
-| `POSITIONS` / `POSITIONS_V2` | `/api/v1/positions`                   | GET    | Open positions                 |
-| `FETCH_SINGLE_ACCOUNT`       | `/api/v2/position`                    | GET    | Single position info           |
-| `SYMBOL_LEVERAGE`            | `/api/v1/position/risk/limit`         | GET    | Leverage risk limits           |
-| `ORDERS`                     | `/api/v1/orders`                      | GET    | Open orders (status=active)    |
-| `PLACE_ORDER`                | `/api/v1/orders`                      | POST   | Place order                    |
-| `CANCEL_ORDERS`              | `/api/v1/orders`                      | DELETE | Cancel single order (/{id})    |
-| `CANCEL_ALL_ORDERS`          | `/api/v3/orders`                      | DELETE | Cancel all orders              |
+| Constant                     | Path                                  | Method | Description                 |
+| ---------------------------- | ------------------------------------- | ------ | --------------------------- |
+| `ACCOUNT` / `BALANCE`        | `/api/v1/account-overview`            | GET    | Account info and balance    |
+| `MARKETS`                    | `/api/v1/contracts/active`            | GET    | Active markets/contracts    |
+| `TICKERS`                    | `/api/v1/allTickers`                  | GET    | All ticker data             |
+| `POSITIONS` / `POSITIONS_V2` | `/api/v1/positions`                   | GET    | Open positions              |
+| `FETCH_SINGLE_ACCOUNT`       | `/api/v2/position`                    | GET    | Single position info        |
+| `SYMBOL_LEVERAGE`            | `/api/v1/position/risk/limit`         | GET    | Leverage risk limits        |
+| `ORDERS`                     | `/api/v1/orders`                      | GET    | Open orders (status=active) |
+| `PLACE_ORDER`                | `/api/v1/orders`                      | POST   | Place order                 |
+| `CANCEL_ORDERS`              | `/api/v1/orders`                      | DELETE | Cancel single order (/{id}) |
+| `CANCEL_ALL_ORDERS`          | `/api/v3/orders`                      | DELETE | Cancel all orders           |
 | `CANCEL_SYMBOL_ORDERS`       | `/api/v3/orders`                      | DELETE | Cancel normal orders by symbol |
-| `BATCH_ORDERS`               | `/api/v1/orders/multi`                | POST   | Batch order placement          |
-| `ALGO_ORDERS`                | `/api/v1/stopOrders`                  | GET    | Fetch algo/stop orders         |
-| `CANCEL_ALGO_ORDER`          | `/api/v1/stopOrders/{orderId}`        | DELETE | Cancel algo order              |
-| `PLACE_ALGO_ORDER`           | `/api/v1/st-orders`                   | POST   | Place algo order               |
-| `PLACE_TRAILING_STOP_ORDER`  | `/api/v1/stop-order`                  | POST   | Place trailing stop order      |
-| `KLINE`                      | `/api/v1/kline/query`                 | GET    | Kline/candlestick data         |
-| `SET_LEVERAGE`               | `/api/v2/changeCrossUserLeverage`     | POST   | Set cross leverage             |
-| `SET_POSITION_MODE`          | `/api/v2/position/switchPositionMode` | POST   | Change position mode           |
-| `SET_MARGIN_MODE`            | `/api/v2/position/changeMarginMode`   | POST   | Change margin mode (v2)        |
-| `GET_PUBLIC_WS_TOKEN`        | `/api/v1/bullet-public`               | POST   | Get public WS token            |
-| `GET_PRIVATE_WS_TOKEN`       | `/api/v1/bullet-private`              | POST   | Get private WS token           |
+| `BATCH_ORDERS`               | `/api/v1/orders/multi`                | POST   | Batch order placement       |
+| `ALGO_ORDERS`                | `/api/v1/stopOrders`                  | GET    | Fetch algo/stop orders      |
+| `CANCEL_ALGO_ORDER`          | `/api/v1/stopOrders/{orderId}`        | DELETE | Cancel algo order           |
+| `PLACE_ALGO_ORDER`           | `/api/v1/st-orders`                   | POST   | Place algo order            |
+| `PLACE_TRAILING_STOP_ORDER`  | `/api/v1/stop-order`                  | POST   | Place trailing stop order   |
+| `KLINE`                      | `/api/v1/kline/query`                 | GET    | Kline/candlestick data      |
+| `SET_LEVERAGE`               | `/api/v2/changeCrossUserLeverage`     | POST   | Set cross leverage          |
+| `SET_POSITION_MODE`          | `/api/v2/position/switchPositionMode` | POST   | Change position mode        |
+| `SET_MARGIN_MODE`            | `/api/v2/position/changeMarginMode`   | POST   | Change margin mode (v2)     |
+| `GET_PUBLIC_WS_TOKEN`        | `/api/v1/bullet-public`               | POST   | Get public WS token         |
+| `GET_PRIVATE_WS_TOKEN`       | `/api/v1/bullet-private`              | POST   | Get private WS token        |
 
 ## WebSocket Implementation
 
@@ -523,14 +523,11 @@ whole stop path to `st-orders`; the `/api/v1/orders` + `closeOrder` shape is wha
 proven against prod. Incoming stops are classified by `stop` direction
 (`up`/`down`) + side in `mapOrder`, not by any planType.
 
-**Rejections are surfaced, not swallowed.** `placeAlgoOrders` **and**
-`placeOrderBatch` check `code !== '200000'` and throw (the catch emits + the
-order builder rejects). KuCoin returns rejections as **HTTP 200 with a
-non-`200000` code**; reading only `body.data.orderId` (the old shape) dropped
-them silently — that swallow is what hid the `size:"0"` failure above.
-`placeOrderBatch` carried the same swallow for normal orders until Aug 2026
-(it emitted the error but resolved with an empty id list, so awaiting callers
-saw "success" with no ids).
+**Rejections are surfaced, not swallowed.** `placeAlgoOrders` now checks
+`body.code !== '200000'` and throws (the catch emits + the order builder rejects).
+KuCoin returns rejections as **HTTP 200 with a non-`200000` code**; reading only
+`body.data.orderId` (the old shape) dropped them silently — that swallow is what
+hid the `size:"0"` failure above.
 
 ### Cancellation
 
@@ -746,16 +743,6 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
     app's reliance on the raw exchange `isQuanto` field is fragile cross-exchange;
     a normalized `Market.isQuanto` would be the broader fix.)
 
-23. **Order placement needs symbol position metadata in the store.**
-    `formatCreateOrder` reads `marginMode` off the store's position row for the
-    order's symbol (`getPositionForOrder` → `getKucoinMarginMode`). With no row
-    (flat symbol, headless caller), `marginMode` is omitted and KuCoin rejects
-    with _"The order's margin mode does not match the selected one."_ The web
-    worker always commits symbol-scoped fake positions (with margin metadata)
-    for the viewed symbol, so the app never hits this — but headless callers
-    (audit runtime, probes) must `fetchPositions([symbol])` and commit the
-    result to the store before placing an order. Confirmed live Aug 2026.
-
 ## Error Handling
 
 ### API Response Format
@@ -785,7 +772,7 @@ All KuCoin API responses follow this structure:
 
 ### Order Error Propagation
 
-- `placeOrderBatch`: Throws on non-`200000` rejection codes and transport errors alike; the catch emits before rethrowing
+- `placeOrderBatch`: Emits error event and throws on failure (`kucoin.exchange.ts:963-968`)
 - `cancelNormalOrders`: Emit error and re-throw (also handles TP/SL; 404→stopOrders fallback)
 - `updateOrder`, `updateAlgoOrder`, and `updateVirtualTpSlOrder`: emit and rethrow. A failed replacement after cancellation must reject so callers cannot mistake the loss of protection for success.
 

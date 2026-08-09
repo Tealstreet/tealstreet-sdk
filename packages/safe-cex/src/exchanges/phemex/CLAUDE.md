@@ -402,70 +402,11 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - Uses PUT method on `/g-positions/leverage`
 - `prepLeverage()` helper clamps to market min/max and preserves margin type sign unless `allowChangingMarginType` is true
 
-#### Pre-flight throws must emit — this venue hid a failure behind it
-
-`changeMarginType` and `setLeverageHelper` need the symbol's current leverage
-and margin mode, because Phemex encodes margin type as the _sign_ of leverage.
-Their `!position` / `!market` / `!ticker` guards used to be raw
-`throw new Error(...)` with no `emitAndLogError` first — the exact pattern
-`../CLAUDE.md` prohibits.
-
-That is not cosmetic. A raw throw bypasses `BaseExchange.emitter`, so it reaches
-**no** diagnostic surface: not the toast pipeline, not
-`exchangeAccountController.on('error')`, and not the Cypress requests-log
-artifact (which records only _emitted_ errors). The e2e margin-type step failed
-with `expected 'Isolated' to equal 'Cross'` and **1551 logged requests contained
-no negative `leverageRr` and no error at all** — the switch simply never
-happened, invisibly.
-
-Adding the emits is what found the actual bug on the next run: the log then
-carried `14x Position ADAUSDT not found — open a position before changing
-margin type`. Keep the emits; they are what makes this venue debuggable.
-
-#### Never read leverage state through `getOrFetchPositionsForSymbol`
-
-Use **`resolveLeverageContext(symbol)`**. Both callers previously read the
-current leverage/margin mode off `getOrFetchPositionsForSymbol`, which is wrong
-twice over:
-
-- it early-returns `[]` whenever `store.loaded.positions` is false — the
-  permanent state of the never-`start()`ed main-thread mirror that executes
-  hosted-mode order writes (the same trap documented as bitget quirks 22/23);
-- **`mapPosition` drops size-0 rows on purpose**, so a *flat* symbol has no
-  store position even on a fully loaded worker — and changing margin type
-  while flat is the normal case.
-
-Both guards then threw "Position not found" before issuing any request. Two
-distinct user-visible failures came out of that: the margin switch silently
-never happened, and `setLeverage` fell through to a **positive** `leverageRr`,
-which flips a cross account to isolated as a side effect.
-
-`resolveLeverageContext` prefers the store row (only when it carries both
-`marginType` and `positionMode` — guessing a default is what flips the mode)
-and otherwise reads the raw `accountPositions` row, which is present at size 0
-with `leverageRr` and `crossMargin` populated. Read that row **raw**, not via
-`mapPosition`, which would discard it.
-
-#### A leverage change on a flat symbol must record `fetchedLeverage`
-
-`mapPosition` drops size-0 rows, so after `setLeverage` on a symbol with no open
-position there is nothing in `store.positions` for the place-order % slider to
-read, and it falls back to **1x** — order sizes then come out `leverage` times
-too small. The e2e margin-slider step catches this as `expected 5.45 to be close
-to 55.5675` (22.23 available x 10x x 0.25).
-
-`setLeverageHelper` therefore writes `store.fetchedLeverage[symbol]` after a
-confirmed success, which is the app's documented no-position fallback (blofin's
-`fetchLeverageForSymbol` is the reference implementation). The response code is
-checked **before** any store mutation, so a rejected change cannot record a
-leverage the exchange never applied.
-
 #### Margin Type (`changeMarginType`)
 
 - Implemented by toggling leverage sign via `setLeverageHelper` with `allowChangingMarginType = true`
 - Cross margin: negative leverage; Isolated margin: positive leverage
-- Current leverage comes from `resolveLeverageContext`, which works on a flat
-  symbol — it does **not** require an open position
+- Requires an existing position to determine current leverage
 
 #### Position Mode (`changePositionMode`)
 

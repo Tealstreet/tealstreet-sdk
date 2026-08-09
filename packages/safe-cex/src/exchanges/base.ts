@@ -115,11 +115,6 @@ export const summarizeSocketDiagnostics = <K extends 'public' | 'private'>(
     Record<`${K}ReconnectPaused`, boolean>;
 };
 
-// 7 doublings caps a 500ms tick at 60s; the streak stops growing there so a
-// long outage can't push recovery latency past a minute.
-const AUTH_FAILURE_MAX_STREAK = 7;
-const AUTH_FAILURE_MAX_TICK_INTERVAL = 60_000;
-
 /**
  * BaseExchange supplies a few deliberately inert fallbacks so that older
  * integrations can omit optional methods.  Metadata must never advertise one
@@ -417,8 +412,6 @@ export class BaseExchange implements Exchange {
     return !!this.options.key && (!!this.options.secret || !!this.options.remoteSigner);
   }
 
-  private _authFailureStreak = 0;
-
   /**
    * Per-exchange REST tick interval. Metadata is the source of truth;
    * `options.extra.tickInterval` is an explicit override (the web wrapper's
@@ -429,38 +422,11 @@ export class BaseExchange implements Exchange {
    * If metadata is missing and there is no override, returns undefined and
    * `loop()` warns at the use site. The fix is to set `tickInterval` on the
    * exchange's metadata entry — not to add another fallback here.
-   *
-   * Scaled by `_authFailureStreak` so a rejected key stops hammering the venue.
    */
   protected getTickInterval(): number | undefined {
     const override = this.options.extra?.tickInterval;
-    const base = override && override > 0 ? override : getExchangeMetadata(this._exchangeName).tickInterval;
-    if (!base || this._authFailureStreak === 0) return base;
-
-    return Math.min(base * 2 ** this._authFailureStreak, AUTH_FAILURE_MAX_TICK_INTERVAL);
-  }
-
-  /**
-   * Exponential tick backoff for an account whose credentials the venue keeps
-   * rejecting. A bad key otherwise polls forever at the metadata tick interval
-   * — bybit at 500ms emitted 120 errors in a 30s window, and nothing anywhere
-   * backed off. Backoff rather than a hard stop, so fixing the key or riding
-   * out venue maintenance still recovers on its own.
-   *
-   * Call from the transport layer, which is the only place that sees the HTTP
-   * status; classification from an error *message* is unreliable.
-   */
-  recordAuthFailure() {
-    if (this._authFailureStreak < AUTH_FAILURE_MAX_STREAK) this._authFailureStreak += 1;
-  }
-
-  recordAuthSuccess() {
-    this._authFailureStreak = 0;
-  }
-
-  /** Test/diagnostic accessor — not part of the consumer contract. */
-  get authFailureStreak() {
-    return this._authFailureStreak;
+    if (override && override > 0) return override;
+    return getExchangeMetadata(this._exchangeName).tickInterval;
   }
 
   /**
