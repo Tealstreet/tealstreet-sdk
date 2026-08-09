@@ -500,6 +500,24 @@ BloFin API success payloads are not perfectly uniform, but generally follow:
 | `152406` | Your IP is not included in your API key's IP whitelist |
 | `152401` | Access key does not exist                              |
 
+Both of those are **configuration faults that retrying cannot fix**, so the
+response interceptor in `blofin.api.ts` feeds them to
+`BaseExchange.recordAuthFailure()` and the tick loop backs off exponentially
+(capped at 60s). Two details are load-bearing:
+
+- **The tick loop must schedule off `getTickInterval()`, not a hardcoded
+  `10_000`.** It used to hardcode the interval, so the backoff had no effect and
+  a dead key was polled at full rate forever — the e2e bad-key bound caught it
+  as 132 HTTP requests against a limit of 100. The metadata `tickInterval` is
+  also `10_000`, so reading it changes nothing in the healthy case.
+- **Only a *signed* success clears the streak.** Public endpoints return
+  `code: "0"` with no credentials involved, so counting them would immediately
+  cancel the backoff for a rejected key. The interceptor gates on the
+  `ACCESS-SIGN` header being present.
+
+Unrelated non-zero codes (e.g. `400` from `set-position-mode`) must NOT record
+an auth failure — they are real rejections but not credential problems.
+
 ### Retry Strategies
 
 - **Network errors**: Axios retry interceptor retries 3 times on network errors (see `blofin.api.ts`)

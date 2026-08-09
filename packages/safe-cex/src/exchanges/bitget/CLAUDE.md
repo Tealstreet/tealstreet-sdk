@@ -304,14 +304,49 @@ ioc -> ImmediateOrCancel
 - **Algo orders** (`cancelAlgoOrders`, `bitget.exchange.ts:953-969`): Canceled one at a time; requires correct `planType` from `getCancelPlanType()`.
 - **Cancel all** (`cancelAllOrders`, `bitget.exchange.ts:902-911`): Single POST to `CANCEL_ALL_ORDERS`.
 
-### Plan Type Determination (`bitget.exchange.ts:1661-1686`)
+### Plan Type Determination
 
-The `getOrderPlanTypeAndAmount()` method determines whether an algo order is position-level or sized:
+`selectPlanTypeAndAmount(opts, positions)` is the pure decision; `getOrderPlanTypeAndAmount(opts)`
+is the async wrapper that resolves which positions to hand it.
 
 - If `amount === 0`, the order is position-level (`pos_loss`/`pos_profit`)
 - If `amount !== 0` and a matching position is found with `contracts >= amount`, the order is a sized stop (`loss_plan`/`profit_plan`)
 - If `amount !== 0` but no matching position with sufficient contracts is found, the order falls back to position-level (`pos_loss`/`pos_profit`)
 - Trailing stops always use `track_plan`
+
+**`amount === 0` is a product sentinel, not "unknown size."** It means "close the
+whole position" and the web app renders it as **"Full Position"**
+(`apps/web/src/utils/validation/isFullStop.ts`). An attempt to populate it from
+the protected position shipped and had to be reverted — it turned every
+position-level TP/SL into a fixed-size one on drag. Never size a zero-amount stop.
+
+**Position lookup must not read `store.positions` directly — this is another
+instance of quirk 22.** Hosted-mode order writes run on the never-`start()`ed
+main-thread mirror, so a sized stop found no position, fell through to the
+position-level branch, and was POSTed as `planType: pos_loss` **with the `size`
+field omitted entirely** — the requested size silently vanished and the UI showed
+"Full Position". `resolvePositionsForPlanType(symbol)` fixes this with a
+short-lived REST snapshot. Three things about it are load-bearing:
+
+- The store short-circuit is **symbol-scoped**. A bare `positions.length > 0`
+  looks satisfied whenever the account holds _any other_ symbol, which leaves the
+  original bug alive for every multi-symbol account.
+- **Only non-empty snapshots are cached.** `placeOrders` formats algo payloads
+  before the entry order is placed, so a bracket always takes one snapshot while
+  flat; caching that would downgrade every sized stop for the rest of the TTL.
+- A failed fetch **degrades to a position-level stop and emits**. It cannot throw:
+  `formatAlgoOrder` runs inside `placeOrders`' `Promise.all`, so a throw would also
+  block the unrelated entry order in the same bracket.
+
+`getCancelPlanType` deliberately stays **synchronous** and reads only
+`store.positions`. By cancel time the position is usually already closed, so a
+refetch would report flat and compute `pos_loss` for an order that was placed as
+`loss_plan` — and the cancel would fail. It only computes at all when
+`order.info.planType` is missing.
+
+`bitgetinverse` used to carry a byte-identical copy of this logic
+(`getInverseOrderPlanTypeAndAmount`) and stayed broken when the base class was
+fixed. It now delegates to the inherited methods — don't re-fork it.
 
 ## Symbol Format
 
@@ -507,6 +542,18 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 
 23. **`formatCreateOrder` lot-split must guard `maxSize > 0`.** The large-order split is `lots = (maxSize > 0 && amount > maxSize) ? ceil(amount / maxSize) : 1`. The `maxSize > 0` guard is load-bearing: on the hosted-server **mirror**, the streamed market can carry `limits.amount.max === 0`, and `ceil(amount / 0) = Infinity` — lodash **`times(Infinity)` returns `[]`**, so `formatCreateOrder` produced **zero payloads** and the order silently never POSTed (no throw, no error; e2e "expected 0 to equal 1"). The same zeroed `maxSize` would surface as `rest = amount % 0 = NaN`, so `rest` is guarded identically. Real users in worker mode have a real `maxSize` and never hit this. **Root cause not yet fixed:** why the mirror's bitget market gets `limits.amount.max === 0` (server→mirror market serialization) is a separate follow-up — the guard makes order placement correct regardless, but if you touch market hydration, check whether the mirror's `limits` survive the stream.
+
+24. **`placeOrders` must `await Promise.all` the algo payloads.** It read
+    `algoOrders.map(this.formatAlgoOrder)` — an array of **unresolved Promises** —
+    and passed it straight to `placeAlgoOrders`, which reads `payload.planType`
+    (always `undefined` on a Promise, so every algo order took the non-trailing
+    endpoint and trailing stops silently went to the wrong one) and POSTed the
+    Promise itself as the request body. Typecheck does not catch this:
+    `Promise<Record<string, any>>` is structurally assignable to
+    `Record<string, any>`. The single-order `placeOrder` path awaited correctly,
+    which is why only batch placement was affected. The `formatCreateOrder`
+    line directly above it in `placeOrders` already had the correct
+    `await Promise.all(...)` shape — match it.
 
 ## Error Handling
 
