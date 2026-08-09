@@ -337,6 +337,12 @@ short-lived REST snapshot. Three things about it are load-bearing:
   4 buy-side stops went out as `pos_loss` while sell-side stops on the same
   symbol were correctly sized. The rule: if the store cannot already answer the
   question, fetch.
+- **Compare against the size that will actually be POSTed**, i.e.
+  `adjust(amount, precision.amount)`, not the raw request. A "close the whole
+  position" stop derived from a percentage lands at e.g. 30.34 on a 30-contract
+  position with lot size 1; the sent size is 30 and fits perfectly, but the raw
+  30.34 fails `contracts >= amount` and silently downgrades to `pos_loss`.
+  Observed live as 4 such stops in a single run.
 - **Only non-empty snapshots are cached.** `placeOrders` formats algo payloads
   before the entry order is placed, so a bracket always takes one snapshot while
   flat; caching that would downgrade every sized stop for the rest of the TTL.

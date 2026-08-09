@@ -2011,6 +2011,19 @@ export class BitgetExchange extends BaseExchange {
     }
   };
 
+  // Compare against the size that will actually be POSTed, not the raw request.
+  // formatAlgoOrder sends adjust(amount, precision.amount), so a "close the
+  // whole position" stop derived from a percentage (e.g. 30.34 on a 30-contract
+  // position with a lot size of 1) overshoots `contracts` by a fraction of a lot
+  // and would silently downgrade to a position-level stop — the sent size is 30,
+  // which fits perfectly. Observed live: 4 stops protecting a long went out as
+  // pos_loss for exactly this reason.
+  private planTypeComparableAmount = (opts: PlaceOrderOpts | Order): number => {
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market?.precision?.amount) return opts.amount;
+    return adjust(opts.amount, market.precision.amount);
+  };
+
   // amount === 0 is the product's "full position" sentinel (isFullStop) and must
   // keep mapping to pos_loss/pos_profit — do not size it from the position.
   protected selectPlanTypeAndAmount = (opts: PlaceOrderOpts | Order, positions: Position[]): [string, number] => {
@@ -2022,7 +2035,7 @@ export class BitgetExchange extends BaseExchange {
         (p) =>
           p.symbol === opts.symbol &&
           p.side === (opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-          p.contracts >= opts.amount,
+          p.contracts >= this.planTypeComparableAmount(opts),
       );
       if (foundPosition) {
         infiniteStop = false;
@@ -2047,7 +2060,7 @@ export class BitgetExchange extends BaseExchange {
         : await this.resolvePositionsForPlanType(
             opts.symbol,
             opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long,
-            opts.amount,
+            this.planTypeComparableAmount(opts),
           );
 
     return this.selectPlanTypeAndAmount(opts, positions);

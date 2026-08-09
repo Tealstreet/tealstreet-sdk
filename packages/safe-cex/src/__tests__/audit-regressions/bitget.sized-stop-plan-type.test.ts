@@ -127,6 +127,30 @@ describe('audit regression: Bitget sized stop plan type', () => {
     expect(payload.planType).toBe('loss_plan');
   });
 
+  it('keeps a whole-position stop sized when the request overshoots by less than a lot', async () => {
+    // A "close everything" stop derived from a percentage lands at 30.34 on a
+    // 30-contract position. The size actually POSTed is adjust(30.34, 1) = 30,
+    // which fits — but comparing the RAW amount against contracts failed and
+    // downgraded it to pos_loss. Observed live as 4 such stops in one run.
+    const exchange = buildExchange();
+    exchange.fetchOpenPositions = vi.fn().mockResolvedValue([{ ...openPosition, contracts: 30 }]);
+
+    const payload = await exchange.formatAlgoOrder({ ...sizedStop, amount: 30.341646 } as any);
+
+    expect(payload.planType).toBe('loss_plan');
+    expect(payload.size).toBe('30');
+  });
+
+  it('still falls back to a position-level stop when the sent size genuinely exceeds the position', async () => {
+    const exchange = buildExchange();
+    exchange.fetchOpenPositions = vi.fn().mockResolvedValue([{ ...openPosition, contracts: 30 }]);
+
+    const payload = await exchange.formatAlgoOrder({ ...sizedStop, amount: 45 } as any);
+
+    expect(payload.planType).toBe('pos_loss');
+    expect(payload.size).toBeUndefined();
+  });
+
   it('does not cache an empty snapshot taken while flat', async () => {
     // placeOrders formats algo payloads before the entry order is placed, so a
     // bracket always takes one snapshot while flat. Caching it would downgrade
