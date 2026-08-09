@@ -77,6 +77,30 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
     expect(config.params.leverageRr).toBe(-25);
   });
 
+  it('records the applied leverage for a flat symbol', async () => {
+    // mapPosition drops size-0 rows, so a leverage change on a flat symbol
+    // leaves nothing in store.positions and the place-order % slider falls back
+    // to 1x — order sizes then come out `leverage` times too small.
+    const { exchange } = buildExchange();
+
+    await exchange.setLeverage('ADAUSDT', 10);
+
+    expect(exchange.store.fetchedLeverage.ADAUSDT).toMatchObject({
+      buyLeverage: 10,
+      sellLeverage: 10,
+    });
+  });
+
+  it('does not record leverage when the exchange rejects the change', async () => {
+    const { exchange, put } = buildExchange();
+    put.mockResolvedValue({ data: { code: 11001, msg: 'rejected' } });
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(exchange.setLeverage('ADAUSDT', 25)).rejects.toThrow();
+
+    expect(exchange.store.fetchedLeverage.ADAUSDT).toBeUndefined();
+  });
+
   it('reads margin mode off the raw row, which mapPosition would have dropped', async () => {
     // mapPosition returns undefined for size-0 rows on purpose, so the leverage
     // context has to read accountPositions directly.

@@ -951,12 +951,31 @@ export class PhemexExchange extends BaseExchange {
       params,
     });
 
-    const positions = await this.fetchPositions([symbol]);
-    this.store.addOrUpdatePositions(positions);
     if (response?.data?.code !== 0) {
       this.emitAndLogError(response?.data?.msg);
       throw new Error(response?.data?.msg);
     }
+
+    const positions = await this.fetchPositions([symbol]);
+    this.store.addOrUpdatePositions(positions);
+
+    // Record the new leverage even when the symbol is flat. mapPosition drops
+    // size-0 rows, so a leverage change on a symbol with no open position
+    // leaves nothing in store.positions for the place-order % slider to read,
+    // and it falls back to 1x — the order size then comes out `leverage` times
+    // too small. fetchedLeverage is the app's documented no-position fallback
+    // (see blofin's fetchLeverageForSymbol).
+    const appliedLeverage = Math.abs(prepLeverage(inputLeverage));
+    const existing = this.store.fetchedLeverage[symbol];
+    this.store.update({
+      fetchedLeverage: {
+        ...this.store.fetchedLeverage,
+        [symbol]: {
+          buyLeverage: side === PositionSide.Short ? (existing?.buyLeverage ?? appliedLeverage) : appliedLeverage,
+          sellLeverage: side === PositionSide.Long ? (existing?.sellLeverage ?? appliedLeverage) : appliedLeverage,
+        },
+      },
+    });
   };
 
   cancelOrders = async (_orders: Order[]) => {
