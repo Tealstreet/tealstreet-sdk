@@ -446,6 +446,20 @@ and otherwise reads the raw `accountPositions` row, which is present at size 0
 with `leverageRr` and `crossMargin` populated. Read that row **raw**, not via
 `mapPosition`, which would discard it.
 
+#### A leverage change on a flat symbol must record `fetchedLeverage`
+
+`mapPosition` drops size-0 rows, so after `setLeverage` on a symbol with no open
+position there is nothing in `store.positions` for the place-order % slider to
+read, and it falls back to **1x** — order sizes then come out `leverage` times
+too small. The e2e margin-slider step catches this as `expected 5.45 to be close
+to 55.5675` (22.23 available x 10x x 0.25).
+
+`setLeverageHelper` therefore writes `store.fetchedLeverage[symbol]` after a
+confirmed success, which is the app's documented no-position fallback (blofin's
+`fetchLeverageForSymbol` is the reference implementation). The response code is
+checked **before** any store mutation, so a rejected change cannot record a
+leverage the exchange never applied.
+
 #### Margin Type (`changeMarginType`)
 
 - Implemented by toggling leverage sign via `setLeverageHelper` with `allowChangingMarginType = true`

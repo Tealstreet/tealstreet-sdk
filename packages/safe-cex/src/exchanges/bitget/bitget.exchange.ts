@@ -1954,16 +1954,29 @@ export class BitgetExchange extends BaseExchange {
   // writes (see quirk 22), which silently downgraded every sized stop to a
   // position-level one. Fall back to a short-lived REST snapshot there.
   //
-  // The store short-circuit is SYMBOL-scoped, not `positions.length > 0`: the
-  // worker streams positions into the mirror, so an account holding any other
-  // symbol looks "loaded" while the symbol being stopped is still absent.
+  // The store short-circuit asks the exact question the caller needs answered —
+  // "is there a position on this symbol AND this side big enough to size the
+  // stop?" — rather than the weaker "does the store know this symbol?". A
+  // symbol-only check still downgraded stops whenever the store held some other
+  // row for the symbol (e.g. a stale/zeroed long while the open position is
+  // short): the answer looked available but the row that would justify a sized
+  // stop was absent. Observed live as 4 buy-side stops going out as pos_loss
+  // while sell-side ones on the same symbol were correctly sized.
+  //
   // Only non-empty snapshots are cached, so a fetch taken while flat (the
   // entry+bracket flow formats algo payloads before the entry fills) cannot
   // pin an empty result for the rest of the TTL.
   // Deliberately NOT committed to the store — this is a read for one decision,
   // and writing it would pollute the mirror's streamed state.
-  protected resolvePositionsForPlanType = async (symbol: string): Promise<Position[]> => {
-    if (this.store.positions.some((p) => p.symbol === symbol)) return this.store.positions;
+  protected resolvePositionsForPlanType = async (
+    symbol: string,
+    side: PositionSide,
+    amount: number,
+  ): Promise<Position[]> => {
+    const storeAnswers = this.store.positions.some(
+      (p) => p.symbol === symbol && p.side === side && p.contracts >= amount,
+    );
+    if (storeAnswers) return this.store.positions;
 
     const cached = this._planTypePositionsCache;
     if (cached && Date.now() - cached.at < BitgetExchange.POSITIONING_CACHE_TTL_MS) return cached.value;
@@ -2031,7 +2044,11 @@ export class BitgetExchange extends BaseExchange {
     const positions =
       opts.amount === 0 || opts.type === OrderType.TrailingStopLoss
         ? this.store.positions
-        : await this.resolvePositionsForPlanType(opts.symbol);
+        : await this.resolvePositionsForPlanType(
+            opts.symbol,
+            opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long,
+            opts.amount,
+          );
 
     return this.selectPlanTypeAndAmount(opts, positions);
   };

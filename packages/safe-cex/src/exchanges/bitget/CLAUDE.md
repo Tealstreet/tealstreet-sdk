@@ -328,9 +328,15 @@ field omitted entirely** — the requested size silently vanished and the UI sho
 "Full Position". `resolvePositionsForPlanType(symbol)` fixes this with a
 short-lived REST snapshot. Three things about it are load-bearing:
 
-- The store short-circuit is **symbol-scoped**. A bare `positions.length > 0`
-  looks satisfied whenever the account holds _any other_ symbol, which leaves the
-  original bug alive for every multi-symbol account.
+- The store short-circuit asks the **exact question the caller needs**: is there
+  a position on this symbol AND this side with `contracts >= amount`? Two weaker
+  forms were both shipped and both wrong. `positions.length > 0` looks satisfied
+  whenever the account holds _any other symbol_. A symbol-only check looks
+  satisfied whenever the store holds _any row for that symbol_ — e.g. a stale or
+  zeroed long while the live position is short. The second one was caught in CI:
+  4 buy-side stops went out as `pos_loss` while sell-side stops on the same
+  symbol were correctly sized. The rule: if the store cannot already answer the
+  question, fetch.
 - **Only non-empty snapshots are cached.** `placeOrders` formats algo payloads
   before the entry order is placed, so a bracket always takes one snapshot while
   flat; caching that would downgrade every sized stop for the rest of the TTL.

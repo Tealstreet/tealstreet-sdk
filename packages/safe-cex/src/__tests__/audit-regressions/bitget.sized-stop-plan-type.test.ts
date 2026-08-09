@@ -91,6 +91,42 @@ describe('audit regression: Bitget sized stop plan type', () => {
     expect(payload.size).toBe('30');
   });
 
+  it('sizes a stop protecting a short when the store only holds a stale long', async () => {
+    // Observed live: 4 buy-side stops went out as pos_loss while sell-side ones
+    // on the same symbol were correctly sized. A symbol-only store check looked
+    // satisfied by the leftover long row, so the short that would justify the
+    // sized stop was never fetched.
+    const exchange = buildExchange();
+    exchange.store.update({ positions: [{ ...openPosition, contracts: 0 }] as any });
+    const shortPosition = {
+      ...openPosition,
+      id: 'TRXUSDT:short',
+      side: PositionSide.Short,
+      contracts: 100,
+    };
+    const fetchOpenPositions = vi.fn().mockResolvedValue([shortPosition]);
+    exchange.fetchOpenPositions = fetchOpenPositions;
+
+    // Buy-side stop => protects a SHORT position.
+    const payload = await exchange.formatAlgoOrder({ ...sizedStop, side: OrderSide.Buy } as any);
+
+    expect(fetchOpenPositions).toHaveBeenCalledTimes(1);
+    expect(payload.planType).toBe('loss_plan');
+    expect(payload.size).toBe('30');
+  });
+
+  it('skips the fetch when the store already answers for that exact side', async () => {
+    const exchange = buildExchange();
+    exchange.store.update({ positions: [openPosition] as any });
+    const fetchOpenPositions = vi.fn().mockResolvedValue([]);
+    exchange.fetchOpenPositions = fetchOpenPositions;
+
+    const payload = await exchange.formatAlgoOrder(sizedStop as any);
+
+    expect(fetchOpenPositions).not.toHaveBeenCalled();
+    expect(payload.planType).toBe('loss_plan');
+  });
+
   it('does not cache an empty snapshot taken while flat', async () => {
     // placeOrders formats algo payloads before the entry order is placed, so a
     // bracket always takes one snapshot while flat. Caching it would downgrade
