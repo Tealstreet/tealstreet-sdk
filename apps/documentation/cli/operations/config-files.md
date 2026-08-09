@@ -69,6 +69,27 @@ tealstreet`) or for keeping multiple identity configs on one machine.
 
 ---
 
+## Crash reporting
+
+Released binaries report crashes (uncaught exceptions and unhandled
+rejections) to Tealstreet's error tracker so we find breakage that never
+makes it into a bug report.
+
+| Variable                 | Effect                   |
+| ------------------------ | ------------------------ |
+| `TEALSTREET_TELEMETRY=0` | Turn crash reporting off |
+
+Also accepts `false` / `off`. Development runs (`bun run src/index.ts`)
+never report — only versioned release binaries do.
+
+What is sent: the exception type, message, and stack trace. Values that
+look like credentials are redacted before the event leaves your machine,
+and the hostname, OS username, request bodies, and account details are
+not collected. Nothing from `config.json` or `hooks.json` is read by this
+path.
+
+---
+
 ## Backing up
 
 `config.json` and `hooks.json` are the sensitive ones — `config.json`

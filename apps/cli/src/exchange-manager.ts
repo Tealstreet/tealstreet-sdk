@@ -98,7 +98,16 @@ export class ExchangeManager {
    * Enable an account - create exchange, start it, and track it
    * Returns the exchange instance
    */
-  async enable(account: ExchangeAccountConfig): Promise<ExchangeLike> {
+  /**
+   * @param opts.persistActive When false, do NOT write `active: true` back to
+   *   config.json. Required for any SECOND process (e.g. the MCP server)
+   *   connecting alongside a running REPL: `updateAccount` rewrites the whole
+   *   config file with no lock, so persisting from a second process races the
+   *   REPL's own writes — last-writer-wins can clobber edits and resurrect
+   *   deleted-account tombstones — and it silently changes which accounts the
+   *   REPL auto-connects next launch.
+   */
+  async enable(account: ExchangeAccountConfig, opts: { persistActive?: boolean } = {}): Promise<ExchangeLike> {
     // Check if already connected
     if (this.exchanges.has(account.name)) {
       return this.exchanges.get(account.name)!.exchange;
@@ -118,8 +127,10 @@ export class ExchangeManager {
     // Create health monitor for this exchange
     this.createHealthMonitor(account.name, account.exchange);
 
-    // Update the active state in config
-    this.adapter.updateAccount(account.name, { active: true });
+    // Update the active state in config (skipped for read-only side processes)
+    if (opts.persistActive !== false) {
+      this.adapter.updateAccount(account.name, { active: true });
+    }
 
     return exchange;
   }

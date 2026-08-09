@@ -71,6 +71,50 @@ const normalizeSymbols = (symbols: string[]): string[] => {
   return Array.from(deduped);
 };
 
+/** Minimal shape of the reconnect diagnostics a socket exposes. */
+interface SocketDiagnosticsSource {
+  lastCloseCode?: number;
+  lastCloseAt?: number;
+  lifetimeCloseCount?: number;
+  onCloseCount?: number;
+  isReconnectPauseActive?: boolean;
+}
+
+export const summarizeSocketDiagnostics = <K extends 'public' | 'private'>(
+  sockets: readonly SocketDiagnosticsSource[],
+  kind: K,
+) => {
+  let closeCode: number | undefined;
+  let closeAt = -1;
+  let closeCountTotal = 0;
+  let closeStreak = 0;
+  let paused = false;
+
+  for (const socket of sockets) {
+    if (!socket) continue;
+
+    closeCountTotal += socket.lifetimeCloseCount ?? 0;
+    closeStreak += socket.onCloseCount ?? 0;
+    if (socket.isReconnectPauseActive) paused = true;
+
+    // Most-recent close wins; a socket that never closed has lastCloseAt 0.
+    const at = socket.lastCloseAt ?? 0;
+    if (socket.lastCloseCode !== undefined && at > closeAt) {
+      closeAt = at;
+      closeCode = socket.lastCloseCode;
+    }
+  }
+
+  return {
+    [`${kind}CloseCode`]: closeCode,
+    [`${kind}CloseCountTotal`]: closeCountTotal,
+    [`${kind}CloseStreak`]: closeStreak,
+    [`${kind}ReconnectPaused`]: paused,
+  } as Record<`${K}CloseCode`, number | undefined> &
+    Record<`${K}CloseCountTotal` | `${K}CloseStreak`, number> &
+    Record<`${K}ReconnectPaused`, boolean>;
+};
+
 /**
  * BaseExchange supplies a few deliberately inert fallbacks so that older
  * integrations can omit optional methods.  Metadata must never advertise one
@@ -1458,6 +1502,18 @@ export class BaseExchange implements Exchange {
   };
 
   /** Internal method to sync health without starting watchdog (used by audit) */
+  /**
+   * Collapses per-socket reconnect diagnostics into scalars for the store.
+   *
+   * An exchange can hold several sockets of the same kind, so: the close code
+   * comes from the most-recently-closed one (`lastCloseAt`), counts are summed,
+   * and the pause flag is true if ANY socket has given up — that is the state
+   * worth surfacing, since it means nothing is retrying.
+   *
+   * Not covered: `ExternalPublicDataProvider` is not a `BaseWebSocket` and is
+   * absent from `getPublicSockets()`, so gateway-mode accounts report no close
+   * code even though the gateway drives `publicHealthy`.
+   */
   private syncSocketHealthToStoreInternal = () => {
     const publicSockets = this.getPublicSockets();
     const privateSockets = this.getPrivateSockets();
@@ -1493,6 +1549,8 @@ export class BaseExchange implements Exchange {
       privateInitialized,
       publicLastMessage,
       privateLastMessage,
+      ...summarizeSocketDiagnostics(publicSockets, 'public'),
+      ...summarizeSocketDiagnostics(privateSockets, 'private'),
     });
   };
 

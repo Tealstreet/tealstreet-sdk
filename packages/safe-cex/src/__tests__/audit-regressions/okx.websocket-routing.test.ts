@@ -3,6 +3,7 @@ import type { ExchangeOptions, Market } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { ORDER_STATS_TOPIC } from '../../exchanges/okx/okx.ws-business';
 import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {
@@ -137,9 +138,12 @@ describe('OKX websocket exact-topic routing', () => {
 
     expect(candle).toHaveBeenCalledOnce();
     expect(handleOrderTopic).toHaveBeenCalledOnce();
+    // Every order channel records under one stats topic on purpose: OKX only
+    // pushes the channel for a category the account currently holds orders in,
+    // so per-category entries went quiet independently as categories emptied.
     expect(Object.keys(websocket.messageHandlersStats).sort()).toEqual([
       `candle.1m.${market.id}`,
-      'orders-algo',
+      ORDER_STATS_TOPIC,
     ]);
   });
 

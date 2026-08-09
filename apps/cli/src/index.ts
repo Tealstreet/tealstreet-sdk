@@ -17,9 +17,23 @@ import {
 import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
 import { fireCheckin } from './checkin';
+import { login, logout, showAuthStatus } from './auth';
+import { installStdoutGuard, isMcpInvocation } from './mcp/stdoutGuard';
+import { initCliSentry, captureCliError, flushCliSentry } from './sentry';
+
+// MCP stdio frames JSON-RPC over stdout, so nothing else may touch it. Detect
+// the mode from argv here — the noisy writers below run at module top level,
+// long before commander has parsed anything.
+const RUNNING_AS_MCP = isMcpInvocation();
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+// Released binaries only, and opt-out via TEALSTREET_TELEMETRY=0. Must precede
+// the process-level handlers below so an early crash still has a client.
+initCliSentry();
+
+if (RUNNING_AS_MCP) installStdoutGuard();
 
 // Announce this process to the web app so the web's CliListenerWorker
 // gate knows there's a CLI on this platform. Fire-and-forget — no
@@ -31,13 +45,17 @@ fireCheckin();
 process.on('uncaughtException', (error: Error) => {
   logger.error(`Uncaught exception: ${error.message}`, error.stack);
   console.error(error.message);
-  process.exit(1);
+  captureCliError(error, { handler: 'uncaughtException' });
+  // Exit is deferred until the event is on the wire, else the crash we most
+  // want to see is the one that never gets reported.
+  void flushCliSentry().finally(() => process.exit(1));
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
   const message = reason instanceof Error ? reason.message : String(reason);
   const stack = reason instanceof Error ? reason.stack : undefined;
   logger.error(`Unhandled rejection: ${message}`, stack);
+  captureCliError(reason, { handler: 'unhandledRejection' });
   // Don't exit on unhandled rejection - let the app continue
   // The error will be logged and a clean message shown to user
 });
@@ -82,8 +100,11 @@ import { registerCrossTradeCommand } from './commands/cross-trade';
 // Dynamic import for repl to avoid circular dependency issues with safe-cex
 const getRepl = async () => import('./repl');
 
-// Check for updates in background (non-blocking)
-checkForUpdatesBackground();
+// Check for updates in background (non-blocking).
+// Skipped under MCP: it is setImmediate-based and prints a chalk box via
+// console.log, which would land on stdout mid-session and corrupt the
+// JSON-RPC stream.
+if (!RUNNING_AS_MCP) checkForUpdatesBackground();
 
 const program = new Command();
 
@@ -94,6 +115,30 @@ program
   .option('--update', 'Update CLI to the latest version')
   .option('--check-update', 'Check for updates without installing')
   .option('--disable-all', 'Start with all exchanges disabled (skip auto-connecting)');
+
+// ============ Auth Commands ============
+// Same names the REPL uses (repl.ts processSingleCommand), so the instruction
+// "Run \"login\" first" — which the proxy/tunnel path prints on failure — works
+// whether the reader types it in the REPL or the shell. Without these,
+// `tealstreet login` exits with "unknown command 'login'".
+program
+  .command('login')
+  .description('Authenticate with Tealstreet (required for proxy/tunnel routing)')
+  .action(async () => {
+    const ok = await login();
+    process.exit(ok ? 0 : 1);
+  });
+
+program
+  .command('logout')
+  .description('Clear the stored Tealstreet auth token')
+  .action(() => logout());
+
+program
+  .command('auth')
+  .alias('whoami')
+  .description('Show authentication status')
+  .action(() => showAuthStatus());
 
 // ============ Account Commands ============
 const accountCmd = program.command('account').alias('accounts').description('Manage accounts');
@@ -146,6 +191,9 @@ accountCmd
   .option('--private-key <key>', 'Private key (for DEX exchanges)')
   .option('--wallet-address <address>', 'Wallet address (for DEX exchanges)')
   .option('-t, --testnet', 'Use testnet')
+  .option('--tealstreet-proxy', 'Route REST through the Tealstreet proxy (required for IP-whitelisted keys)')
+  .option('--tealstreet-tunnel', 'Route REST through the Tealstreet tradetunnel')
+  .option('--proxy-region <region>', 'Pin the proxy egress region')
   .option('--default', 'Set as default account')
   .action((options) => {
     const exchangeInfo = getExchangeInfo(options.exchange);
@@ -180,6 +228,11 @@ accountCmd
       apiSecret: isWalletBased ? options.privateKey || '' : options.apiSecret || '',
       passphrase: options.passphrase,
       testnet: options.testnet || false,
+      // Routing was already honored by platform-adapter but unsettable here, so a
+      // CLI-added account always egressed direct — which an IP-whitelisted key rejects.
+      ...(options.tealstreetProxy ? { tealstreetProxy: true } : {}),
+      ...(options.tealstreetTunnel ? { tealstreetTunnel: true } : {}),
+      ...(options.proxyRegion ? { proxyRegion: options.proxyRegion } : {}),
     };
 
     addAccount(account);
@@ -363,10 +416,10 @@ tasksCmd
         task.status === 'running'
           ? chalk.green
           : task.status === 'paused'
-            ? chalk.yellow
-            : task.status === 'completed'
-              ? chalk.blue
-              : chalk.red;
+          ? chalk.yellow
+          : task.status === 'completed'
+          ? chalk.blue
+          : chalk.red;
 
       console.log(`  ${chalk.bold(task.id.slice(0, 12))}...`);
       console.log(`    Type: ${task.type}`);
@@ -407,10 +460,10 @@ tasksCmd.action(async () => {
       task.status === 'running'
         ? chalk.green
         : task.status === 'paused'
-          ? chalk.yellow
-          : task.status === 'completed'
-            ? chalk.blue
-            : chalk.red;
+        ? chalk.yellow
+        : task.status === 'completed'
+        ? chalk.blue
+        : chalk.red;
 
     console.log(`  ${chalk.bold(task.id.slice(0, 12))}...  ${task.type}  ${statusColor(task.status)}`);
   }
@@ -783,6 +836,17 @@ tradingCommands.forEach(({ name, desc }) => {
       runSingleCommand(commandString, options.account, options.symbol);
     });
 });
+
+// ============ MCP Server ============
+program
+  .command('mcp')
+  .description('Run as an MCP server over stdio (for Claude Code and other MCP clients)')
+  .action(async () => {
+    // Lazy import: pulls in the TypeScript compiler via
+    // @tealstreet/script-authoring, which no other CLI path needs at runtime.
+    const { startMcpServer } = await import('./mcp/server');
+    await startMcpServer();
+  });
 
 // ============ Default Action ============
 // Handle top-level flags before parsing

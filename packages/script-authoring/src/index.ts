@@ -1,0 +1,19 @@
+export type { ValidationIssue, ValidationResult, ValidateScriptOptions } from './validate/validateScript';
+export { validateScript } from './validate/validateScript';
+export { checkRuntimeImports } from './validate/checkRuntimeImports';
+export { checkTopLevelEffects } from './validate/checkTopLevelEffects';
+export { validate } from './validate/validate';
+export { checkCapabilities, readScriptMeta } from './validate/checkCapabilities';
+export type { DeclaredCapabilities } from './validate/checkCapabilities';
+export { IMPLIED_WRITES, READ_METHOD_NAMES, WRITE_METHOD_NAMES } from './validate/capabilityNames';
+
+export type { CircumventionFinding, ScreenSeverity, ScreenTier } from './screen/types';
+export { hasBlockingFinding, requiredTier, scanCircumvention } from './screen/circumvention';
+export type { ModelConcern, ScreenModuleInput, ScreenModuleOptions, ScreenResult } from './screen/screenModule';
+export { screenModule } from './screen/screenModule';
+export { SCREEN_PROMPT_VERSION } from './screen/screenPrompt';
+export type { OpenAiClientConfig, OpenAiJsonRequest } from './openai';
+export { AiConfigurationError, AiProviderError, OpenAiJsonClient } from './openai';
+export type { ScreenEnvConfig } from './config';
+export { getScreenConfig, isScreenConfigured } from './config';
+export { SCRIPT_COMPILER_OPTIONS, SCRIPT_MARKER_OWNER, SCRIPT_TSCONFIG_JSON } from './compilerOptions';

@@ -26,7 +26,7 @@
  * `main: "src/index.ts"`). Only the Phase 6 generator points here.
  *
  * **Drift safety.** The negative assertions in
- * `apps/cli/src/script-types-bundle.test.ts` fail if a host-only
+ * `packages/script-authoring/src/script-types-bundle.test.ts` fail if a host-only
  * symbol leaks into the bundle (e.g. someone accidentally adds
  * `InProcessProxy` to the re-export list below).
  */
