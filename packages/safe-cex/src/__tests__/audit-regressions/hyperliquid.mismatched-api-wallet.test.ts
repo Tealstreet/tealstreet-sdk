@@ -7,7 +7,8 @@ import { DefaultStore } from '../../store/store.base';
 const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 const OTHER_KEY = '0x59c6995e998f97a5a004497e5daea7ccbbbbb7cce0be69d7f9cf75a18d2ceebd';
-const OTHER_ADDRESS = '0x0000000000000000000000000000000000000001';
+const OTHER_ADDRESS = '0x5398bB4A1b292598Ce641C108FFBB9faF8ABCAfA';
+const INVALID_ADDRESS = '0x0000000000000000000000000000000000000001';
 
 const build = (options: Record<string, unknown>) => {
   const exchange = new HyperliquidExchange('hyperliquid' as any, options as any, new DefaultStore());
@@ -43,16 +44,8 @@ describe('hyperliquid mismatched API wallet warning', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('checks applicationId when the API wallet key is corrupted independently', () => {
+  it('warns when the saved signing wallet is corrupted even if applicationId matches the secret', () => {
     const { exchange, errors } = build({ applicationId: ADDRESS, key: OTHER_ADDRESS, secret: KEY });
-
-    warn(exchange);
-
-    expect(errors).toHaveLength(0);
-  });
-
-  it('warns when the private key does not derive the applicationId used for private reads', () => {
-    const { exchange, errors } = build({ applicationId: OTHER_ADDRESS, key: ADDRESS, secret: KEY });
 
     warn(exchange);
 
@@ -60,13 +53,30 @@ describe('hyperliquid mismatched API wallet warning', () => {
     expect(errors[0]).toContain(OTHER_ADDRESS);
   });
 
-  it('warns for a restored account with an unchanged applicationId and corrupted credentials', () => {
+  it('stays quiet for an agent wallet whose key and secret match even when applicationId is the master wallet', () => {
     const { exchange, errors } = build({ applicationId: ADDRESS, key: OTHER_ADDRESS, secret: OTHER_KEY });
 
     warn(exchange);
 
+    expect(errors).toHaveLength(0);
+  });
+
+  it('warns for a restored account with an unchanged applicationId and corrupted signing credentials', () => {
+    const { exchange, errors } = build({ applicationId: ADDRESS, key: OTHER_ADDRESS, secret: KEY });
+
+    warn(exchange);
+
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain(ADDRESS);
+    expect(errors[0]).toContain(OTHER_ADDRESS);
+  });
+
+  it('falls back to the private-read wallet when no signing wallet is saved', () => {
+    const { exchange, errors } = build({ applicationId: INVALID_ADDRESS, secret: KEY });
+
+    warn(exchange);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(INVALID_ADDRESS);
   });
 
   it('stays quiet for a wallet-based connection with no key pair', () => {
