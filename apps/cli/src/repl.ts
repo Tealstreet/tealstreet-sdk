@@ -60,7 +60,6 @@ import {
   DIM,
   CLEAR_SCREEN,
   CLEAR_LINE,
-  twapTaskParamsToOptions,
 } from '../../../packages/cli-core/src/commands/trading';
 
 import { WatchMode, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, CURSOR_HOME } from './utils/watch-mode';
@@ -80,7 +79,7 @@ import { twapManager } from '../../../packages/safe-cex/src/webworker/twap/TwapM
 import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/TwapInstance';
 import { createStandalonePlatformAdapter } from './platform-adapter';
 import { logger, originalConsoleLog, setPromptController } from './logger';
-import type { ExchangeLike, ExchangeAccountConfig, TwapTaskParams } from '../../../packages/cli-core/src/types';
+import type { ExchangeLike, ExchangeAccountConfig } from '../../../packages/cli-core/src/types';
 import {
   login,
   logout,
@@ -1890,7 +1889,16 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             adapter.printError(`Market not found for symbol ${symbol}`);
           } else {
             // Extract TWAP params (with optional twap-chase fields)
-            const twapParams = params.params as TwapTaskParams;
+            const twapParams = params.params as {
+              totalSize: number;
+              duration: number;
+              slices: number;
+              useChaserOrders?: boolean;
+              reduceOnly?: boolean;
+              timeoutPct?: number;
+              timeoutAction?: 'market' | 'next';
+              failAction?: 'market' | 'next';
+            };
 
             // Create TWAP instance with proper options
             // Cast to Worker since TwapInstance only uses postMessage
@@ -1903,11 +1911,23 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             const twapInstance = new TwapInstance(
               exchange,
               twapContext,
-              twapTaskParamsToOptions(twapParams, {
+              {
                 accountName: effectiveAccount || 'default',
-                market,
+                activeMarket: market,
+                size: twapParams.totalSize,
+                duration: twapParams.duration,
+                ordersCount: twapParams.slices,
                 side: params.side as OrderSide,
-              }),
+                chaserDelay: 1000,
+                reduceOnly: twapParams.reduceOnly ?? false,
+                randomnessPercentage: 0,
+                useLimitOrders: false,
+                useChaserOrders: twapParams.useChaserOrders || false,
+                timeoutPct: twapParams.timeoutPct,
+                timeoutAction: twapParams.timeoutAction,
+                failAction: twapParams.failAction,
+                origin: 'cli',
+              },
               () => {
                 // State updated callback - log progress
                 const state = twapInstance.state;

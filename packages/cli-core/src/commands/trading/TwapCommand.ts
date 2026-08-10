@@ -237,12 +237,10 @@ export class TwapCommand extends TradingBaseCommand {
         options.ordersCount > 0 ? ((state.ordersExecuted / options.ordersCount) * 100).toFixed(1) : '0.0';
 
       // Time remaining (use nextOrderAt to estimate remaining time)
-      // options.duration is minutes (safe-cex TwapOptions convention);
-      // formatDuration takes ms.
-      const sliceIntervalMs = (options.duration * 60_000) / options.ordersCount;
+      const sliceInterval = options.duration / options.ordersCount;
       const remainingSlices = options.ordersCount - state.ordersExecuted;
-      const remainingMs = Math.max(0, remainingSlices * sliceIntervalMs);
-      const remainingStr = remainingMs > 0 ? formatDuration(remainingMs) : 'done';
+      const remaining = Math.max(0, remainingSlices * sliceInterval);
+      const remainingStr = remaining > 0 ? formatDuration(remaining) : 'done';
 
       lines.push(`  ${DIM}[${shortId}]${RESET} ${sideColor}${sideStr}${RESET} ${options.activeMarket.symbol}`);
       lines.push(`    Progress: ${state.ordersExecuted}/${options.ordersCount} slices (${progress}%)`);

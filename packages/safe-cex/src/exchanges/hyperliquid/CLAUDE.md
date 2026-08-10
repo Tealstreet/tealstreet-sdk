@@ -849,6 +849,11 @@ the gap `warnOnMismatchedApiWallet` closes, called from `start()`.
 - The wording has to stay auth-shaped (`invalid`, `credentials`, `API wallet`).
   The e2e bad-api-key spec greps the requests log against a pattern list; a
   warning it cannot recognise is worth the same as no warning.
+- In hosted exchange-server mode the server-side `start()` copy has
+  `secret: ''`, so this safe-cex startup check cannot see restored browser
+  secrets. The web controller repeats the same signing-wallet check after the
+  browser mirror is active and emits a forced `'error'` from that mirror so
+  the request log and toast assertions still get an auth-shaped signal.
 
 ## Hosted mode: L1 actions are signed by the browser, not the exchange-server
 

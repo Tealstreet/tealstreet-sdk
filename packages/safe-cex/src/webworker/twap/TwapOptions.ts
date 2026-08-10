@@ -12,9 +12,6 @@ export interface TwapOptions {
   accountName: string;
   activeMarket: Market;
   size: number;
-  /** Total TWAP duration in **minutes** (web GUI convention).
-   *  TwapInstance multiplies by 60_000 to pace slices. CLI callers must
-   *  convert from ms via twapTaskParamsToOptions. */
   duration: number;
   ordersCount: number;
   side: OrderSide;
