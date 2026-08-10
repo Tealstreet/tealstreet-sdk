@@ -588,3 +588,22 @@ Every pre-flight rejection in `formatTPSLOrder` follows the same emit-before-thr
 Fresh deterministic regressions belong in the package-level
 `src/__tests__/audit-regressions/` directory, derived from current runtime
 contracts and verified upstream behavior.
+
+## Private WS auth must go through the remote signer
+
+`sendLogin` signs `sha256(sha256(nonce + timestamp + apiKey) + secret)` — note
+this is **plain concatenation, not an HMAC**, which is why it needs its own
+`bitunix-double-sha256` output format rather than reusing `hex`.
+
+It used to compute that inline from `options.secret`. **Hosted
+exchange-server runs with `secret: ''` by design** (the secret never leaves the
+client), so the signature was taken over an empty secret and bitunix rejected
+the handshake with *"Bitunix private ws login failed, double check your key and
+secret"* — which reads like bad credentials and is not. It reproduces **only**
+in hosted mode: local dev and `yarn keys audit` both hold the real secret and
+authenticate fine, so the key audits as valid while e2e reports it dead.
+
+The signer branch lives in `BaseExchange.signWsAuth` and is locked by a golden
+vector in `__tests__/base.ws-auth-signing.test.ts` generated with Node's
+built-in crypto. See `../CLAUDE.md` → "Remote-signer WS auth" for the general
+rule; bitunix is the fourth venue to hit it after kraken, blofin and apexomni.

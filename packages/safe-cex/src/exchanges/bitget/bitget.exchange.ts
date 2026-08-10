@@ -2050,6 +2050,22 @@ export class BitgetExchange extends BaseExchange {
     }
 
     if (infiniteStop) {
+      // Downgrading a sized stop is a real behavior change for the user: the
+      // stop they sized closes the whole position instead. Say so, with the
+      // numbers that drove the decision — a silent downgrade is what made this
+      // take three rounds to pin down.
+      if (opts.amount !== 0) {
+        const candidates = positions
+          .filter((p) => p.symbol === opts.symbol)
+          .map((p) => `${p.side}:${p.contracts}`)
+          .join(', ');
+        this.emitAndLogError(
+          `Sized ${opts.symbol} stop became a full-position stop: need ${this.planTypeComparableAmount(opts)} ` +
+            `(requested ${opts.amount}) on the ${
+              opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long
+            } side, positions seen [${candidates || 'none'}]`,
+        );
+      }
       if (opts.type === OrderType.StopLoss) return ['pos_loss', 0];
       if (opts.type === OrderType.TakeProfit) return ['pos_profit', 0];
     } else {
