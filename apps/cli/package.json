@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sentry/bun": "^10.69.0",
     "@tealstreet/cli-core": "*",
     "@tealstreet/safe-cex": "*",
     "@tealstreet/script-api-cli": "*",

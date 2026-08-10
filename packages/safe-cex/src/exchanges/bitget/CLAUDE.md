@@ -16,6 +16,21 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/bitget.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/bitget.ts
 
+## UTA Support Status
+
+Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade
+endpoints. The adapter is **not fully UTA-compatible yet**: validation, balance,
+positions, orders, order placement/cancel/update, and private WS still use the
+Classic v2 contracts. The only v3 paths currently wired are the account-type
+probe (`ACCOUNT_SETTINGS_V3`) and UTA isolated hedge per-side leverage
+(`SET_LEVERAGE_V3`) after startup detection.
+
+When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
+Account API is not supported", surface the Tealstreet-owned UTA unsupported
+message from `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE`. Do not present it as a
+bad key, bad secret, or IP whitelist problem. Full UTA support requires a real
+v3 migration for REST payloads, pagination, and private WS topics.
+
 ## File Structure
 
 | File                            | Description                                                                                                         |
@@ -90,7 +105,8 @@ Each step checks `this.isDisposed` to allow early exit if the exchange is dispos
 
 ## REST API Endpoints
 
-All endpoints use the V2 API prefix (`/api/v2/mix/`):
+Private trading/account endpoints are Classic v2 unless explicitly marked as v3
+below. Do not infer full UTA support from the v3 probe/leverage paths.
 
 ### Market Data
 
@@ -304,14 +320,109 @@ ioc -> ImmediateOrCancel
 - **Algo orders** (`cancelAlgoOrders`, `bitget.exchange.ts:953-969`): Canceled one at a time; requires correct `planType` from `getCancelPlanType()`.
 - **Cancel all** (`cancelAllOrders`, `bitget.exchange.ts:902-911`): Single POST to `CANCEL_ALL_ORDERS`.
 
-### Plan Type Determination (`bitget.exchange.ts:1661-1686`)
+### Plan Type Determination
 
-The `getOrderPlanTypeAndAmount()` method determines whether an algo order is position-level or sized:
+`selectPlanTypeAndAmount(opts, positions)` is the pure decision; `getOrderPlanTypeAndAmount(opts)`
+is the async wrapper that resolves which positions to hand it.
 
 - If `amount === 0`, the order is position-level (`pos_loss`/`pos_profit`)
-- If `amount !== 0` and a matching position is found with `contracts >= amount`, the order is a sized stop (`loss_plan`/`profit_plan`)
-- If `amount !== 0` but no matching position with sufficient contracts is found, the order falls back to position-level (`pos_loss`/`pos_profit`)
+- If `amount !== 0` and **any** open position exists on the protected side, the order is a sized stop (`loss_plan`/`profit_plan`) with the size **clamped** to `min(requested, floorToLot(contracts))`
+- If `amount !== 0` and the protected side is flat (or the position is smaller than one lot), the order falls back to position-level (`pos_loss`/`pos_profit`)
 - Trailing stops always use `track_plan`
+
+**Clamp, don't downgrade.** The match used to require `contracts >= amount`, so a
+sized stop that overshot the position by even one lot silently became a
+whole-position stop. That is exactly what happens in practice: price drift
+between opening a position and sizing its stop asked for **31 against a
+30-contract long** (e2e run 31353474704), and the user's deliberately-sized stop
+came back covering everything. Bitget is on the `autoDownSizeReduceOrders: true`
+list — it does **not** auto-cap — so passing the oversized value through would
+just be rejected. Clamping is the only option that preserves intent.
+
+Two details are load-bearing:
+
+- **The clamp floors to the lot.** `adjust` rounds to **nearest**, and
+  `position.contracts` comes straight off the venue with no guarantee of lot
+  alignment, so `adjust(min(31, 30.6), 1)` would give **31** — back above the
+  position it was meant to bound. `floorToLot` exists for this.
+- **A sub-lot position still downgrades.** Clamping dust (0.4 contracts, lot 1)
+  would POST `size: "0"`, which is not a sized stop at all.
+
+**This is not the forbidden hand-rolled reduce-only clamp.** `../CLAUDE.md` →
+"Reduce-only order downsizing" bans re-adding a clamp in
+`formatCreateOrder`/`placeOrder` for **limit and market** reduce-only orders,
+because the `autoDownSizeReduceOrders` flag path adds hedge-side matching and
+orders-ahead accounting that a bare `Math.min` misses. Neither applies here:
+side matching is already exact (see below), orders-ahead is meaningless for
+trigger orders, and the alternative is not "no clamp" — it's `pos_loss` with the
+size field omitted, a worse silent behavior change. Don't revert this to the
+`>= amount` form.
+
+Side matching is on `PositionSide` derived from `opts.side` (Buy→Short,
+Sell→Long), never on `holdSide`. `getAlgoOrderSide` inverts only the payload
+field, and agrees in both modes, so a hedge account holding both legs cannot
+have the wrong leg clamped against.
+
+**`formatAlgoOrder` must POST the returned amount, not `opts.amount`.** It
+destructured `amount` from `getOrderPlanTypeAndAmount` and then used it only as a
+truthiness gate (`if (amount) payload.size = adjust(opts.amount, …)`). Any
+sizing decision made in `selectPlanTypeAndAmount` was therefore discarded on the
+way to the wire — which is why the first fix for this would have been a no-op.
+The same two lines exist in `bitgetinverse.exchange.ts`'s override; change both.
+
+**Deploying a plan-type change means a PREVIEW release, not an exchange-server
+redeploy.** `formatAlgoOrder` is on the order-write path, and order writes run on
+the browser's main-thread mirror (quirk 22), so this code ships in the web
+bundle. Redeploying only the exchange-server leaves the run on the old browser
+code and the fix looks dead. The tell is cheap: reword the downgrade warning as
+part of the change, and if the artifact log comes back with the OLD wording, you
+deployed the wrong target.
+
+**`amount === 0` is a product sentinel, not "unknown size."** It means "close the
+whole position" and the web app renders it as **"Full Position"**
+(`apps/web/src/utils/validation/isFullStop.ts`). An attempt to populate it from
+the protected position shipped and had to be reverted — it turned every
+position-level TP/SL into a fixed-size one on drag. Never size a zero-amount stop.
+
+**Position lookup must not read `store.positions` directly — this is another
+instance of quirk 22.** Hosted-mode order writes run on the never-`start()`ed
+main-thread mirror, so a sized stop found no position, fell through to the
+position-level branch, and was POSTed as `planType: pos_loss` **with the `size`
+field omitted entirely** — the requested size silently vanished and the UI showed
+"Full Position". `resolvePositionsForPlanType(symbol)` fixes this with a
+short-lived REST snapshot. Three things about it are load-bearing:
+
+- The store short-circuit asks the **exact question the caller needs**: is there
+  a position on this symbol AND this side with `contracts >= amount`? Two weaker
+  forms were both shipped and both wrong. `positions.length > 0` looks satisfied
+  whenever the account holds _any other symbol_. A symbol-only check looks
+  satisfied whenever the store holds _any row for that symbol_ — e.g. a stale or
+  zeroed long while the live position is short. The second one was caught in CI:
+  4 buy-side stops went out as `pos_loss` while sell-side stops on the same
+  symbol were correctly sized. The rule: if the store cannot already answer the
+  question, fetch.
+- **Compare against the size that will actually be POSTed**, i.e.
+  `adjust(amount, precision.amount)`, not the raw request. A "close the whole
+  position" stop derived from a percentage lands at e.g. 30.34 on a 30-contract
+  position with lot size 1; the sent size is 30 and fits perfectly, but the raw
+  30.34 fails `contracts >= amount` and silently downgrades to `pos_loss`.
+  Observed live as 4 such stops in a single run.
+- **Only non-empty snapshots are cached.** `placeOrders` formats algo payloads
+  before the entry order is placed, so a bracket always takes one snapshot while
+  flat; caching that would downgrade every sized stop for the rest of the TTL.
+- A failed fetch **degrades to a position-level stop and emits**. It cannot throw:
+  `formatAlgoOrder` runs inside `placeOrders`' `Promise.all`, so a throw would also
+  block the unrelated entry order in the same bracket.
+
+`getCancelPlanType` deliberately stays **synchronous** and reads only
+`store.positions`. By cancel time the position is usually already closed, so a
+refetch would report flat and compute `pos_loss` for an order that was placed as
+`loss_plan` — and the cancel would fail. It only computes at all when
+`order.info.planType` is missing.
+
+`bitgetinverse` used to carry a byte-identical copy of this logic
+(`getInverseOrderPlanTypeAndAmount`) and stayed broken when the base class was
+fixed. It now delegates to the inherited methods — don't re-fork it.
 
 ## Symbol Format
 
@@ -498,15 +609,27 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 18. **One-way mode isolated leverage mismatch warning**: `fetchPositionMetadata()` (`bitget.exchange.ts:326-332`) warns if isolated long and short leverages differ in one-way mode.
 
-19. **Response interceptor error logging**: The response interceptor in `bitget.api.ts` fires `emitAndLogError` (user-facing toast) when `code !== '00000'` and data has no `data` field; it does not throw, so the caller still receives the response. Codes in the file-scope `SILENT_ERROR_CODES` set are skipped — currently `'40084'` ("Classic Account mode"), because `_detectAccountType` deliberately probes a v3 endpoint expecting that exact response on Classic accounts. **Add new codes to that set when you have a probe / fallback path that legitimately expects an error**; do not relax the interceptor itself.
+19. **Response interceptor error logging**: The response interceptor in `bitget.api.ts` fires `emitAndLogError` (user-facing toast) when `code !== '00000'` and data has no `data` field; it does not throw, so the caller still receives the response. Codes in the file-scope `SILENT_ERROR_CODES` set are skipped — currently `'40084'` ("Classic Account mode"), because `_detectAccountType` deliberately probes a v3 endpoint expecting that exact response on Classic accounts, and `'40085'` ("Unified Account mode ... Classic Account API is not supported"), because callers translate it to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE`. **Add new codes to that set when you have a probe / fallback path that legitimately expects an error or a caller-owned translation**; do not relax the interceptor itself.
 
 20. **Trailing stop orders response format**: `fetchTrailingStopOrders()` handles both array and `{ entrustedList }` response formats (`bitget.exchange.ts:824-828`).
 
-21. **UTA vs Classic — per-side ISO leverage routing**: The v2 endpoint `set-leverage` silently couples long and short leverage on **all** accounts (Bitget removed per-side support from v2). Per-side ISO leverage in hedge mode only works through the v3 UTA endpoint (`SET_LEVERAGE_V3`) with `posSide`. UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during `start()` — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The probe runs in parallel with the first `tick()` so it adds zero serial startup latency. **Do NOT** auto-detect from `BALANCE` / `account/account` responses — `assetMode` and `unionAvailable` are populated on Classic too (verified against the `bg e2e` Classic account). Every future v3-routing method must read `this.isUta`; do not reintroduce trial-and-error fallbacks in setLeverage. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. If you add another v3-probing pattern, extend that set (see quirk 19).
+21. **UTA vs Classic — per-side ISO leverage routing only, not full UTA support**: The v2 endpoint `set-leverage` silently couples long and short leverage on **all** accounts (Bitget removed per-side support from v2). Per-side ISO leverage in hedge mode only works through the v3 UTA endpoint (`SET_LEVERAGE_V3`) with `posSide`. UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during `start()` — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The probe runs in parallel with the first `tick()` so it adds zero serial startup latency. **Do NOT** auto-detect from `BALANCE` / `account/account` responses — `assetMode` and `unionAvailable` are populated on Classic too (verified against the `bg e2e` Classic account). Every future v3-routing method must read `this.isUta`; do not reintroduce trial-and-error fallbacks in setLeverage. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. Until the adapter is fully migrated to Bitget v3, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
 
 22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 
 23. **`formatCreateOrder` lot-split must guard `maxSize > 0`.** The large-order split is `lots = (maxSize > 0 && amount > maxSize) ? ceil(amount / maxSize) : 1`. The `maxSize > 0` guard is load-bearing: on the hosted-server **mirror**, the streamed market can carry `limits.amount.max === 0`, and `ceil(amount / 0) = Infinity` — lodash **`times(Infinity)` returns `[]`**, so `formatCreateOrder` produced **zero payloads** and the order silently never POSTed (no throw, no error; e2e "expected 0 to equal 1"). The same zeroed `maxSize` would surface as `rest = amount % 0 = NaN`, so `rest` is guarded identically. Real users in worker mode have a real `maxSize` and never hit this. **Root cause not yet fixed:** why the mirror's bitget market gets `limits.amount.max === 0` (server→mirror market serialization) is a separate follow-up — the guard makes order placement correct regardless, but if you touch market hydration, check whether the mirror's `limits` survive the stream.
+
+24. **`placeOrders` must `await Promise.all` the algo payloads.** It read
+    `algoOrders.map(this.formatAlgoOrder)` — an array of **unresolved Promises** —
+    and passed it straight to `placeAlgoOrders`, which reads `payload.planType`
+    (always `undefined` on a Promise, so every algo order took the non-trailing
+    endpoint and trailing stops silently went to the wrong one) and POSTed the
+    Promise itself as the request body. Typecheck does not catch this:
+    `Promise<Record<string, any>>` is structurally assignable to
+    `Record<string, any>`. The single-order `placeOrder` path awaited correctly,
+    which is why only batch placement was affected. The `formatCreateOrder`
+    line directly above it in `placeOrders` already had the correct
+    `await Promise.all(...)` shape — match it.
 
 ## Error Handling
 

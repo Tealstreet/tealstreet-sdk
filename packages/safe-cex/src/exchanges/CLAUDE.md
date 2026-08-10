@@ -188,6 +188,17 @@ extend `downSizeReduceOrder` to stops, note its orders-ahead logic was
 written for price-laddered _limit_ reduce orders and needs review for the
 trigger-order path first.
 
+**Carve-out — bitget's plan-type selection.** `selectPlanTypeAndAmount` in
+`bitget/bitget.exchange.ts` clamps a sized stop to the protected position. That
+is **not** a violation of the rule above and must not be "cleaned up" into the
+flag path. Bitget's wire format forces a choice the flag cannot express: a stop
+is either `loss_plan` **with** a size or `pos_loss` **with the size field
+omitted**, so declining to clamp does not mean "send the requested size" — it
+means silently converting a deliberately-sized stop into a whole-position one.
+The two things `downSizeReduceOrder` adds over a bare `Math.min` are already
+handled or moot there (side matching is exact; orders-ahead is meaningless for
+trigger orders). See `bitget/CLAUDE.md` → "Plan Type Determination".
+
 Each exchange does exactly one of:
 
 - **Set `autoDownSizeReduceOrders: true`** if it does _not_ auto-cap
@@ -256,6 +267,27 @@ in the Lighter ws classes and `external-public-data.ts`) bound a single
 healthy-traffic point). Don't turn them back into lifetime counters — long-lived
 sessions (flaky networks, 24h WS session limits) legitimately accumulate 100+
 closes, and a lifetime cap silently kills the socket forever.
+
+**`lifetimeCloseCount` exists precisely because those counters reset.** Any
+observer that samples _after_ recovery — an error reporter, a support bundle —
+reads `onCloseCount`/`reconnectCount` as 0 and concludes the socket was fine.
+`BaseWebSocket.lifetimeCloseCount` is monotonic and never reset, alongside
+`lastCloseCode` / `lastCloseAt`, which survive reconnect. Don't "tidy" these
+into the streak counters; they answer a different question.
+
+These surface to consumers through `store.socketHealth` (aggregated by
+`summarizeSocketDiagnostics` in `base.ts`), which already crosses the worker and
+exchange-server boundaries. **That is deliberately the only channel** — safe-cex
+ships in the `tealstreet-sdk` OSS mirror, so it must not gain a dependency on
+any app's telemetry. Add fields to the existing struct; do not import a
+reporting client here.
+
+Two shape notes: `*ReconnectPaused` is a boolean, not a remaining-ms countdown,
+because a countdown would mutate `socketHealth` on every watchdog tick and
+manufacture store deltas for the whole pause — and because hosted mode stamps
+these on the server's clock. `ExternalPublicDataProvider` is not a
+`BaseWebSocket` and is absent from `getPublicSockets()`, so gateway-mode
+accounts report no close code even though the gateway drives `publicHealthy`.
 
 Native-WebSocket reconnects use close-code-scoped exponential backoff. A
 different close code or a failure-free window longer than twice the maximum
