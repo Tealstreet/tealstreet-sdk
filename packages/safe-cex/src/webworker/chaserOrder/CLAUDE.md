@@ -76,12 +76,7 @@ applied after the private WS frame. The manager requires two consecutive,
 distinct order-updateId changes with the tracked IDs absent; ticker-only
 notifications do not count, and seeing the order again resets the confirmation.
 On confirmed loss it uses `cleanupInstance`, so the last known IDs are cancelled
-instead of leaving a resting order without a supervisor — and it emits a
-user-visible `warning`. That stop was silent for months, which is how the Bybit
-demo bug (REST snapshots wiping just-placed orders → chaser self-terminating
-and cancelling its own order) went unreported so long. The same rule applies to
-`processInstance`'s could-not-start tail: a chaser dying without a stop reason
-must emit, never vanish. Keep both loud.
+instead of leaving a resting order without a supervisor.
 
 ## Supervisor failures are contained locally
 
@@ -136,7 +131,7 @@ now mirror cumulative fill onto the store row on `PARTIALLY_FILLED`
 Before that fix, partial fills didn't bump `updateIds.orders` for
 Binance, so the chaser never saw a per-partial-fill order-update
 edge; it only re-evaluated on the ticker throttle. With the partial
-fills now visible, we _must_ hold steady — otherwise the chaser
+fills now visible, we *must* hold steady — otherwise the chaser
 re-evaluates and tries to cancel inside the fill window.
 
 ## Fill-based tracking (Hyperliquid and GRVT)
@@ -169,7 +164,7 @@ coming back":
 1. **`tryPlaceOrders` ignored `isStopped`.** A `placeOrder` await
    that resolved AFTER the user cancelled would still hand its
    new ID back to the caller, which then reassigned
-   `instance.currentOrderIds` _after_ `cleanupInstance` had
+   `instance.currentOrderIds` *after* `cleanupInstance` had
    already read the stale value and spliced the instance. The
    new resting order became orphan. `tryPlaceOrders` now checks
    `instance.isStopped` at entry, after `placeOrder`, and after

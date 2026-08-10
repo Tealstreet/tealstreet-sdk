@@ -99,13 +99,6 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
     data.forEach((order: Record<string, any>) => {
       const orders = this.parent.mapOrder(order);
 
-      // Any WS frame for an order is its first sighting — from here on the
-      // normal WS/REST reconciliation owns it and the recently-placed
-      // snapshot-preserve grace must stop protecting it.
-      for (const mapped of orders) {
-        this.parent.markOrderSeen(mapped.id);
-      }
-
       const price = parseFloat(v(order, 'price'));
       const amount = parseFloat(v(order, 'qty'));
 
