@@ -148,6 +148,10 @@ if (!position) {
 }
 ```
 
+`BaseExchange.rejectPreflight(message)` is the shared helper for this shape:
+it emits via `emitAndLogError` first, then throws — prefer it over hand-rolled
+emit/throw pairs in new pre-flight checks.
+
 Lighter's `assertReduceOnlyLimitHasPosition` (`lighter.exchange.ts`, near
 the `buildNoPositionReduceOnlyMessage` helper) is the direct analog for
 reduce-only-no-position validation; mirror that shape when adding similar

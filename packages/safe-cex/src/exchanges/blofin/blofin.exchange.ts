@@ -91,6 +91,13 @@ const isKnownNonSwapInstrument = (payload: Record<string, any>) => {
   return !!instType && instType !== BLOFIN_SUPPORTED_INST_TYPE;
 };
 
+const clientOrderIdShapeMessage = (opts: PlaceOrderOpts) =>
+  `BloFin clientOrderId cannot be honored for this order shape (type=${opts.type}` +
+  `${opts.stopLoss !== undefined ? ' +stopLoss' : ''}` +
+  `${opts.takeProfit !== undefined ? ' +takeProfit' : ''}` +
+  `${opts.triggerPrice !== undefined ? ' +triggerPrice' : ''}` +
+  `); caller client order IDs are supported only on plain Limit/Market orders`;
+
 export class BlofinExchange extends BaseExchange {
   xhr: Axios;
 
@@ -1212,6 +1219,10 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    if (opts.clientOrderId !== undefined && (opts.type === OrderType.Conditional || this.isAlgoOrder(opts.type))) {
+      this.rejectPreflight(clientOrderIdShapeMessage(opts));
+    }
+
     if (opts.type === OrderType.Conditional) {
       return [await this.placeTriggerOrder(await this.formatTriggerOrder(opts))];
     }
@@ -1238,36 +1249,51 @@ export class BlofinExchange extends BaseExchange {
 
     if (!/^[A-Za-z0-9]{1,32}$/.test(clientOrderId)) {
       const message = 'BloFin clientOrderId must be 1-32 alphanumeric characters';
-      this.emitAndLogError(message);
-      throw new Error(message);
+      this.rejectPreflight(message);
     }
 
     return clientOrderId;
   };
 
   private applyRegularClientOrderId = (opts: PlaceOrderOpts, payloads: Array<Record<string, any>>) => {
-    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) return;
-    if (opts.stopLoss !== undefined || opts.takeProfit !== undefined || opts.triggerPrice !== undefined) return;
-
-    const clientOrderId = this.getRegularClientOrderId(opts);
-    if (!clientOrderId) return;
-
-    if (payloads.length !== 1) {
-      const message = 'BloFin clientOrderId is supported only when one safe-cex order maps to one native order';
-      this.emitAndLogError(message);
-      throw new Error(message);
+    if (opts.clientOrderId === undefined) return;
+    if (
+      (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+      opts.stopLoss !== undefined ||
+      opts.takeProfit !== undefined ||
+      opts.triggerPrice !== undefined
+    ) {
+      this.rejectPreflight(clientOrderIdShapeMessage(opts));
     }
-
+    const clientOrderId = this.getRegularClientOrderId(opts)!;
+    if (payloads.length !== 1) {
+      this.rejectPreflight('BloFin clientOrderId is supported only when one safe-cex order maps to one native order');
+    }
     payloads[0].clientOrderId = clientOrderId;
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
+    // Fail closed for the whole batch before any order is sent: a caller ID on
+    // an unsupported shape can never be honored.
+    for (const o of opts) {
+      if (o.clientOrderId !== undefined && (o.type === OrderType.Conditional || this.isAlgoOrder(o.type))) {
+        this.rejectPreflight(clientOrderIdShapeMessage(o));
+      }
+    }
+
     const [triggerOrders, nonTriggerOrders] = partition(opts, (o) => o.type === OrderType.Conditional);
     const [algoOrders, normalOrders] = partition(nonTriggerOrders, (o) => this.isAlgoOrder(o.type));
 
     // force fetch here before map
     await Promise.all([this.getOrFetchPositionMode(), this.getOrFetchMarginType()]);
-    const normalOrdersOpts = (await Promise.all(normalOrders.map((o) => this.formatNormalOrder(o)))).flat();
+    const normalPayloadGroups = await Promise.all(
+      normalOrders.map(async (o) => {
+        const payloads = await this.formatNormalOrder(o);
+        this.applyRegularClientOrderId(o, payloads);
+        return payloads;
+      }),
+    );
+    const normalOrdersOpts = normalPayloadGroups.flat();
 
     if (normalOrdersOpts.some((o) => parseFloat(o.size) === 0)) {
       this.emitAndLogError(`Total order amount is too small`);

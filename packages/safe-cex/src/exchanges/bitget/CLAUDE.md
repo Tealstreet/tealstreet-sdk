@@ -284,10 +284,11 @@ ioc -> ImmediateOrCancel
    - Position mode is fetched to determine `side`/`tradeSide` fields
    - Orders exceeding `maxSize` are split into multiple lots
    - Plain single-payload limit/market orders use caller `clientOrderId` as `clientOid` when provided
-   - Split orders and attached TP/SL brackets keep generated unique `clientOid` values; caller IDs on splits reject
+   - Split orders keep generated unique `clientOid` values only when no caller ID is supplied; caller IDs on splits or attached TP/SL brackets reject before any request is sent (`BaseExchange.rejectPreflight`)
    - Placed via `placeOrderBatch()` using `BATCH_ORDERS` endpoint (up to 50 per symbol per batch)
 2. **Algo orders** are formatted via `formatAlgoOrder()` (`bitget.exchange.ts:1085-1148`):
    - Placed one at a time via `placeAlgoOrders()`
+   - Caller `clientOrderId` values reject pre-flight — algo payloads always use generated `clientOid`. In `placeOrders`, formatting of both groups completes (and any rejection propagates) before anything is sent
    - Trailing stops route to `PLACE_TRAILING_STOP_ORDER`, others to `PLACE_ALGO_ORDER`
    - Trailing stops compute `callbackRatio` as percentage distance from current price and use the documented `place-plan-order` contract
 

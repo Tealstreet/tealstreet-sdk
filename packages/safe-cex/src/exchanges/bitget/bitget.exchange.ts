@@ -65,21 +65,12 @@ import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
 
 const BITGET_CLIENT_ORDER_ID_RE = /^[.A-Z:/a-z0-9_-]{1,32}$/;
 
-const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
-  if (opts.clientOrderId === undefined) return undefined;
-  if (
-    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
-    opts.stopLoss ||
-    opts.takeProfit ||
-    opts.triggerPrice
-  ) {
-    return undefined;
-  }
-  if (!BITGET_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
-    throw new Error('Bitget clientOrderId must match /^[.A-Z:/a-z0-9_-]{1,32}$/');
-  }
-  return opts.clientOrderId;
-};
+const clientOrderIdShapeMessage = (opts: PlaceOrderOpts) =>
+  `Bitget clientOrderId cannot be honored for this order shape (type=${opts.type}` +
+  `${opts.stopLoss !== undefined ? ' +stopLoss' : ''}` +
+  `${opts.takeProfit !== undefined ? ' +takeProfit' : ''}` +
+  `${opts.triggerPrice !== undefined ? ' +triggerPrice' : ''}` +
+  `); caller client order IDs are supported only on plain Limit/Market orders`;
 
 export class BitgetExchange extends BaseExchange {
   xhr: Axios;
@@ -1233,10 +1224,28 @@ export class BitgetExchange extends BaseExchange {
     const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatCreateOrder(o)))).flat();
     const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => o.size > 0);
 
-    // const derivedAlgoOrders = this.deriveAlgoOrdersFromNormalOrdersOpts(orders);
-    const algoOrdersOpts = algoOrders.map(this.formatAlgoOrder);
+    // Await algo formatting BEFORE any placement call: formatAlgoOrder rejects
+    // caller clientOrderIds pre-flight, and the whole batch must fail closed
+    // before placeOrderBatch sends anything.
+    const algoOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatAlgoOrder(o)));
 
     return [...(await this.placeOrderBatch(normalOrdersOpts)), ...(await this.placeAlgoOrders(algoOrdersOpts))];
+  };
+
+  private getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+    if (opts.clientOrderId === undefined) return undefined;
+    if (
+      (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+      opts.stopLoss ||
+      opts.takeProfit ||
+      opts.triggerPrice
+    ) {
+      this.rejectPreflight(clientOrderIdShapeMessage(opts));
+    }
+    if (!BITGET_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
+      this.rejectPreflight('Bitget clientOrderId must match /^[.A-Z:/a-z0-9_-]{1,32}$/');
+    }
+    return opts.clientOrderId;
   };
 
   formatCreateOrder = async (opts: PlaceOrderOpts) => {
@@ -1299,7 +1308,7 @@ export class BitgetExchange extends BaseExchange {
       payloads.push({ ...req, size: `${rest}` });
     }
 
-    const clientOrderId = getRegularOrderClientOrderId(opts);
+    const clientOrderId = this.getRegularOrderClientOrderId(opts);
 
     if (clientOrderId && payloads.length !== 1) {
       const msg = 'Bitget clientOrderId is only supported when one safe-cex order creates one native order';
@@ -1315,6 +1324,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   formatAlgoOrder = async (opts: PlaceOrderOpts) => {
+    if (opts.clientOrderId !== undefined) {
+      this.rejectPreflight(clientOrderIdShapeMessage(opts));
+    }
+
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) throw new Error(`Market ${opts.symbol} not found`);
 

@@ -108,14 +108,37 @@ describe('Bybit regular-order clientOrderId', () => {
     );
   });
 
-  it('keeps caller clientOrderId off attached TP/SL bracket payloads', async () => {
+  it('rejects caller clientOrderId on attached TP/SL bracket orders', async () => {
     const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
     mockPositionMode(exchange);
-    const post = vi.fn().mockResolvedValue({ data: { retMsg: 'OK', result: { orderId: 'order-1' } } });
+    const post = vi.fn();
     exchange.xhr = { post } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
 
-    await exchange.placeOrder(limitOrder('BTCUSDT', 1, { clientOrderId: 'bybit-client-1', stopLoss: 49_000 }));
+    await expect(
+      exchange.placeOrder(limitOrder('BTCUSDT', 1, { clientOrderId: 'bybit-client-1', stopLoss: 49_000 })),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
+  });
 
-    expect(post.mock.calls[0][1]).not.toHaveProperty('orderLinkId');
+  it('rejects caller clientOrderId on conditional orders', async () => {
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
+    mockPositionMode(exchange);
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.placeOrder(
+        limitOrder('BTCUSDT', 1, {
+          type: OrderType.Conditional,
+          triggerPrice: 51_000,
+          clientOrderId: 'bybit-client-1',
+        }),
+      ),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
   });
 });

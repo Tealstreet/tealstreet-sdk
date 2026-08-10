@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType, PositionMode } from '../../types';
+import { MarginType, OrderSide, OrderType, PositionMode } from '../../types';
 
 const createExchange = () => {
   const exchange = new BitgetExchange(
@@ -62,12 +63,75 @@ describe('Bitget regular-order clientOrderId', () => {
     );
   });
 
-  it('keeps caller clientOrderId off attached TP/SL bracket payloads', async () => {
-    const [payload] = await createExchange().formatCreateOrder(
-      limitOrder({ clientOrderId: 'bitget-client-1', stopLoss: 49_000 }),
-    );
+  it('rejects caller clientOrderId on attached TP/SL bracket orders', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    const unlimitedPost = vi.fn();
+    exchange.xhr = { post } as any;
+    exchange.unlimitedXHR = { post: unlimitedPost } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
 
-    expect(payload.clientOid).toEqual(expect.any(String));
-    expect(payload.clientOid).not.toBe('bitget-client-1');
+    await expect(
+      exchange.placeOrder(limitOrder({ clientOrderId: 'bitget-client-1', stopLoss: 49_000 })),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(unlimitedPost).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
+  });
+
+  it('rejects caller clientOrderId on standalone algo orders', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    const unlimitedPost = vi.fn();
+    exchange.xhr = { post } as any;
+    exchange.unlimitedXHR = { post: unlimitedPost } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.placeOrder(
+        limitOrder({ type: OrderType.StopLoss, price: 49_000, clientOrderId: 'bitget-client-1' }),
+      ),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(unlimitedPost).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
+  });
+
+  it('sends the caller clientOrderId on the wire for a supported regular order', async () => {
+    const exchange = createExchange();
+    vi.spyOn(exchange as any, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    const post = vi.fn();
+    const unlimitedPost = vi
+      .fn()
+      .mockResolvedValue({ data: { data: { successList: [{ orderId: 'order-1' }] } } });
+    exchange.xhr = { post } as any;
+    exchange.unlimitedXHR = { post: unlimitedPost } as any;
+
+    await expect(exchange.placeOrder(limitOrder({ clientOrderId: 'bitget-client-1' }))).resolves.toEqual(['order-1']);
+
+    expect(post).not.toHaveBeenCalled();
+    expect(unlimitedPost).toHaveBeenCalledWith(
+      ENDPOINTS.BATCH_ORDERS,
+      expect.objectContaining({ orderList: [expect.objectContaining({ clientOid: 'bitget-client-1' })] }),
+    );
+  });
+
+  it('rejects the whole batch before any send when an algo order carries a caller clientOrderId', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    const unlimitedPost = vi.fn();
+    exchange.xhr = { post } as any;
+    exchange.unlimitedXHR = { post: unlimitedPost } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.placeOrders([
+        limitOrder(),
+        limitOrder({ type: OrderType.StopLoss, price: 49_000, clientOrderId: 'bitget-client-1' }),
+      ]),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(unlimitedPost).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
   });
 });

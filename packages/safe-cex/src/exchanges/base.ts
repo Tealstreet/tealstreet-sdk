@@ -1358,6 +1358,17 @@ export class BaseExchange implements Exchange {
     }
   }
 
+  /**
+   * Pre-flight validation reject: emit the error (toast pipeline) first, then
+   * throw. See src/exchanges/CLAUDE.md → "Pre-flight validation throws must
+   * emit first". Formalizes the local rejectPreflight closures already used in
+   * bingx/bitunix/coinbase/paradex.
+   */
+  protected rejectPreflight(message: string): never {
+    this.emitAndLogError(message);
+    throw new Error(message);
+  }
+
   // if multiple child WS they will all send reconnect messages, try and only emit once...
   emitWsReconnected() {
     const now = Date.now();

@@ -50,6 +50,20 @@ payloads, the adapter must not send the same caller ID on more than one native
 order; either apply the caller ID only when exactly one payload is emitted or
 reject the request with a deterministic error.
 
+When `clientOrderId` is supplied, the adapter must either send exactly that ID
+on the native order or reject the call before any order request is sent (emit
+first, then throw — `BaseExchange.rejectPreflight`). Never silently drop or
+substitute a caller ID: a dropped ID makes later discovery-by-ID truthfully
+report "not found" while the order is live, which manufactures double
+placements inside the SDK. For batch placement, if any order in the batch
+carries an ID that cannot be honored, the whole call must reject before any
+order in the batch is sent (BloFin and Bitget `placeOrders` implement this;
+partial sends recreate the same ambiguity within one call). Bybit linear
+(single-order `placeOrder` only — its bulk `placeOrders` path still drops
+caller IDs), Bitget, and BloFin enforce this; bybit's bulk path and the
+remaining venues listed on PR #21 issuecomment-5235272032 are tracked as
+follow-up work.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual

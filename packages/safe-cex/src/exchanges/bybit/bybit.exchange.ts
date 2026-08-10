@@ -97,21 +97,12 @@ const isBybitLeverageNotModified = (data: Record<string, any>) => {
   );
 };
 
-const getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
-  if (opts.clientOrderId === undefined) return undefined;
-  if (
-    (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
-    opts.stopLoss ||
-    opts.takeProfit ||
-    opts.triggerPrice
-  ) {
-    return undefined;
-  }
-  if (!BYBIT_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
-    throw new Error('Bybit clientOrderId must match /^[A-Za-z0-9_-]{1,36}$/');
-  }
-  return opts.clientOrderId;
-};
+const clientOrderIdShapeMessage = (opts: PlaceOrderOpts) =>
+  `Bybit clientOrderId cannot be honored for this order shape (type=${opts.type}` +
+  `${opts.stopLoss !== undefined ? ' +stopLoss' : ''}` +
+  `${opts.takeProfit !== undefined ? ' +takeProfit' : ''}` +
+  `${opts.triggerPrice !== undefined ? ' +triggerPrice' : ''}` +
+  `); caller client order IDs are supported only on plain Limit/Market orders`;
 
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
@@ -1517,9 +1508,26 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
+  private getRegularOrderClientOrderId = (opts: PlaceOrderOpts) => {
+    if (opts.clientOrderId === undefined) return undefined;
+    if (
+      (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) ||
+      opts.stopLoss ||
+      opts.takeProfit ||
+      opts.triggerPrice
+    ) {
+      this.rejectPreflight(clientOrderIdShapeMessage(opts));
+    }
+    if (!BYBIT_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
+      this.rejectPreflight('Bybit clientOrderId must match /^[A-Za-z0-9_-]{1,36}$/');
+    }
+    return opts.clientOrderId;
+  };
+
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
+    const clientOrderId = this.getRegularOrderClientOrderId(opts);
 
     if (
       this._hasFullSizedPositionOppositeSide(opts.symbol, opts.side, opts.amount) &&
@@ -1574,8 +1582,6 @@ export class BybitExchange extends BaseExchange {
     if (triggerPrice && (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit)) {
       type = OrderType.Market;
     }
-
-    const clientOrderId = getRegularOrderClientOrderId(opts);
 
     const req = omitUndefined({
       category,

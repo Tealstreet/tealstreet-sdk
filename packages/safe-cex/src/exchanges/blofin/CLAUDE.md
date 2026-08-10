@@ -348,8 +348,12 @@ Controlled by `USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY` flag (currently `false`, 
   single-native `LIMIT`/`MARKET` orders, replacing the generated
   `clientOrderId` after split checks. BloFin documents 1-32 case-sensitive
   alphanumeric characters for `POST /api/v1/trade/order`; regular split
-  payloads reject instead of duplicating the caller ID. TP/SL and trigger paths
-  keep generated IDs.
+  payloads reject instead of duplicating the caller ID. A caller ID on TP/SL,
+  trigger, or attached-protection shapes rejects before any request is sent
+  (`BaseExchange.rejectPreflight`) — never silently replaced by a generated
+  ID. In `placeOrders`, each regular order's ID is applied per payload group
+  and a caller ID that cannot be honored rejects the whole batch before any
+  order is sent.
 
 ### Combined TP/SL for Position Orders
 

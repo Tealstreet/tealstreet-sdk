@@ -84,4 +84,79 @@ describe('BloFin regular order clientOrderId support', () => {
       'BloFin clientOrderId must be 1-32 alphanumeric characters',
     );
   });
+
+  it('rejects caller clientOrderId on attached TP/SL bracket orders', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.placeOrder(order({ clientOrderId: 'Client01', stopLoss: 49_000 })),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
+  });
+
+  it('rejects caller clientOrderId on conditional orders', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.placeOrder(order({ type: OrderType.Conditional, triggerPrice: 51_000, clientOrderId: 'Client01' })),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
+  });
+
+  it('sends each caller clientOrderId on the wire for supported batch orders', async () => {
+    const exchange = createExchange();
+    const post = vi
+      .fn()
+      .mockResolvedValue({ data: { code: '0', msg: 'success', data: [{ orderId: 'o1' }, { orderId: 'o2' }] } });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrders([order({ amount: 2, clientOrderId: 'ClientA1' }), order({ amount: 3, clientOrderId: 'ClientB2' })]),
+    ).resolves.toEqual(['o1', 'o2']);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.PLACE_ORDERS_BATCH,
+      expect.arrayContaining([
+        expect.objectContaining({ clientOrderId: 'ClientA1' }),
+        expect.objectContaining({ clientOrderId: 'ClientB2' }),
+      ]),
+    );
+  });
+
+  it('rejects the whole batch when any caller clientOrderId cannot be honored', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.placeOrders([order({ clientOrderId: 'ClientA1' }), order({ clientOrderId: 'ClientB2', stopLoss: 49_000 })]),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(post).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
+  });
+
+  it('preserves generated clientOrderId values on batch orders when no caller ID is supplied', async () => {
+    const exchange = createExchange();
+    const post = vi
+      .fn()
+      .mockResolvedValue({ data: { code: '0', msg: 'success', data: [{ orderId: 'o1' }, { orderId: 'o2' }] } });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrders([order(), order()]);
+
+    const payloads = post.mock.calls[0][1];
+    expect(payloads).toHaveLength(2);
+    for (const payload of payloads) {
+      expect(payload.clientOrderId).toMatch(/^[A-Za-z0-9]{32}$/);
+    }
+  });
 });
