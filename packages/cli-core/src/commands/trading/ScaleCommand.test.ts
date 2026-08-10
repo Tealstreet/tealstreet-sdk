@@ -120,6 +120,95 @@ describe('ScaleCommand — argument validation', () => {
   });
 });
 
+// A05: the allocator is linear-only. Reserved distribution modifiers
+// must fail parsing with an error naming the implemented flags.
+describe('ScaleCommand — modifier honesty', () => {
+  let cmd: ScaleCommand;
+  beforeEach(() => {
+    cmd = new ScaleCommand();
+  });
+
+  it.each([
+    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic'], 'cubic'],
+    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'icubic'], 'icubic'],
+    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic', '2'], 'cubic'],
+    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic', 'BTCUSDT'], 'cubic'],
+    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential'], 'exponential'],
+    [
+      ['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential', 'BTCUSDT'],
+      'exponential',
+    ],
+    [
+      ['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'bogus', 'BTCUSDT'],
+      'bogus',
+    ],
+  ])('rejects an unimplemented modifier with the supported list (%s)', async (args, modifier) => {
+    const ex = makeExchange();
+    const r = await cmd.execute(ctx(args, ex));
+    expect(r.success).toBe(false);
+    expect(r.error).toBe(`modifier '${modifier}' is not implemented; supported: reduce, taker`);
+    expect(ex.placeOrders).not.toHaveBeenCalled();
+  });
+
+  it('rejects `cubic` even when a CUBIC market resolves as a symbol (reserved keyword)', async () => {
+    const ex = makeExchange();
+    ex.store!.markets = [
+      ...(ex.store!.markets ?? []),
+      { symbol: 'CUBICUSDT', base: 'CUBIC', quote: 'USDT', precision: { amount: 1, price: 0.01 } } as never,
+    ];
+    ex.store!.tickers = [...(ex.store!.tickers ?? []), { symbol: 'CUBICUSDT', last: 5 } as never];
+    const r = await cmd.execute(ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic'], ex));
+    expect(r.success).toBe(false);
+    expect(r.error).toBe(`modifier 'cubic' is not implemented; supported: reduce, taker`);
+    expect(ex.placeOrders).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce'], 'reduce alone'],
+    [['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'taker'], 'taker alone'],
+    [
+      ['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'],
+      'reduce + taker',
+    ],
+    [
+      ['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'taker', 'reduce'],
+      'taker + reduce',
+    ],
+    [
+      ['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'taker', 'ETHUSDT'],
+      'supported modifier + symbol scope',
+    ],
+  ])('still parses supported modifiers (%s)', async (args, _label) => {
+    const ex = makeExchange();
+    const r = await cmd.execute(ctx(args, ex));
+    expect(r.success).toBe(true);
+    expect(ex.placeOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps reduce-only and taker semantics when both flags are present', async () => {
+    const ex = makeExchange();
+    const r = await cmd.execute(
+      ctx(['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'], ex),
+    );
+    expect(r.success).toBe(true);
+    const orders = placedOrders(ex);
+    expect(orders.every((o) => o.reduceOnly === true)).toBe(true);
+    expect(orders.every((o) => o.timeInForce === undefined)).toBe(true);
+  });
+
+  it('reports an unresolved symbol scope as an unknown symbol, not a modifier', async () => {
+    const ex = makeExchange();
+    const r = await cmd.execute(
+      ctx(['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'BTCUSDX'], ex),
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toBe(
+      'Unknown symbol "BTCUSDX". Use a valid market symbol, or omit it to trade the focused symbol (BTCUSDT).',
+    );
+    expect(ex.placeOrders).not.toHaveBeenCalled();
+  });
+});
+
 describe('ScaleCommand — order distribution', () => {
   let cmd: ScaleCommand;
   beforeEach(() => {

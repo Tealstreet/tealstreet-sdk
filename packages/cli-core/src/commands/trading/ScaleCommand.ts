@@ -1,7 +1,27 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import type { ExchangeLike } from '../../types';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 import { adjust, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
+
+/**
+ * Modifiers the scale allocator genuinely implements: `reduce`
+ * (reduce-only legs, position-scoped percent sizing) and `taker`
+ * (drops PostOnly so orders may cross).
+ */
+export const SUPPORTED_MODIFIERS: readonly string[] = ['reduce', 'taker'];
+
+/**
+ * Grammar keywords for scaling algorithms the linear allocator does not
+ * implement. They remain reserved even if a market shares the name.
+ */
+export const RESERVED_MODIFIERS: readonly string[] = ['cubic', 'icubic', 'exponential'];
+
+interface ParsedScaleCommand {
+  allowTaker: boolean;
+  reduceOnly: boolean;
+  symbol?: string;
+}
 
 /**
  * Scale command - creates a set of scaled orders
@@ -15,23 +35,61 @@ export class ScaleCommand extends TradingBaseCommand {
     'scale buy 10 into 10 from 31000 to 32000',
     'scale buy $1000 into 10 from -0.25% to -1% ETHUSDT',
     'scale sell $10000 into 25 from 50000 to 48500 reduce',
-    'scale sell $10000 into 25 from 50000 to 48500 reduce taker',
+    'scale sell $10000 into 25 from 50000 to 48500 taker',
     'scale sell 1 into 5 from +1% to 32000 reduce',
   ];
   readonly requiresConnection = true;
 
-  private validateCommand(input: string): boolean {
-    // Size: $N (prefix), N$ (suffix), N%, N%bal, N%pos. Mirrors
-    // Phase 0 decision 1's accepted forms; bare numbers are rejected.
-    // Prices: absolute, relative ([+-]N), or percent (N%). Optional
-    // trailing keywords: reduce / cubic / icubic / taker plus an
-    // optional symbol scope.
+  /**
+   * Parse scale syntax without consulting the exchange's market inventory.
+   * The optional tail is any implemented modifiers followed by one
+   * optional symbol scope.
+   */
+  private parseCommand(input: string): ParsedScaleCommand | string {
     const sizeRe = String.raw`(?:\$\d+(?:\.\d+)?|\d+(?:\.\d+)?\$|\d+(?:\.\d+)?%(?:bal|pos)?)`;
     const priceRe = String.raw`(?:[-+]?[\d.]+%?|\d+%?)`;
-    const regex = new RegExp(
-      String.raw`^scale (buy|sell) (${sizeRe}) into (\d+) from (${priceRe}) to (${priceRe})(?: (reduce|cubic|icubic|taker)(?: ([-+]?[\d.]+))?)?( [A-Za-z]+)?$`,
+    const core = new RegExp(
+      String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`,
     );
-    return regex.test(input);
+    const match = core.exec(input);
+    if (!match) {
+      return `Invalid syntax "${input}"`;
+    }
+
+    const tail = (match[1] ?? '').trim();
+    if (!tail) {
+      return { allowTaker: false, reduceOnly: false };
+    }
+
+    const tokens = tail.split(/\s+/);
+    let allowTaker = false;
+    let reduceOnly = false;
+
+    while (tokens.length > 0) {
+      const next = tokens[0];
+      if (RESERVED_MODIFIERS.includes(next)) {
+        return `modifier '${next}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
+      }
+      if (!SUPPORTED_MODIFIERS.includes(next)) break;
+
+      tokens.shift();
+      if (next === 'reduce') {
+        if (reduceOnly) return `modifier 'reduce' specified more than once`;
+        reduceOnly = true;
+      } else if (next === 'taker') {
+        if (allowTaker) return `modifier 'taker' specified more than once`;
+        allowTaker = true;
+      }
+    }
+
+    const symbol = tokens.shift();
+    if (symbol && (SUPPORTED_MODIFIERS.includes(symbol) || RESERVED_MODIFIERS.includes(symbol))) {
+      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
+    }
+    if (tokens.length > 0) {
+      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
+    }
+    return { allowTaker, reduceOnly, ...(symbol ? { symbol } : {}) };
   }
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -46,35 +104,37 @@ export class ScaleCommand extends TradingBaseCommand {
 
     const args = this.getRawArgs(ctx);
     const commandStr = args.join(' ');
-
-    if (!this.validateCommand(commandStr)) {
-      return this.error(`Invalid syntax "${commandStr}"`);
+    const parsedCommand = this.parseCommand(commandStr);
+    if (typeof parsedCommand === 'string') {
+      return this.error(parsedCommand);
     }
+
+    let targetSymbol = ctx.symbol;
+    if (parsedCommand.symbol) {
+      const [resolvedSymbol] = this.validateSymbols(exchange, [parsedCommand.symbol]);
+      // An explicit scope must be a canonical market symbol. validateSymbols
+      // also supports fuzzy base-token resolution, which must not turn a typo
+      // such as BTCUSDX into BTCUSDT.
+      if (!resolvedSymbol || resolvedSymbol.toUpperCase() !== parsedCommand.symbol.toUpperCase()) {
+        return this.error(
+          `Unknown symbol "${parsedCommand.symbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
+        );
+      }
+      targetSymbol = resolvedSymbol;
+    }
+
+    const { allowTaker, reduceOnly } = parsedCommand;
 
     // Health gate — block opening exposure when the private stream is
     // degraded; reduce-only scales reduce risk and stay allowed. Gated
     // after syntax validation so a malformed scale surfaces its parse
     // error rather than the degraded message (TSBUG-106).
-    if (!this.hasArgValue(args, 'reduce')) {
+    if (!reduceOnly) {
       const blocked = this.healthGate(ctx);
       if (blocked) return this.error(blocked);
     }
 
-    const targetSymbol = this.getTargetSymbol(ctx, [
-      'buy',
-      'sell',
-      'into',
-      'from',
-      'to',
-      'reduce',
-      'cubic',
-      'icubic',
-      'taker',
-    ]);
-
     const orderSide = args[1] === 'buy' ? OrderSide.Buy : OrderSide.Sell;
-    const reduceOnly = this.hasArgValue(args, 'reduce');
-    const allowTaker = this.hasArgValue(args, 'taker');
     // Match the buy/sell vs close convention from Phase 0 decision 1:
     // entries (non-reduce) take % of balance, exits (reduce) take % of
     // position. Without `allowPercentage=true` the regex-vs-parser
