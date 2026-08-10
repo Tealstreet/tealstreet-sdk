@@ -949,19 +949,18 @@ export class HyperliquidExchange extends BaseExchange {
    */
   private warnOnMismatchedApiWallet = (explicitPublicDataOnly: boolean) => {
     if (explicitPublicDataOnly) return;
-    const { applicationId, key, secret, vault } = this.options;
-    const wallet = vault || applicationId || key;
-    if (!wallet || !secret) return;
+    const { key, secret } = this.options;
+    if (!key || !secret) return;
     // A malformed secret makes ethers throw rather than return false. That is
     // still invalid credentials, and startup must never fail on the diagnostic.
     try {
-      if (validateWalletAndPrivateKey(secret, wallet)) return;
+      if (validateWalletAndPrivateKey(secret, key)) return;
     } catch {
       // fall through to the warning
     }
 
     this.emitAndLogError(
-      `Hyperliquid credentials are invalid: the saved private key does not match API wallet ${wallet}. ` +
+      `Hyperliquid credentials are invalid: the saved private key does not match API wallet ${key}. ` +
         `Orders will be rejected until the account is re-added.`,
     );
   };

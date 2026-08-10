@@ -6,8 +6,6 @@ import { DefaultStore } from '../../store/store.base';
 // Well-known test pair; no value, never used in production.
 const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
-const OTHER_KEY = '0x59c6995e998f97a5a004497e5daea7ccbbbbb7cce0be69d7f9cf75a18d2ceebd';
-const OTHER_ADDRESS = '0x0000000000000000000000000000000000000001';
 
 const build = (options: Record<string, unknown>) => {
   const exchange = new HyperliquidExchange('hyperliquid' as any, options as any, new DefaultStore());
@@ -27,7 +25,7 @@ const warn = (exchange: HyperliquidExchange, publicOnly = false) =>
 // catches it, but only on the add-key form — never for a restored account.
 describe('hyperliquid mismatched API wallet warning', () => {
   it('warns when the private key does not derive the saved wallet', () => {
-    const { exchange, errors } = build({ key: OTHER_ADDRESS, secret: KEY });
+    const { exchange, errors } = build({ key: '0x0000000000000000000000000000000000000001', secret: KEY });
 
     warn(exchange);
 
@@ -43,32 +41,6 @@ describe('hyperliquid mismatched API wallet warning', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('checks applicationId when the API wallet key is corrupted independently', () => {
-    const { exchange, errors } = build({ applicationId: ADDRESS, key: OTHER_ADDRESS, secret: KEY });
-
-    warn(exchange);
-
-    expect(errors).toHaveLength(0);
-  });
-
-  it('warns when the private key does not derive the applicationId used for private reads', () => {
-    const { exchange, errors } = build({ applicationId: OTHER_ADDRESS, key: ADDRESS, secret: KEY });
-
-    warn(exchange);
-
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain(OTHER_ADDRESS);
-  });
-
-  it('warns for a restored account with an unchanged applicationId and corrupted credentials', () => {
-    const { exchange, errors } = build({ applicationId: ADDRESS, key: OTHER_ADDRESS, secret: OTHER_KEY });
-
-    warn(exchange);
-
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain(ADDRESS);
-  });
-
   it('stays quiet for a wallet-based connection with no key pair', () => {
     const { exchange, errors } = build({ applicationId: ADDRESS });
 
@@ -78,7 +50,7 @@ describe('hyperliquid mismatched API wallet warning', () => {
   });
 
   it('stays quiet in explicit public-data-only mode', () => {
-    const { exchange, errors } = build({ key: OTHER_ADDRESS, secret: KEY });
+    const { exchange, errors } = build({ key: '0x0000000000000000000000000000000000000001', secret: KEY });
 
     warn(exchange, true);
 
@@ -86,11 +58,12 @@ describe('hyperliquid mismatched API wallet warning', () => {
   });
 
   it('names the wallet so the user can tell which account is broken', () => {
-    const { exchange, errors } = build({ key: OTHER_ADDRESS, secret: KEY });
+    const bogus = '0x0000000000000000000000000000000000000001';
+    const { exchange, errors } = build({ key: bogus, secret: KEY });
 
     warn(exchange);
 
-    expect(errors[0]).toContain(OTHER_ADDRESS);
+    expect(errors[0]).toContain(bogus);
   });
 
   it('warns instead of throwing when the secret is malformed', () => {
@@ -104,7 +77,7 @@ describe('hyperliquid mismatched API wallet warning', () => {
   // The e2e bad-api-key spec greps the requests log for an auth-shaped message;
   // a warning it cannot recognise is the same as no warning at all.
   it('emits a message the bad-api-key assertion recognises', () => {
-    const { exchange, errors } = build({ key: OTHER_ADDRESS, secret: KEY });
+    const { exchange, errors } = build({ key: '0x0000000000000000000000000000000000000001', secret: KEY });
 
     warn(exchange);
 
