@@ -1,6 +1,7 @@
 import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionSide } from '../../types';
 
 export const RECV_WINDOW = 20_000;
+export const BROKER_ID = 'x-s3vFFRQp'; // Tealstreet broker attribution (USD-M)
 export const BASE_URL = {
   livenet: 'https://fapi.binance.com',
   testnet: 'https://demo-fapi.binance.com',

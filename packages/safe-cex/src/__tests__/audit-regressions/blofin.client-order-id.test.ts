@@ -1,9 +1,10 @@
+import type { Axios } from 'axios';
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
-import { ENDPOINTS } from '../../exchanges/blofin/blofin.types';
+import { BROKER_ID, ENDPOINTS } from '../../exchanges/blofin/blofin.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType, PositionMode } from '../../types';
 
@@ -46,7 +47,7 @@ describe('BloFin regular order clientOrderId support', () => {
 
     expect(post).toHaveBeenCalledWith(
       ENDPOINTS.PLACE_ORDERS_BATCH,
-      [expect.objectContaining({ clientOrderId: 'Client01' })],
+      [expect.objectContaining({ clientOrderId: BROKER_ID + 'Client01' })],
     );
   });
 
@@ -81,7 +82,7 @@ describe('BloFin regular order clientOrderId support', () => {
     const exchange = createExchange();
 
     await expect(exchange.placeOrder(order({ clientOrderId: 'bad_id' }))).rejects.toThrow(
-      'BloFin clientOrderId must be 1-32 alphanumeric characters',
+      'BloFin clientOrderId must be 1-16 alphanumeric characters (BloFin reserves 16 of 32 chars for the Tealstreet broker prefix)',
     );
   });
 
@@ -125,8 +126,8 @@ describe('BloFin regular order clientOrderId support', () => {
     expect(post).toHaveBeenCalledWith(
       ENDPOINTS.PLACE_ORDERS_BATCH,
       expect.arrayContaining([
-        expect.objectContaining({ clientOrderId: 'ClientA1' }),
-        expect.objectContaining({ clientOrderId: 'ClientB2' }),
+        expect.objectContaining({ clientOrderId: BROKER_ID + 'ClientA1' }),
+        expect.objectContaining({ clientOrderId: BROKER_ID + 'ClientB2' }),
       ]),
     );
   });
@@ -158,5 +159,35 @@ describe('BloFin regular order clientOrderId support', () => {
     for (const payload of payloads) {
       expect(payload.clientOrderId).toMatch(/^[A-Za-z0-9]{32}$/);
     }
+  });
+
+  it('accepts a 16-char caller ID, composing to the 32-char venue maximum', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: 'success', data: [{ orderId: 'order-1' }] } });
+    // partial xhr stand-in: only `post` is exercised in these tests
+    exchange.xhr = { post } as unknown as Axios;
+
+    await expect(exchange.placeOrder(order({ clientOrderId: 'A'.repeat(16) }))).resolves.toEqual(['order-1']);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.PLACE_ORDERS_BATCH, [
+      expect.objectContaining({ clientOrderId: BROKER_ID + 'A'.repeat(16) }),
+    ]);
+    const payload = post.mock.calls[0][1][0] as Record<string, unknown>;
+    expect(String(payload.clientOrderId)).toHaveLength(32);
+  });
+
+  it('rejects a 17-char caller ID before any request', async () => {
+    const exchange = createExchange();
+    const post = vi.fn();
+    exchange.xhr = { post } as unknown as Axios;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+
+    await expect(exchange.placeOrder(order({ clientOrderId: 'A'.repeat(17) }))).rejects.toThrow(
+      'BloFin clientOrderId must be 1-16 alphanumeric characters (BloFin reserves 16 of 32 chars for the Tealstreet broker prefix)',
+    );
+    expect(emitAndLogError).toHaveBeenCalledWith(
+      'BloFin clientOrderId must be 1-16 alphanumeric characters (BloFin reserves 16 of 32 chars for the Tealstreet broker prefix)',
+    );
+    expect(post).not.toHaveBeenCalled();
   });
 });

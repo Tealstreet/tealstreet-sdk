@@ -482,6 +482,7 @@ Note: Minutes use lowercase (e.g., `1m`), hours and days use uppercase (e.g., `1
 
 - **Regular orders**: `clOrdId` = `{BROKER_ID}{uuid}` truncated to 32 chars, plus `tag: BROKER_ID`
 - **Algo orders**: `algoClOrdId` = `{BROKER_ID}{uuid}` truncated to 32 chars, plus `tag: BROKER_ID`
+- **Caller-supplied `clientOrderId`**: composed as `BROKER_ID + callerId` on single native regular orders only; the caller budget is 1-16 alphanumeric characters (16 of 32 reserved for the broker prefix), enforced via `rejectPreflight`
 - **Broker ID**: `e847386590ce4dBC` in `okx.types.ts`
 
 ### Algo Order ID Suffixes

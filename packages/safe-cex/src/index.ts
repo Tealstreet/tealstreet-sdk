@@ -296,3 +296,9 @@ export type {
   CandleCacheRangeLookup,
   CandleCacheSparseChunk,
 } from './candleCache';
+
+/**
+ * Client order ID broker-prefix composition.
+ * The composed value is the wire ID sent to the venue.
+ */
+export { CLIENT_ORDER_ID_BROKER_PREFIXES, composeClientOrderId } from './composeClientOrderId';

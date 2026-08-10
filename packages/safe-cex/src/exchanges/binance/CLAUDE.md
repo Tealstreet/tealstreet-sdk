@@ -83,6 +83,8 @@ All orders use the broker prefix `x-s3vFFRQp` followed by a UUID:
 - Regular orders: `newClientOrderId: 'x-s3vFFRQp' + uuid()`
 - Algo orders: `clientAlgoId: 'x-s3vFFRQp' + uuid()`
 
+Caller-supplied `clientOrderId` on USD-M is composed as `x-s3vFFRQp + callerId`, so the caller budget is 26 of the 36-char venue maximum (`^[.A-Z:/a-z0-9_-]{1,26}$`, enforced via `rejectPreflight`). Portfolio Margin and Spot caller IDs stay prefix-less.
+
 ### Secondary Key Support
 
 - **Futures**: Supports a secondary API key via `createApiWithSecondaryKey` (`binance.exchange.ts:92`). The `xhr` property automatically rotates between primary and secondary keys. Both keys are validated on startup. The secondary key rate limit is commented out.

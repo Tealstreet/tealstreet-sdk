@@ -88,12 +88,6 @@ const getPlaceOrderClientOrderId = (opts: PlaceOrderOpts): string | undefined =>
   return (opts as PlaceOrderOptsWithClientOrderId).clientOrderId;
 };
 
-const assertOKXClientOrderId = (clientOrderId: string) => {
-  if (!/^[A-Za-z0-9]{1,32}$/.test(clientOrderId)) {
-    throw new Error('OKX clientOrderId must be 1 to 32 case-sensitive alphanumeric characters');
-  }
-};
-
 const getOKXTriggerPxType = (triggerType?: OrderStopTriggerType) => {
   if (triggerType === OrderStopTriggerType.IndexPrice) return 'index';
   if (triggerType === OrderStopTriggerType.MarkPrice) return 'mark';
@@ -1628,7 +1622,11 @@ export class OKXExchange extends BaseExchange {
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     const clientOrderId = getPlaceOrderClientOrderId(opts);
     if (clientOrderId !== undefined) {
-      assertOKXClientOrderId(clientOrderId);
+      if (!/^[A-Za-z0-9]{1,16}$/.test(clientOrderId)) {
+        this.rejectPreflight(
+          'OKX clientOrderId must be 1 to 16 case-sensitive alphanumeric characters (OKX reserves 16 of 32 chars for the Tealstreet broker prefix)',
+        );
+      }
       if (opts.stopLoss || opts.takeProfit) {
         throw new Error('OKX clientOrderId is only supported for a single native regular order');
       }
@@ -1653,7 +1651,10 @@ export class OKXExchange extends BaseExchange {
     });
 
     if (amount <= maxSize) {
-      return [createPayload(new BigNumber(amount), clientOrderId)];
+      if (clientOrderId !== undefined) {
+        return [createPayload(new BigNumber(amount), `${BROKER_ID}${clientOrderId}`)];
+      }
+      return [createPayload(new BigNumber(amount))];
     }
 
     if (clientOrderId !== undefined) {

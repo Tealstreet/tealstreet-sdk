@@ -345,10 +345,12 @@ Controlled by `USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY` flag (currently `false`, 
 - Each split gets its own `clientOrderId`
 - When TP/SL is requested, payload includes both legacy top-level trigger fields (`slTriggerPrice` / `tpTriggerPrice`) and an `attachAlgoOrders` compatibility object so BloFin schema variants keep attached protection.
 - Caller-supplied `PlaceOrderOpts.clientOrderId` is honored only for regular
-  single-native `LIMIT`/`MARKET` orders, replacing the generated
-  `clientOrderId` after split checks. BloFin documents 1-32 case-sensitive
-  alphanumeric characters for `POST /api/v1/trade/order`; regular split
-  payloads reject instead of duplicating the caller ID. A caller ID on TP/SL,
+  single-native `LIMIT`/`MARKET` orders: the wire `clientOrderId` is composed
+  as `BROKER_ID + callerId`, so the caller budget is 1-16 alphanumeric
+  characters (BloFin documents 32 for `POST /api/v1/trade/order`; 16 are
+  reserved for the Tealstreet broker prefix), enforced via
+  `BaseExchange.rejectPreflight`. Regular split payloads reject instead of
+  duplicating the caller ID. A caller ID on TP/SL,
   trigger, or attached-protection shapes rejects before any request is sent
   (`BaseExchange.rejectPreflight`) — never silently replaced by a generated
   ID. In `placeOrders`, each regular order's ID is applied per payload group

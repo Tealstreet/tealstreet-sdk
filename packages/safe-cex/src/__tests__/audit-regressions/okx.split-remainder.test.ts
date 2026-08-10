@@ -109,7 +109,7 @@ describe('OKX oversized order regression', () => {
 
     const payloads = post.mock.calls[0][1] as Array<Record<string, unknown>>;
     expect(payloads).toHaveLength(1);
-    expect(payloads[0].clOrdId).toBe('CallerId1');
+    expect(payloads[0].clOrdId).toBe(BROKER_ID + 'CallerId1');
   });
 
   it('rejects caller clientOrderId when a regular order splits into multiple native orders', async () => {

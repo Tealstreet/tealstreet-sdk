@@ -64,6 +64,26 @@ caller IDs), Bitget, and BloFin enforce this; bybit's bulk path and the
 remaining venues listed on PR #21 issuecomment-5235272032 are tracked as
 follow-up work.
 
+On venues whose broker attribution is embedded in generated client IDs, a
+caller `clientOrderId` is composed, deterministically and always, as
+`wireId = BROKER_PREFIX + callerId` (helper:
+`composeClientOrderId(exchangeName, callerId)` in `src/composeClientOrderId.ts`,
+exported from the package root). The composed wire ID — not the bare caller
+ID — is what a later exact-ID lookup must use. Caller IDs are validated
+against the shrunk budget and venue charset at preflight (`rejectPreflight`);
+the message names the effective budget and the prefix reservation.
+
+| Venue | Caller budget | Venue max | Broker prefix | Caller charset |
+|---|---|---|---|---|
+| binance (USD-M) | 26 | 36 | `x-s3vFFRQp` (10) | `^[.A-Z:/a-z0-9_-]{1,26}$` |
+| okx / okxeu | 16 | 32 | `e847386590ce4dBC` (16) | `^[A-Za-z0-9]{1,16}$` |
+| blofin | 16 | 32 | `b3cdedc0a20880ba` (16) | `^[A-Za-z0-9]{1,16}$` |
+| bitget | 32 | 32 | none — attribution rides the `X-CHANNEL-API-CODE: Tealstreet` header | `^[0-9A-Za-z_:#\-+\s]{1,32}$` (classic v2) |
+| bybit | 36 | 36 | none | unchanged |
+
+`binancepm` (32) and `binancespot` (36) caller paths remain prefix-less —
+known residue, upstream's call.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual

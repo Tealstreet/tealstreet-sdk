@@ -51,9 +51,10 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI, createPublicAPI } from './binance.api';
-import { assertBinanceNewClientOrderId, getPlaceOrderClientOrderId } from './binance.client-order-id';
+import { getPlaceOrderClientOrderId } from './binance.client-order-id';
 import {
   BinanceIncomeRecord,
+  BROKER_ID,
   ENDPOINTS,
   GET_POSITION_RISK_RESPONSE,
   GRAFANA_ENDPOINTS_EVERY,
@@ -1594,11 +1595,15 @@ export class BinanceExchange extends BaseExchange {
 
     const clientOrderId = getPlaceOrderClientOrderId(opts);
     if (clientOrderId !== undefined) {
-      assertBinanceNewClientOrderId(clientOrderId, 36);
+      if (!/^[.A-Z:/a-z0-9_-]{1,26}$/.test(clientOrderId)) {
+        this.rejectPreflight(
+          'Binance clientOrderId must match ^[.A-Z:/a-z0-9_-]{1,26}$ (Binance reserves 10 of 36 chars for the x-s3vFFRQp broker prefix)',
+        );
+      }
       if (regularPayloads.length !== 1 || algoPayloads.length !== 0) {
         throw new Error('Binance clientOrderId is only supported for a single native regular order');
       }
-      regularPayloads[0].newClientOrderId = clientOrderId;
+      regularPayloads[0].newClientOrderId = BROKER_ID + clientOrderId;
     } else {
       for (const payload of regularPayloads) {
         payload.newClientOrderId = 'x-s3vFFRQp' + uuid();

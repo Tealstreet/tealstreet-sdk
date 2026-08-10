@@ -1247,8 +1247,9 @@ export class BlofinExchange extends BaseExchange {
     const clientOrderId = opts.clientOrderId;
     if (clientOrderId === undefined) return undefined;
 
-    if (!/^[A-Za-z0-9]{1,32}$/.test(clientOrderId)) {
-      const message = 'BloFin clientOrderId must be 1-32 alphanumeric characters';
+    if (!/^[A-Za-z0-9]{1,16}$/.test(clientOrderId)) {
+      const message =
+        'BloFin clientOrderId must be 1-16 alphanumeric characters (BloFin reserves 16 of 32 chars for the Tealstreet broker prefix)';
       this.rejectPreflight(message);
     }
 
@@ -1269,7 +1270,7 @@ export class BlofinExchange extends BaseExchange {
     if (payloads.length !== 1) {
       this.rejectPreflight('BloFin clientOrderId is supported only when one safe-cex order maps to one native order');
     }
-    payloads[0].clientOrderId = clientOrderId;
+    payloads[0].clientOrderId = `${BROKER_ID}${clientOrderId}`;
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
