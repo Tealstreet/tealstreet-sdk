@@ -1983,7 +1983,10 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
  * (stripped + one warning per invocation) for backwards compatibility;
  * users should migrate to `&`.
  */
-export async function processCommand(commandString: string): Promise<void> {
+export async function processCommand(
+  commandString: string,
+  options: { drainFinalInFlight?: boolean } = {},
+): Promise<void> {
   // Per-call overrides from the listener's `cmd:exec` handler. When a
   // web tab dispatches a command with `account`/`symbol` set, scope the
   // run to those values instead of the REPL's long-lived session — so
@@ -2039,6 +2042,9 @@ export async function processCommand(commandString: string): Promise<void> {
       } else {
         inFlight.push(p);
       }
+    }
+    if (options.drainFinalInFlight && inFlight.length > 0) {
+      await Promise.allSettled(inFlight.splice(0));
     }
   });
 }
@@ -2667,6 +2673,23 @@ export async function runSingleCommand(commandString: string, accountName?: stri
   // Setup event listeners
   setupExchangeListeners(session.currentExchange, session.currentAccountName);
 
-  await processCommand(commandString);
+  const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
+  await processCommand(commandString, { drainFinalInFlight: true });
+  await waitForTwapsStartedByCommand(twapsBeforeCommand);
   await adapter.stopExchange(session.currentExchange);
+}
+
+async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Promise<void> {
+  const startedTwapIds = Array.from(twapManager.runningTwaps.keys()).filter((id) => !twapsBeforeCommand.has(id));
+  if (startedTwapIds.length === 0) return;
+
+  await new Promise<void>((resolve) => {
+    const interval = setInterval(() => {
+      const stillRunning = startedTwapIds.some((id) => twapManager.getById(id));
+      if (!stillRunning) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 250);
+  });
 }
