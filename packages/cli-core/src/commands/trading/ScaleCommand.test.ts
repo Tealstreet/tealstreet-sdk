@@ -120,8 +120,8 @@ describe('ScaleCommand — argument validation', () => {
   });
 });
 
-// A05: the allocator is linear-only. Reserved scaling modifiers must
-// fail parsing with an error naming the supported list (reduce, taker).
+// A05: the allocator is linear-only. Reserved distribution modifiers
+// must fail parsing with an error naming the implemented flags.
 describe('ScaleCommand — modifier honesty', () => {
   let cmd: ScaleCommand;
   beforeEach(() => {
@@ -163,19 +163,17 @@ describe('ScaleCommand — modifier honesty', () => {
     expect(ex.placeOrders).not.toHaveBeenCalled();
   });
 
-  it('rejects a second modifier token', async () => {
-    const ex = makeExchange();
-    const r = await cmd.execute(
-      ctx(['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'], ex),
-    );
-    expect(r.success).toBe(false);
-    expect(r.error).toBe(`only one modifier allowed, got 'reduce' and 'taker'`);
-    expect(ex.placeOrders).not.toHaveBeenCalled();
-  });
-
   it.each([
     [['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce'], 'reduce alone'],
     [['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'taker'], 'taker alone'],
+    [
+      ['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'],
+      'reduce + taker',
+    ],
+    [
+      ['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'taker', 'reduce'],
+      'taker + reduce',
+    ],
     [
       ['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'taker', 'ETHUSDT'],
       'supported modifier + symbol scope',
@@ -185,6 +183,17 @@ describe('ScaleCommand — modifier honesty', () => {
     const r = await cmd.execute(ctx(args, ex));
     expect(r.success).toBe(true);
     expect(ex.placeOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps reduce-only and taker semantics when both flags are present', async () => {
+    const ex = makeExchange();
+    const r = await cmd.execute(
+      ctx(['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'], ex),
+    );
+    expect(r.success).toBe(true);
+    const orders = placedOrders(ex);
+    expect(orders.every((o) => o.reduceOnly === true)).toBe(true);
+    expect(orders.every((o) => o.timeInForce === undefined)).toBe(true);
   });
 
   it('reports an unresolved symbol scope as an unknown symbol, not a modifier', async () => {

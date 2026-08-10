@@ -18,7 +18,8 @@ export const SUPPORTED_MODIFIERS: readonly string[] = ['reduce', 'taker'];
 export const RESERVED_MODIFIERS: readonly string[] = ['cubic', 'icubic', 'exponential'];
 
 interface ParsedScaleCommand {
-  modifier?: string;
+  allowTaker: boolean;
+  reduceOnly: boolean;
   symbol?: string;
 }
 
@@ -41,8 +42,8 @@ export class ScaleCommand extends TradingBaseCommand {
 
   /**
    * Parse scale syntax without consulting the exchange's market inventory.
-   * The optional tail is one modifier (with an optional legacy numeric
-   * parameter) followed by one optional symbol scope.
+   * The optional tail is any implemented modifiers followed by one
+   * optional symbol scope.
    */
   private parseCommand(input: string): ParsedScaleCommand | string {
     const sizeRe = String.raw`(?:\$\d+(?:\.\d+)?|\d+(?:\.\d+)?\$|\d+(?:\.\d+)?%(?:bal|pos)?)`;
@@ -57,39 +58,38 @@ export class ScaleCommand extends TradingBaseCommand {
 
     const tail = (match[1] ?? '').trim();
     if (!tail) {
-      return {};
+      return { allowTaker: false, reduceOnly: false };
     }
 
     const tokens = tail.split(/\s+/);
-    const first = tokens.shift()!;
-    if (RESERVED_MODIFIERS.includes(first)) {
-      return `modifier '${first}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
-    }
+    let allowTaker = false;
+    let reduceOnly = false;
 
-    if (!SUPPORTED_MODIFIERS.includes(first)) {
-      return tokens.length === 0
-        ? { symbol: first }
-        : `modifier '${first}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
-    }
+    while (tokens.length > 0) {
+      const next = tokens[0];
+      if (RESERVED_MODIFIERS.includes(next)) {
+        return `modifier '${next}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
+      }
+      if (!SUPPORTED_MODIFIERS.includes(next)) break;
 
-    const modifier = first;
-    const next = tokens[0];
-    if (next && (SUPPORTED_MODIFIERS.includes(next) || RESERVED_MODIFIERS.includes(next))) {
-      return `only one modifier allowed, got '${modifier}' and '${next}'`;
-    }
-
-    if (next && /^[-+]?[\d.]+$/.test(next)) {
       tokens.shift();
+      if (next === 'reduce') {
+        if (reduceOnly) return `modifier 'reduce' specified more than once`;
+        reduceOnly = true;
+      } else if (next === 'taker') {
+        if (allowTaker) return `modifier 'taker' specified more than once`;
+        allowTaker = true;
+      }
     }
 
     const symbol = tokens.shift();
     if (symbol && (SUPPORTED_MODIFIERS.includes(symbol) || RESERVED_MODIFIERS.includes(symbol))) {
-      return `only one modifier allowed, got '${modifier}' and '${symbol}'`;
+      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
     }
     if (tokens.length > 0) {
-      return `Invalid syntax "${input}"`;
+      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
     }
-    return { modifier, ...(symbol ? { symbol } : {}) };
+    return { allowTaker, reduceOnly, ...(symbol ? { symbol } : {}) };
   }
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -123,8 +123,7 @@ export class ScaleCommand extends TradingBaseCommand {
       targetSymbol = resolvedSymbol;
     }
 
-    const reduceOnly = parsedCommand.modifier === SUPPORTED_MODIFIERS[0];
-    const allowTaker = parsedCommand.modifier === SUPPORTED_MODIFIERS[1];
+    const { allowTaker, reduceOnly } = parsedCommand;
 
     // Health gate — block opening exposure when the private stream is
     // degraded; reduce-only scales reduce risk and stay allowed. Gated

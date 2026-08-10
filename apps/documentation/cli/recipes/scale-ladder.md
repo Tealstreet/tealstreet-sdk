@@ -34,13 +34,13 @@ Raw contract size (`5`) instead of notional, with an explicit symbol
 override. Mix and match — size + range can each be absolute or relative.
 
 ```text
-scale sell $10000 into 25 from 50000 to 48500 taker
+scale sell $10000 into 25 from 50000 to 48500 reduce taker
 ```
 
-`taker` drops the default post-only TIF on every rung. Use this when you
-want the ladder to be **immediately fillable** if price walks through it
-(e.g. a panic-exit ladder) rather than rejecting at exchange-side post-only
-checks.
+`reduce` makes every rung reduce-only. `taker` drops the default post-only
+TIF on every rung. Use this when you want the ladder to be **immediately
+fillable** if price walks through it (e.g. a panic-exit ladder) rather than
+rejecting at exchange-side post-only checks.
 
 ```text
 scale buy $500 into 5 from $bid -0.1% to $bid -0.5%

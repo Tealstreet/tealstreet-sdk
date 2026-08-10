@@ -109,9 +109,9 @@ depends on the command's grammar.
 | `last` / `top` / `bottom` / `first` | `cancel`, `bump`                                            | Sort-and-pick selectors                                              |
 | `from <p1> to <p2>`                 | `cancel`                                                    | Price-range filter (limits only)                                     |
 
-`scale` is linear-only and accepts at most one optional modifier after its
-price range: `reduce` or `taker`, followed by an optional symbol scope. `cubic`, `icubic`, and other distribution names are not
-implemented; they are rejected with
+`scale` is linear-only. After its price range it accepts `reduce`, `taker`,
+or both, followed by an optional symbol scope. `cubic`, `icubic`, and other
+distribution names are not implemented; they are rejected with
 `modifier '<x>' is not implemented; supported: reduce, taker`.
 
 ---
