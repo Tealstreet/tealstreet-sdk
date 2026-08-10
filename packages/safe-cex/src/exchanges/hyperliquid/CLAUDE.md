@@ -834,6 +834,10 @@ the gap `warnOnMismatchedApiWallet` closes, called from `start()`.
 
 - It is **non-fatal**. Public and read-only use still work, and the pair is
   legitimately absent for wallet-based connections.
+- It compares the private key to the effective private-read wallet
+  (`vault || applicationId || key`), not just `key`. The bad-key e2e keeps
+  `applicationId` unchanged while corrupting `key` and `secret`; checking only
+  `key` lets that restored-account path miss the auth error entirely.
 - It **catches**, rather than propagates, the ethers error. A malformed secret
   makes `validateWalletAndPrivateKey` throw instead of returning false, and an
   unguarded call took the whole of `start()` down with it — caught by the
