@@ -1,6 +1,5 @@
-import type { Exchange } from '../../exchanges/base';
-
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import type { Exchange } from '../../exchanges/base';
 import {
   Order,
   OrderFillEvent,
@@ -335,7 +334,10 @@ export class ChaserOrderManager {
             // Order is currently filling — don't yank it out from under
             // an in-flight fill. See the constant's comment above for
             // the race this guards against.
-            this.log(`hold steady: ${Date.now() - instance.lastPartialFillAt}ms since last partial fill`, instance);
+            this.log(
+              `hold steady: ${Date.now() - instance.lastPartialFillAt}ms since last partial fill`,
+              instance,
+            );
             return;
           } else if (orderPrice !== lastPrice) {
             const ordersToCancel = orders.filter(
@@ -438,14 +440,6 @@ export class ChaserOrderManager {
 
           this.log('tracked orders absent across confirmed order updates; stopping safely', instance);
           instance.markComplete('Tracked orders disappeared from store');
-          // This stop used to be silent, which hid a real bug for weeks (Bybit
-          // demo REST snapshots wiping just-placed orders — the chaser died and
-          // cancelled its own order with no user-visible trace). Any resting
-          // remainder is cancelled by cleanupInstance below, so tell the user.
-          exchange?.emitter.emit(
-            'warning',
-            `Chaser for ${instance.options.symbol} stopped: its order left the order book (filled or cancelled externally); any resting remainder was cancelled`,
-          );
           cleanup();
           await this.cleanupInstance(instance);
         }
@@ -599,16 +593,8 @@ export class ChaserOrderManager {
       return;
     }
 
-    // We didn't manage to even start a chaser. `tryPlaceOrders` returns []
-    // for user-stop and after its own error-emitting failure paths (which
-    // already set a stop reason) — but if we get here with the instance NOT
-    // stopped, the chaser is dying without anything having told the user.
-    // That silent vanish is exactly how the Bybit demo chaser bug went
-    // unreported; keep this path loud.
-    if (!instance.isStopped) {
-      exchange.emitter.emit('warning', `Chaser for ${instance.options.symbol} could not start — no order was placed`);
-      instance.markComplete('No order placed');
-    }
+    // We didn't manage to even start a chaser, marking complete
+    instance.markComplete();
     // cleanup routine
     await this.cleanupInstance(instance);
   }
