@@ -33,7 +33,6 @@ export const ENDPOINTS = {
   CANCEL_SYMBOL_ORDERS: '/openApi/swap/v2/trade/allOpenOrders',
   ORDER: '/openApi/swap/v2/trade/order',
   AMEND_ORDER: '/openApi/swap/v1/trade/amend',
-  CANCEL_REPLACE_ORDER: '/openApi/swap/v1/trade/cancelReplace',
   BATCH_ORDERS: '/openApi/swap/v2/trade/batchOrders',
   KLINE: '/openApi/swap/v3/quote/klines',
   LISTEN_KEY: '/openApi/user/auth/userDataStream',
@@ -62,7 +61,6 @@ export type FETCH_BALANCE_RESPONSE = {
 export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.ORDER,
   ENDPOINTS.AMEND_ORDER,
-  ENDPOINTS.CANCEL_REPLACE_ORDER,
   ENDPOINTS.BATCH_ORDERS,
   ENDPOINTS.SET_LEVERAGE,
   ENDPOINTS.CANCEL_SYMBOL_ORDERS,
@@ -103,23 +101,12 @@ export const TIME_IN_FORCE: Record<string, OrderTimeInForce> = {
   PostOnly: OrderTimeInForce.PostOnly,
 };
 
-export type BINGX_ORDER_STATUS =
-  | 'CANCELED'
-  | 'FILLED'
-  | 'NEW'
-  | 'OPEN'
-  | 'PARTIALLY_FILLED'
-  | 'PENDING'
-  | 'WORKING'
-  | 'EXPIRED';
+export type BINGX_ORDER_STATUS = 'CANCELED' | 'FILLED' | 'NEW' | 'PARTIALLY_FILLED' | 'EXPIRED';
 export const ORDER_STATUS: Record<BINGX_ORDER_STATUS, OrderStatus> = {
   CANCELED: OrderStatus.Canceled,
   FILLED: OrderStatus.Closed,
   NEW: OrderStatus.Open,
-  OPEN: OrderStatus.Open,
   PARTIALLY_FILLED: OrderStatus.Open,
-  PENDING: OrderStatus.Open,
-  WORKING: OrderStatus.Open,
   EXPIRED: OrderStatus.Closed,
 };
 

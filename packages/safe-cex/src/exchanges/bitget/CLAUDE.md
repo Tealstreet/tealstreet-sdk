@@ -16,21 +16,6 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/bitget.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/bitget.ts
 
-## UTA Support Status
-
-Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade
-endpoints. The adapter is **not fully UTA-compatible yet**: validation, balance,
-positions, orders, order placement/cancel/update, and private WS still use the
-Classic v2 contracts. The only v3 paths currently wired are the account-type
-probe (`ACCOUNT_SETTINGS_V3`) and UTA isolated hedge per-side leverage
-(`SET_LEVERAGE_V3`) after startup detection.
-
-When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
-Account API is not supported", surface the Tealstreet-owned UTA unsupported
-message from `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE`. Do not present it as a
-bad key, bad secret, or IP whitelist problem. Full UTA support requires a real
-v3 migration for REST payloads, pagination, and private WS topics.
-
 ## File Structure
 
 | File                            | Description                                                                                                         |
@@ -105,8 +90,7 @@ Each step checks `this.isDisposed` to allow early exit if the exchange is dispos
 
 ## REST API Endpoints
 
-Private trading/account endpoints are Classic v2 unless explicitly marked as v3
-below. Do not infer full UTA support from the v3 probe/leverage paths.
+All endpoints use the V2 API prefix (`/api/v2/mix/`):
 
 ### Market Data
 
@@ -561,11 +545,11 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 18. **One-way mode isolated leverage mismatch warning**: `fetchPositionMetadata()` (`bitget.exchange.ts:326-332`) warns if isolated long and short leverages differ in one-way mode.
 
-19. **Response interceptor error logging**: The response interceptor in `bitget.api.ts` fires `emitAndLogError` (user-facing toast) when `code !== '00000'` and data has no `data` field; it does not throw, so the caller still receives the response. Codes in the file-scope `SILENT_ERROR_CODES` set are skipped — currently `'40084'` ("Classic Account mode"), because `_detectAccountType` deliberately probes a v3 endpoint expecting that exact response on Classic accounts, and `'40085'` ("Unified Account mode ... Classic Account API is not supported"), because callers translate it to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE`. **Add new codes to that set when you have a probe / fallback path that legitimately expects an error or a caller-owned translation**; do not relax the interceptor itself.
+19. **Response interceptor error logging**: The response interceptor in `bitget.api.ts` fires `emitAndLogError` (user-facing toast) when `code !== '00000'` and data has no `data` field; it does not throw, so the caller still receives the response. Codes in the file-scope `SILENT_ERROR_CODES` set are skipped — currently `'40084'` ("Classic Account mode"), because `_detectAccountType` deliberately probes a v3 endpoint expecting that exact response on Classic accounts. **Add new codes to that set when you have a probe / fallback path that legitimately expects an error**; do not relax the interceptor itself.
 
 20. **Trailing stop orders response format**: `fetchTrailingStopOrders()` handles both array and `{ entrustedList }` response formats (`bitget.exchange.ts:824-828`).
 
-21. **UTA vs Classic — per-side ISO leverage routing only, not full UTA support**: The v2 endpoint `set-leverage` silently couples long and short leverage on **all** accounts (Bitget removed per-side support from v2). Per-side ISO leverage in hedge mode only works through the v3 UTA endpoint (`SET_LEVERAGE_V3`) with `posSide`. UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during `start()` — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The probe runs in parallel with the first `tick()` so it adds zero serial startup latency. **Do NOT** auto-detect from `BALANCE` / `account/account` responses — `assetMode` and `unionAvailable` are populated on Classic too (verified against the `bg e2e` Classic account). Every future v3-routing method must read `this.isUta`; do not reintroduce trial-and-error fallbacks in setLeverage. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. Until the adapter is fully migrated to Bitget v3, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
+21. **UTA vs Classic — per-side ISO leverage routing**: The v2 endpoint `set-leverage` silently couples long and short leverage on **all** accounts (Bitget removed per-side support from v2). Per-side ISO leverage in hedge mode only works through the v3 UTA endpoint (`SET_LEVERAGE_V3`) with `posSide`. UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during `start()` — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The probe runs in parallel with the first `tick()` so it adds zero serial startup latency. **Do NOT** auto-detect from `BALANCE` / `account/account` responses — `assetMode` and `unionAvailable` are populated on Classic too (verified against the `bg e2e` Classic account). Every future v3-routing method must read `this.isUta`; do not reintroduce trial-and-error fallbacks in setLeverage. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. If you add another v3-probing pattern, extend that set (see quirk 19).
 
 22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 

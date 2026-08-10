@@ -1029,6 +1029,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         status === 'reduceOnlyRejected'
       ) {
         this.parent.store.removeOrder({ id: orderId });
+        this.parent.forgetLimitOrderTimeInForce(orderId);
         continue;
       }
 
@@ -1127,14 +1128,16 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         const isUnconfirmedPlaceholder = inferenceSource === 'hip3-unconfirmed-placeholder';
         const orderStatus = isUnconfirmedPlaceholder ? OrderStatus.Creating : OrderStatus.Open;
 
-        // Determine timeInForce: use WS data if present, otherwise preserve from store.
-        // HIP-3 orderUpdates may omit tif, so we fall back to the existing order's value
-        // (set by optimistic add or REST frontendOpenOrders).
+        // Determine timeInForce: use WS data if present, otherwise preserve.
+        // `orderUpdates` omits tif for EVERY market, not just HIP-3 ones, so
+        // without this fallback each update wipes the value REST/placement set.
         let inferredTimeInForce = parseHyperliquidOrderTimeInForce(orderData.tif);
-        if (!inferredTimeInForce && isHip3) {
-          // HIP-3 WS may omit tif — preserve from existing order in store
-          // (O(1) via the pre-built map).
-          inferredTimeInForce = existingOrdersById[orderId]?.timeInForce;
+        if (!inferredTimeInForce) {
+          // Store first (O(1) via the pre-built map), then the placement-time
+          // record — core perps are never REST-reconciled after startup, so for
+          // them the placement record is the only source.
+          inferredTimeInForce =
+            existingOrdersById[orderId]?.timeInForce ?? this.parent.getPlacedLimitOrderTimeInForce(orderId);
         }
 
         const order: Order = {

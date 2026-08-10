@@ -63,27 +63,6 @@ import { BitgetPrivateWebsocket } from './bitget.ws-private';
 import { BitgetPublicWebsocket } from './bitget.ws-public';
 import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
 
-export const BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE =
-  'This Bitget API key belongs to a Unified Trading Account (UTA), but Tealstreet currently uses Bitget Classic API endpoints for this adapter. Please use a Classic-mode Bitget account/sub-account until the Bitget v3 migration is complete.';
-
-const isBitgetSuccessCode = (code: unknown): boolean => parseInt(`${code ?? 0}`, 10) === 0;
-
-const isBitgetUtaClassicUnsupported = (payload?: { code?: string | number; msg?: string }): boolean => {
-  const code = `${payload?.code ?? ''}`;
-  const message = payload?.msg?.toLowerCase() ?? '';
-  return (
-    code === '40085' ||
-    (message.includes('unified account mode') && message.includes('classic account api is not supported'))
-  );
-};
-
-const getBitgetApiErrorMessage = (payload: { code?: string | number; msg?: string } | undefined, fallback: string) => {
-  if (isBitgetUtaClassicUnsupported(payload)) {
-    return BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE;
-  }
-  return payload?.msg || fallback;
-};
-
 export class BitgetExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
@@ -216,7 +195,7 @@ export class BitgetExchange extends BaseExchange {
       const balance = await this.fetchBalance();
       return { error: '', balance };
     } catch (err: any) {
-      const errorMsg = getBitgetApiErrorMessage(err?.response?.data, err?.message || 'Invalid API key or secret');
+      const errorMsg = err?.response?.data?.msg || err?.message;
 
       // Detect environment mismatch and provide helpful message
       if (errorMsg?.toLowerCase().includes('environment is incorrect')) {
@@ -373,19 +352,12 @@ export class BitgetExchange extends BaseExchange {
 
   fetchBalance = async ({ preferFast = false }: { preferFast?: boolean } = {}) => {
     const client = preferFast ? this.unlimitedXHR : this.xhr;
-    const { data: response } = await client.get<{
-      code?: string | number;
-      msg?: string;
-      data: Array<Record<string, any>> | null;
-    }>(ENDPOINTS.BALANCE, {
+    const {
+      data: { data },
+    } = await client.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.BALANCE, {
       params: { productType: this.apiProductType },
     });
 
-    if (!isBitgetSuccessCode(response.code)) {
-      throw new Error(getBitgetApiErrorMessage(response, 'Bitget account balance request failed'));
-    }
-
-    const data = Array.isArray(response.data) ? response.data : [];
     const usdt = data.find((b) => b.marginCoin === this.apiMarginCoin);
     if (!usdt) return this.store.balance;
 
@@ -569,7 +541,7 @@ export class BitgetExchange extends BaseExchange {
       },
     });
 
-    if (!isBitgetSuccessCode(data.code)) {
+    if (parseInt(data.code || '0') !== 0) {
       // Detect environment mismatch and provide helpful message
       if (data.msg?.toLowerCase().includes('environment is incorrect')) {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';
@@ -578,7 +550,7 @@ export class BitgetExchange extends BaseExchange {
           `API key environment mismatch: Your API key is for ${suggestedMode}, but configured for ${currentMode}. Check Testnet setting.`,
         );
       } else {
-        this.emitAndLogError(getBitgetApiErrorMessage(data, 'Bitget positions request failed'));
+        this.emitAndLogError(data.msg);
       }
       return [];
     }
