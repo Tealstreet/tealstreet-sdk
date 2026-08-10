@@ -950,7 +950,7 @@ export class HyperliquidExchange extends BaseExchange {
   private warnOnMismatchedApiWallet = (explicitPublicDataOnly: boolean) => {
     if (explicitPublicDataOnly) return;
     const { applicationId, key, secret, vault } = this.options;
-    const wallet = vault || applicationId || key;
+    const wallet = key || vault || applicationId;
     if (!wallet || !secret) return;
     // A malformed secret makes ethers throw rather than return false. That is
     // still invalid credentials, and startup must never fail on the diagnostic.
