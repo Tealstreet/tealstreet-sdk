@@ -820,6 +820,25 @@ Entries expire after 60 seconds.
 18. **DEX abstraction deprecation can be per-account before global date**: users can be migrated early via `agentSetAbstraction` / UI flows before network-wide milestones. Never gate balance mode on calendar date; always read runtime `userAbstraction`.
 19. **Dead man's switch lifecycle is caller-owned**: `scheduleCancel` is an explicit API/worker capability, not a startup heartbeat. Callers must refresh an armed deadline themselves; safe-cex neither auto-arms nor clears it on disposal.
 
+## Hosted mode: L1 actions are signed by the browser, not the exchange-server
+
+Hyperliquid signs in the **method body** (`signL1Action(createWalletFromPrivateKey(this.options.secret), …)`), not in an axios interceptor. The hosted exchange-server runs with `secret: ''` by design, and `createWalletFromPrivateKey('')` **throws** — so every worker-reachable signed method died before issuing a request. `useMarginType` swallows the throw into a toast, so the symptom was silent: **hosted users could not change margin type or leverage at all**, and the e2e log showed zero `updateLeverage` actions rather than a failed one.
+
+Order placement was never affected, which is what made this easy to miss: order writes run on the browser's main-thread mirror, while `callMethodInWorker` (`setLeverage`, `changeMarginType`, `scheduleCancel`) runs on the server.
+
+The fix reuses the machinery that already exists rather than adding a signer type. `POST /exchange` is **already** relayed to the browser by `setInnerAdapterForRemoteSigning`, and `BaseExchange.signHttpRequest` replays it through the browser's own axios instance — so a request interceptor is enough:
+
+- **Server**: `signActionOrDefer` returns `undefined` when `options.secret` is empty, and the payload omits `signature`.
+- **Browser**: `addSigningInterceptor` (`hyperliquid.api.ts`) fills it in on the replay, keyed off a body carrying `action` + `nonce` and no `signature`.
+- Locally-signed requests (browser-placed orders) already carry a signature, so the interceptor skips them — no double-signing.
+
+Two things are deliberate:
+
+- **The action type is allowlisted.** The relay lets the server ask the browser to sign whatever it sends, so `usdSend` / `withdraw3` / `vaultTransfer` are excluded — a transferable signature for those moves funds. Adding a new signed action means adding it to `RELAY_SIGNABLE_ACTION_TYPES`.
+- **This is a two-target deploy.** The defer half ships in the exchange-server, the signing half in the web bundle.
+
+**Known remaining gap: `hyperliquidspot`'s own signed methods are NOT fixed.** Spot builds its clients from the same `createExchangeAPI` (it imports it as `createAPI`), so the interceptor **is already installed there** — it is simply inert, because every spot body carries an inline signature. Spot's `setLeverage` / `changeMarginType` still sign in the method body and therefore still throw in hosted mode. Completing it is not just adding `signActionOrDefer`: those calls pass four arguments to `signL1Action`, leaving `isMainnet` at its `true` default, while the shared interceptor derives it from `!options.testnet`. On mainnet the two agree; on testnet they do not. Reconcile the `isMainnet` argument first. Spot is `hiddenFromNewAccountPicker` and outside the e2e matrix, which is why this was left rather than half-changed.
+
 ## Error Handling
 
 ### API Response Error Detection

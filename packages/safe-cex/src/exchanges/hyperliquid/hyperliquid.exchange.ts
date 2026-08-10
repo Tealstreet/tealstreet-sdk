@@ -2783,19 +2783,13 @@ export class HyperliquidExchange extends BaseExchange {
       isCross: activeAssetData?.leverage.type === 'cross',
       leverage: +inputLeverage,
     };
-    const signature = await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      timestamp,
-      !this.options.testnet,
-    );
+    const signature = await this.signActionOrDefer(action, timestamp);
     await this.xhr.post(
       ENDPOINTS.EXCHANGE,
       {
         action,
         nonce: timestamp,
-        signature,
+        ...(signature ? { signature } : {}),
         ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
       },
       {
@@ -2824,19 +2818,13 @@ export class HyperliquidExchange extends BaseExchange {
       isCross: !isolated,
       leverage: activeAssetData?.leverage.value,
     };
-    const signature = await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      timestamp,
-      !this.options.testnet,
-    );
+    const signature = await this.signActionOrDefer(action, timestamp);
     await this.xhr.post(
       ENDPOINTS.EXCHANGE,
       {
         action,
         nonce: timestamp,
-        signature,
+        ...(signature ? { signature } : {}),
         ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
       },
       {
@@ -3169,6 +3157,20 @@ export class HyperliquidExchange extends BaseExchange {
    * shape is added.
    */
   private resolveReduceOnly = (market: Market, requested: boolean): boolean => (market.isSpot ? false : requested);
+
+  // The exchange-server holds no secret, so it cannot sign here. Send the action
+  // unsigned and let the browser's replay fill the signature in — see
+  // hyperliquid.api.ts `addSigningInterceptor`.
+  private signActionOrDefer = async (action: any, nonce: number) => {
+    if (!this.options.secret) return undefined;
+    return await signL1Action(
+      createWalletFromPrivateKey(this.options.secret),
+      action,
+      this.options.vault || null,
+      nonce,
+      !this.options.testnet,
+    );
+  };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     if (opts.type === OrderType.TrailingStopLoss) {
@@ -3603,17 +3605,11 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     const nonce = this.generateNonce();
-    const signature = await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      nonce,
-      !this.options.testnet,
-    );
+    const signature = await this.signActionOrDefer(action, nonce);
     const payload = {
       action,
       nonce,
-      signature,
+      ...(signature ? { signature } : {}),
       ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
     };
 
