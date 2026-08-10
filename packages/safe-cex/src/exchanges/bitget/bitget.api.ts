@@ -12,12 +12,12 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
 
-// Bitget error codes that must NOT surface as user-facing toasts. The
+// Bitget error codes that must NOT surface as raw user-facing toasts. The
 // `_detectAccountType` probe in bitget.exchange.ts intentionally calls a
 // v3 endpoint expecting `40084` ("Classic Account mode") on Classic
-// accounts — that's the signal we use to set `isUta=false`, not a real
-// failure.
-const SILENT_ERROR_CODES = new Set<string>(['40084']);
+// accounts. `40085` is translated by callers into a clearer "UTA not yet
+// supported" message instead of the exchange's credential-looking envelope.
+const SILENT_ERROR_CODES = new Set<string>(['40084', '40085']);
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;

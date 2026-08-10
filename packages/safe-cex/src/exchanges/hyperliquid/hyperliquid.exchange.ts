@@ -241,6 +241,34 @@ export class HyperliquidExchange extends BaseExchange {
     getCrossCache().removePendingOrder(orderId);
   }
 
+  // ============================================================================
+  // TIME-IN-FORCE PRESERVATION
+  // `orderUpdates` carries no `tif` for ANY market (core perps included — the
+  // field is absent from the WS frame, not just from HIP-3 ones), and `tick()`
+  // only re-fetches orders when HIP-3 dexes are configured. So for core perps
+  // the placement-time value is the only lasting source of truth.
+  // ============================================================================
+  private _placedLimitOrderTif = new Map<string, OrderTimeInForce>();
+  private readonly PLACED_TIF_CACHE_LIMIT = 500;
+
+  public rememberLimitOrderTimeInForce(orderId: string, timeInForce: OrderTimeInForce): void {
+    this._placedLimitOrderTif.delete(orderId);
+    this._placedLimitOrderTif.set(orderId, timeInForce);
+    while (this._placedLimitOrderTif.size > this.PLACED_TIF_CACHE_LIMIT) {
+      const oldest = this._placedLimitOrderTif.keys().next();
+      if (oldest.done) break;
+      this._placedLimitOrderTif.delete(oldest.value);
+    }
+  }
+
+  public getPlacedLimitOrderTimeInForce(orderId: string): OrderTimeInForce | undefined {
+    return this._placedLimitOrderTif.get(orderId);
+  }
+
+  public forgetLimitOrderTimeInForce(orderId: string): void {
+    this._placedLimitOrderTif.delete(orderId);
+  }
+
   // Cache for fake positions - invalidated when markets change
   private _fakePositionsCache: Position[] | null = null;
 
@@ -1142,6 +1170,7 @@ export class HyperliquidExchange extends BaseExchange {
 
   dispose = () => {
     this._fetchOrdersInFlight = null;
+    this._placedLimitOrderTif.clear();
 
     // Clear any pending debounced order refresh
     if (this._orderRefreshDebounceTimer) {
@@ -3088,6 +3117,16 @@ export class HyperliquidExchange extends BaseExchange {
 
     const orderIds = this.validateResponseAndExtractOrderIds(data);
 
+    // orderWires[0] is always the main limit wire; any extras are TP/SL triggers,
+    // which have no time-in-force of their own.
+    const [limitOrderId] = orderIds;
+    if (limitOrderId) {
+      this.rememberLimitOrderTimeInForce(
+        limitOrderId,
+        opts.timeInForce === OrderTimeInForce.PostOnly ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
+      );
+    }
+
     // For HIP-3 limit orders, add optimistic order immediately
     if (market?.id.includes(':')) {
       for (const orderId of orderIds) {
@@ -3227,6 +3266,9 @@ export class HyperliquidExchange extends BaseExchange {
       });
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
+
+      // A market order is a Gtc limit at 5% slippage, so an unfilled remainder rests.
+      if (orderIds[0]) this.rememberLimitOrderTimeInForce(orderIds[0], OrderTimeInForce.GoodTillCancel);
 
       return orderIds;
     } else if (opts.type === OrderType.Limit) {
@@ -3592,6 +3634,9 @@ export class HyperliquidExchange extends BaseExchange {
       price: order.price,
       amount: order.amount,
       reduceOnly: order.reduceOnly || false,
+      // Cancel+replace rebuilds the wire from scratch, so without this an Alo
+      // order silently comes back as Gtc after a price edit.
+      timeInForce: order.timeInForce,
     };
 
     if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;

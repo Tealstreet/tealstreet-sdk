@@ -6,12 +6,15 @@ import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
 import { ENDPOINTS } from '../../exchanges/bingx/bingx.types';
 import { DefaultStore } from '../../store/store.base';
 import {
+  MarginType,
   Market,
   Order,
   OrderSide,
   OrderStatus,
   OrderTimeInForce,
   OrderType,
+  PositionMode,
+  PositionSide,
 } from '../../types';
 
 const MARKET: Market = {
@@ -49,6 +52,7 @@ const createOrder = (overrides: Partial<Order> = {}): Order => ({
     timeInForce: 'GTC',
     postOnly: false,
     status: 'NEW',
+    clientOrderId: 'client-order-1',
   },
   ...overrides,
 });
@@ -105,6 +109,406 @@ describe('BingX native amend safety boundary', () => {
     assertNoReplacementWrites();
   });
 
+  it('uses atomic cancel-replace for a reconciled unfilled LIMIT price move', async () => {
+    const { exchange, amendPost, replacementPost } = createExchange();
+    amendPost.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          cancelResult: 'true',
+          cancelMsg: '',
+          cancelResponse: {
+            cancelClientOrderId: 'client-order-1',
+            orderId: '1989246372640980993',
+          },
+          replaceResult: 'true',
+          replaceMsg: '',
+          newOrderResponse: {
+            orderId: '1989246372640980994',
+            orderID: '',
+            symbol: MARKET.id,
+            positionSide: 'BOTH',
+            side: 'BUY',
+            type: 'LIMIT',
+            price: 50_100,
+            quantity: 1.25,
+            clientOrderId: 'tsreplacement1',
+            timeInForce: 'GTC',
+            status: 'PENDING',
+            executedQty: '0',
+          },
+        },
+      },
+    });
+    vi.spyOn(exchange as any, 'createClientOrderId').mockReturnValue('tsreplacement1');
+    exchange.store.addOrUpdateOrder(createOrder());
+
+    await expect(exchange.updateOrder({ order: createOrder(), update: { price: 50_100 } })).resolves.toEqual([
+      '1989246372640980994',
+    ]);
+
+    expect(amendPost).toHaveBeenCalledOnce();
+    expect(amendPost).toHaveBeenCalledWith(ENDPOINTS.CANCEL_REPLACE_ORDER, {
+      symbol: MARKET.id,
+      cancelClientOrderId: 'client-order-1',
+      side: 'BUY',
+      positionSide: 'BOTH',
+      type: 'LIMIT',
+      quantity: 1.25,
+      price: 50_100,
+      cancelReplaceMode: 'STOP_ON_FAILURE',
+      cancelRestrictions: 'ONLY_NEW',
+      timeInForce: 'GTC',
+      clientOrderId: 'tsreplacement1',
+    });
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({ id: '1989246372640980993', status: OrderStatus.Canceled }),
+      expect.objectContaining({ id: '1989246372640980994', status: OrderStatus.Open, price: 50_100 }),
+    ]);
+    expect(replacementPost).not.toHaveBeenCalled();
+  });
+
+  it('cancels and replaces a reconciled active STOP_MARKET price move', async () => {
+    const { exchange, amendPost, replacementPost } = createExchange();
+    const deleteOrder = vi.fn().mockResolvedValueOnce({ data: { code: 0, msg: '' } });
+    replacementPost.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          order: {
+            orderId: '2086644409474576385',
+            orderID: '2086644409474576385',
+            symbol: MARKET.id,
+            positionSide: 'LONG',
+            side: 'SELL',
+            type: 'STOP_MARKET',
+            quantity: '27',
+            price: '0',
+            stopPrice: '49000',
+            status: 'PENDING',
+            executedQty: '0',
+            workingType: 'MARK_PRICE',
+          },
+        },
+      },
+    });
+    exchange.xhr = { post: amendPost, delete: deleteOrder } as unknown as Axios;
+    exchange.store.update({
+      positions: [
+        {
+          id: 'BTCUSDT-long',
+          symbol: MARKET.symbol,
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 1_350_000,
+          leverage: 20,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.Hedged,
+          unrealizedPnl: 0,
+          contracts: 27,
+          liquidationPrice: 0,
+        },
+      ],
+    });
+    (exchange as any)._accountPositionMode = PositionMode.Hedged;
+    const stopLoss = createOrder({
+      id: '2086644409474576384',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 48_500,
+      amount: 27,
+      remaining: 27,
+      reduceOnly: true,
+      timeInForce: undefined,
+      info: {
+        orderId: '2086644409474576384',
+        symbol: MARKET.id,
+        side: 'SELL',
+        positionSide: 'LONG',
+        type: 'STOP_MARKET',
+        origQty: '27.0',
+        price: '0.00000',
+        executedQty: '0.0',
+        stopPrice: '48500',
+        status: 'NEW',
+        clientOrderId: '',
+        workingType: 'MARK_PRICE',
+        reduceOnly: true,
+        postOnly: false,
+        closePosition: 'false',
+      },
+    });
+    exchange.store.addOrUpdateOrder(stopLoss);
+
+    await expect(exchange.updateOrder({ order: stopLoss, update: { price: 49_000 } })).resolves.toEqual([
+      '2086644409474576385',
+    ]);
+
+    expect(deleteOrder).toHaveBeenCalledOnce();
+    expect(deleteOrder).toHaveBeenCalledWith(ENDPOINTS.ORDER, {
+      params: {
+        symbol: MARKET.id,
+        orderId: '2086644409474576384',
+      },
+    });
+    expect(replacementPost).toHaveBeenCalledOnce();
+    expect(replacementPost).toHaveBeenCalledWith(ENDPOINTS.ORDER, {
+      symbol: MARKET.id,
+      positionSide: 'LONG',
+      side: 'SELL',
+      type: 'STOP_MARKET',
+      quantity: 27,
+      stopPrice: 49_000,
+      workingType: 'MARK_PRICE',
+    });
+    expect(amendPost).not.toHaveBeenCalled();
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({ id: '2086644409474576384', status: OrderStatus.Canceled }),
+      expect.objectContaining({ id: '2086644409474576385', status: OrderStatus.Open, price: 49_000 }),
+    ]);
+  });
+
+  it('preserves the raw STOP_MARKET type when a stale mark reclassified the row as take-profit', async () => {
+    const { exchange, amendPost, replacementPost } = createExchange();
+    const deleteOrder = vi.fn().mockResolvedValueOnce({ data: { code: 0, msg: '' } });
+    replacementPost.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          order: {
+            orderId: '2086644409474576385',
+            orderID: '2086644409474576385',
+            symbol: MARKET.id,
+            positionSide: 'LONG',
+            side: 'SELL',
+            type: 'STOP_MARKET',
+            quantity: '27',
+            price: '0',
+            stopPrice: '49000',
+            status: 'PENDING',
+            executedQty: '0',
+            workingType: 'MARK_PRICE',
+          },
+        },
+      },
+    });
+    exchange.xhr = { post: amendPost, delete: deleteOrder } as unknown as Axios;
+    exchange.store.update({
+      positions: [
+        {
+          id: 'BTCUSDT-long',
+          symbol: MARKET.symbol,
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 1_350_000,
+          leverage: 20,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.Hedged,
+          unrealizedPnl: 0,
+          contracts: 27,
+          liquidationPrice: 0,
+        },
+      ],
+    });
+    (exchange as any)._accountPositionMode = PositionMode.Hedged;
+    const misclassifiedStopLoss = createOrder({
+      id: '2086644409474576384',
+      type: OrderType.TakeProfit,
+      side: OrderSide.Sell,
+      price: 48_500,
+      amount: 27,
+      remaining: 27,
+      reduceOnly: true,
+      timeInForce: undefined,
+      info: {
+        orderId: '2086644409474576384',
+        symbol: MARKET.id,
+        side: 'SELL',
+        positionSide: 'LONG',
+        type: 'STOP_MARKET',
+        origQty: '27.0',
+        price: '0.00000',
+        executedQty: '0.0',
+        stopPrice: '48500',
+        status: 'NEW',
+        clientOrderId: '',
+        workingType: 'MARK_PRICE',
+        reduceOnly: true,
+        postOnly: false,
+        closePosition: 'false',
+      },
+    });
+
+    await exchange.updateOrder({ order: misclassifiedStopLoss, update: { price: 49_000 } });
+
+    expect(replacementPost).toHaveBeenCalledWith(ENDPOINTS.ORDER, {
+      symbol: MARKET.id,
+      positionSide: 'LONG',
+      side: 'SELL',
+      type: 'STOP_MARKET',
+      quantity: 27,
+      stopPrice: 49_000,
+      workingType: 'MARK_PRICE',
+    });
+    expect(amendPost).not.toHaveBeenCalled();
+  });
+
+  it('allows BingX PENDING/post-only rows with empty TP/SL placeholders to be cancel-replaced', async () => {
+    const { exchange, amendPost } = createExchange();
+    amendPost.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          cancelResult: 'SUCCESS',
+          newOrderResult: 'SUCCESS',
+          cancelOrderId: '1989246372640980993',
+          newOrderId: '1989246372640980994',
+        },
+      },
+    });
+    vi.spyOn(exchange as any, 'createClientOrderId').mockReturnValue('tsreplacement1');
+    const pendingPostOnly = createOrder({
+      timeInForce: OrderTimeInForce.PostOnly,
+      info: {
+        ...createOrder().info,
+        status: 'PENDING',
+        timeInForce: 'PostOnly',
+        postOnly: true,
+        takeProfit: { type: 'TAKE_PROFIT', quantity: 0, stopPrice: 0, price: 0 },
+        stopLoss: { type: 'STOP', quantity: 0, stopPrice: 0, price: 0 },
+      },
+    });
+
+    await exchange.updateOrder({ order: pendingPostOnly, update: { price: 50_100 } });
+
+    expect(amendPost).toHaveBeenCalledWith(
+      ENDPOINTS.CANCEL_REPLACE_ORDER,
+      expect.objectContaining({
+        cancelRestrictions: 'ONLY_PENDING',
+        timeInForce: 'PostOnly',
+        price: 50_100,
+      }),
+    );
+  });
+
+  it('falls back to normalized order fields when raw info lacks REST identity aliases', async () => {
+    const { exchange, amendPost } = createExchange();
+    amendPost.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          cancelResult: 'SUCCESS',
+          newOrderResult: 'SUCCESS',
+          cancelOrderId: '1989246372640980993',
+          newOrderId: '1989246372640980994',
+        },
+      },
+    });
+    vi.spyOn(exchange as any, 'createClientOrderId').mockReturnValue('tsreplacement1');
+    (exchange as any)._accountPositionMode = PositionMode.Hedged;
+    const orderWithSparseInfo = createOrder({
+      timeInForce: OrderTimeInForce.PostOnly,
+      info: {
+        orderId: '1989246372640980993',
+        c: 'client-order-1',
+        status: 'PENDING',
+        quantity: '1.25',
+        executedQty: '0',
+      },
+    });
+
+    await exchange.updateOrder({ order: orderWithSparseInfo, update: { price: 50_100 } });
+
+    expect(amendPost).toHaveBeenCalledWith(
+      ENDPOINTS.CANCEL_REPLACE_ORDER,
+      expect.objectContaining({
+        symbol: MARKET.id,
+        cancelClientOrderId: 'client-order-1',
+        side: 'BUY',
+        positionSide: 'LONG',
+        timeInForce: 'PostOnly',
+      }),
+    );
+  });
+
+  it('reconciles REST order details before cancel-replace when WS info omitted time in force', async () => {
+    const { exchange, amendPost } = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          orders: [
+            {
+              orderId: '1989246372640980993',
+              symbol: MARKET.id,
+              side: 'BUY',
+              positionSide: 'LONG',
+              type: 'LIMIT',
+              origQty: '1.25',
+              price: '50000',
+              executedQty: '0',
+              status: 'PENDING',
+              clientOrderId: 'client-order-1',
+              timeInForce: 'PostOnly',
+              postOnly: true,
+              reduceOnly: false,
+              takeProfit: { type: 'TAKE_PROFIT', quantity: 0, stopPrice: 0, price: 0 },
+              stopLoss: { type: 'STOP', quantity: 0, stopPrice: 0, price: 0 },
+            },
+          ],
+        },
+      },
+    });
+    amendPost.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          cancelResult: 'SUCCESS',
+          newOrderResult: 'SUCCESS',
+          cancelOrderId: '1989246372640980993',
+          newOrderId: '1989246372640980994',
+        },
+      },
+    });
+    exchange.xhr = { get, post: amendPost } as unknown as Axios;
+    vi.spyOn(exchange as any, 'createClientOrderId').mockReturnValue('tsreplacement1');
+    const wsOnlyOrder = createOrder({
+      timeInForce: undefined,
+      info: {
+        i: '1989246372640980993',
+        s: MARKET.id,
+        S: 'BUY',
+        ps: 'LONG',
+        o: 'LIMIT',
+        q: '1.25',
+        p: '50000',
+        z: '0',
+        X: 'WORKING',
+        c: 'client-order-1',
+        ro: false,
+      },
+    });
+
+    await exchange.updateOrder({ order: wsOnlyOrder, update: { price: 50_100 } });
+
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.OPEN_ORDERS);
+    expect(amendPost).toHaveBeenCalledWith(
+      ENDPOINTS.CANCEL_REPLACE_ORDER,
+      expect.objectContaining({
+        cancelClientOrderId: 'client-order-1',
+        timeInForce: 'PostOnly',
+        positionSide: 'LONG',
+      }),
+    );
+  });
+
   it('preserves post-only, reduce-only, side, and hedged position-side attributes by amending only identity and size', async () => {
     const { exchange, amendPost } = createExchange();
     const order = createOrder({
@@ -136,16 +540,10 @@ describe('BingX native amend safety boundary', () => {
 
   it.each([
     {
-      name: 'price edit',
-      order: createOrder(),
-      update: { price: 50_100 },
-      error: 'cannot change price',
-    },
-    {
       name: 'combined price and quantity edit',
       order: createOrder(),
       update: { price: 50_100, amount: 1 },
-      error: 'cannot change price',
+      error: 'cannot be combined',
     },
     {
       name: 'unchanged normalized quantity',
@@ -167,7 +565,7 @@ describe('BingX native amend safety boundary', () => {
       name: 'trigger order',
       order: createOrder({ type: OrderType.StopLoss }),
       update: { amount: 1 },
-      error: 'supports only exactly reconciled open LIMIT orders',
+      error: 'trigger order movement supports price updates only',
     },
     {
       name: 'LIMIT with attached protection',
@@ -219,11 +617,6 @@ describe('BingX native amend safety boundary', () => {
     {
       name: 'mismatched reduce-only',
       info: { ...createOrder().info, reduceOnly: true },
-      error: 'reduce-only state is not reconciled',
-    },
-    {
-      name: 'missing reduce-only provenance',
-      info: { ...createOrder().info, reduceOnly: undefined },
       error: 'reduce-only state is not reconciled',
     },
     {

@@ -423,6 +423,10 @@ Subscribed for the user (or vault address):
 | Limit + TP + SL    | Combined wires                                              | `normalTpsl`                                              |
 | `TrailingStopLoss` | **Not supported** (throws before submission)                | -                                                         |
 
+### Reduce-only sizing
+
+Hyperliquid **rests a reduce-only order at whatever size it was sent** — it does not cap it to the open position server-side. A reduce-only sell of 336 against a 168-contract long stays open at 336. So the venue sets `autoDownSizeReduceOrders: true`, routing through the shared `downSizeReduceOrder` util in the web limit/market builders. Do not hand-roll a clamp in `placeOrder`/`createLimitOrderWires`; see `../CLAUDE.md` → "Reduce-only order downsizing". `hyperliquidspot` deliberately stays on the default `false`: spot has no positions, and `resolveReduceOnly` already forces `r:false` for `market.isSpot`.
+
 ### TIF Mappings
 
 | Internal            | Hyperliquid Wire |
@@ -539,12 +543,12 @@ The pipe `|` separator is used instead of colon `:` to avoid TradingView conflic
 
 `hyperliquidspot` is **superseded but still registered**: existing saved accounts keep loading against it, while `hiddenFromNewAccountPicker` removes it from the add-account picker so nobody creates a new split account. Do **not** retire it with `enabled: false` — availability gates also decide whether a _saved_ account may register at startup, so that would break every existing user account on it.
 
-| Field                       | Format                                       | Example           |
-| --------------------------- | -------------------------------------------- | ----------------- |
-| `market.id`                 | API coin handle from `universe[].name`       | `@1`, `PURR/USDC` |
-| `market.symbol`             | `{TOKEN}/{QUOTE}` (both from the `tokens` table) | `HFUN/USDH` |
-| `market.info.hyperliquidId` | `universe[].index + SPOT_ASSET_INDEX_OFFSET` | `10001`           |
-| `market.isSpot`             | `true`                                       | —                 |
+| Field                       | Format                                           | Example           |
+| --------------------------- | ------------------------------------------------ | ----------------- |
+| `market.id`                 | API coin handle from `universe[].name`           | `@1`, `PURR/USDC` |
+| `market.symbol`             | `{TOKEN}/{QUOTE}` (both from the `tokens` table) | `HFUN/USDH`       |
+| `market.info.hyperliquidId` | `universe[].index + SPOT_ASSET_INDEX_OFFSET`     | `10001`           |
+| `market.isSpot`             | `true`                                           | —                 |
 
 Asset-index ranges: **perps `0..N`**, **spot `10000+`**, **HIP-3 `110000+`**. Disjoint by construction, so one instance builds a correct order wire from `market.info.hyperliquidId` for any of them.
 
@@ -730,7 +734,7 @@ The private WS tracks per-position realized PnL in `handleFills`:
 
 ### HIP-3 Order Type Inference
 
-HIP-3 `orderUpdates` WS channel omits `orderType`, `triggerPx`, `tpsl`, and sometimes `tif`. This requires a multi-layer inference system:
+HIP-3 `orderUpdates` WS channel omits `orderType`, `triggerPx`, and `tpsl`. This requires a multi-layer inference system:
 
 ```
 Order type resolution chain (in priority order):
@@ -774,7 +778,15 @@ Entries expire after 60 seconds.
 
 ## Known Quirks / Implementation Notes
 
-1. **HIP-3 `orderUpdates` missing fields**: `orderType`, `triggerPx`, `tpsl`, `tif` are omitted (API limitation). Requires the multi-layer inference system described above.
+1. **HIP-3 `orderUpdates` missing fields**: `orderType`, `triggerPx`, `tpsl` are omitted (API limitation). Requires the multi-layer inference system described above.
+
+   **`tif` is omitted for EVERY market, core perps included** — the field is absent from the `WsOrder.order` payload entirely, so `parseHyperliquidOrderTimeInForce(orderData.tif)` never resolves on the WS path. Only REST `frontendOpenOrders` carries it. This used to be believed HIP-3-only, and the preserve-from-store fallback was gated on `isHip3`; core-perp orders therefore had `timeInForce` overwritten with `undefined` by every order update, and the UI's TIF column rendered blank (caught by the Cypress `expected '' to equal 'GTC'` assertion). Two things make the value survive now, and **both are needed**:
+
+   - the fallback in `handleOrderUpdates` is ungated, so a stored value is preserved; and
+   - `placeLimitOrder` records the placement-time TIF via `rememberLimitOrderTimeInForce(orderIds[0], …)`, because core perps get **no** optimistic store row (that is HIP-3-only) and `tick()` only re-fetches orders when HIP-3 dexes are configured — so without the placement record there is nothing in the store to preserve, and nothing ever repairs it.
+
+   Only `orderIds[0]` is recorded: it is always the main limit wire, and any extra ids are TP/SL triggers, which have no TIF of their own. The map is bounded (500, FIFO), cleared on `dispose`, and entries are dropped on terminal order statuses.
+
 2. **Aggregate feeds are not drop-in reconciliation replacements**: `webData2` is rejected and current `webData3` contains frontend user/DEX status but no positions, orders, or ticker contexts. Current `allDexs*` live frames also differ from their published record-shaped contract and do not remove the metadata dependency. Do not adopt them without a concrete consumer, stable mapping, and refreshed upstream evidence.
 3. **Balance scoping depends on account abstraction mode**: `clearinghouseState` with `dex` returns dex-specific margin only. In `unifiedAccount`/`portfolioMargin`, all collateral and holds are in spot state: use the current `spotState` WS channel, not the rejected `spotClearinghouseState` WS channel. Token 0 `tokenToAvailableAfterMaintenance` is authoritative free USDC; only responses without it fall back to core margin plus spot-hold reconstruction. Keep `currencies.USDC` as the aggregate margin slice for sizing; raw spot slices belong under `balance.info.spotCollateralCurrencies`.
 4. **`activeAssetData` not available for HIP-3**: Only subscribes for core perp markets (channel limit concern). HIP-3 leverage defaults until WS delivers.
