@@ -4,9 +4,8 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { LogSeverity, MarginType, OrderStatus, OrderType, Position, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { readBlob } from '../../utils/readBlob';
-import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRADE_UPDATE, ORDER_TYPE, POSITION_SIDE } from './bingx.types';
+import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRADE_UPDATE, POSITION_SIDE } from './bingx.types';
 
 export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
   private static readonly LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
@@ -150,22 +149,9 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
         }
       }
 
-      const orderType = ORDER_TYPE[data?.o];
-      if (status === 'NEW' && orderType && orderType !== OrderType.Market) {
-        this.store.addOrUpdateOrder({
-          id: data.i,
-          status: OrderStatus.Open,
-          symbol: data.s.replace(/-/, ''),
-          type: orderType,
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.p) || parseFloat(data.sp),
-          amount: parseFloat(data.q),
-          filled: parseFloat(data.z),
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(data.q) - parseFloat(data.z),
-          reduceOnly: data.R || false,
-          info: data,
-        });
+      const order = this.parent.mapOrder(data);
+      if (order?.status === OrderStatus.Open && order.type !== OrderType.Market) {
+        this.store.addOrUpdateOrder(order);
       }
 
       if (status === 'CANCELED' || status === 'EXPIRED') {

@@ -2,6 +2,8 @@ import type { Axios, AxiosInstance } from 'axios';
 import type { Store } from '../store/store.interface';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import createHmac from 'create-hmac';
 import uniq from 'lodash/uniq';
 import { nanoid } from 'nanoid';
@@ -1670,6 +1672,13 @@ export class BaseExchange implements Exchange {
         // apexomni: the HMAC key is the base64 of the secret, not the secret.
         const key = Buffer.from(secret).toString('base64');
         return { id: request.id, wsAuthSignature: createHmac('sha256', key).update(toSign).digest('base64') };
+      }
+      case 'bitunix-double-sha256': {
+        // bitunix is NOT HMAC: sha256(sha256(nonce+timestamp+apiKey) + secret),
+        // with the secret concatenated as a plain string. `toSign` carries the
+        // inner digest input.
+        const inner = bytesToHex(sha256(utf8ToBytes(toSign)));
+        return { id: request.id, wsAuthSignature: bytesToHex(sha256(utf8ToBytes(inner + secret))) };
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };

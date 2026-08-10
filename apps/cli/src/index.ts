@@ -808,7 +808,7 @@ program
   .action(async (cmdArgs, options) => {
     const { runSingleCommand } = await getRepl();
     const commandString = cmdArgs.join(' ');
-    runSingleCommand(commandString, options.account, options.symbol);
+    await runSingleCommand(commandString, options.account, options.symbol);
   });
 
 // ============ Shorthand Trading Commands ============
@@ -833,7 +833,7 @@ tradingCommands.forEach(({ name, desc }) => {
     .action(async (args, options) => {
       const { runSingleCommand } = await getRepl();
       const commandString = `${name} ${args.join(' ')}`;
-      runSingleCommand(commandString, options.account, options.symbol);
+      await runSingleCommand(commandString, options.account, options.symbol);
     });
 });
 

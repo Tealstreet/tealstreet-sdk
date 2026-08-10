@@ -241,6 +241,34 @@ export class HyperliquidExchange extends BaseExchange {
     getCrossCache().removePendingOrder(orderId);
   }
 
+  // ============================================================================
+  // TIME-IN-FORCE PRESERVATION
+  // `orderUpdates` carries no `tif` for ANY market (core perps included — the
+  // field is absent from the WS frame, not just from HIP-3 ones), and `tick()`
+  // only re-fetches orders when HIP-3 dexes are configured. So for core perps
+  // the placement-time value is the only lasting source of truth.
+  // ============================================================================
+  private _placedLimitOrderTif = new Map<string, OrderTimeInForce>();
+  private readonly PLACED_TIF_CACHE_LIMIT = 500;
+
+  public rememberLimitOrderTimeInForce(orderId: string, timeInForce: OrderTimeInForce): void {
+    this._placedLimitOrderTif.delete(orderId);
+    this._placedLimitOrderTif.set(orderId, timeInForce);
+    while (this._placedLimitOrderTif.size > this.PLACED_TIF_CACHE_LIMIT) {
+      const oldest = this._placedLimitOrderTif.keys().next();
+      if (oldest.done) break;
+      this._placedLimitOrderTif.delete(oldest.value);
+    }
+  }
+
+  public getPlacedLimitOrderTimeInForce(orderId: string): OrderTimeInForce | undefined {
+    return this._placedLimitOrderTif.get(orderId);
+  }
+
+  public forgetLimitOrderTimeInForce(orderId: string): void {
+    this._placedLimitOrderTif.delete(orderId);
+  }
+
   // Cache for fake positions - invalidated when markets change
   private _fakePositionsCache: Position[] | null = null;
 
@@ -908,6 +936,36 @@ export class HyperliquidExchange extends BaseExchange {
     return undefined;
   };
 
+  /**
+   * Hyperliquid reads are unauthenticated — `/info` takes the wallet address as
+   * a parameter — so a saved account whose private key no longer matches its API
+   * wallet loads looking perfectly healthy and only fails when the user tries to
+   * trade. `validateAccount` catches this, but it only runs on the add-key form,
+   * never for an account restored from storage. Warn once at startup instead of
+   * letting the first rejected order be the notification.
+   *
+   * Deliberately non-fatal: public data and read-only use still work, and the
+   * pair can legitimately be unset for wallet-based connections.
+   */
+  private warnOnMismatchedApiWallet = (explicitPublicDataOnly: boolean) => {
+    if (explicitPublicDataOnly) return;
+    const { applicationId, key, secret, vault } = this.options;
+    const wallet = key || vault || applicationId;
+    if (!wallet || !secret) return;
+    // A malformed secret makes ethers throw rather than return false. That is
+    // still invalid credentials, and startup must never fail on the diagnostic.
+    try {
+      if (validateWalletAndPrivateKey(secret, wallet)) return;
+    } catch {
+      // fall through to the warning
+    }
+
+    this.emitAndLogError(
+      `Hyperliquid credentials are invalid: the saved private key does not match API wallet ${wallet}. ` +
+        `Orders will be rejected until the account is re-added.`,
+    );
+  };
+
   start = async () => {
     const useExternalPublicData = await this.initExternalPublicData();
     const explicitPublicDataOnly = this.options.publicDataOnly === true;
@@ -918,6 +976,8 @@ export class HyperliquidExchange extends BaseExchange {
       await this.resolveApplicationIdFromKey();
       if (this.isDisposed) return;
     }
+
+    this.warnOnMismatchedApiWallet(explicitPublicDataOnly);
 
     const shouldStartPrivateData = !explicitPublicDataOnly && this.hasPrivateSessionIdentity;
     const shouldMarkPrivateLoaded = explicitPublicDataOnly || shouldStartPrivateData;
@@ -1142,6 +1202,7 @@ export class HyperliquidExchange extends BaseExchange {
 
   dispose = () => {
     this._fetchOrdersInFlight = null;
+    this._placedLimitOrderTif.clear();
 
     // Clear any pending debounced order refresh
     if (this._orderRefreshDebounceTimer) {
@@ -2754,19 +2815,13 @@ export class HyperliquidExchange extends BaseExchange {
       isCross: activeAssetData?.leverage.type === 'cross',
       leverage: +inputLeverage,
     };
-    const signature = await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      timestamp,
-      !this.options.testnet,
-    );
+    const signature = await this.signActionOrDefer(action, timestamp);
     await this.xhr.post(
       ENDPOINTS.EXCHANGE,
       {
         action,
         nonce: timestamp,
-        signature,
+        ...(signature ? { signature } : {}),
         ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
       },
       {
@@ -2795,19 +2850,13 @@ export class HyperliquidExchange extends BaseExchange {
       isCross: !isolated,
       leverage: activeAssetData?.leverage.value,
     };
-    const signature = await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      timestamp,
-      !this.options.testnet,
-    );
+    const signature = await this.signActionOrDefer(action, timestamp);
     await this.xhr.post(
       ENDPOINTS.EXCHANGE,
       {
         action,
         nonce: timestamp,
-        signature,
+        ...(signature ? { signature } : {}),
         ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
       },
       {
@@ -3088,6 +3137,16 @@ export class HyperliquidExchange extends BaseExchange {
 
     const orderIds = this.validateResponseAndExtractOrderIds(data);
 
+    // orderWires[0] is always the main limit wire; any extras are TP/SL triggers,
+    // which have no time-in-force of their own.
+    const [limitOrderId] = orderIds;
+    if (limitOrderId) {
+      this.rememberLimitOrderTimeInForce(
+        limitOrderId,
+        opts.timeInForce === OrderTimeInForce.PostOnly ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
+      );
+    }
+
     // For HIP-3 limit orders, add optimistic order immediately
     if (market?.id.includes(':')) {
       for (const orderId of orderIds) {
@@ -3130,6 +3189,20 @@ export class HyperliquidExchange extends BaseExchange {
    * shape is added.
    */
   private resolveReduceOnly = (market: Market, requested: boolean): boolean => (market.isSpot ? false : requested);
+
+  // The exchange-server holds no secret, so it cannot sign here. Send the action
+  // unsigned and let the browser's replay fill the signature in — see
+  // hyperliquid.api.ts `addSigningInterceptor`.
+  private signActionOrDefer = async (action: any, nonce: number) => {
+    if (!this.options.secret) return undefined;
+    return await signL1Action(
+      createWalletFromPrivateKey(this.options.secret),
+      action,
+      this.options.vault || null,
+      nonce,
+      !this.options.testnet,
+    );
+  };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     if (opts.type === OrderType.TrailingStopLoss) {
@@ -3227,6 +3300,9 @@ export class HyperliquidExchange extends BaseExchange {
       });
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
+
+      // A market order is a Gtc limit at 5% slippage, so an unfilled remainder rests.
+      if (orderIds[0]) this.rememberLimitOrderTimeInForce(orderIds[0], OrderTimeInForce.GoodTillCancel);
 
       return orderIds;
     } else if (opts.type === OrderType.Limit) {
@@ -3561,17 +3637,11 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     const nonce = this.generateNonce();
-    const signature = await signL1Action(
-      createWalletFromPrivateKey(this.options.secret),
-      action,
-      this.options.vault || null,
-      nonce,
-      !this.options.testnet,
-    );
+    const signature = await this.signActionOrDefer(action, nonce);
     const payload = {
       action,
       nonce,
-      signature,
+      ...(signature ? { signature } : {}),
       ...(this.options.vault ? { vaultAddress: this.options.vault } : {}),
     };
 
@@ -3592,6 +3662,9 @@ export class HyperliquidExchange extends BaseExchange {
       price: order.price,
       amount: order.amount,
       reduceOnly: order.reduceOnly || false,
+      // Cancel+replace rebuilds the wire from scratch, so without this an Alo
+      // order silently comes back as Gtc after a price edit.
+      timeInForce: order.timeInForce,
     };
 
     if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
