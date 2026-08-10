@@ -116,14 +116,15 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   };
 
   subscribe = () => {
+    const productTopics = this.parent.getInstrumentTypes().flatMap((instType) => [
+      { channel: 'positions', instType },
+      { channel: 'orders', instType },
+    ]);
+
     this.sendWithLog(
       JSON.stringify({
         op: 'subscribe',
-        args: [
-          { channel: 'account' },
-          { channel: 'positions', instType: 'SWAP' },
-          { channel: 'orders', instType: 'SWAP' },
-        ],
+        args: [{ channel: 'account' }, ...productTopics],
       }),
     );
   };

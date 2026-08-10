@@ -117,13 +117,15 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   };
 
   subscribe = () => {
+    const orderTopics = this.parent.getInstrumentTypes().flatMap((instType) => [
+      { channel: 'orders-algo', instType },
+      { channel: 'algo-advance', instType },
+    ]);
+
     this.sendWithLog(
       JSON.stringify({
         op: 'subscribe',
-        args: [
-          { channel: 'orders-algo', instType: 'SWAP' },
-          { channel: 'algo-advance', instType: 'SWAP' },
-        ],
+        args: orderTopics,
       }),
     );
 
