@@ -1,0 +1,115 @@
+---
+title: Connect an AI Assistant
+description: Let Claude, or any MCP client, write custom modules in your Tealstreet account.
+sidebar_position: 100
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+Tealstreet hosts an **MCP connector**, so an AI assistant you already use can
+write [Custom Modules](./custom-module.mdx) directly into your account. You
+bring your own assistant and pay for your own usage; Tealstreet provides the
+module API, the safety screen, and the storage.
+
+---
+
+### Connecting
+
+Add this URL as an MCP server in your assistant:
+
+```
+https://v3.tealstreet.io/api/mcp
+```
+
+There is nothing to generate and no key to copy. The first time your assistant
+calls it, you will be sent to a Tealstreet consent page listing exactly what it
+is asking for, and you approve or cancel there.
+
+Whitelabel domains use their own host — connect to the site you actually log
+in to.
+
+::::caution
+Only connect an assistant you trust. It can create, change and delete your
+custom modules. It **cannot** place orders, move funds, or read your exchange
+API keys.
+::::
+
+---
+
+### What it can and cannot do
+
+Two permissions exist, and both are shown on the consent screen:
+
+| Permission      | What it allows                           |
+| --------------- | ---------------------------------------- |
+| `modules:read`  | List and read your modules               |
+| `modules:write` | Create, change and delete your modules   |
+
+Neither reaches a trading surface. There is no scope that lets a connected
+assistant trade, and the module it writes is subject to the same sandbox and
+the same safety screen as code you type yourself.
+
+---
+
+### Drafts and commits
+
+An assistant writes in two steps, which mirrors how the editor already works —
+your keystrokes go to local storage instantly and are only stored in your
+account a couple of seconds later, once they have been screened.
+
+- **Draft** — instant, unscreened, and held on the server. A draft is **not
+  live**: it does not appear in your terminal, does not reach your other
+  devices, and does not survive as a module until it is committed. It does
+  survive your assistant's session ending.
+- **Commit** — runs the safety screen. If it passes, the module is stored and
+  loads in your terminal and on your other devices.
+
+**A module your assistant says it "saved" may only be drafted.** That is why
+the terminal marks it: a module with uncommitted work shows `(draft)` in the
+module picker and a notice in the editor. If you see that, ask your assistant
+to commit.
+
+An open tab picks up a committed module the next time it loads modules —
+reload the tab if you want to see it immediately.
+
+---
+
+### Why a write gets refused
+
+Refusals are normal and specific; your assistant is told which one it hit.
+
+| Refusal                         | Why                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| No top-level `Component`        | The runtime looks up a function binding called `Component`. Without it a module loads and renders nothing. |
+| Does not compile                | Checked before anything is stored, and before the screen is asked. Free and unlimited.           |
+| Reserved name                   | `Global Module` and `Override…` are system-managed.                                              |
+| Too long                        | A module has to be small enough to typecheck and screen.                                         |
+| Safety screen refused it        | The module did something it should not. Your previously committed version is untouched.          |
+| Can only run locally            | The screen allowed it but not for storage, so it is not synced. Nothing is lost — the draft stays. |
+| Daily limit reached             | A cap on automated changes, so a stuck assistant cannot fill or empty your library.              |
+| A newer version exists          | Something else changed the module since your assistant last saw it.                              |
+
+Every refusal leaves both the draft and the last committed version intact. An
+assistant that is told "no" has not lost your work.
+
+---
+
+### Disconnecting
+
+Remove the server from your assistant's configuration. There is no
+disconnect button in Tealstreet settings yet; if you need a connection revoked
+server-side, contact support.
+
+---
+
+### Troubleshooting
+
+1. **The consent page asks me to log in** — you are signed out. Log in and the
+   page returns.
+2. **My assistant says it saved, but nothing is in my terminal** — it drafted
+   without committing. Look for the `(draft)` marker and ask it to commit.
+3. **Committed, but the panel still shows the old version** — reload the tab.
+4. **"Daily limit reached"** — the cap resets at midnight UTC.
