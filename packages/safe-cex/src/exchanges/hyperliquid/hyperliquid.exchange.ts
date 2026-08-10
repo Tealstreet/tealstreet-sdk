@@ -936,6 +936,35 @@ export class HyperliquidExchange extends BaseExchange {
     return undefined;
   };
 
+  /**
+   * Hyperliquid reads are unauthenticated — `/info` takes the wallet address as
+   * a parameter — so a saved account whose private key no longer matches its API
+   * wallet loads looking perfectly healthy and only fails when the user tries to
+   * trade. `validateAccount` catches this, but it only runs on the add-key form,
+   * never for an account restored from storage. Warn once at startup instead of
+   * letting the first rejected order be the notification.
+   *
+   * Deliberately non-fatal: public data and read-only use still work, and the
+   * pair can legitimately be unset for wallet-based connections.
+   */
+  private warnOnMismatchedApiWallet = (explicitPublicDataOnly: boolean) => {
+    if (explicitPublicDataOnly) return;
+    const { key, secret } = this.options;
+    if (!key || !secret) return;
+    // A malformed secret makes ethers throw rather than return false. That is
+    // still invalid credentials, and startup must never fail on the diagnostic.
+    try {
+      if (validateWalletAndPrivateKey(secret, key)) return;
+    } catch {
+      // fall through to the warning
+    }
+
+    this.emitAndLogError(
+      `Hyperliquid credentials are invalid: the saved private key does not match API wallet ${key}. ` +
+        `Orders will be rejected until the account is re-added.`,
+    );
+  };
+
   start = async () => {
     const useExternalPublicData = await this.initExternalPublicData();
     const explicitPublicDataOnly = this.options.publicDataOnly === true;
@@ -946,6 +975,8 @@ export class HyperliquidExchange extends BaseExchange {
       await this.resolveApplicationIdFromKey();
       if (this.isDisposed) return;
     }
+
+    this.warnOnMismatchedApiWallet(explicitPublicDataOnly);
 
     const shouldStartPrivateData = !explicitPublicDataOnly && this.hasPrivateSessionIdentity;
     const shouldMarkPrivateLoaded = explicitPublicDataOnly || shouldStartPrivateData;
