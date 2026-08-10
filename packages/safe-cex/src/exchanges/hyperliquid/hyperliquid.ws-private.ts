@@ -1140,6 +1140,13 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             existingOrdersById[orderId]?.timeInForce ?? this.parent.getPlacedLimitOrderTimeInForce(orderId);
         }
 
+        // In hosted mode the order was placed on the browser mirror, so this
+        // instance never saw the placement and REST is its only tif source.
+        // Debounced + rate-limited, so a burst of orders costs one fetch.
+        if (!inferredTimeInForce && inferredType === OrderType.Limit) {
+          this.parent.scheduleOrderRefresh();
+        }
+
         const order: Order = {
           id: orderId,
           status: orderStatus,
