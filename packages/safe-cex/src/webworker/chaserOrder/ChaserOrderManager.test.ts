@@ -163,6 +163,7 @@ describe('ChaserOrderManager', () => {
 
     await vi.advanceTimersByTimeAsync(50);
 
+    expect(instance.state.attempts).toBe(1);
     expect(exchange.cancelOrders).toHaveBeenCalledWith([order]);
     expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
     expect(exchange.placeOrder).toHaveBeenLastCalledWith(
@@ -429,6 +430,125 @@ describe('ChaserOrderManager', () => {
     expect(instance.isStopped).toBe(true);
     expect(instance.state.stopReason).toBe('Completed');
     expect(manager.instances).not.toContain(instance);
+  });
+
+  it('stops non-reduce chasers when the target position size is reached', async () => {
+    const { emit, exchange, store } = createMockExchange();
+    (exchange as any).name = 'bybitdemo';
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    (store as any).positions = [
+      {
+        id: 'BTCUSDT-long',
+        symbol: 'BTCUSDT',
+        side: PositionSide.Long,
+        entryPrice: 100,
+        notional: 100,
+        leverage: 1,
+        unrealizedPnl: 0,
+        contracts: 1,
+        liquidationPrice: 0,
+      },
+    ];
+    store.updateIds.positions += 1;
+
+    await emit('update', store);
+
+    expect(instance.isStopped).toBe(true);
+    expect(instance.state.stopReason).toBe('Completed');
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
+    ]);
+  });
+
+  it('uses the starting same-side position as the non-reduce chaser target baseline', async () => {
+    const { emit, exchange, store } = createMockExchange();
+    (exchange as any).name = 'bybitdemo';
+    (store as any).positions = [
+      {
+        id: 'BTCUSDT-long',
+        symbol: 'BTCUSDT',
+        side: PositionSide.Long,
+        entryPrice: 100,
+        notional: 200,
+        leverage: 1,
+        unrealizedPnl: 0,
+        contracts: 2,
+        liquidationPrice: 0,
+      },
+    ];
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    (store.positions[0] as any).contracts = 2.5;
+    store.updateIds.positions += 1;
+    await emit('update', store);
+    expect(instance.isStopped).toBe(false);
+
+    (store.positions[0] as any).contracts = 3;
+    store.updateIds.positions += 1;
+    await emit('update', store);
+
+    expect(instance.isStopped).toBe(true);
+    expect(instance.state.stopReason).toBe('Completed');
+  });
+
+  it('does not use position-target completion outside Bybit demo', async () => {
+    const { emit, exchange, store } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    (store as any).positions = [
+      {
+        id: 'BTCUSDT-long',
+        symbol: 'BTCUSDT',
+        side: PositionSide.Long,
+        entryPrice: 100,
+        notional: 100,
+        leverage: 1,
+        unrealizedPnl: 0,
+        contracts: 1,
+        liquidationPrice: 0,
+      },
+    ];
+    store.updateIds.positions += 1;
+
+    await emit('update', store);
+
+    expect(instance.isStopped).toBe(false);
+    expect(exchange.cancelOrders).not.toHaveBeenCalled();
   });
 
   it('requires two order updates before treating a missing tracked order as final', async () => {

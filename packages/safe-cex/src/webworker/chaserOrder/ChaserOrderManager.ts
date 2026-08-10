@@ -125,6 +125,23 @@ export class ChaserOrderManager {
     return [];
   }
 
+  private hasReachedTargetPosition(instance: ChaserOrderInstance) {
+    if (
+      instance.exchange.name !== 'bybitdemo' ||
+      instance.options.reduceOnly ||
+      instance.targetPositionContracts === undefined
+    ) {
+      return false;
+    }
+
+    const targetSide = instance.options.side === OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+    const position = (instance.exchange.store.positions || []).find(
+      (p) => p.symbol === instance.options.symbol && p.side === targetSide,
+    );
+    const contracts = Math.abs(position?.contracts || 0);
+    return contracts >= instance.targetPositionContracts - 1e-12;
+  }
+
   private findBestPrice(instance: ChaserOrderInstance) {
     const exchange = instance.exchange;
 
@@ -275,7 +292,8 @@ export class ChaserOrderManager {
 
       // Use fill-based tracking for exchanges where order status updates may be delayed
       // or missed during cancel/replace cycles (pendingOrdersUpdate race condition)
-      const useFillBasedTracking = exchange.name === 'hyperliquid' || exchange.name === 'grvt';
+      const useFillBasedTracking =
+        exchange.name === 'hyperliquid' || exchange.name === 'grvt' || exchange.name === 'bybitdemo';
       this.log(`monitoring started, useFillBasedTracking=${useFillBasedTracking}`, instance);
       let priceCheckTimeout: ReturnType<typeof setTimeout> | undefined;
       let queuedOrdersTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -364,7 +382,7 @@ export class ChaserOrderManager {
           // check if reduce only and position is already gone
           if (instance.options.reduceOnly) {
             if (
-              !exchange?.store.positions.find(
+              !(exchange?.store.positions || []).find(
                 (position) =>
                   position.symbol === instance.options.symbol &&
                   position.side ===
@@ -410,6 +428,13 @@ export class ChaserOrderManager {
             );
             return;
           } else if (orderPrice !== lastPrice) {
+            instance.incrementAttempts();
+            if (instance.isStopped) {
+              cleanup();
+              await this.cleanupInstance(instance);
+              return;
+            }
+
             const ordersToCancel = orders.filter(
               (order) => order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
             );
@@ -492,6 +517,7 @@ export class ChaserOrderManager {
       };
 
       let lastOrdersUpdateId = -1;
+      let lastPositionsUpdateId = -1;
       let lastPriceCheckAt = 0;
 
       const handleTrackedOrders = async (orders: Order[], confirmMissingOrders: boolean) => {
@@ -548,6 +574,14 @@ export class ChaserOrderManager {
             await this.cleanupInstance(instance);
             return;
           }
+        }
+
+        if (this.hasReachedTargetPosition(instance)) {
+          this.log('target position reached - marking ourselves completed', instance);
+          instance.markComplete();
+          cleanup();
+          await this.cleanupInstance(instance);
+          return;
         }
 
         await handleTrackedOrders(orders, confirmMissingOrders);
@@ -609,8 +643,13 @@ export class ChaserOrderManager {
           if (ordersUpdateId !== undefined) {
             lastOrdersUpdateId = ordersUpdateId;
           }
+          const positionsUpdateId = data.updateIds?.positions;
+          const hasPositionUpdate = positionsUpdateId === undefined || positionsUpdateId !== lastPositionsUpdateId;
+          if (positionsUpdateId !== undefined) {
+            lastPositionsUpdateId = positionsUpdateId;
+          }
 
-          if (hasOrderUpdate) {
+          if (hasOrderUpdate || hasPositionUpdate) {
             if (priceCheckTimeout) {
               clearTimeout(priceCheckTimeout);
               priceCheckTimeout = undefined;
@@ -619,7 +658,7 @@ export class ChaserOrderManager {
               clearTimeout(queuedOrdersTimeout);
               queuedOrdersTimeout = undefined;
             }
-            await runPriceCheck(filterCurrentOrders(data.orders), true);
+            await runPriceCheck(filterCurrentOrders(data.orders), hasOrderUpdate);
             return;
           }
 

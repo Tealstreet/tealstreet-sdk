@@ -91,6 +91,11 @@ const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
 
+const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
+  const normalized = `${message || ''}`.toLowerCase();
+  return normalized.includes('order not exists') || normalized.includes('too late to cancel');
+};
+
 const isBybitLeverageNotModified = (data: Record<string, any>) => {
   const retCode = Number(v(data, 'retCode'));
   const retMsg = `${v(data, 'retMsg') || ''}`.toLowerCase();
@@ -1388,6 +1393,60 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
+  fetchFillsForOrderIds = async (orderIds: string[]): Promise<Map<string, number>> => {
+    const fillsByOrderId = new Map<string, number>();
+    if (orderIds.length === 0) {
+      return fillsByOrderId;
+    }
+
+    const requestedOrderIds = new Set(orderIds.map((orderId) => String(orderId)));
+    const symbolByOrderId = new Map<string, string>();
+    for (const order of this.store.orders) {
+      if (requestedOrderIds.has(order.id)) {
+        symbolByOrderId.set(order.id, order.symbol);
+      }
+    }
+
+    try {
+      await mapSeries([...requestedOrderIds], async (orderId) => {
+        const symbol = symbolByOrderId.get(orderId);
+        if (!symbol) {
+          return;
+        }
+
+        const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, {
+          params: {
+            category: this.getCategoryForSymbol(symbol),
+            symbol,
+            orderId,
+            limit: 50,
+          },
+        });
+        const retMsg = `${v(data, 'retMsg') || 'UNKNOWN'}`;
+        if (retMsg !== 'OK') {
+          throw new Error(retMsg);
+        }
+
+        const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
+        for (const exec of executionsList) {
+          if (`${exec.orderId ?? ''}` !== orderId) {
+            continue;
+          }
+
+          const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
+          if (Number.isFinite(qty) && qty > 0) {
+            fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + qty);
+          }
+        }
+      });
+
+      return fillsByOrderId;
+    } catch (error: any) {
+      this.log(`Error fetching fills for order IDs: ${error.message}`, LogSeverity.Warning);
+      throw error;
+    }
+  };
+
   /**
    * Fetch income/transaction history from Bybit.
    * Maps Bybit transaction log to the generic IncomeRecord format.
@@ -2231,10 +2290,15 @@ export class BybitExchange extends BaseExchange {
         request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
       });
       if (data.retMsg !== 'OK') {
+        if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
+          return;
+        }
         this.emitAndLogError(data.retMsg);
         throw new Error(data.retMsg);
       }
-      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
+      const foundErr = data.retExtInfo?.list.find(
+        (l: any) => l.code !== 0 && !isBybitOrderAlreadyGoneCancelMessage(l.msg),
+      );
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);

@@ -44,6 +44,12 @@ that queued check and runs immediately. Do not restore recursive
 `runPriceCheck` calls from the pending pass's `finally`; they can chain
 cancel/replace work without a bound during update storms.
 
+Increment `ChaserOrderInstance.attempts` only when the supervisor actually
+enters the cancel/reprice branch. Initial placement is attempt zero; no-op price
+checks where the current order is still at an acceptable price must not bump the
+counter. The UI uses this count to show whether the chaser is truly replacing
+orders.
+
 ```ts
 const onUpdate = async (data: StoreData) => {
   if (instance.isStopped) { ...; return; }
@@ -108,6 +114,16 @@ the canonical normalized view, and the `'update'` event is
 exchange-agnostic. The chaser doesn't need to know how Bybit
 reports a fill vs how Hyperliquid does.
 
+## Bybit demo non-reduce completion can come from positions
+
+For Bybit demo non-reduce chasers, record the same-side starting position size
+in `ChaserOrderInstance` and treat `startingContracts + chaserSize` as the
+target. This lets demo complete when private WS is unavailable: the order-status
+fill event may never arrive, but the REST position snapshot can still prove the
+target was reached. Keep this scoped to `bybitdemo`; healthy private-WS venues
+should continue to rely on order/fill lifecycle events so manual same-side
+position changes do not complete an unrelated chaser.
+
 ## Hold-steady window after partial fills
 
 `updateOrders` short-circuits the cancel+replace path when
@@ -153,6 +169,10 @@ For Hyperliquid and GRVT, the chaser also subscribes to the `'fill'` event
 (`useFillBasedTracking`) — an order-status lifecycle can lag behind the actual
 fill, and we want to mark the chase complete as soon as the fill event arrives
 instead of waiting for the order to be marked `Filled` in the next snapshot.
+Bybit demo also uses the cancel/replacement REST reconciliation part of this
+path because private WS may be geo/policy blocked; it does not rely on direct
+fill events, but it must prove fills through `fetchFillsForOrderIds()` before
+placing a replacement after cancel.
 
 Other exchanges rely on the order status transition.
 

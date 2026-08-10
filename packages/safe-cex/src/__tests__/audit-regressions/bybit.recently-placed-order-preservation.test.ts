@@ -106,6 +106,58 @@ describe('Bybit recently placed order preservation', () => {
     expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
   });
 
+  it('treats already-gone cancel rows as success', async () => {
+    const { exchange } = makeExchange();
+    const placed = makeOrder('new-1');
+    seedRecentlyPlaced(exchange, placed);
+    exchange.unlimitedXHR = {
+      post: async () => ({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: {},
+          retExtInfo: { list: [{ code: 110001, msg: 'order not exists or too late to cancel' }] },
+        },
+      }),
+    };
+
+    await expect(exchange.cancelOrders([placed])).resolves.toBeUndefined();
+
+    expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
+  });
+
+  it('fetches fills for chaser order reconciliation by order id', async () => {
+    const { exchange, store } = makeExchange();
+    store.addOrUpdateOrders([makeOrder('filled-1')]);
+    exchange.xhr = {
+      get: async () => ({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: {
+            list: [
+              { orderId: 'filled-1', execQty: '0.4' },
+              { orderId: 'filled-1', execQty: '0.6' },
+              { orderId: 'other', execQty: '5' },
+            ],
+          },
+        },
+      }),
+    };
+
+    await expect(exchange.fetchFillsForOrderIds(['filled-1'])).resolves.toEqual(new Map([['filled-1', 1]]));
+  });
+
+  it('fails closed when Bybit fill reconciliation errors', async () => {
+    const { exchange, store } = makeExchange();
+    store.addOrUpdateOrders([makeOrder('filled-1')]);
+    exchange.xhr = {
+      get: async () => ({ data: { retCode: 10001, retMsg: 'bad request', result: { list: [] } } }),
+    };
+
+    await expect(exchange.fetchFillsForOrderIds(['filled-1'])).rejects.toThrow('bad request');
+  });
+
   it('recordRecentlyPlacedOrder adds the row to the store on demo only', () => {
     const demo = makeExchange(true);
     demo.exchange.recordRecentlyPlacedOrder(makeOrder('demo-1'));
