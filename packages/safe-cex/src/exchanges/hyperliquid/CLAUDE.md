@@ -787,6 +787,20 @@ Entries expire after 60 seconds.
 
    Only `orderIds[0]` is recorded: it is always the main limit wire, and any extra ids are TP/SL triggers, which have no TIF of their own. The map is bounded (500, FIFO), cleared on `dispose`, and entries are dropped on terminal order statuses.
 
+   **The placement cache does NOT cover hosted mode, and that is why there is a
+   third mechanism.** Under the hosted exchange-server, order writes run on the
+   browser's main-thread mirror while `handleOrderUpdates` runs on the *server*
+   instance — two different objects, so the server never sees the placement and
+   its cache is always empty for browser-placed orders. Since `tick()` does not
+   re-fetch core-perp orders, REST is the server's only tif source, so a resting
+   limit order that still resolves to `undefined` triggers
+   `scheduleOrderRefresh()` (500 ms debounce, 1 s minimum interval, so a burst of
+   orders costs one fetch). It converges: REST sets the value and every later WS
+   update preserves it from the store. This is another instance of the
+   dual-instance trap — a fix that works in worker mode can be a complete no-op
+   in hosted mode, which is exactly how the first version of this fix shipped and
+   moved hyperliquid 4/11 → 5/11 without touching the TIF assertion at all.
+
 2. **Aggregate feeds are not drop-in reconciliation replacements**: `webData2` is rejected and current `webData3` contains frontend user/DEX status but no positions, orders, or ticker contexts. Current `allDexs*` live frames also differ from their published record-shaped contract and do not remove the metadata dependency. Do not adopt them without a concrete consumer, stable mapping, and refreshed upstream evidence.
 3. **Balance scoping depends on account abstraction mode**: `clearinghouseState` with `dex` returns dex-specific margin only. In `unifiedAccount`/`portfolioMargin`, all collateral and holds are in spot state: use the current `spotState` WS channel, not the rejected `spotClearinghouseState` WS channel. Token 0 `tokenToAvailableAfterMaintenance` is authoritative free USDC; only responses without it fall back to core margin plus spot-hold reconstruction. Keep `currencies.USDC` as the aggregate margin slice for sizing; raw spot slices belong under `balance.info.spotCollateralCurrencies`.
 4. **`activeAssetData` not available for HIP-3**: Only subscribes for core perp markets (channel limit concern). HIP-3 leverage defaults until WS delivers.
