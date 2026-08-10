@@ -18,6 +18,8 @@ import { ChaserOrderInstance } from './ChaserOrderInstance';
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
 const CHASER_MISSING_ORDER_CONFIRMATIONS = 2;
+const CHASER_PLACED_ORDER_VISIBILITY_ATTEMPTS = 6;
+const CHASER_PLACED_ORDER_VISIBILITY_INTERVAL_MS = 500;
 
 // After observing a partial fill on the tracked order, freeze the
 // cancel+replace path for this long. The order is at the touch and
@@ -57,6 +59,70 @@ export class ChaserOrderManager {
 
   private getCurrentOrders(instance: ChaserOrderInstance) {
     return instance.exchange.store.orders.filter((order) => instance.currentOrderIds.includes(order.id)) || [];
+  }
+
+  private getErrorDetail(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private async refreshPrivateSnapshotForTrackedOrders(instance: ChaserOrderInstance, attempt: number) {
+    try {
+      this.log(
+        `tracked orders not visible after placement; refreshing private snapshot (${attempt}/${CHASER_PLACED_ORDER_VISIBILITY_ATTEMPTS})`,
+        instance,
+      );
+      await instance.exchange.fetchAndSetPrivateSnapshot();
+    } catch (error) {
+      this.log(`tracked-order snapshot refresh failed: ${this.getErrorDetail(error)}`, instance);
+    }
+  }
+
+  private async waitForPlacedOrdersToAppear(instance: ChaserOrderInstance) {
+    let orders = this.getCurrentOrders(instance);
+    if (orders.length > 0 || instance.currentOrderIds.length === 0) {
+      return orders;
+    }
+
+    for (let attempt = 1; attempt <= CHASER_PLACED_ORDER_VISIBILITY_ATTEMPTS; attempt++) {
+      if (instance.isStopped || instance.currentOrderIds.length === 0) {
+        return [];
+      }
+
+      await this.refreshPrivateSnapshotForTrackedOrders(instance, attempt);
+      orders = this.getCurrentOrders(instance);
+      if (orders.length > 0) {
+        return orders;
+      }
+
+      if (attempt < CHASER_PLACED_ORDER_VISIBILITY_ATTEMPTS) {
+        await sleep(CHASER_PLACED_ORDER_VISIBILITY_INTERVAL_MS);
+      }
+    }
+
+    return [];
+  }
+
+  private async confirmPlacedOrdersOrStop(instance: ChaserOrderInstance, phase: string) {
+    await sleep(1000);
+
+    if (instance.isStopped) {
+      await this.cleanupInstance(instance);
+      return [];
+    }
+
+    const orders = await this.waitForPlacedOrdersToAppear(instance);
+    if (orders.length > 0 || instance.isStopped) {
+      return orders;
+    }
+
+    this.log(`placed orders never appeared during ${phase}; stopping safely`, instance);
+    instance.exchange.emitter.emit(
+      'warning',
+      `Chaser for ${instance.options.symbol} stopped: placed order IDs never appeared in the local order book; any resting remainder was cancelled`,
+    );
+    instance.markComplete('Placed orders did not appear in store');
+    await this.cleanupInstance(instance);
+    return [];
   }
 
   private findBestPrice(instance: ChaserOrderInstance) {
@@ -200,9 +266,13 @@ export class ChaserOrderManager {
     this.log(`processInstance starting for ${instance.options.symbol}`, instance);
     instance.currentOrderIds = await this.tryPlaceOrders(instance);
     this.log(`initial orderIds: ${JSON.stringify(instance.currentOrderIds)}`, instance);
-    await sleep(1000);
 
     if (instance.currentOrderIds.length > 0) {
+      const initialOrders = await this.confirmPlacedOrdersOrStop(instance, 'startup');
+      if (instance.isStopped) {
+        return;
+      }
+
       // Use fill-based tracking for exchanges where order status updates may be delayed
       // or missed during cancel/replace cycles (pendingOrdersUpdate race condition)
       const useFillBasedTracking = exchange.name === 'hyperliquid' || exchange.name === 'grvt';
@@ -215,7 +285,7 @@ export class ChaserOrderManager {
       // Track whether the current order IDs have appeared in the store. This
       // is intentionally reset after each replace, because new order IDs can
       // arrive in the private store after placeOrder returns.
-      let hasSeenOrders = false;
+      let hasSeenOrders = initialOrders.length > 0;
       let consecutiveMissingOrderUpdates = 0;
       let queuedOrdersCheck = false;
       let runPriceCheck: ((orders: Order[], confirmMissingOrders?: boolean) => Promise<void>) | undefined;
@@ -405,7 +475,11 @@ export class ChaserOrderManager {
 
             instance.currentOrderIds = await this.tryPlaceOrders(instance);
             hasSeenOrders = false;
-            await sleep(1000);
+            const replacementOrders = await this.confirmPlacedOrdersOrStop(instance, 'replacement');
+            if (instance.isStopped || isCleanedUp) {
+              return;
+            }
+            hasSeenOrders = replacementOrders.length > 0;
             this.log('created new orders', instance);
           }
         } finally {
@@ -440,6 +514,10 @@ export class ChaserOrderManager {
 
           this.log('tracked orders absent across confirmed order updates; stopping safely', instance);
           instance.markComplete('Tracked orders disappeared from store');
+          exchange?.emitter.emit(
+            'warning',
+            `Chaser for ${instance.options.symbol} stopped: its order left the order book (filled or cancelled externally); any resting remainder was cancelled`,
+          );
           cleanup();
           await this.cleanupInstance(instance);
         }
@@ -593,8 +671,14 @@ export class ChaserOrderManager {
       return;
     }
 
-    // We didn't manage to even start a chaser, marking complete
-    instance.markComplete();
+    // We didn't manage to even start a chaser. `tryPlaceOrders` returns []
+    // for user-stop and after its own error-emitting failure paths (which
+    // already set a stop reason), but if we get here with the instance NOT
+    // stopped, the chaser is dying without anything having told the user.
+    if (!instance.isStopped) {
+      exchange.emitter.emit('warning', `Chaser for ${instance.options.symbol} could not start - no order was placed`);
+      instance.markComplete('No order placed');
+    }
     // cleanup routine
     await this.cleanupInstance(instance);
   }

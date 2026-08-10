@@ -70,13 +70,26 @@ bump on bulk replacement".
 
 ## Missing-order snapshots require confirmation
 
+After `placeOrder` returns IDs, those IDs must become visible in `store.orders`
+before the supervisor relies on normal ticker/order updates. Bybit demo can miss
+private order frames while an early REST snapshot also predates the just-placed
+order, leaving the UI with a pending chaser that has `currentOrderIds` but no
+tracked order row. The manager therefore waits after each placement, forces a
+bounded sequence of private snapshots while the IDs are missing, and only starts
+or resumes normal monitoring once at least one tracked row is visible. If the
+IDs still never appear, it emits a warning, marks the chase failed, and cancels
+the last-known IDs by ID so the user is not left with a silent orphan.
+
 Once a tracked order has appeared, a single wholesale snapshot that omits it
 does not complete the chase. REST snapshots can be fetched before placement and
 applied after the private WS frame. The manager requires two consecutive,
 distinct order-updateId changes with the tracked IDs absent; ticker-only
 notifications do not count, and seeing the order again resets the confirmation.
 On confirmed loss it uses `cleanupInstance`, so the last known IDs are cancelled
-instead of leaving a resting order without a supervisor.
+instead of leaving a resting order without a supervisor, and it emits a
+user-visible `warning`. The same rule applies to `processInstance`'s
+could-not-start tail: a chaser dying without a stop reason must emit, never
+vanish. Keep both loud.
 
 ## Supervisor failures are contained locally
 
