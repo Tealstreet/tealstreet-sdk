@@ -370,6 +370,14 @@ sizing decision made in `selectPlanTypeAndAmount` was therefore discarded on the
 way to the wire — which is why the first fix for this would have been a no-op.
 The same two lines exist in `bitgetinverse.exchange.ts`'s override; change both.
 
+**Deploying a plan-type change means a PREVIEW release, not an exchange-server
+redeploy.** `formatAlgoOrder` is on the order-write path, and order writes run on
+the browser's main-thread mirror (quirk 22), so this code ships in the web
+bundle. Redeploying only the exchange-server leaves the run on the old browser
+code and the fix looks dead. The tell is cheap: reword the downgrade warning as
+part of the change, and if the artifact log comes back with the OLD wording, you
+deployed the wrong target.
+
 **`amount === 0` is a product sentinel, not "unknown size."** It means "close the
 whole position" and the web app renders it as **"Full Position"**
 (`apps/web/src/utils/validation/isFullStop.ts`). An attempt to populate it from
