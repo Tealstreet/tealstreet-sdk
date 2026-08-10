@@ -820,6 +820,28 @@ Entries expire after 60 seconds.
 18. **DEX abstraction deprecation can be per-account before global date**: users can be migrated early via `agentSetAbstraction` / UI flows before network-wide milestones. Never gate balance mode on calendar date; always read runtime `userAbstraction`.
 19. **Dead man's switch lifecycle is caller-owned**: `scheduleCancel` is an explicit API/worker capability, not a startup heartbeat. Callers must refresh an armed deadline themselves; safe-cex neither auto-arms nor clears it on disposal.
 
+## A bad key is invisible on reads — check the pair at startup
+
+Hyperliquid is a DEX: `/info` takes the wallet address as a **parameter** and is
+unauthenticated. So a saved account whose private key no longer matches its API
+wallet loads looking completely healthy — balance, positions and orders all
+populate off `applicationId` — and the first sign of trouble is a rejected order.
+There is no auth error to surface, because nothing authenticated ever happened.
+
+`validateAccount` does check the key/wallet pair, but it only runs on the
+**add-key form**; an account restored from storage never goes through it. That is
+the gap `warnOnMismatchedApiWallet` closes, called from `start()`.
+
+- It is **non-fatal**. Public and read-only use still work, and the pair is
+  legitimately absent for wallet-based connections.
+- It **catches**, rather than propagates, the ethers error. A malformed secret
+  makes `validateWalletAndPrivateKey` throw instead of returning false, and an
+  unguarded call took the whole of `start()` down with it — caught by the
+  existing startup sequencing suite, which uses `'0xsecret'` as a fixture.
+- The wording has to stay auth-shaped (`invalid`, `credentials`, `API wallet`).
+  The e2e bad-api-key spec greps the requests log against a pattern list; a
+  warning it cannot recognise is worth the same as no warning.
+
 ## Hosted mode: L1 actions are signed by the browser, not the exchange-server
 
 Hyperliquid signs in the **method body** (`signL1Action(createWalletFromPrivateKey(this.options.secret), …)`), not in an axios interceptor. The hosted exchange-server runs with `secret: ''` by design, and `createWalletFromPrivateKey('')` **throws** — so every worker-reachable signed method died before issuing a request. `useMarginType` swallows the throw into a toast, so the symptom was silent: **hosted users could not change margin type or leverage at all**, and the e2e log showed zero `updateLeverage` actions rather than a failed one.
