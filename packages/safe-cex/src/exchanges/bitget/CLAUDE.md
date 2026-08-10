@@ -326,9 +326,49 @@ ioc -> ImmediateOrCancel
 is the async wrapper that resolves which positions to hand it.
 
 - If `amount === 0`, the order is position-level (`pos_loss`/`pos_profit`)
-- If `amount !== 0` and a matching position is found with `contracts >= amount`, the order is a sized stop (`loss_plan`/`profit_plan`)
-- If `amount !== 0` but no matching position with sufficient contracts is found, the order falls back to position-level (`pos_loss`/`pos_profit`)
+- If `amount !== 0` and **any** open position exists on the protected side, the order is a sized stop (`loss_plan`/`profit_plan`) with the size **clamped** to `min(requested, floorToLot(contracts))`
+- If `amount !== 0` and the protected side is flat (or the position is smaller than one lot), the order falls back to position-level (`pos_loss`/`pos_profit`)
 - Trailing stops always use `track_plan`
+
+**Clamp, don't downgrade.** The match used to require `contracts >= amount`, so a
+sized stop that overshot the position by even one lot silently became a
+whole-position stop. That is exactly what happens in practice: price drift
+between opening a position and sizing its stop asked for **31 against a
+30-contract long** (e2e run 31353474704), and the user's deliberately-sized stop
+came back covering everything. Bitget is on the `autoDownSizeReduceOrders: true`
+list — it does **not** auto-cap — so passing the oversized value through would
+just be rejected. Clamping is the only option that preserves intent.
+
+Two details are load-bearing:
+
+- **The clamp floors to the lot.** `adjust` rounds to **nearest**, and
+  `position.contracts` comes straight off the venue with no guarantee of lot
+  alignment, so `adjust(min(31, 30.6), 1)` would give **31** — back above the
+  position it was meant to bound. `floorToLot` exists for this.
+- **A sub-lot position still downgrades.** Clamping dust (0.4 contracts, lot 1)
+  would POST `size: "0"`, which is not a sized stop at all.
+
+**This is not the forbidden hand-rolled reduce-only clamp.** `../CLAUDE.md` →
+"Reduce-only order downsizing" bans re-adding a clamp in
+`formatCreateOrder`/`placeOrder` for **limit and market** reduce-only orders,
+because the `autoDownSizeReduceOrders` flag path adds hedge-side matching and
+orders-ahead accounting that a bare `Math.min` misses. Neither applies here:
+side matching is already exact (see below), orders-ahead is meaningless for
+trigger orders, and the alternative is not "no clamp" — it's `pos_loss` with the
+size field omitted, a worse silent behavior change. Don't revert this to the
+`>= amount` form.
+
+Side matching is on `PositionSide` derived from `opts.side` (Buy→Short,
+Sell→Long), never on `holdSide`. `getAlgoOrderSide` inverts only the payload
+field, and agrees in both modes, so a hedge account holding both legs cannot
+have the wrong leg clamped against.
+
+**`formatAlgoOrder` must POST the returned amount, not `opts.amount`.** It
+destructured `amount` from `getOrderPlanTypeAndAmount` and then used it only as a
+truthiness gate (`if (amount) payload.size = adjust(opts.amount, …)`). Any
+sizing decision made in `selectPlanTypeAndAmount` was therefore discarded on the
+way to the wire — which is why the first fix for this would have been a no-op.
+The same two lines exist in `bitgetinverse.exchange.ts`'s override; change both.
 
 **`amount === 0` is a product sentinel, not "unknown size."** It means "close the
 whole position" and the web app renders it as **"Full Position"**

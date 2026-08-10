@@ -1343,7 +1343,7 @@ export class BitgetExchange extends BaseExchange {
       payload.holdSide = this.getAlgoOrderSide(opts, positionMode);
       const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
       // Bitget V2 API: mark_price (default) or fill_price (last price)
       payload.triggerType = opts.tpTriggerType === OrderStopTriggerType.LastPrice ? 'fill_price' : 'mark_price';
     }
@@ -1354,7 +1354,7 @@ export class BitgetExchange extends BaseExchange {
       payload.holdSide = this.getAlgoOrderSide(opts, positionMode);
       const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
       // Bitget V2 API: mark_price (default) or fill_price (last price)
       payload.triggerType = opts.slTriggerType === OrderStopTriggerType.LastPrice ? 'fill_price' : 'mark_price';
     }
@@ -1996,14 +1996,11 @@ export class BitgetExchange extends BaseExchange {
   // pin an empty result for the rest of the TTL.
   // Deliberately NOT committed to the store — this is a read for one decision,
   // and writing it would pollute the mirror's streamed state.
-  protected resolvePositionsForPlanType = async (
-    symbol: string,
-    side: PositionSide,
-    amount: number,
-  ): Promise<Position[]> => {
-    const storeAnswers = this.store.positions.some(
-      (p) => p.symbol === symbol && p.side === side && p.contracts >= amount,
-    );
+  protected resolvePositionsForPlanType = async (symbol: string, side: PositionSide): Promise<Position[]> => {
+    // Any open position on the protected side is enough — the stop is clamped
+    // to it, so a store row smaller than the request no longer needs a REST
+    // round-trip to confirm.
+    const storeAnswers = this.store.positions.some((p) => p.symbol === symbol && p.side === side && p.contracts > 0);
     if (storeAnswers) return this.store.positions;
 
     const cached = this._planTypePositionsCache;
@@ -2052,25 +2049,43 @@ export class BitgetExchange extends BaseExchange {
     return adjust(opts.amount, market.precision.amount);
   };
 
+  // `adjust` rounds to NEAREST, so it can land above the position it is meant to
+  // bound. Step back one lot when it does, rather than `Math.floor(value / step)`
+  // — that inherits IEEE division error and drops a whole lot on fractional
+  // steps (0.29 / 0.01 = 28.999999999999996 → 0.28).
+  private floorToLot = (symbol: string, value: number): number => {
+    const step = this.store.marketsBySymbol[symbol]?.precision?.amount;
+    if (!step) return value;
+    const rounded = adjust(value, step);
+    return rounded > value ? adjust(rounded - step, step) : rounded;
+  };
+
   // amount === 0 is the product's "full position" sentinel (isFullStop) and must
   // keep mapping to pos_loss/pos_profit — do not size it from the position.
   protected selectPlanTypeAndAmount = (opts: PlaceOrderOpts | Order, positions: Position[]): [string, number] => {
     if (opts.type === OrderType.TrailingStopLoss) return ['track_plan', opts.amount];
 
-    let infiniteStop = true;
+    let sizedAmount: number | undefined;
     if (opts.amount !== 0) {
       const foundPosition = positions.find(
         (p) =>
           p.symbol === opts.symbol &&
           p.side === (opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-          p.contracts >= this.planTypeComparableAmount(opts),
+          p.contracts > 0,
       );
       if (foundPosition) {
-        infiniteStop = false;
+        // Clamp rather than downgrade: price drift routinely overshoots the
+        // position by a fraction of a lot, and silently converting a stop the
+        // user sized into a whole-position one is the worse failure.
+        const clamped = Math.min(
+          this.planTypeComparableAmount(opts),
+          this.floorToLot(opts.symbol, foundPosition.contracts),
+        );
+        if (clamped > 0) sizedAmount = clamped;
       }
     }
 
-    if (infiniteStop) {
+    if (sizedAmount === undefined) {
       // Downgrading a sized stop is a real behavior change for the user: the
       // stop they sized closes the whole position instead. Say so, with the
       // numbers that drove the decision — a silent downgrade is what made this
@@ -2081,17 +2096,17 @@ export class BitgetExchange extends BaseExchange {
           .map((p) => `${p.side}:${p.contracts}`)
           .join(', ');
         this.emitAndLogError(
-          `Sized ${opts.symbol} stop became a full-position stop: need ${this.planTypeComparableAmount(opts)} ` +
-            `(requested ${opts.amount}) on the ${
-              opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long
-            } side, positions seen [${candidates || 'none'}]`,
+          `Sized ${opts.symbol} stop became a full-position stop: no open ${
+            opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long
+          } position to size ${this.planTypeComparableAmount(opts)} (requested ${opts.amount}) against, ` +
+            `positions seen [${candidates || 'none'}]`,
         );
       }
       if (opts.type === OrderType.StopLoss) return ['pos_loss', 0];
       if (opts.type === OrderType.TakeProfit) return ['pos_profit', 0];
     } else {
-      if (opts.type === OrderType.StopLoss) return ['loss_plan', opts.amount];
-      if (opts.type === OrderType.TakeProfit) return ['profit_plan', opts.amount];
+      if (opts.type === OrderType.StopLoss) return ['loss_plan', sizedAmount];
+      if (opts.type === OrderType.TakeProfit) return ['profit_plan', sizedAmount];
     }
 
     throw new Error(`Unknown order type: ${opts.type}`);
@@ -2104,7 +2119,6 @@ export class BitgetExchange extends BaseExchange {
         : await this.resolvePositionsForPlanType(
             opts.symbol,
             opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long,
-            this.planTypeComparableAmount(opts),
           );
 
     return this.selectPlanTypeAndAmount(opts, positions);

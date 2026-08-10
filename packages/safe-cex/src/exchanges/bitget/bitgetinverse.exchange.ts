@@ -401,7 +401,7 @@ export class BitgetInverseExchange extends BitgetExchange {
       payload.holdSide = this.getInverseAlgoOrderSide(opts, positionMode);
       const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
     }
 
     if (opts.type === OrderType.StopLoss && opts.price) {
@@ -410,7 +410,7 @@ export class BitgetInverseExchange extends BitgetExchange {
       payload.holdSide = this.getInverseAlgoOrderSide(opts, positionMode);
       const [planType, amount] = await this.getOrderPlanTypeAndAmount(opts);
       payload.planType = planType;
-      if (amount) payload.size = `${adjust(opts.amount, market.precision.amount)}`;
+      if (amount) payload.size = `${adjust(amount, market.precision.amount)}`;
     }
 
     if (opts.type === OrderType.TrailingStopLoss && opts.price) {
