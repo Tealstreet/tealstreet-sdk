@@ -901,7 +901,7 @@ export interface RemoteSignerRequest {
   // For WS auth: exchange-specific auth data
   wsAuth?: {
     toSign: string;
-    outputFormat: 'hex' | 'base64' | 'hex-base64' | 'kraken-challenge' | 'apexomni-base64';
+    outputFormat: 'hex' | 'base64' | 'hex-base64' | 'kraken-challenge' | 'apexomni-base64' | 'bitunix-double-sha256';
     extraData?: unknown;
   };
 }
