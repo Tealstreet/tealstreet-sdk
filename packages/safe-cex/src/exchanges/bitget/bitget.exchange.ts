@@ -63,7 +63,7 @@ import { BitgetPrivateWebsocket } from './bitget.ws-private';
 import { BitgetPublicWebsocket } from './bitget.ws-public';
 import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
 
-const BITGET_CLIENT_ORDER_ID_RE = /^[.A-Z:/a-z0-9_-]{1,32}$/;
+const BITGET_CLIENT_ORDER_ID_RE = /^[0-9A-Za-z_:#\-+\s]{1,32}$/;
 
 const clientOrderIdShapeMessage = (opts: PlaceOrderOpts) =>
   `Bitget clientOrderId cannot be honored for this order shape (type=${opts.type}` +
@@ -1243,7 +1243,9 @@ export class BitgetExchange extends BaseExchange {
       this.rejectPreflight(clientOrderIdShapeMessage(opts));
     }
     if (!BITGET_CLIENT_ORDER_ID_RE.test(opts.clientOrderId)) {
-      this.rejectPreflight('Bitget clientOrderId must match /^[.A-Z:/a-z0-9_-]{1,32}$/');
+      this.rejectPreflight(
+        'Bitget clientOrderId must match /^[0-9A-Za-z_:#\\-+\\s]{1,32}$/ (Bitget classic v2 charset)',
+      );
     }
     return opts.clientOrderId;
   };

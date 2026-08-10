@@ -284,6 +284,7 @@ ioc -> ImmediateOrCancel
    - Position mode is fetched to determine `side`/`tradeSide` fields
    - Orders exceeding `maxSize` are split into multiple lots
    - Plain single-payload limit/market orders use caller `clientOrderId` as `clientOid` when provided
+   - Caller `clientOid` is validated against the classic v2 charset `^[0-9A-Za-z_:#\-+\s]{1,32}$` (the adapter calls classic `/api/v2/mix/...` endpoints, so the UTA regex does not apply). Bitget keeps NO ID-embedded prefix — attribution rides the `X-CHANNEL-API-CODE: Tealstreet` header — so the caller budget stays 32.
    - Split orders keep generated unique `clientOid` values only when no caller ID is supplied; caller IDs on splits or attached TP/SL brackets reject before any request is sent (`BaseExchange.rejectPreflight`)
    - Placed via `placeOrderBatch()` using `BATCH_ORDERS` endpoint (up to 50 per symbol per batch)
 2. **Algo orders** are formatted via `formatAlgoOrder()` (`bitget.exchange.ts:1085-1148`):

@@ -1,3 +1,5 @@
+import type { Axios } from 'axios';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
@@ -134,4 +136,52 @@ describe('Bitget regular-order clientOrderId', () => {
     expect(unlimitedPost).not.toHaveBeenCalled();
     expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('clientOrderId cannot be honored'));
   });
+});
+
+describe('Bitget clientOrderId classic v2 charset', () => {
+  const CLASSIC_MESSAGE =
+    'Bitget clientOrderId must match /^[0-9A-Za-z_:#\\-+\\s]{1,32}$/ (Bitget classic v2 charset)';
+
+  const mockWire = (exchange: BitgetExchange) => {
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    const post = vi.fn();
+    const unlimitedPost = vi
+      .fn()
+      .mockResolvedValue({ data: { data: { successList: [{ orderId: 'order-1' }] } } });
+    // partial xhr stand-ins: only `post` is exercised in these tests
+    exchange.xhr = { post } as unknown as Axios;
+    exchange.unlimitedXHR = { post: unlimitedPost } as unknown as Axios;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    return { post, unlimitedPost, emitAndLogError };
+  };
+
+  it.each(['id#1', 'id+1', 'id 1', 'a'.repeat(32)])(
+    'sends caller clientOrderId %j on the wire unchanged (classic charset)',
+    async (clientOrderId) => {
+      const exchange = createExchange();
+      const { post, unlimitedPost } = mockWire(exchange);
+
+      await expect(exchange.placeOrder(limitOrder({ clientOrderId }))).resolves.toEqual(['order-1']);
+
+      expect(post).not.toHaveBeenCalled();
+      expect(unlimitedPost).toHaveBeenCalledWith(
+        ENDPOINTS.BATCH_ORDERS,
+        expect.objectContaining({ orderList: [expect.objectContaining({ clientOid: clientOrderId })] }),
+      );
+    },
+  );
+
+  it.each(['id/1', 'id.1', 'a'.repeat(33)])(
+    'rejects caller clientOrderId %j outside the classic charset before any request',
+    async (clientOrderId) => {
+      const exchange = createExchange();
+      const { post, unlimitedPost, emitAndLogError } = mockWire(exchange);
+
+      await expect(exchange.placeOrder(limitOrder({ clientOrderId }))).rejects.toThrow(CLASSIC_MESSAGE);
+
+      expect(emitAndLogError).toHaveBeenCalledWith(CLASSIC_MESSAGE);
+      expect(post).not.toHaveBeenCalled();
+      expect(unlimitedPost).not.toHaveBeenCalled();
+    },
+  );
 });
