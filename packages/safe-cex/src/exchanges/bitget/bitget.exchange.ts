@@ -352,12 +352,19 @@ export class BitgetExchange extends BaseExchange {
 
   fetchBalance = async ({ preferFast = false }: { preferFast?: boolean } = {}) => {
     const client = preferFast ? this.unlimitedXHR : this.xhr;
-    const {
-      data: { data },
-    } = await client.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.BALANCE, {
+    const { data: response } = await client.get<{
+      code?: string | number;
+      msg?: string;
+      data: Array<Record<string, any>> | null;
+    }>(ENDPOINTS.BALANCE, {
       params: { productType: this.apiProductType },
     });
 
+    if (parseInt(`${response.code ?? 0}`, 10) !== 0) {
+      throw new Error(response.msg || 'Bitget account balance request failed');
+    }
+
+    const data = Array.isArray(response.data) ? response.data : [];
     const usdt = data.find((b) => b.marginCoin === this.apiMarginCoin);
     if (!usdt) return this.store.balance;
 

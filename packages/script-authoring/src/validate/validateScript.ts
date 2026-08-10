@@ -60,17 +60,46 @@ const require_ = createRequire(import.meta.url);
  */
 let tsLibDir: string | undefined;
 
+/**
+ * BOTH strategies, because each one is broken in an environment the other
+ * survives — and the two environments are the CLI and the web deployment.
+ *
+ * - `require.resolve('typescript')` is what a `bun build --compile` binary
+ *   needs, since `ts.sys.getExecutingFilePath()` does not survive compilation.
+ * - Under Turbopack it is the one that fails: the bundler keeps the
+ *   `createRequire(...)` call for its side effect and DISCARDS the
+ *   `.resolve()`, so this returned `undefined` on every call in every deployed
+ *   build while reading as correct in source.
+ *
+ * Trying `require.resolve` first keeps the compiled-binary behaviour exactly
+ * as it was; the fallback only engages where the bundler already broke it.
+ */
 const getTsLibDir = (): string => {
   if (tsLibDir !== undefined) return tsLibDir;
-  const resolved = require_.resolve('typescript');
-  if (typeof resolved !== 'string') {
+
+  const resolved =
+    tryResolve(() => require_.resolve('typescript')) ?? tryResolve(() => ts.sys?.getExecutingFilePath?.());
+  if (resolved === null) {
     throw new Error(
-      `cannot locate the TypeScript lib directory: require.resolve returned ${typeof resolved}. ` +
-        'This build has replaced require.resolve with a bundler shim; validation needs the real files on disk.',
+      'cannot locate the TypeScript lib directory: neither require.resolve nor ' +
+        'ts.sys.getExecutingFilePath() returned a path. TypeScript has been inlined into a ' +
+        'bundle and its lib files are not on disk.',
     );
   }
+
   tsLibDir = path.dirname(resolved);
   return tsLibDir;
+};
+
+/** A throwing resolver and a shimmed one that returns a module id are the same
+ *  failure here: no path. Both become `null` so the caller can try the next. */
+const tryResolve = (resolve: () => string | undefined): string | null => {
+  try {
+    const value = resolve();
+    return typeof value === 'string' && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
 };
 
 /**
