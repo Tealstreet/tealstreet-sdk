@@ -300,8 +300,6 @@ export interface FrontendOpenOrders {
   timestamp: number;
   triggerCondition: string;
   triggerPx: string;
-  /** Present on REST `frontendOpenOrders` rows; absent from every WS `orderUpdates` frame. */
-  tif?: Tif | null;
 }
 
 [];

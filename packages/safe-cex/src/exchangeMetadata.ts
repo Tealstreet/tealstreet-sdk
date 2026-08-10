@@ -1412,9 +1412,6 @@ const HyperliquidMetadata: ExchangeMetadata = {
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: true,
-  // Hyperliquid rests a reduce-only order at whatever size it was sent, so the
-  // client has to cap it to the open position itself.
-  autoDownSizeReduceOrders: true,
   forbidCors: true,
   supportsVault: true,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,

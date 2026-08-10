@@ -700,9 +700,6 @@ REPL. With a subcommand, it runs one-shot.
 > persisted task records from `~/.tealstreet/tasks.json`. REPL `tasks` lists
 > live chasers + TWAPs from memory. Don't conflate them.
 
-One-shot `exec` commands that start TWAPs keep the process alive until those
-TWAPs finish, then disconnect the exchange session.
-
 Source: `apps/cli/src/index.ts`.
 
 ---

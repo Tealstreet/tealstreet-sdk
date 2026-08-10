@@ -188,17 +188,6 @@ extend `downSizeReduceOrder` to stops, note its orders-ahead logic was
 written for price-laddered _limit_ reduce orders and needs review for the
 trigger-order path first.
 
-**Carve-out — bitget's plan-type selection.** `selectPlanTypeAndAmount` in
-`bitget/bitget.exchange.ts` clamps a sized stop to the protected position. That
-is **not** a violation of the rule above and must not be "cleaned up" into the
-flag path. Bitget's wire format forces a choice the flag cannot express: a stop
-is either `loss_plan` **with** a size or `pos_loss` **with the size field
-omitted**, so declining to clamp does not mean "send the requested size" — it
-means silently converting a deliberately-sized stop into a whole-position one.
-The two things `downSizeReduceOrder` adds over a bare `Math.min` are already
-handled or moot there (side matching is exact; orders-ahead is meaningless for
-trigger orders). See `bitget/CLAUDE.md` → "Plan Type Determination".
-
 Each exchange does exactly one of:
 
 - **Set `autoDownSizeReduceOrders: true`** if it does _not_ auto-cap

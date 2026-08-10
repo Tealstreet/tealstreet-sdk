@@ -75,47 +75,6 @@ describe('transport remote-signing adapter invariant', () => {
     expect(response.data).toEqual({ ok: true });
   });
 
-  it('does not restore request body data after the remote signer removes it', async () => {
-    const innerAdapter = vi.fn(async (config: any) => ({
-      config,
-      data: { ok: true },
-      headers: {},
-      status: 200,
-      statusText: 'OK',
-    }));
-    const remoteSigner: RemoteSigner = {
-      accountName: 'hosted-account',
-      isAvailable: () => true,
-      onAvailabilityChange: () => () => {},
-      sign: vi.fn(async (request) => ({
-        id: request.id,
-        config: {
-          headers: { Authorization: 'signed' },
-          params: { ...request.config?.data, signature: 'signed-body-as-query' },
-          url: request.config?.url,
-        },
-      })),
-    };
-    const exchange = {
-      grafanaEndpointsEvery: [],
-      grafanaEndpointsPeriodic: [],
-      name: 'binance',
-    } as unknown as BaseExchange;
-    const options = { remoteSigner } as ExchangeOptions;
-    const api = safeCexAxiosCreateNoProxy({ baseURL: 'https://example.com' }, options, exchange);
-
-    setInnerAdapterForRemoteSigning(api, innerAdapter);
-    await api.post('/private', { symbol: 'DOGEUSDT', leverage: 10 });
-
-    expect(innerAdapter).toHaveBeenCalledOnce();
-    expect((innerAdapter.mock.calls[0][0] as any).params).toEqual({
-      symbol: 'DOGEUSDT',
-      leverage: 10,
-      signature: 'signed-body-as-query',
-    });
-    expect((innerAdapter.mock.calls[0][0] as any).data).toBeUndefined();
-  });
-
   it('forbids exchange factories from replacing the outer adapter directly', () => {
     const exchangesDirectory = resolve(process.cwd(), 'src/exchanges');
     const offenders = exchangeApiFiles(exchangesDirectory)

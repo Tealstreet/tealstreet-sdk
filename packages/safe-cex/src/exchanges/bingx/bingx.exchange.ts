@@ -57,7 +57,6 @@ import {
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   ORDER_SIDE,
-  ORDER_STATUS,
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
   POSITION_SIDE,
@@ -496,88 +495,41 @@ export class BingxExchange extends BaseExchange {
       return this.store.orders;
     }
 
-    const rawOrders = Array.isArray(data.data?.orders)
-      ? data.data.orders
-      : Array.isArray(data.data)
-        ? data.data
-        : [];
-
-    const orders: Order[] = rawOrders.flatMap((o) => {
-      const order = this.mapOrder(o);
-      if (!order) return [];
-
+    const orders: Order[] = data.data.orders.map((o) => {
+      const order = {
+        id: v(o, 'orderId'),
+        status: OrderStatus.Open,
+        symbol: o.symbol.replace(/-/, ''),
+        type: ORDER_TYPE[o.type],
+        side: ORDER_SIDE[o.side],
+        price: parseFloat(o.price) || parseFloat(v(o, 'stopPrice')),
+        amount: parseFloat(v(o, 'origQty')),
+        reduceOnly: v(o, 'reduceOnly') || false,
+        close: v(o, 'closePosition') === true || v(o, 'closePosition') === 'true',
+        timeInForce: v(o, 'postOnly') ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
+        filled: parseFloat(v(o, 'executedQty')),
+        lastUpdate: virtualClock.getCurrentTimeMs(),
+        remaining: subtract(v(o, 'origQty'), v(o, 'executedQty')),
+        info: o,
+        ...(ORDER_TYPE[o.type] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')] }),
+        ...(ORDER_TYPE[o.type] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')] }),
+      };
       if (order.type === OrderType.StopLoss) {
         const ticker = this.store.tickersBySymbol[order.symbol];
-        if (ticker && Number.isFinite(ticker.mark) && ticker.mark > 0) {
+        if (ticker) {
           if (
             (order.side === OrderSide.Buy && order.price < ticker.mark) ||
             (order.side === OrderSide.Sell && order.price > ticker.mark)
           ) {
-            return [{ ...order, type: OrderType.TakeProfit, tpTriggerType: order.slTriggerType }];
+            order.type = OrderType.TakeProfit;
+            order.tpTriggerType = order.slTriggerType;
           }
         }
       }
-      return [order];
+      return order;
     });
 
     return orders;
-  };
-
-  mapOrder = (o: Record<string, any>): Order | undefined => {
-    const id = o.orderId ?? o.orderID ?? o.i;
-    const rawSymbol = o.symbol ?? o.s;
-    const rawType = o.type ?? o.o;
-    const rawSide = o.side ?? o.S;
-    const rawStatusValue = o.status ?? o.X;
-    const rawStatus = rawStatusValue === undefined ? undefined : String(rawStatusValue).toUpperCase();
-    const orderType = ORDER_TYPE[String(rawType).toUpperCase()];
-    const orderSide = ORDER_SIDE[String(rawSide).toUpperCase()];
-    const symbol = typeof rawSymbol === 'string' ? rawSymbol.replace(/-/g, '') : undefined;
-    const status =
-      rawStatus === undefined ? OrderStatus.Open : ORDER_STATUS[rawStatus as keyof typeof ORDER_STATUS] ?? undefined;
-
-    if (id === undefined || !symbol || !orderType || !orderSide || !status) {
-      return undefined;
-    }
-
-    const close = o.closePosition === true || o.closePosition === 'true';
-    const rawAmount = o.origQty ?? o.quantity ?? o.q;
-    const price = Number(o.price ?? o.p);
-    const stopPrice = Number(o.stopPrice ?? o.sp);
-    const amount = rawAmount === undefined && close ? 0 : Number(rawAmount);
-    const filled = Number(o.executedQty ?? o.z ?? 0);
-    if (!Number.isFinite(amount) || !Number.isFinite(filled)) {
-      return undefined;
-    }
-
-    const existingOrder = this.store.orders.find((order) => order.id === String(id));
-    const reduceOnlyValue = o.reduceOnly ?? o.ro ?? o.R;
-    const postOnlyValue = o.postOnly;
-    const rawTimeInForce = o.timeInForce ?? o.f;
-    const timeInForce =
-      postOnlyValue === true || postOnlyValue === 'true'
-        ? OrderTimeInForce.PostOnly
-        : TIME_IN_FORCE[rawTimeInForce] ??
-          (rawTimeInForce === undefined ? existingOrder?.timeInForce : OrderTimeInForce.GoodTillCancel);
-
-    return {
-      id: String(id),
-      status,
-      symbol,
-      type: orderType,
-      side: orderSide,
-      price: Number.isFinite(price) && price > 0 ? price : Number.isFinite(stopPrice) ? stopPrice : 0,
-      amount,
-      reduceOnly: reduceOnlyValue === true || reduceOnlyValue === 'true',
-      close,
-      timeInForce,
-      filled,
-      lastUpdate: virtualClock.getCurrentTimeMs(),
-      remaining: subtract(amount, filled),
-      info: o,
-      ...(orderType === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[o.workingType ?? o.wt] }),
-      ...(orderType === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[o.workingType ?? o.wt] }),
-    };
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
@@ -978,23 +930,13 @@ export class BingxExchange extends BaseExchange {
       throw new Error(message);
     };
 
-    if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
-      if ('amount' in update) {
-        return rejectPreflight('BingX trigger order movement supports price updates only');
-      }
-      return await this.replaceTriggerOrderPrice(order, update.price);
-    }
     if (order.status !== OrderStatus.Open || order.type !== OrderType.Limit) {
       return rejectPreflight('BingX native amendment supports only exactly reconciled open LIMIT orders');
     }
-    if ('price' in update && 'amount' in update) {
-      return rejectPreflight('BingX limit price replacement cannot be combined with native quantity amendment');
-    }
-    if ('price' in update) {
-      return await this.cancelReplaceLimitOrderPrice(order, update.price);
-    }
-    if (!('amount' in update)) {
-      return rejectPreflight('BingX native amendment requires an amount update');
+    if (!('amount' in update) || 'price' in update) {
+      return rejectPreflight(
+        'BingX native amendment cannot change price; cancelReplace would replace the stable order identity',
+      );
     }
     if (
       order.timeInForce !== OrderTimeInForce.GoodTillCancel &&
@@ -1018,9 +960,9 @@ export class BingxExchange extends BaseExchange {
     const rawSide = String(info?.side ?? info?.S ?? '').toUpperCase();
     const rawPositionSide = String(info?.positionSide ?? info?.ps ?? '').toUpperCase();
     const rawStatus = String(info?.status ?? info?.X ?? '').toUpperCase();
-    const rawQuantity = Number(info?.origQty ?? info?.quantity ?? info?.q);
+    const rawQuantity = Number(info?.origQty ?? info?.q);
     const rawExecutedQuantity = Number(info?.executedQty ?? info?.z);
-    const rawReduceOnlyValue = info?.reduceOnly ?? info?.ro ?? info?.R;
+    const rawReduceOnlyValue = info?.reduceOnly ?? info?.R;
     const rawReduceOnly =
       rawReduceOnlyValue === true || rawReduceOnlyValue === 'true'
         ? true
@@ -1039,7 +981,7 @@ export class BingxExchange extends BaseExchange {
     ) {
       return rejectPreflight(`BingX cannot safely amend ${order.id}: immutable order identity is not reconciled`);
     }
-    if (rawReduceOnly !== undefined && rawReduceOnly !== order.reduceOnly) {
+    if (rawReduceOnly === undefined || rawReduceOnly !== order.reduceOnly) {
       return rejectPreflight(`BingX cannot safely amend ${order.id}: reduce-only state is not reconciled`);
     }
 
@@ -1065,7 +1007,7 @@ export class BingxExchange extends BaseExchange {
     const adjustedRemaining = adjust(order.remaining, market.precision.amount);
     const adjustedRawQuantity = adjust(rawQuantity, market.precision.amount);
     if (
-      !['NEW', 'OPEN', 'PENDING', 'WORKING'].includes(rawStatus) ||
+      !['NEW', 'PENDING'].includes(rawStatus) ||
       order.filled !== 0 ||
       rawExecutedQuantity !== 0 ||
       adjustedRemaining !== adjustedOrderAmount ||
@@ -1079,7 +1021,7 @@ export class BingxExchange extends BaseExchange {
     const hasAttachedProtection = (value: unknown) => {
       if (!value || typeof value !== 'object') return false;
       const protection = value as Record<string, unknown>;
-      return Number(protection.stopPrice) > 0 || Number(protection.quantity) > 0 || Number(protection.price) > 0;
+      return Boolean(protection.type) || Number(protection.stopPrice) > 0 || Number(protection.quantity) > 0;
     };
     if (
       order.takeProfit !== undefined ||
@@ -1119,287 +1061,6 @@ export class BingxExchange extends BaseExchange {
       }
 
       return [order.id];
-    } catch (error: any) {
-      const message = error?.response?.data?.msg || error?.message || String(error);
-      this.emitAndLogError(message);
-      throw error;
-    }
-  };
-
-  private replaceTriggerOrderPrice = async (order: Order, nextPrice: number): Promise<string[]> => {
-    const rejectPreflight = (message: string): never => {
-      this.emitAndLogError(message);
-      throw new Error(message);
-    };
-
-    if (
-      order.status !== OrderStatus.Open ||
-      (order.type !== OrderType.StopLoss && order.type !== OrderType.TakeProfit)
-    ) {
-      return rejectPreflight('BingX trigger replacement supports only reconciled open STOP/TP orders');
-    }
-
-    const market = this.store.marketsBySymbol[order.symbol];
-    if (!market) {
-      return rejectPreflight(`Market ${order.symbol} not found`);
-    }
-
-    const info = order.info;
-    const rawSymbol = info?.symbol ?? info?.s;
-    const rawType = String(info?.type ?? info?.o ?? '').toUpperCase();
-    const rawSide = String(info?.side ?? info?.S ?? '').toUpperCase();
-    const rawStatus = String(info?.status ?? info?.X ?? '').toUpperCase();
-    const rawExecutedQuantity = Number(info?.executedQty ?? info?.z ?? 0);
-    const mappedRawType = ORDER_TYPE[rawType];
-    const mappedRawSide = ORDER_SIDE[rawSide];
-    const rawTriggerType =
-      mappedRawType === OrderType.StopLoss || mappedRawType === OrderType.TakeProfit ? mappedRawType : undefined;
-    const replacementType = rawTriggerType ?? order.type;
-    if (typeof rawSymbol === 'string' && rawSymbol.replace(/-/g, '') !== order.symbol) {
-      return rejectPreflight(`BingX cannot safely replace ${order.id}: trigger order identity is not reconciled`);
-    }
-    if (
-      (rawType && !rawTriggerType) ||
-      (rawSide && mappedRawSide !== order.side) ||
-      (rawStatus && !['NEW', 'OPEN', 'PENDING', 'WORKING'].includes(rawStatus)) ||
-      order.filled !== 0 ||
-      rawExecutedQuantity !== 0
-    ) {
-      return rejectPreflight('BingX trigger replacement is disabled for partially filled orders');
-    }
-
-    const adjustedOrderAmount = adjust(order.amount, market.precision.amount);
-    if (!order.close && (!Number.isFinite(adjustedOrderAmount) || adjustedOrderAmount <= 0)) {
-      return rejectPreflight('BingX replacement trigger quantity must be greater than zero');
-    }
-
-    const adjustedPrice = adjust(nextPrice, market.precision.price);
-    if (!Number.isFinite(adjustedPrice) || adjustedPrice <= 0) {
-      return rejectPreflight('BingX replacement trigger price must be greater than zero');
-    }
-    if (adjustedPrice === adjust(order.price, market.precision.price)) {
-      return rejectPreflight('BingX replacement trigger price must change after market-precision normalization');
-    }
-
-    const ticker = this.store.tickersBySymbol[order.symbol];
-    if (ticker && Number.isFinite(ticker.mark) && ticker.mark > 0) {
-      const wouldTriggerImmediately =
-        replacementType === OrderType.StopLoss
-          ? (order.side === OrderSide.Sell && adjustedPrice >= ticker.mark) ||
-            (order.side === OrderSide.Buy && adjustedPrice <= ticker.mark)
-          : (order.side === OrderSide.Sell && adjustedPrice <= ticker.mark) ||
-            (order.side === OrderSide.Buy && adjustedPrice >= ticker.mark);
-      if (wouldTriggerImmediately) {
-        return rejectPreflight('BingX replacement trigger price would execute immediately against current mark price');
-      }
-    }
-
-    await this.cancelOrders([order]);
-    return await this.placeOrder({
-      symbol: order.symbol,
-      type: replacementType,
-      side: order.side,
-      amount: adjustedOrderAmount,
-      price: adjustedPrice,
-      reduceOnly: order.reduceOnly,
-      close: order.close,
-      tpTriggerType:
-        replacementType === OrderType.TakeProfit ? (order.tpTriggerType ?? order.slTriggerType) : undefined,
-      slTriggerType: replacementType === OrderType.StopLoss ? (order.slTriggerType ?? order.tpTriggerType) : undefined,
-    });
-  };
-
-  private cancelReplaceLimitOrderPrice = async (order: Order, nextPrice: number): Promise<string[]> => {
-    const rejectPreflight = (message: string): never => {
-      this.emitAndLogError(message);
-      throw new Error(message);
-    };
-
-    if (order.status !== OrderStatus.Open || order.type !== OrderType.Limit) {
-      return rejectPreflight('BingX cancel-replace supports only exactly reconciled open LIMIT orders');
-    }
-    if (order.close) {
-      return rejectPreflight('BingX cancel-replace does not support close-position orders');
-    }
-
-    const market = this.store.marketsBySymbol[order.symbol];
-    if (!market) {
-      return rejectPreflight(`Market ${order.symbol} not found`);
-    }
-
-    let orderToReplace = order;
-    if (!orderToReplace.timeInForce) {
-      const reconciledOrder = (await this.fetchOrders()).find((candidate) => candidate.id === order.id);
-      if (reconciledOrder?.timeInForce) {
-        orderToReplace = reconciledOrder;
-      }
-    }
-
-    const info = orderToReplace.info;
-    const rawOrderId = info?.orderId ?? info?.orderID ?? info?.i;
-    const rawSymbol = info?.symbol ?? info?.s;
-    const rawType = String(info?.type ?? info?.o ?? '').toUpperCase();
-    const rawSide = String(info?.side ?? info?.S ?? '').toUpperCase();
-    const rawPositionSide = String(info?.positionSide ?? info?.ps ?? '').toUpperCase();
-    const rawStatus = String(info?.status ?? info?.X ?? '').toUpperCase();
-    const rawQuantity = Number(info?.origQty ?? info?.quantity ?? info?.q);
-    const rawExecutedQuantity = Number(info?.executedQty ?? info?.z);
-    const rawClientOrderId = info?.clientOrderId ?? info?.clientOrderID ?? info?.c;
-    const rawReduceOnlyValue = info?.reduceOnly ?? info?.ro ?? info?.R;
-    const rawReduceOnly =
-      rawReduceOnlyValue === true || rawReduceOnlyValue === 'true'
-        ? true
-        : rawReduceOnlyValue === false || rawReduceOnlyValue === 'false'
-          ? false
-          : undefined;
-    const mappedRawSide = ORDER_SIDE[rawSide];
-    const resolvedPositionSide = ['BOTH', 'LONG', 'SHORT'].includes(rawPositionSide)
-      ? rawPositionSide
-      : await this.getOrderPositionSide({
-          symbol: order.symbol,
-          side: orderToReplace.side,
-          type: orderToReplace.type,
-          amount: orderToReplace.amount,
-          price: orderToReplace.price,
-          reduceOnly: orderToReplace.reduceOnly,
-        });
-
-    if (
-      (rawOrderId !== undefined && String(rawOrderId) !== orderToReplace.id) ||
-      (typeof rawSymbol === 'string' && rawSymbol.replace(/-/g, '') !== orderToReplace.symbol) ||
-      (rawType && rawType !== 'LIMIT') ||
-      (rawSide && mappedRawSide !== orderToReplace.side) ||
-      (rawPositionSide && !['BOTH', 'LONG', 'SHORT'].includes(rawPositionSide))
-    ) {
-      return rejectPreflight(`BingX cannot safely replace ${order.id}: immutable order identity is not reconciled`);
-    }
-    if (rawReduceOnly !== undefined && rawReduceOnly !== orderToReplace.reduceOnly) {
-      return rejectPreflight(`BingX cannot safely replace ${order.id}: reduce-only state is not reconciled`);
-    }
-
-    const rawPostOnlyValue = info?.postOnly;
-    const rawPostOnly =
-      rawPostOnlyValue === true || rawPostOnlyValue === 'true'
-        ? true
-        : rawPostOnlyValue === false || rawPostOnlyValue === 'false'
-          ? false
-          : undefined;
-    const rawTimeInForceValue = String(info?.timeInForce ?? info?.f ?? '');
-    const parsedRawTimeInForce = TIME_IN_FORCE[rawTimeInForceValue];
-    const rawTimeInForce =
-      rawPostOnly === true ? OrderTimeInForce.PostOnly : (parsedRawTimeInForce ?? orderToReplace.timeInForce);
-    if (
-      rawTimeInForce === undefined ||
-      (rawPostOnly === false && parsedRawTimeInForce === undefined && orderToReplace.timeInForce === undefined) ||
-      rawTimeInForce !== orderToReplace.timeInForce
-    ) {
-      return rejectPreflight(`BingX cannot safely replace ${order.id}: time in force is not reconciled`);
-    }
-
-    const adjustedOrderAmount = adjust(orderToReplace.amount, market.precision.amount);
-    const adjustedRemaining = adjust(orderToReplace.remaining, market.precision.amount);
-    const resolvedRawQuantity = Number.isFinite(rawQuantity) ? rawQuantity : orderToReplace.amount;
-    const resolvedRawExecutedQuantity = Number.isFinite(rawExecutedQuantity) ? rawExecutedQuantity : orderToReplace.filled;
-    const adjustedRawQuantity = adjust(resolvedRawQuantity, market.precision.amount);
-    if (
-      (rawStatus && !['NEW', 'OPEN', 'PENDING', 'WORKING'].includes(rawStatus)) ||
-      orderToReplace.filled !== 0 ||
-      resolvedRawExecutedQuantity !== 0 ||
-      adjustedRemaining !== adjustedOrderAmount ||
-      adjustedRawQuantity !== adjustedOrderAmount
-    ) {
-      return rejectPreflight('BingX cancel-replace is disabled for partially filled LIMIT orders');
-    }
-
-    const hasAttachedProtection = (value: unknown) => {
-      if (!value || typeof value !== 'object') return false;
-      const protection = value as Record<string, unknown>;
-      return Number(protection.stopPrice) > 0 || Number(protection.quantity) > 0 || Number(protection.price) > 0;
-    };
-    if (
-      orderToReplace.takeProfit !== undefined ||
-      orderToReplace.stopLoss !== undefined ||
-      hasAttachedProtection(info?.takeProfit) ||
-      hasAttachedProtection(info?.stopLoss)
-    ) {
-      return rejectPreflight('BingX cancel-replace cannot prove attached TP/SL preservation');
-    }
-
-    const adjustedPrice = adjust(nextPrice, market.precision.price);
-    if (!Number.isFinite(adjustedPrice) || adjustedPrice <= 0) {
-      return rejectPreflight('BingX replacement order price must be greater than zero');
-    }
-    if (adjustedPrice === adjust(orderToReplace.price, market.precision.price)) {
-      return rejectPreflight('BingX replacement order price must change after market-precision normalization');
-    }
-
-    const timeInForce = inverseObj(TIME_IN_FORCE)[orderToReplace.timeInForce];
-    if (!timeInForce) {
-      return rejectPreflight(`BingX cannot safely replace ${order.id}: time in force is not reconciled`);
-    }
-    if (typeof rawClientOrderId !== 'string' || rawClientOrderId.length === 0) {
-      return rejectPreflight(`BingX cannot safely replace ${order.id}: client order id is not reconciled`);
-    }
-
-    const cancelRestrictions =
-      rawStatus === 'PENDING'
-        ? 'ONLY_PENDING'
-        : rawStatus === 'NEW'
-          ? 'ONLY_NEW'
-          : undefined;
-    const payload = omitUndefined({
-      symbol: market.id,
-      cancelClientOrderId: rawClientOrderId,
-      side: inverseObj(ORDER_SIDE)[orderToReplace.side],
-      positionSide: resolvedPositionSide,
-      type: 'LIMIT',
-      quantity: adjustedOrderAmount,
-      price: adjustedPrice,
-      cancelReplaceMode: 'STOP_ON_FAILURE',
-      cancelRestrictions,
-      timeInForce,
-      clientOrderId: this.createClientOrderId(),
-      reduceOnly: resolvedPositionSide === 'BOTH' && orderToReplace.reduceOnly ? true : undefined,
-    });
-
-    try {
-      const { data } = await this.xhr.post(ENDPOINTS.CANCEL_REPLACE_ORDER, payload);
-      if (data.code !== 0) {
-        throw new Error(data.msg || `BingX cancel-replace failed with code ${data.code}`);
-      }
-
-      const result = data?.data || {};
-      const isSuccessfulResult = (value: unknown) => value === true || ['SUCCESS', 'TRUE'].includes(String(value).toUpperCase());
-      const cancelResult = result.cancelResult;
-      const replaceResult = result.newOrderResult ?? result.replaceResult;
-      if (!isSuccessfulResult(cancelResult) || !isSuccessfulResult(replaceResult)) {
-        throw new Error(
-          `BingX cancel-replace failed: cancel=${cancelResult || 'unknown'}, new=${replaceResult || 'unknown'}`,
-        );
-      }
-
-      const newOrderResponse = result.newOrderResponse || {};
-      const newOrderId = result.newOrderId ?? newOrderResponse.orderId ?? newOrderResponse.orderID ?? result.orderId ?? result.orderID;
-      if (newOrderId === undefined) {
-        throw new Error(`BingX cancel-replace response did not include a replacement order id`);
-      }
-
-      const replacementOrder = this.mapOrder({
-        ...newOrderResponse,
-        ...info,
-        ...payload,
-        orderId: String(newOrderId),
-        orderID: String(newOrderId),
-        status: 'PENDING',
-        origQty: String(adjustedOrderAmount),
-        executedQty: '0',
-      });
-      this.store.updateOrderStatus({ id: orderToReplace.id }, OrderStatus.Canceled);
-      if (replacementOrder) {
-        this.store.addOrUpdateOrder(replacementOrder);
-      }
-
-      return [String(newOrderId)];
     } catch (error: any) {
       const message = error?.response?.data?.msg || error?.message || String(error);
       this.emitAndLogError(message);
@@ -1826,10 +1487,6 @@ export class BingxExchange extends BaseExchange {
           );
           this.emitAndLogError(errMsg);
         } else {
-          const acceptedOrder = this.mapOrder(data?.data?.order || {});
-          if (acceptedOrder?.status === OrderStatus.Open && acceptedOrder.type !== OrderType.Market) {
-            this.store.addOrUpdateOrder(acceptedOrder);
-          }
           orderIds.push(data?.data?.order?.orderID || data?.data?.order?.orderId);
         }
       } catch (err: any) {
