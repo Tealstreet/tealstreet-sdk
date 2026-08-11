@@ -1,4 +1,7 @@
-import { normalizeExchangeAccountConfig } from '@tealstreet/safe-cex/src/accounts/normalizeExchangeAccountConfig';
+import {
+  buildExchangeAccountConfig,
+  ExchangeAccountConfigError,
+} from '@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig';
 
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
@@ -14,9 +17,19 @@ interface WebAccountExport {
   name: string;
   apiKey?: string;
   apiSecret?: string;
+  secret?: string;
   passphrase?: string;
   privateKey?: string;
   walletAddress?: string;
+  applicationId?: string;
+  apiKeyIndex?: string;
+  vault?: string;
+  omniKeySeed?: string;
+  paradexAddress?: string;
+  subkeyAddress?: string;
+  subaccount?: string;
+  grvtSignerAddress?: string;
+  grvtTradingAccountId?: string;
   testnet?: boolean;
   // Tunnel/proxy settings
   tealstreetProxy?: boolean;
@@ -180,10 +193,22 @@ export class AccountsCommand extends BaseCommand {
     const apiSecret = this.getOption(ctx, 's', 'api-secret');
     const passphrase = this.getOption(ctx, 'p', 'passphrase');
     const privateKey = this.getOption(ctx, 'private-key');
-    const _walletAddress = this.getOption(ctx, 'wallet-address');
+    const walletAddress = this.getOption(ctx, 'wallet-address');
+    const applicationId = this.getOption(ctx, 'application-id');
+    const apiKeyIndex = this.getOption(ctx, 'api-key-index');
+    const vault = this.getOption(ctx, 'vault');
+    const omniKeySeed = this.getOption(ctx, 'omni-key-seed');
+    const paradexAddress = this.getOption(ctx, 'paradex-address');
+    const subkeyAddress = this.getOption(ctx, 'subkey-address');
+    const subaccount = this.getOption(ctx, 'subaccount');
+    const grvtSignerAddress = this.getOption(ctx, 'grvt-signer-address');
+    const grvtTradingAccountId = this.getOption(ctx, 'grvt-trading-account-id');
     const proxyRegion = this.getOption(ctx, 'proxy-region');
     const testnet = this.hasFlag(ctx, 't', 'testnet');
     const tealstreetProxy = this.hasFlag(ctx, 'tealstreet-proxy', 'use-tealstreet-ips');
+    const tealstreetTunnel = this.hasFlag(ctx, 'tealstreet-tunnel');
+    const tealstreetWsRoute = this.hasFlag(ctx, 'tealstreet-ws-route');
+    const enableSpotMarkets = this.hasFlag(ctx, 'enable-spot-markets');
 
     // Validate required fields
     if (!name || !exchange) {
@@ -207,17 +232,41 @@ export class AccountsCommand extends BaseCommand {
       return this.success();
     }
 
-    const newAccount: AccountConfig = normalizeExchangeAccountConfig({
-      name,
-      exchange: exchange.toLowerCase() as ExchangeName,
-      apiKey: privateKey || apiKey || '',
-      apiSecret: apiSecret || '',
-      passphrase,
-      testnet,
-      tealstreetProxy,
-      proxyRegion,
-      active: true, // Always set active on add so it will be enabled
-    });
+    let newAccount: AccountConfig;
+    try {
+      newAccount = buildExchangeAccountConfig({
+        name,
+        exchange: exchange.toLowerCase() as ExchangeName,
+        apiKey,
+        apiSecret,
+        passphrase,
+        privateKey,
+        walletAddress,
+        applicationId,
+        apiKeyIndex,
+        vault,
+        omniKeySeed,
+        paradexAddress,
+        subkeyAddress,
+        subaccount,
+        grvtSignerAddress,
+        grvtTradingAccountId,
+        testnet,
+        tealstreetProxy,
+        tealstreetTunnel,
+        tealstreetWsRoute,
+        proxyRegion,
+        enableSpotMarkets,
+        active: true, // Always set active on add so it will be enabled
+      });
+    } catch (error) {
+      if (error instanceof ExchangeAccountConfigError) {
+        this.printError(ctx, error.message);
+      } else {
+        this.printError(ctx, error instanceof Error ? error.message : String(error));
+      }
+      return this.success();
+    }
 
     ctx.adapter.addAccount(newAccount);
     this.printSuccess(ctx, `Account "${newAccount.name}" added successfully`);
@@ -292,19 +341,17 @@ export class AccountsCommand extends BaseCommand {
     }
 
     // Build account config from parsed JSON
-    const newAccount: AccountConfig = normalizeExchangeAccountConfig({
-      name: parsed.name,
-      exchange: parsed.exchange.toLowerCase() as ExchangeName,
-      apiKey: parsed.privateKey || parsed.apiKey || '',
-      apiSecret: parsed.apiSecret || '',
-      passphrase: parsed.passphrase,
-      testnet: parsed.testnet,
-      // Tunnel/proxy settings
-      tealstreetProxy: parsed.tealstreetProxy,
-      tealstreetTunnel: parsed.tealstreetTunnel,
-      proxyRegion: parsed.proxyRegion,
-      active: true, // Always set active on import so it will be enabled
-    });
+    let newAccount: AccountConfig;
+    try {
+      newAccount = buildExchangeAccountConfig({
+        ...parsed,
+        exchange: parsed.exchange.toLowerCase() as ExchangeName,
+        active: true, // Always set active on import so it will be enabled
+      });
+    } catch (error) {
+      this.printError(ctx, error instanceof Error ? error.message : String(error));
+      return this.success();
+    }
 
     ctx.adapter.addAccount(newAccount);
     this.printSuccess(ctx, `Account "${newAccount.name}" imported successfully`);
@@ -564,7 +611,7 @@ export class AccountsCommand extends BaseCommand {
       '',
       'Adding accounts manually:',
       '  accounts add -n <name> -e <exchange> -k <api-key> -s <api-secret> [-p <passphrase>] [-t]',
-      '  accounts add -n <name> -e <exchange> --private-key <key> --wallet-address <addr> [-t]',
+      '  accounts add -n <name> -e paradex -k <subkey-private-key> --paradex-address <addr> --subkey-address <addr>',
       '  Add --tealstreet-proxy [--proxy-region <region>] to match web "Use Tealstreet IPs".',
       '',
       'Options:',
@@ -573,10 +620,19 @@ export class AccountsCommand extends BaseCommand {
       '  -k, --api-key        API key',
       '  -s, --api-secret     API secret',
       '  -p, --passphrase     Passphrase (OKX, BloFin, Bitget, KuCoin)',
-      '  --private-key        Private key (Hyperliquid, Paradex)',
-      '  --wallet-address     Wallet address (for DEX exchanges)',
+      '  --private-key        Alias for wallet/private-key exchanges',
+      '  --wallet-address     Alias for wallet/private-key exchanges',
+      '  --application-id     Application ID / main wallet / account index',
+      '  --api-key-index      API key index',
+      '  --paradex-address    Paradex account address',
+      '  --subkey-address     Paradex subkey public address',
+      '  --omni-key-seed      Omni key seed',
+      '  --subaccount         Exchange subaccount/account ID',
+      '  --vault              Optional vault address/name',
       '  -t, --testnet        Use testnet',
       '  --tealstreet-proxy   Route like web "Use Tealstreet IPs"',
+      '  --tealstreet-tunnel  Route REST through the Tealstreet tradetunnel',
+      '  --tealstreet-ws-route Route private WebSockets through Tealstreet',
       '  --proxy-region       Proxy region to use when proxy routing is enabled',
       '',
     ]);

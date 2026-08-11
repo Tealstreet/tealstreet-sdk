@@ -67,4 +67,56 @@ describe('AccountsCommand', () => {
       }),
     );
   });
+
+  it('adds Paradex accounts with canonical web credential fields', async () => {
+    const command = new AccountsCommand();
+    const ctx = createContext(
+      'accounts add -n pd -e paradex -k 0xsubkey-private --paradex-address 0xmain --subkey-address 0xsubkey',
+    );
+
+    await command.execute(ctx);
+
+    expect(ctx.adapter.addAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'pd',
+        exchange: 'paradex',
+        apiKey: '0xsubkey-private',
+        apiSecret: '0xsubkey-private',
+        paradexAddress: '0xmain',
+        subkeyAddress: '0xsubkey',
+      }),
+    );
+  });
+
+  it('rejects incomplete Paradex account adds before persistence', async () => {
+    const command = new AccountsCommand();
+    const ctx = createContext('accounts add -n pd -e paradex -k 0xsubkey-private --paradex-address 0xmain');
+
+    await command.execute(ctx);
+
+    expect(ctx.adapter.addAccount).not.toHaveBeenCalled();
+    expect(ctx.adapter.printError).toHaveBeenCalledWith(
+      expect.stringContaining('Missing required fields for Paradex: subkeyAddress'),
+    );
+  });
+
+  it('imports Paradex web account JSON without dropping address fields', async () => {
+    const command = new AccountsCommand();
+    const ctx = createContext(
+      'accounts import {"exchange":"paradex","name":"pd","apiKey":"0xsubkey-private","apiSecret":"0xsubkey-private","paradexAddress":"0xmain","subkeyAddress":"0xsubkey"}',
+    );
+
+    await command.execute(ctx);
+
+    expect(ctx.adapter.addAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'pd',
+        exchange: 'paradex',
+        apiKey: '0xsubkey-private',
+        apiSecret: '0xsubkey-private',
+        paradexAddress: '0xmain',
+        subkeyAddress: '0xsubkey',
+      }),
+    );
+  });
 });

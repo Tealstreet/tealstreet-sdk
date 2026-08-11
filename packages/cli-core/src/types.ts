@@ -182,11 +182,7 @@ export interface CLIPlatformAdapter {
 /**
  * Exchange info for config
  */
-export interface ExchangeInfo {
-  displayName: string;
-  requiredFields: ('apiKey' | 'apiSecret' | 'passphrase' | 'privateKey' | 'walletAddress')[];
-  optionalFields: ('testnet' | 'passphrase')[];
-}
+export type { ExchangeAccountCredentialSchema as ExchangeInfo } from '@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig';
 
 // ============================================================================
 // Command Execution Types
