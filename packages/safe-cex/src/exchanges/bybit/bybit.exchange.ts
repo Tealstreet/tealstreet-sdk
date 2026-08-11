@@ -33,6 +33,7 @@ import {
   Order,
   OrderBook,
   OrderSide,
+  OrderStatus,
   OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
@@ -82,10 +83,18 @@ import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFro
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
+// Shields just-placed orders from early wholesale REST snapshots before Bybit
+// has indexed them, especially on api-demo.
+const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
+
+const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
+  const normalized = `${message || ''}`.toLowerCase();
+  return normalized.includes('order not exists') || normalized.includes('too late to cancel');
+};
 
 const isBybitLeverageNotModified = (data: Record<string, any>) => {
   const retCode = Number(v(data, 'retCode'));
@@ -167,6 +176,7 @@ export class BybitExchange extends BaseExchange {
   private batchLimit: number = 10;
   private readonly EXECUTION_QUERY_MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000 - 1;
   private readonly DEFAULT_EXECUTIONS_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+  private readonly recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
 
   private getExecutionQueryWindows = (
     from?: number,
@@ -277,6 +287,49 @@ export class BybitExchange extends BaseExchange {
     // still missing order events. Once orders have loaded, force the same
     // debounced REST backstop used by cancel / SET_TRADING_STOP flows.
     this.scheduleDegradedPrivateSnapshotRefresh(this.isDemo && this.store.loaded?.orders === true);
+  };
+
+  markOrderSeen = (orderId: string) => {
+    this.recentlyPlacedOrders.delete(orderId);
+  };
+
+  private recordRecentlyPlacedOrder = (order: Order) => {
+    this.recentlyPlacedOrders.set(order.id, {
+      placedAt: virtualClock.getCurrentTimeMs(),
+      order,
+    });
+
+    // Demo private WS can fail for geo/policy reasons, so seed the store with
+    // the order we just placed. Live Bybit keeps normal WS/REST reconciliation.
+    if (this.isDemo) {
+      this.store.addOrUpdateOrders([order]);
+    }
+  };
+
+  private preserveRecentlyPlacedOrders = (orders: Order[]) => {
+    if (this.recentlyPlacedOrders.size === 0) {
+      return orders;
+    }
+
+    const now = virtualClock.getCurrentTimeMs();
+    const fetchedOrderIds = new Set(orders.map((order) => order.id));
+    const preservedOrders: Order[] = [];
+
+    for (const [orderId, entry] of this.recentlyPlacedOrders) {
+      if (fetchedOrderIds.has(orderId)) {
+        this.recentlyPlacedOrders.delete(orderId);
+        continue;
+      }
+
+      if (now - entry.placedAt > RECENTLY_PLACED_ORDER_GRACE_MS) {
+        this.recentlyPlacedOrders.delete(orderId);
+        continue;
+      }
+
+      preservedOrders.push(this.store.orders.find((order) => order.id === orderId) ?? entry.order);
+    }
+
+    return preservedOrders.length > 0 ? [...orders, ...preservedOrders] : orders;
   };
 
   getAccount = async () => {
@@ -638,7 +691,7 @@ export class BybitExchange extends BaseExchange {
     const orders = await mapSeries(settleCoins, async (settleCoin) => {
       return this.fetchOrdersHelper('linear', settleCoin);
     });
-    return orders.flat();
+    return this.preserveRecentlyPlacedOrders(orders.flat());
   };
 
   fetchOrdersHelper = async (category: string, settleCoin?: string) => {
@@ -1340,6 +1393,60 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
+  fetchFillsForOrderIds = async (orderIds: string[]): Promise<Map<string, number>> => {
+    const fillsByOrderId = new Map<string, number>();
+    if (orderIds.length === 0) {
+      return fillsByOrderId;
+    }
+
+    const requestedOrderIds = new Set(orderIds.map((orderId) => String(orderId)));
+    const symbolByOrderId = new Map<string, string>();
+    for (const order of this.store.orders) {
+      if (requestedOrderIds.has(order.id)) {
+        symbolByOrderId.set(order.id, order.symbol);
+      }
+    }
+
+    try {
+      await mapSeries([...requestedOrderIds], async (orderId) => {
+        const symbol = symbolByOrderId.get(orderId);
+        if (!symbol) {
+          return;
+        }
+
+        const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, {
+          params: {
+            category: this.getCategoryForSymbol(symbol),
+            symbol,
+            orderId,
+            limit: 50,
+          },
+        });
+        const retMsg = `${v(data, 'retMsg') || 'UNKNOWN'}`;
+        if (retMsg !== 'OK') {
+          throw new Error(retMsg);
+        }
+
+        const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
+        for (const exec of executionsList) {
+          if (`${exec.orderId ?? ''}` !== orderId) {
+            continue;
+          }
+
+          const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
+          if (Number.isFinite(qty) && qty > 0) {
+            fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + qty);
+          }
+        }
+      });
+
+      return fillsByOrderId;
+    } catch (error: any) {
+      this.log(`Error fetching fills for order IDs: ${error.message}`, LogSeverity.Warning);
+      throw error;
+    }
+  };
+
   /**
    * Fetch income/transaction history from Bybit.
    * Maps Bybit transaction log to the generic IncomeRecord format.
@@ -1610,20 +1717,20 @@ export class BybitExchange extends BaseExchange {
     const responses = await mapSeries(payloads, async (p) => {
       try {
         const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, p);
-        return data;
+        return { data, payload: p };
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.retMsg || err.message);
         return undefined;
       }
     });
 
-    const fullfilled = responses.filter((r) => r !== undefined);
+    const fullfilled = responses.filter((r): r is NonNullable<(typeof responses)[number]> => r !== undefined);
 
     let errMsg = '';
     fullfilled.forEach((resp) => {
-      if (v(resp, 'retMsg') !== 'OK') {
-        this.emitAndLogError(v(resp, 'retMsg'));
-        errMsg = v(resp, 'retMsg');
+      if (v(resp.data, 'retMsg') !== 'OK') {
+        this.emitAndLogError(v(resp.data, 'retMsg'));
+        errMsg = v(resp.data, 'retMsg');
       }
     });
 
@@ -1631,7 +1738,28 @@ export class BybitExchange extends BaseExchange {
       throw new Error(errMsg);
     }
 
-    const orderIds = fullfilled.map((resp) => resp.result.orderId);
+    const placedAt = virtualClock.getCurrentTimeMs();
+    const orderIds = fullfilled.map((resp) => {
+      const orderId = resp.data.result.orderId;
+      if (orderId) {
+        const qty = parseFloat(resp.payload.qty as string) || 0;
+        this.recordRecentlyPlacedOrder({
+          id: orderId,
+          status: OrderStatus.Open,
+          symbol: opts.symbol,
+          type,
+          side: opts.side,
+          price: price ?? triggerPrice ?? 0,
+          amount: qty,
+          filled: 0,
+          remaining: qty,
+          reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
+          timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
+          lastUpdate: placedAt,
+        });
+      }
+      return orderId;
+    });
     this.scheduleOrderMutationPrivateSnapshotRefresh();
     return orderIds;
   };
@@ -2124,6 +2252,10 @@ export class BybitExchange extends BaseExchange {
     // fields hang off the parent limit order, so the parent's cancellation
     // already drops them. Without this filter, batch cancels containing
     // bracket-attached limits throw entirely on UNIFIED accounts.
+    for (const order of orders) {
+      this.markOrderSeen(order.id);
+    }
+
     const filteredOrders = orders.filter((o) => !o.id.endsWith('__stop_loss') && !o.id.endsWith('__take_profit'));
     if (filteredOrders.length === 0) return;
 
@@ -2158,10 +2290,15 @@ export class BybitExchange extends BaseExchange {
         request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
       });
       if (data.retMsg !== 'OK') {
+        if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
+          return;
+        }
         this.emitAndLogError(data.retMsg);
         throw new Error(data.retMsg);
       }
-      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
+      const foundErr = data.retExtInfo?.list.find(
+        (l: any) => l.code !== 0 && !isBybitOrderAlreadyGoneCancelMessage(l.msg),
+      );
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);

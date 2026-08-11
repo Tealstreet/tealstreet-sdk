@@ -337,6 +337,27 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
    while missing order topic events, so do not gate this backstop solely on
    `privateWebsocket.isHealthy`.
 
+8. **Recently placed orders are shielded until first sighting.** Bybit's
+   `/v5/order/realtime` can lag order creation, especially on `api-demo`. A
+   mutation backstop snapshot fetched before the venue indexes the order must
+   not wholesale-replace that just-placed row out of `store.orders`; otherwise
+   chaser sees its live order disappear and cancels itself. `placeOrder` records
+   each created id in `recentlyPlacedOrders`, and `fetchOrders` re-adds any
+   not-yet-sighted recent order that the snapshot omitted. Protection ends on
+   the first REST/WS/cancel sighting or after `RECENTLY_PLACED_ORDER_GRACE_MS`.
+   Never preserve already sighted orders: after first sighting, absence means
+   filled/cancelled and must be honored to avoid replacing on top of a fill. On
+   demo only, `recordRecentlyPlacedOrder` also adds the constructed order row to
+   the store optimistically so chasers can continue when private WS is
+   geo/policy blocked.
+
+9. **Demo chaser fill reconciliation is REST-backed.** `BybitDemoExchange` uses
+   the chaser manager's fill-based reconciliation path because private WS can be
+   unavailable in geo/policy-blocked environments. `fetchFillsForOrderIds`
+   queries `/v5/execution/list` by current order id and fails closed on malformed
+   or non-OK responses, so the manager will not replace after a cancel if fill
+   state is unknowable.
+
 ### Native Market Slippage Protection
 
 All Bybit variants map `PlaceOrderOpts.maxSlippagePct` to V5
@@ -445,6 +466,11 @@ The update path depends on the order type:
 - **Cancel all for symbol** (`cancelSymbolOrders` at `bybit.exchange.ts:1702-1726`): When `cancelTpSl=false`, preserves TP/SL orders by saving them, canceling all, then re-placing the TP/SL orders with flipped sides.
 - Successful cancels force an order-inclusive REST snapshot so stale TP/SL rows
   do not linger when Bybit demo/private WS is degraded.
+- Treat `"order not exists or too late to cancel"` batch-cancel rows as
+  already-gone success. Demo can have optimistic/preserved rows for orders whose
+  post-only create was accepted and then immediately rejected/cancelled by the
+  venue; canceling such a row during chase reprice or cleanup must not kill the
+  supervisor.
 - **Inter-batch delay**: 1000ms between cancel batches (`bybit.exchange.ts:1666`)
 
 ## Symbol Format
