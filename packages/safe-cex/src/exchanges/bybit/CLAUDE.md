@@ -337,19 +337,24 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
    while missing order topic events, so do not gate this backstop solely on
    `privateWebsocket.isHealthy`.
 
-8. **Recently placed orders are shielded until first sighting.** Bybit's
-   `/v5/order/realtime` can lag order creation, especially on `api-demo`. A
-   mutation backstop snapshot fetched before the venue indexes the order must
-   not wholesale-replace that just-placed row out of `store.orders`; otherwise
-   chaser sees its live order disappear and cancels itself. `placeOrder` records
-   each created id in `recentlyPlacedOrders`, and `fetchOrders` re-adds any
-   not-yet-sighted recent order that the snapshot omitted. Protection ends on
-   the first REST/WS/cancel sighting or after `RECENTLY_PLACED_ORDER_GRACE_MS`.
-   Never preserve already sighted orders: after first sighting, absence means
-   filled/cancelled and must be honored to avoid replacing on top of a fill. On
-   demo only, `recordRecentlyPlacedOrder` also adds the constructed order row to
-   the store optimistically so chasers can continue when private WS is
-   geo/policy blocked.
+8. **Recently-placed orders are shielded from snapshot replacement until first
+   sighting.** `/v5/order/realtime` lags order creation (worst on `api-demo`),
+   so the forced backstop above could fetch a snapshot WITHOUT an order placed
+   250ms earlier and wholesale-replace it out of the store — the chaser
+   supervisor then saw its live order "disappear", stopped itself, and
+   **cancelled the order on the exchange** (the Aug 2026 "quick chaser does
+   nothing on demo" bug). `placeOrder` records each created id in
+   `recentlyPlacedOrders`; `fetchOrders` re-adds a recorded order a snapshot
+   omitted via `preserveRecentlyPlacedOrders`. Protection ends on the FIRST
+   sighting anywhere — REST snapshot inclusion, any private-WS order frame
+   (`handleOrderTopic` calls `markOrderSeen`), or our own `cancelOrders` — or
+   after `RECENTLY_PLACED_ORDER_GRACE_MS` (8s). **Never widen this to
+   already-sighted orders**: once seen, absence means filled/cancelled and must
+   be honored, or the chaser would re-place on top of a fill (overfill). On
+   demo only, `recordRecentlyPlacedOrder` also adds the constructed row to the
+   store optimistically, because demo's WS may never deliver it — without that
+   the UI shows nothing and the chaser idles with an unmanaged resting order
+   (a second click then places a duplicate).
 
 9. **Demo chaser fill reconciliation is REST-backed.** `BybitDemoExchange` uses
    the chaser manager's fill-based reconciliation path because private WS can be
