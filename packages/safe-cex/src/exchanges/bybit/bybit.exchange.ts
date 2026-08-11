@@ -2,6 +2,7 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
 import axios from 'axios';
 import rateLimit from 'axios-rate-limit';
@@ -55,8 +56,6 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
-import type { BybitPlaceOrderOpts } from './bybit.order-params';
-
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
@@ -83,8 +82,10 @@ import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFro
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
-// Shields just-placed orders from early wholesale REST snapshots before Bybit
-// has indexed them, especially on api-demo.
+// How long a just-placed order is shielded from wholesale REST order-snapshot
+// replacement while no REST/WS sighting has confirmed it. Covers api-demo's
+// order-indexing lag with margin; short enough that a phantom row for an order
+// that filled before its first sighting cannot linger.
 const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
@@ -100,8 +101,7 @@ const isBybitLeverageNotModified = (data: Record<string, any>) => {
   const retCode = Number(v(data, 'retCode'));
   const retMsg = `${v(data, 'retMsg') || ''}`.toLowerCase();
   return (
-    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE ||
-    (retMsg.includes('leverage') && retMsg.includes('not modified'))
+    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE || (retMsg.includes('leverage') && retMsg.includes('not modified'))
   );
 };
 
@@ -176,7 +176,6 @@ export class BybitExchange extends BaseExchange {
   private batchLimit: number = 10;
   private readonly EXECUTION_QUERY_MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000 - 1;
   private readonly DEFAULT_EXECUTIONS_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-  private readonly recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
 
   private getExecutionQueryWindows = (
     from?: number,
@@ -289,47 +288,63 @@ export class BybitExchange extends BaseExchange {
     this.scheduleDegradedPrivateSnapshotRefresh(this.isDemo && this.store.loaded?.orders === true);
   };
 
+  /**
+   * Orders placed moments ago that no REST snapshot or private-WS frame has
+   * confirmed yet. `/v5/order/realtime` lags order creation (worst on
+   * `api-demo`), so the forced snapshot backstop above could fetch a list
+   * WITHOUT an order placed 250ms earlier and wholesale-replace it out of the
+   * store — the chaser supervisor then saw its live order "disappear", stopped
+   * itself, and cancelled the order on the exchange (the demo "quick chaser
+   * does nothing" bug). An id leaves this map on its FIRST sighting anywhere
+   * (REST snapshot, private-WS order frame, or our own cancel) or after
+   * `RECENTLY_PLACED_ORDER_GRACE_MS` — once an order has been seen, its later
+   * absence means filled/cancelled and MUST be honored, or the chaser would
+   * re-place on top of a fill.
+   */
+  private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
+
+  /** First sighting via private WS or an explicit cancel — stop protecting the id. */
   markOrderSeen = (orderId: string) => {
     this.recentlyPlacedOrders.delete(orderId);
   };
 
   private recordRecentlyPlacedOrder = (order: Order) => {
-    this.recentlyPlacedOrders.set(order.id, {
-      placedAt: virtualClock.getCurrentTimeMs(),
-      order,
-    });
-
-    // Demo private WS can fail for geo/policy reasons, so seed the store with
-    // the order we just placed. Live Bybit keeps normal WS/REST reconciliation.
+    this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
+    // Demo's private WS drops order events, so without this the row may never
+    // reach the store at all: the UI shows nothing and the chaser supervisor
+    // idles with an unmanaged resting order (a second click would then place a
+    // DUPLICATE). Live bybit keeps its WS-driven flow untouched.
     if (this.isDemo) {
       this.store.addOrUpdateOrders([order]);
     }
   };
 
-  private preserveRecentlyPlacedOrders = (orders: Order[]) => {
-    if (this.recentlyPlacedOrders.size === 0) {
-      return orders;
-    }
+  /**
+   * Re-add not-yet-sighted recent orders that a REST snapshot omitted. Runs on
+   * the successful `fetchOrders` result so every wholesale replacement
+   * (startup reinit, degraded tick, demo mutation backstop) honors it.
+   */
+  private preserveRecentlyPlacedOrders = (fetched: Order[]): Order[] => {
+    if (this.recentlyPlacedOrders.size === 0) return fetched;
 
     const now = virtualClock.getCurrentTimeMs();
-    const fetchedOrderIds = new Set(orders.map((order) => order.id));
-    const preservedOrders: Order[] = [];
+    const fetchedIds = new Set(fetched.map((o) => o.id));
+    const preserved: Order[] = [];
 
-    for (const [orderId, entry] of this.recentlyPlacedOrders) {
-      if (fetchedOrderIds.has(orderId)) {
-        this.recentlyPlacedOrders.delete(orderId);
+    for (const [id, entry] of this.recentlyPlacedOrders) {
+      if (fetchedIds.has(id)) {
+        // REST has indexed it — normal reconciliation owns it from here on.
+        this.recentlyPlacedOrders.delete(id);
         continue;
       }
-
       if (now - entry.placedAt > RECENTLY_PLACED_ORDER_GRACE_MS) {
-        this.recentlyPlacedOrders.delete(orderId);
+        this.recentlyPlacedOrders.delete(id);
         continue;
       }
-
-      preservedOrders.push(this.store.orders.find((order) => order.id === orderId) ?? entry.order);
+      preserved.push(this.store.orders.find((o) => o.id === id) ?? entry.order);
     }
 
-    return preservedOrders.length > 0 ? [...orders, ...preservedOrders] : orders;
+    return preserved.length > 0 ? [...fetched, ...preserved] : fetched;
   };
 
   getAccount = async () => {
@@ -691,6 +706,8 @@ export class BybitExchange extends BaseExchange {
     const orders = await mapSeries(settleCoins, async (settleCoin) => {
       return this.fetchOrdersHelper('linear', settleCoin);
     });
+    // Every consumer of this result wholesale-replaces store.orders, so shield
+    // just-placed orders REST hasn't indexed yet (worst on api-demo).
     return this.preserveRecentlyPlacedOrders(orders.flat());
   };
 
@@ -828,10 +845,7 @@ export class BybitExchange extends BaseExchange {
 
     if (symbols && symbols.length > 0) {
       const positions: Position[][] = await mapSeries(symbols, async (symbol) => {
-        const bybitPositions = await fetchAllPages(
-          { symbol, category: this.getCategoryForSymbol(symbol) },
-          true,
-        );
+        const bybitPositions = await fetchAllPages({ symbol, category: this.getCategoryForSymbol(symbol) }, true);
         return this.dedupePositionsById(bybitPositions.map(this.mapPosition.bind(this)));
       });
       return positions.flat();
@@ -2026,7 +2040,7 @@ export class BybitExchange extends BaseExchange {
       const price = opts.price ? adjust(opts.price, pPrice) : null;
       const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
       const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+      const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
       const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
       let triggerDirection: number | undefined = undefined;
@@ -2252,10 +2266,9 @@ export class BybitExchange extends BaseExchange {
     // fields hang off the parent limit order, so the parent's cancellation
     // already drops them. Without this filter, batch cancels containing
     // bracket-attached limits throw entirely on UNIFIED accounts.
-    for (const order of orders) {
-      this.markOrderSeen(order.id);
-    }
-
+    // An explicit cancel counts as a sighting: the snapshot-preserve grace
+    // window must never resurrect an order we deliberately cancelled.
+    for (const order of orders) this.markOrderSeen(order.id);
     const filteredOrders = orders.filter((o) => !o.id.endsWith('__stop_loss') && !o.id.endsWith('__take_profit'));
     if (filteredOrders.length === 0) return;
 
@@ -2410,7 +2423,10 @@ export class BybitExchange extends BaseExchange {
 
     const reasons = Array.isArray(data?.result?.reasons) ? data.result.reasons : [];
     if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0 || reasons.length > 0) {
-      const reasonMessage = reasons.map((reason: any) => reason?.reasonMsg).filter(Boolean).join(', ');
+      const reasonMessage = reasons
+        .map((reason: any) => reason?.reasonMsg)
+        .filter(Boolean)
+        .join(', ');
       const errorMsg = reasonMessage || v(data, 'retMsg') || 'Failed to switch margin type';
       this.emitAndLogError(errorMsg);
       throw new Error(errorMsg);
