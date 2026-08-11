@@ -505,15 +505,23 @@ Source: `AccountCommand.ts`.
 
 ### `accounts` &nbsp; _(alias `config`)_
 
-| Form                                                    | Result                                                                                     |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `accounts` / `accounts list`                            | List all configured accounts                                                               |
-| `accounts add -n <name> -e <ex> -k <key> -s <secret>`   | Add — use `--tealstreet-proxy [--proxy-region <region>]` to match web "Use Tealstreet IPs" |
-| `accounts import <json>`                                | Import from web export JSON                                                                |
-| `accounts remove <name>` / `--all`                      | Remove (tombstoned for 30 days)                                                            |
-| `accounts enable <name…>` / `disable <name…>` / `--all` | Bulk streaming control                                                                     |
-| `accounts enabled` / `streaming` / `active`             | List only streaming accounts                                                               |
-| `accounts help`                                         | Full reference                                                                             |
+| Form                                                                                                         | Result                                                                                     |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `accounts` / `accounts list`                                                                                 | List all configured accounts                                                               |
+| `accounts add -n <name> -e <ex> -k <key> -s <secret>`                                                        | Add — use `--tealstreet-proxy [--proxy-region <region>]` to match web "Use Tealstreet IPs" |
+| `accounts add -n <name> -e paradex -k <subkey-private-key> --paradex-address <addr> --subkey-address <addr>` | Add Paradex with the same credential fields as web                                         |
+| `accounts import <json>`                                                                                     | Import from web export JSON                                                                |
+| `accounts remove <name>` / `--all`                                                                           | Remove (tombstoned for 30 days)                                                            |
+| `accounts enable <name…>` / `disable <name…>` / `--all`                                                      | Bulk streaming control                                                                     |
+| `accounts enabled` / `streaming` / `active`                                                                  | List only streaming accounts                                                               |
+| `accounts help`                                                                                              | Full reference                                                                             |
+
+Manual account creation is validated by the shared safe-cex account contract
+used by web. Exchange-specific fields include `--passphrase`,
+`--application-id`, `--api-key-index`, `--omni-key-seed`,
+`--paradex-address`, `--subkey-address`, `--subaccount`,
+`--grvt-signer-address`, `--grvt-trading-account-id`, `--vault`,
+`--tealstreet-tunnel`, and `--tealstreet-ws-route`.
 
 Source: `AccountsCommand.ts`.
 

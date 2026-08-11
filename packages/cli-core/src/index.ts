@@ -30,11 +30,11 @@ export {
   accountToExchangeOptions,
 } from '@tealstreet/safe-cex/src/createExchangeFromAccount';
 
-// Exchange info
-export { SUPPORTED_EXCHANGES, getSupportedExchangeNames, getExchangeInfo } from './exchanges';
+// Exchange info derived from safe-cex account credential metadata
+export { getSupportedExchangeNames, getExchangeInfo, getSupportedExchangeInfos } from './exchanges';
 
-// Legacy command processing (deprecated - use executeCommand)
-export { processSessionCommand, connectToAccount } from './legacyCommands';
+// Standalone REPL account connection helper
+export { connectToAccount } from './legacyCommands';
 
 // New command architecture
 export {
