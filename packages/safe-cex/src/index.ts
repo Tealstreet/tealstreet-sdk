@@ -178,16 +178,6 @@ export const createPublicExchange = async (
  * Account-based exchange creation
  */
 export { normalizeExchangeAccountConfig } from './accounts/normalizeExchangeAccountConfig';
-export {
-  buildExchangeAccountConfig,
-  getExchangeAccountCredentialSchema,
-  getSupportedExchangeAccountCredentialSchemas,
-  getSupportedExchangeAccountNames,
-  ExchangeAccountConfigError,
-  type ExchangeAccountCredentialField,
-  type ExchangeAccountCredentialInput,
-  type ExchangeAccountCredentialSchema,
-} from './accounts/buildExchangeAccountConfig';
 export { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
 export type { ExchangeAccountConfig, PublicExchangeOptions } from './types';
 export type {
@@ -214,6 +204,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+
 
 export type {
   BuilderFeeApprovalResult,

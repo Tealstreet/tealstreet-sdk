@@ -5,13 +5,6 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
 import {
-  buildExchangeAccountConfig,
-  ExchangeAccountConfigError,
-  getExchangeAccountCredentialSchema,
-  getSupportedExchangeAccountNames,
-  getSupportedExchangeAccountCredentialSchemas,
-} from '@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig';
-import {
   loadConfig,
   addAccount,
   removeAccount,
@@ -66,6 +59,41 @@ process.on('unhandledRejection', (reason: unknown) => {
   // Don't exit on unhandled rejection - let the app continue
   // The error will be logged and a clean message shown to user
 });
+// Exchange info inlined to avoid circular dependency issues
+type ExchangeInfo = {
+  displayName: string;
+  requiredFields: string[];
+  optionalFields: string[];
+};
+
+const SUPPORTED_EXCHANGES: Record<string, ExchangeInfo> = {
+  bybit: { displayName: 'Bybit', requiredFields: ['apiKey', 'apiSecret'], optionalFields: ['testnet'] },
+  binance: { displayName: 'Binance Futures', requiredFields: ['apiKey', 'apiSecret'], optionalFields: ['testnet'] },
+  hyperliquid: {
+    displayName: 'Hyperliquid',
+    requiredFields: ['privateKey', 'walletAddress'],
+    optionalFields: ['testnet'],
+  },
+  blofin: { displayName: 'BloFin', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: [] },
+  bitget: { displayName: 'Bitget', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: [] },
+  woo: { displayName: 'WOO X', requiredFields: ['apiKey', 'apiSecret'], optionalFields: [] },
+  okx: { displayName: 'OKX', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: ['testnet'] },
+  okxeu: { displayName: 'OKX EU', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: ['testnet'] },
+  bitmex: { displayName: 'BitMEX', requiredFields: ['apiKey', 'apiSecret'], optionalFields: ['testnet'] },
+  coinbase: { displayName: 'Coinbase', requiredFields: ['apiKey', 'apiSecret'], optionalFields: [] },
+  kraken: { displayName: 'Kraken', requiredFields: ['apiKey', 'apiSecret'], optionalFields: [] },
+  kucoin: { displayName: 'KuCoin', requiredFields: ['apiKey', 'apiSecret', 'passphrase'], optionalFields: [] },
+  phemex: { displayName: 'Phemex', requiredFields: ['apiKey', 'apiSecret'], optionalFields: ['testnet'] },
+  paradex: { displayName: 'Paradex', requiredFields: ['privateKey', 'walletAddress'], optionalFields: ['testnet'] },
+};
+
+function getSupportedExchangeNames(): string[] {
+  return Object.keys(SUPPORTED_EXCHANGES);
+}
+
+function getExchangeInfo(name: string): ExchangeInfo | undefined {
+  return SUPPORTED_EXCHANGES[name.toLowerCase()];
+}
 import { checkForUpdatesBackground, performUpdate, forceCheckForUpdates, getCurrentVersion } from './updater';
 import { registerCrossTradeCommand } from './commands/cross-trade';
 
@@ -155,71 +183,57 @@ accountCmd
   .requiredOption('-n, --name <name>', 'Account name (unique identifier)')
   .requiredOption(
     '-e, --exchange <exchange>',
-    `Exchange name (${getSupportedExchangeAccountNames().slice(0, 5).join(', ')}...)`,
+    `Exchange name (${getSupportedExchangeNames().slice(0, 5).join(', ')}...)`,
   )
   .option('-k, --api-key <key>', 'API key')
   .option('-s, --api-secret <secret>', 'API secret')
   .option('-p, --passphrase <passphrase>', 'API passphrase (for exchanges that require it)')
-  .option('--private-key <key>', 'Alias for wallet/private-key exchanges')
-  .option('--wallet-address <address>', 'Alias for wallet/private-key exchanges')
-  .option('--application-id <id>', 'Application ID / main wallet / account index')
-  .option('--api-key-index <index>', 'API key index')
-  .option('--vault <vault>', 'Optional vault address/name')
-  .option('--omni-key-seed <seed>', 'Omni key seed')
-  .option('--paradex-address <address>', 'Paradex account address')
-  .option('--subkey-address <address>', 'Paradex subkey public address')
-  .option('--subaccount <subaccount>', 'Exchange subaccount/account ID')
-  .option('--grvt-signer-address <address>', 'GRVT signer address')
-  .option('--grvt-trading-account-id <id>', 'GRVT trading account ID')
-  .option('--enable-spot-markets', 'Enable spot markets for exchanges with a spot toggle')
+  .option('--private-key <key>', 'Private key (for DEX exchanges)')
+  .option('--wallet-address <address>', 'Wallet address (for DEX exchanges)')
   .option('-t, --testnet', 'Use testnet')
   .option('--tealstreet-proxy', 'Route REST through the Tealstreet proxy (required for IP-whitelisted keys)')
   .option('--tealstreet-tunnel', 'Route REST through the Tealstreet tradetunnel')
-  .option('--tealstreet-ws-route', 'Route private WebSockets through Tealstreet')
   .option('--proxy-region <region>', 'Pin the proxy egress region')
   .option('--default', 'Set as default account')
   .action((options) => {
-    const exchangeInfo = getExchangeAccountCredentialSchema(options.exchange);
+    const exchangeInfo = getExchangeInfo(options.exchange);
     if (!exchangeInfo) {
       console.log(chalk.red(`Unknown exchange: ${options.exchange}`));
-      console.log(chalk.gray(`Supported exchanges: ${getSupportedExchangeAccountNames().join(', ')}`));
+      console.log(chalk.gray(`Supported exchanges: ${getSupportedExchangeNames().join(', ')}`));
       return;
     }
 
-    let account: AccountConfig;
-    try {
-      account = buildExchangeAccountConfig({
-        name: options.name,
-        exchange: options.exchange.toLowerCase() as ExchangeName,
-        apiKey: options.apiKey,
-        apiSecret: options.apiSecret,
-        passphrase: options.passphrase,
-        privateKey: options.privateKey,
-        walletAddress: options.walletAddress,
-        applicationId: options.applicationId,
-        apiKeyIndex: options.apiKeyIndex,
-        vault: options.vault,
-        omniKeySeed: options.omniKeySeed,
-        paradexAddress: options.paradexAddress,
-        subkeyAddress: options.subkeyAddress,
-        subaccount: options.subaccount,
-        grvtSignerAddress: options.grvtSignerAddress,
-        grvtTradingAccountId: options.grvtTradingAccountId,
-        testnet: options.testnet || false,
-        tealstreetProxy: options.tealstreetProxy,
-        tealstreetTunnel: options.tealstreetTunnel,
-        tealstreetWsRoute: options.tealstreetWsRoute,
-        proxyRegion: options.proxyRegion,
-        enableSpotMarkets: options.enableSpotMarkets,
-      });
-    } catch (error) {
-      if (error instanceof ExchangeAccountConfigError) {
-        console.log(chalk.red(error.message));
-      } else {
-        console.log(chalk.red(error instanceof Error ? error.message : String(error)));
-      }
+    // Validate required fields
+    const missingFields: string[] = [];
+    for (const field of exchangeInfo.requiredFields) {
+      if (field === 'apiKey' && !options.apiKey) missingFields.push('--api-key');
+      if (field === 'apiSecret' && !options.apiSecret) missingFields.push('--api-secret');
+      if (field === 'passphrase' && !options.passphrase) missingFields.push('--passphrase');
+      if (field === 'privateKey' && !options.privateKey) missingFields.push('--private-key');
+      if (field === 'walletAddress' && !options.walletAddress) missingFields.push('--wallet-address');
+    }
+
+    if (missingFields.length > 0) {
+      console.log(chalk.red(`Missing required fields for ${exchangeInfo.displayName}:`));
+      console.log(chalk.yellow(`  ${missingFields.join(', ')}`));
       return;
     }
+
+    // wallet-based exchanges store wallet → apiKey, private key → apiSecret (canonical safe-cex shape)
+    const isWalletBased = exchangeInfo.requiredFields.includes('privateKey');
+    const account: AccountConfig = {
+      name: options.name,
+      exchange: options.exchange.toLowerCase() as AccountConfig['exchange'],
+      apiKey: isWalletBased ? options.walletAddress || '' : options.apiKey || '',
+      apiSecret: isWalletBased ? options.privateKey || '' : options.apiSecret || '',
+      passphrase: options.passphrase,
+      testnet: options.testnet || false,
+      // Routing was already honored by platform-adapter but unsettable here, so a
+      // CLI-added account always egressed direct — which an IP-whitelisted key rejects.
+      ...(options.tealstreetProxy ? { tealstreetProxy: true } : {}),
+      ...(options.tealstreetTunnel ? { tealstreetTunnel: true } : {}),
+      ...(options.proxyRegion ? { proxyRegion: options.proxyRegion } : {}),
+    };
 
     addAccount(account);
     console.log(chalk.green(`Account "${options.name}" added successfully`));
@@ -270,8 +284,8 @@ accountCmd
   .description('List supported exchanges')
   .action(() => {
     console.log(chalk.cyan('\nSupported Exchanges:\n'));
-    for (const info of getSupportedExchangeAccountCredentialSchemas()) {
-      console.log(chalk.bold(`  ${info.exchange.padEnd(15)} ${info.displayName}`));
+    for (const [name, info] of Object.entries(SUPPORTED_EXCHANGES)) {
+      console.log(chalk.bold(`  ${name.padEnd(15)} ${info.displayName}`));
       console.log(chalk.gray(`                 Required: ${info.requiredFields.join(', ')}`));
       if (info.optionalFields.length > 0) {
         console.log(chalk.gray(`                 Optional: ${info.optionalFields.join(', ')}`));
@@ -323,8 +337,12 @@ accountCmd
         continue;
       }
 
+      // Normalize exchange name to lowercase — input came from a JSON import,
+      // so narrowing through `string` then back to `ExchangeName` is honest.
+      account.exchange = (account.exchange as string).toLowerCase() as ExchangeName;
+
       // Validate exchange is supported
-      if (!getExchangeAccountCredentialSchema(account.exchange)) {
+      if (!getExchangeInfo(account.exchange)) {
         console.log(chalk.yellow(`  Skipping "${account.name}" - unsupported exchange: ${account.exchange}`));
         skipped++;
         continue;
@@ -398,10 +416,10 @@ tasksCmd
         task.status === 'running'
           ? chalk.green
           : task.status === 'paused'
-            ? chalk.yellow
-            : task.status === 'completed'
-              ? chalk.blue
-              : chalk.red;
+          ? chalk.yellow
+          : task.status === 'completed'
+          ? chalk.blue
+          : chalk.red;
 
       console.log(`  ${chalk.bold(task.id.slice(0, 12))}...`);
       console.log(`    Type: ${task.type}`);
@@ -442,10 +460,10 @@ tasksCmd.action(async () => {
       task.status === 'running'
         ? chalk.green
         : task.status === 'paused'
-          ? chalk.yellow
-          : task.status === 'completed'
-            ? chalk.blue
-            : chalk.red;
+        ? chalk.yellow
+        : task.status === 'completed'
+        ? chalk.blue
+        : chalk.red;
 
     console.log(`  ${chalk.bold(task.id.slice(0, 12))}...  ${task.type}  ${statusColor(task.status)}`);
   }

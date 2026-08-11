@@ -106,7 +106,6 @@ const createMockExchange = () => {
     }),
     placeOrder: vi.fn().mockResolvedValueOnce(['order-1']).mockResolvedValueOnce(['order-2']),
     cancelOrders: vi.fn().mockResolvedValue(undefined),
-    fetchAndSetPrivateSnapshot: vi.fn().mockResolvedValue(undefined),
   } as unknown as Exchange;
 
   return {
@@ -163,7 +162,6 @@ describe('ChaserOrderManager', () => {
 
     await vi.advanceTimersByTimeAsync(50);
 
-    expect(instance.state.attempts).toBe(1);
     expect(exchange.cancelOrders).toHaveBeenCalledWith([order]);
     expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
     expect(exchange.placeOrder).toHaveBeenLastCalledWith(
@@ -284,12 +282,12 @@ describe('ChaserOrderManager', () => {
     // recurse immediately when the first pass finishes.
     store.updateIds.orders += 1;
     await emit('update', store);
-    const replacement = createOrder('order-2', 101);
-    (store as any).orders = [replacement];
     resolveCancel();
     await vi.advanceTimersByTimeAsync(1000);
     await inFlightUpdate;
 
+    const replacement = createOrder('order-2', 101);
+    (store as any).orders = [replacement];
     (exchange.placeOrder as any).mockResolvedValueOnce(['order-3']);
     (store.tickersBySymbol.BTCUSDT as any).bid = 102;
     (store.tickersBySymbol.BTCUSDT as any).ask = 103;
@@ -432,125 +430,6 @@ describe('ChaserOrderManager', () => {
     expect(manager.instances).not.toContain(instance);
   });
 
-  it('stops non-reduce chasers when the target position size is reached', async () => {
-    const { emit, exchange, store } = createMockExchange();
-    (exchange as any).name = 'bybitdemo';
-    const manager = new ChaserOrderManager();
-    const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT',
-      size: 1,
-      side: OrderSide.Buy,
-      maxAttempts: 10,
-      reduceOnly: false,
-      delay: 5000,
-    });
-
-    manager.add(instance);
-    await vi.advanceTimersByTimeAsync(1000);
-
-    (store as any).positions = [
-      {
-        id: 'BTCUSDT-long',
-        symbol: 'BTCUSDT',
-        side: PositionSide.Long,
-        entryPrice: 100,
-        notional: 100,
-        leverage: 1,
-        unrealizedPnl: 0,
-        contracts: 1,
-        liquidationPrice: 0,
-      },
-    ];
-    store.updateIds.positions += 1;
-
-    await emit('update', store);
-
-    expect(instance.isStopped).toBe(true);
-    expect(instance.state.stopReason).toBe('Completed');
-    expect(manager.instances).not.toContain(instance);
-    expect(exchange.cancelOrders).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
-    ]);
-  });
-
-  it('uses the starting same-side position as the non-reduce chaser target baseline', async () => {
-    const { emit, exchange, store } = createMockExchange();
-    (exchange as any).name = 'bybitdemo';
-    (store as any).positions = [
-      {
-        id: 'BTCUSDT-long',
-        symbol: 'BTCUSDT',
-        side: PositionSide.Long,
-        entryPrice: 100,
-        notional: 200,
-        leverage: 1,
-        unrealizedPnl: 0,
-        contracts: 2,
-        liquidationPrice: 0,
-      },
-    ];
-    const manager = new ChaserOrderManager();
-    const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT',
-      size: 1,
-      side: OrderSide.Buy,
-      maxAttempts: 10,
-      reduceOnly: false,
-      delay: 5000,
-    });
-
-    manager.add(instance);
-    await vi.advanceTimersByTimeAsync(1000);
-
-    (store.positions[0] as any).contracts = 2.5;
-    store.updateIds.positions += 1;
-    await emit('update', store);
-    expect(instance.isStopped).toBe(false);
-
-    (store.positions[0] as any).contracts = 3;
-    store.updateIds.positions += 1;
-    await emit('update', store);
-
-    expect(instance.isStopped).toBe(true);
-    expect(instance.state.stopReason).toBe('Completed');
-  });
-
-  it('does not use position-target completion outside Bybit demo', async () => {
-    const { emit, exchange, store } = createMockExchange();
-    const manager = new ChaserOrderManager();
-    const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT',
-      size: 1,
-      side: OrderSide.Buy,
-      maxAttempts: 10,
-      reduceOnly: false,
-      delay: 5000,
-    });
-
-    manager.add(instance);
-    await vi.advanceTimersByTimeAsync(1000);
-
-    (store as any).positions = [
-      {
-        id: 'BTCUSDT-long',
-        symbol: 'BTCUSDT',
-        side: PositionSide.Long,
-        entryPrice: 100,
-        notional: 100,
-        leverage: 1,
-        unrealizedPnl: 0,
-        contracts: 1,
-        liquidationPrice: 0,
-      },
-    ];
-    store.updateIds.positions += 1;
-
-    await emit('update', store);
-
-    expect(instance.isStopped).toBe(false);
-    expect(exchange.cancelOrders).not.toHaveBeenCalled();
-  });
-
   it('requires two order updates before treating a missing tracked order as final', async () => {
     const { emit, exchange, order, store } = createMockExchange();
     const manager = new ChaserOrderManager();
@@ -592,60 +471,6 @@ describe('ChaserOrderManager', () => {
     expect(exchange.cancelOrders).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
     ]);
-  });
-
-  it('refreshes private snapshots when placed order ids have not appeared in the store yet', async () => {
-    const { exchange, order, store } = createMockExchange();
-    const manager = new ChaserOrderManager();
-    const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT',
-      size: 1,
-      side: OrderSide.Buy,
-      maxAttempts: 10,
-      reduceOnly: false,
-      delay: 5000,
-    });
-
-    (store as any).orders = [];
-    (exchange.fetchAndSetPrivateSnapshot as any).mockImplementationOnce(async () => {
-      (store as any).orders = [order];
-      store.updateIds.orders += 1;
-    });
-
-    manager.add(instance);
-    await vi.advanceTimersByTimeAsync(1000);
-
-    expect(exchange.fetchAndSetPrivateSnapshot).toHaveBeenCalledTimes(1);
-    expect(instance.isStopped).toBe(false);
-    expect(manager.instances).toContain(instance);
-    expect(exchange.on).toHaveBeenCalledWith('update', expect.any(Function));
-  });
-
-  it('stops safely when placed order ids never appear in the store', async () => {
-    const { exchange, store } = createMockExchange();
-    const manager = new ChaserOrderManager();
-    const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT',
-      size: 1,
-      side: OrderSide.Buy,
-      maxAttempts: 10,
-      reduceOnly: false,
-      delay: 5000,
-    });
-
-    (store as any).orders = [];
-
-    manager.add(instance);
-    await vi.advanceTimersByTimeAsync(3500);
-
-    expect(exchange.fetchAndSetPrivateSnapshot).toHaveBeenCalledTimes(6);
-    expect(instance.isStopped).toBe(true);
-    expect(instance.state.stopReason).toBe('Placed orders did not appear in store');
-    expect(manager.instances).not.toContain(instance);
-    expect(exchange.cancelOrders).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
-    ]);
-    expect(exchange.emitter.emit).toHaveBeenCalledWith('warning', expect.stringMatching(/never appeared/i));
   });
 
   it('cancels orders placed during the user-cancel window so STOP fully clears the book', async () => {

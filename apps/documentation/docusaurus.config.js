@@ -403,8 +403,8 @@ const config = {
                 href: 'https://teal.link/woo',
               },
               {
-                label: 'Crypto.com',
-                href: 'https://teal.link/cryptocom',
+                label: 'Bitrue',
+                href: 'https://teal.link/bitrue',
               },
               {
                 label: 'Breakout',

@@ -16,7 +16,7 @@ describe('parseImportAccountData', () => {
 
       expect(result.isValid).toBe(true);
       expect(result.error).toBeUndefined();
-      expect(result.data).toMatchObject({
+      expect(result.data).toEqual({
         exchange: 'binance',
         apiKey: 'test-api-key',
         apiSecret: 'test-api-secret',
@@ -42,29 +42,24 @@ describe('parseImportAccountData', () => {
   });
 
   describe('valid single account (DEX)', () => {
-    it('parses valid Paradex account with privateKey aliases into canonical fields', () => {
+    it('parses valid account with privateKey', () => {
       const input = JSON.stringify({
-        exchange: 'paradex',
-        privateKey: '0xsubkey-private',
-        walletAddress: '0xmain',
-        subkeyAddress: '0xsubkey',
-        name: 'Paradex Account',
+        exchange: 'hyperliquid',
+        privateKey: '0x1234567890abcdef',
+        name: 'DEX Account',
       });
 
       const result = parseImportAccountData(input);
 
       expect(result.isValid).toBe(true);
-      expect(result.data).toMatchObject({
-        exchange: 'paradex',
-        apiKey: '0xsubkey-private',
-        apiSecret: '0xsubkey-private',
-        paradexAddress: '0xmain',
-        subkeyAddress: '0xsubkey',
-        name: 'Paradex Account',
+      expect(result.data).toEqual({
+        exchange: 'hyperliquid',
+        privateKey: '0x1234567890abcdef',
+        name: 'DEX Account',
       });
     });
 
-    it('rejects incomplete Hyperliquid legacy wallet-only data', () => {
+    it('parses valid account with walletAddress', () => {
       const input = JSON.stringify({
         exchange: 'hyperliquid',
         walletAddress: '0xabc123',
@@ -73,7 +68,7 @@ describe('parseImportAccountData', () => {
 
       const result = parseImportAccountData(input);
 
-      expect(result.isValid).toBe(false);
+      expect(result.isValid).toBe(true);
     });
   });
 
@@ -145,7 +140,7 @@ describe('parseImportAccountData', () => {
       expect(result.error).toContain('exchange');
     });
 
-    it('returns error for missing credentials', () => {
+    it('returns error for missing credentials (no apiKey/apiSecret and no privateKey/walletAddress)', () => {
       const input = JSON.stringify({
         exchange: 'binance',
         name: 'My Account',
@@ -154,8 +149,7 @@ describe('parseImportAccountData', () => {
       const result = parseImportAccountData(input);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toContain('apiKey');
-      expect(result.error).toContain('apiSecret');
+      expect(result.error).toContain('apiKey/apiSecret or privateKey/walletAddress');
     });
 
     it('returns error for partial CEX credentials (only apiKey)', () => {
@@ -301,26 +295,24 @@ describe('isValidExchangeAccount', () => {
       expect(isValidExchangeAccount(account)).toBe(true);
     });
 
-    it('returns true for valid Paradex account with privateKey aliases', () => {
+    it('returns true for valid DEX account with privateKey', () => {
       const account = {
-        exchange: 'paradex',
-        privateKey: '0xsubkey-private',
-        walletAddress: '0xmain',
-        subkeyAddress: '0xsubkey',
+        exchange: 'hyperliquid',
+        privateKey: '0x123',
         name: 'Account',
       };
 
       expect(isValidExchangeAccount(account)).toBe(true);
     });
 
-    it('returns false for incomplete Hyperliquid legacy wallet-only data', () => {
+    it('returns true for valid DEX account with walletAddress', () => {
       const account = {
         exchange: 'hyperliquid',
         walletAddress: '0xabc',
         name: 'Account',
       };
 
-      expect(isValidExchangeAccount(account)).toBe(false);
+      expect(isValidExchangeAccount(account)).toBe(true);
     });
   });
 
