@@ -64,8 +64,9 @@ import { normalizeSymbol, reverseSymbol } from './woo.utils';
 import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
 
-const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.5;
-const MARKET_IOC_QUOTE_FAIR_PRICE_TOLERANCE_PCT = 1;
+// WOO ETH perps cap crossing prices near 1% through fair price; stay below it
+// while still crossing enough spread to fill market-order IOC emulation.
+const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.9;
 const POSITION_METADATA_CACHE_TTL_MS = 30_000;
 const POSITION_METADATA_RATE_LIMIT_BACKOFF_MS = 10_000;
 
@@ -83,16 +84,11 @@ const chooseMarketIocReferencePrice = (ticker: Ticker | undefined, side: OrderSi
   const sideQuote = side === OrderSide.Buy ? ticker?.ask : ticker?.bid;
   const fairPrice = [ticker?.mark, ticker?.index, ticker?.midPrice, ticker?.last].find(isPositiveFinitePrice);
 
-  if (isPositiveFinitePrice(sideQuote) && isPositiveFinitePrice(fairPrice)) {
-    const quoteDeviationPct = (Math.abs(sideQuote - fairPrice) / fairPrice) * 100;
-
-    if (quoteDeviationPct <= MARKET_IOC_QUOTE_FAIR_PRICE_TOLERANCE_PCT) {
-      return sideQuote;
-    }
+  if (isPositiveFinitePrice(fairPrice)) {
+    return fairPrice;
   }
 
   return (
-    fairPrice ||
     (isPositiveFinitePrice(sideQuote) ? sideQuote : undefined) ||
     (side === OrderSide.Buy
       ? isPositiveFinitePrice(ticker?.bid)

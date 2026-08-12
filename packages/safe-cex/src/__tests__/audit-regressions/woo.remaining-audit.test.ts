@@ -85,7 +85,7 @@ describe('WooX remaining July audit regressions', () => {
       expect.objectContaining({
         symbol: 'PERP_BTC_USDT',
         order_type: 'IOC',
-        order_price: 100.5,
+        order_price: 100.9,
         side: 'BUY',
         order_quantity: 2,
       }),
@@ -126,7 +126,7 @@ describe('WooX remaining July audit regressions', () => {
       expect.objectContaining({
         symbol: 'PERP_BTC_USDT',
         order_type: 'IOC',
-        order_price: 1895.5,
+        order_price: 1903.1,
         side: 'BUY',
         order_quantity: 2,
       }),
@@ -228,7 +228,7 @@ describe('WooX remaining July audit regressions', () => {
       expect.objectContaining({
         symbol: 'PERP_BTC_USDT',
         order_type: 'IOC',
-        order_price: 99.5,
+        order_price: 99.1,
         side: 'SELL',
         order_quantity: 2,
       }),
