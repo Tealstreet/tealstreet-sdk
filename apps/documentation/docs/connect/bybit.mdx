@@ -18,6 +18,7 @@ import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
 import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 import ApiWhitelist from '/img/connect/bybit/v3/apiwhitelist.png';
 import ApiTealstreet from '/img/connect/bybit/v3/api-teal.png';
+import DocumentSign from '/img/connect/bybit/v3/document-sign.png';
 import ApiDropdown from '/img/connect/bybit/apidropdown.png';
 import ApiCreate from '/img/connect/bybit/apicreate.png';
 import SystemApi from '/img/connect/bybit/system-api.png';
@@ -230,10 +231,14 @@ You can find more [info here](https://announcements.bybit.com/article/introducin
 
 - Yes, Tealstreet V3 supports demo mode. Make sure you are using demo and not testnet. You also do not need to provide any IP's for the whitelisting process for demo mode.
 
-### Does Tealstreet support HyroTrader?
-
-- Yes, Tealstreet supports HyroTrader. You can connect your HyroTrader account to Tealstreet by following the [HyroTrader Instructions](https://www.hyrotrader.com/faq/getting-started/) and connecting a `Bybit Demo` account.
-
 ### I have available balance but my available margin is zero and I can't place orders?
 
 - Try toggling your isolated / cross margin settings on the official Bybit website. Some users have reported that this resolves the issue.
+
+### I get an error about signing an agreement before being able to trade?
+
+<div class="text--center">
+    <img src={DocumentSign} alt="Document Sign" style={{ width: 550 }} />
+</div>
+
+- Bybit requires you to sign a disclosure document to trade certain products. If you go to their website and manually trade the product in question, you will get a popup to sign the agreement.

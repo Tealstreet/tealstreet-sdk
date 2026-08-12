@@ -1,7 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
-import type { OkxInstrumentType, OkxRegion } from './okx.types';
+import type { OkxRegion } from './okx.types';
 
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
@@ -127,49 +127,6 @@ export class OKXExchange extends BaseExchange {
     this.businessWebsocket = new OKXBusinessWebsocket(this);
   }
 
-  getInstrumentTypes(): OkxInstrumentType[] {
-    return ['SWAP'];
-  }
-
-  isSupportedMarketInstrument(market: Record<string, any>): boolean {
-    return (
-      this.getInstrumentTypes().includes(market.instType) && (market.ctType === 'linear' || market.ctType === 'inverse')
-    );
-  }
-
-  getMarketInstrumentType(market: { info?: any; instType?: unknown }): OkxInstrumentType {
-    const instType = String(market.info?.instType || market.instType || 'SWAP');
-    return instType === 'FUTURES' ? 'FUTURES' : 'SWAP';
-  }
-
-  getIndexTickerInstId(market: Market): string {
-    const underlying = String(market.info?.uly || '');
-    if (underlying) return underlying;
-    return market.id.replace(/-SWAP$/, '');
-  }
-
-  getMarketsForIndexTickerInstId(instId: string): Market[] {
-    return this.store.markets.filter((market) => this.getIndexTickerInstId(market) === instId);
-  }
-
-  private formatMarketSymbol = (market: Record<string, any>) => {
-    if (market.instType === 'FUTURES' && market.ruleType === 'xperp') {
-      return String(market.instId || '').replace(/-/g, '');
-    }
-
-    return String(market.instId || '')
-      .replace(/-SWAP$/, '')
-      .replace(/-/g, '');
-  };
-
-  private formatMarketPrettySymbol = (market: Record<string, any>, base: string, quote: string) => {
-    if (market.instType === 'FUTURES' && market.ruleType === 'xperp') {
-      return `${base}/${quote} XPERP`;
-    }
-
-    return undefined;
-  };
-
   validateAccount = async () => {
     try {
       await this.xhr.get(ENDPOINTS.BALANCE);
@@ -288,15 +245,12 @@ export class OKXExchange extends BaseExchange {
 
   fetchMarkets = async () => {
     try {
-      const responses = await Promise.all(
-        this.getInstrumentTypes().map((instType) =>
-          this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS, { params: { instType } }),
-        ),
-      );
-      const data = responses.flatMap(({ data }) => data.data);
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS, { params: { instType: 'SWAP' } });
 
       return data
-        .filter((m) => this.isSupportedMarketInstrument(m))
+        .filter((m) => m.ctType === 'linear' || m.ctType === 'inverse')
         .map((m) => {
           const isInverse = m.ctType === 'inverse';
           const [ulyBase, ulyQuote] = String(m.uly || m.instFamily || '')
@@ -313,12 +267,9 @@ export class OKXExchange extends BaseExchange {
           const base = (m.baseCcy || (isInverse ? m.settleCcy : m.ctValCcy) || ulyBase || '').toUpperCase();
           const quote = (m.quoteCcy || (isInverse ? m.ctValCcy : m.settleCcy) || ulyQuote || '').toUpperCase();
 
-          const prettySymbol = this.formatMarketPrettySymbol(m, base, quote);
-
           return {
             id: m.instId,
-            symbol: this.formatMarketSymbol(m),
-            ...(prettySymbol ? { prettySymbol } : {}),
+            symbol: m.instId.replace(/-SWAP$/, '').replace(/-/g, ''),
             base,
             quote,
             isInverse,
@@ -354,16 +305,13 @@ export class OKXExchange extends BaseExchange {
 
   fetchTickersRaw = async () => {
     try {
-      const responses = await Promise.all(
-        this.getInstrumentTypes().map((instType) =>
-          this.xhr.get(ENDPOINTS.TICKERS, {
-            params: {
-              instType,
-            },
-          }),
-        ),
-      );
-      const data = responses.flatMap(({ data }) => data.data);
+      const {
+        data: { data },
+      } = await this.xhr.get(ENDPOINTS.TICKERS, {
+        params: {
+          instType: 'SWAP',
+        },
+      });
 
       return data;
     } catch (err: any) {
@@ -486,16 +434,13 @@ export class OKXExchange extends BaseExchange {
         },
       } = await this.xhr.get<{
         data: Array<Record<string, Array<Record<string, any>>>>;
-      }>(ENDPOINTS.BALANCE, { params: { instType: this.getInstrumentTypes()[0] } });
+      }>(ENDPOINTS.BALANCE, { params: { instType: 'SWAP' } });
 
-      const positionResponses = await Promise.all(
-        this.getInstrumentTypes().map((instType) =>
-          this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS, {
-            params: { instType },
-          }),
-        ),
-      );
-      const pData = positionResponses.flatMap(({ data }) => data.data);
+      const {
+        data: { data: pData },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS, {
+        params: { instType: 'SWAP' },
+      });
 
       const positions: Position[] = this.mapPositions(pData);
       const balance = await this.formatBalanceUsedAvail(bal, positions, this.store.orders || []);
@@ -675,53 +620,47 @@ export class OKXExchange extends BaseExchange {
   };
 
   fetchNormalOrders = async () => {
-    const recursiveFetch = async (
-      orders: Array<Record<string, any>> = [],
-      instType: OkxInstrumentType,
-    ): Promise<Array<Record<string, any>>> => {
+    const recursiveFetch = async (orders: Array<Record<string, any>> = []): Promise<Array<Record<string, any>>> => {
       const {
         data: { data },
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.UNFILLED_ORDERS, {
         params: {
-          instType,
+          instType: 'SWAP',
           after: orders.length ? orders[orders.length - 1].ordId : undefined,
         },
       });
 
       if (data.length === 100) {
-        return recursiveFetch([...orders, ...data], instType);
+        return recursiveFetch([...orders, ...data]);
       }
 
       return [...orders, ...data];
     };
 
-    const okxOrders = flatten(await map(this.getInstrumentTypes(), (instType) => recursiveFetch([], instType)));
+    const okxOrders = await recursiveFetch();
     return this.mapOrders(okxOrders);
   };
 
   fetchAlgoOrders = async (type: 'conditional' | 'trigger' | 'move_order_stop' | 'oco') => {
-    const recursiveFetch = async (
-      orders: Array<Record<string, any>> = [],
-      instType: OkxInstrumentType,
-    ): Promise<Array<Record<string, any>>> => {
+    const recursiveFetch = async (orders: Array<Record<string, any>> = []): Promise<Array<Record<string, any>>> => {
       const {
         data: { data },
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.UNFILLED_ALGO_ORDERS, {
         params: {
-          instType,
+          instType: 'SWAP',
           ordType: type,
           after: orders.length ? orders[orders.length - 1].algoId : undefined,
         },
       });
 
       if (data.length === 100) {
-        return recursiveFetch([...orders, ...data], instType);
+        return recursiveFetch([...orders, ...data]);
       }
 
       return [...orders, ...data];
     };
 
-    const okxOrders = flatten(await map(this.getInstrumentTypes(), (instType) => recursiveFetch([], instType)));
+    const okxOrders = await recursiveFetch();
     return this.mapOrders(okxOrders);
   };
 
@@ -818,7 +757,7 @@ export class OKXExchange extends BaseExchange {
 
     const fetchByEndpoint = async (endpoint: string) => {
       const params = omitUndefined({
-        instType: this.getMarketInstrumentType(market),
+        instType: 'SWAP',
         instId: market.id,
         ordId: orderId,
         begin: fromMilliseconds,
@@ -1006,7 +945,8 @@ export class OKXExchange extends BaseExchange {
 
     const conditionalOrderPrice = this.toFiniteNumber(order.extra?.conditionalOrderPrice);
     payload.newTriggerPx = `${triggerPrice}`;
-    payload.newOrdPx = conditionalOrderPrice > 0 ? `${adjust(conditionalOrderPrice, market.precision.price)}` : '-1';
+    payload.newOrdPx =
+      conditionalOrderPrice > 0 ? `${adjust(conditionalOrderPrice, market.precision.price)}` : '-1';
     payload.newTriggerPxType = getOKXTriggerPxType(order.triggerType);
 
     if ('amount' in update && +order.amount !== 0) {
@@ -1215,7 +1155,11 @@ export class OKXExchange extends BaseExchange {
     return this.store.tickersById[market.id] || this.store.tickersBySymbol[market.symbol];
   };
 
-  private hasExternalTriggerReferencePrice = (market: Market, source: 'mark' | 'index', ticker: Ticker | undefined) => {
+  private hasExternalTriggerReferencePrice = (
+    market: Market,
+    source: 'mark' | 'index',
+    ticker: Ticker | undefined,
+  ) => {
     const config = this.options.externalPublicData;
 
     if (config?.type === 'in-process') {
@@ -1335,7 +1279,8 @@ export class OKXExchange extends BaseExchange {
         const isReduceOnly = o.reduceOnly === 'true' || o.reduceOnly === true;
         const type = isReduceOnly ? this.getReduceOnlyTriggerOrderType(o, market) : OrderType.Conditional;
         const triggerType = parseOKXTriggerPxType(o.triggerPxType);
-        const suffix = type === OrderType.StopLoss ? '_sl' : type === OrderType.TakeProfit ? '_tp' : '';
+        const suffix =
+          type === OrderType.StopLoss ? '_sl' : type === OrderType.TakeProfit ? '_tp' : '';
         const triggerTypeFields =
           type === OrderType.StopLoss
             ? { slTriggerType: triggerType }

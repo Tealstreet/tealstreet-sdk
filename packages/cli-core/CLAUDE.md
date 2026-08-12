@@ -4,12 +4,11 @@ Shared utilities for the Tealstreet CLI and web terminal.
 
 ## Account commands
 
-- `accounts add` and `accounts import` must build/validate new accounts through
-  `@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig` before
+- `accounts add` and `accounts import` must normalize new accounts through
+  `@tealstreet/safe-cex/src/accounts/normalizeExchangeAccountConfig` before
   persisting. Manual add supports `--tealstreet-proxy` / `--proxy-region` so
   standalone CLI can express the same saved account routing shape as the web
-  "Use Tealstreet IPs" checkbox. Do not add CLI-local exchange credential
-  schemas; derive required fields from safe-cex.
+  "Use Tealstreet IPs" checkbox.
 
 ## Strategy commands
 

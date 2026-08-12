@@ -1,7 +1,5 @@
 import type { ExchangeAccountConfig } from '../types';
 
-import { buildExchangeAccountConfig } from './buildExchangeAccountConfig';
-
 export interface ParseImportResult {
   isValid: boolean;
   data?: ExchangeAccountConfig | ExchangeAccountConfig[];
@@ -46,7 +44,7 @@ export function parseImportAccountData(rawData: string): ParseImportResult {
       if (result.error) {
         return { isValid: false, error: result.error };
       }
-      return { isValid: true, data: result.account };
+      return { isValid: true, data: parsed as ExchangeAccountConfig };
     }
 
     // Handle array of accounts
@@ -64,7 +62,6 @@ export function parseImportAccountData(rawData: string): ParseImportResult {
         if (result.error) {
           return { isValid: false, error: result.error };
         }
-        parsed[i] = result.account;
       }
 
       return { isValid: true, data: parsed as ExchangeAccountConfig[] };
@@ -86,7 +83,7 @@ export function parseImportAccountData(rawData: string): ParseImportResult {
  * Validates a single account object
  * Returns error message if invalid, undefined if valid
  */
-function validateAccount(account: unknown, index: number): { account?: ExchangeAccountConfig; error?: string } {
+function validateAccount(account: unknown, index: number): { error?: string } {
   if (typeof account !== 'object' || account === null) {
     return { error: `Account #${index} is not a valid object` };
   }
@@ -98,21 +95,26 @@ function validateAccount(account: unknown, index: number): { account?: ExchangeA
   if (!obj.name) missingFields.push('name');
   if (!obj.exchange) missingFields.push('exchange');
 
+  // Check for API credentials (either apiKey/apiSecret or privateKey/walletAddress)
+  const hasApiKey = !!obj.apiKey;
+  const hasApiSecret = !!obj.apiSecret;
+  const hasPrivateKey = !!obj.privateKey;
+  const hasWalletAddress = !!obj.walletAddress;
+
+  const hasCexCredentials = hasApiKey && hasApiSecret;
+  const hasDexCredentials = hasPrivateKey || hasWalletAddress;
+
+  if (!hasCexCredentials && !hasDexCredentials) {
+    missingFields.push('apiKey/apiSecret or privateKey/walletAddress');
+  }
+
   if (missingFields.length > 0) {
     return {
       error: `Account #${index} missing fields: ${missingFields.join(', ')}`,
     };
   }
 
-  try {
-    return {
-      account: buildExchangeAccountConfig(obj as unknown as Parameters<typeof buildExchangeAccountConfig>[0]),
-    };
-  } catch (error) {
-    return {
-      error: `Account #${index} ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
+  return {};
 }
 
 /**
@@ -120,10 +122,14 @@ function validateAccount(account: unknown, index: number): { account?: ExchangeA
  */
 export function isValidExchangeAccount(obj: unknown): obj is ExchangeAccountConfig {
   if (typeof obj !== 'object' || obj === null) return false;
-  try {
-    buildExchangeAccountConfig(obj as unknown as Parameters<typeof buildExchangeAccountConfig>[0]);
-    return true;
-  } catch {
-    return false;
-  }
+  const account = obj as Record<string, unknown>;
+
+  // Must have name and exchange
+  if (!account.name || !account.exchange) return false;
+
+  // Must have either CEX credentials or DEX credentials
+  const hasCexCredentials = !!account.apiKey && !!account.apiSecret;
+  const hasDexCredentials = !!account.privateKey || !!account.walletAddress;
+
+  return hasCexCredentials || hasDexCredentials;
 }
