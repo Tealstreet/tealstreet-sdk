@@ -65,6 +65,35 @@ import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
 
 const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.5;
+const MARKET_IOC_QUOTE_FAIR_PRICE_TOLERANCE_PCT = 1;
+
+const isPositiveFinitePrice = (price: number | undefined): price is number =>
+  typeof price === 'number' && Number.isFinite(price) && price > 0;
+
+const chooseMarketIocReferencePrice = (ticker: Ticker | undefined, side: OrderSide) => {
+  const sideQuote = side === OrderSide.Buy ? ticker?.ask : ticker?.bid;
+  const fairPrice = [ticker?.mark, ticker?.index, ticker?.midPrice, ticker?.last].find(isPositiveFinitePrice);
+
+  if (isPositiveFinitePrice(sideQuote) && isPositiveFinitePrice(fairPrice)) {
+    const quoteDeviationPct = (Math.abs(sideQuote - fairPrice) / fairPrice) * 100;
+
+    if (quoteDeviationPct <= MARKET_IOC_QUOTE_FAIR_PRICE_TOLERANCE_PCT) {
+      return sideQuote;
+    }
+  }
+
+  return (
+    fairPrice ||
+    (isPositiveFinitePrice(sideQuote) ? sideQuote : undefined) ||
+    (side === OrderSide.Buy
+      ? isPositiveFinitePrice(ticker?.bid)
+        ? ticker?.bid
+        : undefined
+      : isPositiveFinitePrice(ticker?.ask)
+        ? ticker?.ask
+        : undefined)
+  );
+};
 
 export class WOOXExchange extends BaseExchange {
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
@@ -1594,10 +1623,7 @@ export class WOOXExchange extends BaseExchange {
       type = 'POST_ONLY';
     } else if (opts.type === OrderType.Market) {
       const ticker = this.store.tickersBySymbol[opts.symbol];
-      const referencePrice =
-        opts.side === OrderSide.Buy
-          ? ticker?.ask || ticker?.last || ticker?.mark || ticker?.index || ticker?.bid
-          : ticker?.bid || ticker?.last || ticker?.mark || ticker?.index || ticker?.ask;
+      const referencePrice = chooseMarketIocReferencePrice(ticker, opts.side);
 
       if (!referencePrice || !Number.isFinite(referencePrice) || referencePrice <= 0) {
         throw new Error(`Ticker ${opts.symbol} missing valid price for WOO market IOC order`);

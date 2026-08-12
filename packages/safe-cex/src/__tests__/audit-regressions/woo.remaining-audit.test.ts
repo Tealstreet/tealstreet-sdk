@@ -94,6 +94,46 @@ describe('WooX remaining July audit regressions', () => {
     expect(ids).toEqual(['301']);
   });
 
+  it('uses mark price for market buys when legacy ticker ask is stale', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      tickers: [
+        {
+          id: 'BTC/USDT:USDT',
+          symbol: 'BTCUSDT',
+          bid: 1989.9,
+          ask: 1989.9,
+          last: 1989.9,
+          index: 1886.1,
+          mark: 1886.1,
+        } as any,
+      ],
+    });
+    const post = vi.fn().mockResolvedValue({
+      data: { success: true, order_id: 303 },
+    });
+    exchange.xhr = { post } as any;
+
+    const ids = await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Market,
+      amount: 2,
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.PLACE_ORDER,
+      expect.objectContaining({
+        symbol: 'PERP_BTC_USDT',
+        order_type: 'IOC',
+        order_price: 1895.5,
+        side: 'BUY',
+        order_quantity: 2,
+      }),
+    );
+    expect(ids).toEqual(['303']);
+  });
+
   it('emulates market sells with a crossing IOC order', async () => {
     const { exchange } = makeExchange();
     const post = vi.fn().mockResolvedValue({
