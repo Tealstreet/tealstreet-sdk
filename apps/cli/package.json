@@ -43,7 +43,7 @@
     "postinstall": "node scripts/install-binary.cjs --optional"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@sentry/bun": "^10.69.0",
     "@tealstreet/cli-core": "*",
     "@tealstreet/safe-cex": "*",
