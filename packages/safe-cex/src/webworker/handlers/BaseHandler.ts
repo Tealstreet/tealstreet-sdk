@@ -19,6 +19,7 @@ export abstract class BaseHandler {
   private _pendingUntilMarkets: StoreWorkerPayload[] = [];
   private _pendingTimeout: ReturnType<typeof setTimeout> | null = null;
   private _pendingPoll: ReturnType<typeof setInterval> | null = null;
+  private _firstPendingAt: number | null = null;
 
   constructor(
     accountName: string,
@@ -45,6 +46,7 @@ export abstract class BaseHandler {
   protected bufferUntilMarketsLoaded(payload: StoreWorkerPayload): boolean {
     if (this._exchange.store.markets.length > 0) return false;
 
+    this._firstPendingAt ??= Date.now();
     this._pendingUntilMarkets.push(payload);
 
     // Start polling to flush when markets load
@@ -62,7 +64,27 @@ export abstract class BaseHandler {
         if (this._pendingUntilMarkets.length > 0) {
           const msg = `Markets still not loaded after ${PENDING_TIMEOUT_MS / 1000}s, dropping ${this._pendingUntilMarkets.length} pending subscriptions`;
           console.error(`[${this.constructor.name}] ${msg}`);
-          this._ctx.postMessage({ op: 'error', data: [msg] });
+          const error = new Error(msg);
+          error.name = 'MarketsNotLoadedError';
+          this._ctx.postMessage({
+            op: 'error',
+            data: [
+              msg,
+              {
+                sendToSentry: true,
+                sentryData: {
+                  error,
+                  tags: {
+                    exchange: this._exchange.name,
+                    module: 'BaseHandler',
+                    worker_handler: this.constructor.name,
+                    worker_error_family: 'markets_not_loaded',
+                  },
+                  extra: this._getPendingTelemetry(),
+                },
+              },
+            ],
+          });
           this._pendingUntilMarkets = [];
         }
         this._clearPendingTimers();
@@ -87,6 +109,39 @@ export abstract class BaseHandler {
       clearInterval(this._pendingPoll);
       this._pendingPoll = null;
     }
+    this._firstPendingAt = null;
+  }
+
+  private _getPendingTelemetry(): Record<string, unknown> {
+    const pendingOpCounts: Record<string, number> = {};
+    for (const payload of this._pendingUntilMarkets) {
+      pendingOpCounts[payload.op] = (pendingOpCounts[payload.op] ?? 0) + 1;
+    }
+
+    const socketHealth = this._exchange.store.socketHealth;
+    return {
+      marketCount: this._exchange.store.markets.length,
+      loadedMarkets: this._exchange.store.loaded?.markets === true,
+      pendingCount: this._pendingUntilMarkets.length,
+      pendingAgeMs: this._firstPendingAt === null ? 0 : Date.now() - this._firstPendingAt,
+      pendingOpCounts,
+      exchangeOptions: {
+        testnet: this._exchange.options?.testnet,
+        publicDataOnly: this._exchange.options?.publicDataOnly,
+      },
+      socketHealth: {
+        publicInitialized: socketHealth?.publicInitialized,
+        privateInitialized: socketHealth?.privateInitialized,
+        publicHealthy: socketHealth?.publicHealthy,
+        privateHealthy: socketHealth?.privateHealthy,
+        publicCloseCode: socketHealth?.publicCloseCode,
+        privateCloseCode: socketHealth?.privateCloseCode,
+        publicCloseStreak: socketHealth?.publicCloseStreak,
+        privateCloseStreak: socketHealth?.privateCloseStreak,
+        publicReconnectPaused: socketHealth?.publicReconnectPaused,
+        privateReconnectPaused: socketHealth?.privateReconnectPaused,
+      },
+    };
   }
 
   dispose() {

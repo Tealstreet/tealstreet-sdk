@@ -114,12 +114,13 @@ Exchanges connect to APIs in three modes, controlled by metadata flags in `excha
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
-Canonical saved account shaping lives in
+Canonical saved account construction lives in
+`src/accounts/buildExchangeAccountConfig.ts`, with routing normalization in
 `src/accounts/normalizeExchangeAccountConfig.ts`. Web, CLI, key-audit, and
-other "add API key" flows should produce an `ExchangeAccountConfig`, normalize
-that account, then persist/test/pass it to `createExchangeFromAccount()`.
-Do not reimplement `tealstreetProxy` / `proxyRegion` account defaults in app
-code.
+other "add API key" flows should build or validate new credentials through that
+shared account contract before persisting/testing/passing the account to
+`createExchangeFromAccount()`. Do not reimplement exchange credential fields or
+`tealstreetProxy` / `proxyRegion` account defaults in app code.
 
 Exchange API factories must install HOW and other transport adapters through
 `setInnerAdapterForRemoteSigning(instance, adapter)`, never by assigning
@@ -228,13 +229,13 @@ follow-up, not an oversight.
 
 ### Other metadata flags
 
-| Flag                         | Default | Purpose                                                              |
-| ---------------------------- | ------- | -------------------------------------------------------------------- |
+| Flag                         | Default | Purpose                                                               |
+| ---------------------------- | ------- | --------------------------------------------------------------------- |
 | `hiddenFromNewAccountPicker` | `false` | Hide from the add-API-key picker while keeping saved accounts running |
 | `supportsSpotToggle`         | `false` | Venue serves spot + derivatives from one connection; offer the opt-in |
 
 `hiddenFromNewAccountPicker` is deliberately **not** `enabled: false`:
-availability gates also decide whether a *saved* account may register at
+availability gates also decide whether a _saved_ account may register at
 startup, so disabling a superseded venue stops every existing user account on
 it from loading. Set on `hyperliquidspot`, now served by `hyperliquid`'s spot
 toggle.

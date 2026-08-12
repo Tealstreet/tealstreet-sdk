@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseHandler } from './BaseHandler';
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
@@ -15,6 +15,10 @@ class TestHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
     this.handleCallCount++;
     this.lastPayload = payload;
+  }
+
+  buffer(payload: StoreWorkerPayload): boolean {
+    return this.bufferUntilMarketsLoaded(payload);
   }
 
   dispose(): void {
@@ -48,8 +52,23 @@ class TestHandler extends BaseHandler {
 }
 
 describe('BaseHandler', () => {
-  const mockExchange = { name: 'bybit' } as Exchange;
-  const mockCtx = {} as Worker;
+  const mockExchange = {
+    name: 'bybit',
+    options: { testnet: true, publicDataOnly: false },
+    store: {
+      markets: [],
+      loaded: { markets: false },
+      socketHealth: {
+        publicInitialized: true,
+        privateInitialized: false,
+        publicHealthy: false,
+        privateHealthy: false,
+        publicCloseCode: 1006,
+        publicCloseStreak: 2,
+      },
+    },
+  } as unknown as Exchange;
+  const mockCtx = { postMessage: vi.fn() } as unknown as Worker;
   const mockSettings: AppSettingsWorkerType = {
     placeOrder: {
       tpTriggerType: OrderStopTriggerType.MarkPrice,
@@ -62,6 +81,18 @@ describe('BaseHandler', () => {
     defaultTPTriggerType: OrderStopTriggerType.MarkPrice,
     defaultSLTriggerType: OrderStopTriggerType.LastPrice,
   };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    vi.mocked(mockCtx.postMessage).mockClear();
+    (mockExchange.store as any).markets = [];
+    (mockExchange.store as any).loaded = { markets: false };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   describe('constructor', () => {
     it('should store accountName', () => {
@@ -174,6 +205,59 @@ describe('BaseHandler', () => {
       handler.handle(payload);
 
       expect(handler.lastPayload).toBe(payload);
+    });
+  });
+
+  describe('market-load buffering telemetry', () => {
+    it('sends structured Sentry data when pending subscriptions time out before markets load', () => {
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'BTCUSDT' } })).toBe(true);
+      expect(handler.buffer({ op: 'subscribeOHLCV' as any, data: { symbol: 'ETHUSDT', interval: '1m' } })).toBe(true);
+
+      vi.advanceTimersByTime(30_000);
+
+      expect(mockCtx.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          op: 'error',
+          data: [
+            expect.stringContaining('Markets still not loaded after 30s'),
+            expect.objectContaining({
+              sendToSentry: true,
+              sentryData: expect.objectContaining({
+                error: expect.objectContaining({ name: 'MarketsNotLoadedError' }),
+                tags: expect.objectContaining({
+                  exchange: 'bybit',
+                  module: 'BaseHandler',
+                  worker_handler: 'TestHandler',
+                  worker_error_family: 'markets_not_loaded',
+                }),
+                extra: expect.objectContaining({
+                  marketCount: 0,
+                  loadedMarkets: false,
+                  pendingCount: 2,
+                  pendingAgeMs: 30_000,
+                  pendingOpCounts: {
+                    subscribeOrderBook: 1,
+                    subscribeOHLCV: 1,
+                  },
+                  socketHealth: expect.objectContaining({
+                    publicInitialized: true,
+                    publicCloseCode: 1006,
+                  }),
+                }),
+              }),
+            }),
+          ],
+        }),
+      );
     });
   });
 

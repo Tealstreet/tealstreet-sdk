@@ -337,6 +337,32 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
    while missing order topic events, so do not gate this backstop solely on
    `privateWebsocket.isHealthy`.
 
+8. **Recently-placed orders are shielded from snapshot replacement until first
+   sighting.** `/v5/order/realtime` lags order creation (worst on `api-demo`),
+   so the forced backstop above could fetch a snapshot WITHOUT an order placed
+   250ms earlier and wholesale-replace it out of the store — the chaser
+   supervisor then saw its live order "disappear", stopped itself, and
+   **cancelled the order on the exchange** (the Aug 2026 "quick chaser does
+   nothing on demo" bug). `placeOrder` records each created id in
+   `recentlyPlacedOrders`; `fetchOrders` re-adds a recorded order a snapshot
+   omitted via `preserveRecentlyPlacedOrders`. Protection ends on the FIRST
+   sighting anywhere — REST snapshot inclusion, any private-WS order frame
+   (`handleOrderTopic` calls `markOrderSeen`), or our own `cancelOrders` — or
+   after `RECENTLY_PLACED_ORDER_GRACE_MS` (8s). **Never widen this to
+   already-sighted orders**: once seen, absence means filled/cancelled and must
+   be honored, or the chaser would re-place on top of a fill (overfill). On
+   demo only, `recordRecentlyPlacedOrder` also adds the constructed row to the
+   store optimistically, because demo's WS may never deliver it — without that
+   the UI shows nothing and the chaser idles with an unmanaged resting order
+   (a second click then places a duplicate).
+
+9. **Demo chaser fill reconciliation is REST-backed.** `BybitDemoExchange` uses
+   the chaser manager's fill-based reconciliation path because private WS can be
+   unavailable in geo/policy-blocked environments. `fetchFillsForOrderIds`
+   queries `/v5/execution/list` by current order id and fails closed on malformed
+   or non-OK responses, so the manager will not replace after a cancel if fill
+   state is unknowable.
+
 ### Native Market Slippage Protection
 
 All Bybit variants map `PlaceOrderOpts.maxSlippagePct` to V5
@@ -445,6 +471,11 @@ The update path depends on the order type:
 - **Cancel all for symbol** (`cancelSymbolOrders` at `bybit.exchange.ts:1702-1726`): When `cancelTpSl=false`, preserves TP/SL orders by saving them, canceling all, then re-placing the TP/SL orders with flipped sides.
 - Successful cancels force an order-inclusive REST snapshot so stale TP/SL rows
   do not linger when Bybit demo/private WS is degraded.
+- Treat `"order not exists or too late to cancel"` batch-cancel rows as
+  already-gone success. Demo can have optimistic/preserved rows for orders whose
+  post-only create was accepted and then immediately rejected/cancelled by the
+  venue; canceling such a row during chase reprice or cleanup must not kill the
+  supervisor.
 - **Inter-batch delay**: 1000ms between cancel batches (`bybit.exchange.ts:1666`)
 
 ## Symbol Format

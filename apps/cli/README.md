@@ -71,6 +71,10 @@ High-level entry points:
 - `src/scroll-region.ts` + `src/status-line.ts` + `src/footer.ts` + `src/footer-segments.ts` — the pinned output surfaces (top alert bar + bottom status footer over one shared ANSI scroll region)
 - `src/audit-log.ts` — durable append-only write-op trail + command tracing (`audit` command)
 
+Account add/import surfaces must use
+`@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig`; do not add
+CLI-local credential schemas or exchange support tables.
+
 ## Development
 
 ### Watch Mode Pattern (Terminal Takeover)

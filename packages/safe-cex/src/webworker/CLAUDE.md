@@ -143,6 +143,20 @@ N-bearing payload). The shared-ref race violates that contract by
 letting `updateIds.X` advance _without_ the array following. The
 fix at `_sanitizeForPostMessage` restores the invariant.
 
+## Market-load subscription buffering telemetry
+
+`handlers/BaseHandler.ts` buffers orderbook/OHLCV subscriptions while
+`exchange.store.markets` is empty. If markets still have not loaded after 30 s,
+it drops the pending subscriptions and posts an `op: 'error'` payload with
+`sendToSentry: true`. This is intentionally still app-neutral: safe-cex does
+not import Sentry, it only sends structured data for the web app to sanitize.
+
+That payload carries only bounded, non-user fields: exchange name, handler name,
+pending op counts, market loaded/count state, public-data/testnet flags, and
+socket-health scalars. Do not add raw account names, symbols, topics, payload
+objects, or request bodies here; the web Sentry sanitizer is allowed to index
+the resulting `worker_error_family=markets_not_loaded` tag.
+
 ## Other notes
 
 - `dispose()` tears down every chaser owned by the current exchange before it

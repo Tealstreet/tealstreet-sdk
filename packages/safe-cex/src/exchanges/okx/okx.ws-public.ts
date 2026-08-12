@@ -1,4 +1,4 @@
-import type { OrderBook, OrderBookOrders } from '../../types';
+import type { Market, OrderBook, OrderBookOrders } from '../../types';
 import type { OKXExchange } from './okx.exchange';
 
 import flatten from 'lodash/flatten';
@@ -52,7 +52,7 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
 
       this.topics['index-tickers'] = this.store.markets.map((m) => ({
         channel: 'index-tickers',
-        instId: m.id.replace('-SWAP', ''),
+        instId: this.parent.getIndexTickerInstId(m),
       }));
 
       this.topics['open-interest'] = this.store.markets.map((m) => ({
@@ -88,12 +88,15 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
     }
   };
 
-  private onMarketsChanged = ({ added }: { added: Array<{ id: string; symbol: string }> }) => {
+  private onMarketsChanged = ({ added }: { added: Market[] }) => {
     if (added.length === 0 || !this.ws || this.isDisposed) return;
 
     const newTickerTopics = added.map((m) => ({ channel: 'tickers', instId: m.id }));
     const newMarkPriceTopics = added.map((m) => ({ channel: 'mark-price', instId: m.id }));
-    const newIndexTopics = added.map((m) => ({ channel: 'index-tickers', instId: m.id.replace('-SWAP', '') }));
+    const newIndexTopics = added.map((m) => ({
+      channel: 'index-tickers',
+      instId: this.parent.getIndexTickerInstId(m),
+    }));
     const newOiTopics = added.map((m) => ({ channel: 'open-interest', instId: m.id }));
     const newFundingTopics = added.map((m) => ({ channel: 'funding-rate', instId: m.id }));
 
@@ -234,9 +237,11 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
   };
 
   handleIndexTickerEvents = ({ data: [update] }: Data) => {
-    const marketId = `${update.instId}-SWAP`;
-    this.parent.indexPriceLoaded(marketId);
-    this.store.updateTicker({ id: marketId }, { index: parseFloat(update.idxPx) });
+    const indexPrice = parseFloat(update.idxPx);
+    for (const market of this.parent.getMarketsForIndexTickerInstId(update.instId)) {
+      this.parent.indexPriceLoaded(market.id);
+      this.store.updateTicker({ id: market.id }, { index: indexPrice });
+    }
   };
 
   handleOpenInterestEvents = ({ data: [update] }: Data) => {

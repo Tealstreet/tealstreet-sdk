@@ -1,12 +1,12 @@
 # OKX Exchange Integration
 
-This directory contains the OKX exchange integration for Tealstreet. It supports **linear and inverse perpetual swaps**. Spot instruments are not requested.
+This directory contains the OKX exchange integration for Tealstreet. Regular OKX supports **linear and inverse perpetual swaps**. OKX EU additionally supports **X-Perps**, which OKX exposes as `FUTURES` instruments with `ruleType === 'xperp'`. Spot instruments are not requested.
 
 ## Exchange Information
 
 - **Exchange**: OKX (formerly OKEx)
 - **Type**: Centralized Exchange (CEX)
-- **Supported products**: Linear and inverse perpetual swaps (`ctType === 'linear' || ctType === 'inverse'`)
+- **Supported products**: Linear and inverse perpetual swaps (`ctType === 'linear' || ctType === 'inverse'`); OKX EU also includes X-Perp `FUTURES` rows where `ruleType === 'xperp'`
 - **API version**: v5
 - **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported.
 - **Latency domain**: `www.okx.com` (`okxeu`: `eea.okx.com`)
@@ -97,8 +97,8 @@ Promise.all([
 ])
 ```
 
-- **Markets** (`/api/v5/public/instruments?instType=SWAP`): Fetches SWAP instruments, keeps linear and inverse contracts, and stores them
-- **Tickers** (`/api/v5/market/tickers?instType=SWAP`): Fetched in parallel with markets
+- **Markets** (`/api/v5/public/instruments?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetches supported instruments, keeps linear/inverse contracts, and stores them. For OKX EU, regular dated futures are ignored unless `ruleType === 'xperp'`.
+- **Tickers** (`/api/v5/market/tickers?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetched in parallel with markets
 
 ### Phase 2: Parse & Connect Public WS (sequential)
 
@@ -556,11 +556,12 @@ automatically split by `formatCreateOrder`:
 
 ## Symbol Format
 
-- **OKX instrument ID (`instId`)**: `BTC-USDT-SWAP`, `ETH-USDT-SWAP`
+- **OKX instrument ID (`instId`)**: `BTC-USDT-SWAP`, `ETH-USDT-SWAP`; OKX EU X-Perps use IDs like `ETH-USD_UM_XPERP-310404`
 - **Internal symbol**: `BTCUSDT`, `ETHUSDT` (derived by stripping `-SWAP` and removing all `-` from `instId`)
-- **Market filter**: Linear and inverse SWAP contracts are included; spot is not requested
-- **Index ticker subscription**: Uses `instId` without `-SWAP` suffix (e.g., `BTC-USDT`)
-- **Index ticker response mapping**: Re-appends `-SWAP` to match stored ticker IDs
+- **X-Perp internal symbol**: Keeps the venue's `_UM_XPERP` identity and expiry while removing dashes (for example `ETHUSD_UM_XPERP310404`) so it does not collide with `ETHUSD` SWAP markets.
+- **Market filter**: Linear and inverse SWAP contracts are included; OKX EU also includes `FUTURES` X-Perps. Spot is not requested.
+- **Index ticker subscription**: Uses the market `uly` when available (e.g. `BTC-USDT`, `ETH-USD`), falling back to `instId` without `-SWAP`
+- **Index ticker response mapping**: Updates every stored market whose index source matches the received `instId`; this allows `ETH-USD` to feed both `ETH-USD-SWAP` and `ETH-USD_UM_XPERP-...`
 
 ## Data Precision & Conversion
 
