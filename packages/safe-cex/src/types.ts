@@ -264,6 +264,13 @@ export interface ExchangeAccountConfig {
   updatedAt?: number;
   /** Tombstone marker for sync deletes. Live accounts have undefined. */
   deletedAt?: number;
+  /** Stable identity minted at creation, carried across renames and key
+   *  rotations. Merge still keys on `name`; this is what tells a rotated
+   *  key (same id, plain last-write-wins) from two devices that
+   *  independently created different accounts under one name (different
+   *  id, both worth keeping). Missing on pre-sync rows — see
+   *  `apps/web/src/utils/accountSync/accountFields.ts`. */
+  syncId?: string;
 }
 
 export type PublicExchangeOptions = Omit<ExchangeOptions, 'key' | 'secret'> & {
