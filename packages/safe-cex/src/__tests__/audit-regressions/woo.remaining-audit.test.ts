@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
 import { ENDPOINTS } from '../../exchanges/woo/woo.types';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 
 const makeExchange = () => {
   const store = new DefaultStore();
@@ -132,6 +132,81 @@ describe('WooX remaining July audit regressions', () => {
       }),
     );
     expect(ids).toEqual(['303']);
+  });
+
+  it('caches zero-position leverage metadata instead of refetching every positions poll', async () => {
+    const { exchange } = makeExchange();
+    const get = vi.fn(async (endpoint: string) => {
+      if (endpoint === ENDPOINTS.POSITIONS) {
+        return { data: { success: true, data: { positions: [] } } };
+      }
+      if (endpoint === ENDPOINTS.FUTURES_LEVERAGE) {
+        return {
+          data: {
+            success: true,
+            data: {
+              symbol: 'PERP_BTC_USDT',
+              default_margin_mode: 'CROSS',
+              position_mode: 'ONE_WAY',
+              details: [{ position_side: 'BOTH', leverage: '10' }],
+            },
+            timestamp: 1,
+          },
+        };
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    });
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.fetchPositions(['BTCUSDT'])).resolves.toEqual([
+      expect.objectContaining({ symbol: 'BTCUSDT', contracts: 0, leverage: 10 }),
+    ]);
+    await expect(exchange.fetchPositions(['BTCUSDT'])).resolves.toEqual([
+      expect.objectContaining({ symbol: 'BTCUSDT', contracts: 0, leverage: 10 }),
+    ]);
+
+    expect(get.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.FUTURES_LEVERAGE)).toHaveLength(1);
+  });
+
+  it('keeps cached zero-position leverage metadata through Woo rate limits', async () => {
+    const { exchange } = makeExchange();
+    (exchange as any)._positionMetadataCache.set(`BTCUSDT:${PositionMode.OneWay}`, {
+      metadata: [
+        {
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          leverage: 10,
+          positionMode: PositionMode.OneWay,
+          marginType: MarginType.Cross,
+        },
+      ],
+      updatedAt: 0,
+    });
+    const get = vi.fn(async (endpoint: string) => {
+      if (endpoint === ENDPOINTS.POSITIONS) {
+        return { data: { success: true, data: { positions: [] } } };
+      }
+      if (endpoint === ENDPOINTS.FUTURES_LEVERAGE) {
+        throw {
+          response: {
+            status: 429,
+            data: {
+              code: -1003,
+              error_code: 90003,
+              message: 'You have exceeded the rate limit, please try again in 10 seconds.',
+            },
+          },
+          message: 'Too Many Requests',
+        };
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    });
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.fetchPositions(['BTCUSDT'])).resolves.toEqual([
+      expect.objectContaining({ symbol: 'BTCUSDT', contracts: 0, leverage: 10 }),
+    ]);
+    expect(get.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.FUTURES_LEVERAGE)).toHaveLength(1);
   });
 
   it('emulates market sells with a crossing IOC order', async () => {

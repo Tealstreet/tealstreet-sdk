@@ -66,6 +66,15 @@ import { WooPublicWebsocket } from './woo.ws-public';
 
 const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.5;
 const MARKET_IOC_QUOTE_FAIR_PRICE_TOLERANCE_PCT = 1;
+const POSITION_METADATA_CACHE_TTL_MS = 30_000;
+const POSITION_METADATA_RATE_LIMIT_BACKOFF_MS = 10_000;
+
+type WooPositionMetadata = Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>;
+
+type CachedWooPositionMetadata = {
+  metadata: WooPositionMetadata[];
+  updatedAt: number;
+};
 
 const isPositiveFinitePrice = (price: number | undefined): price is number =>
   typeof price === 'number' && Number.isFinite(price) && price > 0;
@@ -95,6 +104,14 @@ const chooseMarketIocReferencePrice = (ticker: Ticker | undefined, side: OrderSi
   );
 };
 
+const isWooRateLimitError = (err: any) =>
+  err?.response?.status === 429 ||
+  err?.response?.data?.code === -1003 ||
+  err?.response?.data?.error_code === 90003 ||
+  String(err?.response?.data?.message || err?.message || '')
+    .toLowerCase()
+    .includes('rate limit');
+
 export class WOOXExchange extends BaseExchange {
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
   private static readonly FILL_POSITION_REFRESH_BASE_DELAY_MS = 150;
@@ -121,6 +138,9 @@ export class WOOXExchange extends BaseExchange {
   private _fillExpectedPositionSignatureBySymbol = new Map<string, string>();
   private _fundingRefreshTimer?: ReturnType<typeof setInterval>;
   private _fundingRefreshInFlight = false;
+  private _positionMetadataCache = new Map<string, CachedWooPositionMetadata>();
+  private _positionMetadataInFlight = new Map<string, Promise<WooPositionMetadata[]>>();
+  private _positionMetadataRateLimitedUntil = new Map<string, number>();
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -940,65 +960,116 @@ export class WOOXExchange extends BaseExchange {
     return { positions, balance };
   };
 
-  fetchPositionMetadata = async (
-    symbols: string[],
-  ): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
+  private createPositionMetadataCacheKey = (symbol: string, positionMode: PositionMode) => `${symbol}:${positionMode}`;
+
+  private buildPositionMetadataFromLeverage = (
+    symbol: string,
+    positionMode: PositionMode,
+    response: GET_FUTURES_LEVERAGE_RESPONSE,
+  ): WooPositionMetadata[] => {
+    const detail = response.data.details[0];
+    const leverage = parseInt(detail.leverage);
+
+    if (positionMode === PositionMode.OneWay) {
+      return [
+        {
+          symbol,
+          side: PositionSide.Long,
+          leverage,
+          positionMode,
+          marginType: MarginType.Cross,
+        },
+      ];
+    }
+
+    return [
+      {
+        symbol,
+        side: PositionSide.Long,
+        leverage,
+        positionMode,
+        marginType: MarginType.Cross,
+      },
+      {
+        symbol,
+        side: PositionSide.Short,
+        leverage,
+        positionMode,
+        marginType: MarginType.Cross,
+      },
+    ];
+  };
+
+  private fetchPositionMetadataForSymbol = async (symbol: string, positionMode: PositionMode) => {
+    const cacheKey = this.createPositionMetadataCacheKey(symbol, positionMode);
+    const cached = this._positionMetadataCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && now - cached.updatedAt < POSITION_METADATA_CACHE_TTL_MS) {
+      return cached.metadata;
+    }
+
+    const inFlight = this._positionMetadataInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    if (cached && now < (this._positionMetadataRateLimitedUntil.get(cacheKey) || 0)) {
+      return cached.metadata;
+    }
+
+    const request = (async () => {
+      try {
+        const { data } = await this.xhr.get<GET_FUTURES_LEVERAGE_RESPONSE>(ENDPOINTS.FUTURES_LEVERAGE, {
+          params: {
+            symbol: reverseSymbol(symbol),
+            // woo is fucked and always uses oneway leverage
+            // position_mode: positionMode === PositionMode.OneWay ? 'ONE_WAY' : 'HEDGE_MODE',
+            position_mode: 'ONE_WAY',
+            margin_mode: 'CROSS',
+          },
+        });
+
+        const metadata = this.buildPositionMetadataFromLeverage(symbol, positionMode, data);
+        this._positionMetadataCache.set(cacheKey, { metadata, updatedAt: Date.now() });
+        this._positionMetadataRateLimitedUntil.delete(cacheKey);
+        return metadata;
+      } catch (err: any) {
+        if (cached && isWooRateLimitError(err)) {
+          this._positionMetadataRateLimitedUntil.set(cacheKey, Date.now() + POSITION_METADATA_RATE_LIMIT_BACKOFF_MS);
+          return cached.metadata;
+        }
+
+        throw err;
+      } finally {
+        this._positionMetadataInFlight.delete(cacheKey);
+      }
+    })();
+
+    this._positionMetadataInFlight.set(cacheKey, request);
+    return request;
+  };
+
+  private updateCachedPositionMetadataLeverage = (symbol: string, leverage: number) => {
+    for (const [cacheKey, cached] of this._positionMetadataCache.entries()) {
+      if (!cacheKey.startsWith(`${symbol}:`)) continue;
+
+      this._positionMetadataCache.set(cacheKey, {
+        metadata: cached.metadata.map((metadata) => ({ ...metadata, leverage })),
+        updatedAt: Date.now(),
+      });
+      this._positionMetadataRateLimitedUntil.delete(cacheKey);
+    }
+  };
+
+  fetchPositionMetadata = async (symbols: string[]): Promise<WooPositionMetadata[]> => {
     try {
       const positionMode = await this.getPositionMode();
       return flatten(
-        await mapSeries(
-          symbols,
-          async (symbol): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
-            if (this.isDisposed) return [];
-
-            const { data } = await this.xhr.get<GET_FUTURES_LEVERAGE_RESPONSE>(ENDPOINTS.FUTURES_LEVERAGE, {
-              params: {
-                symbol: reverseSymbol(symbol),
-                // woo is fucked and always uses oneway leverage
-                // position_mode: positionMode === PositionMode.OneWay ? 'ONE_WAY' : 'HEDGE_MODE',
-                position_mode: 'ONE_WAY',
-                margin_mode: 'CROSS',
-              },
-            });
-
-            if (this.isDisposed) return [];
-
-            if (positionMode === PositionMode.OneWay) {
-              const detail = data.data.details[0];
-              return [
-                {
-                  symbol,
-                  side: PositionSide.Long,
-                  leverage: parseInt(detail.leverage),
-                  positionMode,
-                  marginType: MarginType.Cross,
-                },
-              ];
-            } else {
-              // const longDetail = data.data.details.find((d) => d.position_side === 'LONG');
-              // const shortDetail = data.data.details.find((d) => d.position_side === 'SHORT');
-              const detail = data.data.details[0];
-              return [
-                {
-                  symbol,
-                  side: PositionSide.Long,
-                  // leverage: parseInt(longDetail?.leverage || '1'),
-                  leverage: parseInt(detail.leverage),
-                  positionMode,
-                  marginType: MarginType.Cross,
-                },
-                {
-                  symbol,
-                  side: PositionSide.Short,
-                  // leverage: parseInt(shortDetail?.leverage || '1'),
-                  leverage: parseInt(detail.leverage),
-                  positionMode,
-                  marginType: MarginType.Cross,
-                },
-              ];
-            }
-          },
-        ),
+        await mapSeries(symbols, async (symbol): Promise<WooPositionMetadata[]> => {
+          if (this.isDisposed) return [];
+          return this.fetchPositionMetadataForSymbol(symbol, positionMode);
+        }),
       );
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
@@ -1935,6 +2006,7 @@ export class WOOXExchange extends BaseExchange {
         position_side: 'BOTH',
         leverage: inputLeverage,
       });
+      this.updateCachedPositionMetadataLeverage(symbol, inputLeverage);
       // } else {
       //   // const sides = side ? [side === PositionSide.Long ? 'LONG' : 'SHORT'] : ['LONG', 'SHORT'];
       //   // WOO seems to actually ignore this and always sets both, so to avoid regression lets just set both explicitly
@@ -1959,6 +2031,8 @@ export class WOOXExchange extends BaseExchange {
       // ONE_WAY | HEDGE_MODE
       await this.xhr.post(ENDPOINTS.POSITION_MODE, { position_mode: hedged ? 'HEDGE_MODE' : 'ONE_WAY' });
       this._accountPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
+      this._positionMetadataCache.clear();
+      this._positionMetadataRateLimitedUntil.clear();
       const positions = await this.fetchPositions();
       this.store.update({ positions });
     } catch (e: any) {

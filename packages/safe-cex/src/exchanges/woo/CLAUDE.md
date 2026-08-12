@@ -151,6 +151,10 @@ open-interest and 24-hour statistics remain authoritative and are retained in ty
 The active legacy market-order IOC emulation must not blindly trust legacy REST bid/ask fields,
 because they are initialized from `24h_close`; when side quotes drift materially from mark/index, use
 mark/index/mid/last as the protected IOC reference before applying bounded slippage.
+Legacy futures leverage reads are rate-limit sensitive. `fetchPositions()` may need leverage metadata
+only to synthesize zero-size rows for symbols with pending orders, so cache those per symbol/position
+mode, share concurrent readbacks, and keep cached metadata when Woo answers 429 instead of replacing
+positions with an empty metadata set.
 safe-cex `fundingRate` uses V3 `estFundingRate`, matching the active legacy `estfundingrate` stream's
 predicted-funding semantics; the distinct `lastFundingRate` remains available only in
 `info.futuresStats` provenance and is never a fallback for a missing or malformed estimate.
