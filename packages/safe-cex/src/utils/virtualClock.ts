@@ -48,9 +48,21 @@ class VirtualClock {
     return typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
   };
 
+  /**
+   * Accepts either a bare origin for the dedicated time service, which serves
+   * `/v1/time`, or a full endpoint URL.
+   *
+   * The full-URL form exists for the native app. It has no usable same-origin
+   * to fall back to — `self.location.origin` there is the Metro dev server —
+   * so it must name a route explicitly, and the route it wants is the edge
+   * `/api/time` rather than the CloudFront-fronted service. Measured: ~750ms
+   * against the dedicated host versus ~70ms against the edge route, on a call
+   * that sits on the boot path.
+   */
   private getTimeEndpoint = (): string => {
-    const configuredOrigin = process.env.NEXT_PUBLIC_TIME_API_ORIGIN?.trim().replace(/\/+$/, '');
-    return configuredOrigin ? `${configuredOrigin}/v1/time` : `${this.getBaseUrl()}/api/time`;
+    const configured = process.env.NEXT_PUBLIC_TIME_API_ORIGIN?.trim().replace(/\/+$/, '');
+    if (!configured) return `${this.getBaseUrl()}/api/time`;
+    return /\/time$/.test(configured) ? configured : `${configured}/v1/time`;
   };
 
   private notifyTimeSync = () => {

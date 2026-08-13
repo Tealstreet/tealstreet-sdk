@@ -255,6 +255,20 @@ describe('virtualClock', () => {
       delete (global as any).window;
     });
 
+    // The native app has no usable same-origin — `self.location.origin` there
+    // is the Metro dev server — so it names the edge route outright rather
+    // than relying on the bare-origin form.
+    it('uses a configured full endpoint URL verbatim', async () => {
+      (global as any).window = {};
+      process.env.NEXT_PUBLIC_TIME_API_ORIGIN = 'https://preview.tealstreet.io/api/time/';
+      vi.mocked(axios.get).mockResolvedValueOnce({ data: { time: new Date().toISOString(), unixMs: Date.now() } });
+
+      await virtualClock.syncClientServerTime();
+
+      expect(axios.get).toHaveBeenCalledWith('https://preview.tealstreet.io/api/time', { timeout: 5000 });
+      delete (global as any).window;
+    });
+
     it('falls back to the local clock after the two maintained sources fail', async () => {
       (global as any).window = {};
       vi.mocked(axios.get).mockRejectedValue(new Error('offline'));
