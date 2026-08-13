@@ -15,15 +15,22 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
+  ClosedPnlEntry,
   ExchangeName,
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
+  HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
+  LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderStopTriggerType,
@@ -44,8 +51,13 @@ import { roundUSD } from '../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
+import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
+import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './okx.api';
+import { mapOkxClosedPosition } from './okx.closed-pnl';
+import { mapOkxBillToIncomeRecords, OKX_BILL_TYPE_BY_INCOME_TYPE } from './okx.income';
+import { mapOkxHistoricalOrder } from './okx.order-history';
 import {
   BROKER_ID,
   ENDPOINTS,
@@ -738,9 +750,16 @@ export class OKXExchange extends BaseExchange {
 
         const commissionRaw = parseFloat(row.fee || row.fillFee || '0');
         const commission = Number.isFinite(commissionRaw) ? Math.abs(commissionRaw) : undefined;
+        const realizedPnl = parseFloat(row.fillPnl ?? '');
 
         acc.push(
           omitUndefined({
+            // One order fills across many rows, so orderId cannot identify a fill.
+            // tradeId, NOT billId: OKX emits several bill rows per trade (fill plus
+            // fee/rebate) that share ordId/fillTime/fillPx/fillSz, and keying on the
+            // per-bill id would split them into duplicate fills and double the qty.
+            // billId only stands in when tradeId is absent.
+            id: row.tradeId ? String(row.tradeId) : row.billId ? String(row.billId) : undefined,
             timestamp,
             symbol: resolvedSymbol,
             orderId: executionOrderId || undefined,
@@ -749,6 +768,10 @@ export class OKXExchange extends BaseExchange {
             side,
             commission,
             commissionAsset: row.feeCcy || row.ccy || undefined,
+            positionSide: row.posSide ? normalizeExecutionPositionSide(row.posSide) : undefined,
+            realizedPnl: Number.isFinite(realizedPnl) ? realizedPnl : undefined,
+            // execType 'M' = maker, 'T' = taker.
+            maker: row.execType ? String(row.execType).toUpperCase() === 'M' : undefined,
           }),
         );
         return acc;
@@ -782,7 +805,11 @@ export class OKXExchange extends BaseExchange {
         if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
           continue;
         }
-        const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        // Without the fill id, two genuine fills of one order at the same timestamp,
+        // price and size collapse into one — the exact data loss the id exists to stop.
+        const key = execution.id
+          ? `id:${execution.id}`
+          : `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
         dedupe.set(key, execution);
       }
 
@@ -791,6 +818,312 @@ export class OKXExchange extends BaseExchange {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return [];
     }
+  };
+
+  /**
+   * Account ledger (bills). Scoped to `instType: 'SWAP'` — this repo's journal is
+   * position-based and perp-only, so spot/margin bills are deliberately excluded. The
+   * consequence is that the returned ledger reconciles against swap-account flows, NOT
+   * against total account equity.
+   *
+   * BILLS retains 7 days and BILLS_ARCHIVE 3 months; a window older than the chosen
+   * endpoint's retention answers code=0 with an empty list rather than an error, so the
+   * endpoint is picked from the requested window rather than discovered by failure.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const PAGE_LIMIT = 100;
+    // A runaway-loop backstop, not a coverage bound. Bills come newest-first, so a cap
+    // that bites silently drops the OLDEST rows of the window — a hole in the middle of
+    // the ledger, which is exactly what makes reconciliation unfixable. Hitting it is
+    // logged rather than swallowed.
+    const MAX_PAGES = 200;
+    const RECENT_WINDOW_MS = 6 * 24 * 60 * 60 * 1000;
+
+    const market = opts?.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts?.symbol && !market) {
+      return [];
+    }
+
+    const now = virtualClock.getCurrentTimeMs();
+    const windowStart = opts?.startTime;
+    const endpoint = windowStart && now - windowStart > RECENT_WINDOW_MS ? ENDPOINTS.BILLS_ARCHIVE : ENDPOINTS.BILLS;
+
+    const resolveSymbol = (instId: string) => this.store.marketsById[instId]?.symbol;
+    const maxRecords = opts?.limit && opts.limit > 0 ? opts.limit : Infinity;
+
+    try {
+      const dedupe = new Map<string, IncomeRecord>();
+      let after: string | undefined;
+      let exhausted = false;
+      let rowsSeen = 0;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const params = omitUndefined({
+          instType: 'SWAP',
+          instId: market?.id,
+          type: opts?.incomeType ? OKX_BILL_TYPE_BY_INCOME_TYPE[opts.incomeType] : undefined,
+          begin: opts?.startTime,
+          end: opts?.endTime,
+          limit: PAGE_LIMIT,
+          after,
+        });
+
+        const {
+          data: { data },
+        } = await this.xhr.get<{ data: Array<Record<string, any>> }>(endpoint, { params });
+
+        const rows = Array.isArray(data) ? data : [];
+        if (rows.length === 0) {
+          exhausted = true;
+          break;
+        }
+
+        rowsSeen += rows.length;
+        for (const row of rows) {
+          for (const record of mapOkxBillToIncomeRecords(row, resolveSymbol)) {
+            dedupe.set(record.tranId, record);
+          }
+        }
+
+        // `maxRecords` bounds BILLS read, not records emitted — one bill yields up to
+        // three records, so counting records would stop short of the caller's ask.
+        if (rows.length < PAGE_LIMIT || rowsSeen >= maxRecords) {
+          exhausted = true;
+          break;
+        }
+
+        // `after` means "older than this bill id". Derived as the page's SMALLEST id
+        // rather than its last element: taking the last is only correct while okx returns
+        // newest-first, and if that ever flips the cursor walks the wrong way and the walk
+        // silently ends one page in — on a venue that currently PASSES the gate.
+        const nextAfter = oldestCursorId(rows, 'billId') ?? '';
+        if (!nextAfter || nextAfter === after) {
+          exhausted = true;
+          break;
+        }
+        after = nextAfter;
+
+        await sleep(100);
+      }
+
+      if (!exhausted) {
+        this.log(
+          `OKX bills paging hit the ${MAX_PAGES}-page cap after ${rowsSeen} rows; older rows in this window were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      return [...dedupe.values()].sort((a, b) => b.timestamp - a.timestamp);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  /**
+   * Historical orders, including ones that never filled — see `okx.order-history.ts`.
+   *
+   * Bounded to the 7-day `/orders-history` route on purpose. OKX's 3-month
+   * `/orders-history-archive` returns FILLED ORDERS ONLY, so paging into it to reach
+   * further back would silently drop every cancellation — the one population this axis
+   * holds that the fills axis does not. Measured on a live account: `state=canceled`
+   * returned 0 rows from the archive and 58 from this route, and a matched 2-day window
+   * gave 100/0 filled/canceled there against 80/20 here.
+   */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const market = opts?.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts?.symbol && !market) {
+      return [];
+    }
+
+    const MAX_PAGES = 50;
+    const PAGE_LIMIT = 100;
+
+    try {
+      const orders: HistoricalOrder[] = [];
+      const seen = new Set<string>();
+      // `after` is an ordId cursor on this endpoint — unlike /positions-history, where the
+      // same-named param is a timestamp. Mixing the two conventions up returns the newest
+      // page forever, which reads as a short history rather than as a broken loop.
+      let after: string | undefined;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const params = omitUndefined({
+          instType: 'SWAP',
+          instId: market?.id,
+          begin: opts?.from,
+          end: opts?.to,
+          limit: PAGE_LIMIT,
+          after,
+        });
+
+        const {
+          data: { data },
+        } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.ORDERS_HISTORY, { params });
+
+        const rows = Array.isArray(data) ? data : [];
+        if (rows.length === 0) break;
+
+        for (const row of rows) {
+          const rowMarket = market ?? this.store.marketsById[String(row.instId ?? '')];
+          const order = mapOkxHistoricalOrder(row, rowMarket, this.contractsToBase);
+          if (!order || seen.has(order.id)) continue;
+          seen.add(order.id);
+          orders.push(order);
+        }
+
+        if (rows.length < PAGE_LIMIT) break;
+
+        const nextAfter = oldestCursorId(rows, 'ordId') ?? '';
+        if (!nextAfter || nextAfter === after) break;
+        after = nextAfter;
+
+        await sleep(100);
+      }
+
+      if (page >= MAX_PAGES) {
+        // Newest-first, so a cap that bites drops the OLDEST orders of the window.
+        this.log(
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      const sorted = orders.sort((a, b) => b.createdTime - a.createdTime);
+      return opts?.limit && opts.limit > 0 ? sorted.slice(0, opts.limit) : sorted;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  /**
+   * Exchange-reported closed positions, from a DIFFERENT endpoint than the ledger — which
+   * is the only reason it can cross-check it. See `okx.closed-pnl.ts` for the field shape
+   * and the funding-inclusion difference from bybit.
+   */
+  fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const market = opts.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts.symbol && !market) {
+      return [];
+    }
+
+    const MAX_PAGES = 100;
+    const PAGE_LIMIT = 100;
+
+    try {
+      const entries: ClosedPnlEntry[] = [];
+      let after: string | undefined = opts.to ? String(opts.to) : undefined;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        // `after`/`before` are TIMESTAMPS on this endpoint, not ids — unlike /bills, where
+        // `after` is a billId. And `begin`/`end` are SILENTLY IGNORED here: passing them
+        // returns the same unbounded 100 rows spanning nine months, which looks like a
+        // working time filter until you check the oldest row. Verified live.
+        const params = omitUndefined({
+          instType: 'SWAP',
+          instId: market?.id,
+          before: opts.from,
+          after,
+          limit: PAGE_LIMIT,
+        });
+
+        const {
+          data: { data },
+        } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS_HISTORY, { params });
+
+        const rows = Array.isArray(data) ? data : [];
+        if (rows.length === 0) break;
+
+        for (const row of rows) {
+          // NO posId dedupe. OKX reuses a posId across separate open->close cycles in net
+          // mode, so every row here is a distinct close: a live window returned 87 rows
+          // across only 3 posIds, and deduping on it destroyed 84 real closes and 96% of
+          // the realized PnL. Third time an identity dedupe has deleted rows in this epic
+          // (bybit tranId, hyperliquid boundary fills, now this) — the endpoint's row IS
+          // the event; do not assume an id identifies one.
+          const rowMarket = market ?? this.store.marketsById[String(row.instId ?? '')];
+          const entry = mapOkxClosedPosition(row, rowMarket, this.contractsToBase.bind(this), opts.accountName || '');
+          if (entry) entries.push(entry);
+        }
+
+        if (rows.length < PAGE_LIMIT) break;
+
+        // Walk backwards by the oldest close time seen, minus 1ms so the boundary row is
+        // not returned again.
+        const oldest = rows.reduce((acc, row) => {
+          const t = parseInt(String(row.uTime ?? '0'), 10);
+          return Number.isFinite(t) && t > 0 ? Math.min(acc, t) : acc;
+        }, Number.POSITIVE_INFINITY);
+        if (!Number.isFinite(oldest)) break;
+
+        const nextAfter = String(oldest - 1);
+        if (nextAfter === after) break;
+        after = nextAfter;
+
+        await sleep(100);
+      }
+
+      if (page >= MAX_PAGES) {
+        this.log(
+          `fetchClosedPnl stopped at the ${MAX_PAGES}-page cap; older positions were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      return entries.sort((a, b) => b.closedTime - a.closedTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const dedupe = new Map<string, IncomeRecord>();
+
+    let currentStart = startTime;
+
+    while (currentStart < endTime) {
+      const currentEnd = Math.min(currentStart + SEVEN_DAYS_MS, endTime);
+
+      const records = await this.fetchIncomeHistory({
+        startTime: currentStart,
+        endTime: currentEnd,
+        incomeType,
+      });
+
+      for (const record of records) {
+        dedupe.set(record.tranId, record);
+      }
+
+      // Exclusive, so consecutive chunks cannot both return a row on the boundary. The
+      // tranId dedupe above is safe here only because OKX billIds are genuinely unique;
+      // do not copy that pattern to a venue whose ids are not.
+      currentStart = currentEnd + 1;
+      await sleep(100);
+    }
+
+    return [...dedupe.values()].sort((a, b) => b.timestamp - a.timestamp);
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
@@ -945,8 +1278,7 @@ export class OKXExchange extends BaseExchange {
 
     const conditionalOrderPrice = this.toFiniteNumber(order.extra?.conditionalOrderPrice);
     payload.newTriggerPx = `${triggerPrice}`;
-    payload.newOrdPx =
-      conditionalOrderPrice > 0 ? `${adjust(conditionalOrderPrice, market.precision.price)}` : '-1';
+    payload.newOrdPx = conditionalOrderPrice > 0 ? `${adjust(conditionalOrderPrice, market.precision.price)}` : '-1';
     payload.newTriggerPxType = getOKXTriggerPxType(order.triggerType);
 
     if ('amount' in update && +order.amount !== 0) {
@@ -1155,11 +1487,7 @@ export class OKXExchange extends BaseExchange {
     return this.store.tickersById[market.id] || this.store.tickersBySymbol[market.symbol];
   };
 
-  private hasExternalTriggerReferencePrice = (
-    market: Market,
-    source: 'mark' | 'index',
-    ticker: Ticker | undefined,
-  ) => {
+  private hasExternalTriggerReferencePrice = (market: Market, source: 'mark' | 'index', ticker: Ticker | undefined) => {
     const config = this.options.externalPublicData;
 
     if (config?.type === 'in-process') {
@@ -1279,8 +1607,7 @@ export class OKXExchange extends BaseExchange {
         const isReduceOnly = o.reduceOnly === 'true' || o.reduceOnly === true;
         const type = isReduceOnly ? this.getReduceOnlyTriggerOrderType(o, market) : OrderType.Conditional;
         const triggerType = parseOKXTriggerPxType(o.triggerPxType);
-        const suffix =
-          type === OrderType.StopLoss ? '_sl' : type === OrderType.TakeProfit ? '_tp' : '';
+        const suffix = type === OrderType.StopLoss ? '_sl' : type === OrderType.TakeProfit ? '_tp' : '';
         const triggerTypeFields =
           type === OrderType.StopLoss
             ? { slTriggerType: triggerType }

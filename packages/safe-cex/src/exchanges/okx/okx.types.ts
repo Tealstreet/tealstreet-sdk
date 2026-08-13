@@ -58,8 +58,22 @@ export const ENDPOINTS = {
   POSITIONS: '/api/v5/account/positions',
   KLINE: '/api/v5/market/candles',
   KLINE_HISTORY: '/api/v5/market/history-candles',
+  // 7 days. There IS a deeper `/orders-history-archive` covering 3 months, and it is
+  // NOT usable for this axis: it returns filled orders only. Verified live on one
+  // account — `state=canceled` gave 0 rows against the archive and 58 against this
+  // route, and a matched 2-day window gave 100/0 filled/canceled there versus 80/20
+  // here. Reaching further back therefore costs exactly the orders that never filled,
+  // which is the only thing this axis knows that the fills axis does not.
+  ORDERS_HISTORY: '/api/v5/trade/orders-history',
   FILLS: '/api/v5/trade/fills',
   FILLS_HISTORY: '/api/v5/trade/fills-history',
+  // Closed positions — a DIFFERENT source from BILLS, which is what makes it usable as a
+  // cross-check on the ledger rather than a restatement of it.
+  POSITIONS_HISTORY: '/api/v5/account/positions-history',
+  // BILLS covers the last 7 days, BILLS_ARCHIVE the last 3 months. Windows older
+  // than the endpoint's retention answer code=0 with an empty list, not an error.
+  BILLS: '/api/v5/account/bills',
+  BILLS_ARCHIVE: '/api/v5/account/bills-archive',
   UNFILLED_ORDERS: '/api/v5/trade/orders-pending',
   UNFILLED_ALGO_ORDERS: '/api/v5/trade/orders-algo-pending',
   CANCEL_ORDERS: '/api/v5/trade/cancel-batch-orders',

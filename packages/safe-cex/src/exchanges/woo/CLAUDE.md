@@ -664,10 +664,73 @@ to public WebSocket reconnection.
 
 - `fetchExecutions` reads `/v3/trade/transactionHistory`, normalizes both current camelCase and
   legacy snake_case fields, applies symbol/order/time filters, sorts ascending, and caps the result.
-- `fetchHistoricalTrades` queries `/v1/client/trades` and then `/v1/client/hist_trades` when needed,
-  deduplicating normalized fills across the two legacy windows.
+- `fetchHistoricalTrades` also reads `/v3/trade/transactionHistory` (not the legacy
+  `/v1/client/trades` pair this doc previously claimed) and shares
+  `parseTransactionHistoryRow` with `fetchExecutions`.
+- **`side` has two vocabularies.** One-way accounts return `BUY`/`SELL`; hedge accounts return
+  `OPEN LONG` / `CLOSE LONG` / `OPEN SHORT` / `CLOSE SHORT`. The mapper understood only BUY/SELL
+  and returned `null` for everything else, so **every hedge-mode fill was silently dropped** —
+  measured at 210 of 500 rows on a live account (2026-08). Mapping lives in
+  `mapWooHedgeTransactionSide` (`woo.utils.ts`) as a pure function because
+  `parseTransactionHistoryRow` is an instance field and unreachable from tests; the regression is
+  `src/__tests__/audit-regressions/woo.transaction-history-hedge-sides.test.ts`. Those strings are
+  also the **only** place this endpoint carries the position side — it has no `positionSide` field,
+  which is why hedge rows previously reported `positionSide: 'both'`.
+- **`realizedPnl` is `null` on every row.** `Number(null)` is `0`, so it used to surface as a real
+  zero, indistinguishable from a genuinely flat fill. Absent now maps to `undefined`.
+
+  **This is true of THIS ROUTE ONLY — do not generalize it to the venue.** It was, and the
+  branch summary called woo UNSUPPORTABLE on that basis for a week. **WOO X publishes realized
+  PnL on the v1 family**, which this adapter does not read:
+
+  | Route                            | Carries                                                                              |
+  | -------------------------------- | ------------------------------------------------------------------------------------ |
+  | `/v1/client/transaction_history` | Ledger; entry types include **`REALIZED_PNL`**, **`FUNDING_FEE`**, `FUTURES_TRADING` |
+  | `/v1/orders?realized_pnl=true`   | Order history with `realized_pnl` (futures settlements only)                         |
+  | `/v1/client/hist_trades`         | **All-time** fills, `fromId` cursor + required `start_t`/`end_t`                     |
+  | `/v1/funding_fee_history`        | Funding payments per position                                                        |
+
+  Reading the v1 ledger beside the existing v3 fills is a **v1/v3 hybrid** — normal here, not a
+  workaround; bitget already runs 33 `/api/v2` routes next to 3 `/api/v3`. `hist_trades` also
+  fixes the truncation below, so do both in one pass.
+
+- **The per-fill `id` is not the `orderId`.** One order fills across many rows (500 fills → 495
+  orderIds on the sampled account), so `HistoricalTrade.id` carries the row `id`; it is the only
+  idempotent dedupe key, and `users_app_trades` keys on it.
+- **No pagination.** WOO honours `limit` but ignores `page`, and `meta.total` on the sampled symbol
+  was 1005 against a 500 cap — so more than half that symbol's history is unreachable through this
+  path. Windowing via `startTime`/`endTime` is the only way to go deeper; `from`/`to` are currently
+  applied as post-fetch filters, not as pagination.
 - These routes are read-only reconciliation paths; the V3 migration target for both legacy trade
   lists is `/v3/trade/transactionHistory`.
+
+### Order history (`GET /v1/orders`)
+
+`fetchOrderHistory` reads this route. Mapper: `woo.order-history.ts`, pure and exported.
+Measured live over 30 days: **617 orders, 169 of which never filled (27.4%)** — invisible
+to `/v3/trade/transactionHistory` and to every other axis.
+
+Three things that make this route unlike the trade route beside it:
+
+- **`start_t` / `end_t` are MILLISECONDS on the request, while the response reports
+  fractional SECONDS** (`created_time: "1786536593.515"`). Sending seconds is rejected with
+  `400 end_t must be greater than or equal to 1000000000000`, which `fetchOrderHistory`'s
+  own catch turns into an empty list — so the unit mismatch reads as an account with no
+  orders rather than as a rejected request. Passing the response value through unscaled
+  puts the account in January 1970, where a window filter then discards all of it.
+- **`page` genuinely advances and rows are newest-first**, unlike the trade route, which
+  returns the OLDEST rows first and ignores `page` (see "Executions and trade history"
+  above). The two routes share neither ordering nor pagination behaviour.
+- **Do NOT reuse `fetchOrdersRecursively`.** It hardcodes `status: 'INCOMPLETE'` — the
+  open-order path — so routing history through it returns exactly the orders this axis
+  exists to look past.
+
+`type` carries what other venues call time-in-force (`POST_ONLY`, `IOC`, `FOK`), so all of
+those map to `OrderType.Limit`. The `status` filter works here (`status=CANCELLED` returned
+100/100 cancelled), unlike bitunix's equivalent.
+
+**Known gap:** algo orders (TP/SL, trailing) live on `/v3/algo/orders` and are NOT included,
+the same split as okx's conditional archive.
 
 ### Fill-driven optimistic position sync
 

@@ -15,16 +15,22 @@ import { parsePrecision } from '@tealstreet/ccxt-compat/src/functions/ccxt_excha
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Candle,
+  ClosedPnlEntry,
   ExchangeName,
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
+  HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderStopTriggerType,
@@ -48,6 +54,8 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bitunix.api';
+import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from './bitunix.income';
+import { mapBitunixHistoricalOrder } from './bitunix.order-history';
 import {
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
@@ -59,10 +67,7 @@ import {
 } from './bitunix.types';
 import { BitunixFuturesWebsocket } from './bitunix.ws-futures';
 import { BitunixPrivateWebsocket } from './bitunix.ws-private';
-import {
-  BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION,
-  BitunixPublicWebsocket,
-} from './bitunix.ws-public';
+import { BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION, BitunixPublicWebsocket } from './bitunix.ws-public';
 
 // TODO: translate our err messages
 export class BitunixExchange extends BaseExchange {
@@ -227,7 +232,8 @@ export class BitunixExchange extends BaseExchange {
 
   private isStandaloneTpslOrder = (order: Order) => {
     return (
-      (order.type === OrderType.TakeProfit || order.type === OrderType.StopLoss) && !this.getAttachedVirtualTpslLeg(order)
+      (order.type === OrderType.TakeProfit || order.type === OrderType.StopLoss) &&
+      !this.getAttachedVirtualTpslLeg(order)
     );
   };
 
@@ -472,7 +478,6 @@ export class BitunixExchange extends BaseExchange {
       orders,
       loaded: { ...this.store.loaded, orders: true },
     });
-
   };
 
   tick = async (count = 0) => {
@@ -537,12 +542,7 @@ export class BitunixExchange extends BaseExchange {
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS);
 
       const markets: Market[] = symbols
-        .filter(
-          (m) =>
-            v(m, 'symbolStatus') === 'OPEN' &&
-            v(m, 'quote') === 'USDT' &&
-            v(m, 'isApiSupported') !== false,
-        )
+        .filter((m) => v(m, 'symbolStatus') === 'OPEN' && v(m, 'quote') === 'USDT' && v(m, 'isApiSupported') !== false)
         .map((m) => {
           const baseAsset = v(m, 'base');
           const quoteAsset = v(m, 'quote');
@@ -996,6 +996,222 @@ export class BitunixExchange extends BaseExchange {
     return orders;
   };
 
+  /**
+   * Ledger from `get_history_trades`, closed positions from `get_history_positions`.
+   * See `bitunix.income.ts` for the verified sign conventions and the funding gap.
+   *
+   * Both windows are enforced CLIENT-SIDE as well as sent, because a sibling venue
+   * (blofin) silently ignores its server-side time filter on the fills endpoint while
+   * honouring it on positions — a 30-day request there returned six months. Enforcing
+   * locally costs nothing and removes the need to trust each endpoint individually.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const rows = await this.fetchBitunixHistoryPages(
+      ENDPOINTS.HISTORY_TRADES,
+      opts?.startTime,
+      opts?.endTime,
+      (r) => parseInt(String(r.ctime ?? '0'), 10),
+      (r) => String(r.tradeId ?? ''),
+      opts?.symbol,
+    );
+
+    const records = rows.flatMap((row) => mapBitunixTradeToIncomeRecords(row));
+    return records.sort((a, b) => b.timestamp - a.timestamp);
+  };
+
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    return await this.fetchIncomeHistory({ startTime, endTime, incomeType });
+  };
+
+  fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const rows = await this.fetchBitunixHistoryPages(
+      ENDPOINTS.HISTORY_POSITIONS,
+      opts.from,
+      opts.to,
+      (r) => parseInt(String(r.mtime ?? r.ctime ?? '0'), 10),
+      (r) => String(r.positionId ?? ''),
+      opts.symbol,
+    );
+
+    return rows
+      .map((row) => mapBitunixClosedPosition(row, opts.accountName || ''))
+      .filter((entry): entry is ClosedPnlEntry => entry !== null)
+      .sort((a, b) => b.closedTime - a.closedTime);
+  };
+
+  /**
+   * Historical orders, including ones that never filled — see `bitunix.order-history.ts`.
+   *
+   * **This endpoint does NOT share the `skip` pagination of `get_history_trades`.** On
+   * `get_history_orders`, `skip=100` returns a byte-identical first page and `status` is
+   * ignored outright (`status=CANCELED` came back 100/100 `FILLED`). Only `symbol` and the
+   * `startTime`/`endTime` window are honoured. So this walks the window backwards instead
+   * of reusing `fetchBitunixHistoryPages`; routing it through the shared pager silently
+   * caps the axis at 100 orders and reads as a small account.
+   *
+   * The cursor is the oldest `ctime` seen, NOT `oldest - 1`. Trimming a millisecond off
+   * the boundary would drop any same-millisecond order that did not fit on the page —
+   * the same defect that cost real fills on hyperliquid. Overlap is absorbed by the id
+   * dedupe, and a page that contributes nothing new ends the walk.
+   */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const MAX_PAGES = 50;
+    const PAGE_LIMIT = 100;
+
+    try {
+      const orders: HistoricalOrder[] = [];
+      const seen = new Set<string>();
+      let endTime = opts?.to;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const { data } = await this.xhr.get(ENDPOINTS.HISTORY_ORDERS, {
+          params: omitUndefined({
+            symbol: opts?.symbol,
+            startTime: opts?.from,
+            endTime,
+            limit: PAGE_LIMIT,
+          }),
+        });
+
+        const rows: Array<Record<string, any>> = Array.isArray(data?.data?.orderList) ? data.data.orderList : [];
+        if (rows.length === 0) break;
+
+        let oldest = Number.POSITIVE_INFINITY;
+        // Progress is measured in RAW ids, not in mapped orders. A full page the mapper
+        // rejects — an unrecognised side, a missing ctime — would otherwise read as "no
+        // more history" and truncate the walk while older orders still exist, which is
+        // indistinguishable from an account that simply stops there.
+        let freshRows = 0;
+
+        for (const row of rows) {
+          const createdTime = parseInt(String(row.ctime ?? '0'), 10);
+          if (createdTime) oldest = Math.min(oldest, createdTime);
+
+          const rawId = String(row.orderId ?? '');
+          if (!rawId || seen.has(rawId)) continue;
+          seen.add(rawId);
+          freshRows += 1;
+
+          const order = mapBitunixHistoricalOrder(row);
+          if (order) orders.push(order);
+        }
+
+        if (rows.length < PAGE_LIMIT || freshRows === 0 || !Number.isFinite(oldest)) break;
+        if (opts?.from && oldest <= opts.from) break;
+        endTime = oldest;
+      }
+
+      if (page >= MAX_PAGES) {
+        this.log(
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      const sorted = orders.sort((a, b) => b.createdTime - a.createdTime);
+      return opts?.limit && opts.limit > 0 ? sorted.slice(0, opts.limit) : sorted;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  private fetchBitunixHistoryPages = async (
+    endpoint: string,
+    startTime: number | undefined,
+    endTime: number | undefined,
+    timeOf: (row: Record<string, any>) => number,
+    idOf: (row: Record<string, any>) => string,
+    symbol?: string,
+  ): Promise<Array<Record<string, any>>> => {
+    const MAX_PAGES = 100;
+    const PAGE_LIMIT = 100;
+    const collected: Array<Record<string, any>> = [];
+    const seen = new Set<string>();
+
+    try {
+      // `skip` is the pagination param. `page` and `offset` are SILENTLY IGNORED — both
+      // return the identical newest page, so a loop built on either stops after one page
+      // (every row deduped) and the ledger looks like a 100-fill account. Verified live.
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const { data } = await this.xhr.get(endpoint, {
+          params: omitUndefined({
+            symbol,
+            startTime,
+            endTime,
+            limit: PAGE_LIMIT,
+            skip: page === 0 ? undefined : page * PAGE_LIMIT,
+          }),
+        });
+
+        const body = data?.data;
+        // The row key is per-endpoint. Getting it wrong does NOT error: bitunix answers a
+        // nonexistent path with `code: 404`, but a real path read under the wrong key
+        // yields `code: 0` and nothing, which reads as an empty account.
+        const rows: Array<Record<string, any>> = Array.isArray(body)
+          ? body
+          : Array.isArray(body?.positionList)
+            ? body.positionList
+            : Array.isArray(body?.tradeList)
+              ? body.tradeList
+              : Array.isArray(body?.orderList)
+                ? body.orderList
+                : [];
+
+        if (rows.length === 0) break;
+
+        let added = 0;
+        let reachedStart = false;
+        for (const row of rows) {
+          const ts = timeOf(row);
+          if (startTime && ts && ts < startTime) {
+            reachedStart = true;
+            continue;
+          }
+          if (endTime && ts && ts > endTime) continue;
+
+          const id = idOf(row);
+          if (id && seen.has(id)) continue;
+          if (id) seen.add(id);
+          collected.push(row);
+          added += 1;
+        }
+
+        // Newest-first, so the first page reaching past the window start ends the walk.
+        if (reachedStart || rows.length < PAGE_LIMIT || added === 0) break;
+
+        if (page === MAX_PAGES - 1) {
+          this.log(
+            `bitunix history paging hit the ${MAX_PAGES}-page cap on ${endpoint}; older rows were not fetched`,
+            LogSeverity.Warning,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return collected;
+    }
+
+    return collected;
+  };
+
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
@@ -1100,6 +1316,9 @@ export class BitunixExchange extends BaseExchange {
         const fee = parseFloat(row.fee || row.execFee || '0');
         acc.push(
           omitUndefined({
+            // /futures/trade/get_history_trades returns a tradeId per fill; orderId
+            // repeats across the partial fills of one order and cannot dedupe them.
+            id: row.tradeId != null && row.tradeId !== '' ? String(row.tradeId) : undefined,
             timestamp,
             symbol: market.symbol,
             orderId: executionOrderId || undefined,
@@ -1478,7 +1697,8 @@ export class BitunixExchange extends BaseExchange {
         return;
       }
 
-      const qty = targetLeg === leg && 'amount' in update ? adjust(update.amount, market.precision.amount) : snapshot.qty;
+      const qty =
+        targetLeg === leg && 'amount' in update ? adjust(update.amount, market.precision.amount) : snapshot.qty;
       if (!Number.isFinite(qty) || qty <= 0) {
         return rejectPreflight(`Bitunix ${prefix.toUpperCase()} quantity is invalid`);
       }

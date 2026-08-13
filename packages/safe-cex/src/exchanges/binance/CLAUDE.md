@@ -158,16 +158,16 @@ All three variants follow the same high-level pattern, with variant-specific dif
 
 ### Spot (`api.binance.com`)
 
-| Endpoint                 | Method      | Description                              |
-| ------------------------ | ----------- | ---------------------------------------- |
-| `/api/v3/exchangeInfo`   | GET         | Fetch spot markets                       |
-| `/api/v3/account`        | GET         | Fetch spot balances                      |
-| `/api/v3/ticker/24hr`    | GET         | 24h ticker statistics (includes bid/ask) |
-| `/api/v3/order`          | POST/DELETE | Place or cancel a single order           |
-| `/api/v3/openOrders`     | DELETE      | Cancel all open orders for a symbol      |
-| `/api/v3/openOrders`     | GET         | Fetch all currently open orders          |
-| `/api/v3/klines`         | GET         | OHLCV candle data                        |
-| `/api/v3/depth`          | GET         | Orderbook snapshot                       |
+| Endpoint               | Method      | Description                              |
+| ---------------------- | ----------- | ---------------------------------------- |
+| `/api/v3/exchangeInfo` | GET         | Fetch spot markets                       |
+| `/api/v3/account`      | GET         | Fetch spot balances                      |
+| `/api/v3/ticker/24hr`  | GET         | 24h ticker statistics (includes bid/ask) |
+| `/api/v3/order`        | POST/DELETE | Place or cancel a single order           |
+| `/api/v3/openOrders`   | DELETE      | Cancel all open orders for a symbol      |
+| `/api/v3/openOrders`   | GET         | Fetch all currently open orders          |
+| `/api/v3/klines`       | GET         | OHLCV candle data                        |
+| `/api/v3/depth`        | GET         | Orderbook snapshot                       |
 
 Spot private events do not have a REST listen-key endpoint. Binance removed
 `POST`/`PUT`/`DELETE /api/v3/userDataStream` on 2026-02-20; private subscription
@@ -585,6 +585,25 @@ Network errors are retried up to 3 times via `axios-retry` (condition: `isNetwor
 
 The `recvWindow` parameter defaults to `20_000` ms (20 seconds) for all variants, overridable via `options.extra.recvWindow`.
 
+### User Trades (`/fapi/v1/userTrades`)
+
+`fetchHistoricalTrades` builds its query through `buildUserTradesParams` and maps rows through
+`mapBinanceUserTrade` (both in `binance.utils.ts`) rather than inline, because the exchange method is
+an instance field and cannot be reached from a test. Two fixed defects worth not reintroducing:
+
+- **The request used to be hardcoded to `{ symbol, limit: 1000 }`**, so `limit`, `from`/`to`,
+  `orderId`, and `fromId` were all silently discarded — a caller asking for 5 rows, one order, or a
+  one-hour window received the account's most recent 1000 fills instead. Verified live: `limit: 5`
+  now returns 5, an `orderId` returns just that order's fills, and a time window returned 66 of 131.
+- **`quoteQty` was the one numeric passed through uncoerced.** Binance returns every number as a
+  decimal string, so `quoteQty` violated `HistoricalTrade.quoteQty: number` on 100% of rows while its
+  siblings were `+`-coerced. Absent/null now maps to `undefined` rather than `NaN`.
+
+Binance rejects `fromId` combined with `startTime`/`endTime`, so a time window wins and `fromId` is
+only sent when neither bound is present. `limit` is clamped to the endpoint's 1000 maximum. Deeper
+history than the most recent 1000 fills per symbol still requires explicit `fromId` paging by the
+caller — `fetchHistoricalTrades` issues a single request.
+
 ### Income History Rate Limit
 
 The `/fapi/v1/income` endpoint currently carries IP request weight 30, returns
@@ -592,6 +611,38 @@ at most 1000 records, and accepts at most a 7-day time window per request.
 `fetchIncomeHistoryRange` handles longer ranges and pagination within a window;
 separate seven-day chunks are paced two seconds apart so long journal backfills
 do not burst this high-weight endpoint.
+
+**The 2s chunk pacing is a WEIGHT budget and `maxRPS: 3` does not substitute for
+it.** The axios limiter counts requests, not weight: at weight 30, 3 RPS is 5400
+weight/min against a 2400 cap. Removing the sleep because "the client already
+rate-limits" is wrong, and `binance.income-pacing.test.ts` exists to catch it.
+
+**Paging is span-based — see `../income-paging.ts` (shared with weex).** The
+previous implementation gated _both_ ends of its loop on a full-page count
+(`length === 1000` to enter the inner walk, `< 1000` to leave it). Both are
+guesses about the venue, and either one stopping early truncates the ledger
+silently — which matters more here than anywhere else, because binance currently
+PASSES the canonical gate, so a silent truncation corrupts a _green_ verdict
+rather than producing an obviously absent one. It had never fired only because
+the test account is quiet enough that no 7-day window reaches 1000 records.
+
+Two defects the live probe (`yarn history-audit --income-paging`) found that
+fixtures structurally could not:
+
+- **`fetchIncomeHistory` swallows errors into `[]`, and a pager must not be
+  handed that contract.** A rate-limited page and an empty window become the same
+  value, so a 429 mid-walk reads as "nothing more here". Measured: a 90-day walk
+  returned 492 of 512 records while reporting success. `_fetchIncomeHistoryPage`
+  is the RETHROWING variant used by the range walker; the public method keeps
+  returning `[]` because the worker `CallMethodHandler` and the module-frame
+  account hooks call it directly and expect an array.
+- **A full page whose boundary millisecond is shared cuts rows.** Stepping the
+  cursor to `newest + 1` skipped a `COMMISSION` that shared its timestamp with a
+  `REALIZED_PNL` — 279 of 280 records. Branch boundaries are inclusive, with an
+  exclusive continuation only when an inclusive re-ask yields nothing new.
+
+Verified live on sheet row 2: 280/280 records over 30 days and 512/512 over 90
+days, against a forced small page size so the walk really pages.
 
 ## State Reconciliation
 
@@ -692,18 +743,18 @@ supportsTradesHistory: false  (no executions/historical-trades implementation)
 
 ### URL Differences
 
-| Variant   | Livenet REST               | Testnet REST                        |
-| --------- | -------------------------- | ----------------------------------- |
-| Futures   | `https://fapi.binance.com` | `https://demo-fapi.binance.com` |
-| PM (papi) | `https://papi.binance.com` | `https://demo-fapi.binance.com` |
-| PM (fapi) | `https://fapi.binance.com` | `https://demo-fapi.binance.com` |
-| Spot      | `https://api.binance.com`  | `https://testnet.binance.vision`    |
+| Variant   | Livenet REST               | Testnet REST                     |
+| --------- | -------------------------- | -------------------------------- |
+| Futures   | `https://fapi.binance.com` | `https://demo-fapi.binance.com`  |
+| PM (papi) | `https://papi.binance.com` | `https://demo-fapi.binance.com`  |
+| PM (fapi) | `https://fapi.binance.com` | `https://demo-fapi.binance.com`  |
+| Spot      | `https://api.binance.com`  | `https://testnet.binance.vision` |
 
-| Variant | Livenet WS (public + market)                                                  | Testnet WS (public + market)                                                            |
-| ------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Futures | `wss://fstream.binance.com/public/ws` + `wss://fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/public/ws` + `wss://demo-fstream.binance.com/market/ws` |
-| Spot public | `wss://stream.binance.com:9443/ws`                                        | `wss://testnet.binance.vision/ws`                                                       |
-| Spot private | `wss://ws-api.binance.com:443/ws-api/v3`                                | `wss://ws-api.testnet.binance.vision/ws-api/v3`                                        |
+| Variant      | Livenet WS (public + market)                                                  | Testnet WS (public + market)                                                            |
+| ------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Futures      | `wss://fstream.binance.com/public/ws` + `wss://fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/public/ws` + `wss://demo-fstream.binance.com/market/ws` |
+| Spot public  | `wss://stream.binance.com:9443/ws`                                            | `wss://testnet.binance.vision/ws`                                                       |
+| Spot private | `wss://ws-api.binance.com:443/ws-api/v3`                                      | `wss://ws-api.testnet.binance.vision/ws-api/v3`                                         |
 
 ### Behavioral Differences
 

@@ -108,6 +108,33 @@ Uses `virtualClock.getCurrentTimeMs()` for nonce generation. No explicit server 
 
 **No parallel fetches at startup** -- markets must load before tickers (tickers rely on `marketsBySymbol` lookup).
 
+## History axes live on a DIFFERENT base URL — that is why they look absent
+
+This adapter implements **no** history method: no `fetchHistoricalTrades`, `fetchExecutions`,
+`fetchIncomeHistory`, `fetchIncomeHistoryRange`, or `fetchClosedPnl`. All five fall through to
+the inert `BaseExchange` stubs. **Do not read that as "kraken has no history axis"** — it was
+recorded that way in the venue survey and it was wrong.
+
+The reason it is easy to miss: every route in the table below hangs off
+`https://futures.kraken.com/derivatives/api`, and **the ledger is not on that base URL at
+all.** Confirmed against the CCXT `krakenfutures` reference linked above:
+
+| Venue route                      | Axis          |
+| -------------------------------- | ------------- |
+| `derivatives/api/v3/fills`       | Fills         |
+| **`api/history/v2/account-log`** | **Ledger**    |
+| `api/history/v2/orders`          | Order history |
+
+`history/v2` is a different base **and** a different version family, so implementing these
+means a second signed client alongside the existing one — the signer keys on the endpoint
+path, so it must cover both prefixes. Mixing versions inside one adapter is established
+practice here: bitget already runs 33 `/api/v2` routes next to 3 `/api/v3`.
+
+**`account-log`'s field schema is UNCONFIRMED** — Kraken's own history doc pages 404, and the
+CCXT excerpt did not include `parseLedgerEntry`. Whether it carries realized PnL, funding and
+a running balance decides whether kraken is gradeable or fold-only, so **probe the funded
+cypress account read-only before designing the mapper.** Do not assume a convention profile.
+
 ## REST API Endpoints
 
 All endpoints are relative to the base URL. Defined in `kraken.types.ts`.

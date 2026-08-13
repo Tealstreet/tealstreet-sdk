@@ -35,6 +35,7 @@ export const ENDPOINTS = {
   ORDERBOOK: '/orderBook/L2',
   KLINE: '/udf/history',
   WALLET_ASSETS: '/wallet/assets',
+  WALLET_HISTORY: '/user/walletHistory',
 };
 
 export const GRAFANA_ENDPOINTS_EVERY = [ENDPOINTS.ORDER, ENDPOINTS.SET_LEVERAGE];

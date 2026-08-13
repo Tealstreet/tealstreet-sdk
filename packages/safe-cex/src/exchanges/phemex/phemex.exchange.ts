@@ -608,6 +608,9 @@ export class PhemexExchange extends BaseExchange {
         const fee = parseFloat(row.execFeeRv || row.execFee || row.fee || '0');
         acc.push(
           omitUndefined({
+            // execID is read above only as an orderId fallback; on its own it is the
+            // per-fill dedupe key, which orderId cannot be.
+            id: row.execID || row.execId ? String(row.execID || row.execId) : undefined,
             timestamp,
             symbol: market.symbol,
             orderId: executionOrderId || undefined,

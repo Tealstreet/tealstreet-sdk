@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
-import axios from 'axios';
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
@@ -22,6 +22,7 @@ import {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
   HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -32,6 +33,7 @@ import {
   OHLCVSOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStopTriggerType,
   OrderTimeInForce,
@@ -51,11 +53,13 @@ import { loop } from '../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
+import { splitTimeRange } from '../../utils/splitTimeRange';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
-import type { BybitPlaceOrderOpts } from './bybit.order-params';
-
+import { mapBybitClosedPnl } from './bybit.closed-pnl';
+import { mapBybitTransactionToIncomeRecords } from './bybit.income';
+import { mapBybitHistoricalOrder } from './bybit.order-history';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
@@ -79,6 +83,8 @@ import { BybitPrivateWebsocket } from './bybit.ws-private';
 import { BybitPublicWebsocket } from './bybit.ws-public';
 import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
 
+const MAX_CLOSED_PNL_PAGES = 20;
+
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
@@ -91,8 +97,7 @@ const isBybitLeverageNotModified = (data: Record<string, any>) => {
   const retCode = Number(v(data, 'retCode'));
   const retMsg = `${v(data, 'retMsg') || ''}`.toLowerCase();
   return (
-    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE ||
-    (retMsg.includes('leverage') && retMsg.includes('not modified'))
+    retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE || (retMsg.includes('leverage') && retMsg.includes('not modified'))
   );
 };
 
@@ -125,6 +130,15 @@ const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => 
   }
   return ticker.last;
 };
+
+/**
+ * Bybit REJECTS a >7-day range on `/v5/order/history` and `/v5/account/transaction-log`
+ * (retCode 10001) instead of clamping it, and both call sites swallow the error into an
+ * empty list — so an unchunked ask reads as "this account has no orders / no ledger".
+ * Mirrors `EXECUTION_QUERY_MAX_RANGE_MS`; kept module-level so it is usable from a class
+ * field without making inference circular.
+ */
+const ORDER_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1;
 
 export class BybitExchange extends BaseExchange {
   xhr: Axios;
@@ -775,10 +789,7 @@ export class BybitExchange extends BaseExchange {
 
     if (symbols && symbols.length > 0) {
       const positions: Position[][] = await mapSeries(symbols, async (symbol) => {
-        const bybitPositions = await fetchAllPages(
-          { symbol, category: this.getCategoryForSymbol(symbol) },
-          true,
-        );
+        const bybitPositions = await fetchAllPages({ symbol, category: this.getCategoryForSymbol(symbol) }, true);
         return this.dedupePositionsById(bybitPositions.map(this.mapPosition.bind(this)));
       });
       return positions.flat();
@@ -943,16 +954,72 @@ export class BybitExchange extends BaseExchange {
     return markets;
   };
 
-  fetchClosedPnl? = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
-    if (process.env.NEXT_PUBLIC_DISABLE_EXTRA_APIS_IN_DEV === '1') {
+  /**
+   * Exchange-reported closed PnL — the low-multiplicity anchor, as opposed to positions
+   * inferred by polling in the browser.
+   *
+   * This used to GET Tealstreet's own `/api/trades-history/bybit/closed-pnl`, backed by
+   * `users_app_history_bybit_closed_pnl` — a table with zero rows and no producer — so it
+   * always returned `[]` while looking implemented. It now calls bybit.
+   */
+  fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) {
       return [];
     }
-    const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-    return (
-      await axios.get(
-        `${baseUrl}/api/trades-history/bybit/closed-pnl?accountName=` + opts.accountName + '&symbol=' + opts.symbol,
-      )
-    ).data;
+
+    const category = this.getCategoryForSymbol(opts.symbol);
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
+    const entries: ClosedPnlEntry[] = [];
+
+    try {
+      // Bybit caps a closed-PnL query at a 7-day range, same as executions.
+      for (const window of this.getExecutionQueryWindows(from, to)) {
+        let cursor: string | undefined;
+        let page = 0;
+
+        do {
+          const { data } = await this.xhr.get(ENDPOINTS.USER_CLOSED_PNL, {
+            params: omitUndefined({
+              category,
+              symbol: opts.symbol,
+              startTime: window.startTime,
+              endTime: window.endTime,
+              limit: 100,
+              cursor,
+            }),
+          });
+
+          if (data.retMsg !== 'OK' && +data.retCode !== 0) {
+            this.log(`Failed to fetch closed PnL: ${data.retMsg}`, LogSeverity.Error);
+            break;
+          }
+
+          const rows = (data.result?.list || []) as Array<Record<string, any>>;
+          for (const row of rows) {
+            const entry = mapBybitClosedPnl(row, opts.accountName || '');
+            if (entry) entries.push(entry);
+          }
+
+          cursor = data.result?.nextPageCursor || undefined;
+          page += 1;
+
+          // Results are newest-first, so a cap that bites drops the OLDEST rows of the
+          // window — a hole in the middle of the history rather than a short tail.
+          if (cursor && page >= MAX_CLOSED_PNL_PAGES) {
+            this.log(
+              `Closed-PnL paging hit the ${MAX_CLOSED_PNL_PAGES}-page cap for ${opts.symbol}; older rows in this window were not fetched`,
+              LogSeverity.Warning,
+            );
+          }
+        } while (cursor && page < MAX_CLOSED_PNL_PAGES);
+      }
+
+      return entries.sort((a, b) => b.closedTime - a.closedTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.retMsg || err?.message);
+      return [];
+    }
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
@@ -1281,6 +1348,13 @@ export class BybitExchange extends BaseExchange {
             side: isBuy ? OrderSide.Buy : OrderSide.Sell,
             commission: Math.abs(parseFloat(exec.execFee ?? exec.fee ?? '0')),
             commissionAsset: exec.feeCurrency || exec.feeCoin || exec.quoteCoin,
+            // `isMaker` is the only one of the three /v5/execution/list carries. A live
+            // key dump (2026-08, `--fills-probe`) returned neither `execPnl` nor
+            // `closedPnl` nor any position side — `closedSize` is the closest-named
+            // field and is a size, not a PnL. Realized PnL comes from
+            // /v5/position/closed-pnl, whose figure is NET of fees unlike the gross
+            // convention `Execution.realizedPnl` documents.
+            maker: typeof exec.isMaker === 'boolean' ? exec.isMaker : undefined,
           });
         }
 
@@ -1347,21 +1421,108 @@ export class BybitExchange extends BaseExchange {
    * @param opts - Options for filtering (symbol, type, time range)
    * @returns Array of income records
    */
+  /**
+   * Historical orders, INCLUDING ones that never filled — the only axis that sees them.
+   * A live 50-row sample was 24 Filled, 16 Deactivated, 10 Cancelled, so most of this
+   * account's order activity is invisible to fills, executions and closed positions alike.
+   *
+   * `symbol` is optional here, unlike `HistoricalTradeOptions`: an account-wide sweep is
+   * the normal shape for backfilling this axis, and requiring a symbol would force
+   * per-symbol fan-out across every market.
+   */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const MAX_PAGES = 20;
+    const PAGE_LIMIT = 50;
+
+    try {
+      const orders: HistoricalOrder[] = [];
+      const seen = new Set<string>();
+      let page = 0;
+
+      // MUST be windowed. Bybit REJECTS a range wider than 7 days on this endpoint
+      // (retCode 10001) rather than clamping it, and the `break` below swallows that into
+      // an empty list — so a 30-day ask returned ZERO orders and every consumer read it as
+      // "this account placed no orders". Measured: the canonical audit's hedge-leg join
+      // resolved 0 legs unchunked and 452 once split, silently degrading every hedged
+      // position to `both` with no error anywhere.
+      // `splitTimeRange` rather than the sibling `getExecutionQueryWindows`: referencing
+      // another class-field arrow from inside this one makes `data`'s inference circular
+      // (TS7022). The module-level helper has no `this` and is shared with binance, which
+      // has the identical 7-day hard-reject endpoint.
+      const windows =
+        opts?.from !== undefined && opts?.to !== undefined
+          ? splitTimeRange(opts.from, opts.to, ORDER_HISTORY_MAX_WINDOW_MS)
+          : [{ startTime: opts?.from, endTime: opts?.to }];
+
+      for (const window of windows) {
+        let cursor: string | undefined = undefined;
+        for (page = 0; page < MAX_PAGES; page += 1) {
+          // `params` is annotated rather than inferred: `cursor` feeds into it and is then
+          // reassigned FROM the response, so letting omitUndefined's generic carry cursor's
+          // type into the request makes `data` circular (TS7022).
+          const params: Record<string, any> = omitUndefined({
+            category: 'linear',
+            symbol: opts?.symbol,
+            startTime: window.startTime,
+            endTime: window.endTime,
+            limit: PAGE_LIMIT,
+            cursor,
+          });
+          const { data } = await this.xhr.get(ENDPOINTS.USER_ORDERS, { params });
+
+          if (data.retMsg !== 'OK' && +data.retCode !== 0) {
+            this.log(`Failed to fetch order history: ${data.retMsg}`, LogSeverity.Error);
+            break;
+          }
+
+          const rows = (data.result?.list || []) as Array<Record<string, any>>;
+          if (rows.length === 0) break;
+
+          for (const row of rows) {
+            const order = mapBybitHistoricalOrder(row);
+            if (!order || seen.has(order.id)) continue;
+            seen.add(order.id);
+            orders.push(order);
+          }
+
+          cursor = data.result?.nextPageCursor || undefined;
+          if (!cursor) break;
+        }
+      }
+
+      if (page >= MAX_PAGES) {
+        // Newest-first, so a cap that bites drops the OLDEST orders of the window.
+        this.log(
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      return orders
+        .sort((a, b) => b.createdTime - a.createdTime)
+        .slice(0, opts?.limit && opts.limit > 0 ? opts.limit : undefined);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.retMsg || err?.message);
+      return [];
+    }
+  };
+
   fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
     try {
       const params: BybitTransactionHistoryOptions = {
         // Transaction log endpoint only supports UNIFIED account type
         accountType: 'UNIFIED',
         category: 'linear',
-        limit: opts?.limit || 50,
+        // V5 transaction-log caps `limit` at 50. Sending more is rejected outright, and
+        // the non-zero retCode path below breaks out with an EMPTY list — so an oversized
+        // limit reads downstream as "this account has no ledger", not as an error.
+        limit: Math.min(opts?.limit || 50, 50),
       };
 
-      if (opts?.startTime) {
-        params.startTime = opts.startTime;
-      }
-      if (opts?.endTime) {
-        params.endTime = opts.endTime;
-      }
       if (opts?.incomeType) {
         // Map generic income types to Bybit transaction types
         const typeMap: Record<string, string> = {
@@ -1373,50 +1534,53 @@ export class BybitExchange extends BaseExchange {
       }
 
       const allRecords: IncomeRecord[] = [];
-      let cursor: string | undefined;
       const maxPages = 10; // Safety limit
-      let page = 0;
+      const recordCap = opts?.limit || 1000;
 
-      do {
-        const requestParams = { ...params, cursor };
+      // Bybit rejects a >7-day range on the transaction log too, and the `break` below
+      // turns that into an empty list — "this account has no ledger" rather than an error.
+      // `fetchIncomeHistoryRange` already chunked before calling; this makes the method
+      // safe for DIRECT callers, who previously had no protection at all. Chunks already
+      // inside the cap come back as a single window, so that path is unchanged.
+      const windows =
+        opts?.startTime !== undefined && opts?.endTime !== undefined
+          ? splitTimeRange(opts.startTime, opts.endTime, ORDER_HISTORY_MAX_WINDOW_MS)
+          : [{ startTime: opts?.startTime, endTime: opts?.endTime }];
 
-        const { data } = await this.xhr.get(ENDPOINTS.TRANSACTION_LOG, { params: requestParams });
+      for (const window of windows) {
+        let cursor: string | undefined;
+        let page = 0;
 
-        if (data.retMsg !== 'OK' && +data.retCode !== 0) {
-          this.log(`Failed to fetch transaction log: ${data.retMsg}`, LogSeverity.Error);
-          break;
-        }
+        do {
+          const requestParams = omitUndefined({
+            ...params,
+            startTime: window.startTime,
+            endTime: window.endTime,
+            cursor,
+          });
 
-        const records = data.result?.list as BybitTransactionRecord[] | undefined;
-        if (!records || records.length === 0) break;
+          const { data } = await this.xhr.get(ENDPOINTS.TRANSACTION_LOG, { params: requestParams });
 
-        for (const record of records) {
-          // Map Bybit transaction to generic IncomeRecord
-          // cashFlow represents the actual P&L change
-          const income = parseFloat(record.cashFlow || '0');
-
-          // Map Bybit types to generic income types
-          let incomeType = record.type;
-          if (record.type === 'TRADE' && income !== 0) {
-            incomeType = 'REALIZED_PNL' as any;
-          } else if (record.type === 'SETTLEMENT') {
-            incomeType = 'FUNDING_FEE' as any;
+          if (data.retMsg !== 'OK' && +data.retCode !== 0) {
+            this.log(`Failed to fetch transaction log: ${data.retMsg}`, LogSeverity.Error);
+            break;
           }
 
-          allRecords.push({
-            symbol: record.symbol || '',
-            incomeType,
-            income,
-            asset: record.currency || 'USDT',
-            timestamp: parseInt(record.transactionTime, 10),
-            tranId: record.tradeId || record.orderId || `${record.transactionTime}`,
-            tradeId: record.tradeId || undefined,
-          });
-        }
+          const records = data.result?.list as BybitTransactionRecord[] | undefined;
+          if (!records || records.length === 0) break;
 
-        cursor = data.result?.nextPageCursor;
-        page++;
-      } while (cursor && page < maxPages && allRecords.length < (opts?.limit || 1000));
+          for (const record of records) {
+            // One transaction row carries cashFlow, funding AND fee independently, so it
+            // maps to several records. Reading only cashFlow silently dropped every fee.
+            allRecords.push(...mapBybitTransactionToIncomeRecords(record));
+          }
+
+          cursor = data.result?.nextPageCursor;
+          page++;
+        } while (cursor && page < maxPages && allRecords.length < recordCap);
+
+        if (allRecords.length >= recordCap) break;
+      }
 
       return allRecords;
     } catch (error: any) {
@@ -1439,8 +1603,13 @@ export class BybitExchange extends BaseExchange {
     endTime: number,
     incomeType?: string,
   ): Promise<IncomeRecord[]> => {
-    const allRecords: IncomeRecord[] = [];
     const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000; // 7 days per chunk (Bybit limit)
+    // Chunk bounds are inclusive at both ends, so consecutive chunks must not share an
+    // endpoint or the boundary row is returned twice. Advancing past it is the fix —
+    // deduping on tranId is NOT, because bybit tranIds are not unique (hedge-mode
+    // settlement rows share every identity component, and transfers have no id at all),
+    // so a Map keyed on them silently deletes real value.
+    const allRecords: IncomeRecord[] = [];
 
     let currentStart = startTime;
 
@@ -1456,13 +1625,13 @@ export class BybitExchange extends BaseExchange {
 
       allRecords.push(...records);
 
-      currentStart = currentEnd;
+      currentStart = currentEnd + 1;
 
       // Add a small delay to respect rate limits
       await sleep(100);
     }
 
-    return allRecords;
+    return allRecords.sort((a, b) => b.timestamp - a.timestamp);
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
@@ -1898,7 +2067,7 @@ export class BybitExchange extends BaseExchange {
       const price = opts.price ? adjust(opts.price, pPrice) : null;
       const stopLoss = opts.stopLoss ? adjust(opts.stopLoss, pPrice) : null;
       const takeProfit = opts.takeProfit ? adjust(opts.takeProfit, pPrice) : null;
-    const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
+      const timeInForce = ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel];
       const triggerPrice = opts.triggerPrice ? adjust(opts.triggerPrice, pPrice) : null;
 
       let triggerDirection: number | undefined = undefined;
@@ -2273,7 +2442,10 @@ export class BybitExchange extends BaseExchange {
 
     const reasons = Array.isArray(data?.result?.reasons) ? data.result.reasons : [];
     if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0 || reasons.length > 0) {
-      const reasonMessage = reasons.map((reason: any) => reason?.reasonMsg).filter(Boolean).join(', ');
+      const reasonMessage = reasons
+        .map((reason: any) => reason?.reasonMsg)
+        .filter(Boolean)
+        .join(', ');
       const errorMsg = reasonMessage || v(data, 'retMsg') || 'Failed to switch margin type';
       this.emitAndLogError(errorMsg);
       throw new Error(errorMsg);

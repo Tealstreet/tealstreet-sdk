@@ -45,6 +45,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { paginateIncomeRange } from '../income-paging';
 import { createAPI } from './weex.api';
 import {
   ENDPOINTS,
@@ -91,6 +92,19 @@ type SymbolConfig = {
   isolatedLongLeverage: number;
   isolatedShortLeverage: number;
 };
+
+/**
+ * Widest income window accepted in one request, and the venue's own row cap.
+ *
+ * Both are UNVERIFIED against the live venue — WEEX has no credential anywhere in the
+ * `yarn keys` sheet. The 100-day window is carried over from the previous implementation;
+ * the 100-row cap is what `fetchIncomeHistory` already clamps to. They are named here rather
+ * than left inline so the pager's correctness does not depend on either being right: it
+ * pages until the records span the window, so a window that is actually narrower costs extra
+ * requests instead of silently losing rows.
+ */
+const WEEX_INCOME_MAX_WINDOW_MS = 100 * 24 * 60 * 60 * 1000;
+const WEEX_INCOME_PAGE_LIMIT = 100;
 
 const extractArray = <T = Record<string, any>>(payload: any, keys: string[] = []): T[] => {
   if (Array.isArray(payload)) return payload;
@@ -507,30 +521,47 @@ export class WeexExchange extends BaseExchange {
     return extractArray<Record<string, any>>(data, ['items']).map(normalizeIncome);
   };
 
+  /**
+   * Income over a range, paged for real.
+   *
+   * This used to issue ONE request per 100-day chunk at `limit: 100` with no cursor, so an
+   * active account silently lost everything past the first 100 rows of each window — and the
+   * ledger identity would have reconciled against the partial result and reported PASS. The
+   * walk now continues until the returned records SPAN the requested window; see
+   * `weex.income.ts` for why span rather than a full-page row count, and why no sort order is
+   * assumed.
+   */
   fetchIncomeHistoryRange = async (
     startTime: number,
     endTime: number,
     incomeType?: string,
   ): Promise<IncomeRecord[]> => {
-    const allRecords: IncomeRecord[] = [];
-    const HUNDRED_DAYS_MS = 100 * 24 * 60 * 60 * 1000;
-    let currentStart = startTime;
+    const { records, truncated, exhaustedChunks } = await paginateIncomeRange(
+      async ({ startTime: from, endTime: to, limit }) => {
+        const page = await this.fetchIncomeHistory({ startTime: from, endTime: to, incomeType, limit });
+        // The venue shares egress with everything else on this connection.
+        await sleep(100);
+        return page;
+      },
+      {
+        startTime,
+        endTime,
+        chunkMs: WEEX_INCOME_MAX_WINDOW_MS,
+        pageLimit: WEEX_INCOME_PAGE_LIMIT,
+      },
+    );
 
-    while (currentStart < endTime) {
-      const currentEnd = Math.min(currentStart + HUNDRED_DAYS_MS, endTime);
-      const records = await this.fetchIncomeHistory({
-        startTime: currentStart,
-        endTime: currentEnd,
-        incomeType,
-        limit: 100,
-      });
-
-      allRecords.push(...records);
-      currentStart = currentEnd + 1;
-      await sleep(100);
+    // A partial ledger that is not announced is worse than an error: it reconciles. Callers
+    // cannot see the return of a truncated walk as different from a complete one, so say so.
+    if (truncated) {
+      this.log(
+        `Income history for ${new Date(startTime).toISOString()}..${new Date(endTime).toISOString()} is INCOMPLETE — ` +
+          `the page budget ran out on ${exhaustedChunks} chunk(s). Any total derived from it is a lower bound.`,
+        LogSeverity.Warning,
+      );
     }
 
-    return allRecords.sort((a, b) => b.timestamp - a.timestamp);
+    return records;
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
@@ -539,8 +570,8 @@ export class WeexExchange extends BaseExchange {
       opts.type === OrderType.Conditional
         ? ENDPOINTS.ALGO_ORDER
         : opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit
-        ? ENDPOINTS.PLACE_TP_SL_ORDER
-        : ENDPOINTS.ORDER;
+          ? ENDPOINTS.PLACE_TP_SL_ORDER
+          : ENDPOINTS.ORDER;
 
     let data: WeexOrderResult | WeexOrderResult[];
     try {
@@ -654,7 +685,11 @@ export class WeexExchange extends BaseExchange {
       type: order.type,
       side: order.side,
       amount: 'amount' in update ? update.amount : order.amount,
-      price: isConditional ? toNumber(order.info?.price, 0) || undefined : 'price' in update ? update.price : order.price,
+      price: isConditional
+        ? toNumber(order.info?.price, 0) || undefined
+        : 'price' in update
+          ? update.price
+          : order.price,
       triggerPrice: isConditional ? ('price' in update ? update.price : order.price) : undefined,
       reduceOnly: order.reduceOnly,
       timeInForce: order.timeInForce,
@@ -972,20 +1007,14 @@ export class WeexExchange extends BaseExchange {
 
     orderedResults.forEach((result, index) => {
       if (result.success && orders[index].timeInForce === OrderTimeInForce.PostOnly) {
-        this.store.updateOrder(
-          { id: result.orderId as string },
-          { timeInForce: OrderTimeInForce.PostOnly },
-        );
+        this.store.updateOrder({ id: result.orderId as string }, { timeInForce: OrderTimeInForce.PostOnly });
       }
     });
 
     const rejectedResults = orderedResults.filter((result) => !result.success);
     if (rejectedResults.length) {
       const message = rejectedResults
-        .map(
-          (result) =>
-            `${result.clientOrderId}: ${result.errorMessage || result.errorCode || 'WEEX order rejected'}`,
-        )
+        .map((result) => `${result.clientOrderId}: ${result.errorMessage || result.errorCode || 'WEEX order rejected'}`)
         .join('; ');
       this.emitAndLogError(message);
       throw new Error(message);
@@ -1037,9 +1066,7 @@ export class WeexExchange extends BaseExchange {
         price: opts.price ? `${price}` : undefined,
         triggerPrice: `${adjust(triggerPrice, market.precision.price)}`,
         clientAlgoId: `ts${uuid()}`.slice(0, 36),
-        presetTakeProfitPrice: opts.takeProfit
-          ? `${adjust(opts.takeProfit, market.precision.price)}`
-          : undefined,
+        presetTakeProfitPrice: opts.takeProfit ? `${adjust(opts.takeProfit, market.precision.price)}` : undefined,
         presetStopLossPrice: opts.stopLoss ? `${adjust(opts.stopLoss, market.precision.price)}` : undefined,
         TpWorkingType: opts.takeProfit
           ? REVERSE_ORDER_TRIGGER_TYPE[opts.tpTriggerType || OrderStopTriggerType.LastPrice]

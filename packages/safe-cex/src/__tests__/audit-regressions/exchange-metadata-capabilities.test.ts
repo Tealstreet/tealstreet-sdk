@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import {
-  BaseCapabilityMethod,
-  BaseExchange,
-  isBaseCapabilityFallback,
-} from '../../exchanges/base';
+import { BaseCapabilityMethod, BaseExchange, isBaseCapabilityFallback, isInertCapability } from '../../exchanges/base';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
@@ -13,10 +9,7 @@ import { ExchangeName, ExchangeOptions } from '../../types';
 const liveInstances: BaseExchange[] = [];
 const REGISTRY_CONSTRUCTION_TIMEOUT_MS = 15_000;
 
-const createImplementation = async (
-  exchangeName: ExchangeName,
-  publicDataOnly = false,
-): Promise<BaseExchange> => {
+const createImplementation = async (exchangeName: ExchangeName, publicDataOnly = false): Promise<BaseExchange> => {
   const Exchange = await exchangeRegistry[exchangeName]();
   const options: ExchangeOptions = {
     key: 'capability-contract-key',
@@ -62,24 +55,53 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     REGISTRY_CONSTRUCTION_TIMEOUT_MS,
   );
 
-  it('advertised trade history has a non-fallback executions or historical-trades path', async () => {
+  it('advertised trade history has a non-INERT executions or historical-trades path', async () => {
+    // `isInertCapability`, not `isBaseCapabilityFallback`. The branded-fallback check answers
+    // "was this never implemented", which is only half the question: an override whose entire
+    // body is `return []` is unbranded and passed as a real implementation. coinbase and
+    // phemex both ship exactly that for `fetchHistoricalTrades`, so the flag could point at
+    // nothing and still satisfy the contract.
     const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
       (name) => exchangeMetadata[name].supportsTradesHistory,
     );
 
     for (const name of advertised) {
       const exchange = await createImplementation(name);
-      const hasExecutionHistory = !isBaseCapabilityFallback(exchange.fetchExecutions, 'fetchExecutions');
-      const hasHistoricalTrades = !isBaseCapabilityFallback(
-        exchange.fetchHistoricalTrades,
-        'fetchHistoricalTrades',
-      );
+      const hasExecutionHistory = !isInertCapability(exchange.fetchExecutions, 'fetchExecutions');
+      const hasHistoricalTrades = !isInertCapability(exchange.fetchHistoricalTrades, 'fetchHistoricalTrades');
 
       expect(
         hasExecutionHistory || hasHistoricalTrades,
-        `${name}: supportsTradesHistory uses both inert BaseExchange history fallbacks`,
+        `${name}: supportsTradesHistory points only at inert history paths (base fallback or empty stub)`,
       ).toBe(true);
     }
+  });
+
+  it('advertised executions history is not an empty stub either', async () => {
+    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
+      (name) => exchangeMetadata[name].supportsExecutionsHistory,
+    );
+
+    for (const name of advertised) {
+      const exchange = await createImplementation(name);
+      expect(
+        isInertCapability(exchange.fetchExecutions, 'fetchExecutions'),
+        `${name}: supportsExecutionsHistory points at an inert fetchExecutions`,
+      ).toBe(false);
+    }
+  });
+
+  it('detects an empty-stub override as inert, and a real one as live', () => {
+    // The mechanism itself, so the two tests above cannot quietly stop discriminating.
+    const stub = async () => [];
+    const guarded = async (publicOnly: boolean) => {
+      if (publicOnly) return [];
+      return [1];
+    };
+
+    expect(isInertCapability(stub, 'fetchHistoricalTrades')).toBe(true);
+    // A real implementation that merely OPENS with a guard clause must not be a stub.
+    expect(isInertCapability(guarded, 'fetchHistoricalTrades')).toBe(false);
   });
 
   it('advertised executions history does not use the inert executions fallback', async () => {

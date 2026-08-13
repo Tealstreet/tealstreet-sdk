@@ -18,6 +18,8 @@ import {
   ExecutionsOptions,
   HistoricalTrade,
   HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
@@ -38,6 +40,7 @@ import {
   UpdateOrderOpts,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+import { mapBitmexWalletHistory } from './bitmex.income';
 import { v } from '../../utils/get-key';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
@@ -353,6 +356,66 @@ export class BitmexExchange extends BaseExchange {
       this.emitAndLogError(this.parseError(err));
       return {};
     }
+  };
+
+  /**
+   * Ledger axis. BitMEX had NONE before this — `fetchIncomeHistory` fell through to the base
+   * stub returning `[]`, so the venue could not be graded at all: the closed-vs-ledger
+   * identity had no second axis to compare against.
+   *
+   * Mapping lives in `bitmex.income.ts` (pure, unit-tested) because an instance-field method
+   * is unreachable from a test — the same reason the WOO hedge-side parser was extracted.
+   *
+   * The per-currency SCALE comes from `/wallet/assets`, already fetched into `this.currencies`
+   * at startup. Values on this endpoint are minor units and the divisor DIFFERS per currency
+   * (`USDt` 1e6, `XBt` 1e8), so a single constant is wrong for half the rows.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const PAGE = 500;
+    const MAX_PAGES = 20;
+
+    try {
+      const rows: Array<Record<string, any>> = [];
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const { data } = await this.xhr.get<Array<Record<string, any>>>(ENDPOINTS.WALLET_HISTORY, {
+          params: omitUndefined({
+            currency: 'all',
+            count: PAGE,
+            start: page * PAGE,
+            reverse: true,
+            startTime: opts?.startTime ? new Date(opts.startTime).toISOString() : undefined,
+            endTime: opts?.endTime ? new Date(opts.endTime).toISOString() : undefined,
+          }),
+        });
+        const batch = Array.isArray(data) ? data : [];
+        if (batch.length === 0) break;
+        rows.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+
+      return mapBitmexWalletHistory(rows, {
+        scaleFor: (currency: string) => {
+          const precision = this.currencies[currency]?.precision;
+          const parsed = precision === undefined ? NaN : parseFloat(String(precision));
+          // A currency we have no scale for is DROPPED by the mapper, never guessed.
+          return Number.isFinite(parsed) && parsed > 0 ? 1 / parsed : undefined;
+        },
+      });
+    } catch (err: any) {
+      this.emitAndLogError(this.parseError(err));
+      return [];
+    }
+  };
+
+  /**
+   * BitMEX honours `startTime`/`endTime` on this endpoint, so no chunking is needed — unlike
+   * binance and bybit, whose equivalents REJECT a wide range outright. Verified against the
+   * live endpoint rather than assumed.
+   */
+  fetchIncomeHistoryRange = async (startTime: number, endTime: number): Promise<IncomeRecord[]> => {
+    return this.fetchIncomeHistory({ startTime, endTime });
   };
 
   fetchBalance = async () => {

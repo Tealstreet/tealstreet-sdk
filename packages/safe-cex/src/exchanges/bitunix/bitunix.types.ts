@@ -56,6 +56,11 @@ export const ENDPOINTS = {
   CANCEL_ORDER: '/api/v1/futures/trade/cancel_orders',
   KLINE: '/api/v1/futures/market/kline',
   HISTORY_TRADES: '/api/v1/futures/trade/get_history_trades',
+  // Order history, including orders that never filled. Rows nest under `data.orderList`.
+  HISTORY_ORDERS: '/api/v1/futures/trade/get_history_orders',
+  // Closed positions. A DIFFERENT source from HISTORY_TRADES, which is what lets it
+  // cross-check the fills-derived ledger. `/api/v1/futures/account/get_bills` is 404.
+  HISTORY_POSITIONS: '/api/v1/futures/position/get_history_positions',
   SET_MARGIN_TYPE: '/api/v1/futures/account/change_margin_mode',
   POSITIONS: '/api/v1/futures/position/get_pending_positions',
 };

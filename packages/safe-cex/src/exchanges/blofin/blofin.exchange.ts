@@ -16,16 +16,22 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
+  ClosedPnlEntry,
   ExchangeName,
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
   FetchedLeverage,
+  HistoricalOrder,
+  HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderStopTriggerType,
@@ -47,8 +53,12 @@ import { roundUSD } from '../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
+import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
+import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './blofin.api';
+import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from './blofin.income';
+import { mapBlofinHistoricalOrder } from './blofin.order-history';
 import {
   BROKER_ID,
   ENDPOINTS,
@@ -692,6 +702,206 @@ export class BlofinExchange extends BaseExchange {
     );
   };
 
+  /**
+   * Ledger from `/api/v1/trade/fills-history`. BloFin has no bills endpoint
+   * (`/api/v1/account/bills` answers 152404 "not supported"), so the fills carry it.
+   * Funding is on neither endpoint, so that category is always empty here.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const market = opts?.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts?.symbol && !market) {
+      return [];
+    }
+
+    const resolveSymbol = (instId: string) => this.store.marketsById[instId]?.symbol;
+    const MAX_PAGES = 100;
+    const PAGE_LIMIT = 100;
+    const startTime = opts?.startTime;
+    const endTime = opts?.endTime;
+
+    try {
+      const records: IncomeRecord[] = [];
+      const seen = new Set<string>();
+      // `after` means "earlier than this id" on BloFin, as on OKX. Using `before` pages
+      // the wrong direction and silently returns nothing after the first page — the
+      // ledger then truncates at exactly one page and looks like a small account.
+      //
+      // And `begin`/`end` are IGNORED on THIS endpoint, though `positions-history` on the
+      // same venue honours them. So paging by cursor alone walks back through ALL history:
+      // a 30-day request returned fills spanning six months. The window has to be enforced
+      // client-side — both as a stop condition and as a filter.
+      let after: string | undefined;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const params = omitUndefined({
+          instId: market?.id,
+          // Sent anyway in case BloFin starts honouring them; the client-side window
+          // above is what actually bounds the result today.
+          begin: startTime,
+          end: endTime,
+          limit: PAGE_LIMIT,
+          after,
+        });
+        const { data } = await this.xhr.get(ENDPOINTS.FILLS, { params });
+        const rows: Array<Record<string, any>> = Array.isArray(data?.data) ? data.data : [];
+        if (rows.length === 0) break;
+
+        let added = 0;
+        let reachedStart = false;
+        for (const row of rows) {
+          const ts = parseInt(String(row.ts ?? '0'), 10);
+          if (startTime && ts && ts < startTime) {
+            reachedStart = true;
+            continue;
+          }
+          if (endTime && ts && ts > endTime) continue;
+
+          const id = String(row.tradeId ?? '');
+          if (id && seen.has(id)) continue;
+          if (id) seen.add(id);
+          added += 1;
+          records.push(...mapBlofinFillToIncomeRecords(row, resolveSymbol));
+        }
+
+        // Rows are newest-first, so the first page containing anything older than the
+        // window start means the window is exhausted.
+        if (reachedStart || rows.length < PAGE_LIMIT) break;
+        if (added === 0) break;
+        const next = oldestCursorId(rows, 'tradeId') ?? '';
+        if (!next || next === after) break;
+        after = next;
+      }
+
+      if (page >= MAX_PAGES) {
+        this.log(
+          `fetchIncomeHistory stopped at the ${MAX_PAGES}-page cap; older fills were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      return records.sort((a, b) => b.timestamp - a.timestamp);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    return await this.fetchIncomeHistory({ startTime, endTime, incomeType });
+  };
+
+  /**
+   * Closed positions from `/api/v1/account/positions-history` — a DIFFERENT source from
+   * the fills the ledger reads, which is what makes it a real cross-check.
+   */
+  fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const market = opts.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts.symbol && !market) {
+      return [];
+    }
+
+    const resolveSymbol = (instId: string) => this.store.marketsById[instId]?.symbol;
+    const MAX_PAGES = 100;
+    const PAGE_LIMIT = 100;
+
+    try {
+      const entries: ClosedPnlEntry[] = [];
+      // Dedupe on `historyId`, NOT `positionId`: a live sample had 20 rows across only 2
+      // positionIds, so keying on the position would delete 18 real closes. Same trap as
+      // okx's posId.
+      const seen = new Set<string>();
+      let after: string | undefined;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const params = omitUndefined({
+          instId: market?.id,
+          begin: opts.from,
+          end: opts.to,
+          limit: PAGE_LIMIT,
+          after,
+        });
+        const { data } = await this.xhr.get(ENDPOINTS.POSITIONS_HISTORY, { params });
+        const rows: Array<Record<string, any>> = Array.isArray(data?.data) ? data.data : [];
+        if (rows.length === 0) break;
+
+        let added = 0;
+        for (const row of rows) {
+          const id = String(row.historyId ?? '');
+          if (id && seen.has(id)) continue;
+          if (id) seen.add(id);
+          added += 1;
+          const entry = mapBlofinClosedPosition(row, resolveSymbol, opts.accountName || '');
+          if (entry) entries.push(entry);
+        }
+
+        if (added === 0 || rows.length < PAGE_LIMIT) break;
+        const next = oldestCursorId(rows, 'historyId') ?? '';
+        if (!next || next === after) break;
+        after = next;
+      }
+
+      if (page >= MAX_PAGES) {
+        this.log(
+          `fetchClosedPnl stopped at the ${MAX_PAGES}-page cap; older positions were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      return entries.sort((a, b) => b.closedTime - a.closedTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  /** Historical orders, including ones that never filled — see blofin.order-history.ts. */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const market = opts?.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts?.symbol && !market) {
+      return [];
+    }
+
+    const resolveSymbol = (instId: string) => this.store.marketsById[instId]?.symbol;
+
+    try {
+      const { data } = await this.xhr.get(ENDPOINTS.ORDERS_HISTORY, {
+        params: omitUndefined({
+          instId: market?.id,
+          begin: opts?.from,
+          end: opts?.to,
+          limit: Math.min(opts?.limit || 100, 100),
+        }),
+      });
+
+      const rows: Array<Record<string, any>> = Array.isArray(data?.data) ? data.data : [];
+      return rows
+        .map((row) => mapBlofinHistoricalOrder(row, resolveSymbol))
+        .filter((order): order is HistoricalOrder => order !== null)
+        .sort((a, b) => b.createdTime - a.createdTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
@@ -808,8 +1018,12 @@ export class BlofinExchange extends BaseExchange {
 
         const feeRaw = parseFirstNumeric(row.fee, row.fillFee, row.execFee, row.tradeFee, row.actualFee);
         const commission = feeRaw !== undefined && Number.isFinite(feeRaw) ? Math.abs(feeRaw) : undefined;
+        const realizedPnl = parseFirstNumeric(row.fillPnl);
         acc.push(
           omitUndefined({
+            // Per-fill dedupe key. Only /trade/fills-history carries it; rows from the
+            // ORDERS_HISTORY fallback are order-level and correctly leave it undefined.
+            id: row.tradeId ? String(row.tradeId) : undefined,
             timestamp,
             symbol: market.symbol,
             orderId: executionOrderId || undefined,
@@ -818,6 +1032,9 @@ export class BlofinExchange extends BaseExchange {
             side,
             commission,
             commissionAsset: row.feeCurrency || row.feeCcy || row.feeAsset || row.ccy || undefined,
+            positionSide: row.positionSide ? normalizeExecutionPositionSide(row.positionSide) : undefined,
+            realizedPnl: realizedPnl !== undefined && Number.isFinite(realizedPnl) ? realizedPnl : undefined,
+            // Blofin fills carry no maker/liquidity field, so `maker` stays absent.
           }),
         );
         return acc;
@@ -892,7 +1109,11 @@ export class BlofinExchange extends BaseExchange {
         if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
           continue;
         }
-        const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        // Without the fill id, two genuine fills of one order at the same timestamp,
+        // price and size collapse into one — the exact data loss the id exists to stop.
+        const key = execution.id
+          ? `id:${execution.id}`
+          : `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
         deduped.set(key, execution);
       }
 

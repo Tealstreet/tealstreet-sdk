@@ -86,6 +86,29 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 - On error, logs the error and continues the loop
 - Uses `loop()` utility for scheduling
 
+## History axes: NONE implemented, but the venue publishes up to three
+
+`fetchHistoricalTrades` here is an unconditional `return []` — an **unbranded stub**, so
+`isBaseCapabilityFallback` cannot see it and it reads as a real implementation. Use
+`isInertCapability`. More importantly, do not read that stub as a statement about phemex:
+
+| Venue route                               | Axis                          | Notes                                                                    |
+| ----------------------------------------- | ----------------------------- | ------------------------------------------------------------------------ |
+| `/g-positions/positions-history`          | **Reported closed positions** | The strongest axis kind — held today only by okx, bybit, blofin, bitunix |
+| `/api-data/futures/v2/tradeAccountDetail` | Ledger                        | `amountRv`, `typeDesc`, **running `balanceRv`**, `createTime`            |
+| `/g-orders/orderTrade`                    | Fills                         | `execQty`, `execPriceEp`, `execFeeEv`, **`fundingFeeEv`**, `tradeType`   |
+| `/g-orders/list`                          | Order history                 | `offset`/`limit` ≤ 200, `start`/`end` in ms                              |
+
+The running `balanceRv` is what makes this venue cheap to grade: consecutive-delta arithmetic
+against a venue-supplied balance column is how bitget's gross-vs-net convention was pinned
+without guessing. Do that before assuming a profile.
+
+**Probing hazard, separate from all of the above and still live:** an earlier probe of the
+executions route wedged unrelated REST on this venue, including public `/products`. That is
+also why `supportsExecutionsHistory` is a deliberate opt-**out** here (`FillsModule` and
+`executionsController` both gate on it) — phemex must not be invoked through the shared HOW
+tunnel. Probe narrowly, one route at a time, and expect to need a fresh connection after.
+
 ## REST API Endpoints
 
 All endpoints are defined in `ENDPOINTS` constant in `phemex.types.ts`:
@@ -431,7 +454,7 @@ twice over:
 - it early-returns `[]` whenever `store.loaded.positions` is false — the
   permanent state of the never-`start()`ed main-thread mirror that executes
   hosted-mode order writes (the same trap documented as bitget quirks 22/23);
-- **`mapPosition` drops size-0 rows on purpose**, so a *flat* symbol has no
+- **`mapPosition` drops size-0 rows on purpose**, so a _flat_ symbol has no
   store position even on a fully loaded worker — and changing margin type
   while flat is the normal case.
 

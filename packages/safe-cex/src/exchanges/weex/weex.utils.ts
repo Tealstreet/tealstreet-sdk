@@ -21,6 +21,7 @@ import {
   Writable,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+import { incomeCategoryFromType } from '../../utils/incomeCategoryFromType';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import {
@@ -231,7 +232,7 @@ export const normalizeAlgoOrder = (raw: Record<string, any>, market?: Market): O
       ? planType
       : isTriggerOrder && !isProtective
         ? 'CONDITIONAL'
-        : raw.orderType ?? raw.planType;
+        : (raw.orderType ?? raw.planType);
   const baseOrder = normalizeOrder(
     {
       ...raw,
@@ -422,6 +423,7 @@ export const normalizeIncome = (raw: Record<string, any>): IncomeRecord => ({
   timestamp: normalizeTimestampToMs(raw.time ?? raw.createdTime),
   tranId: toIntegerString(raw.billId ?? raw.tranId ?? raw.id),
   tradeId: raw.tradeId ? toIntegerString(raw.tradeId) : undefined,
+  category: incomeCategoryFromType(raw.incomeType),
 });
 
 export const normalizePublicTrade = (raw: Record<string, any>, symbol: string): PublicTrade | null => {

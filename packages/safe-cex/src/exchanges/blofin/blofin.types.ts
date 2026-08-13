@@ -27,6 +27,10 @@ export const ENDPOINTS = {
   POSITIONS: '/api/v1/account/positions',
   KLINE: '/api/v1/market/candles',
   FILLS: '/api/v1/trade/fills-history',
+  // Closed positions. A DIFFERENT source from FILLS, which is what lets it cross-check
+  // the fills-derived ledger rather than restate it. `/api/v1/account/bills` answers
+  // 152404 "This operation is not supported" on this account type — do not add it.
+  POSITIONS_HISTORY: '/api/v1/account/positions-history',
   ORDERS_HISTORY: '/api/v1/trade/orders-history',
   UNFILLED_ORDERS: '/api/v1/trade/orders-pending',
   UNFILLED_ALGO_ORDERS: '/api/v1/trade/orders-tpsl-pending',

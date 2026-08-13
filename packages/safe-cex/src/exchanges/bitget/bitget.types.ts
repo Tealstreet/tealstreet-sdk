@@ -13,6 +13,8 @@ export const ENDPOINTS = {
   ACCOUNT_SPOT: '/api/v2/spot/account/info',
   ACCOUNT: '/api/v2/mix/account/account',
   BALANCE: '/api/v2/mix/account/accounts',
+  /** The ledger axis. Verified live: authenticates, honours startTime/endTime, 100/page. */
+  ACCOUNT_BILL: '/api/v2/mix/account/bill',
   MARKETS: '/api/v2/mix/market/contracts',
   SYMBOL_LEVERAGE: '/api/v2/mix/market/symbol-leverage',
   TICKERS: '/api/v2/mix/market/tickers',
@@ -38,6 +40,8 @@ export const ENDPOINTS = {
   PLACE_TRAILING_STOP_ORDER: '/api/v2/mix/order/place-plan-order',
   FETCH_SINGLE_ACCOUNT: '/api/v2/mix/account/account',
   ORDER_HISTORY: '/api/v2/mix/order/orders-history',
+  /** PER-FILL route. Account-wide, and the only one carrying `profit` + `tradeId`. */
+  ORDER_FILLS: '/api/v2/mix/order/fills',
 };
 
 export const GRAFANA_ENDPOINTS_EVERY = [

@@ -81,6 +81,7 @@ describe('WOOXExchange execution history mapping', () => {
         side: OrderSide.Buy,
         commission: 0.0001,
         commissionAsset: 'LTC',
+        positionSide: 'both',
       },
     ]);
   });
@@ -146,6 +147,7 @@ describe('WOOXExchange execution history mapping', () => {
         side: OrderSide.Sell,
         commission: 0.2,
         commissionAsset: 'USDT',
+        positionSide: 'both',
       },
       {
         timestamp: 1752055200,
@@ -156,6 +158,7 @@ describe('WOOXExchange execution history mapping', () => {
         side: OrderSide.Buy,
         commission: 0.1,
         commissionAsset: 'USDT',
+        positionSide: 'both',
       },
     ]);
   });
@@ -192,6 +195,7 @@ describe('WOOXExchange execution history mapping', () => {
         price: 60000,
         qty: 0.005,
         side: OrderSide.Buy,
+        positionSide: 'both',
       },
     ]);
   });
@@ -306,6 +310,7 @@ describe('WOOXExchange execution history mapping', () => {
         side: OrderSide.Buy,
         commission: 0.01,
         commissionAsset: 'USDT',
+        positionSide: 'both',
       },
     ]);
     expect(get.mock.calls.some((call) => call[0] === '/v1/client/trades')).toBe(true);
@@ -353,6 +358,9 @@ describe('WOOXExchange execution history mapping', () => {
         side: OrderSide.Buy,
         commission: 0.1,
         commissionAsset: 'USDT',
+        positionSide: 'both',
+        // Carried through from the HistoricalTrade fallback, which already parsed it.
+        realizedPnl: 1.23,
       },
     ]);
   });

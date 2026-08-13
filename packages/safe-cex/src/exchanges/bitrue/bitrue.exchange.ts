@@ -890,6 +890,9 @@ export class BitrueExchange extends BaseExchange {
           }
 
           return omitUndefined({
+            // Distinct from orderId, which is only a last-resort fallback here: one
+            // order fills across many rows, so tradeId is the per-fill dedupe key.
+            id: entry.tradeId != null && entry.tradeId !== '' ? String(entry.tradeId) : undefined,
             symbol,
             orderId,
             price,
@@ -929,6 +932,9 @@ export class BitrueExchange extends BaseExchange {
 
       return trades.map((trade) => {
         return omitUndefined({
+          // Carry the per-fill id across the re-map; dropping it here undid the whole
+          // point of populating it on the HistoricalTrade above.
+          id: trade.id,
           timestamp: Math.floor(trade.time / 1000),
           symbol: trade.symbol,
           orderId: trade.orderId,

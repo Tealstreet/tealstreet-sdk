@@ -19,17 +19,23 @@ import {
 import { safeString } from '@tealstreet/ccxt-compat/src/functions/type';
 import {
   Candle,
+  ClosedPnlEntry,
   CoinBalance,
   ExchangeName,
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
+  HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderTimeInForce,
@@ -61,9 +67,16 @@ import {
 } from './hyperliquid.constants';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
+  deriveHyperliquidClosedPositions,
+  mapHyperliquidFillToIncomeRecords,
+  mapHyperliquidFundingToIncomeRecord,
+  paginateHyperliquidByTime,
+} from './hyperliquid.income';
+import {
   fetchCoreMetaAndAssetCtxsWithFallback,
   fetchHip3MetaAndAssetCtxsWithRetry,
 } from './hyperliquid.market-startup-helpers';
+import { collapseHyperliquidOrderHistory, mapHyperliquidHistoricalOrder } from './hyperliquid.order-history';
 import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from './hyperliquid.order-inference';
 import {
   orderRequestToOrderWire,
@@ -2576,6 +2589,254 @@ export class HyperliquidExchange extends BaseExchange {
       .filter((order): order is Order => order !== null);
   };
 
+  /**
+   * Account ledger from fills + funding.
+   *
+   * Hyperliquid emits no separate fee row — the fee rides on the fill next to that fill's
+   * `closedPnl` — so one fill becomes up to two records. See `hyperliquid.income.ts`.
+   *
+   * Three deliberate departures from `fetchExecutions` in this same file:
+   *
+   * - **Uses `infoXhr`, not `xhr`.** Every other private read here goes through the
+   *   unlimited info client; `fetchExecutions` is the odd one out.
+   * - **Uses `vault || applicationId`.** `fetchExecutions` reads `applicationId` alone, so
+   *   on a vault account it returns the MASTER WALLET's data. Every other private read in
+   *   this file uses the pair.
+   * - **No 30-day floor and no 7-day chunking.** Those constants in `fetchExecutions` are
+   *   ours, bybit-shaped, with no upstream citation. Hyperliquid is address-queryable with
+   *   no retention ceiling — that is the entire reason this venue matters for a journal —
+   *   so the range is walked by row-cap exhaustion instead, and warns if it stops early.
+   *
+   * Known gap, stated rather than hidden: deposits, withdrawals and liquidations live in
+   * `userNonFundingLedgerUpdates`, which is not read here, so the `transfer` and
+   * `liquidation` categories are always empty on hyperliquid. Until that is added the
+   * full equity identity cannot close on this venue — it is what distinguishes a losing
+   * trade from a withdrawal.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const user = this.options.vault || this.options.applicationId;
+    if (!user) {
+      this.log('Skipping fetchIncomeHistory: no vault/applicationId', LogSeverity.Warning);
+      return [];
+    }
+
+    const endTime = opts?.endTime ?? virtualClock.getCurrentTimeMs();
+    const startTime = opts?.startTime ?? endTime - 30 * 24 * 60 * 60 * 1000;
+    // Via the helper: a direct marketsById lookup misses every HIP-3 coin on casing.
+    const resolveSymbol = (coin: string) => this.resolveCoinToSymbol(coin);
+
+    const onCapHit = (type: string, pages: number) =>
+      this.log(
+        `fetchIncomeHistory stopped at the ${pages}-page cap for ${type}; older rows in this window were not fetched`,
+        LogSeverity.Warning,
+      );
+
+    const post = async (type: string, body: Record<string, any> = {}) => {
+      const { data } = await this.infoXhr.post<any>(
+        ENDPOINTS.INFO,
+        { type, user, ...body },
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+      return Array.isArray(data) ? data : [];
+    };
+
+    try {
+      const records: IncomeRecord[] = [];
+
+      if (!opts?.incomeType || opts.incomeType !== 'FUNDING_FEE') {
+        const fills = await paginateHyperliquidByTime(
+          post,
+          INFO_TYPES.USER_FILLS_BY_TIME,
+          startTime,
+          endTime,
+          (row) => String(row.tid ?? `${row.time}:${row.coin}:${row.px}:${row.sz}`),
+          onCapHit,
+        );
+        for (const fill of fills) {
+          records.push(...mapHyperliquidFillToIncomeRecords(fill, resolveSymbol));
+        }
+      }
+
+      if (!opts?.incomeType || opts.incomeType === 'FUNDING_FEE') {
+        // Paged, not a single request: funding is row-capped like fills, and a 30-day
+        // window on a multi-coin account exceeds that in days. Truncating here would be
+        // INVISIBLE to the ledger audit, because the audit reads the same truncated
+        // response — both sides shrink together and the residual stays 0.
+        const funding = await paginateHyperliquidByTime(
+          post,
+          INFO_TYPES.USER_FUNDING,
+          startTime,
+          endTime,
+          (row) => {
+            const delta = row.delta ?? row;
+            return `${row.hash ?? ''}:${delta.coin ?? ''}:${row.time ?? ''}`;
+          },
+          onCapHit,
+        );
+        for (const row of funding) {
+          const record = mapHyperliquidFundingToIncomeRecord(row, resolveSymbol);
+          if (record) records.push(record);
+        }
+      }
+
+      const filtered = opts?.symbol ? records.filter((record) => record.symbol === opts.symbol) : records;
+      return filtered.sort((a, b) => b.timestamp - a.timestamp);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  /**
+   * Closed positions folded from this account's own fills.
+   *
+   * Deliberately NOT named `fetchClosedPnl`: hyperliquid has no closed-position endpoint,
+   * so this is a reshaping of the fills rather than a second observation of them. Under
+   * the venue method's name it would look identical to bybit's exchange-reported rows and
+   * the cross-axis oracle would "verify" the ledger against data folded from the same
+   * source. `resolveClosedPositions` composes the two and stamps provenance.
+   */
+  /**
+   * TRUE here: this folds `userFillsByTime`, which is exactly what `fetchIncomeHistory`
+   * reads. So it cannot cross-check the ledger — they would agree by construction. Binance
+   * folds a different endpoint than its ledger reads and therefore declares false.
+   */
+  closedPositionsShareLedgerSource = true;
+
+  /**
+   * Coin -> safe-cex symbol, honouring HIP-3's casing.
+   *
+   * HIP-3 market ids are built from the meta's own casing (`vntls:vKRAKEN`), so a direct
+   * `marketsById[coin]` lookup MISSES for every HIP-3 asset — which is why `parseOpenOrders`
+   * and the HIP-3 position path both fall back to `marketsLowerCaseMap`. A history mapper
+   * that skips the fallback emits the raw `dex:ASSET` string as the symbol, which looks
+   * like a deliberate fallback rather than a miss and can never match a caller's symbol
+   * filter.
+   */
+  private resolveCoinToSymbol = (coin: string): string | undefined => {
+    const direct = this.store.marketsById[coin];
+    if (direct) return direct.symbol;
+    return this.marketsLowerCaseMap.get(coin.toLowerCase())?.symbol;
+  };
+
+  /**
+   * Historical orders, including ones that never filled — see
+   * `hyperliquid.order-history.ts`. Measured live: 1020 orders, only 315 of them filled.
+   *
+   * Two properties of `historicalOrders` shape this method and are not negotiable:
+   *
+   * - **the server-side time window is ignored**, so `from`/`to` are applied here. Passing
+   *   `startTime`/`endTime` returned a byte-identical response, which would otherwise read
+   *   as a working filter;
+   * - **it returns one row per status transition**, 2000 rows for 1020 orders on a live
+   *   account, so the rows are collapsed to the latest status per `oid` before mapping.
+   *
+   * The 2000-row ceiling is a retention limit, not a page size — there is no cursor to
+   * walk past it, so a window older than the snapshot returns nothing rather than paging.
+   */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const user = this.options.vault || this.options.applicationId;
+    if (!user) {
+      this.log('Skipping fetchOrderHistory: no vault/applicationId', LogSeverity.Warning);
+      return [];
+    }
+
+    const SNAPSHOT_CAP = 2000;
+    const resolveSymbol = (coin: string) => this.resolveCoinToSymbol(coin);
+
+    try {
+      const { data } = await this.infoXhr.post<any>(
+        ENDPOINTS.INFO,
+        { type: INFO_TYPES.HISTORICAL_ORDERS, user },
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+
+      // A rejected `/info` comes back 200 with a STRING body, so a bare isArray guard turns
+      // it into "this account has no orders" with nothing logged.
+      if (!Array.isArray(data)) {
+        this.log(`fetchOrderHistory got a non-array historicalOrders response`, LogSeverity.Warning);
+        return [];
+      }
+
+      const rows: Array<Record<string, any>> = data;
+      if (rows.length >= SNAPSHOT_CAP) {
+        this.log(
+          `fetchOrderHistory received the full ${SNAPSHOT_CAP}-row historicalOrders snapshot; older orders are not retrievable`,
+          LogSeverity.Warning,
+        );
+      }
+
+      const orders = collapseHyperliquidOrderHistory(rows)
+        .map((row) => mapHyperliquidHistoricalOrder(row, resolveSymbol))
+        .filter((order): order is HistoricalOrder => order !== null)
+        .filter((order) => {
+          if (opts?.symbol && order.symbol !== opts.symbol) return false;
+          if (opts?.from && order.createdTime < opts.from) return false;
+          if (opts?.to && order.createdTime > opts.to) return false;
+          return true;
+        })
+        .sort((a, b) => b.createdTime - a.createdTime);
+
+      return opts?.limit && opts.limit > 0 ? orders.slice(0, opts.limit) : orders;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  deriveClosedPositions = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const user = this.options.vault || this.options.applicationId;
+    if (!user) {
+      return [];
+    }
+
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+    // Via the helper: a direct marketsById lookup misses every HIP-3 coin on casing.
+    const resolveSymbol = (coin: string) => this.resolveCoinToSymbol(coin);
+
+    const post = async (type: string, body: Record<string, any> = {}) => {
+      const { data } = await this.infoXhr.post<any>(
+        ENDPOINTS.INFO,
+        { type, user, ...body },
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+      return Array.isArray(data) ? data : [];
+    };
+
+    try {
+      const fills = await paginateHyperliquidByTime(post, INFO_TYPES.USER_FILLS_BY_TIME, from, to, (row) =>
+        String(row.tid ?? `${row.time}:${row.coin}:${row.px}:${row.sz}`),
+      );
+      const entries = deriveHyperliquidClosedPositions(fills, resolveSymbol, opts.accountName || '');
+      return opts.symbol ? entries.filter((entry) => entry.symbol === opts.symbol) : entries;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    // No chunking: hyperliquid bounds a response by row count, not by window width.
+    return await this.fetchIncomeHistory({ startTime, endTime, incomeType });
+  };
+
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
@@ -2712,6 +2973,7 @@ export class HyperliquidExchange extends BaseExchange {
           }
 
           const feeRaw = Number.parseFloat(String(fill?.fee || 0));
+          const closedPnlRaw = Number.parseFloat(String(fill?.closedPnl ?? ''));
           const execution: Execution = {
             id: fill?.tid !== undefined && fill?.tid !== null ? `${fill.tid}` : undefined,
             timestamp: Math.floor(timestampMilliseconds / 1000),
@@ -2722,6 +2984,14 @@ export class HyperliquidExchange extends BaseExchange {
             side,
             commission: Number.isFinite(feeRaw) ? Math.abs(feeRaw) : undefined,
             commissionAsset: fill?.feeToken || 'USDC',
+            // positionSide is deliberately NOT derived from `dir`. Hyperliquid is
+            // one-way only (metadata `positionModes: [OneWay]`), so `dir`
+            // ("Open Long" / "Close Long") describes the fill, not a hedge leg —
+            // mapping it would split one continuous position into long/short
+            // buckets that a one-way consumer never seeds.
+            realizedPnl: Number.isFinite(closedPnlRaw) ? closedPnlRaw : undefined,
+            // `crossed` means the fill crossed the spread, i.e. took liquidity.
+            maker: typeof fill?.crossed === 'boolean' ? !fill.crossed : undefined,
           };
 
           const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;

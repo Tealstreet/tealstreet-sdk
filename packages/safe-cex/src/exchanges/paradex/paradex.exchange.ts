@@ -12,12 +12,16 @@ import {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderType,
@@ -34,22 +38,24 @@ import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust } from '../../utils/safe-math';
-import { virtualClock } from '../../utils/virtualClock';
 import { uuid } from '../../utils/uuid';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './paradex.api';
+import { mapParadexFillToIncomeRecords } from './paradex.income';
+import { mapParadexHistoricalOrder } from './paradex.order-history';
 import { initializeParadexSDK, ParadexJWTManager, ParadexRequestSigner } from './paradex.sdk';
 import {
   ACCOUNT_RESPONSE,
   BATCH_CANCEL_ORDER_RESPONSE,
   BATCH_ORDER_RESPONSE,
   ENDPOINTS,
+  isParadexTriggerOrderType,
   MARGIN_RESPONSE,
   MARKET_RESPONSE,
-  isParadexTriggerOrderType,
-  ORDER_TYPE,
   ORDER_RESPONSE,
   ORDER_SIDE,
+  ORDER_TYPE,
   ORDERBOOK_RESPONSE,
   POSITION_RESPONSE,
   TICKER_RESPONSE,
@@ -766,6 +772,158 @@ export class ParadexExchange extends BaseExchange {
     }
   };
 
+  /**
+   * Account ledger. Every term rides on the fill — `realized_pnl`, `fee` and
+   * `realized_funding` — so unlike every other venue here this needs no second endpoint.
+   * Field names verified live; see `paradex.income.ts`.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    if (this.sdkInitPromise) {
+      await this.sdkInitPromise;
+    }
+    if (!this.jwtManager) {
+      this.log('Skipping fetchIncomeHistory: JWT manager not initialized', LogSeverity.Warning);
+      return [];
+    }
+
+    const endTime = opts?.endTime ?? Date.now();
+    const startTime = opts?.startTime ?? endTime - 30 * 24 * 60 * 60 * 1000;
+    const market = opts?.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts?.symbol && !market) {
+      return [];
+    }
+
+    const resolveSymbol = (id: string) => this.store.marketsById[id]?.symbol;
+    const MAX_PAGES = 200;
+    const PAGE_SIZE = 500;
+
+    try {
+      const records: IncomeRecord[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const params = omitUndefined({
+          cursor,
+          market: market?.symbol,
+          page_size: PAGE_SIZE,
+          start_at: startTime,
+          end_at: endTime,
+        });
+        const response = await this.xhr.get(ENDPOINTS.FILLS, { params });
+        const body = response?.data;
+        const rows: Array<Record<string, any>> = Array.isArray(body?.results)
+          ? body.results
+          : Array.isArray(body)
+            ? body
+            : [];
+
+        if (rows.length === 0) break;
+
+        for (const row of rows) {
+          const id = String(row.id ?? '');
+          if (id && seen.has(id)) continue;
+          if (id) seen.add(id);
+          records.push(...mapParadexFillToIncomeRecords(row, resolveSymbol));
+        }
+
+        const next = typeof body?.next === 'string' && body.next ? body.next : undefined;
+        if (!next || next === cursor) break;
+        cursor = next;
+      }
+
+      if (page >= MAX_PAGES) {
+        // Fills come newest-first, so a cap that bites drops the OLDEST rows of the window
+        // — a hole mid-ledger rather than a short tail.
+        this.log(
+          `fetchIncomeHistory stopped at the ${MAX_PAGES}-page cap; older fills in this window were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      return records.sort((a, b) => b.timestamp - a.timestamp);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    // No chunking: paradex bounds a response by page size and walks with a cursor.
+    const records = await this.fetchIncomeHistory({ startTime, endTime, incomeType });
+    return incomeType ? records.filter((record) => record.incomeType === incomeType) : records;
+  };
+
+  /**
+   * Historical orders, including ones that never filled — see `paradex.order-history.ts`.
+   *
+   * `start_at` / `end_at` ARE honoured here (a window the account has no orders in comes
+   * back `results: []`), which is worth stating because four other venues in this epic
+   * answered a windowed request with their full history and no error.
+   */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const MAX_PAGES = 50;
+    const PAGE_SIZE = 100;
+
+    try {
+      const orders: HistoricalOrder[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      let page = 0;
+
+      for (; page < MAX_PAGES; page += 1) {
+        const { data } = await this.xhr.get(ENDPOINTS.ORDERS_HISTORY, {
+          params: omitUndefined({
+            market: opts?.symbol,
+            start_at: opts?.from,
+            end_at: opts?.to,
+            page_size: PAGE_SIZE,
+            cursor,
+          }),
+        });
+
+        const rows: Array<Record<string, any>> = Array.isArray(data?.results) ? data.results : [];
+        if (rows.length === 0) break;
+
+        for (const row of rows) {
+          const order = mapParadexHistoricalOrder(row);
+          if (!order || seen.has(order.id)) continue;
+          seen.add(order.id);
+          orders.push(order);
+        }
+
+        cursor = typeof data?.next === 'string' && data.next ? data.next : undefined;
+        if (!cursor) break;
+      }
+
+      if (page >= MAX_PAGES) {
+        this.log(
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      const sorted = orders.sort((a, b) => b.createdTime - a.createdTime);
+      return opts?.limit && opts.limit > 0 ? sorted.slice(0, opts.limit) : sorted;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
+    }
+  };
+
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
@@ -842,8 +1000,13 @@ export class ParadexExchange extends BaseExchange {
         }
 
         const fee = parseFloat(row.fee || '0');
+        const realizedPnl = parseFloat(row.realized_pnl ?? '');
         acc.push(
           omitUndefined({
+            // Paradex gives every fill a unique `id`. Without it, two genuine fills of one
+            // order at the same timestamp, price and size collapse into one — the exact
+            // data loss the field exists to prevent.
+            id: row.id ? String(row.id) : undefined,
             timestamp,
             symbol: rowSymbol,
             orderId: executionOrderId || undefined,
@@ -852,6 +1015,10 @@ export class ParadexExchange extends BaseExchange {
             side,
             commission: Number.isFinite(fee) ? Math.abs(fee) : undefined,
             commissionAsset: row.fee_currency || market.quote,
+            // Paradex fills carry no position side — `side` is the order side —
+            // so positionSide is left absent rather than inferred.
+            realizedPnl: Number.isFinite(realizedPnl) ? realizedPnl : undefined,
+            maker: row.liquidity ? String(row.liquidity).toUpperCase() === 'MAKER' : undefined,
           }),
         );
         return acc;
@@ -1389,7 +1556,10 @@ export class ParadexExchange extends BaseExchange {
       }
       const error = row.error;
       const message = row.message;
-      if ((error !== undefined && typeof error !== 'string') || (message !== undefined && typeof message !== 'string')) {
+      if (
+        (error !== undefined && typeof error !== 'string') ||
+        (message !== undefined && typeof message !== 'string')
+      ) {
         return malformed(`errors[${index}] must contain only string error/message fields`);
       }
       if (!error && !message) {
@@ -1631,7 +1801,9 @@ export class ParadexExchange extends BaseExchange {
       rawSide !== expectedSide ||
       this.reverseMapOrderType(rawType, rawReduceOnly) !== order.type
     ) {
-      return rejectPreflight(`Paradex cannot safely amend ${order.id}: order identity or immutable shape is not reconciled`);
+      return rejectPreflight(
+        `Paradex cannot safely amend ${order.id}: order identity or immutable shape is not reconciled`,
+      );
     }
     if (raw?.on_behalf_of_account) {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: isolated-margin order routing is unsupported`);
@@ -1642,7 +1814,9 @@ export class ParadexExchange extends BaseExchange {
     const hasLegacyInstruction =
       typeof raw?.post_only === 'boolean' || ['GTT', 'FOK', 'IOC'].includes(String(raw?.time_in_force || ''));
     if (!knownInstruction && !hasLegacyInstruction) {
-      return rejectPreflight(`Paradex cannot safely amend ${order.id}: time-in-force/post-only state is not reconciled`);
+      return rejectPreflight(
+        `Paradex cannot safely amend ${order.id}: time-in-force/post-only state is not reconciled`,
+      );
     }
 
     if (rawReduceOnly === undefined || rawReduceOnly !== order.reduceOnly) {
@@ -1664,7 +1838,9 @@ export class ParadexExchange extends BaseExchange {
       rawRemaining !== order.remaining ||
       reconciledFilled !== order.filled
     ) {
-      return rejectPreflight(`Paradex cannot safely amend ${order.id}: total/filled/remaining base size is not reconciled`);
+      return rejectPreflight(
+        `Paradex cannot safely amend ${order.id}: total/filled/remaining base size is not reconciled`,
+      );
     }
     if (!Number.isFinite(rawPrice) || rawPrice < 0 || (supportedLimit && rawPrice <= 0)) {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: existing limit price is not reconciled`);
@@ -1672,7 +1848,10 @@ export class ParadexExchange extends BaseExchange {
     if (supportedLimit && rawPrice !== order.price) {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: displayed limit price is not reconciled`);
     }
-    if (supportedUntriggeredTpSl && (!Number.isFinite(rawTriggerPrice) || rawTriggerPrice <= 0 || rawTriggerPrice !== order.price)) {
+    if (
+      supportedUntriggeredTpSl &&
+      (!Number.isFinite(rawTriggerPrice) || rawTriggerPrice <= 0 || rawTriggerPrice !== order.price)
+    ) {
       return rejectPreflight(`Paradex cannot safely amend ${order.id}: TPSL trigger price is not reconciled`);
     }
 
@@ -1715,10 +1894,7 @@ export class ParadexExchange extends BaseExchange {
         signature,
         signature_timestamp,
       });
-      const { data } = await this.xhr.put<ORDER_RESPONSE>(
-        ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id),
-        payload,
-      );
+      const { data } = await this.xhr.put<ORDER_RESPONSE>(ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id), payload);
       if (!data || String(data.id || '') !== order.id) {
         throw new Error(`Paradex modify response did not confirm stable order id ${order.id}`);
       }

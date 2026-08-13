@@ -786,6 +786,107 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 - **Grafana logging**: `ENABLE_PWS_LOG` is enabled by default. All private and business WebSocket messages are emitted to `grafana-pws` for monitoring. Subscription messages are emitted to `grafana-pws-sub`.
 - **Potential follow-up (not confirmed bug)**: Inverse close sizing in the web layer currently prefers `Math.max(extra.contractsNative, notional/contractSize)` in [`getPositionNativeSize.ts`](mdc:apps/web/src/utils/position/getPositionNativeSize.ts) to avoid partial closes. This can theoretically oversize if notional is briefly inflated or stale. Re-evaluate if oversize-close reports appear; consider freshness/tolerance-based bounds instead of raw max/min switching.
 
+## Income History / Account Bills
+
+`fetchIncomeHistory` / `fetchIncomeHistoryRange` read `/api/v5/account/bills` (7-day
+retention) and `/api/v5/account/bills-archive` (3 months). The endpoint is chosen from
+the requested window, not discovered by failure: a window older than an endpoint's
+retention answers `code=0` with an **empty list**, never an error.
+
+**One OKX bill carries BOTH `fee` and `pnl`.** This is the structural difference from
+binance, which emits a separate row per category. Measured live over 100 `type=2` rows:
+`sum balChg = -0.48706`, `sum fee = -0.42126`, `sum pnl = -0.06580`, residual
+`0.0000000000`. Mapping a bill 1:1 to an `IncomeRecord` therefore merges realized PnL and
+commission — two distinct terms of the reconciliation identity — into a single number.
+
+The mapper is the pure, exported `mapOkxBillToIncomeRecords` in `okx.income.ts` (kept out
+of the exchange class so it is unit-testable). One bill becomes up to three records —
+`:pnl`, `:fee`, and a `:adj` residual — with the invariant that **the emitted incomes sum
+to that bill's `balChg`**. The residual term is what keeps that true for bill types whose
+balance change is not explained by fee + pnl (transfers, interest, conversions); without
+it those rows would silently drop out of the ledger.
+
+Three things not to "simplify":
+
+- **Bill `type` codes come from the ccxt listing** vendored at `v2/ccxt/python/ccxt/okx.py`
+  — `5`/`9` are liquidation and ADL, while `13`/`14` are DDH and block trade and must NOT
+  be categorised as liquidation.
+- **An unresolvable `instId` falls back to the raw id rather than dropping the row.**
+  Dropping it would remove value from the ledger and break the sum-to-`balChg` invariant.
+- **`incomeType` is the binance-style uppercase spelling, not OKX's raw type.** The raw
+  type is a bare number (`"2"`) that no consumer can interpret, and the journal aggregator
+  keys on the binance spellings.
+
+Scoped to `instType: 'SWAP'` — the journal is position-based and perp-only. The
+consequence, worth stating explicitly: the returned ledger reconciles against swap-account
+flows, **not** against total account equity.
+
+## Closed positions (`/api/v5/account/positions-history`)
+
+`fetchClosedPnl` reads this endpoint. It is a **different source from `/account/bills`**,
+which is the whole reason it can cross-check the ledger rather than restate it — see
+`scripts/history-audit/README.md` → "Cross-axis oracle".
+
+Three things verified live, each of which silently produces wrong data if assumed:
+
+- **`begin`/`end` are IGNORED here.** Passing them returns the same unbounded 100 rows
+  spanning nine months, so it looks like a working time filter until you check the oldest
+  row. The time bounds are **`before`** (newer than) and **`after`** (older than), as
+  **timestamps** — unlike `/bills`, where `after` is a billId. Page backwards by setting
+  `after` to the oldest `uTime` seen, minus 1ms.
+- **Do NOT dedupe on `posId`.** OKX reuses a posId across separate open→close cycles in
+  net mode. A live 30-day DOGE window returned **87 rows across only 3 posIds**, and
+  deduping on it destroyed 84 real closes and 96% of the realized PnL. Every row is a
+  distinct close event; the row IS the event.
+- **`realizedPnl` is net of BOTH fee and funding** — measured as
+  `pnl(-0.0014) + fee(-0.0100359) + fundingFee(0) = realizedPnl(-0.0114359)`. Bybit's
+  `closedPnl` excludes funding, so anything comparing the two conventions must know which
+  a venue uses or it reports a residual exactly the size of the funding term and blames
+  the mapper.
+
+`fee` is negative when charged here (the opposite of bybit), and sizes are in CONTRACTS
+so `closeTotalPos` needs `contractsToBase`. Mapper: `okx.closed-pnl.ts`, pure and exported.
+
+Cross-checked 2026-08-12 against the ledger over 30 days on DOGEUSDT: 87 closes,
+`closedPnl = -1.18589240` vs `ledger = -1.19091000`, residual `5.018e-3` — reported
+BOUNDARY, i.e. within a few window-edge fees rather than a mapping defect.
+
+## Order history (`/api/v5/trade/orders-history`)
+
+`fetchOrderHistory` reads the **7-day** route. Mapper: `okx.order-history.ts`, pure and
+exported. Measured live over 7 days: 255 orders, **58 of which never filled (22.7%)** —
+invisible to fills, executions and closed positions alike.
+
+**Do not "improve" this by paging into `/api/v5/trade/orders-history-archive`.** The
+3-month archive returns **filled orders only**, so reaching further back silently drops
+every cancellation — the one population this axis holds that the fills axis does not.
+Verified live on row 13: `state=canceled` returned **0 rows** from the archive and **58**
+from the 7-day route, and a matched 2-day window returned 100/0 filled/canceled from the
+archive against 80/20 from this route. Depth on this axis costs the axis.
+
+Two more details that produce silently wrong data if assumed:
+
+- **`sz` and `accFillSz` are CONTRACTS.** A `DOGE-USDT-SWAP` row reading `sz: "0.14"` at
+  `avgPx: 0.07168` carries `fee: -0.005` — 0.05% of $10, not of $0.01 — because one
+  contract is 1000 DOGE. The mapper therefore _requires_ a `toBase` converter and returns
+  `null` when the market is unknown, rather than emitting a raw contract count that would
+  be off by the contract size with nothing downstream able to notice.
+- **`ORDER_STATUS` in `okx.types.ts` is NOT reusable here.** It maps only `live` and
+  `partially_filled`, because the live order feed never sees a terminal state. Running
+  history rows through it sends `filled`, `canceled` and `mmp_canceled` to the caller's
+  default and reports every cancellation as a completed order. `okx.order-history.ts`
+  keeps its own table on purpose.
+
+`after` on this endpoint is an **ordId cursor**, unlike `/positions-history` where the
+same-named param is a timestamp. Mixing the two returns the newest page forever, which
+reads as a short history rather than as a broken loop.
+
+**Known gap:** conditional/TP-SL orders live in a separate `/orders-algo-history` archive
+and are NOT included. A live probe found 100 canceled `conditional` rows there, so this is
+real missing volume — but those rows carry `sz: ""` with `closeFraction: "1"` (position-
+scoped, no size), which has no honest mapping onto `HistoricalOrder.amount`. Wiring it
+needs a decision about representing position-scoped protective orders, not just a mapper.
+
 ## Error Handling
 
 ### General Pattern
@@ -845,3 +946,36 @@ Endpoints are split into two monitoring groups:
 - `src/exchanges/okx/` is production runtime only. Do not add tests or fixtures here.
 - Fresh deterministic regressions belong in `src/__tests__/audit-regressions/`.
 - Use `yarn test-ci` from the `safe-cex` package root for the full deterministic suite.
+
+## The SAME trade carries gross PnL on fills and net PnL on closed positions
+
+Measured live 2026-08-12 on row 13, against an e2e run whose actions were known
+independently (a deliberate position flip):
+
+| Axis | Field | Value |
+| --- | --- | --- |
+| `/trade/fills` | `fillPnl` | `-0.0014` — **gross** |
+| `/account/positions-history` | `realizedPnl` | `-0.0112889` — **net** |
+| both | fee | `0.0098889` |
+
+`-0.0014 - 0.0098889 = -0.0112889` exactly. Two axes on ONE venue, both naming the
+quantity "realized PnL", differing by the fee. Anything that picks an axis per venue, or
+sums across axes, silently changes the number by the commission — and every reconciliation
+total still balances, because the fee moves with it.
+
+This is why `Execution.realizedPnl` is documented gross and why a canonical position model
+has to normalize convention at the adapter rather than trusting the field name.
+
+## A flip through zero IS split by positions-history
+
+The same run sold 280 against a 140 long in one fill. `/positions-history` returned:
+
+```
+closed=15:04:24 opened=15:04:12 long  qty=140 entry=0.07064 exit=0.07063
+closed=15:04:32 opened=15:04:24 short qty=140 entry=0.07063 exit=0.07064
+```
+
+The long closes at the flip instant and the short opens at that same instant, each with
+the CLOSED size (140), not the fill size (280). So on OKX the split does not have to be
+inferred — the venue reports it, and `opened` is a real open time. Prefer this axis over
+folding fills whenever it is available; the fold is only needed where it is not.

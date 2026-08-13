@@ -46,6 +46,8 @@ export const ENDPOINTS = {
   KLINE: '/fapi/v1/klines',
   LISTEN_KEY: '/fapi/v1/listenKey',
   ORDERBOOK: '/fapi/v1/depth',
+  // Historical orders, including ones that never filled — the only axis that sees them.
+  ALL_ORDERS: '/fapi/v1/allOrders',
   USER_TRADES: '/fapi/v1/userTrades',
   SET_MARGIN_TYPE: '/fapi/v1/marginType',
   POSITION_RISK: '/fapi/v3/positionRisk',

@@ -2,6 +2,7 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
 import axios from 'axios';
 import rateLimit from 'axios-rate-limit';
@@ -16,7 +17,6 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
-  ClosedPnlEntry,
   CoinBalance,
   ExchangeOptions,
   HistoricalTradeOptions,
@@ -46,8 +46,6 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
-import type { BybitPlaceOrderOpts } from './bybit.order-params';
-
 import { getBybitOrderExecutionParams } from './bybit.order-params';
 import {
   ENDPOINTS,
@@ -532,17 +530,12 @@ export class BybitSpotExchange extends BaseExchange {
     ).data;
   };
 
-  fetchClosedPnl? = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
-    if (process.env.NEXT_PUBLIC_DISABLE_EXTRA_APIS_IN_DEV === '1') {
-      return [];
-    }
-    const baseUrl2 = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-    return (
-      await axios.get(
-        `${baseUrl2}/api/trades-history/bybit/closed-pnl?accountName=` + opts.accountName + '&symbol=' + opts.symbol,
-      )
-    ).data;
-  };
+  // No `fetchClosedPnl` on spot. Bybit's closed-PnL endpoint is position-based and does
+  // not serve `category: 'spot'`, so there is nothing to call. The dead Tealstreet-cache
+  // version that used to live here always returned []. `BybitSpotMetadata` therefore sets
+  // `supportsClosedPnLEndpoint: false` — it inherits `true` from BybitMetadata via the
+  // spread, and leaving it would send the UI down the endpoint branch and render the
+  // Closed Positions tab permanently empty.
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
     const limit = Math.min(opts.limit || 500, 1000);

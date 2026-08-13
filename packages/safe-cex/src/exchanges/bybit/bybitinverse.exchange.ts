@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
-import axios from 'axios';
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
@@ -51,8 +51,7 @@ import { adjust, divide, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
-import type { BybitPlaceOrderOpts } from './bybit.order-params';
-
+import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import {
   BYBIT_RATE_LIMIT_TABLE as BYBITINVERSE_RATE_LIMIT_TABLE,
@@ -76,6 +75,8 @@ import {
 } from './bybit.types';
 import { BybitInversePrivateWebsocket } from './bybitinverse.ws-private';
 import { BybitInversePublicWebsocket } from './bybitinverse.ws-public';
+
+const MAX_CLOSED_PNL_PAGES = 20;
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
@@ -649,10 +650,7 @@ export class BybitInverseExchange extends BaseExchange {
 
     if (symbols && symbols.length > 0) {
       const positions: Position[][] = await mapSeries(symbols, async (symbol) => {
-        const bybitPositions = await fetchAllPages(
-          { symbol, category: this.getCategoryForSymbol(symbol) },
-          true,
-        );
+        const bybitPositions = await fetchAllPages({ symbol, category: this.getCategoryForSymbol(symbol) }, true);
         return bybitPositions.map(this.mapPosition.bind(this));
       });
       return positions.flat();
@@ -830,16 +828,64 @@ export class BybitInverseExchange extends BaseExchange {
     return markets;
   };
 
-  fetchClosedPnl? = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
-    if (process.env.NEXT_PUBLIC_DISABLE_EXTRA_APIS_IN_DEV === '1') {
+  /** Inverse contracts, so `category: 'inverse'`. See `bybit.exchange.ts` for why this
+   *  no longer reads Tealstreet's own dead cache. */
+  fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) {
       return [];
     }
-    const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-    return (
-      await axios.get(
-        `${baseUrl}/api/trades-history/bybit/closed-pnl?accountName=` + opts.accountName + '&symbol=' + opts.symbol,
-      )
-    ).data;
+
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
+    const entries: ClosedPnlEntry[] = [];
+
+    try {
+      for (const window of this.getExecutionQueryWindows(from, to)) {
+        let cursor: string | undefined;
+        let page = 0;
+
+        do {
+          const { data } = await this.xhr.get(ENDPOINTS.USER_CLOSED_PNL, {
+            params: omitUndefined({
+              category: 'inverse',
+              symbol: opts.symbol,
+              startTime: window.startTime,
+              endTime: window.endTime,
+              limit: 100,
+              cursor,
+            }),
+          });
+
+          if (data.retMsg !== 'OK' && +data.retCode !== 0) {
+            this.log(`Failed to fetch closed PnL: ${data.retMsg}`, LogSeverity.Error);
+            break;
+          }
+
+          const rows = (data.result?.list || []) as Array<Record<string, any>>;
+          for (const row of rows) {
+            const entry = mapBybitClosedPnl(row, opts.accountName || '', true);
+            if (entry) entries.push(entry);
+          }
+
+          cursor = data.result?.nextPageCursor || undefined;
+          page += 1;
+
+          // Results are newest-first, so a cap that bites drops the OLDEST rows of the
+          // window — a hole in the middle of the history rather than a short tail.
+          if (cursor && page >= MAX_CLOSED_PNL_PAGES) {
+            this.log(
+              `Closed-PnL paging hit the ${MAX_CLOSED_PNL_PAGES}-page cap for ${opts.symbol}; older rows in this window were not fetched`,
+              LogSeverity.Warning,
+            );
+          }
+        } while (cursor && page < MAX_CLOSED_PNL_PAGES);
+      }
+
+      return entries.sort((a, b) => b.closedTime - a.closedTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.retMsg || err?.message);
+      return [];
+    }
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
@@ -1129,6 +1175,10 @@ export class BybitInverseExchange extends BaseExchange {
           const timestamp = rawExecTime > 100_000_000_000 ? Math.floor(rawExecTime / 1000) : Math.floor(rawExecTime);
 
           executions.push({
+            // bybit.exchange.ts sets this on its own copy of this loop; inverse is a
+            // standalone BaseExchange subclass, so it was silently dropping the only
+            // per-fill dedupe key.
+            id: exec.execId ? String(exec.execId) : undefined,
             timestamp,
             symbol: exec.symbol || symbol,
             orderId: exec.orderId,
@@ -2034,7 +2084,10 @@ export class BybitInverseExchange extends BaseExchange {
 
     const reasons = Array.isArray(data?.result?.reasons) ? data.result.reasons : [];
     if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0 || reasons.length > 0) {
-      const reasonMessage = reasons.map((reason: any) => reason?.reasonMsg).filter(Boolean).join(', ');
+      const reasonMessage = reasons
+        .map((reason: any) => reason?.reasonMsg)
+        .filter(Boolean)
+        .join(', ');
       const errorMsg = reasonMessage || v(data, 'retMsg') || 'Failed to switch margin type';
       this.emitAndLogError(errorMsg);
       throw new Error(errorMsg);

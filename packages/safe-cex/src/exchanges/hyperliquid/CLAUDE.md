@@ -251,24 +251,25 @@ Hyperliquid uses only two REST endpoints. All operations are differentiated by t
 
 ### Info Types (POST /info, `type` field)
 
-| Type                            | Purpose                                                          | When Called                             |
-| ------------------------------- | ---------------------------------------------------------------- | --------------------------------------- |
-| `metaAndAssetCtxs`              | Market metadata + ticker data (core perps)                       | Startup                                 |
-| `metaAndAssetCtxs` with `dex`   | Market metadata per HIP-3 DEX                                    | Startup (per DEX)                       |
-| `perpDexs`                      | List of HIP-3 DEXes                                              | Startup                                 |
-| `userFees`                      | User fee rates (taker/maker)                                     | Startup                                 |
-| `maxBuilderFee`                 | Check builder fee approval status                                | Startup                                 |
-| `userRole`                      | Resolve missing applicationId from key                           | Startup (legacy accounts only)          |
-| `userAbstraction`               | Resolve abstraction mode (`unified`/`portfolio`/`standard`-like) | Startup (private accounts)              |
-| `clearinghouseState`            | Account positions + margin (core perps)                          | Startup (initial balance)               |
-| `clearinghouseState` with `dex` | HIP-3 positions per DEX                                          | Startup + every 120s safety net         |
-| `frontendOpenOrders`            | Open orders with type/trigger info (core perps)                  | Startup + on-demand refresh             |
-| `frontendOpenOrders` with `dex` | HIP-3 open orders per DEX                                        | Startup + on-demand + retry chain       |
-| `candleSnapshot`                | OHLCV candle data                                                | On chart load                           |
-| `userFills`                     | User fill history                                                | Executions tab                          |
-| `userFillsByTime`               | User fills filtered by time                                      | Executions tab                          |
-| `spotMetaAndAssetCtxs`          | Spot market metadata                                             | Spot startup                            |
-| `spotClearinghouseState`        | Spot balances / holds (collateral source for unified/portfolio)  | Spot exchange + perps unified/portfolio |
+| Type                            | Purpose                                                          | When Called                                   |
+| ------------------------------- | ---------------------------------------------------------------- | --------------------------------------------- |
+| `metaAndAssetCtxs`              | Market metadata + ticker data (core perps)                       | Startup                                       |
+| `metaAndAssetCtxs` with `dex`   | Market metadata per HIP-3 DEX                                    | Startup (per DEX)                             |
+| `perpDexs`                      | List of HIP-3 DEXes                                              | Startup                                       |
+| `userFees`                      | User fee rates (taker/maker)                                     | Startup                                       |
+| `maxBuilderFee`                 | Check builder fee approval status                                | Startup                                       |
+| `userRole`                      | Resolve missing applicationId from key                           | Startup (legacy accounts only)                |
+| `userAbstraction`               | Resolve abstraction mode (`unified`/`portfolio`/`standard`-like) | Startup (private accounts)                    |
+| `clearinghouseState`            | Account positions + margin (core perps)                          | Startup (initial balance)                     |
+| `clearinghouseState` with `dex` | HIP-3 positions per DEX                                          | Startup + every 120s safety net               |
+| `frontendOpenOrders`            | Open orders with type/trigger info (core perps)                  | Startup + on-demand refresh                   |
+| `frontendOpenOrders` with `dex` | HIP-3 open orders per DEX                                        | Startup + on-demand + retry chain             |
+| `candleSnapshot`                | OHLCV candle data                                                | On chart load                                 |
+| `userFills`                     | User fill history                                                | Executions tab                                |
+| `userFillsByTime`               | User fills filtered by time                                      | Executions tab, ledger (`fetchIncomeHistory`) |
+| `userFunding`                   | Funding payments                                                 | Ledger (`fetchIncomeHistory`)                 |
+| `spotMetaAndAssetCtxs`          | Spot market metadata                                             | Spot startup                                  |
+| `spotClearinghouseState`        | Spot balances / holds (collateral source for unified/portfolio)  | Spot exchange + perps unified/portfolio       |
 
 ### Chaser fill reconciliation
 
@@ -789,7 +790,7 @@ Entries expire after 60 seconds.
 
    **The placement cache does NOT cover hosted mode, and that is why there is a
    third mechanism.** Under the hosted exchange-server, order writes run on the
-   browser's main-thread mirror while `handleOrderUpdates` runs on the *server*
+   browser's main-thread mirror while `handleOrderUpdates` runs on the _server_
    instance — two different objects, so the server never sees the placement and
    its cache is always empty for browser-placed orders. Since `tick()` does not
    re-fetch core-perp orders, REST is the server's only tif source, so a resting
@@ -819,6 +820,105 @@ Entries expire after 60 seconds.
 17. **`userAbstraction: "default"` is currently treated as standard fallback**: unified collateral merge only enables for explicit `unifiedAccount` / `portfolioMargin`. If Hyperliquid remaps `"default"` semantics in the future, update `shouldUseSpotCollateralBalance`.
 18. **DEX abstraction deprecation can be per-account before global date**: users can be migrated early via `agentSetAbstraction` / UI flows before network-wide milestones. Never gate balance mode on calendar date; always read runtime `userAbstraction`.
 19. **Dead man's switch lifecycle is caller-owned**: `scheduleCancel` is an explicit API/worker capability, not a startup heartbeat. Callers must refresh an armed deadline themselves; safe-cex neither auto-arms nor clears it on disposal.
+
+## Ledger (`fetchIncomeHistory`) — fills carry the fee, and three traps
+
+The account ledger is built from `userFillsByTime` + `userFunding`. **Hyperliquid emits
+no separate fee row** — the fee rides on the fill next to that fill's `closedPnl`, and
+`closedPnl` EXCLUDES it (the same arithmetic `handleFills` already does as
+`netRealizedPnl = closedPnl - fee`). So one fill maps to up to two `IncomeRecord`s;
+mapping `closedPnl` alone drops every fee from the ledger. Mapper:
+`hyperliquid.income.ts`, pure and exported.
+
+Three traps, none of which a typecheck catches:
+
+- **`fee` can be NEGATIVE** (maker rebate). `fetchExecutions` in this directory does
+  `Math.abs(feeRaw)`, which is already wrong for rebates — do not copy it into new code.
+- **REST and WS funding rows have different shapes.** REST `UserFundingEntry` nests under
+  `delta` (`{ time, hash, delta: { coin, usdc, … } }`); the WS `WsUserFunding` is flat.
+  A mapper written against one silently yields `undefined` against the other.
+- **`tranId` keys on the fill's `tid`**, never a price/size/time composite.
+  `fetchExecutions` dedupes on `orderId:ts:price:qty:side`, which collapses genuine
+  identical partial fills.
+
+`fetchIncomeHistory` deliberately diverges from `fetchExecutions` in the same file:
+
+|        | `fetchExecutions`                                                              | `fetchIncomeHistory`                     |
+| ------ | ------------------------------------------------------------------------------ | ---------------------------------------- |
+| client | `xhr` (3 RPS)                                                                  | `infoXhr`, like every other private read |
+| user   | `applicationId` only — **returns the master wallet's data on a vault account** | `vault \|\| applicationId`               |
+| range  | 30-day floor, 7-day chunks                                                     | neither                                  |
+
+Those 30-day/7-day constants are **ours**, bybit-shaped, with no upstream citation.
+Hyperliquid is address-queryable with no retention ceiling — the entire reason this venue
+matters for a journal — and bounds a response by ROW COUNT, not window width. So the
+pager walks `userFillsByTime` forward until a page comes back short, with an **exclusive**
+cursor (`newest + 1`): `startTime` is inclusive, so reusing the boundary re-returns rows,
+and relying on the `tid` dedupe to absorb that makes any raw-vs-mapped comparison
+double-count. That asymmetry has already produced one false FAIL in this repo.
+
+**Two known gaps, stated rather than hidden:**
+
+- Deposits, withdrawals and liquidations live in `userNonFundingLedgerUpdates`, which this
+  does not read — so `transfer` and `liquidation` are always empty here and the full
+  equity identity cannot close. That is precisely what distinguishes a losing trade from
+  a withdrawal.
+- **HIP-3 scope is UNVERIFIED.** Every other private read in this file is per-dex, and
+  ws-private subscribes `userFills` _with_ a `dex` param, but `fetchIncomeHistory` makes a
+  single non-dex call. If REST `userFillsByTime` is dex-scoped, HIP-3 income is silently
+  absent. Do not assume the ledger covers HIP-3 until someone checks against an address
+  with HIP-3 fills (their coins are formatted `dex:ASSET`, so presence is detectable).
+
+**What the ledger audit run proves, and what it does not.** `yarn history-audit --ledger
+--targets hyperliquid:50:30` reported 378 raw rows to 463 records, residual 0, zero
+uncategorised. Its raw side computes `closedPnl - fee` from the same two fields the mapper
+splits, so a PASS demonstrates **row coverage, parsing and paging** — no row dropped, none
+left uncategorised. It does **not** independently validate the choice of those fields, and
+it cannot see either gap above, because a truncated or dex-scoped response shrinks both
+sides together and the residual stays 0. Hyperliquid has no second axis to cross-check
+against (`--closed-pnl` needs one), and synthesising `fetchClosedPnl` from these same fills
+would be a fake oracle that always agrees.
+
+## Order history (`historicalOrders`) — one row per TRANSITION, and no time filter
+
+`fetchOrderHistory` reads `POST /info { type: "historicalOrders", user }`. Mappers:
+`hyperliquid.order-history.ts` (`collapseHyperliquidOrderHistory` +
+`mapHyperliquidHistoricalOrder`), both pure and exported.
+
+Measured live (sheet row 50): **2000 rows carrying 1020 distinct `oid`s**, of which only
+315 filled. Over a 7-day window that is 490 orders with **63% never filled** — the largest
+blind spot of any axis on this venue, since a cancelled order appears in no fill, no
+execution and no closed position.
+
+Four properties, every one of them measured, and each silently wrong if assumed:
+
+- **One row per status TRANSITION, not per order.** The surplus 980 rows are the `open`
+  state of orders that later filled or cancelled; the sampled `open` and `canceled` rows
+  were byte-identical apart from `status`/`statusTimestamp`. Collapse before mapping.
+  Note this is the **inverse** of the okx and bybit traps in this epic, where an id dedupe
+  destroyed real rows — which is exactly why it must be measured per venue, never
+  generalised in either direction.
+- **`statusTimestamp` alone cannot order those two rows.** An order that fills on
+  placement carries the SAME `statusTimestamp` on both, so breaking the tie by array
+  position let `open` win and the axis returned **zero filled orders out of 490** while the
+  raw snapshot held 315. The conformance check passed straight through it — ids, counts and
+  malformed were all correct — and only the status census exposed it. A terminal state now
+  outranks `open` at an equal timestamp, which is also order-independent.
+- **The time window is IGNORED.** Passing `startTime`/`endTime` returns a byte-identical
+  response, so `from`/`to` are applied client-side and `paginateHyperliquidByTime` would
+  degenerate to one call. The **2000-row ceiling is a retention limit, not a page size** —
+  there is no cursor past it, so unlike every other private read on this venue, order
+  history is NOT address-queryable-complete.
+- **`sz` is REMAINING, `origSz` is original.** A `filled` row carries `sz: "0.0"`; a
+  cancelled one carries `sz === origSz`. Reading `sz` as the amount reports every completed
+  order as size zero.
+
+`side` is `A`/`B` (ask/bid), not buy/sell. There is no average fill price on this endpoint,
+so `averagePrice` is left absent rather than guessed from `limitPx`.
+
+**HIP-3 scope is UNVERIFIED**, the same open question as the ledger: this is a single
+non-dex call, while every other private read here is per-dex. HIP-3 coins are formatted
+`dex:ASSET`, so presence is detectable on an address that trades them.
 
 ## A bad key is invisible on reads — check the pair at startup
 
@@ -976,3 +1076,18 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 
 - **REST**: https://github.com/ccxt/ccxt/blob/master/ts/src/hyperliquid.ts
 - **WebSocket**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/hyperliquid.ts
+
+## `Execution` position fields — `dir` is NOT a hedge leg
+
+`fetchExecutions` populates `realizedPnl` (from `closedPnl`, gross of fees) and `maker`
+(from `!crossed`), but deliberately leaves `positionSide` **absent**.
+
+Hyperliquid is one-way only (`positionModes: [PositionMode.OneWay]`,
+`hidePositionModeSelector: true`). Its `dir` field reads `"Open Long"` / `"Close Long"`,
+which describes what the fill DID, not which hedge leg it belongs to. Mapping it splits
+one continuous position across `long` / `short` buckets that a one-way consumer never
+seeds — `processTrades` only fills `positions.both` when `isHedged` is false — so every
+fill would land in an empty bucket and the position would never reconcile.
+
+`closedPnl` excludes the fee, which rides on the same fill (see the ledger section
+above); do not net it a second time.

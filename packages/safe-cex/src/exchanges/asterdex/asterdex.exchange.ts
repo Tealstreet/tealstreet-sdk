@@ -1111,6 +1111,8 @@ export class AsterDEXExchange extends BaseExchange {
         }
 
         executions.push({
+          // Per-fill dedupe key. orderId cannot serve: one order fills across many rows.
+          id: trade.id != null ? String(trade.id) : undefined,
           // Chart execution marks expect seconds-based timestamps.
           timestamp: Math.floor(trade.time / 1000),
           symbol: trade.symbol,
@@ -1159,6 +1161,9 @@ export class AsterDEXExchange extends BaseExchange {
           rawPositionSide === 'LONG' ? PositionSide.Long : rawPositionSide === 'SHORT' ? PositionSide.Short : 'both';
 
         return {
+          // Distinct from orderId, which falls back to this same value: the fill id is
+          // the only thing that separates two fills of one order.
+          id: trade.id != null ? String(trade.id) : undefined,
           symbol: trade.symbol,
           orderId: trade.orderId?.toString() || trade.id?.toString() || '',
           price: parseFloat(trade.price),

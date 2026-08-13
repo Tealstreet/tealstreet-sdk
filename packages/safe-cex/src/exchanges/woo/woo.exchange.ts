@@ -15,13 +15,16 @@ import {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
   HistoricalTrade,
   HistoricalTradeOptions,
+  LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderStopTriggerType,
@@ -46,6 +49,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPI } from './woo.api';
+import { mapWooHistoricalOrder } from './woo.order-history';
 import {
   ACCOUNT_RESPONSE,
   ENDPOINTS,
@@ -60,7 +64,7 @@ import {
   PLACE_ALGO_ORDER_RESPONSE,
   PLACE_ORDER_RESPONSE,
 } from './woo.types';
-import { normalizeSymbol, reverseSymbol } from './woo.utils';
+import { mapWooHedgeTransactionSide, normalizeSymbol, reverseSymbol } from './woo.utils';
 import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
 
@@ -107,6 +111,11 @@ const isWooRateLimitError = (err: any) =>
   String(err?.response?.data?.message || err?.message || '')
     .toLowerCase()
     .includes('rate limit');
+
+// Hedge-mode `side` values on /v3/trade/transactionHistory. Keys are
+// whitespace-normalized and upper-cased before lookup.
+// Mapping lives in woo.utils.ts as a pure function so the invariant is
+// testable — the parser below is an instance field and unreachable from tests.
 
 export class WOOXExchange extends BaseExchange {
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
@@ -335,9 +344,16 @@ export class WOOXExchange extends BaseExchange {
       return null;
     }
 
+    // WOO reports `side` in two vocabularies: BUY/SELL in one-way mode, and
+    // OPEN|CLOSE LONG|SHORT in hedge mode. Only mapping BUY/SELL silently
+    // dropped every hedge-mode fill — measured at 210 of 500 rows on a live
+    // account. The hedge strings also carry the position side, which is the
+    // only place transactionHistory exposes it.
     const rawSide = `${v(row, 'side') || ''}`.toUpperCase();
+    const hedgeSide = mapWooHedgeTransactionSide(rawSide);
     const side =
-      ORDER_SIDE[rawSide] || (rawSide === 'BUY' ? OrderSide.Buy : rawSide === 'SELL' ? OrderSide.Sell : undefined);
+      (hedgeSide?.side as OrderSide | undefined) ??
+      (ORDER_SIDE[rawSide] || (rawSide === 'BUY' ? OrderSide.Buy : rawSide === 'SELL' ? OrderSide.Sell : undefined));
     if (side !== OrderSide.Buy && side !== OrderSide.Sell) {
       return null;
     }
@@ -373,20 +389,35 @@ export class WOOXExchange extends BaseExchange {
     const rawOrderId = v(row, 'orderId') ?? v(row, 'order_id') ?? v(row, 'id');
     const orderId = rawOrderId === undefined || rawOrderId === null || rawOrderId === '' ? undefined : `${rawOrderId}`;
 
+    // Distinct from orderId: one order fills across many rows, so the per-fill
+    // id is the only idempotent dedupe key (users_app_trades keys on it).
+    const rawFillId = v(row, 'id') ?? v(row, 'tradeId') ?? v(row, 'trade_id');
+    const fillId = rawFillId === undefined || rawFillId === null || rawFillId === '' ? undefined : `${rawFillId}`;
+
     const rawCommission = Number(v(row, 'fee') ?? v(row, 'total_fee'));
     const commission = Number.isFinite(rawCommission) ? rawCommission : undefined;
     const commissionAsset = v(row, 'feeAsset') ?? v(row, 'fee_asset');
 
-    const rawRealizedPnl = Number(v(row, 'realizedPnl') ?? v(row, 'realized_pnl'));
+    // `Number(null)` is 0, so a null realizedPnl used to surface as a real
+    // zero — indistinguishable from a genuinely flat fill. WOO returns null on
+    // every transactionHistory row, so treat absent as absent.
+    const rawRealizedPnlValue = v(row, 'realizedPnl') ?? v(row, 'realized_pnl');
+    const rawRealizedPnl =
+      rawRealizedPnlValue === null || rawRealizedPnlValue === undefined ? NaN : Number(rawRealizedPnlValue);
     const realizedPnl = Number.isFinite(rawRealizedPnl) ? rawRealizedPnl : undefined;
 
-    const rawPositionSide = `${v(row, 'positionSide') ?? v(row, 'position_side') ?? 'BOTH'}`.toUpperCase();
+    const rawIsMaker = v(row, 'isMaker') ?? v(row, 'is_maker');
+    const maker = rawIsMaker === undefined || rawIsMaker === null ? undefined : Boolean(Number(rawIsMaker));
+
+    const rawPositionSide = `${v(row, 'positionSide') ?? v(row, 'position_side') ?? ''}`.toUpperCase();
     const positionSide =
       rawPositionSide === 'LONG'
         ? PositionSide.Long
         : rawPositionSide === 'SHORT'
           ? PositionSide.Short
-          : ('both' as const);
+          : // transactionHistory has no positionSide field; in hedge mode the
+            // side string is the only carrier of it.
+            ((hedgeSide?.positionSide as PositionSide | undefined) ?? ('both' as const));
 
     return {
       symbol: normalizedSymbol,
@@ -396,6 +427,8 @@ export class WOOXExchange extends BaseExchange {
       timestampMilliseconds,
       timestampSeconds: Math.floor(timestampMilliseconds / 1000),
       orderId,
+      fillId,
+      maker,
       commission,
       commissionAsset: commissionAsset || undefined,
       realizedPnl,
@@ -1236,6 +1269,7 @@ export class WOOXExchange extends BaseExchange {
         })
         .map((entry): Execution => {
           return omitUndefined({
+            id: entry!.fillId,
             timestamp: entry!.timestampSeconds,
             symbol: entry!.symbol,
             orderId: entry!.orderId,
@@ -1244,6 +1278,9 @@ export class WOOXExchange extends BaseExchange {
             side: entry!.side,
             commission: entry!.commission,
             commissionAsset: entry!.commissionAsset,
+            positionSide: entry!.positionSide,
+            realizedPnl: entry!.realizedPnl,
+            maker: entry!.maker,
           });
         })
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -1262,6 +1299,7 @@ export class WOOXExchange extends BaseExchange {
           return historicalTrades
             .map((trade): Execution => {
               return omitUndefined({
+                id: trade.id,
                 timestamp: Math.floor(trade.time / 1000),
                 symbol: trade.symbol,
                 orderId: trade.orderId,
@@ -1270,6 +1308,9 @@ export class WOOXExchange extends BaseExchange {
                 side: trade.side,
                 commission: trade.commission,
                 commissionAsset: trade.commissionAsset,
+                positionSide: trade.positionSide,
+                realizedPnl: trade.realizedPnl,
+                maker: trade.maker,
               });
             })
             .sort((a, b) => b.timestamp - a.timestamp)
@@ -1329,6 +1370,7 @@ export class WOOXExchange extends BaseExchange {
         })
         .map((entry): HistoricalTrade => {
           return omitUndefined({
+            id: entry!.fillId,
             symbol: entry!.symbol,
             orderId: entry!.orderId || `${entry!.symbol}-${entry!.timestampMilliseconds}`,
             price: entry!.price,
@@ -1336,6 +1378,7 @@ export class WOOXExchange extends BaseExchange {
             realizedPnl: entry!.realizedPnl,
             positionSide: entry!.positionSide,
             side: entry!.side,
+            maker: entry!.maker,
             commission: entry!.commission,
             commissionAsset: entry!.commissionAsset,
             time: entry!.timestampMilliseconds,
@@ -1450,6 +1493,102 @@ export class WOOXExchange extends BaseExchange {
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       throw err;
+    }
+  };
+
+  /**
+   * Historical orders, including ones that never filled — see `woo.order-history.ts`.
+   *
+   * Deliberately NOT routed through `fetchOrdersRecursively`, which hardcodes
+   * `status: 'INCOMPLETE'` — that is the OPEN-order path, and reusing it would return
+   * exactly the orders this axis exists to look past.
+   *
+   * `page` genuinely advances here (page 2 returned strictly older rows), unlike WOO's
+   * trade route, which returns the oldest rows first.
+   */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const MAX_PAGES = 50;
+    const PAGE_SIZE = 100;
+    if (opts?.symbol && !this.store.marketsBySymbol[opts.symbol]) {
+      return [];
+    }
+    // `reverseSymbol`, not `market.id` — every other symbol-scoped WOO call does the same,
+    // because `Market.id` is `ETH/USDT:USDT` and the API wants `PERP_ETH_USDT`. Passing the
+    // id returns zero rows or a 400 that this method's catch turns into an empty list.
+    const requestSymbol = opts?.symbol ? reverseSymbol(opts.symbol) : undefined;
+
+    // NOT `marketsById`. WOO's `Market.id` is `ETH/USDT:USDT` while this endpoint returns
+    // `PERP_ETH_USDT`, so an id lookup never matches and every order would fall back to the
+    // raw venue string — silently, since the mapper's fallback looks deliberate. blofin can
+    // key on the venue id only because it sets `id: instId`; WOO does not.
+    const resolveSymbol = (marketId: string) => this.store.marketsBySymbol[normalizeSymbol(marketId)]?.symbol;
+
+    try {
+      const orders: HistoricalOrder[] = [];
+      const seen = new Set<string>();
+      let page = 1;
+
+      for (; page <= MAX_PAGES; page += 1) {
+        const { data } = await this.xhr.get<any>(ENDPOINTS.ORDERS, {
+          params: omitUndefined({
+            symbol: requestSymbol,
+            // MILLISECONDS on the request, even though the response reports fractional
+            // SECONDS. Sending seconds is rejected with
+            // `400 end_t must be greater than or equal to 1000000000000` — which this
+            // method's own catch turns into an empty list, so the mismatch reads as an
+            // account with no orders rather than as a rejected request.
+            start_t: opts?.from,
+            end_t: opts?.to,
+            size: PAGE_SIZE,
+            page,
+          }),
+        });
+
+        if (this.isDisposed) return [];
+
+        if (data?.success === false) {
+          this.emitAndLogError(data?.message || data?.meta?.message || 'Failed to fetch order history');
+          break;
+        }
+
+        const rows: Array<Record<string, any>> = Array.isArray(data?.rows) ? data.rows : [];
+        if (rows.length === 0) break;
+
+        for (const row of rows) {
+          const order = mapWooHistoricalOrder(row, resolveSymbol);
+          if (!order || seen.has(order.id)) continue;
+          seen.add(order.id);
+          orders.push(order);
+        }
+
+        // `records_per_page` rather than the requested `size`, so a clamped or ignored size
+        // cannot make the loop think it has read everything. With no `meta` at all, fall
+        // back to the page-shortness test rather than stopping after page one.
+        const total = Number(data?.meta?.total ?? 0);
+        const perPage = Number(data?.meta?.records_per_page ?? PAGE_SIZE);
+        if (!total) {
+          if (rows.length < PAGE_SIZE) break;
+        } else if (total <= perPage * page) {
+          break;
+        }
+      }
+
+      if (page > MAX_PAGES) {
+        this.log(
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          LogSeverity.Warning,
+        );
+      }
+
+      const sorted = orders.sort((a, b) => b.createdTime - a.createdTime);
+      return opts?.limit && opts.limit > 0 ? sorted.slice(0, opts.limit) : sorted;
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return [];
     }
   };
 

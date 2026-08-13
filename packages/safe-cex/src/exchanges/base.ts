@@ -22,6 +22,7 @@ import {
   Execution,
   ExecutionsOptions,
   FetchedLeverage,
+  HistoricalOrder,
   HistoricalTrade,
   HistoricalTradeOptions,
   IncomeHistoryOptions,
@@ -32,6 +33,7 @@ import {
   OHLCVSOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderType,
   PlaceOrderOpts,
@@ -133,7 +135,15 @@ const AUTH_FAILURE_MAX_TICK_INTERVAL = 60_000;
  */
 const baseCapabilityFallback = Symbol('baseCapabilityFallback');
 
-export type BaseCapabilityMethod = 'fetchExecutions' | 'fetchHistoricalTrades' | 'placeOrder' | 'start';
+export type BaseCapabilityMethod =
+  | 'fetchClosedPnl'
+  | 'fetchExecutions'
+  | 'fetchHistoricalTrades'
+  | 'fetchIncomeHistory'
+  | 'fetchIncomeHistoryRange'
+  | 'fetchOrderHistory'
+  | 'placeOrder'
+  | 'start';
 
 type BrandedCapabilityFallback = {
   [baseCapabilityFallback]?: BaseCapabilityMethod;
@@ -152,6 +162,51 @@ const markBaseCapabilityFallback = <T extends object>(method: BaseCapabilityMeth
 export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityMethod): boolean =>
   typeof value === 'function' && (value as BrandedCapabilityFallback)[baseCapabilityFallback] === method;
 
+/**
+ * Is this override an unconditional `return []`?
+ *
+ * `isBaseCapabilityFallback` answers "was this never implemented", which is not the same
+ * question as "does this do anything". `coinbase` and `phemex` both define
+ * `fetchHistoricalTrades` whose entire body is `return []` — a real override, unbranded, and
+ * therefore indistinguishable from a working implementation to every capability check we
+ * had. That is how a metadata flag stays "accurate" while pointing at nothing.
+ *
+ * Strict on purpose. Many genuine implementations OPEN with a guard clause —
+ * `if (this.isPublicDataOnly) return [];` — and must not be classified as stubs, so the test
+ * is that the body, once comments are stripped, is exactly that one statement and nothing
+ * else.
+ */
+export const isEmptyStubCapability = (value: unknown): boolean => {
+  if (typeof value !== 'function') return false;
+
+  const source = Function.prototype.toString
+    .call(value)
+    // Strip comments first, so a commented-out implementation cannot disguise an empty body.
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+  const brace = source.indexOf('{');
+  if (brace === -1) {
+    // Concise arrow body with no block: `async () => []`. Same inert shape, different syntax
+    // — and the one the base fallbacks themselves are written in, so missing it would make
+    // this function blind to exactly the case it exists for.
+    const arrow = source.indexOf('=>');
+    if (arrow === -1) return false;
+    return /^\s*\[\s*\]\s*;?\s*$/.test(source.slice(arrow + 2));
+  }
+
+  const body = source.slice(brace + 1, source.lastIndexOf('}'));
+  return /^\s*return\s*\[\s*\]\s*;?\s*$/.test(body);
+};
+
+/**
+ * Does this method do nothing — whether because it was never implemented, or because its
+ * implementation is an empty stub? This is the question a capability flag should be checked
+ * against; `isBaseCapabilityFallback` alone answers only half of it.
+ */
+export const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
+  isBaseCapabilityFallback(value, method) || isEmptyStubCapability(value);
+
 export type CallableMethodsInWorker =
   | 'setLeverage'
   | 'scheduleCancel'
@@ -167,7 +222,9 @@ export type CallableMethodsInWorker =
   | 'fetchLastLogsFromWebsockets'
   | 'removeOrders'
   | 'fetchIncomeHistory'
-  | 'fetchIncomeHistoryRange';
+  | 'fetchIncomeHistoryRange'
+  | 'fetchOrderHistory'
+  | 'fetchClosedPnl';
 
 export interface Exchange {
   // udf endpoints for TV, if supported
@@ -243,8 +300,9 @@ export interface Exchange {
   fetchLeverageForSymbol: (symbol: string) => Promise<FetchedLeverage | null>;
   updateSymbolMetadata: (symbol: string) => Promise<void>;
   fetchHistoricalTrades: (opts: HistoricalTradeOptions) => Promise<HistoricalTrade[]>;
-  fetchClosedPnl?: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
+  fetchClosedPnl: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
   fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
+  fetchOrderHistory: (opts?: OrderHistoryOptions) => Promise<HistoricalOrder[]>;
   fetchIncomeHistoryRange: (startTime: number, endTime: number, incomeType?: string) => Promise<IncomeRecord[]>;
   fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
   getActiveTickerSymbols: () => string[];
@@ -772,19 +830,48 @@ export class BaseExchange implements Exchange {
     return await Promise.resolve([] as HistoricalTrade[]);
   });
 
-  // Default implementation - exchanges that support income history should override
-  fetchIncomeHistory = async (_opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
-    return await Promise.resolve([] as IncomeRecord[]);
-  };
+  // Branded so support can be detected. `typeof exchange.fetchIncomeHistory` is TRUE
+  // on every venue because this field always exists — any consumer duck-typing on that
+  // silently treats all 11 exchanges as supported and then renders an empty ledger.
+  // Use `isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')`.
+  fetchIncomeHistory = markBaseCapabilityFallback(
+    'fetchIncomeHistory',
+    async (_opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+      return await Promise.resolve([] as IncomeRecord[]);
+    },
+  );
 
-  // Default implementation - exchanges that support income history should override
-  fetchIncomeHistoryRange = async (
-    _startTime: number,
-    _endTime: number,
-    _incomeType?: string,
-  ): Promise<IncomeRecord[]> => {
-    return await Promise.resolve([] as IncomeRecord[]);
-  };
+  fetchIncomeHistoryRange = markBaseCapabilityFallback(
+    'fetchIncomeHistoryRange',
+    async (_startTime: number, _endTime: number, _incomeType?: string): Promise<IncomeRecord[]> => {
+      return await Promise.resolve([] as IncomeRecord[]);
+    },
+  );
+
+  /**
+   * Exchange-reported closed positions — the low-multiplicity anchor, as distinct from
+   * positions inferred by polling in the browser. Branded and non-optional: it was
+   * declared `fetchClosedPnl?` on the interface, so consumers guarded with
+   * `if (!exchange?.fetchClosedPnl)`, which cannot distinguish an implementation from
+   * this stub once the field always exists.
+   */
+  fetchClosedPnl = markBaseCapabilityFallback(
+    'fetchClosedPnl',
+    async (_opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+      return await Promise.resolve([] as ClosedPnlEntry[]);
+    },
+  );
+
+  /**
+   * Historical orders, including ones that never filled. Base returns [] and is
+   * branded, so an unimplemented venue is distinguishable from one with no orders.
+   */
+  fetchOrderHistory = markBaseCapabilityFallback(
+    'fetchOrderHistory',
+    async (_opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+      return await Promise.resolve([] as HistoricalOrder[]);
+    },
+  );
 
   fetchPublicTrades = async (_symbol: string, _limit?: number): Promise<PublicTrade[]> => {
     await Promise.reject(new Error('Not implemented'));

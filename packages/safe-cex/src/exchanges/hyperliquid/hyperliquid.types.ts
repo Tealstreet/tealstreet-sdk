@@ -31,6 +31,11 @@ export const INFO_TYPES = {
   FRONTEND_OPEN_ORDERS: 'frontendOpenOrders',
   USER_FILLS: 'userFills',
   USER_FILLS_BY_TIME: 'userFillsByTime',
+  /**
+   * Fixed rolling snapshot, capped at 2000 rows, with one row per status TRANSITION and
+   * NO server-side time filter — see `hyperliquid.order-history.ts`.
+   */
+  HISTORICAL_ORDERS: 'historicalOrders',
   USER_RATE_LIMIT: 'userRateLimit',
   ORDER_STATUS: 'orderStatus',
   L2_BOOK: 'l2Book',

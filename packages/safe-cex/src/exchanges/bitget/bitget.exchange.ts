@@ -20,6 +20,9 @@ import {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
+  LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
@@ -45,7 +48,11 @@ import { adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { paginateIncomeRange } from '../income-paging';
 import { createAPI } from './bitget.api';
+import { mapBitgetBills } from './bitget.income';
+import { mapBitgetFills } from './bitget.fills';
+import { splitTimeRange } from '../../utils/splitTimeRange';
 import {
   ENDPOINTS,
   FETCH_POSITIONS_V2_RESPONSE,
@@ -62,6 +69,21 @@ import {
 import { BitgetPrivateWebsocket } from './bitget.ws-private';
 import { BitgetPublicWebsocket } from './bitget.ws-public';
 import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
+
+/**
+ * Bitget caps a bill page at 100 rows. The window cap is not documented as a hard reject, so
+ * a conservative 30-day chunk is used; the pager does not depend on either being exact —
+ * it walks until the records span the request, so a narrower real window costs extra
+ * requests rather than losing rows.
+ */
+const BILL_PAGE_LIMIT = 100;
+/** Bitget caps a fills page at 100. */
+const BITGET_FILLS_PAGE_LIMIT = 100;
+/** Bitget REJECTS a fills window wider than 90 days — it does not clamp it. */
+const BITGET_FILLS_MAX_WINDOW_MS = 89 * 24 * 60 * 60 * 1000;
+/** Backstop only; the cursor is what actually terminates the walk. */
+const BITGET_FILLS_MAX_PAGES = 100;
+const BILL_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE =
   'This Bitget API key belongs to a Unified Trading Account (UTA), but Tealstreet currently uses Bitget Classic API endpoints for this adapter. Please use a Classic-mode Bitget account/sub-account until the Bitget v3 migration is complete.';
@@ -655,88 +677,189 @@ export class BitgetExchange extends BaseExchange {
     return this.store.markets.find((m) => m.base === base && m.quote === this.apiMarginCoin);
   }
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  /**
+   * One page of `/api/v2/mix/account/bill`, RETHROWING on failure.
+   *
+   * The public `fetchIncomeHistory` below swallows errors into `[]` for consistency with
+   * every other venue, but a pager must never be handed that contract: a rate-limited page
+   * and an empty window become the same value, so a 429 mid-walk reads as "nothing more
+   * here" and truncates the ledger silently. Measured on binance, where exactly that lost 20
+   * of 512 records while reporting success — so bitget is built with the split from the
+   * start rather than retrofitted.
+   */
+  private _fetchBillPage = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const params: Record<string, any> = {
+      productType: this.apiProductType,
+      limit: Math.min(opts?.limit || BILL_PAGE_LIMIT, BILL_PAGE_LIMIT),
+    };
+    if (opts?.symbol) params.symbol = this._resolveMarket(opts.symbol)?.id ?? opts.symbol;
+    if (opts?.startTime) params.startTime = opts.startTime;
+    if (opts?.endTime) params.endTime = opts.endTime;
+
+    const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT_BILL, { params });
+    if (data?.code && String(data.code) !== '00000') {
+      throw new Error(`${data.code} ${data.msg ?? ''}`.trim());
+    }
+
+    const rows: Array<Record<string, any>> = Array.isArray(data?.data?.bills) ? data.data.bills : [];
+    return mapBitgetBills(rows);
+  };
+
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
     try {
-      const { symbol, from, to } = opts;
-      if (!symbol) {
-        throw new Error('Symbol is required for fetchExecutions');
-      }
-      const normalizeTimestampToSeconds = (value: unknown): number => {
-        const parsed = Number.parseInt(`${value ?? '0'}`, 10);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          return 0;
-        }
-        return parsed >= 1_000_000_000_000 ? Math.floor(parsed / 1000) : parsed;
-      };
-      const market = this._resolveMarket(symbol);
-      if (!market) {
-        throw new Error(`Market ${symbol} not found`);
-      }
-
-      // Use the resolved market symbol (e.g., "BTCUSDT") for API calls
-      const marketSymbol = market.symbol;
-
-      const { data } = await this.xhr.get(ENDPOINTS.ORDER_HISTORY, {
-        params: {
-          productType: this.apiProductType,
-          symbol: marketSymbol,
-          limit: 100,
-        },
-      });
-
-      if (parseInt(data.code || '0') !== 0) {
-        this.emitAndLogError(data.msg);
-        return [];
-      }
-
-      if (!data.data?.entrustedList || !Array.isArray(data.data.entrustedList)) {
-        return [];
-      }
-
-      // Filter for filled orders (handle both 'state' and 'status' fields)
-      let fills = data.data.entrustedList.filter((order: any) => order.state === 'filled' || order.status === 'filled');
-
-      // Filter by time range if provided
-      const fromSeconds = from ? normalizeTimestampToSeconds(from) : undefined;
-      const toSeconds = to ? normalizeTimestampToSeconds(to) : undefined;
-      if (from) {
-        fills = fills.filter((fill: any) => {
-          const timestamp = normalizeTimestampToSeconds(fill.uTime || fill.cTime || '0');
-          return fromSeconds !== undefined ? timestamp >= fromSeconds : true;
-        });
-      }
-      if (to) {
-        fills = fills.filter((fill: any) => {
-          const timestamp = normalizeTimestampToSeconds(fill.uTime || fill.cTime || '0');
-          return toSeconds !== undefined ? timestamp <= toSeconds : true;
-        });
-      }
-
-      const result = fills.map((order: any) => {
-        const side = order.side === 'buy' ? OrderSide.Buy : OrderSide.Sell;
-        const contracts = parseFloat(order.size || order.baseVolume || '0');
-        const avgPrice = parseFloat(order.priceAvg || order.price || '0');
-        const fee = parseFloat(order.fee || '0');
-        // Prefer fill/update time over create time, and normalize to seconds for chart markers.
-        const timestamp = normalizeTimestampToSeconds(order.uTime || order.cTime || '0');
-
-        return {
-          timestamp,
-          symbol: marketSymbol,
-          orderId: order.orderId,
-          price: avgPrice,
-          qty: contracts,
-          side,
-          commission: Math.abs(fee),
-          commissionAsset: this.apiMarginCoin,
-        } as Execution;
-      });
-
-      return result;
+      return await this._fetchBillPage(opts);
     } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      this.emitAndLogError(`Error fetching income history: ${err?.message ?? err}`);
       return [];
     }
+  };
+
+  /**
+   * Income over a range. Uses the shared span-based pager rather than a fourth copy — see
+   * `exchanges/income-paging.ts` for why completeness is decided by span rather than by a
+   * full-page row count, and why no sort order is assumed.
+   *
+   * Bitget's ordering is UNVERIFIED as a contract even though the sampled account answers
+   * newest-first: this epic has twice been bitten by inferring a whole set from the first
+   * page of a sorted list, most recently in the activity probe that wrongly called this very
+   * account idle. The pager reads each page's order from the page itself.
+   */
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    const { records, truncated, exhaustedChunks } = await paginateIncomeRange(
+      ({ startTime: from, endTime: to, limit }) => this._fetchBillPage({ startTime: from, endTime: to, limit }),
+      {
+        startTime,
+        endTime,
+        chunkMs: BILL_MAX_WINDOW_MS,
+        pageLimit: BILL_PAGE_LIMIT,
+      },
+    );
+
+    if (truncated) {
+      this.log(
+        `Income history for ${new Date(startTime).toISOString()}..${new Date(endTime).toISOString()} is INCOMPLETE — ` +
+          `${exhaustedChunks} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.`,
+        LogSeverity.Warning,
+      );
+    }
+
+    return incomeType ? records.filter((record) => record.incomeType === incomeType) : records;
+  };
+
+  /**
+   * Per-fill executions from `/api/v2/mix/order/fills`.
+   *
+   * This used to read `orders-history` and filter `state === 'filled'` — an ORDER-level
+   * route, so partial fills collapsed into a single row and the result carried no per-fill
+   * id, no realized PnL, and no hedge leg. Without realized PnL the venue cannot fold
+   * position records at all, which is what kept it fold-only-in-name and ungradeable.
+   *
+   * The per-fill route is also ACCOUNT-WIDE: unlike binance's `userTrades` it answers
+   * without a symbol, so callers do not have to discover a symbol list first. A symbol is
+   * still forwarded when given.
+   */
+  /** One cursor page of fills. Rethrows so a failed page can never read as an empty one. */
+  private _fetchFillsPage = async (params: Record<string, any>): Promise<{ rows: any[]; endId?: string }> => {
+    const { data } = await this.xhr.get(ENDPOINTS.ORDER_FILLS, { params });
+    if (data?.code && String(data.code) !== '00000') {
+      throw new Error(`${data.code} ${data.msg ?? ''}`.trim());
+    }
+    return {
+      rows: Array.isArray(data?.data?.fillList) ? data.data.fillList : [],
+      endId: data?.data?.endId ? String(data.data.endId) : undefined,
+    };
+  };
+
+  /**
+   * Per-fill executions from `/api/v2/mix/order/fills`.
+   *
+   * This used to read `orders-history` and filter `state === 'filled'` — an ORDER-level
+   * route, so partial fills collapsed into a single row and the result carried no per-fill
+   * id, no realized PnL, and no hedge leg. Without realized PnL the venue cannot fold
+   * position records at all, which is what kept it ungradeable.
+   *
+   * TWO THINGS THE OLD SINGLE-REQUEST SHAPE GOT WRONG, both already-known lessons here:
+   *
+   * 1. **The window is REJECTED, not clamped.** Bitget answers a range wider than 90 days
+   *    with `00001 startTime and endTime interval cannot be greater than 90 days`, and the
+   *    old catch turned that into `[]` — so an over-wide ask read as "this account has never
+   *    traded". Identical to the binance/bybit defect `splitTimeRange` exists for, which is
+   *    what is used here.
+   * 2. **A page caps at 100 rows**, so one request silently truncated any active window.
+   *    Paged on the venue's own `endId`/`idLessThan` cursor, terminating when the cursor
+   *    stops advancing rather than when a page looks short — a short page is a guess about
+   *    the venue, and this epic has been bitten by that guess twice.
+   *
+   * The route is also ACCOUNT-WIDE — unlike binance's `userTrades` it answers without a
+   * symbol, so callers need not discover a symbol list first.
+   */
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const { symbol, from, to, limit = BITGET_FILLS_PAGE_LIMIT } = opts;
+
+    let venueSymbol: string | undefined;
+    if (symbol) {
+      const market = this._resolveMarket(symbol);
+      if (!market) return [];
+      venueSymbol = market.id;
+    }
+
+    const deps = {
+      resolveSymbol: (raw: string) => this._resolveMarket(raw)?.symbol,
+      // Executions are stamped in SECONDS, matching the previous mapper and chart markers.
+      toTimestamp: (ms: number) => Math.floor(ms / 1000),
+    };
+
+    const windows =
+      from !== undefined && to !== undefined ? splitTimeRange(from, to, BITGET_FILLS_MAX_WINDOW_MS) : [undefined];
+
+    const executions: Execution[] = [];
+    const seen = new Set<string>();
+
+    try {
+      for (const window of windows) {
+        let cursor: string | undefined;
+
+        for (let page = 0; page < BITGET_FILLS_MAX_PAGES; page += 1) {
+          const params: Record<string, any> = {
+            productType: this.apiProductType,
+            limit: Math.min(limit, BITGET_FILLS_PAGE_LIMIT),
+          };
+          if (venueSymbol) params.symbol = venueSymbol;
+          if (window) {
+            params.startTime = window.startTime;
+            params.endTime = window.endTime;
+          }
+          if (cursor) params.idLessThan = cursor;
+
+          const { rows, endId } = await this._fetchFillsPage(params);
+          if (!rows.length) break;
+
+          for (const execution of mapBitgetFills(rows, deps)) {
+            const id = execution.id ?? `${execution.symbol}|${execution.timestamp}|${execution.qty}|${execution.price}`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            executions.push(execution);
+          }
+
+          // Terminate on cursor exhaustion or non-advancement, never on a short page.
+          if (!endId || endId === cursor) break;
+          cursor = endId;
+        }
+      }
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return executions;
+    }
+
+    return executions;
   };
 
   fetchMarkets = async () => {

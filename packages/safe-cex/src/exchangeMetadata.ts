@@ -398,6 +398,11 @@ const BybitSpotMetadata: ExchangeMetadata = {
   prettyName: 'Bybit Spot',
   supportsTestnet: false,
   supportsExecutionsHistory: false,
+  // Inherits `true` from BybitMetadata via the spread above. Spot has no position-based
+  // closed PnL, and this flag is a SOURCE SWITCH for the Closed Positions tab, not a
+  // capability advertisement — leaving it true sends spot down the endpoint branch and
+  // renders the tab permanently empty.
+  supportsClosedPnLEndpoint: false,
   supportsOpeningTriggerOrders: false,
   forbidCors: true,
   enabled: false,

@@ -59,6 +59,139 @@ Variants (spot, inverse, USDC, demo, PM) typically live in the same
 directory under different file prefixes (e.g. `binancespot.api.ts`,
 `binancepm.exchange.ts`) and are exposed as separate `exchangeName`s.
 
+### A venue method means "the venue said so" — derivation composes above it
+
+Some venues can only produce an axis by folding another one: hyperliquid has no
+closed-position endpoint, but its fills carry `closedPnl`, so closed positions are
+derivable. **Do not put that fold behind the venue method's name.** `fetchClosedPnl`
+means exactly one thing — the exchange reported this — and laundering a fold through it
+gives polymorphic parity at the cost of making the two indistinguishable at every call
+site afterwards.
+
+That distinction is not cosmetic. Reported closed PnL is low-multiplicity with error
+local to the row. A fold of fills is **path-dependent**: one bad fill corrupts every
+position after it, and it cannot validate the axis it came from — comparing them compares
+data to itself and agrees by construction.
+
+The pattern:
+
+- venue method (`fetchClosedPnl`) — reported only, branded base stub when absent;
+- venue derivation (`deriveClosedPositions`) — explicitly named, clearly a fold;
+- `utils/resolveClosedPositions.ts` — composes them, returns `{ entries, provenance,
+independentlyVerifiable }`.
+
+**Provenance rides ON the data** (`ClosedPnlEntry.provenance`), not in a capability table.
+Derived data is indistinguishable from reported data at the call site — a fold of fills
+does not look derived, it looks like a closed position — and a table someone must remember
+to consult is the same shape as `supportsTradesHistory`, which advertises `true` on three
+venues that always return empty and has no production consumer at all.
+
+Consumers branch on provenance, never on whether a method exists:
+
+| Consumer                                   | Contract                                                                                                                          |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Journal / UI                               | renders either, but must not present `derived` rows as verified, and should not back an export from them without a visible caveat |
+| Validators (`--closed-pnl`, health checks) | require `independentlyVerifiable`; SKIP with a reason otherwise                                                                   |
+| Anything counting "trades"                 | `derived` granularity is per closing FILL; venue-reported is usually per closed POSITION                                          |
+
+The resolver also fixes the duplicate-fetch problem the naive shape creates: two sibling
+methods that each fold fills fetch fills twice, whereas the resolver fetches once.
+
+### Before declaring a venue unsupportable: enumerate the VENUE's API, not ours
+
+**What this tree implements is a statement about our backlog. It is never evidence about the
+exchange.** That inference was made three times in one survey and was wrong every time —
+woo was called UNSUPPORTABLE, phemex and kraken were recorded as having no history axis. All
+three publish full history surfaces; see `docs/VENUE_COVERAGE_SURVEY_v1.md` → "A fourth trap".
+
+Two failure shapes, both of which look like findings once written down:
+
+1. **A missing method read as a missing capability.** `kraken.exchange.ts` implements none of
+   the five history methods, so the axis probe reports none — while the venue serves
+   `history/v2/account-log`.
+2. **A measurement generalized past the route it measured.** woo's `realizedPnl` really is
+   `null` on 534/534 fills — of `/v3/trade/transactionHistory`, the one route the adapter
+   reads. The v1 ledger next to it carries `REALIZED_PNL` and `FUNDING_FEE` rows.
+
+The second is the dangerous one, because a live number makes the conclusion feel earned.
+**A measurement's scope is the route it measured.** Before writing "this venue cannot", read
+the venue's docs or the CCXT reference (`../CLAUDE.md` → Reference) and cite the source.
+
+**The axis is often on a different API generation than the adapter uses**, so re-reading the
+adapter's own routes can never surface it:
+
+- woo — adapter on `/v3/trade/transactionHistory`; realized PnL is on the **v1** family.
+- kraken — adapter entirely on `futures.kraken.com/derivatives/api/v3`; the ledger is on
+  `futures.kraken.com/api/history/v2`, a different base URL **and** version.
+
+**Mixing versions inside one adapter is normal here, not a workaround** — bitget already runs
+33 `/api/v2` routes alongside 3 `/api/v3`. Implement the hybrid; do not port the adapter to a
+new generation wholesale just to reach one endpoint, and do not conclude the endpoint is
+absent because the generation the adapter happens to speak lacks it.
+
+### Paging: the "first page of a sorted list" family
+
+Four defects in this repo have been the same mistake wearing different clothes — **drawing a
+conclusion about a whole set from one page of it, without establishing the sort direction**:
+an activity probe called a bitget account idle off the OLDEST 100 orders; the first weex
+pager walked a backwards cursor and stopped after one page against an ascending venue; the
+income pager inferred which end of a window had been served; and okx/blofin derived their
+cursor from `rows[rows.length - 1]`.
+
+Rules for any new paging code, and for the 9th and 10th ledger axes especially:
+
+- **Never take a cursor by array position.** Use `utils/oldestCursorId` (smallest id in the
+  page, order-agnostic). It compares numeric strings by length-then-lexicographic rather than
+  parsing — okx billIds exceed `MAX_SAFE_INTEGER`, so `parseInt` collapses distinct ids.
+- **Completeness is a SPAN question, not a row count.** `page.length === limit` is a guess
+  about the venue: a server-side filter or a cap below the asked limit returns a short page
+  with more behind it. `exchanges/income-paging.ts` decides by whether the requested window
+  has been covered, and terminates a branch only on an empty page or on no fresh rows.
+- **A failed page is not an empty one.** Give a pager a RETHROWING fetcher; the public
+  `fetchIncomeHistory` swallowing into `[]` makes a 429 indistinguishable from an idle
+  window. Measured on binance: 492 of 512 records returned while reporting success.
+- **Dedupe on a key unique per RECORD, not per row.** A ledger row commonly yields both a
+  realized-PnL and a commission record. okx/bybit/bitunix/hyperliquid/bitget/bitmex all
+  suffix (`${id}:pnl` / `:fee` / `:adj`); bitget and bitmex did not until the collision
+  discarded every bitget commission — 820 records where the venue's own row census predicted
+  ~1190.
+- **Verify against a venue-supplied census or running balance, not a self-consistency
+  check.** The live paging probe compares two walks through the same mapper, so it PASSED at 820. Arithmetic against the row census caught it; bitget's `balance` column is what pinned
+  its gross-vs-net convention.
+
+**Known-latent, deliberately unchanged:** okx (`bills`, `orders-history`, `closed-pnl`) still
+adds `rows.length < PAGE_LIMIT` as an early stop alongside its cursor check, and
+blofin/bitunix do the same behind `added === 0` / `freshRows === 0` guards. These are
+correct while those venues only return a short page at the end, which is true today. They
+were left alone because changing paging on venues that currently PASS, without an
+independent census to verify the change against, risks more than it fixes — but do not copy
+the idiom into a new venue.
+
+### `<name>.<concern>.ts` — extract pure mappers, don't inline them
+
+Beyond the five files above, a venue may carry extra single-concern siblings
+(`bybit.order-params.ts`, `bybit.response.ts`, `hyperliquid.builderFee.ts`,
+`hyperliquid.order-inference.ts`, `bybit.income.ts`, `okx.income.ts`,
+`bybit.closed-pnl.ts`, `hyperliquid.income.ts`, …). This is the normal shape —
+not a special case — and for response mappers it is close to mandatory:
+
+**Exchange methods are instance fields** (`fetchIncomeHistory = async () => {}`),
+so a parser written inside one is unreachable from a test. That is not a
+theoretical cost. The WOO hedge-side bug silently dropped 42% of returned rows
+and lived behind an instance-field parser where no unit test could reach it; the
+fix was to extract `mapWooHedgeTransactionSide` and only then assert on it.
+
+So: any function that turns a venue response into a domain type — fills,
+ledger rows, closed positions, orders — goes in its own file, is `export`ed, and
+is pure (no `this`, no I/O). Pass what it needs, including store lookups, as
+arguments (`resolveSymbol: (id) => string | undefined` is the usual shape).
+
+This matters most where the call site erases types. `ClosedPositions.tsx` casts
+`as unknown[] as ClosedPosition[]`, so TypeScript catches **no** shape error in
+`mapBybitClosedPnl` — a side inversion or a passed-through decimal string
+compiles cleanly and is wrong at runtime. The extracted function plus a
+deterministic regression is the only thing standing there.
+
 ## BaseExchange Contract
 
 `base.ts` defines the `Exchange` interface and `BaseExchange` class. Every
@@ -421,7 +554,7 @@ Three rules, each of which has already bitten:
 
 - **Tag on the url or body, never on a credential-shaped condition.** Hosted
   mode is handed the key but never the secret, so `!options.secret` is true for
-  *every* request it makes. Tagging on the common
+  _every_ request it makes. Tagging on the common
   `if (!options.key || !options.secret) return` shape would mark real orders as
   needing no signature and ship them unauthenticated. `publicDataOnly` is the
   same trap on a public-data instance. Where an exchange ORs its URL test
@@ -443,7 +576,7 @@ Hyperliquid siblings. Drive the real interceptor through a capture adapter and
 assert both directions: public tagged, private never tagged **in the hosted
 shape** (`{ key: 'k', secret: '', remoteSigner }` — the signer is what makes it
 hosted, and the blank secret is what makes the hazard live), and where the
-endpoint is public but locally signed, that it is tagged *and* still carries its
+endpoint is public but locally signed, that it is tagged _and_ still carries its
 signature header.
 
 Tagged today: kraken futures, okx, bybit (+spot/inverse, shared `createAPI`),

@@ -514,6 +514,40 @@ Similarly, TP/SL orders may be direct arrays or wrapped in `orderList`.
 - **WebSocket URLs**: Same as livenet (no separate testnet WS URLs in configuration)
 - **Fallback WS URLs**: Same for testnet and livenet
 
+## Order history (`/api/v1/futures/trade/get_history_orders`)
+
+`fetchOrderHistory` reads this endpoint. Mapper: `bitunix.order-history.ts`, pure and
+exported. Rows nest under **`data.orderList`** — the row key is per-endpoint here
+(`orderList`, `tradeList`, `positionList`).
+
+**Three traps, all verified live on sheet row 56, all of which return less data rather
+than an error:**
+
+- **`skip` does NOT work on this endpoint, unlike `get_history_trades` where it does.**
+  `skip=100` returns a byte-identical first page. Routing this axis through the shared
+  `fetchBitunixHistoryPages` therefore caps it at 100 orders and reads as a small account
+  — it fetched 200 raw rows for 100 distinct ids before the fix. `fetchOrderHistory` walks
+  the `startTime`/`endTime` window backwards instead, and recovered 164 of the venue's own
+  reported `total: "164"` for a 30-day window.
+- **`status` is ignored outright.** `status=CANCELED` returned 100/100 rows reading
+  `FILLED`. So the filter cannot be used, and more importantly it cannot be used to _ask_
+  whether cancels are returned at all.
+- **A wrong row key looks exactly like an empty account.** Bitunix answers a path that
+  does not exist with `code: 404`, but answers a real path read under the wrong key with
+  `code: 0` and nothing. `code: 0` plus zero rows is therefore not evidence of an empty
+  account; check the key first.
+
+**The 0% never-filled rate here is UNVERIFIED, not a clean result.** Over 30 days this
+account returned 164 orders, 25 of them `LIMIT`, with zero cancellations — where okx's
+comparable account shows 58 cancels among 114 limits. Because the `status` filter is
+ignored, whether the endpoint returns unfilled cancels at all cannot be confirmed from
+read-only probing. Treat bitunix order history as fills-shaped until a deliberate
+place-and-cancel proves otherwise.
+
+`price` can be the **literal string `"MARKET"`** on a market order — not `""`, not `"0"`,
+the word — so `parseFloat` yields `NaN` and an unguarded mapper publishes NaN into the
+axis. Filled quantity is `tradeQty`, not `qty`.
+
 ## Known Quirks / Implementation Notes
 
 1. **Separate TP/SL API**: TP/SL orders use entirely separate endpoints (`/tpsl/place_order`, `/tpsl/cancel_order`, `/tpsl/get_pending_orders`) from regular orders.

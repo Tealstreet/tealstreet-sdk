@@ -171,36 +171,36 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 
 ### Account
 
-| Endpoint                   | Method | Description                                                            |
-| -------------------------- | ------ | ---------------------------------------------------------------------- |
-| `/account`                 | GET    | Account info (account_number, total_collateral, free_collateral, etc.) |
-| `/onboarding`              | POST   | Account onboarding                                                     |
-| `/account/margin`          | GET    | Get all margin/leverage configs                                        |
-| `/account/margin/{market}` | POST   | Set leverage for a market                                              |
-| `/account/profile/max_slippage` | POST | Set account max slippage tolerance                                  |
+| Endpoint                        | Method | Description                                                            |
+| ------------------------------- | ------ | ---------------------------------------------------------------------- |
+| `/account`                      | GET    | Account info (account_number, total_collateral, free_collateral, etc.) |
+| `/onboarding`                   | POST   | Account onboarding                                                     |
+| `/account/margin`               | GET    | Get all margin/leverage configs                                        |
+| `/account/margin/{market}`      | POST   | Set leverage for a market                                              |
+| `/account/profile/max_slippage` | POST   | Set account max slippage tolerance                                     |
 
 ### Markets
 
-| Endpoint                      | Method | Description                               |
-| ----------------------------- | ------ | ----------------------------------------- |
-| `/markets`                    | GET    | List all markets                          |
-| `/markets/summary`            | GET    | Tickers (use `?market=ALL`)               |
-| `/orderbook/{market}`         | GET    | Orderbook (with `?depth=N`)               |
-| `/markets/klines`             | GET    | OHLCV klines (public, limited intervals)  |
-| `/tradingview/history`        | GET    | TradingView OHLCV (supports 1D, 4H, etc.) |
+| Endpoint               | Method | Description                               |
+| ---------------------- | ------ | ----------------------------------------- |
+| `/markets`             | GET    | List all markets                          |
+| `/markets/summary`     | GET    | Tickers (use `?market=ALL`)               |
+| `/orderbook/{market}`  | GET    | Orderbook (with `?depth=N`)               |
+| `/markets/klines`      | GET    | OHLCV klines (public, limited intervals)  |
+| `/tradingview/history` | GET    | TradingView OHLCV (supports 1D, 4H, etc.) |
 
 ### Orders
 
-| Endpoint                           | Method | Description                                    |
-| ---------------------------------- | ------ | ---------------------------------------------- |
-| `/orders`                          | GET    | List open orders                               |
-| `/orders-history`                  | GET    | List historical orders (execution fallback)   |
-| `/orders`                          | POST   | Place order (with signature)                   |
-| `/orders/batch`                    | POST   | Place 1-10 independently signed LIMIT orders   |
-| `/orders/batch`                    | DELETE | Cancel an exact locally bounded pair by ID     |
-| `/orders`                          | DELETE | Cancel all orders (optional `?market=` filter) |
-| `/orders/{id}`                     | DELETE | Cancel specific order                          |
-| `/orders/by_client_id/{client_id}` | DELETE | Cancel by client ID                            |
+| Endpoint                           | Method | Description                                                         |
+| ---------------------------------- | ------ | ------------------------------------------------------------------- |
+| `/orders`                          | GET    | List open orders                                                    |
+| `/orders-history`                  | GET    | List historical orders (execution fallback)                         |
+| `/orders`                          | POST   | Place order (with signature)                                        |
+| `/orders/batch`                    | POST   | Place 1-10 independently signed LIMIT orders                        |
+| `/orders/batch`                    | DELETE | Cancel an exact locally bounded pair by ID                          |
+| `/orders`                          | DELETE | Cancel all orders (optional `?market=` filter)                      |
+| `/orders/{id}`                     | DELETE | Cancel specific order                                               |
+| `/orders/by_client_id/{client_id}` | DELETE | Cancel by client ID                                                 |
 | `/fills`                           | GET    | Private fills history (`fetchExecutions` primary; cursor-paginated) |
 
 ### Positions
@@ -211,6 +211,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/positions/{market}` | GET    | Get position for specific market |
 
 Execution-history behavior (`fetchExecutions`):
+
 - Uses authenticated `/fills` with cursor pagination for primary execution history
 - Falls back to `/orders-history` rows where filled size is positive (`size - remaining_size > 0`)
 - Normalizes symbol/side/timestamp and returns Unix-second execution timestamps
@@ -249,11 +250,11 @@ Execution-history behavior (`fetchExecutions`):
 - `markets_summary` — single aggregate stream for slow-changing fields (volume_24h, open_interest, funding_rate)
 - Orderbook channels are **not** subscribed on connect; only when `listenOrderBook()` is called
 
-| Channel                                                            | Format    | Description                                          |
-| ------------------------------------------------------------------ | --------- | ---------------------------------------------------- |
-| `bbo.{market}`                                                     | Automatic | Best bid/ask/index per symbol (throttled 100ms in handler) |
-| `trades.{market}`                                                  | Automatic | Live last-price + drives in-memory OHLCV update from trade ticks |
-| `markets_summary`                                                  | Automatic | Aggregate stream for volume_24h / open_interest / funding_rate (slow cadence) |
+| Channel                                               | Format    | Description                                                                                    |
+| ----------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `bbo.{market}`                                        | Automatic | Best bid/ask/index per symbol (throttled 100ms in handler)                                     |
+| `trades.{market}`                                     | Automatic | Live last-price + drives in-memory OHLCV update from trade ticks                               |
+| `markets_summary`                                     | Automatic | Aggregate stream for volume_24h / open_interest / funding_rate (slow cadence)                  |
 | `order_book.{market}.snapshot@{depth}@{refresh_rate}` | On-demand | Orderbook snapshots (current implementation uses `snapshot@15@100ms`; no `@price_tick` suffix) |
 
 **BBO handling** (`paradex.ws-public.ts`):
@@ -353,16 +354,16 @@ Execution-history behavior (`fetchExecutions`):
 
 ### API -> Internal Type Mapping
 
-| API Type                | Internal Type          |
-| ----------------------- | ---------------------- |
-| `MARKET`                | `OrderType.Market`     |
-| `LIMIT`                 | `OrderType.Limit`      |
-| `STOP_MARKET`           | `OrderType.StopLoss`   |
-| `STOP_LIMIT`            | `OrderType.StopLoss`   |
-| `STOP_LOSS_MARKET`      | `OrderType.StopLoss`   |
-| `STOP_LOSS_LIMIT`       | `OrderType.StopLoss`   |
-| `TAKE_PROFIT_MARKET`    | `OrderType.TakeProfit` |
-| `TAKE_PROFIT_LIMIT`     | `OrderType.TakeProfit` |
+| API Type             | Internal Type          |
+| -------------------- | ---------------------- |
+| `MARKET`             | `OrderType.Market`     |
+| `LIMIT`              | `OrderType.Limit`      |
+| `STOP_MARKET`        | `OrderType.StopLoss`   |
+| `STOP_LIMIT`         | `OrderType.StopLoss`   |
+| `STOP_LOSS_MARKET`   | `OrderType.StopLoss`   |
+| `STOP_LOSS_LIMIT`    | `OrderType.StopLoss`   |
+| `TAKE_PROFIT_MARKET` | `OrderType.TakeProfit` |
+| `TAKE_PROFIT_LIMIT`  | `OrderType.TakeProfit` |
 
 The REST and private-WebSocket mappers share `ORDER_TYPE` and
 `isParadexTriggerOrderType` from `paradex.types.ts`. Generic `STOP_LIMIT` and
@@ -659,6 +660,31 @@ For order signatures, size and price are scaled by `1e8`:
 - SDK config endpoint differs: `SDK.Config.fetchConfig('testnet')` vs `SDK.Config.fetchConfig('prod')`
 - Testnet credentials at: https://testnet.paradex.trade/
 - `src/exchanges/paradex/` is runtime-only. Fresh deterministic regressions belong in `src/__tests__/audit-regressions/`; do not restore credentialed/manual exchange-tree tests.
+
+## Order history (`GET /orders-history`)
+
+`fetchOrderHistory` reads this endpoint with cursor pagination. Mapper:
+`paradex.order-history.ts`, pure and exported. Measured live over 7 days: 301 orders,
+**184 of which never filled (61.1%)** — the highest never-filled share of any venue in
+the epic, and entirely invisible to `/fills`.
+
+Two shape facts, both verified live and both silent failures if assumed away:
+
+- **`status` carries no information here — every row reads `CLOSED`.** 100/100 rows on a
+  live account came back `CLOSED` whether they filled or were rejected outright, because
+  `/orders-history` _is_ the terminal set (open orders live on `/orders`). The fill/cancel
+  distinction comes from **`cancel_reason`**; a mapper that trusts `status` marks every
+  cancellation as a completed order.
+- **There is no `filled` field.** It is `size - remaining_size`, the same derivation the
+  live order path uses. An unfilled row carries `remaining_size === size` and
+  `avg_fill_price: ""`.
+
+`reduce_only` is not a top-level boolean either — it appears as `"REDUCE_ONLY"` inside the
+`flags` array.
+
+`start_at` / `end_at` **are** honoured (a window the account has no orders in returns
+`results: []`). Worth stating only because four other venues in this epic answered a
+windowed request with their full history and no error.
 
 ## Known Quirks / Implementation Notes
 

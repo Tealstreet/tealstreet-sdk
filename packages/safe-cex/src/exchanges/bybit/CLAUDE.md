@@ -634,9 +634,84 @@ Fetched per category via `fetchFees()` before market loading (`bybit.exchange.ts
 - Uses `/v5/account/transaction-log` endpoint
 - Only supports `accountType: 'UNIFIED'`
 - Bybit limits queries to **7-day windows**; `fetchIncomeHistoryRange` chunks ranges accordingly with 100ms delay between chunks (`bybit.exchange.ts:983-1012`)
-- Type mapping: `TRADE` -> `REALIZED_PNL`, `SETTLEMENT` -> `FUNDING_FEE`
-- Uses `cashFlow` field for income amount
 - Paginated with cursor, max 10 pages safety limit
+
+**One transaction row becomes several `IncomeRecord`s.** Bybit reports `cashFlow`,
+`funding` and `fee` as three independent terms on the same row, so mapping a row to a
+single record merges terms of the reconciliation identity. The mapper is the pure,
+exported `mapBybitTransactionToIncomeRecords` in `bybit.income.ts` — kept out of the
+exchange class because an instance-field parser cannot be unit tested.
+
+Two things that must not be re-simplified:
+
+- **`record.fee` is load-bearing.** The previous inline mapper read only `cashFlow`, so
+  every trading fee silently vanished from the ledger — an absent term, not a wrong one,
+  which nothing downstream can detect. `fee` is positive when charged, so the emitted
+  income is `-fee`; a negative `fee` is a rebate.
+- **`tranId` is suffixed** (`:flow` / `:funding` / `:fee`). Splitting a row without
+  distinct ids lets downstream dedupe collapse the terms back into one.
+
+`change` is bybit's own net for the row. It is deliberately NOT used to derive the fee —
+its exact composition is undocumented here — so the emitted incomes sum to
+`cashFlow + funding - fee` rather than to `change`. Category comes from the row `type`
+(`TRADE`/`DELIVERY` → realized PnL, `SETTLEMENT` → funding, `TRANSFER_*` → transfer,
+`LIQUIDATION` → liquidation, `FEE_REFUND` → rebate); `incomeType` keeps the binance-style
+uppercase spellings the journal aggregator recognises.
+
+### Closed PnL — `USER_CLOSED_PNL`, and the shape trap in mapping it
+
+`bybit` and `bybitinverse` implement `fetchClosedPnl` against the real
+`/v5/position/closed-pnl` (7-day query windows via `getExecutionQueryWindows`,
+`nextPageCursor` paging, `limit` 100, `category` `linear`/`inverse`). This is the
+exchange-reported closed-position anchor — as opposed to the browser-inferred rows
+described in `apps/web/src/components/componentWorkers/CLAUDE.md`.
+
+**Until 2026-08 all three variants GETed Tealstreet's own
+`/api/trades-history/bybit/closed-pnl`**, backed by `users_app_history_bybit_*` — tables
+with 0 rows and no producer — so the method looked implemented and always returned `[]`.
+`bybitspot.fetchHistoricalTrades` is still that same trap against
+`/api/trades-history/bybit`.
+
+The mapper is the pure, exported `mapBybitClosedPnl` in `bybit.closed-pnl.ts`. Its
+consumer casts the result `as unknown[] as ClosedPosition[]`, **so TypeScript catches no
+shape mistake at all** and the runtime contract has to be held deliberately:
+
+- **`side` is the CLOSING order's side and inverts** — a `Sell` close means the position
+  was Long. Backwards flips every row and still compiles.
+- **Coerce every numeric.** Bybit returns decimal strings; the grid sorts with
+  `a.notional - b.notional` and divides by `entryPrice`, so a passed-through string is NaN.
+- **`fees` is `openFee + closeFee`.** The dead route hardcoded `fees: 0`.
+- **`account` must be stamped** from `opts.accountName` — that option's only remaining
+  purpose now the call goes to the venue.
+
+**`closedPnl` is NET of open and close fees AND of FUNDING** —
+`closedPnl = realized − fees + funding` — so it is not directly comparable to the ledger's
+`realized_pnl` category, which comes from `cashFlow` with fees and funding as separate
+records. Reconciling means adding the fee term back **and** removing funding.
+
+The funding half was measured 2026-08-13 and corrects a `funding: false` that had been
+assumed: over 30 days of BTCUSDT both `--canonical` and `--closed-pnl` put the residual at
+**−0.05958766** against a window funding of **−0.05958766**, equal to every digit. It hid
+because the account had never been reconciled over a window containing funding and every
+unit fixture used `fundingFee: '0'`, so the term was unexercised on both sides at once.
+
+**It is not fixable on this axis alone.** The row carries no funding field, and attributing
+funding to a round trip needs the interval the position was open — which the axis that
+reports `opened == closed` cannot give. The interval now comes from the FILLS axis via
+`reconstructPositionIntervals`, and the journal adapter `aggregateBybitClosedPnl` takes it
+through `resolveContext`, subtracting funding to reach canonical gross: `--canonical` PASSes
+with residual −1.96e-16 across 131 records.
+
+`mapBybitClosedPnl` (the `ClosedPnlEntry` path) still reports the venue's net figure — it
+has no fills input and is not the journal path. Without context the adapter degrades to the
+same net figure rather than inventing one, which the gate then FAILs on. Contrast okx, which
+reports `fundingFee` per position and needs no reconstruction.
+
+**Spot is deliberately excluded.** `bybitspot` has no `fetchClosedPnl` and
+`BybitSpotMetadata` sets `supportsClosedPnLEndpoint: false` — it inherits `true` through
+the `...BybitMetadata` spread, and that flag is a **source switch** for the Closed
+Positions tab, not a capability advertisement. Leaving it `true` with no implementation
+renders the tab permanently empty.
 
 ## Testnet/Demo
 
@@ -956,3 +1031,56 @@ yarn test-ci
 9. **Partial position mode switch**: Returns "Partial symbols switched successfully, excluding symbols with open orders or positions." -- logged as error but does not throw.
 10. **False PartiallyFilled on replace**: When replacing an order, Bybit emits a PartiallyFilled event with 0 price and 0 amount. This is filtered out in `handleOrderTopic`.
 11. **Position pagination**: Position fetches follow `nextPageCursor`; do not collapse them back to a single 200-row request.
+
+## `Execution` position fields — only `maker` exists
+
+`/v5/execution/list` carries `isMaker`, and that is the ONLY one of
+`positionSide` / `realizedPnl` / `maker` it reports. A live key dump (2026-08,
+`yarn history-audit --fills-probe --targets bybit:6:DOGEUSDT`) returned no `execPnl`,
+no `closedPnl` and no position side. `closedSize` is the closest-named field and is a
+size, not a PnL — do not map it to `realizedPnl`.
+
+Realized PnL comes from `/v5/position/closed-pnl` instead, and **that figure is NET of
+fees**, whereas `Execution.realizedPnl` is documented gross. Converting is required
+before the two can be summed; skipping it produces a residual exactly the size of the
+fee term, which reads as a mapper bug rather than a convention mismatch.
+
+## Closed-PnL rows carry no real open time
+
+Measured live 2026-08-12 on row 6. Every `/v5/position/closed-pnl` row returns
+`opened == closed` — the same timestamp on both ends, even for a position held for
+seconds across several fills:
+
+```
+closed=15:12:39 opened=15:12:39 long qty=141 entry=0.07078 exit=0.07077 pnl=-0.0123872
+```
+
+OKX's equivalent axis returns the true open time, so **position duration is derivable
+there and not here**. Anything showing hold time, or bucketing trades by session, must
+either source `openedAt` from fills on bybit or mark it unavailable — computing it from
+these two fields yields zero for every trade.
+
+`realizedPnl` here is NET of fees, matching OKX's closed-position axis and opposite to the
+gross convention on both venues' fills: `-0.0123872 + 0.0109772 = -0.00141` gross.
+
+One more shape note: a partial residual closes as its own row with its own size
+(`qty=1` rows appeared from a 1-DOGE remainder), so row count is not trade count.
+
+## Hedge mode: the leg is NOT on fills — join orders on `orderId`
+
+Measured live 2026-08-12 (row 6) against a hedge-mode e2e run:
+
+- `/v5/execution/list` returns **no position side at all**, in hedge mode as in one-way.
+  Its full key set contains no `positionIdx` and no `posSide`.
+- `/v5/order/history` carries **`positionIdx` on every row** — census `0:34 1:9 2:7` over
+  the run, where `0` is one-way, `1` the long leg and `2` the short leg.
+- `/v5/position/closed-pnl` carries a side, but no usable open time (see above).
+
+So a hedged bybit account **cannot be folded from fills alone** — the fill does not know
+which leg it belongs to, and the order side cannot be used to infer it (a `sell` opens the
+short leg or closes the long one, and both occur seconds apart). The leg has to come from
+the order axis, joined on `orderId`, which makes hedge-mode reconstruction a two-axis
+operation on this venue.
+
+OKX is the contrast: its fills carry `posSide` directly, so the same reconstruction is
+single-axis there. Do not write one fold and assume it ports.

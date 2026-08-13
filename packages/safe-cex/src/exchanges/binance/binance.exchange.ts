@@ -14,10 +14,12 @@ import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
 import {
   Balance,
   Candle,
+  ClosedPnlEntry,
   ExchangeName,
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  HistoricalOrder,
   HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -27,6 +29,7 @@ import {
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderHistoryOptions,
   OrderSide,
   OrderStatus,
   OrderStopTriggerType,
@@ -43,14 +46,20 @@ import {
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
+import { incomeCategoryFromType } from '../../utils/incomeCategoryFromType';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
+import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
+import { splitTimeRange } from '../../utils/splitTimeRange';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { paginateIncomeRange } from '../income-paging';
 import { createAPI, createPublicAPI } from './binance.api';
+import { deriveBinanceClosedPositions } from './binance.closed-pnl';
+import { mapBinanceHistoricalOrder } from './binance.order-history';
 import {
   BinanceIncomeRecord,
   ENDPOINTS,
@@ -63,6 +72,7 @@ import {
   POSITION_SIDE,
   TIME_IN_FORCE,
 } from './binance.types';
+import { buildUserTradesParams, mapBinanceUserTrade, USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
 
@@ -70,6 +80,25 @@ const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
 const ACCOUNT_RECONCILIATION_INTERVAL_MS = 25_000;
 const DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS = 3_000;
 const POSITION_RISK_RECONCILIATION_INTERVAL_MS = 75_000;
+/**
+ * Binance rejects an income query wider than 7 days, and caps a page at 1000 rows.
+ *
+ * Both are venue limits, not tuning knobs. The pager does not depend on either being exact:
+ * it walks until the returned records span the requested window, so a narrower real window
+ * costs extra requests rather than silently losing rows.
+ */
+const INCOME_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const INCOME_HISTORY_PAGE_LIMIT = 1000;
+
+/**
+ * Pacing between seven-day chunks. This is a WEIGHT budget, not politeness.
+ *
+ * `/fapi/v1/income` costs **weight 30** against binance's 2400/min IP budget — 80 requests
+ * per minute. The client's own `maxRPS: 3` limiter counts REQUESTS, not weight, so it would
+ * permit 5400 weight/min on this endpoint. Removing this sleep on the grounds that "the
+ * axios rate limiter already paces us" is therefore wrong, and `binance.income-pacing.test`
+ * exists to catch exactly that.
+ */
 const INCOME_HISTORY_CHUNK_DELAY_MS = 2_000;
 const REQUEST_WEIGHT_LIMIT_PER_MINUTE = 2_400;
 const REQUEST_WEIGHT_BACKOFF_THRESHOLD = REQUEST_WEIGHT_LIMIT_PER_MINUTE * 0.8;
@@ -282,7 +311,6 @@ export class BinanceExchange extends BaseExchange {
       orders,
       loaded: { ...this.store.loaded, orders: true },
     });
-
   };
 
   _startPublicDataOnly = async () => {
@@ -805,32 +833,22 @@ export class BinanceExchange extends BaseExchange {
   };
 
   fetchHistoricalTrades = async (opts: HistoricalTradeOptions) => {
-    const { data } = await this.xhr.get<any[]>(ENDPOINTS.USER_TRADES, {
-      params: {
-        symbol: opts.symbol,
-        limit: 1000,
-      },
-    });
+    // Same 7-day hard reject as fetchExecutions. `fromId` paging is mutually exclusive with
+    // a window, so only a from+to ask is split; leaving the id path untouched.
+    const windows =
+      opts.from !== undefined && opts.to !== undefined
+        ? splitTimeRange(opts.from, opts.to, USER_TRADES_MAX_WINDOW_MS)
+        : [undefined];
 
-    // Ensure data is an array before mapping
-    const trades = Array.isArray(data) ? data : [];
+    const rows: any[] = [];
+    for (const window of windows) {
+      const { data } = await this.xhr.get<any[]>(ENDPOINTS.USER_TRADES, {
+        params: buildUserTradesParams(window ? { ...opts, from: window.startTime, to: window.endTime } : opts),
+      });
+      if (Array.isArray(data)) rows.push(...data);
+    }
 
-    return trades.map((entry) => ({
-      id: entry.id?.toString(),
-      symbol: entry.symbol,
-      orderId: entry.orderId?.toString(),
-      price: +entry.price,
-      qty: +entry.qty,
-      quoteQty: entry.quoteQty,
-      realizedPnl: +entry.realizedPnl,
-      positionSide: entry.positionSide.toLocaleLowerCase(),
-      side: entry.side.toLocaleLowerCase(),
-      buyer: entry.buyer,
-      maker: entry.maker,
-      commission: +entry.commission,
-      commissionAsset: entry.commissionAsset,
-      time: +entry.time,
-    }));
+    return rows.map(mapBinanceUserTrade);
   };
 
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
@@ -855,28 +873,45 @@ export class BinanceExchange extends BaseExchange {
       if (orderId) {
         params.orderId = orderId;
       }
-      if (from) {
-        params.startTime = from;
+
+      // `/fapi/v1/userTrades` REJECTS a window wider than 7 days — it does not clamp it.
+      // The catch below turns that error into `[]`, so an unchunked 30-day ask returned
+      // ZERO fills and read downstream as "this symbol has never traded". Same defect as
+      // `deriveClosedPositions` was already written to avoid, in this same class.
+      const windows =
+        from && to ? splitTimeRange(from, to, USER_TRADES_MAX_WINDOW_MS) : [{ startTime: from, endTime: to }];
+
+      const rows: any[] = [];
+      for (const window of windows) {
+        const { data } = await this.xhr.get<any[]>(ENDPOINTS.USER_TRADES, {
+          params: omitUndefined({ ...params, startTime: window.startTime, endTime: window.endTime }),
+        });
+        if (Array.isArray(data)) rows.push(...data);
       }
-      if (to) {
-        params.endTime = to;
-      }
 
-      const { data } = await this.xhr.get<any[]>(ENDPOINTS.USER_TRADES, { params });
+      const trades = rows;
 
-      // Ensure data is an array before mapping
-      const trades = Array.isArray(data) ? data : [];
-
-      return trades.map((entry) => ({
-        timestamp: Math.floor(entry.time / 1000), // Convert from milliseconds to seconds
-        symbol: entry.symbol,
-        orderId: entry.orderId?.toString(),
-        price: parseFloat(entry.price),
-        qty: parseFloat(entry.qty),
-        side: ORDER_SIDE[entry.side] || OrderSide.Buy,
-        commission: parseFloat(entry.commission || '0'),
-        commissionAsset: entry.commissionAsset,
-      }));
+      return trades.map((entry) =>
+        // omitUndefined for parity with every other venue's executions mapper: an
+        // explicit `undefined` key survives structuredClone across the worker
+        // boundary, where an omitted one does not.
+        omitUndefined({
+          // Per-fill trade id — the only idempotent dedupe key. orderId is
+          // shared across the partial fills of one order.
+          id: entry.id !== undefined && entry.id !== null ? String(entry.id) : undefined,
+          timestamp: Math.floor(entry.time / 1000), // Convert from milliseconds to seconds
+          symbol: entry.symbol,
+          orderId: entry.orderId?.toString(),
+          price: parseFloat(entry.price),
+          qty: parseFloat(entry.qty),
+          side: ORDER_SIDE[entry.side] || OrderSide.Buy,
+          commission: parseFloat(entry.commission || '0'),
+          commissionAsset: entry.commissionAsset,
+          positionSide: entry.positionSide ? normalizeExecutionPositionSide(entry.positionSide) : undefined,
+          realizedPnl: Number.isFinite(parseFloat(entry.realizedPnl)) ? parseFloat(entry.realizedPnl) : undefined,
+          maker: typeof entry.maker === 'boolean' ? entry.maker : undefined,
+        }),
+      );
     } catch (error: any) {
       this.log(`Error fetching executions: ${error.message}`, LogSeverity.Error);
       return [];
@@ -893,6 +928,117 @@ export class BinanceExchange extends BaseExchange {
    * @param opts - Options for filtering income history
    * @returns Array of normalized income records
    */
+  /**
+   * Binance has no closed-position endpoint, so this folds `/fapi/v1/userTrades`. That is
+   * a DIFFERENT source from the `/fapi/v1/income` the ledger reads, which is why the flag
+   * below says it does not share a source — a fold of a different endpoint is still a
+   * legitimate cross-check. See `binance.closed-pnl.ts`.
+   */
+  closedPositionsShareLedgerSource = false;
+
+  /** Historical orders, including ones that never filled — see binance.order-history.ts. */
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+    if (this.isPublicDataOnly || !opts?.symbol) {
+      // `/fapi/v1/allOrders` requires a symbol, unlike bybit's account-wide history.
+      return [];
+    }
+
+    try {
+      const { data } = await this.xhr.get<Array<Record<string, any>>>(ENDPOINTS.ALL_ORDERS, {
+        params: omitUndefined({
+          symbol: opts.symbol,
+          startTime: opts.from,
+          endTime: opts.to,
+          limit: Math.min(opts.limit || 1000, 1000),
+        }),
+      });
+
+      const rows = Array.isArray(data) ? data : [];
+      return rows
+        .map(mapBinanceHistoricalOrder)
+        .filter((order): order is HistoricalOrder => order !== null)
+        .sort((a, b) => b.createdTime - a.createdTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  deriveClosedPositions = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly || !opts.symbol) {
+      return [];
+    }
+
+    const to = opts.to ?? Date.now();
+    const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+
+    try {
+      const rows: Array<Record<string, any>> = [];
+
+      // `/fapi/v1/userTrades` rejects a window wider than 7 days outright. A 30-day ask
+      // returns an error that the catch below turns into an empty list — which reads
+      // downstream as "this symbol has no closes", not as a failed request. This loop was
+      // the only correct copy in the class; the two sibling methods lacked it entirely,
+      // which is why the split now lives in one shared, tested helper.
+      for (const window of splitTimeRange(from, to, USER_TRADES_MAX_WINDOW_MS)) {
+        const params = omitUndefined({
+          symbol: opts.symbol,
+          startTime: window.startTime,
+          endTime: window.endTime,
+          limit: 1000,
+        });
+        const { data } = await this.xhr.get<Array<Record<string, any>>>(ENDPOINTS.USER_TRADES, { params });
+        if (Array.isArray(data)) rows.push(...data);
+      }
+
+      return deriveBinanceClosedPositions(rows, opts.accountName || '').sort((a, b) => b.closedTime - a.closedTime);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
+  /**
+   * One income page, RETHROWING on failure.
+   *
+   * `fetchIncomeHistory` below swallows errors into `[]` and must keep doing so — the worker
+   * `CallMethodHandler` and the module-frame account hooks both call it directly and expect
+   * an array. But a pager cannot be handed that contract: a rate-limited page and an empty
+   * window are then the same value, so a 429 mid-walk reads as "nothing more here" and
+   * silently truncates the ledger.
+   *
+   * That is not hypothetical. The live paging probe hit binance's 2400/min IP limit — the
+   * proxy IP is shared — and the walk returned 492 of 512 records while reporting success,
+   * because 20 rows sat behind pages that errored into `[]`. An error becoming authoritative
+   * empty data is the exact thing `packages/safe-cex/CLAUDE.md` forbids, one axis over from
+   * the fabricated zero PnL.
+   */
+  private _fetchIncomeHistoryPage = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const params: Record<string, any> = {
+      limit: Math.min(opts?.limit || 1000, 1000),
+    };
+    if (opts?.symbol) params.symbol = opts.symbol;
+    if (opts?.incomeType) params.incomeType = opts.incomeType;
+    if (opts?.startTime) params.startTime = opts.startTime;
+    if (opts?.endTime) params.endTime = opts.endTime;
+
+    const { data } = await this.xhr.get<BinanceIncomeRecord[]>(ENDPOINTS.INCOME, { params });
+    const records = Array.isArray(data) ? data : [];
+
+    return records.map((record) => ({
+      symbol: record.symbol,
+      incomeType: record.incomeType,
+      income: parseFloat(record.income),
+      asset: record.asset,
+      timestamp: record.time,
+      tranId: record.tranId,
+      tradeId: record.tradeId,
+      category: incomeCategoryFromType(record.incomeType),
+    }));
+  };
+
   fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
     // Return empty array if in public data only mode
     if (this.isPublicDataOnly) {
@@ -930,6 +1076,7 @@ export class BinanceExchange extends BaseExchange {
         timestamp: record.time,
         tranId: record.tranId,
         tradeId: record.tradeId,
+        category: incomeCategoryFromType(record.incomeType),
       }));
     } catch (error: any) {
       this.log(`Error fetching income history: ${error.message}`, LogSeverity.Error);
@@ -938,70 +1085,54 @@ export class BinanceExchange extends BaseExchange {
   };
 
   /**
-   * Fetch income history for a date range, handling pagination and 7-day limit.
-   * Binance limits income queries to 7 days per request, so we chunk the range.
+   * Income over a range. Binance caps a single income query at 7 days, so the range is
+   * chunked; within a chunk it is paged until the records SPAN the window.
    *
-   * @param startTime - Start timestamp in ms
-   * @param endTime - End timestamp in ms
-   * @param incomeType - Optional filter by income type (e.g., 'REALIZED_PNL')
-   * @returns Array of all income records in the range
+   * This used to page off a full-page count at BOTH ends of the loop — `length === 1000` to
+   * enter the inner walk, `length < 1000` to leave it. Both are guesses about the venue:
+   * a server-side filter, or any cap below the asked limit, returns a short page with more
+   * behind it and the walk stops early, silently. That is worse here than on weex, because
+   * binance currently PASSES the canonical gate — a silent truncation corrupts a green
+   * verdict rather than producing an obviously absent one. It has never fired only because
+   * the test account is quiet enough that no 7-day window reaches 1000 records.
+   *
+   * The old inner cursor also stepped `lastTimestamp + 1`, which assumes the last row is the
+   * newest (ascending order) AND drops any rows sharing that millisecond past the page
+   * boundary. The shared pager assumes no order and reports the saturated-millisecond case
+   * instead of silently skipping it. See `exchanges/income-paging.ts`.
    */
   fetchIncomeHistoryRange = async (
     startTime: number,
     endTime: number,
     incomeType?: string,
   ): Promise<IncomeRecord[]> => {
-    const allRecords: IncomeRecord[] = [];
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const { records, truncated, exhaustedChunks } = await paginateIncomeRange(
+      // The RETHROWING variant — see `_fetchIncomeHistoryPage`. Handing the pager the
+      // swallowing one turns a 429 into "no more records" and truncates silently.
+      ({ startTime: from, endTime: to, limit }) =>
+        this._fetchIncomeHistoryPage({ startTime: from, endTime: to, incomeType: incomeType as any, limit }),
+      {
+        startTime,
+        endTime,
+        chunkMs: INCOME_HISTORY_MAX_WINDOW_MS,
+        pageLimit: INCOME_HISTORY_PAGE_LIMIT,
+        // Weight budget, not politeness — see the constant. `this.xhr`'s maxRPS 3 does NOT
+        // substitute for it: at weight 30 that is 5400 weight/min against a 2400 cap.
+        chunkDelayMs: INCOME_HISTORY_CHUNK_DELAY_MS,
+      },
+    );
 
-    let currentStart = startTime;
-
-    while (currentStart < endTime) {
-      const currentEnd = Math.min(currentStart + SEVEN_DAYS_MS, endTime);
-
-      const records = await this.fetchIncomeHistory({
-        startTime: currentStart,
-        endTime: currentEnd,
-        incomeType: incomeType as any,
-        limit: 1000,
-      });
-
-      allRecords.push(...records);
-
-      // If we got 1000 records, there might be more - paginate within this chunk
-      if (records.length === 1000) {
-        // Use the last record's timestamp as the new start
-        const lastTimestamp = records[records.length - 1].timestamp;
-        // Fetch remaining records in this chunk
-        let moreRecords = await this.fetchIncomeHistory({
-          startTime: lastTimestamp + 1,
-          endTime: currentEnd,
-          incomeType: incomeType as any,
-          limit: 1000,
-        });
-
-        while (moreRecords.length > 0) {
-          allRecords.push(...moreRecords);
-          if (moreRecords.length < 1000) break;
-
-          const nextStart = moreRecords[moreRecords.length - 1].timestamp + 1;
-          moreRecords = await this.fetchIncomeHistory({
-            startTime: nextStart,
-            endTime: currentEnd,
-            incomeType: incomeType as any,
-            limit: 1000,
-          });
-        }
-      }
-
-      currentStart = currentEnd;
-
-      if (currentStart < endTime) {
-        await new Promise((resolve) => setTimeout(resolve, INCOME_HISTORY_CHUNK_DELAY_MS));
-      }
+    // A partial ledger reconciles perfectly well against itself, so an unannounced one is
+    // worse than an error. Callers cannot distinguish a truncated walk from a complete one.
+    if (truncated) {
+      this.log(
+        `Income history for ${new Date(startTime).toISOString()}..${new Date(endTime).toISOString()} is INCOMPLETE — ` +
+          `${exhaustedChunks} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.`,
+        LogSeverity.Warning,
+      );
     }
 
-    return allRecords;
+    return records;
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
