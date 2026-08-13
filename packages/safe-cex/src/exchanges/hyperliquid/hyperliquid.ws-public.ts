@@ -581,7 +581,6 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         waitingTimeout = undefined;
       }
 
-      this.cleanupMessageHandlerStats(`l2Book.${subSymbol}`);
       // Clean up orderbook inner state to prevent memory leak
       delete this.orderBookInnerState[innerId];
 
@@ -592,6 +591,25 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       if (this.isConnected && !this.messageHandlers[handler].length) {
         this.sendUnsubscription({ type: 'l2Book', coin: subSymbol });
         this.sendUnsubscription({ type: 'bbo', coin: subSymbol });
+      }
+
+      // Stats are keyed by the bare channel (`recordMessageHandlerStats` is
+      // handed `json.channel`), so every symbol shares ONE `bbo` entry, and
+      // nothing used to clear it. The previous `l2Book.${subSymbol}` cleanup
+      // could not: l2Book is excluded from stats above, so that key is never
+      // written. Once the last bbo subscription went away the entry kept its
+      // final timestamp, aged past the staleness threshold, and the reconnect
+      // banner reported Bbo dead on a socket where every other feed was fine —
+      // bbo being the only orderbook liveness signal, since l2Book is excluded.
+      //
+      // Clearing it returns the topic to the harmless never-recorded case, as
+      // getGroupedMessageTopicStats prescribes. Guarded on the shared key: only
+      // drop it once no symbol has a bbo handler left.
+      const bboStillSubscribed = Object.keys(this.messageHandlers).some(
+        (key) => key.startsWith('bbo.') && this.messageHandlers[key]?.length,
+      );
+      if (!bboStillSubscribed) {
+        this.cleanupMessageHandlerStats('bbo');
       }
     };
   };
