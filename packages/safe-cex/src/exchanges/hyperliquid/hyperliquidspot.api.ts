@@ -4,9 +4,10 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
-import { BASE_URLS } from './hyperliquidspot.types';
+import { BASE_URLS, ENDPOINTS } from './hyperliquidspot.types';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
@@ -35,6 +36,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };
+    // This interceptor never signs anything, so a hosted `/info` read costs a
+    // round trip to the device for a signature that is never produced.
+    if (nextConfig.url === ENDPOINTS.INFO) markSkipRemoteSigning(nextConfig);
     // const timestamp = virtualClock.getCurrentTimeMs();
 
     // const data = config.data || config.params || {};

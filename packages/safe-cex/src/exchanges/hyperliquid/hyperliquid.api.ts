@@ -4,11 +4,12 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
 import { signL1Action } from './hyperliquid.signing';
-import { BASE_URLS } from './hyperliquid.types';
+import { BASE_URLS, ENDPOINTS } from './hyperliquid.types';
 
 // Common response interceptor for Hyperliquid API responses
 const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exchange: BaseExchange) => {
@@ -72,6 +73,11 @@ const addSigningInterceptor = (
   exchange: BaseExchange,
 ) => {
   xhr.interceptors.request.use(async (config) => {
+    // Above the `!options.secret` guard on purpose: that guard is the branch
+    // every hosted request takes, so a tag below it would never run where it
+    // matters. Keyed on the url, which is credential-independent.
+    if (config.url === ENDPOINTS.INFO) markSkipRemoteSigning(config);
+
     const body = config.data as any;
     if (!options.secret || !body || typeof body !== 'object') return config;
     if (body.signature || !body.action || body.nonce === undefined) return config;
@@ -143,6 +149,20 @@ export const createInfoAPI = (options: ExchangeOptions, exchange: BaseExchange) 
   );
 
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
+
+  // This instance has no signing interceptor at all — every request through it
+  // is unsigned by construction — yet it still carries the remote-signing
+  // adapter, so without this tag each `/info` read costs a round trip to the
+  // device for a signature nothing was ever going to produce. Registered
+  // unconditionally, like every other exchange's: a public-data instance can
+  // still be handed a remoteSigner, and the tag is inert without one. Guarded
+  // on the url rather than set in the instance defaults, so an `/exchange`
+  // action posted here would still be signed.
+  xhr.interceptors.request.use((config) => {
+    if (config.url === ENDPOINTS.INFO) markSkipRemoteSigning(config);
+    return config;
+  });
+
   if (!options.publicDataOnly) {
     setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
