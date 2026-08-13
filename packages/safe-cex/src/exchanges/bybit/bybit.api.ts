@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid';
 import qs from 'qs';
 
 import { createAxiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -27,6 +28,10 @@ const BYBIT_AUTH_RET_CODES = new Set([
 // KLINE is fetched unsigned (headers are stripped below) and shares this
 // client, so header presence is what distinguishes a credential-proving call.
 const isSignedRequest = (config: { headers?: any } | undefined) => Boolean(config?.headers?.['X-BAPI-SIGN']);
+
+// Public market data: tickers, instruments-info and kline. IP-metered by Bybit
+// whether or not a signature rides along.
+const isPublicEndpoint = (url?: string) => Boolean(url?.includes('/v5/market/'));
 
 const isErrorSignature = (error: any) => {
   const isNetwork = isNetworkError(error);
@@ -76,6 +81,12 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         requestId: nanoid(),
       },
     };
+
+    // Tag `nextConfig`, not `config` — every return below is built from it, so
+    // a tag on `config` would be dropped by the spread above. Broader than the
+    // kline check, which misses tickers and instruments-info; this only skips
+    // the hosted signing round trip and never decides signing.
+    if (isPublicEndpoint(nextConfig.url)) markSkipRemoteSigning(nextConfig);
 
     if (nextConfig.method === 'get' && nextConfig.url === ENDPOINTS.KLINE) {
       return { ...nextConfig, headers: new AxiosHeaders({}) };

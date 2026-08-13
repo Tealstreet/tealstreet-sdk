@@ -32,9 +32,12 @@ import { tryParseJson } from './utils/tryParseJson';
  *    guaranteed no-op, and tagging costs nothing anywhere.
  *  - The endpoint is public but currently signed — OKX `/api/v5/market/*` and
  *    Bybit's `/v5/market/` tickers and instruments-info, none of which match
- *    their exchange's narrow public test. Here tagging does trade the
- *    per-account bucket for latency, but only on the hosted path: the
- *    fall-through leaves every key-holding client signing exactly as today.
+ *    their exchange's narrow public test. Here the hosted request does go out
+ *    unsigned where it used to be signed. Both venues meter public market data
+ *    per-IP whether or not a signature rides along, so nothing is actually
+ *    given up; on a venue that did credit these to the account instead, this is
+ *    the case that would cost something, and the one to think twice about.
+ *    Either way the fall-through leaves key-holding clients signing as today.
  *
  * Absence means "sign it", so an untagged exchange keeps today's behaviour
  * exactly. The way to get this wrong is to tag on a condition that is merely

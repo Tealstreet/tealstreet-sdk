@@ -6,11 +6,17 @@ import createHmac from 'create-hmac';
 import qs from 'qs';
 
 import { bigIntAxiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import type { OKXExchange } from './okx.exchange';
 import { BASE_URLS, RECV_WINDOW } from './okx.types';
+
+// Broader than the signing check below, which matches only `/api/v5/public/`
+// and so misses tickers and both candle endpoints under `/api/v5/market/`.
+// Used only to skip the hosted signing round trip, never to decide signing.
+const isPublicEndpoint = (url?: string) => Boolean(url && (url.includes('/public/') || url.includes('/market/')));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const { passphrase } = options;
@@ -48,6 +54,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   xhr.interceptors.request.use((config) => {
+    // Tag first, then fall through: whether this gets signed locally is decided
+    // by the branches below, exactly as before.
+    if (isPublicEndpoint(config.url)) markSkipRemoteSigning(config);
+
     if (config?.url?.includes('public')) {
       return config;
     }
