@@ -117,6 +117,7 @@ All three variants follow the same high-level pattern, with variant-specific dif
 - Uses `papiXhr` instead of `xhr` for authenticated endpoints.
 - `fetchBalance()` is separate from position fetching (tick calls `fetchBalance()` instead of `fetchPositionsAndBalance()`).
 - `fetchPositions()` creates fake zero-size positions for all markets to ensure UI shows all symbols (`binancepm.exchange.ts:343-365`).
+- PM REST snapshots must validate array response shapes before `.map()` / `.find()`. Binance and the HoW/proxy path can surface non-array error envelopes; those should become clear `Binance PM <endpoint> response malformed` exchange errors and preserve the previous store snapshot, not raw `e.map is not a function` / `t.find is not a function` crashes.
 
 ### Spot Startup Differences
 

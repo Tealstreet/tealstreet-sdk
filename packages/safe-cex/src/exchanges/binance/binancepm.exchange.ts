@@ -56,6 +56,37 @@ import {
 import { BinancePMPrivateWebsocket } from './binancepm.ws-private';
 import { BinancePMPublicWebsocket } from './binancepm.ws-public';
 
+type BinancePMResponseRecord = Record<string, any>;
+
+const describeBinancePMResponseShape = (payload: unknown): string => {
+  if (Array.isArray(payload)) return `array(${payload.length})`;
+  if (payload === null) return 'null';
+  if (typeof payload === 'object') {
+    const keys = Object.keys(payload as Record<string, unknown>).slice(0, 6);
+    return keys.length ? `object(${keys.join(',')})` : 'object';
+  }
+  return typeof payload;
+};
+
+const getBinancePMResponseMessage = (payload: unknown): string => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+  const record = payload as Record<string, unknown>;
+  const message = record.msg || record.message || record.error;
+  const code = record.code;
+  const parts = [code !== undefined ? `code=${String(code)}` : '', message ? String(message) : ''].filter(Boolean);
+  return parts.join(' ');
+};
+
+const requireBinancePMArrayResponse = <T>(endpoint: string, payload: unknown): T[] => {
+  if (Array.isArray(payload)) return payload as T[];
+
+  const shape = describeBinancePMResponseShape(payload);
+  const message = getBinancePMResponseMessage(payload);
+  throw new Error(
+    `Binance PM ${endpoint} response malformed: expected array, received ${shape}${message ? ` (${message})` : ''}`,
+  );
+};
+
 // TODO: translate our err messages
 export class BinancePMExchange extends BaseExchange {
   papiXhr: Axios;
@@ -97,9 +128,8 @@ export class BinancePMExchange extends BaseExchange {
   };
 
   getAccount = async () => {
-    const {
-      data: [{ accountAlias }],
-    } = await this.papiXhr.get(ENDPOINTS.BALANCE);
+    const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.BALANCE);
+    const [{ accountAlias }] = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.BALANCE, data);
 
     return { userId: accountAlias };
   };
@@ -241,53 +271,62 @@ export class BinancePMExchange extends BaseExchange {
 
   fetchMarkets = async () => {
     try {
-      const {
-        data: { symbols },
-      } = await this.publicXhr.get<{ symbols: Array<Record<string, any>> }>(ENDPOINTS.MARKETS);
+      const { data: marketData } = await this.publicXhr.get<{ symbols?: unknown }>(ENDPOINTS.MARKETS);
+      const symbols = requireBinancePMArrayResponse<BinancePMResponseRecord>(
+        `${ENDPOINTS.MARKETS}.symbols`,
+        marketData?.symbols,
+      );
 
-      const { data } = this.isPublicDataOnly
+      const { data: leverageBracketData } = this.isPublicDataOnly
         ? { data: [] }
-        : await this.papiXhr.get<Array<Record<string, any>>>(ENDPOINTS.LEVERAGE_BRACKET);
+        : await this.papiXhr.get<unknown>(ENDPOINTS.LEVERAGE_BRACKET);
+      const leverageBrackets = requireBinancePMArrayResponse<BinancePMResponseRecord>(
+        ENDPOINTS.LEVERAGE_BRACKET,
+        leverageBracketData,
+      );
 
-      const markets: Market[] = symbols
-        .filter(
-          (m) =>
-            ['PERPETUAL', 'TRADIFI_PERPETUAL'].includes(v(m, 'contractType')) &&
-            ['USDT', 'USDC'].includes(v(m, 'marginAsset')),
-        )
-        .map((m) => {
-          const p = m.filters.find((f: any) => v(f, 'filterType') === 'PRICE_FILTER');
+      const markets: Market[] = symbols.reduce<Market[]>((acc, m) => {
+        if (
+          !['PERPETUAL', 'TRADIFI_PERPETUAL'].includes(v(m, 'contractType')) ||
+          !['USDT', 'USDC'].includes(v(m, 'marginAsset'))
+        ) {
+          return acc;
+        }
 
-          const amt = m.filters.find((f: any) => v(f, 'filterType') === 'LOT_SIZE');
+        const filters = Array.isArray(m.filters) ? m.filters : [];
+        const p = filters.find((f: any) => v(f, 'filterType') === 'PRICE_FILTER');
+        const amt = filters.find((f: any) => v(f, 'filterType') === 'LOT_SIZE');
+        const mAmt = filters.find((f: any) => v(f, 'filterType') === 'MARKET_LOT_SIZE');
+        if (!p || !amt || !mAmt) return acc;
 
-          const mAmt = m.filters.find((f: any) => v(f, 'filterType') === 'MARKET_LOT_SIZE');
-          const brackets = data.find((b) => b.symbol === m.symbol)?.brackets;
-          const baseAsset = v(m, 'baseAsset');
-          const quoteAsset = v(m, 'quoteAsset');
-          const marginAsset = v(m, 'marginAsset');
+        const brackets = leverageBrackets.find((b) => b.symbol === m.symbol)?.brackets;
+        const baseAsset = v(m, 'baseAsset');
+        const quoteAsset = v(m, 'quoteAsset');
+        const marginAsset = v(m, 'marginAsset');
 
-          return {
-            id: `${baseAsset}/${quoteAsset}:${marginAsset}`,
-            symbol: m.symbol,
-            base: baseAsset,
-            quote: quoteAsset,
-            active: m.status === 'TRADING',
-            precision: {
-              amount: parseFloat(v(amt, 'stepSize')),
-              price: parseFloat(v(p, 'tickSize')),
+        acc.push({
+          id: `${baseAsset}/${quoteAsset}:${marginAsset}`,
+          symbol: m.symbol,
+          base: baseAsset,
+          quote: quoteAsset,
+          active: m.status === 'TRADING',
+          precision: {
+            amount: parseFloat(v(amt, 'stepSize')),
+            price: parseFloat(v(p, 'tickSize')),
+          },
+          limits: {
+            amount: {
+              min: Math.max(parseFloat(v(amt, 'minQty')), parseFloat(v(mAmt, 'minQty'))),
+              max: Math.min(parseFloat(v(amt, 'maxQty')), parseFloat(v(mAmt, 'maxQty'))),
             },
-            limits: {
-              amount: {
-                min: Math.max(parseFloat(v(amt, 'minQty')), parseFloat(v(mAmt, 'minQty'))),
-                max: Math.min(parseFloat(v(amt, 'maxQty')), parseFloat(v(mAmt, 'maxQty'))),
-              },
-              leverage: {
-                min: 1,
-                max: v(brackets?.[0], 'initialLeverage') || 1,
-              },
+            leverage: {
+              min: 1,
+              max: v(brackets?.[0], 'initialLeverage') || 1,
             },
-          };
+          },
         });
+        return acc;
+      }, []);
 
       return markets;
     } catch (err: any) {
@@ -298,11 +337,14 @@ export class BinancePMExchange extends BaseExchange {
 
   fetchTickers = async () => {
     try {
-      const { data: dailys } = await this.publicXhr.get<Array<Record<string, any>>>(ENDPOINTS.TICKERS_24H);
+      const { data: dailyData } = await this.publicXhr.get<unknown>(ENDPOINTS.TICKERS_24H);
+      const dailys = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.TICKERS_24H, dailyData);
 
-      const { data: books } = await this.publicXhr.get<Array<Record<string, any>>>(ENDPOINTS.TICKERS_BOOK);
+      const { data: bookData } = await this.publicXhr.get<unknown>(ENDPOINTS.TICKERS_BOOK);
+      const books = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.TICKERS_BOOK, bookData);
 
-      const { data: prices } = await this.publicXhr.get<Array<Record<string, any>>>(ENDPOINTS.TICKERS_PRICE);
+      const { data: priceData } = await this.publicXhr.get<unknown>(ENDPOINTS.TICKERS_PRICE);
+      const prices = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.TICKERS_PRICE, priceData);
 
       return books.reduce((acc: Ticker[], book) => {
         const market = this.store.marketsBySymbol[book.symbol];
@@ -340,8 +382,9 @@ export class BinancePMExchange extends BaseExchange {
     // const { positions } = await this.fetchPositionsAndBalance();
     // return positions;
     try {
-      const { data } = await this.papiXhr.get<GET_POSITION_RISK_RESPONSE>(ENDPOINTS.POSITION_RISK);
-      const formattedPositions = data.map((p) => {
+      const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.POSITION_RISK);
+      const rows = requireBinancePMArrayResponse<GET_POSITION_RISK_RESPONSE[number]>(ENDPOINTS.POSITION_RISK, data);
+      const formattedPositions = rows.map((p) => {
         // const foundPosition = this.store.positions.find((pos) => pos.symbol === p.symbol);
         const pSide = p.positionSide;
         const contracts = parseFloat(p.positionAmt);
@@ -402,7 +445,7 @@ export class BinancePMExchange extends BaseExchange {
 
   fetchBalance = async () => {
     try {
-      const { data } = await this.papiXhr.get<Record<string, any>>(ENDPOINTS.BALANCE);
+      const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.BALANCE);
       // {
       //   "uniMMR": "99999999",
       //   "accountEquity": "62.4579898",
@@ -450,18 +493,17 @@ export class BinancePMExchange extends BaseExchange {
       let free = 0;
       let upnl = 0;
 
-      if (Array.isArray(data)) {
-        for (let i = 0; i < data.length; i++) {
-          if (data[i].asset === 'USDT' || data[i].asset === 'USDC' || data[i].asset === 'FDUSD') {
-            const item = data[i];
-            const itemTotal = parseFloat(item.totalWalletBalance);
-            const itemFree = parseFloat(item.crossMarginFree);
-            const itemUsed = itemTotal - itemFree;
-            free += itemFree;
-            total += itemTotal;
-            used += itemUsed;
-            upnl += parseFloat(item.umUnrealizedPNL);
-          }
+      const rows = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.BALANCE, data);
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].asset === 'USDT' || rows[i].asset === 'USDC' || rows[i].asset === 'FDUSD') {
+          const item = rows[i];
+          const itemTotal = parseFloat(item.totalWalletBalance);
+          const itemFree = parseFloat(item.crossMarginFree);
+          const itemUsed = itemTotal - itemFree;
+          free += itemFree;
+          total += itemTotal;
+          used += itemUsed;
+          upnl += parseFloat(item.umUnrealizedPNL);
         }
       }
 
@@ -480,9 +522,10 @@ export class BinancePMExchange extends BaseExchange {
   };
 
   fetchRegularOrders = async () => {
-    const { data } = await this.papiXhr.get<Array<Record<string, any>>>(ENDPOINTS.OPEN_ORDERS);
+    const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.OPEN_ORDERS);
+    const rows = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.OPEN_ORDERS, data);
 
-    const orders: Order[] = data.map((o) => {
+    const orders: Order[] = rows.map((o) => {
       return {
         id: v(o, 'clientOrderId'),
         status: OrderStatus.Open,
@@ -527,9 +570,10 @@ export class BinancePMExchange extends BaseExchange {
   //   }
   // ]
   fetchConditionalOrders = async () => {
-    const { data } = await this.papiXhr.get<Array<Record<string, any>>>(ENDPOINTS.OPEN_CONDITIONAL_ORDERS);
+    const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.OPEN_CONDITIONAL_ORDERS);
+    const rows = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.OPEN_CONDITIONAL_ORDERS, data);
 
-    const orders: Order[] = data.map((o) => {
+    const orders: Order[] = rows.map((o) => {
       return {
         id: v(o, 'newClientStrategyId'),
         status: OrderStatus.Open,
@@ -552,7 +596,12 @@ export class BinancePMExchange extends BaseExchange {
   };
 
   fetchOrders = async () => {
-    return [...(await this.fetchRegularOrders()), ...(await this.fetchConditionalOrders())];
+    try {
+      return [...(await this.fetchRegularOrders()), ...(await this.fetchConditionalOrders())];
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return this.store.orders;
+    }
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
@@ -564,7 +613,7 @@ export class BinancePMExchange extends BaseExchange {
     const start =
       !opts.limit && opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
 
-    const { data } = await this.publicXhr.get<any[][]>(ENDPOINTS.KLINE, {
+    const { data } = await this.publicXhr.get<unknown>(ENDPOINTS.KLINE, {
       params: {
         symbol: opts.symbol,
         interval,
@@ -578,7 +627,8 @@ export class BinancePMExchange extends BaseExchange {
       },
     });
 
-    const candles: Candle[] = data.map(([time, open, high, low, close, volume]) => {
+    const rows = requireBinancePMArrayResponse<any[]>(ENDPOINTS.KLINE, data);
+    const candles: Candle[] = rows.map(([time, open, high, low, close, volume]) => {
       return {
         timestamp: time / 1000,
         open: parseFloat(open),
