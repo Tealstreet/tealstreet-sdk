@@ -7,24 +7,53 @@ import { nanoid } from 'nanoid';
 import { tryParseJson } from './utils/tryParseJson';
 
 /**
- * Set by an exchange's signing interceptor on a request it has already decided
- * needs no signature — a public market-data endpoint.
+ * Set by an exchange's signing interceptor on a public market-data endpoint, to
+ * tell the adapter not to round-trip to the client for a signature.
  *
- * Without it, the adapter cannot know: it runs AFTER every interceptor, so the
- * round trip to the client is committed before the interceptor's own `isPublic`
- * branch has any say. The client then signs nothing and we have paid a
- * WebSocket hop plus crypto on the device for a no-op. Measured on a hosted
- * mobile session: four of the first six sign requests on connect were public
- * endpoints, and they gate the markets and tickers lanes.
+ * It does NOT mean "send this unsigned". It says nothing about local signing:
+ * a client that holds the key still runs its normal signing path afterwards, so
+ * tag by falling through, never by returning early on the tag's behalf. That
+ * distinction is load-bearing — many venues meter signed requests against a
+ * per-account bucket and unsigned ones against a shared per-IP bucket, so
+ * dropping a signature we can produce for free is a real cost. Only a keyless
+ * hosted server, which cannot sign locally in the first place, skips.
+ *
+ * Without the flag the adapter cannot know: it runs AFTER every interceptor, so
+ * the round trip is committed before the interceptor's own `isPublic` branch
+ * has any say. Two cases end up here:
+ *
+ *  - The request already ends up unsigned regardless. Kraken's `PUBLIC_ENDPOINTS`
+ *    list, OKX's `url.includes('public')`, and Bybit's GET-on-kline all
+ *    early-return; Hyperliquid arrives here differently, since `createInfoAPI`
+ *    registers no signing interceptor at all and the one on `createExchangeAPI`
+ *    skips any body without an `action`. Either way the client replays the
+ *    request through that same code, reaches that same outcome, and hands back
+ *    a config with no signature on it. The round trip is pure latency for a
+ *    guaranteed no-op, and tagging costs nothing anywhere.
+ *  - The endpoint is public but currently signed — OKX `/api/v5/market/*` and
+ *    Bybit's `/v5/market/` tickers and instruments-info, none of which match
+ *    their exchange's narrow public test. Here tagging does trade the
+ *    per-account bucket for latency, but only on the hosted path: the
+ *    fall-through leaves every key-holding client signing exactly as today.
  *
  * Absence means "sign it", so an untagged exchange keeps today's behaviour
- * exactly. The only way to get this wrong is to tag inside a branch that does
- * need signing, which is a different line of code.
+ * exactly. The way to get this wrong is to tag on a condition that is merely
+ * credential-shaped — `!options.key`, `!options.secret`, `publicDataOnly` are
+ * all true for EVERY request in hosted mode, where the keys live on the device,
+ * so tagging there marks genuinely private requests as needing no signature.
+ * Tag only on something derived from the request itself.
+ *
+ * Measured on a hosted mobile session: four of the first six sign requests on
+ * connect were public endpoints, and they gate the markets and tickers lanes.
  */
 const SKIP_REMOTE_SIGNING = 'safeCexSkipRemoteSigning';
 
-/** Tag a request the interceptor has established needs no signature. */
-export const markRequestAsUnsigned = <T>(config: T): T => {
+/**
+ * Tag a public request so a keyless hosted server skips the signing round trip.
+ * Mutates and returns the config; callers should fall through to the normal
+ * signing path rather than returning this directly.
+ */
+export const markSkipRemoteSigning = <T>(config: T): T => {
   (config as Record<string, unknown>)[SKIP_REMOTE_SIGNING] = true;
   return config;
 };

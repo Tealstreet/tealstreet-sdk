@@ -3,7 +3,7 @@ import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
 import { AxiosHeaders } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRemoteSigningAdapter, markRequestAsUnsigned } from './remoteSigningAdapter';
+import { createRemoteSigningAdapter, markSkipRemoteSigning } from './remoteSigningAdapter';
 import type { RemoteSigner } from './types';
 
 const configFor = (url: string): InternalAxiosRequestConfig =>
@@ -47,18 +47,31 @@ describe('createRemoteSigningAdapter', () => {
   // The point of the tag: a public endpoint costs a WebSocket hop to the device
   // and crypto on its JS thread to produce a signature nothing checks.
   it('skips the remote signer entirely for a tagged request', async () => {
-    await build()(markRequestAsUnsigned(configFor('/v3/instruments')));
+    await build()(markSkipRemoteSigning(configFor('/v3/instruments')));
 
     expect(sign).not.toHaveBeenCalled();
     expect(inner).toHaveBeenCalledTimes(1);
   });
 
   it('still executes a tagged request and returns the response', async () => {
-    const response = await build()(markRequestAsUnsigned(configFor('/v3/tickers')));
+    const response = await build()(markSkipRemoteSigning(configFor('/v3/tickers')));
 
     expect(response.status).toBe(200);
     expect(response.data).toEqual({ ok: true });
     expect(inner.mock.calls[0][0].url).toBe('/v3/tickers');
+  });
+
+  // Interceptors tag and then fall through, and some rebuild the config on the
+  // way out (Bybit returns `{ ...config, headers: new AxiosHeaders({}) }`). The
+  // tag has to survive that, or those exchanges silently keep round-tripping.
+  it('survives an interceptor that spreads the config after tagging', async () => {
+    const tagged = markSkipRemoteSigning(configFor('/v5/market/tickers'));
+    const rebuilt = { ...tagged, headers: new AxiosHeaders({}) } as InternalAxiosRequestConfig;
+
+    await build()(rebuilt);
+
+    expect(sign).not.toHaveBeenCalled();
+    expect(inner).toHaveBeenCalledTimes(1);
   });
 
   // Absence of the tag must mean "sign it", so an exchange that never tags
