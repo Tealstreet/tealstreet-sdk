@@ -6,6 +6,7 @@ import createHmac from 'create-hmac';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markRequestAsUnsigned } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -52,7 +53,12 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   xhr.interceptors.request.use((config) => {
     const urlPath = (config.url || '').replace(/^\//, ''); // e.g. v3/openorders
     const isPublic = PUBLIC_ENDPOINTS.some((p) => (config?.url || '').includes(p));
-    if (isPublic || options.publicDataOnly || !options.key) return config;
+    // Tagged so remote signing can skip the round trip to the client entirely.
+    // Only this branch: `!options.key` is TRUE for every request in hosted mode,
+    // where the keys live on the device, so tagging it would mark genuinely
+    // private requests as needing no signature.
+    if (isPublic) return markRequestAsUnsigned(config);
+    if (options.publicDataOnly || !options.key) return config;
 
     if (options.remoteSigner) return config;
 

@@ -7,6 +7,29 @@ import { nanoid } from 'nanoid';
 import { tryParseJson } from './utils/tryParseJson';
 
 /**
+ * Set by an exchange's signing interceptor on a request it has already decided
+ * needs no signature — a public market-data endpoint.
+ *
+ * Without it, the adapter cannot know: it runs AFTER every interceptor, so the
+ * round trip to the client is committed before the interceptor's own `isPublic`
+ * branch has any say. The client then signs nothing and we have paid a
+ * WebSocket hop plus crypto on the device for a no-op. Measured on a hosted
+ * mobile session: four of the first six sign requests on connect were public
+ * endpoints, and they gate the markets and tickers lanes.
+ *
+ * Absence means "sign it", so an untagged exchange keeps today's behaviour
+ * exactly. The only way to get this wrong is to tag inside a branch that does
+ * need signing, which is a different line of code.
+ */
+const SKIP_REMOTE_SIGNING = 'safeCexSkipRemoteSigning';
+
+/** Tag a request the interceptor has established needs no signature. */
+export const markRequestAsUnsigned = <T>(config: T): T => {
+  (config as Record<string, unknown>)[SKIP_REMOTE_SIGNING] = true;
+  return config;
+};
+
+/**
  * Serialize AxiosHeaders to a plain Record<string, string> for transport.
  */
 const serializeHeaders = (headers: InternalAxiosRequestConfig['headers']): Record<string, string> => {
@@ -48,7 +71,29 @@ export const createRemoteSigningAdapter = (
   getInnerAdapter?: () => AxiosAdapter | undefined,
   accountName?: string,
 ): AxiosAdapter => {
+  const execute = (finalConfig: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+    // Execute with inner adapter (e.g. HOW) or default HTTP adapter
+    const innerAdapter = getInnerAdapter?.();
+    const executeAdapter = innerAdapter || axios.defaults.adapter;
+    if (!executeAdapter) {
+      throw new Error('No axios adapter available for HTTP execution');
+    }
+
+    if (Array.isArray(executeAdapter)) {
+      finalConfig.adapter = executeAdapter;
+      return axios(finalConfig);
+    }
+
+    return (executeAdapter as AxiosAdapter)(finalConfig);
+  };
+
   return async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+    // Public endpoint — the interceptor already established there is nothing to
+    // sign, so go straight to the wire instead of round-tripping to the client.
+    if ((config as unknown as Record<string, unknown>)[SKIP_REMOTE_SIGNING]) {
+      return execute(config);
+    }
+
     // The adapter runs AFTER axios transformRequest, which may have stringified
     // objects (e.g. JSON.stringify on data, qs.stringify on params). Parse them
     // back so the browser receives clean objects for its own signing interceptors.
@@ -92,18 +137,6 @@ export const createRemoteSigningAdapter = (
       );
     }
 
-    // Execute with inner adapter (e.g. HOW) or default HTTP adapter
-    const innerAdapter = getInnerAdapter?.();
-    const executeAdapter = innerAdapter || axios.defaults.adapter;
-    if (!executeAdapter) {
-      throw new Error('No axios adapter available for HTTP execution');
-    }
-
-    if (Array.isArray(executeAdapter)) {
-      signedConfig.adapter = executeAdapter;
-      return axios(signedConfig);
-    }
-
-    return (executeAdapter as AxiosAdapter)(signedConfig);
+    return execute(signedConfig);
   };
 };
