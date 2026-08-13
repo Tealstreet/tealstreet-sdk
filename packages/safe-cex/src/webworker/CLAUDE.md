@@ -181,6 +181,10 @@ the resulting `worker_error_family=markets_not_loaded` tag.
   bridged event requires adding it both to the worker-side
   forwarder in `_setupExchangeEventListeners` and the main-side
   `workerListener` switch in `exchangeAccountController.ts`.
+- Startup failures should go through `ExchangeWorker.logError(...)` once. That
+  path sends structured `{ error, tags, extra }` data for the web app's Sentry
+  sanitizer; do not also post a bare string `op: 'error'`, because it loses the
+  original stack and creates a duplicate controller/sanitizer-looking event.
 - `instanceId` on outbound bridge messages is **optional** —
   store payloads omit it. The main-side listener's
   `if (payload.instanceId && payload.instanceId !== instanceId)`

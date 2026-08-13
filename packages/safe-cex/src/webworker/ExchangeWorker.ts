@@ -263,7 +263,6 @@ export class ExchangeWorker {
         return false;
       }
       this.logError(`Error starting exchange: ${this._exchangeName}`, e);
-      this._ctx.postMessage({ op: 'error', data: `${e}` });
       return false;
     } finally {
       if (startupToken === this._startupToken) {
