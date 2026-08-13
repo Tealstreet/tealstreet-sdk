@@ -44,8 +44,10 @@ const createParentMock = () => {
     shouldUseSpotCollateralBalance: vi.fn(() => false),
     shouldRequestPortfolioMarginSpotState: vi.fn(() => false),
     handleSpotClearinghouseStateUpdate: vi.fn(),
-    // Derived exactly as the exchange derives it, so a test that flips either
-    // input gets the real behaviour instead of a hardcoded answer.
+    // Spot state is subscribed for unified/PM accounts AND for standard
+    // accounts that opted into spot markets, so the stub needs both. Derived
+    // exactly as the exchange derives it, so a test that flips either input
+    // gets the real behaviour instead of a hardcoded answer.
     shouldTrackSpotHoldings: vi.fn(
       (): boolean => parent.shouldUseSpotCollateralBalance() || Boolean(parent.options.enableSpotMarkets),
     ),
@@ -138,6 +140,7 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
     const parent = createParentMock();
     (parent as any).options = { ...parent.options, applicationId: '0xuser' };
     (parent as any).shouldUseSpotCollateralBalance.mockReturnValue(true);
+    (parent as any).shouldTrackSpotHoldings.mockReturnValue(true);
     const ws = new HyperliquidPrivateWebSocket(parent as any);
     const sendMock = vi.fn();
 
@@ -167,6 +170,7 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
     const parent = createParentMock();
     (parent as any).options = { ...parent.options, applicationId: '0xuser' };
     (parent as any).shouldUseSpotCollateralBalance.mockReturnValue(true);
+    (parent as any).shouldTrackSpotHoldings.mockReturnValue(true);
     (parent as any).shouldRequestPortfolioMarginSpotState.mockReturnValue(true);
     const ws = new HyperliquidPrivateWebSocket(parent as any);
     const sendMock = vi.fn();

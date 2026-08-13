@@ -541,7 +541,10 @@ The private WS triggers throttled REST fetches (500ms debounce) after receiving 
   autoDownSizeReduceOrders: true,
   supportsChaser: true,
   supportsTunnel: true,
-  supportsWsRoute: true,
+  // No supportsWsRoute: bitget's routing entry is `fallbackOnly`, which the
+  // resolver evaluates without consulting `tealstreetWsRoute`, and all three ws
+  // classes hardcode `useFallbackUrl = false` and flip it themselves after
+  // failed connects. Advertising it rendered a checkbox nothing read.
   tvMaxGetBarFetches: 5,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   supportedTPSLTriggerTypes: [MarkPrice],      // Only mark price trigger type

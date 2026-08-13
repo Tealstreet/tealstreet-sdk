@@ -19,8 +19,25 @@ import type { CandleCacheBackend } from './types';
 export const cleanCandles = <TCandle extends { timestamp: number }>(candles: TCandle[]): TCandle[] =>
   uniqBy(candles, (candle) => candle.timestamp).sort((a, b) => a.timestamp - b.timestamp);
 
-export const getCandleCacheKey = (exchangeName: ExchangeName, symbol: string, interval: Timeframe): string =>
-  `${exchangeName}-${symbol}-${interval}`;
+/**
+ * Cache key for a candle series.
+ *
+ * `testnet` is part of the key because a testnet account and a live account
+ * share an `ExchangeName` — the environment is a per-account flag, not a
+ * separate exchange. Without it, testnet candles and live candles collide in
+ * one entry and the chart can render the wrong market's history. This affects
+ * every venue offering the testnet checkbox (binance, binancepm, hyperliquid,
+ * grvt, bitmex, paradex, asterdex, ...), not just one.
+ *
+ * Live keys keep their existing shape, so no cached entry is invalidated by
+ * introducing this; only testnet accounts get a new namespace.
+ */
+export const getCandleCacheKey = (
+  exchangeName: ExchangeName,
+  symbol: string,
+  interval: Timeframe,
+  testnet?: boolean,
+): string => `${exchangeName}${testnet ? '-testnet' : ''}-${symbol}-${interval}`;
 
 export const fetchOHLCVWithExchange = async (
   request: Pick<CandleCacheExchangeFetchRequest, 'exchange' | 'symbol' | 'useWorker'> & {
