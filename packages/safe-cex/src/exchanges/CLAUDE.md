@@ -384,6 +384,84 @@ Two related traps in the same area:
   web dev, where a real Worker holds the actual secret. Verify private-WS
   changes against exchange-server, not just `yarn dev`.
 
+### Public endpoints MUST be tagged so hosted mode skips the signing round trip
+
+The hosted exchange-server holds no secrets, so `createRemoteSigningAdapter`
+sends every request over a WebSocket to the user's device, waits for it to sign,
+and only then hits the wire. That adapter runs **after** every request
+interceptor, so it cannot see the `isPublic` branch your interceptor already
+took, and round-trips regardless. Measured on a hosted mobile session: 19 sign
+requests on connect spanning ~3.6s, four of the first six of them public,
+gating the markets and tickers lanes behind a signature nobody wanted.
+
+Two things can be true of such a request, and they differ in cost:
+
+- **Your interceptor already skips signing it.** The device replays it through
+  that same interceptor, reaches that same branch, and hands back the unsigned
+  config that went out. Pure latency for a guaranteed no-op — tagging is free.
+- **It is public but your interceptor signs it anyway**, because the public test
+  is narrower than the public surface (OKX and Bybit `/market/*`). Tagging means
+  the hosted request now goes out unsigned where it used to be signed. Both
+  those venues meter public market data per-IP regardless, so nothing is given
+  up; on a venue that credited it to the account, this is the case to weigh.
+
+Tag those requests with `markSkipRemoteSigning(config)` from
+`../remoteSigningAdapter`. **Tag by falling through — never return on the tag's
+behalf.** The tag says only "a keyless server need not ask the device"; it says
+nothing about local signing, and a client that holds the key must keep signing
+exactly what it signs today, since venues that meter signed requests per-account
+and unsigned ones per-IP give you real headroom for free.
+
+```ts
+if (isPublicEndpoint(config.url)) markSkipRemoteSigning(config);
+// existing branches unchanged below
+```
+
+Three rules, each of which has already bitten:
+
+- **Tag on the url or body, never on a credential-shaped condition.** Hosted
+  mode is handed the key but never the secret, so `!options.secret` is true for
+  *every* request it makes. Tagging on the common
+  `if (!options.key || !options.secret) return` shape would mark real orders as
+  needing no signature and ship them unauthenticated. `publicDataOnly` is the
+  same trap on a public-data instance. Where an exchange ORs its URL test
+  together with one of those — `blofin`, `coinbase`, `krakenspot`, `kucoinspot`,
+  `weex`, and kraken futures, which is the worked example — split the URL term
+  out first.
+- **Tag the object every `return` derives from.** Bybit builds
+  `nextConfig = {...config}` and returns spreads of it; a tag on `config` is
+  silently dropped and the round trip quietly comes back.
+- **Check the exchange's public test actually covers its public data.** Most are
+  narrower than they look — OKX matched only `includes('public')`, missing
+  tickers and both candle endpoints under `/api/v5/market/`; Bybit matched kline
+  by exact equality, missing tickers and instruments-info. Widen the tag
+  predicate without touching the signing condition.
+
+Cover it with an interceptor-level test — see
+`__tests__/kraken.public-endpoint-tagging.test.ts` and its OKX/Bybit and
+Hyperliquid siblings. Drive the real interceptor through a capture adapter and
+assert both directions: public tagged, private never tagged **in the hosted
+shape** (`{ key: 'k', secret: '', remoteSigner }` — the signer is what makes it
+hosted, and the blank secret is what makes the hazard live), and where the
+endpoint is public but locally signed, that it is tagged *and* still carries its
+signature header.
+
+Tagged today: kraken futures, okx, bybit (+spot/inverse, shared `createAPI`),
+hyperliquid perps (both instances) and hyperliquidspot. Untagged exchanges keep
+today's behaviour — absence means "sign it" — so this is incremental. The free
+wins remaining are the ones whose interceptor already decides not to sign a
+public URL, and so pay the hop for a guaranteed no-op: binance (+pm/spot),
+apexomni, asterdex, backpack, bitunix, blofin, coinbase, cryptocom, krakenspot,
+kucoinspot, orderly, paradex, polymarket, weex, woo. Some early-return; backpack,
+cryptocom and polymarket instead compute a URL-derived `requiresAuth`/`isPublic`
+and fall past the signing block. Either shape is fine to tag.
+
+An exchange with no per-URL **market-data** test (bitget, bitmex, phemex, bingx,
+bitrue, kucoin futures, grvt, breakoutprop) needs that distinction established
+first, which is a signing change, not a tagging one. Some of those do have a
+per-URL early return for something else — bingx's `LISTEN_KEY`, bitmex's
+`/udf/` — which is not the same thing and does not cover their market data.
+
 ### Big-Integer JSON Parsing
 
 For exchanges with large numeric IDs (Binance, Bybit, etc.), parse responses

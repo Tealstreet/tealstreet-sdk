@@ -40,11 +40,13 @@ import { tryParseJson } from './utils/tryParseJson';
  *    Either way the fall-through leaves key-holding clients signing as today.
  *
  * Absence means "sign it", so an untagged exchange keeps today's behaviour
- * exactly. The way to get this wrong is to tag on a condition that is merely
- * credential-shaped — `!options.key`, `!options.secret`, `publicDataOnly` are
- * all true for EVERY request in hosted mode, where the keys live on the device,
- * so tagging there marks genuinely private requests as needing no signature.
- * Tag only on something derived from the request itself.
+ * exactly. The way to get this wrong is to tag on a credential-shaped condition
+ * instead of on the request. `!options.secret` is TRUE for every request in
+ * hosted mode — the server is handed the key but never the secret — so any
+ * guard OR'd with it (`if (!options.key || !options.secret) return`, the common
+ * shape) would tag every private request as needing no signature, and the
+ * server would ship real orders unauthenticated. `publicDataOnly` is the same
+ * trap on a public-data instance. Tag only on the url or body.
  *
  * Measured on a hosted mobile session: four of the first six sign requests on
  * connect were public endpoints, and they gate the markets and tickers lanes.

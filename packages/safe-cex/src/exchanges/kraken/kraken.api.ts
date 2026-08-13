@@ -53,11 +53,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   xhr.interceptors.request.use((config) => {
     const urlPath = (config.url || '').replace(/^\//, ''); // e.g. v3/openorders
     const isPublic = PUBLIC_ENDPOINTS.some((p) => (config?.url || '').includes(p));
-    // Tag before the guards, on `isPublic` alone: `!options.key` is TRUE for
-    // every request in hosted mode, where the keys live on the device, so
-    // tagging there would mark genuinely private requests as needing no
-    // signature. Kraken never signs these anyway, so the round trip the tag
-    // removes was returning an unsigned config regardless.
+    // Tag on `isPublic` alone, never on the guard it sits next to: a hosted
+    // server is handed the key but no secret, so credential-shaped conditions
+    // do not mean "public" there. Kraken never signs these anyway, so the round
+    // trip the tag removes was returning an unsigned config regardless.
     if (isPublic) markSkipRemoteSigning(config);
     if (isPublic || options.publicDataOnly || !options.key) return config;
 

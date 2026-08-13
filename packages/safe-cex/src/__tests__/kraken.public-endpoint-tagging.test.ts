@@ -56,10 +56,11 @@ describe('kraken public endpoint tagging', () => {
     expect(isTagged(config)).toBe(false);
   });
 
-  // The hazard the tag placement exists to avoid. `!options.key` and
-  // `publicDataOnly` are true for every request in hosted mode, so tagging on
-  // either would mark real private requests as needing no signature — and the
-  // server would ship them to Kraken unauthenticated.
+  // The hazard the tag placement exists to avoid. The hosted server is handed
+  // the key but never the secret, so `!options.secret` is true for every
+  // request it makes; tagging on a guard that includes it would mark real
+  // private requests as needing no signature, and the server would ship them
+  // to Kraken unauthenticated.
   it('never tags a private endpoint in the hosted keyless shape', async () => {
     for (const url of ['/v3/openorders', '/v3/openpositions', '/v3/accounts', '/v3/sendorder']) {
       expect(isTagged(await capture(buildXhr(HOSTED), url))).toBe(false);
