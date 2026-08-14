@@ -35,7 +35,15 @@ export type JournalFetchFailure = {
    * wait. Kept closed-set rather than free text so the surface cannot drift into rendering
    * raw venue error strings, which routinely contain symbols and payload fragments.
    */
-  readonly kind: 'auth' | 'rate-limit' | 'network' | 'unknown';
+  /**
+   * `disconnected` is its own kind and NOT an error: the account exists in the user's list
+   * but has no running exchange instance, so nothing was ever fetched. It is not
+   * `unsupported` — we support the venue fine — and not a fetch failure, because there was
+   * no fetch. Collapsing it into either is the easiest and least visible mistake available
+   * here: into `unsupported` it becomes permanent when it is not, into `unknown` it offers a
+   * retry that cannot help.
+   */
+  readonly kind: 'auth' | 'rate-limit' | 'network' | 'disconnected' | 'unknown';
   /** Safe, already-sanitized message. Never the raw error object. */
   readonly message: string;
   /** True when retrying could plausibly succeed without user action. */
@@ -79,6 +87,9 @@ export const classifyJournalFailure = (error: unknown): Pick<JournalFetchFailure
     // Not retryable: retrying an expired key just fails again and hides the real fix.
     return { kind: 'auth', retryable: false };
   }
+  // Checked before the generic branches: the marker is ours, so it is exact rather than a
+  // guess at the venue's wording.
+  if (text.includes(DISCONNECTED_MARKER)) return { kind: 'disconnected', retryable: false };
   if (/\b(429|rate limit|too many requests)\b/.test(text)) return { kind: 'rate-limit', retryable: true };
   if (/\b(timeout|timed out|econn|enotfound|network|socket)\b/.test(text)) {
     return { kind: 'network', retryable: true };
@@ -86,8 +97,19 @@ export const classifyJournalFailure = (error: unknown): Pick<JournalFetchFailure
   return { kind: 'unknown', retryable: true };
 };
 
+/**
+ * Marker for "this account has no running exchange instance".
+ *
+ * A sentinel rather than a message match, because every other kind is classified by guessing
+ * at a VENUE's wording and this one is entirely ours — there is no reason to make it fuzzy.
+ */
+export const DISCONNECTED_MARKER = '__journal_account_disconnected__';
+
+export const disconnectedAccountError = () => new Error(DISCONNECTED_MARKER);
+
 const MESSAGE_BY_KIND: Record<JournalFetchFailure['kind'], string> = {
   auth: 'Could not authenticate with this exchange. Check the API key for this account.',
+  disconnected: 'This account is not connected right now, so its trades are not included.',
   'rate-limit': 'This exchange is rate limiting us. Trade history will load shortly.',
   network: 'Could not reach this exchange. Trade history for this account is missing.',
   unknown: 'Trade history for this account could not be loaded.',
