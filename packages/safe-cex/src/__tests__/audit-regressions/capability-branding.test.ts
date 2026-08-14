@@ -33,8 +33,16 @@ const options: ExchangeOptions = {
   grvtTradingAccountId: 'capability-branding-account',
 };
 
-// kraken implements none of these axes, so its stubs are the untouched base ones.
-const NO_LEDGER_VENUE: ExchangeName = 'kraken' as ExchangeName;
+// A venue implementing NONE of these axes, so its stubs are the untouched base ones.
+//
+// This was `kraken` until kraken grew a ledger axis (`history/v3/account-log`), at which
+// point the test correctly went red — it is asserting that an unimplemented method stays
+// detectable, so it needs a venue that is genuinely unimplemented. `binancepm` extends
+// `BaseExchange` directly rather than `BinanceExchange`, so it inherits none of binance's
+// history axes and is structurally unlikely to grow one incidentally. Confirmed with
+// `yarn history-audit --axes`; if this venue ever gains a ledger, move the fixture again
+// rather than weakening the assertion.
+const NO_LEDGER_VENUE: ExchangeName = 'binancepm' as ExchangeName;
 
 const liveInstances: any[] = [];
 const construct = async (name: ExchangeName) => {

@@ -11,7 +11,8 @@ import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeC
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { BASE_URL, PUBLIC_ENDPOINTS } from './kraken.types';
+import { BASE_URL, HISTORY_BASE_URL, PUBLIC_ENDPOINTS } from './kraken.types';
+import type { KrakenBaseUrl } from './kraken.types';
 
 // NOTE: Kraken Futures always expects form-encoded data for non-GET requests
 // Signature: base64(HMAC_SHA512(SHA256(formData + nonce + path), base64Decode(secret)))
@@ -19,6 +20,22 @@ import { BASE_URL, PUBLIC_ENDPOINTS } from './kraken.types';
 const sort = function alphabeticalSort(a: string, b: string) {
   return a.localeCompare(b);
 };
+
+/**
+ * Nonce counter shared by EVERY Kraken client, deliberately module-scoped.
+ *
+ * Kraken requires the nonce to strictly increase per API key, and one exchange builds three
+ * clients — `xhr`, `unlimitedXHR` and `historyXhr`. A per-client counter means each starts
+ * at 0, so a client that has been idle emits `ts*1000 + 0` while the busy tick loop has
+ * already sent `ts*1000 + N` for the same millisecond. Kraken rejects the lower nonce, and
+ * it does so as a 200 carrying `{"status":"unauthorized"}` rather than an HTTP error — so it
+ * surfaces as an EMPTY page, not a failure.
+ *
+ * Measured: `history/v3/account-log` returned rows through a one-shot probe and
+ * `unauthorized` through the same client once the tick loop was running.
+ */
+let nonceCounter = 0;
+
 
 const createKrakenApiError = (message: string, response?: unknown, cause?: unknown) => {
   const error = new Error(message, cause === undefined ? undefined : { cause });
@@ -31,15 +48,23 @@ const createKrakenApiError = (message: string, response?: unknown, cause?: unkno
   return error;
 };
 
-export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
-  // Counter to ensure unique nonces even when requests are sent at the same millisecond
-  let nonceCounter = 0;
+export const createAPI = (options: ExchangeOptions, exchange: BaseExchange, baseUrlKind: KrakenBaseUrl = 'derivatives') => {
+
+  const bases = baseUrlKind === 'history' ? HISTORY_BASE_URL : BASE_URL;
 
   const xhr = safeCexAxiosCreate(
     {
-      baseURL: options.testnet ? BASE_URL.testnet : BASE_URL.livenet,
+      baseURL: options.testnet ? bases.testnet : bases.livenet,
       timeout: 20_000,
       headers: {},
+      /**
+       * Kraken signs `qs.stringify(params, { sort, format: 'RFC1738' })` but axios would
+       * otherwise serialize the query in INSERTION order with its own escaping. Every
+       * signed Kraken GET shipped so far has been param-less, so the two never had to
+       * agree; `history/v3/account-log` takes `since`/`before`/`count`/`sort` and is the
+       * first that does. A mismatch is a 401, which reads as a dead credential rather than
+       * as a serialization bug.
+       */
     },
     options,
     exchange,
@@ -102,6 +127,25 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     // Kraken auth: SHA256(postData + nonce + endpointPath)
     const pathForSigning = '/api/' + endpoint;
+    // THE SIGNED STRING IS THE SENT STRING, by construction.
+    //
+    // Kraken signs `qs.stringify(params, { sort })` — alphabetical — while axios serializes
+    // `config.params` in INSERTION order, and a `paramsSerializer` (bare function or
+    // `{serialize}` object) did not reliably take effect through this stack. The result was
+    // a request whose signature covered `count=...&since=...` while the wire carried
+    // `since=...&count=...`, which Kraken answers with HTTP 200
+    // `{"status":"unauthorized","reason":"You are not authorized to access this endpoint."}`.
+    //
+    // It authorized only when a caller happened to declare its params alphabetically, so
+    // `history/v3/account-log` worked from a probe and failed from the income pager with a
+    // byte-identical signature. Moving the query onto the URL removes the coupling entirely;
+    // `woo.signV1` does the same thing for the same reason.
+    if ((method === 'get' || method === 'delete') && postData) {
+      const [pathOnly] = String(config.url || '').split('?');
+      config.url = `${pathOnly}?${postData}`;
+      config.params = undefined;
+    }
+
     const authString = postData + nonce + pathForSigning;
     const hash = createHash('sha256').update(authString, 'utf8').digest();
 

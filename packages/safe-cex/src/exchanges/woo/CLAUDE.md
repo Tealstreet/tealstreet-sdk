@@ -683,16 +683,39 @@ to public WebSocket reconnection.
   branch summary called woo UNSUPPORTABLE on that basis for a week. **WOO X publishes realized
   PnL on the v1 family**, which this adapter does not read:
 
-  | Route                            | Carries                                                                              |
-  | -------------------------------- | ------------------------------------------------------------------------------------ |
-  | `/v1/client/transaction_history` | Ledger; entry types include **`REALIZED_PNL`**, **`FUNDING_FEE`**, `FUTURES_TRADING` |
-  | `/v1/orders?realized_pnl=true`   | Order history with `realized_pnl` (futures settlements only)                         |
-  | `/v1/client/hist_trades`         | **All-time** fills, `fromId` cursor + required `start_t`/`end_t`                     |
-  | `/v1/funding_fee_history`        | Funding payments per position                                                        |
+  **MEASURED 2026-08-13 against the live account (row 28): the usable axis is `/v1/orders`,
+  NOT the ledger.** An earlier revision of this note said to build a ledger axis off
+  `/v1/client/transaction_history` because its documented type list includes `REALIZED_PNL`.
+  That was a second wrong answer reached the same way as the first — reading a type list
+  instead of reading rows.
 
-  Reading the v1 ledger beside the existing v3 fills is a **v1/v3 hybrid** — normal here, not a
-  workaround; bitget already runs 33 `/api/v2` routes next to 3 `/api/v3`. `hist_trades` also
-  fixes the truncation below, so do both in one pass.
+  | Route                              | What it actually returns                                                                                                                                                                                                               |
+  | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | **`/v1/orders?realized_pnl=true`** | **The usable axis.** Per order: `symbol`, `realized_pnl`, `total_fee`/`fee_asset`, `total_rebate`, **`position_side`** (`LONG`/`SHORT`), `side`, `reduce_only`, `executed`, `average_executed_price`, `leverage`, `margin_mode`        |
+  | `/v1/client/transaction_history`   | **Not usable for per-position PnL.** Its `REALIZED_PNL` rows carry **no `symbol`**, their `id` EQUALS their `timestamp`, and those timestamps sit exactly 86 400 000 apart on midnight-UTC boundaries — daily ACCOUNT-level aggregates |
+  | `/v1/client/hist_trades`           | All-time fills, `fromId` cursor — fixes the truncation noted below                                                                                                                                                                     |
+
+  Type vocabulary observed over 400 ledger rows on that account: `TRANSACTION_FEE` (380,
+  per-symbol, **negative when charged**), `CONVERT` (10), `REALIZED_PNL` (5), `INTEREST` (5).
+  **No `FUNDING_FEE` row appeared at all**, and `INTEREST` is borrow interest — it pairs with
+  a `CONVERT` of equal magnitude across USDC/USDT and carries no symbol, so it must not be
+  read as funding.
+
+  **Two routes here use two different time units, and getting it wrong presents as an empty
+  window rather than an error.** `transaction_history` takes `start_t`/`end_t` in
+  **milliseconds** — a seconds value returns `400 The timestamps provided are invalid` —
+  while `/v1/orders` returns `created_time`/`updated_time` as **strings in seconds with a
+  millisecond fraction** (`"1786603865.910"`). The public docs and a reviewer disagreed about
+  this and both were partly wrong; measure per route.
+
+  Reading v1 routes beside the existing v3 fills is a **v1/v3 hybrid** — normal here, not a
+  workaround; bitget already runs 33 `/api/v2` routes next to 3 `/api/v3`.
+
+  Reproduce with:
+
+  ```bash
+  yarn history-audit --raw --venue woo --row 28 --path /v1/orders --params "realized_pnl=true,size=5,status=FILLED"
+  ```
 
 - **The per-fill `id` is not the `orderId`.** One order fills across many rows (500 fills → 495
   orderIds on the sampled account), so `HistoricalTrade.id` carries the row `id`; it is the only

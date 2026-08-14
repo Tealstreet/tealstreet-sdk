@@ -110,10 +110,12 @@ Uses `virtualClock.getCurrentTimeMs()` for nonce generation. No explicit server 
 
 ## History axes live on a DIFFERENT base URL — that is why they look absent
 
-This adapter implements **no** history method: no `fetchHistoricalTrades`, `fetchExecutions`,
-`fetchIncomeHistory`, `fetchIncomeHistoryRange`, or `fetchClosedPnl`. All five fall through to
-the inert `BaseExchange` stubs. **Do not read that as "kraken has no history axis"** — it was
-recorded that way in the venue survey and it was wrong.
+`fetchIncomeHistory` / `fetchIncomeHistoryRange` are **implemented** (see below);
+`fetchHistoricalTrades`, `fetchExecutions` and `fetchClosedPnl` still fall through to the
+inert `BaseExchange` stubs.
+
+All five used to, and the venue survey recorded that as "kraken has no history axis of any
+kind" — which was wrong. The routes existed the whole time; the client could not reach them.
 
 The reason it is easy to miss: every route in the table below hangs off
 `https://futures.kraken.com/derivatives/api`, and **the ledger is not on that base URL at
@@ -122,18 +124,162 @@ all.** Confirmed against the CCXT `krakenfutures` reference linked above:
 | Venue route                      | Axis          |
 | -------------------------------- | ------------- |
 | `derivatives/api/v3/fills`       | Fills         |
-| **`api/history/v2/account-log`** | **Ledger**    |
+| **`api/history/v3/account-log`** | **Ledger**    |
 | `api/history/v2/orders`          | Order history |
 
-`history/v2` is a different base **and** a different version family, so implementing these
-means a second signed client alongside the existing one — the signer keys on the endpoint
-path, so it must cover both prefixes. Mixing versions inside one adapter is established
+`api/history/*` is a different base **and** a different version family, so reaching it means
+a second signed client alongside the existing one — `historyXhr`, built by
+`createAPI(opts, this, 'history')`. It must be a separate INSTANCE rather than a per-request
+`baseURL` override: `safeCexAxiosCreate` bakes the private-proxy prefix into the instance
+baseURL and an override discards it. Mixing versions inside one adapter is established
 practice here: bitget already runs 33 `/api/v2` routes next to 3 `/api/v3`.
 
-**`account-log`'s field schema is UNCONFIRMED** — Kraken's own history doc pages 404, and the
-CCXT excerpt did not include `parseLedgerEntry`. Whether it carries realized PnL, funding and
-a running balance decides whether kraken is gradeable or fold-only, so **probe the funded
-cypress account read-only before designing the mapper.** Do not assume a convention profile.
+### MEASURED 2026-08-14 against sheet row 65
+
+The route is **`/history/v3/account-log`** — not v2. Both this file and the venue survey said
+v2, taken from a CCXT summary; v2 404s. Probe it with:
+
+```bash
+yarn history-audit --raw --venue kraken --row 65 --client historyXhr \
+  --path /history/v3/account-log --params "count=5"
+```
+
+Envelope `{accountUid, logs[]}`. Per row: `asset`, `contract`, `booking_uid`, `date`,
+`execution`, `fee`, `funding_rate`, `id`, `info`, `margin_account`, `mark_price`,
+`new_average_entry_price`, `new_balance`, `old_average_entry_price`, `old_balance`,
+`realized_funding`, `realized_pnl`, `trade_price`, `liquidation_fee`, `position_uid`,
+`collateral`, `conversion_spread_percentage`.
+
+This is the richest ledger measured on any venue in this epic — per-`contract`, with
+`realized_pnl`, `realized_funding` and `fee` as SEPARATE fields, plus `old_balance` /
+`new_balance`. That running balance is what let bitget's convention be pinned
+arithmetically rather than assumed; use it the same way here.
+
+**Every `futures trade` emits TWO rows sharing one `execution` id, and the second must be
+dropped.** Measured pair:
+
+| `asset`     | Carries                                                                      |
+| ----------- | ---------------------------------------------------------------------------- |
+| `usd`       | The CASH leg — `fee`, `realized_pnl`, `realized_funding`, balance in USD     |
+| `pf_xrpusd` | The POSITION-SIZE leg — `old_balance` 195 -> `new_balance` **196 CONTRACTS** |
+
+The discriminator is `asset === contract`. Mapping the size leg would not merely
+double-count, it would read a contract count as a currency amount. CCXT drops it the same
+way.
+
+Measured conventions, not assumed:
+
+- **`fee` is POSITIVE when charged** (0.0002, 0.0198) — woo's sign, the OPPOSITE of okx and
+  blofin. Do not negate it.
+- **`realized_funding` is negative when paid** (-0.0037).
+- `realized_pnl` is `0` on opening trades and `null` on funding rows — so absence and zero
+  both occur and must not be collapsed.
+- **`date` is an ISO-8601 string**, not epoch millis. Every other venue in this axis reports
+  a number; passing this through unparsed puts the account in 1970.
+- `info` vocabulary observed over 400 rows: `futures trade` (294), `funding rate change`
+  (106). Liquidation-shaped types did not appear in the window, so treat the list as
+  incomplete and map unknown values to `other` rather than dropping them.
+
+Reaching any of this needs the SECOND client (`historyXhr`) — see `HISTORY_BASE_URL` in
+`kraken.types.ts` for why a per-request `baseURL` override is not a substitute. It also
+needed a `paramsSerializer`: the interceptor signs `qs.stringify(sorted, RFC1738)` while
+axios would otherwise send insertion order, and `account-log` is the first signed Kraken GET
+to carry query params at all — a mismatch is a 401 that reads as a dead credential.
+
+### Ledger conformance: PASS, and the two effects that hid behind one residual
+
+`yarn history-audit --ledger --targets "kraken:65:30"` reconciles — 347 raw rows across one
+asset, no tolerance widened. Getting there took naming two overlapping causes, because the
+first residual (raw 38.02 vs mapped 114.09) was suspiciously close to 3x and the mapper emits
+exactly three component records per row. **That lead was wrong**, and the balance oracle is
+what killed it:
+
+```bash
+yarn history-audit --ledger-oracle --venue kraken --row 65   # per-ROW, not totals
+```
+
+- **347/347 rows reconcile to their own `new_balance - old_balance`.** The mapper was correct
+  per row the whole time, which rules out a triple count, a sign error and a gross-vs-net
+  mistake arithmetically rather than by inspection.
+- **The twin-row drop holds on live data**: 153 executions booked more than one row, and 0
+  where the drop failed to leave exactly one currency row. Worth verifying explicitly — the
+  drop was written before a single row had ever returned, since the axis was answering
+  `unauthorized` for its entire existence.
+
+The residual was never a mapping error. It was two POPULATION mismatches between the mapper
+and the audit's raw extractor:
+
+1. **Transfers.** The raw side scored `realized_pnl + realized_funding - fee` as `0` for a
+   row carrying none of them, while the mapper recorded its balance delta — measured as a
+   single `admin transfer` worth `95.07900000` present on one side only.
+2. **Overlapping pages, worth exactly 2.0000x.** Every other venue's
+   `fetchIncomeHistoryRange` advances past the chunk boundary so both sides see each row
+   once. Kraken **cannot**: `before` empties the result whatever it is given, so only a lower
+   bound reaches the venue and consecutive chunk requests return overlapping newest-first
+   pages by construction. The mapper dedupes on `tranId`; the raw side did not, so it counted
+   the overlap twice. Fixed by keying raw rows on `booking_uid`, the same exception
+   hyperliquid already carries for the same reason.
+
+Also from that measurement, and worth keeping because the shape explains itself:
+`commission: 153` is exactly the 153 twin executions — every trade charges a fee — while
+`realized_pnl: 52` is the closing subset. Opening trades realize exactly `0` and are
+correctly not emitted, so PnL rows are a minority of trades by construction rather than by
+loss.
+
+### The fills axis, and the trap that makes it precision-limited
+
+`/v3/fills` is kraken's SECOND axis and the reason it is gradeable at all: `fill_id` is the
+same value the ledger reports as `execution`, so the two independently-sourced axes join
+directly. The fills carry `realized_pnl` and `realized_funding` but **no fee** — the fee
+exists only in the ledger — so the overlap is a real cross-check rather than one payload
+compared with itself.
+
+**Supplying `lastFillTime` silently strips the PnL fields.** Measured: the route returns
+**11 keys with no parameters and 9 with the window applied** — `realized_pnl` and
+`realized_funding` simply vanish. The venue offers windowing OR PnL, never both, so
+`fetchExecutions` takes its FIRST page unwindowed even when `to` is supplied, and later
+cursor pages report PnL as ABSENT rather than zero. That distinction is load-bearing: a fill
+that realized nothing and a page that cannot say are different facts.
+
+The rest of the windowing contract, measured, and it is the mirror image of the ledger's:
+
+| Parameter      | Behaviour                                                                       |
+| -------------- | --------------------------------------------------------------------------------- |
+| `lastFillTime` | ISO-8601 **UPPER** bound, **EXCLUSIVE**; a millisecond value is rejected `400 invalidArgument` |
+| lower bound    | **None.** The walk goes backward from newest and stops itself                    |
+| `count`/`limit`| **Ignored** — page size is fixed at 100                                          |
+
+Because the cursor is exclusive it steps back one millisecond past the oldest row rather
+than sitting on it; two fills can share a millisecond, and an exclusive cursor on the exact
+boundary drops the others silently. Re-serving that millisecond costs one duplicate, which
+`fill_id` removes — verified unique across a full live page (100 rows, 0 duplicates) BEFORE
+being used as the key, because `booking_uid` twins and bitget's `billId` are both cases where
+the obvious key was not.
+
+Completeness is EXPLICIT — the page cap — not span-inferred, because with only an upper bound
+there is no span the venue can confirm.
+
+### Cross-axis reconciliation: the two axes AGREE
+
+```
+yarn history-audit --ledger-oracle --venue kraken --row 65
+  cross-axis: 153 fill(s); 100 joined by execution id;
+              54/100 agree exactly, +46 within the ledger 4dp quantum, no residual beyond it
+```
+
+**The ledger is quantized to 4 decimal places and the fills are not.** Measured over 500
+ledger rows: every value carries 0, 3 or 4 decimals and never more, while fills report
+`-0.000028` and `1.126e-8`. So a fill under half a ledger tick reads `0` on one axis and its
+true value on the other. That band is counted SEPARATELY rather than absorbed by a widened
+tolerance — anything exceeding half a tick is still a real disagreement and still prints.
+
+**Kraken is gradeable, with one honest limit:** only the newest ~100 fills carry PnL, so the
+cross-check has depth 100, not an arbitrary window. Deeper verification needs the ledger
+alone.
+
+The question this section used to leave open — whether `account-log` carries realized PnL,
+funding and a running balance, and so whether kraken is gradeable or fold-only — is
+**answered above: it carries all three.** Kraken is gradeable once the axis is written.
 
 ## REST API Endpoints
 

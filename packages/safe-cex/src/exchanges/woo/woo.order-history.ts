@@ -52,6 +52,16 @@ const toOptionalNumber = (value: unknown) => {
   return Number.isFinite(parsed) && parsed !== 0 ? parsed : undefined;
 };
 
+/**
+ * Present at all, as distinct from zero or unparseable.
+ *
+ * `realized_pnl` and `total_fee` are absent from the response unless the request asks for
+ * them, and a genuine 0 is a real value — a breakeven close. Collapsing the two is the
+ * exact defect that made woo look unsupportable.
+ */
+const hasValue = (value: unknown) =>
+  value !== undefined && value !== null && value !== '' && Number.isFinite(parseFloat(String(value)));
+
 const toNumber = (value: unknown) => {
   const parsed = parseFloat(String(value ?? ''));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -89,5 +99,19 @@ export const mapWooHistoricalOrder = (
     positionSide: positionSide === 'LONG' ? PositionSide.Long : positionSide === 'SHORT' ? PositionSide.Short : 'both',
     createdTime,
     updatedTime: toMilliseconds(row.updated_time) || undefined,
+
+    // Only present when the request carried `realized_pnl=true`; the field is absent
+    // otherwise, which is why this uses a PRESENCE test rather than `toOptionalNumber`.
+    // A flat closing order legitimately realizes exactly 0, and folding that to `undefined`
+    // would make "closed at breakeven" indistinguishable from "the venue told us nothing" —
+    // the same collapse that had woo written off as unsupportable.
+    realizedPnl: hasValue(row.realized_pnl) ? toNumber(row.realized_pnl) : undefined,
+    // Measured positive when charged on row 28 (`total_fee: 0.00181194` against a
+    // `TRANSACTION_FEE` ledger row of `-0.00181194`), so it already matches the canonical
+    // "positive = cost" convention and must NOT be negated.
+    fees: hasValue(row.total_fee) ? toNumber(row.total_fee) : undefined,
+    feeAsset: row.fee_asset ? String(row.fee_asset) : undefined,
+    rebate: hasValue(row.total_rebate) ? toNumber(row.total_rebate) : undefined,
+    rebateAsset: row.rebate_asset ? String(row.rebate_asset) : undefined,
   };
 };

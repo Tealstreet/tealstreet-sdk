@@ -817,6 +817,37 @@ export type HistoricalOrder = {
   readonly positionSide?: PositionSide | 'both';
   readonly createdTime: number;
   readonly updatedTime?: number;
+
+  /**
+   * Venue-reported realized PnL for this order, **GROSS of fees** where the venue reports
+   * it that way — which is every venue populating it today.
+   *
+   * **Absent means NOT MAPPED OR not reported — the two are not distinguishable here, and
+   * saying otherwise would be false today.** Only woo populates it. okx (`pnl`), blofin
+   * (`pnl`) and bitunix (`realizedPNL`) all RECEIVE the value in rows their own mappers
+   * document and drop it on the floor; bybit, binance, paradex and hyperliquid genuinely
+   * cannot report it on this axis. So a consumer must not read absence as "this order
+   * realized nothing".
+   *
+   * A sign trap waits for whoever maps the other three: okx and blofin report the paired
+   * fee **negative when charged**, woo reports it **positive**. See `fees` below.
+   *
+   * Never `Number(null)` this field into existence. That coercion yields `0`, and it is
+   * exactly how woo's v3 fills route — which returns `realizedPnl: null` on all 534 rows —
+   * made "this account has no PnL" indistinguishable from "this route carries no PnL", and
+   * got the venue written off as unsupportable for a week.
+   *
+   * On woo it requires `realized_pnl=true` on the request; the field is simply absent
+   * otherwise.
+   */
+  readonly realizedPnl?: number;
+
+  /** Positive = cost to the trader, matching `PositionRecord.fees`. */
+  readonly fees?: number;
+  readonly feeAsset?: string;
+  /** Positive = received by the trader. Kept separate from `fees`, never netted into it. */
+  readonly rebate?: number;
+  readonly rebateAsset?: string;
 };
 
 export type MessageHandlerStatsType = 'public' | 'private' | 'futures' | 'business';

@@ -120,8 +120,31 @@ export const aggregateBybitClosedPnl = (
   for (const bucket of buckets.values()) {
     const ordered = [...bucket].sort((a, b) => num(a.updatedTime) - num(b.updatedTime));
     // Within a bucket every row shares symbol, leg, side and entry price, so the only
-    // thing separating two round trips is a re-open at the identical average price. That
-    // is the documented limit below; there is no signal on this axis to split it.
+    // thing separating two round trips is a re-open at the identical average price.
+    //
+    // **THAT COLLISION IS NOT HYPOTHETICAL — IT HAS BEEN MEASURED, AND IT LOSES A ROUND
+    // TRIP.** This note previously called it a documented limit with "no signal on this
+    // axis to split it", which read as a corner case. On the nightly e2e account
+    // (2026-08-12) the suite ran four long DOGEUSDT round trips and this fold produced
+    // three: two of the flip cycles closed at an IDENTICAL `avgEntryPrice` of 0.07078
+    // (rows `updatedTime` 1786547559607 and 1786547721251), so they bucketed together and
+    // folded into one record. The third flip escaped only because the market had moved a
+    // tick, to 0.07074.
+    //
+    // Identical entry prices are not rare — they are the NORMAL case for a quiet market
+    // and repeated same-size orders, which is exactly what an automated suite and a
+    // gridding user both produce. Anything counting trades, win rate or average hold time
+    // on bybit is undercounting, and the merged records carry a `closedSize` that is the
+    // SUM of two positions.
+    //
+    // "No signal on this axis" is still true of the closed-PnL rows alone, and is also the
+    // wrong frame: the caller reconstructs `PositionInterval[]` from FILLS and already
+    // passes them in via `deps.resolveContext`, and those intervals do know where a
+    // re-open happened. Splitting a bucket on interval boundaries is the fix; it is not
+    // done here because changing the fold on a venue that currently PASSES needs its own
+    // verification pass, and this was found by the ground-truth grader
+    // (`yarn history-audit --ground-truth`), which can now prove the fix rather than
+    // assume it.
     const record = foldRun(ordered, deps);
     if (record) records.push(record);
   }

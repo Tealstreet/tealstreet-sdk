@@ -95,6 +95,12 @@ export type PositionInterval = {
    * nothing", which a 0 default would erase.
    */
   readonly realizedPnl?: number;
+  /**
+   * True when SOME fills carried venue PnL and others did not, so no total can be formed.
+   * Distinct from `realizedPnl === undefined` with this false, which means the venue reported
+   * none at all — a venue limitation rather than a windowing artifact.
+   */
+  readonly realizedPnlPartial?: boolean;
   /** Commission summed over every fill in the interval, positive = cost. */
   readonly fees: number;
   /**
@@ -129,6 +135,7 @@ type RunningPosition = {
   exitNotional: number;
   realizedPnl: number;
   sawRealizedPnl: boolean;
+  sawMissingRealizedPnl: boolean;
   fees: number;
   feeCurrencies: Set<string>;
 };
@@ -145,13 +152,14 @@ const freshPosition = (over: Partial<RunningPosition> = {}): RunningPosition => 
   exitNotional: 0,
   realizedPnl: 0,
   sawRealizedPnl: false,
+  sawMissingRealizedPnl: false,
   fees: 0,
   feeCurrencies: new Set<string>(),
   ...over,
 });
 
 /** Fees and venue-reported PnL accrue on EVERY fill, opening or closing. */
-const accrueFill = (position: RunningPosition, execution: Execution) => {
+const accrueFill = (position: RunningPosition, execution: Execution, reduces = false) => {
   if (execution.commission !== undefined) {
     position.fees += execution.commission;
     if (execution.commissionAsset) position.feeCurrencies.add(execution.commissionAsset);
@@ -159,6 +167,22 @@ const accrueFill = (position: RunningPosition, execution: Execution) => {
   if (execution.realizedPnl !== undefined) {
     position.realizedPnl += execution.realizedPnl;
     position.sawRealizedPnl = true;
+  } else if (reduces) {
+    // A REDUCING fill the venue reported no PnL for. Only reducing fills matter: an opening
+    // fill realizes nothing by definition, and many venues simply omit the field on one —
+    // treating that as a gap marked every ordinary round trip unreportable, which the
+    // existing interval tests caught immediately.
+    //
+    // An interval mixing reported and unreported CLOSES is the dangerous case:
+    // `sawRealizedPnl` alone is true, so it reports a sum that silently omits this fill and
+    // looks complete.
+    //
+    // Reachable for the first time on kraken. Its `/v3/fills` drops `realized_pnl` entirely
+    // once `lastFillTime` is supplied — the venue offers windowing OR PnL, never both — so a
+    // position whose closes straddle the newest-100 boundary has some closes carrying PnL
+    // and some not. Every other venue is uniform: binance and bitget report it on every
+    // fill, woo on none (which the all-undefined refusal already catches).
+    position.sawMissingRealizedPnl = true;
   }
 };
 
@@ -179,7 +203,11 @@ const finish = (
   closedByFlip: false,
   avgEntryPrice: position.entryQty > 0 ? position.entryNotional / position.entryQty : 0,
   avgExitPrice: position.exitQty > 0 ? position.exitNotional / position.exitQty : 0,
-  realizedPnl: position.sawRealizedPnl ? position.realizedPnl : undefined,
+  // UNDEFINED when the population is mixed, not just when it is empty. A partial sum
+  // presented as a total is worse than no number: it reconciles nowhere, and the residual it
+  // creates reads as a mapping defect rather than as missing data.
+  realizedPnl: position.sawRealizedPnl && !position.sawMissingRealizedPnl ? position.realizedPnl : undefined,
+  realizedPnlPartial: position.sawRealizedPnl && position.sawMissingRealizedPnl,
   fees: position.fees,
   feeCurrencies: [...position.feeCurrencies],
 });
@@ -255,7 +283,7 @@ export const reconstructPositionIntervals = (
     if (Math.abs(next) > FLAT_EPSILON && Math.sign(next) === Math.sign(current.signed)) {
       // Partial close — the position survives.
       current.signed = next;
-      accrueFill(current, execution);
+      accrueFill(current, execution, true);
       continue;
     }
 
@@ -267,7 +295,7 @@ export const reconstructPositionIntervals = (
     const crossed = Math.abs(next) > FLAT_EPSILON;
 
     if (!crossed) {
-      accrueFill(current, execution);
+      accrueFill(current, execution, true);
       intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: false });
       running.delete(key);
       continue;
@@ -277,10 +305,14 @@ export const reconstructPositionIntervals = (
     // old position, so it is split by size. Realized PnL is NOT split — it is realized
     // entirely by the closing portion; the opening portion cannot have realized anything.
     const closedShare = closedNow / Math.abs(delta);
-    accrueFill(current, {
-      ...execution,
-      commission: execution.commission === undefined ? undefined : execution.commission * closedShare,
-    });
+    accrueFill(
+      current,
+      {
+        ...execution,
+        commission: execution.commission === undefined ? undefined : execution.commission * closedShare,
+      },
+      true,
+    );
     intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: true });
 
     const openedSize = Math.abs(next);

@@ -1545,6 +1545,13 @@ export class WOOXExchange extends BaseExchange {
             end_t: opts?.to,
             size: PAGE_SIZE,
             page,
+            // WITHOUT THIS THE PnL FIELDS ARE SIMPLY ABSENT, and absent reads as "this
+            // account has no realized PnL" rather than "we did not ask". That confusion is
+            // the whole reason woo was recorded UNSUPPORTABLE: the v3 fills route it was
+            // judged on returns `realizedPnl: null` on every row, and nobody asked this one.
+            // Measured on row 28 — with the flag, each row carries `realized_pnl`,
+            // `total_fee`, `total_rebate` and `position_side`.
+            realized_pnl: true,
           }),
         });
 

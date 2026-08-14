@@ -62,6 +62,13 @@ export const mapFoldedInterval = (
   // With no income axis and no closed-position axis either, every woo record would have
   // carried a silent, unfalsifiable zero. `undefined` means the venue said nothing; a real
   // zero from a venue that does report (binance writes 0 on opening fills) still passes.
+  //
+  // It now also catches a PARTIAL population, which is a different failure with the same
+  // right answer. Kraken's `/v3/fills` drops `realized_pnl` once `lastFillTime` is supplied,
+  // so a position whose closes straddle the newest-100 boundary has some fills carrying PnL
+  // and some not; `reconstructPositionIntervals` reports `undefined` rather than the subset
+  // it could see. A partial sum presented as a total is worse than no number — it reconciles
+  // nowhere, and the residual reads as a mapping defect rather than as missing data.
   if (interval.realizedPnl === undefined) return null;
 
   const funding = deps.resolveFunding?.(interval);

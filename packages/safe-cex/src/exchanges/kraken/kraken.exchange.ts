@@ -11,6 +11,10 @@ import {
   Candle,
   ExchangeName,
   ExchangeOptions,
+  Execution,
+  ExecutionsOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
@@ -35,11 +39,32 @@ import { v } from '../../utils/get-key';
 import { loop } from '../../utils/loop';
 import { adjust } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { paginateIncomeRange } from '../income-paging';
 import { createAPI } from './kraken.api';
+import { mapKrakenFills } from './kraken.fills';
+import { mapKrakenAccountLog } from './kraken.income';
 import { ENDPOINTS } from './kraken.types';
 import { KrakenPrivateWebsocket } from './kraken.ws-private';
 import { KrakenPublicWebsocket } from './kraken.ws-public';
+
+/**
+ * Chunk width and page size for `history/v3/account-log`.
+ *
+ * `count` is honoured up to 500 (measured). The chunk is wide because only the LOWER bound
+ * reaches the venue — `before` empties the result whatever it is given — so a narrow chunk
+ * buys nothing and merely multiplies requests.
+ */
+const ACCOUNT_LOG_PAGE_LIMIT = 500;
+
+/**
+ * `/v3/fills` returns a FIXED 100 rows — measured: `count` and `limit` are both ignored.
+ * There is no page-size control, so depth is pages x 100 and nothing else.
+ */
+const FILLS_PAGE_SIZE = 100;
+const FILLS_MAX_PAGES = 50;
+const ACCOUNT_LOG_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined => {
   switch (String(value || '').toLowerCase()) {
@@ -60,6 +85,8 @@ const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined =>
 export class KrakenExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
+  /** `api/history/*` — ledger and order history. Different prefix, same host. */
+  historyXhr: Axios;
   declare publicWebsocket?: KrakenPublicWebsocket;
   declare privateWebsocket?: KrakenPrivateWebsocket;
   leverageSettings: Map<string, number> = new Map();
@@ -70,6 +97,11 @@ export class KrakenExchange extends BaseExchange {
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
     this.unlimitedXHR = createAPI(opts, this);
+    // Separate client for `api/history/*`, which is a different path prefix on the same
+    // host — see HISTORY_BASE_URL. A per-request `baseURL` override cannot be used: it would
+    // discard the private-proxy prefix that `safeCexAxiosCreate` bakes into the instance,
+    // and an IP-whitelisted key then fails 403 in a way that reads as a bad credential.
+    this.historyXhr = createAPI(opts, this, 'history');
   }
 
   /**
@@ -761,6 +793,228 @@ export class KrakenExchange extends BaseExchange {
     } catch (err) {
       console.trace(err);
       return this.store.positions || [];
+    }
+  };
+
+  /**
+   * Ledger via `history/v3/account-log`, on the SEPARATE `historyXhr` client.
+   *
+   * The windowing contract was MEASURED (2026-08-14, sheet row 65), because the obvious
+   * reading of it is wrong in a way that fails silently:
+   *
+   * - `since` is a millisecond LOWER bound and works.
+   * - `sort=asc|desc` and `count` work.
+   * - **`before` must never be sent.** Every value tried returned ZERO rows — a recent
+   *   millisecond timestamp, `2026-01-01` in millis, the same in seconds, a small integer
+   *   as an id, and a timestamp one day in the FUTURE, which as an upper bound should have
+   *   returned the entire account. A parameter that empties the result whatever you give it
+   *   is exactly how a partial window gets reported as a complete one, which is the binance
+   *   defect this axis already fixed once.
+   *
+   * So only the lower bound goes to the venue; the upper bound is the pager's own row
+   * filter. Ascending order is deliberate — with `since` alone, `sort=asc` makes the first
+   * page the OLDEST rows from the chunk start, so a page budget is spent on the window
+   * asked for rather than on whatever is newest.
+   */
+  private _fetchAccountLogPage = async (params: { startTime: number; limit: number }): Promise<IncomeRecord[]> => {
+    // RETHROWS. The public `fetchIncomeHistory` below swallows into `[]`, and a pager given
+    // a swallowing fetcher cannot tell a rate-limited page from an empty window — measured
+    // on binance as 492 of 512 records returned while reporting success.
+    // `since` + `count` ONLY. Both other knobs on this route are traps, measured:
+    //   `sort: 'asc'` makes `since` return ZERO rows — and on its own it ignores `since`
+    //     entirely and serves the oldest rows in the account.
+    //   `before` returns zero for every value tried, including a FUTURE timestamp that as
+    //     an upper bound should have returned everything.
+    // Either one silently yields an empty or wrong window while the request succeeds.
+    const { data } = await this.historyXhr.get<any>(ENDPOINTS.ACCOUNT_LOG, {
+      params: { since: params.startTime, count: params.limit },
+    });
+
+    // AN ERROR ENVELOPE IS NOT AN EMPTY PAGE, and this route delivers one as HTTP 200.
+    //
+    // Measured: identical requests return rows from a one-shot probe and
+    // `{"status":"unauthorized","reason":"You are not authorized to access this endpoint."}`
+    // when issued from inside this method while the tick loop is running. Returning `[]`
+    // there made the pager treat a refusal as a covered window, so the axis reported zero
+    // records and every mode downstream read it as "the account has no ledger". That is the
+    // swallow-into-empty defect this harness already fixed once on binance, reappearing on a
+    // new venue — so it throws, and the pager's rethrowing contract turns it into an
+    // explicit incomplete walk rather than a silent zero.
+    if (data && typeof data === 'object' && !Array.isArray((data as any).logs)) {
+      const status = String((data as any).status ?? '');
+      const reason = String((data as any).reason ?? '');
+      throw new Error(
+        `kraken account-log did not return a log array` +
+          (status || reason ? ` — ${status}${reason ? `: ${reason}` : ''}` : ` (envelope: ${Object.keys(data).join(',')})`),
+      );
+    }
+
+    const logs: Array<Record<string, any>> = Array.isArray(data?.logs) ? data.logs : [];
+    return mapKrakenAccountLog(logs, (contract) => this.store.marketsBySymbol[contract.toUpperCase()]?.symbol);
+  };
+
+  fetchIncomeHistoryRange = async (
+    startTime: number,
+    endTime: number,
+    incomeType?: string,
+  ): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const { records, truncated, exhaustedChunks } = await paginateIncomeRange(
+      ({ startTime: from, limit }) => this._fetchAccountLogPage({ startTime: from, limit }),
+      {
+        startTime,
+        endTime,
+        chunkMs: ACCOUNT_LOG_MAX_WINDOW_MS,
+        pageLimit: ACCOUNT_LOG_PAGE_LIMIT,
+      },
+    );
+
+    if (truncated) {
+      this.log(
+        `Income history for ${new Date(startTime).toISOString()}..${new Date(endTime).toISOString()} is INCOMPLETE — ` +
+          `${exhaustedChunks} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.`,
+        LogSeverity.Warning,
+      );
+    }
+
+    return incomeType ? records.filter((record) => record.incomeType === incomeType) : records;
+  };
+
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const endTime = opts?.endTime ?? virtualClock.getCurrentTimeMs();
+    const startTime = opts?.startTime ?? endTime - 7 * 24 * 60 * 60 * 1000;
+
+    try {
+      const records = await this.fetchIncomeHistoryRange(startTime, endTime, opts?.incomeType);
+      const scoped = opts?.symbol ? records.filter((record) => record.symbol === opts.symbol) : records;
+      return opts?.limit && opts.limit > 0 ? scoped.slice(0, opts.limit) : scoped;
+    } catch (err: any) {
+      this.emitAndLogError(err?.message || 'Failed to fetch income history');
+      return [];
+    }
+  };
+
+
+  /**
+   * Per-fill executions from `/v3/fills`, on the DERIVATIVES client.
+   *
+   * This is kraken's SECOND axis, and the reason it matters: `fill_id` here is the same
+   * value the ledger reports as `execution`, so the two can be joined and reconciled. The
+   * fills carry `realized_pnl` and `realized_funding` but **no fee** — the fee exists only in
+   * `account-log` — which is what makes them independently sourced rather than two views of
+   * one payload.
+   *
+   * The windowing contract is the MIRROR IMAGE of the ledger's, measured rather than assumed:
+   *
+   * - `lastFillTime` is an ISO-8601 **UPPER** bound and is **EXCLUSIVE**; asking for a known
+   *   fill's own timestamp returns the next older one. A millisecond value is rejected
+   *   outright with `400 invalidArgument`, which is at least honest.
+   * - There is **no lower bound**, so the walk goes backward from newest and stops itself.
+   * - Page size is fixed at 100.
+   *
+   * Because the cursor is exclusive, it steps back one millisecond past the oldest row rather
+   * than sitting on it: two fills can share a millisecond (one order against several makers),
+   * and an exclusive cursor on the exact boundary drops the others silently. Re-serving that
+   * millisecond costs one duplicate row, which `fill_id` removes.
+   *
+   * Completeness is EXPLICIT — the page cap — not inferred from a span, because with only an
+   * upper bound there is no span the venue can confirm.
+   */
+  fetchExecutions = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
+
+    const resolveSymbol = (venueSymbol: string) => this.store.marketsBySymbol[venueSymbol.toUpperCase()]?.symbol;
+    const seen = new Set<string>();
+    const out: Execution[] = [];
+
+    // THE FIRST PAGE IS DELIBERATELY UNWINDOWED, even when `to` is supplied.
+    //
+    // Measured: `/v3/fills` returns ELEVEN keys with no parameters and NINE with
+    // `lastFillTime` — supplying the window silently drops `realized_pnl` and
+    // `realized_funding`, the two fields this axis exists to carry. So the venue offers
+    // windowing OR PnL, not both, and the newest page is the only one that can be
+    // reconciled against the ledger.
+    //
+    // Later pages therefore carry no PnL at all. That is reported as ABSENT rather than
+    // zero — `mapKrakenFill` uses a presence test — so a consumer can tell "this fill
+    // realized nothing" from "this page cannot say".
+    let cursor: string | undefined;
+    let page = 0;
+    let reachedWindowStart = false;
+
+    try {
+      for (; page < FILLS_MAX_PAGES; page += 1) {
+        const { data } = await this.xhr.get<any>(ENDPOINTS.FILLS, {
+          params: cursor ? { lastFillTime: cursor } : {},
+        });
+        // Rows older than the requested `to` are filtered below rather than at the venue,
+        // since asking the venue costs the PnL fields.
+        if (this.isDisposed) return [];
+
+        // A REFUSAL IS NOT AN EMPTY PAGE. Same trap as the ledger: kraken answers an auth or
+        // argument failure with a 200 carrying `{result: 'error', error: ...}`, and returning
+        // `[]` there would report a dead credential as an account with no fills.
+        if (!Array.isArray(data?.fills)) {
+          throw new Error(
+            `kraken fills did not return an array — ${String(data?.error ?? data?.result ?? Object.keys(data ?? {}).join(','))}`,
+          );
+        }
+
+        const rows: Array<Record<string, any>> = data.fills;
+        if (rows.length === 0) {
+          reachedWindowStart = true;
+          break;
+        }
+
+        let oldestMs = Number.POSITIVE_INFINITY;
+        let fresh = 0;
+        for (const fill of mapKrakenFills(rows, resolveSymbol)) {
+          const ms = fill.timestamp * 1000;
+          oldestMs = Math.min(oldestMs, ms);
+          if (ms < from || ms > to) continue;
+          // `fill_id` verified unique across a full page on the live account (100 rows, 0
+          // duplicates) BEFORE being used as the dedupe key — booking_uid twins and bitget's
+          // billId are both cases where the obvious key was not unique.
+          if (seen.has(fill.id as string)) continue;
+          seen.add(fill.id as string);
+          out.push(fill);
+          fresh += 1;
+        }
+
+        if (!Number.isFinite(oldestMs)) break;
+        if (oldestMs <= from) {
+          reachedWindowStart = true;
+          break;
+        }
+        // A page whose rows are all already-seen means the cursor stopped advancing; stopping
+        // is correct, but it has NOT proven the window is covered.
+        if (fresh === 0 && rows.length < FILLS_PAGE_SIZE) {
+          reachedWindowStart = true;
+          break;
+        }
+
+        cursor = new Date(oldestMs + 1).toISOString();
+      }
+
+      if (!reachedWindowStart) {
+        this.log(
+          `fetchExecutions stopped after ${page} page(s) without reaching ${new Date(from).toISOString()} — ` +
+            `the result is a lower bound, not the whole window.`,
+          LogSeverity.Warning,
+        );
+      }
+
+      const sorted = out.sort((a, b) => b.timestamp - a.timestamp);
+      return opts.limit && opts.limit > 0 ? sorted.slice(0, opts.limit) : sorted;
+    } catch (err: any) {
+      this.emitAndLogError(err?.message || 'Failed to fetch executions');
+      return [];
     }
   };
 

@@ -108,7 +108,7 @@ Two failure shapes, both of which look like findings once written down:
 
 1. **A missing method read as a missing capability.** `kraken.exchange.ts` implements none of
    the five history methods, so the axis probe reports none — while the venue serves
-   `history/v2/account-log`.
+   `history/v3/account-log`.
 2. **A measurement generalized past the route it measured.** woo's `realizedPnl` really is
    `null` on 534/534 fills — of `/v3/trade/transactionHistory`, the one route the adapter
    reads. The v1 ledger next to it carries `REALIZED_PNL` and `FUNDING_FEE` rows.
