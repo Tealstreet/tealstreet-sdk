@@ -33,9 +33,9 @@
  * `apps/cli/src/listener/adapter-context.ts`) transparently routes to
  * terminal+log OR listener WS frames depending on invocation context.
  *
- * `getHistoricalPosition` and `getOrderbook` still return undefined — the
- * standalone CLI has no historical-position store and no main-thread
- * orderbook snapshot today; Phase 3+ wires them when those stores land.
+ * `getOrderbook` owns a small subscription-backed cache around safe-cex's
+ * public orderbook listener. CLI has no web-equivalent position-history store,
+ * so `getHistoricalPosition` stays out of the CLI target surface.
  */
 import { executeCommand, type CLIPlatformAdapter, type CLISession, type ExchangeLike } from '@tealstreet/cli-core';
 import type {
@@ -67,6 +67,7 @@ import type {
 
 import type { ExchangeManager } from './exchange-manager';
 import { recordScriptWrite } from './audit-log';
+import { getScriptOrderbookCache } from './script-orderbook-cache';
 
 const EMPTY: readonly never[] = Object.freeze([]);
 
@@ -177,6 +178,8 @@ export const createStandaloneCoreAdapter = (
   session: CLISession,
   platformAdapter?: CLIPlatformAdapter,
 ): CoreAdapter => {
+  const orderbookCache = getScriptOrderbookCache(exchangeManager);
+
   const requireAdapter = (): CLIPlatformAdapter => {
     if (!platformAdapter) {
       throw new Error(
@@ -231,7 +234,8 @@ export const createStandaloneCoreAdapter = (
       return symbol ? list.filter((p) => p.symbol === symbol) : list;
     },
     getHistoricalPosition: (): HistoricalPosition | undefined => {
-      // TODO Phase 3+: wire historical-position source into the standalone store.
+      // Intentionally undeclared on CLI: a live fetch would be thinner than
+      // web/mobile's position-history store contract.
       return undefined;
     },
 
@@ -248,11 +252,7 @@ export const createStandaloneCoreAdapter = (
     },
     getCombinedBalance: ({ accounts }): CombinedBalance => summarizeBalance(exchangeManager, accounts),
 
-    getOrderbook: (): OrderBook | undefined => {
-      // TODO Phase 3+: wire wsPublic OB feed into the standalone store; for
-      // now scripts that need OB depth fall back to `getTicker` quotes.
-      return undefined;
-    },
+    getOrderbook: (symbol, opts): Promise<OrderBook | undefined> => orderbookCache.get(symbol, opts),
 
     getCandles: async (
       symbol: string,
@@ -260,7 +260,9 @@ export const createStandaloneCoreAdapter = (
       { account, from, to, limit }: { account: string; from?: number; to?: number; limit?: number },
     ): Promise<readonly Candle[]> => {
       const exchange = exchangeManager.getExchange(account);
-      if (!exchange?.fetchOHLCV) return EMPTY;
+      if (!exchange?.fetchOHLCV) {
+        throw new Error(`getCandles: account '${account}' does not support OHLCV candles`);
+      }
       const candles = await exchange.fetchOHLCV({
         symbol,
         interval: timeframe,

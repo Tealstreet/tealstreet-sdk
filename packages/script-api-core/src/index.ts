@@ -104,6 +104,24 @@ export { InProcessProxy } from './proxy/InProcessProxy';
 
 /** @internal Host-side — target validation. */
 export { validateTargets, type ScriptDescriptor, type RuntimeDescriptor } from './runtime/targetCheck';
+/** @internal Host-side — target API surface descriptors. */
+export {
+  CORE_READ_API_PATHS,
+  CORE_SHARED_API_PATHS,
+  CORE_WRITE_API_PATHS,
+  CLI_READ_API_PATHS,
+  MOBILE_READ_API_PATHS,
+  PORTABLE_READ_ONLY_API_PATHS,
+  RUNNABLE_TARGETS,
+  RUNTIME_SURFACES,
+  getAllowedApiPathsForTargets,
+  getApiPathAvailability,
+  isKnownApiPath,
+  type ApiPath,
+  type ApiPathAvailability,
+  type RunnableTargetName,
+  type RuntimeSurfaceDescriptor,
+} from './runtime/runtimeSurface';
 /** @internal Host-side — account resolution (SPEC §2.6). */
 export { resolveAccount } from './runtime/accountResolver';
 

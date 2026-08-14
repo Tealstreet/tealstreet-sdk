@@ -4,6 +4,7 @@ export { checkRuntimeImports } from './validate/checkRuntimeImports';
 export { checkTopLevelEffects } from './validate/checkTopLevelEffects';
 export { validate } from './validate/validate';
 export { checkCapabilities, readScriptMeta } from './validate/checkCapabilities';
+export { checkTargetSurface } from './validate/checkTargetSurface';
 export type { DeclaredCapabilities } from './validate/checkCapabilities';
 export { IMPLIED_WRITES, READ_METHOD_NAMES, WRITE_METHOD_NAMES } from './validate/capabilityNames';
 

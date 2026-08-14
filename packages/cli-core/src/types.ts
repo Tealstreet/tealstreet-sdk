@@ -11,10 +11,11 @@ import type {
   PlaceOrderOpts,
   Candle,
   OHLCVOptions,
+  OrderBook,
 } from '@tealstreet/safe-cex/src/types';
 
 // Re-export types from safe-cex
-export type { ExchangeName, UpdateOrderOpts, ExchangeAccountConfig, PlaceOrderOpts, Candle, OHLCVOptions };
+export type { ExchangeName, UpdateOrderOpts, ExchangeAccountConfig, PlaceOrderOpts, Candle, OHLCVOptions, OrderBook };
 // Alias for backwards compatibility
 export type { ExchangeAccountConfig as ExchangeAccount } from '@tealstreet/safe-cex/src/types';
 
@@ -83,6 +84,8 @@ export interface ExchangeLike {
   setAllLeverage?: (leverage: number) => Promise<void>;
   // OHLCV data
   fetchOHLCV?: (opts: OHLCVOptions) => Promise<Candle[]>;
+  // Public orderbook stream
+  listenOrderBook?: (symbol: string, callback: (orderbook: OrderBook) => void) => () => void;
   // Connection management (optional)
   getAllSockets?: () => Array<WebSocketLike | undefined>;
   // Direct WebSocket access (for standalone CLI without postprocessors)

@@ -25,6 +25,9 @@ const TYPES_HEADER = `// AUTO-GENERATED on every CLI launch — do not edit. Edi
 //   - '@tealstreet/script-api-cli'   (CLI-specific extensions; scaffold today)
 //   - '@tealstreet/script-api-web'   (web-app extensions; scaffold today)
 //
+// Mobile currently has no extension package. It runs a read-only CoreApi
+// subset, enforced by meta.targets and the shared target-surface validator.
+//
 // Each is bundled from the source package at CLI build time and
 // stays in lockstep with the running binary's runtime surface (drift
 // test in CI). User scripts \`import type\` from these names:
@@ -94,6 +97,10 @@ export const HELLO_TEMPLATE = `// Example Tealstreet script. Delete or rename fr
 //
 // All trading-action limits are enforced at the dispatcher — see
 // \`./types.d.ts\` for the Capabilities shape.
+//
+// \`meta.targets\` is a support set. \`['core', 'cli']\` means this script can
+// run in the CLI. Add \`web\` and/or \`mobile\` only when the body uses API
+// paths every declared runtime provides. Mobile is read-only today.
 //
 // ⚠️ MODULE-LOAD SIDE EFFECTS ARE NOT SANDBOXED. Anything you write at
 // the TOP LEVEL of this file (outside the default function below) runs

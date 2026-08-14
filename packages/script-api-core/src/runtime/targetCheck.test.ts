@@ -9,9 +9,8 @@ const standaloneRuntime: RuntimeDescriptor = {
 };
 
 const webRuntime: RuntimeDescriptor = {
-  mountedTargets: ['core', 'cli', 'web'],
+  mountedTargets: ['core', 'web'],
   coreApiVersion: '1.0.0',
-  cliApiVersion: '1.0.0',
   webApiVersion: '1.0.0',
 };
 
@@ -21,15 +20,26 @@ describe('validateTargets (SPEC §2.5)', () => {
     expect(() => validateTargets(script, standaloneRuntime)).not.toThrow();
   });
 
-  it('rejects a web-target script on standalone runtime', () => {
+  it('rejects a web-only script on standalone runtime', () => {
     const script: ScriptDescriptor = {
       targets: ['core', 'web'],
       coreApiVersion: '1.0.0',
       webApiVersion: '1.0.0',
     };
     expect(() => validateTargets(script, standaloneRuntime)).toThrow(
-      "this script requires the 'web' surface; not available on this runtime",
+      "this script targets 'web'; this runtime supports 'cli'",
     );
+  });
+
+  it('accepts a cross-target script when the current runtime is included', () => {
+    const script: ScriptDescriptor = {
+      targets: ['core', 'web', 'mobile', 'cli'],
+      coreApiVersion: '1.0.0',
+      webApiVersion: '9.0.0',
+      mobileApiVersion: '9.0.0',
+      cliApiVersion: '1.0.0',
+    };
+    expect(() => validateTargets(script, standaloneRuntime)).not.toThrow();
   });
 
   it('accepts a web-target script on web runtime', () => {
@@ -53,19 +63,29 @@ describe('validateTargets (SPEC §2.5)', () => {
     expect(() => validateTargets(script, standaloneRuntime)).not.toThrow();
   });
 
-  it('rejects when runtime lacks a version for a declared target', () => {
+  it('rejects when runtime lacks a version for its matched declared target', () => {
     const script: ScriptDescriptor = {
       targets: ['core', 'web'],
       coreApiVersion: '1.0.0',
       webApiVersion: '1.0.0',
     };
     const runtimeNoWebVersion: RuntimeDescriptor = {
-      mountedTargets: ['core', 'cli', 'web'],
+      mountedTargets: ['core', 'web'],
       coreApiVersion: '1.0.0',
-      cliApiVersion: '1.0.0',
       // webApiVersion omitted on purpose
     };
     expect(() => validateTargets(script, runtimeNoWebVersion)).toThrow(/runtime provides no 'web' API version/);
+  });
+
+  it('does not require versions for non-current declared runtimes', () => {
+    const script: ScriptDescriptor = {
+      targets: ['core', 'web', 'mobile', 'cli'],
+      coreApiVersion: '1.0.0',
+      webApiVersion: '9.0.0',
+      mobileApiVersion: '9.0.0',
+      cliApiVersion: '1.0.0',
+    };
+    expect(() => validateTargets(script, standaloneRuntime)).not.toThrow();
   });
 
   it('handles patch-level version comparisons correctly', () => {

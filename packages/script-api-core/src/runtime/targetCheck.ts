@@ -4,11 +4,11 @@
  * Pure function. Throws a precise Error with the offending target / version on
  * any mismatch; the caller (runScript, Phase 2) catches and surfaces to the UI.
  *
- * Two failure modes:
- *   1. A declared `target` isn't mounted on this runtime → "this script
- *      requires the X surface; not available on …".
- *   2. The runtime's API version for a declared target is older than what
- *      the script requires → "script requires X v1.2.0; runtime provides v1.0.0".
+ * Runtime targets are a support set, not additive requirements. A script that
+ * declares `['core', 'web', 'mobile', 'cli']` may run on any one of those
+ * runtimes after authoring-time validation has constrained it to their API
+ * intersection. This gate only checks the current host is included and that
+ * the host-provided target versions are new enough.
  */
 import type { TargetName } from '../api/capabilities.types';
 
@@ -68,14 +68,33 @@ const SURFACE_LABEL: Record<TargetName, string> = {
   mobile: 'MOBILE',
 };
 
+const TARGETS = new Set<TargetName>(['core', 'cli', 'web', 'mobile']);
+
 /**
  * Validates a script's declared targets against the host runtime. Throws on
  * first failure with a script-author-facing message. Returns void on success.
  */
 export const validateTargets = (script: ScriptDescriptor, runtime: RuntimeDescriptor): void => {
-  for (const target of script.targets) {
+  const declaredTargets = script.targets.length > 0 ? script.targets : (['core'] as const);
+  for (const target of declaredTargets) {
+    if (!TARGETS.has(target)) {
+      throw new Error(`unknown script target '${String(target)}'`);
+    }
+  }
+
+  const runtimeRunnableTargets = runtime.mountedTargets.filter((target) => target !== 'core');
+  const scriptRunnableTargets = declaredTargets.filter((target) => target !== 'core');
+  const runnableMatches = scriptRunnableTargets.filter((target) => runtimeRunnableTargets.includes(target));
+  if (scriptRunnableTargets.length > 0 && runnableMatches.length === 0) {
+    throw new Error(
+      `this script targets ${scriptRunnableTargets.map((target) => `'${target}'`).join(', ')}; this runtime supports ${runtimeRunnableTargets.map((target) => `'${target}'`).join(', ') || "'core-only'"}`,
+    );
+  }
+
+  const targetsToVersionCheck = ['core', ...runnableMatches] as TargetName[];
+  for (const target of targetsToVersionCheck) {
     if (!runtime.mountedTargets.includes(target)) {
-      throw new Error(`this script requires the '${target}' surface; not available on this runtime`);
+      throw new Error(`this runtime does not mount the '${target}' API surface`);
     }
     const provided = runtime[VERSION_FIELD[target]];
     if (typeof provided !== 'string' || provided.length === 0) {

@@ -8,6 +8,7 @@ import { recordMcpScriptAction } from '../audit-log';
 import { isLoggedIn } from '../auth';
 import { CLI_TYPES_DTS, CORE_TYPES_DTS, WEB_TYPES_DTS } from '@tealstreet/script-authoring/src/script-types-bundle';
 import { SCRIPT_TYPES_BUNDLE } from '@tealstreet/script-authoring/src/scripts-templates';
+import { RUNTIME_SURFACES, getAllowedApiPathsForTargets, type TargetName } from '@tealstreet/script-api-core';
 import {
   deleteScript,
   listScriptFiles,
@@ -44,6 +45,12 @@ HOW TO WRITE ONE — the constraints are unusual, read these before generating c
 - Export \`meta: ScriptMeta\`. \`capabilities.writes\` MUST list every api.exchange.* method
   the body calls, or the dispatcher throws at runtime. \`closePosition\` additionally
   requires \`placeOrder\` (it is synthesized via placeOrder under the hood).
+- \`meta.targets\` is a SUPPORT SET. Use \`['core', 'cli']\` for CLI-only,
+  \`['core', 'web']\` for web-only, \`['core', 'mobile']\` for mobile-only, or include
+  several runtimes when the script is intentionally cross-target. Multi-target scripts
+  may only use the API paths every declared runtime actually provides.
+- Mobile is read-only today: no \`api.exchange.*\`, no \`api.exchange.runCommand\`,
+  no storage, no candles, no historical positions.
 - Omit \`capabilities.reads\` to allow all reads; list it only to restrict.
 - Put ALL logic inside the default function. Top-level CALLS are REJECTED by validation:
   they run at import time whenever the CLI loads the scripts directory, not when the
@@ -101,6 +108,28 @@ const formatIssues = (issues: readonly ValidationIssue[]): string =>
     })
     .join('\n');
 
+const formatApiPaths = (paths: readonly string[]): string =>
+  paths
+    .slice()
+    .sort()
+    .map((path) => `- ${path}`)
+    .join('\n');
+
+const parseTargets = (target: string | undefined): readonly TargetName[] => {
+  switch (target ?? 'core') {
+    case 'cli':
+      return ['core', 'cli'];
+    case 'web':
+      return ['core', 'web'];
+    case 'mobile':
+      return ['core', 'mobile'];
+    case 'all':
+      return ['core', 'web', 'mobile', 'cli'];
+    default:
+      return ['core'];
+  }
+};
+
 /**
  * The full authoring gate: the shared `validate()` plus the top-level-effects
  * check. The latter is MCP-specific on purpose — top-level side effects are a
@@ -157,20 +186,49 @@ defineTool(
   'The complete TypeScript surface available to scripts. Read this before writing one — do not guess method names.',
   {
     target: z
-      .enum(['core', 'cli', 'web', 'all'])
+      .enum(['core', 'cli', 'web', 'mobile', 'all'])
       .optional()
-      .describe("Which tier. 'core' is what most scripts need; defaults to 'core'."),
+      .describe("Which target view. 'core' is the portable intersection; defaults to 'core'."),
   },
   async ({ target }) => {
     switch (target ?? 'core') {
       case 'cli':
-        return text(CLI_TYPES_DTS);
+        return text(
+          [
+            CLI_TYPES_DTS,
+            '',
+            'CLI runtime API paths:',
+            formatApiPaths(RUNTIME_SURFACES.cli.apiPaths),
+          ].join('\n'),
+        );
       case 'web':
-        return text(WEB_TYPES_DTS);
+        return text([WEB_TYPES_DTS, '', 'Web runtime API paths:', formatApiPaths(RUNTIME_SURFACES.web.apiPaths)].join('\n'));
+      case 'mobile':
+        return text(
+          [
+            "Mobile has no extension package yet; it runs the CoreApi subset below.",
+            'Mobile runtime API paths:',
+            formatApiPaths(RUNTIME_SURFACES.mobile.apiPaths),
+          ].join('\n'),
+        );
       case 'all':
-        return text(TYPES_BUNDLE);
+        return text(
+          [
+            TYPES_BUNDLE,
+            '',
+            "Portable web+mobile+CLI intersection for meta.targets ['core', 'web', 'mobile', 'cli']:",
+            formatApiPaths([...getAllowedApiPathsForTargets(parseTargets('all'))]),
+          ].join('\n'),
+        );
       default:
-        return text(CORE_TYPES_DTS);
+        return text(
+          [
+            CORE_TYPES_DTS,
+            '',
+            'Portable core API paths available across web, mobile and CLI:',
+            formatApiPaths([...getAllowedApiPathsForTargets(parseTargets('core'))]),
+          ].join('\n'),
+        );
     }
   },
 );

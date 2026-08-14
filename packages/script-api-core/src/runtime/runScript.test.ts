@@ -152,7 +152,7 @@ describe('runScript — capability + target gates fire before user code', () => 
     });
     const result = await runScript(script, '', buildCtx());
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/requires the 'web' surface/);
+    expect(result.error).toMatch(/this script targets 'web'; this runtime supports 'core-only'/);
     expect((globalThis as Record<string, unknown>).__shouldNotRun).toBeUndefined();
   });
 

@@ -1,4 +1,4 @@
-import type { ReadMethodName, WriteMethodName } from '@tealstreet/script-api-core';
+import type { ReadMethodName, TargetName, WriteMethodName } from '@tealstreet/script-api-core';
 
 import ts from 'typescript';
 
@@ -33,6 +33,7 @@ import type { ValidationIssue } from './validateScript';
  */
 
 export interface DeclaredCapabilities {
+  targets?: TargetName[];
   writes: Set<string>;
   /** `undefined` means "all reads permitted" — SPEC §4.1's author-only default. */
   reads?: Set<string>;
@@ -98,6 +99,10 @@ const readDeclaredCapabilities = (file: ts.SourceFile): DeclaredCapabilities | u
   const caps = getProperty(meta, 'capabilities');
   if (!caps || !ts.isObjectLiteralExpression(caps) || hasUnanalyzableShape(caps)) return undefined;
 
+  const targetsNode = getProperty(meta, 'targets');
+  const targetSet = targetsNode === undefined ? undefined : literalStringSet(targetsNode);
+  if (targetsNode !== undefined && targetSet === undefined) return undefined;
+
   const writes = literalStringSet(getProperty(caps, 'writes'));
   if (!writes) return undefined;
 
@@ -125,7 +130,13 @@ const readDeclaredCapabilities = (file: ts.SourceFile): DeclaredCapabilities | u
     else if (enabled.kind !== ts.SyntaxKind.FalseKeyword) return undefined;
   }
 
-  return { writes, reads, accounts: accountsSet ? [...accountsSet] : undefined, runCommandEnabled };
+  return {
+    targets: targetSet ? ([...targetSet] as TargetName[]) : undefined,
+    writes,
+    reads,
+    accounts: accountsSet ? [...accountsSet] : undefined,
+    runCommandEnabled,
+  };
 };
 
 /**

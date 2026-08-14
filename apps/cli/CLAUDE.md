@@ -547,6 +547,14 @@ name}` footer segment auto-runs the named script ~1×/sec
   through `processCommand`, keep an explicit deny story for management
   commands (`script reload`, `hook create`, `clients revoke`, watch
   modes, etc.).
+- **Script `getOrderbook` is subscription-backed, not best-effort.**
+  `src/script-orderbook-cache.ts` subscribes through the connected
+  exchange's real `listenOrderBook`, waits briefly for a snapshot, and
+  rebuilds if reconnect swaps the account exchange object. Keep
+  `api.getHistoricalPosition` out of the CLI target descriptor: web/mobile
+  read an app position-history store, while CLI has no equivalent store.
+  An on-demand `fetchHistoricalTrades` call would be a thinner,
+  venue-limited contract, not parity.
 - **Script retry idempotency is checked before the first attempt.**
   `retry N script:<name>` must refuse a non-idempotent script before
   user code runs at all. `runScriptStep` performs this preflight; the

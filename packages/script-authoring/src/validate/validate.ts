@@ -1,11 +1,12 @@
 import { checkCapabilities } from './checkCapabilities';
 import { checkRuntimeImports } from './checkRuntimeImports';
+import { checkTargetSurface } from './checkTargetSurface';
 import type { ValidateScriptOptions, ValidationResult } from './validateScript';
 import { validateScript } from './validateScript';
 
 /**
  * The single validation gate: typecheck ++ runtime-import check ++ capability
- * check.
+ * check ++ target-surface check.
  *
  * Everything downstream consumes this one function — the MCP `validate_script`
  * tool, the AI generate → repair loop, and editor diagnostics — so that a
@@ -24,6 +25,7 @@ export const validate = (source: string, options: ValidateScriptOptions): Valida
 
   const importIssues = checkRuntimeImports(source);
   const capabilityIssues = checkCapabilities(source);
-  const errors = [...typecheck.errors, ...importIssues, ...capabilityIssues];
+  const targetSurfaceIssues = checkTargetSurface(source);
+  const errors = [...typecheck.errors, ...importIssues, ...capabilityIssues, ...targetSurfaceIssues];
   return { valid: errors.length === 0, errors };
 };

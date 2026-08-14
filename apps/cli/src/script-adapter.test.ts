@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { CLIPlatformAdapter, CLISession } from '@tealstreet/cli-core';
+import type { OrderBook } from '@tealstreet/safe-cex/src/types';
 
 import type { ExchangeManager } from './exchange-manager';
 import { createStandaloneCoreAdapter } from './script-adapter';
+import { ScriptOrderbookCache } from './script-orderbook-cache';
 
 const buildPlatformAdapter = (): CLIPlatformAdapter =>
   ({
@@ -48,5 +50,125 @@ describe('createStandaloneCoreAdapter', () => {
       output: [],
       error: 'Unknown command: script:missing',
     });
+  });
+
+  it('distinguishes unsupported candles from an empty candle result', async () => {
+    const session: CLISession = {
+      currentExchange: null,
+      currentAccountName: 'acct',
+      currentSymbol: 'BTCUSDT',
+    };
+
+    const unsupported = createStandaloneCoreAdapter(
+      {
+        getExchange: () => ({}),
+      } as unknown as ExchangeManager,
+      session,
+      buildPlatformAdapter(),
+    );
+    await expect(unsupported.getCandles('BTCUSDT', '1m', { account: 'acct' })).rejects.toThrow(
+      "getCandles: account 'acct' does not support OHLCV candles",
+    );
+
+    const supported = createStandaloneCoreAdapter(
+      {
+        getExchange: () => ({ fetchOHLCV: async () => [] }),
+      } as unknown as ExchangeManager,
+      session,
+      buildPlatformAdapter(),
+    );
+    await expect(supported.getCandles('BTCUSDT', '1m', { account: 'acct' })).resolves.toEqual([]);
+  });
+
+  it('backs getOrderbook with the exchange orderbook subscription', async () => {
+    const unsubscribe = vi.fn();
+    const listenOrderBook = vi.fn((_symbol: string, callback: (book: OrderBook) => void) => {
+      callback({
+        bids: [
+          { price: 100, amount: 1, total: 1 },
+          { price: 99, amount: 2, total: 3 },
+        ],
+        asks: [
+          { price: 101, amount: 1.5, total: 1.5 },
+          { price: 102, amount: 2.5, total: 4 },
+        ],
+      });
+      return unsubscribe;
+    });
+    const session: CLISession = {
+      currentExchange: null,
+      currentAccountName: 'acct',
+      currentSymbol: 'BTCUSDT',
+    };
+    const adapter = createStandaloneCoreAdapter(
+      {
+        getExchange: () => ({ listenOrderBook }),
+      } as unknown as ExchangeManager,
+      session,
+      buildPlatformAdapter(),
+    );
+
+    await expect(adapter.getOrderbook('BTCUSDT', { account: 'acct', depth: 1 })).resolves.toEqual({
+      bids: [{ price: 100, amount: 1, total: 1 }],
+      asks: [{ price: 101, amount: 1.5, total: 1.5 }],
+    });
+    expect(listenOrderBook).toHaveBeenCalledWith('BTCUSDT', expect.any(Function));
+  });
+
+  it('rejects unsupported orderbook subscriptions instead of returning a stub', async () => {
+    const session: CLISession = {
+      currentExchange: null,
+      currentAccountName: 'acct',
+      currentSymbol: 'BTCUSDT',
+    };
+    const adapter = createStandaloneCoreAdapter(
+      {
+        getExchange: () => ({}),
+      } as unknown as ExchangeManager,
+      session,
+      buildPlatformAdapter(),
+    );
+
+    await expect(adapter.getOrderbook('BTCUSDT', { account: 'acct' })).rejects.toThrow(
+      "getOrderbook: account 'acct' does not support orderbook subscriptions",
+    );
+  });
+
+  it('rebuilds orderbook subscriptions when the account exchange is replaced', async () => {
+    const unsubscribeFirst = vi.fn();
+    const unsubscribeSecond = vi.fn();
+    let exchange = {
+      listenOrderBook: vi.fn((_symbol: string, callback: (book: OrderBook) => void) => {
+        callback({ bids: [{ price: 100, amount: 1, total: 1 }], asks: [{ price: 101, amount: 1, total: 1 }] });
+        return unsubscribeFirst;
+      }),
+    };
+    const cache = new ScriptOrderbookCache(
+      {
+        getExchange: () => exchange,
+      } as unknown as ExchangeManager,
+      { firstSnapshotTimeoutMs: 1, idleTtlMs: 60_000 },
+    );
+
+    await expect(cache.get('BTCUSDT', { account: 'acct' })).resolves.toEqual({
+      bids: [{ price: 100, amount: 1, total: 1 }],
+      asks: [{ price: 101, amount: 1, total: 1 }],
+    });
+
+    exchange = {
+      listenOrderBook: vi.fn((_symbol: string, callback: (book: OrderBook) => void) => {
+        callback({ bids: [{ price: 200, amount: 2, total: 2 }], asks: [{ price: 201, amount: 2, total: 2 }] });
+        return unsubscribeSecond;
+      }),
+    };
+
+    await expect(cache.get('BTCUSDT', { account: 'acct' })).resolves.toEqual({
+      bids: [{ price: 200, amount: 2, total: 2 }],
+      asks: [{ price: 201, amount: 2, total: 2 }],
+    });
+    expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+
+    cache.disposeAll();
+    expect(unsubscribeSecond).toHaveBeenCalledTimes(1);
   });
 });

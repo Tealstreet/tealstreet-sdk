@@ -20,10 +20,10 @@ Spec: [`docs/custom-scripts/SPEC.md`](../../docs/custom-scripts/SPEC.md).
 `devDependencies`) — the compiler API is the validator. `script-api-core`
 ships into the browser worker and must stay portable, so it cannot carry it.
 
-## `validate()` is three passes, and the second two are the interesting ones
+## `validate()` is four passes, and the last three are the interesting ones
 
 ```
-validate = typecheck  ++  checkRuntimeImports  ++  checkCapabilities
+validate = typecheck  ++  checkRuntimeImports  ++  checkCapabilities  ++  checkTargetSurface
 ```
 
 **`checkRuntimeImports` covers what the typechecker structurally cannot see.**
@@ -50,6 +50,14 @@ aliasing, destructuring, element access.
 
 `closePosition` requires **both** `closePosition` and `placeOrder`, mirroring
 `buildApi`: the adapters synthesize it as `placeOrder({reduceOnly:true})`.
+
+**`checkTargetSurface` is the authoring-time sibling of the per-runtime API
+surface descriptors in `script-api-core/src/runtime/runtimeSurface.ts`.** It
+reads `meta.targets` as a support set and verifies every statically-known
+`api.*` path is available on every declared runtime. Unlike the capability
+check, it chases common aliases/destructuring (`const ex = api.exchange`,
+`const { getTicker } = api`) because target violations are deterministic and
+need actionable errors before marketplace publish or MCP write.
 
 `validate()` suppresses the AST passes when the source has syntax errors —
 speculative findings stacked on a parse failure bury the one thing that

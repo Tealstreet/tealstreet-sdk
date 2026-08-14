@@ -1,0 +1,244 @@
+import type { ReadMethodName, TargetName, WriteMethodName } from '../api/capabilities.types';
+
+export type RunnableTargetName = Exclude<TargetName, 'core'>;
+export type ApiPath = `api.${string}`;
+
+export interface RuntimeSurfaceDescriptor {
+  readonly target: TargetName;
+  readonly label: string;
+  readonly apiPaths: readonly ApiPath[];
+}
+
+export interface ApiPathAvailability {
+  readonly path: ApiPath;
+  readonly allowed: boolean;
+  readonly excludedBy: readonly RunnableTargetName[];
+  readonly alternatives: readonly ApiPath[];
+}
+
+const readPath = (method: ReadMethodName): ApiPath => `api.${method}`;
+const writePath = (method: WriteMethodName): ApiPath => `api.exchange.${method}`;
+
+export const CORE_READ_API_PATHS = Object.freeze([
+  readPath('getActiveAccount'),
+  readPath('getActiveAccounts'),
+  readPath('getActiveSymbol'),
+  readPath('getActiveExchange'),
+  readPath('getAccounts'),
+  readPath('getMarkets'),
+  readPath('getMarket'),
+  readPath('getTicker'),
+  readPath('getTickers'),
+  readPath('getPositions'),
+  readPath('getHistoricalPosition'),
+  readPath('getOrders'),
+  readPath('getBalance'),
+  readPath('getCombinedBalance'),
+  readPath('getOrderbook'),
+  readPath('getCandles'),
+] as const);
+
+export const CORE_WRITE_API_PATHS = Object.freeze([
+  writePath('placeOrder'),
+  writePath('placeOrders'),
+  writePath('cancelOrder'),
+  writePath('cancelOrders'),
+  writePath('updateOrder'),
+  writePath('closePosition'),
+  writePath('setLeverage'),
+  writePath('setPositionMode'),
+  writePath('setMarginType'),
+  writePath('runCommand'),
+] as const);
+
+const PORTABLE_UTILITY_API_PATHS = Object.freeze([
+  'api.io',
+  'api.io.print',
+  'api.io.return',
+  'api.utils',
+  'api.utils.sleep',
+  'api.utils.uuid',
+  'api.utils.adjust',
+  'api.utils.formatPnl',
+  'api.utils.calculateReturns',
+  'api.utils.getMarginCurrency',
+  'api.utils.convertSymbol',
+  'api.utils.getTickerPredictedBestBid',
+  'api.utils.getTickerPredictedBestAsk',
+  'api.utils.getBBOMid',
+  'api.utils.getNearTouchPrice',
+  'api.utils.getFarTouchPrice',
+  'api.utils.getCandleStartTime',
+  'api.utils.getCandleEndTime',
+  'api.utils.getNumCandlesInRange',
+  'api.utils.normalizeEpochToSeconds',
+  'api.constants',
+  'api.constants.ExchangeName',
+  'api.constants.OrderSide',
+  'api.constants.OrderType',
+  'api.constants.PositionSide',
+  'api.constants.PositionMode',
+  'api.constants.OrderStatus',
+  'api.constants.OrderTimeInForce',
+  'api.constants.OrderStopTriggerType',
+  'api.constants.MarginType',
+  'api.version',
+  'api.meta',
+  'api.meta.scriptId',
+  'api.meta.scriptName',
+  'api.meta.invokedFrom',
+  'api.meta.targets',
+  'api.meta.capabilities',
+  'api.meta.loopSymbol',
+] as const satisfies readonly ApiPath[]);
+
+const CORE_READ_ONLY_API_PATHS = Object.freeze([
+  ...CORE_READ_API_PATHS,
+  ...PORTABLE_UTILITY_API_PATHS,
+] as const satisfies readonly ApiPath[]);
+
+export const CORE_SHARED_API_PATHS = Object.freeze([
+  ...CORE_READ_ONLY_API_PATHS,
+  ...CORE_WRITE_API_PATHS,
+  'api.exchange',
+  'api.storage',
+  'api.storage.get',
+  'api.storage.set',
+  'api.storage.delete',
+  'api.storage.list',
+] as const satisfies readonly ApiPath[]);
+
+export const MOBILE_READ_API_PATHS = CORE_READ_API_PATHS;
+export const CLI_READ_API_PATHS = Object.freeze([
+  readPath('getActiveAccount'),
+  readPath('getActiveAccounts'),
+  readPath('getActiveSymbol'),
+  readPath('getActiveExchange'),
+  readPath('getAccounts'),
+  readPath('getMarkets'),
+  readPath('getMarket'),
+  readPath('getTicker'),
+  readPath('getTickers'),
+  readPath('getPositions'),
+  readPath('getOrders'),
+  readPath('getBalance'),
+  readPath('getCombinedBalance'),
+  readPath('getOrderbook'),
+  readPath('getCandles'),
+] as const);
+
+export const PORTABLE_READ_ONLY_API_PATHS = Object.freeze([
+  ...CLI_READ_API_PATHS,
+  ...PORTABLE_UTILITY_API_PATHS,
+] as const satisfies readonly ApiPath[]);
+
+const MOBILE_SHARED_API_PATHS = Object.freeze([
+  ...MOBILE_READ_API_PATHS,
+  ...PORTABLE_UTILITY_API_PATHS,
+] as const satisfies readonly ApiPath[]);
+
+const CLI_SHARED_API_PATHS = Object.freeze([
+  ...CLI_READ_API_PATHS,
+  ...PORTABLE_UTILITY_API_PATHS,
+] as const satisfies readonly ApiPath[]);
+
+const WEB_EXTENSION_API_PATHS = Object.freeze([
+  'api.react',
+  'api.components',
+  'api.ui',
+  'api.ui.getClick',
+  'api.ui.getOrderSize',
+  'api.ui.getQuickSize',
+  'api.domHotkey',
+  'api.domHotkey.register',
+] as const satisfies readonly ApiPath[]);
+
+export const RUNTIME_SURFACES = Object.freeze({
+  core: Object.freeze({
+    target: 'core',
+    label: 'core',
+    apiPaths: PORTABLE_READ_ONLY_API_PATHS,
+  } satisfies RuntimeSurfaceDescriptor),
+  web: Object.freeze({
+    target: 'web',
+    label: 'web',
+    apiPaths: Object.freeze([...CORE_READ_ONLY_API_PATHS, ...WEB_EXTENSION_API_PATHS]),
+  } satisfies RuntimeSurfaceDescriptor),
+  cli: Object.freeze({
+    target: 'cli',
+    label: 'CLI',
+    apiPaths: CLI_SHARED_API_PATHS,
+  } satisfies RuntimeSurfaceDescriptor),
+  mobile: Object.freeze({
+    target: 'mobile',
+    label: 'mobile',
+    apiPaths: MOBILE_SHARED_API_PATHS,
+  } satisfies RuntimeSurfaceDescriptor),
+});
+
+export const RUNNABLE_TARGETS = Object.freeze(['web', 'mobile', 'cli'] as const);
+
+const RUNTIME_TARGET_SET = new Set<TargetName>(RUNNABLE_TARGETS);
+const ALTERNATIVES: Readonly<Record<string, readonly ApiPath[]>> = Object.freeze({
+  'api.getHistoricalPosition': ['api.getPositions'],
+  'api.getOrderbook': ['api.getTicker'],
+  'api.getCandles': ['api.getTicker', 'api.getOrderbook'],
+  'api.storage': ['api.io.return'],
+  'api.storage.get': ['api.io.return'],
+  'api.storage.set': ['api.io.return'],
+  'api.storage.delete': ['api.io.return'],
+  'api.storage.list': ['api.io.return'],
+  'api.exchange': ['api.getOrders', 'api.getPositions', 'api.getTicker'],
+  'api.exchange.placeOrder': ['api.getOrders', 'api.getPositions', 'api.getTicker'],
+  'api.exchange.placeOrders': ['api.getOrders', 'api.getPositions', 'api.getTicker'],
+  'api.exchange.cancelOrder': ['api.getOrders'],
+  'api.exchange.cancelOrders': ['api.getOrders'],
+  'api.exchange.updateOrder': ['api.getOrders'],
+  'api.exchange.closePosition': ['api.getPositions'],
+  'api.exchange.setLeverage': ['api.getPositions'],
+  'api.exchange.setPositionMode': ['api.getPositions'],
+  'api.exchange.setMarginType': ['api.getPositions'],
+  'api.exchange.runCommand': ['api.getOrders', 'api.getPositions', 'api.getTicker'],
+  'api.react': ['api.io.return'],
+  'api.components': ['api.io.return'],
+  'api.ui': ['api.getTicker', 'api.getOrderbook'],
+  'api.ui.getClick': ['api.getTicker', 'api.getOrderbook'],
+  'api.ui.getOrderSize': ['api.getBalance', 'api.getPositions'],
+  'api.ui.getQuickSize': ['api.getBalance', 'api.getPositions'],
+  'api.domHotkey': ['api.io.return'],
+  'api.domHotkey.register': ['api.io.return'],
+});
+
+const KNOWN_API_PATHS = new Set<ApiPath>([
+  ...Object.values(RUNTIME_SURFACES).flatMap((surface) => surface.apiPaths),
+  ...(Object.keys(ALTERNATIVES) as ApiPath[]),
+]);
+
+const asRunnableTargets = (targets: readonly TargetName[]): readonly RunnableTargetName[] => {
+  const runnable = targets.filter((target): target is RunnableTargetName => RUNTIME_TARGET_SET.has(target));
+  return runnable.length > 0 ? runnable : RUNNABLE_TARGETS;
+};
+
+export const getAllowedApiPathsForTargets = (targets: readonly TargetName[]): ReadonlySet<ApiPath> => {
+  const runnable = asRunnableTargets(targets);
+  const [first, ...rest] = runnable;
+  let allowed = new Set<ApiPath>(RUNTIME_SURFACES[first].apiPaths);
+  for (const target of rest) {
+    const next = new Set<ApiPath>(RUNTIME_SURFACES[target].apiPaths);
+    allowed = new Set([...allowed].filter((path) => next.has(path)));
+  }
+  return allowed;
+};
+
+export const isKnownApiPath = (path: string): path is ApiPath => KNOWN_API_PATHS.has(path as ApiPath);
+
+export const getApiPathAvailability = (path: ApiPath, targets: readonly TargetName[]): ApiPathAvailability => {
+  const runnable = asRunnableTargets(targets);
+  const excludedBy = runnable.filter((target) => !RUNTIME_SURFACES[target].apiPaths.includes(path));
+  return {
+    path,
+    allowed: excludedBy.length === 0,
+    excludedBy,
+    alternatives: ALTERNATIVES[path] ?? [],
+  };
+};
