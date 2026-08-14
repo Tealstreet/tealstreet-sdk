@@ -28,6 +28,21 @@ export type JournalVenueGrade =
   /** No usable history axis. Must not be rendered as an empty journal. */
   | 'unsupported';
 
+/**
+ * What a caveat actually invalidates.
+ *
+ * `undercounts-trades` means round trips can MERGE: the money is right and the count is not.
+ * Any metric derived from the number of trades inherits the error; any metric derived from
+ * summed value does not. That distinction is the whole reason this is an enum.
+ */
+export type JournalCaveatKind = 'undercounts-trades';
+
+export type JournalVenueCaveat = {
+  readonly kind: JournalCaveatKind;
+  /** User-facing, written for a trader. */
+  readonly text: string;
+};
+
 export type JournalVenueStatus = {
   readonly grade: JournalVenueGrade;
   /**
@@ -38,8 +53,13 @@ export type JournalVenueStatus = {
   /**
    * A known defect on a venue that OTHERWISE grades clean. Separate from `reason` because a
    * caveat must not downgrade the badge — it qualifies a number that is still reconciled.
+   *
+   * TYPED, not a string, because an aggregator has to REASON about it. bybit's totals are
+   * right while its trade count is not, so a sum of PnL across venues is safe and a sum of
+   * trade counts is not. A free-text caveat forces the consumer to string-match or, worse,
+   * to average the error away silently.
    */
-  readonly caveat?: string;
+  readonly caveat?: JournalVenueCaveat;
 };
 
 const GRADED: JournalVenueStatus = { grade: 'graded' };
@@ -62,9 +82,12 @@ const JOURNAL_VENUE_STATUS: Partial<Record<ExchangeName, JournalVenueStatus>> = 
   // 3 recorded. Totals are right; trade COUNT and average hold time are not.
   bybit: {
     grade: 'graded',
-    caveat:
-      'Two round trips that reopen at exactly the same entry price can merge into one. ' +
-      'Totals are correct; trade count and hold time may undercount.',
+    caveat: {
+      kind: 'undercounts-trades',
+      text:
+        'Two round trips that reopen at exactly the same entry price can merge into one. ' +
+        'Totals are correct; trade count and hold time may undercount.',
+    },
   },
 
   // The ledger quantizes to 4dp while the fills carry full precision, so the two axes cannot

@@ -31,7 +31,8 @@ describe('journal venue grading', () => {
     // loses is trade COUNT, and merging conserves value so no identity can see it.
     const status = getJournalVenueStatus('bybit' as ExchangeName);
     expect(status.grade).toBe('graded');
-    expect(status.caveat).toMatch(/entry price/i);
+    expect(status.caveat?.kind).toBe('undercounts-trades');
+    expect(status.caveat?.text).toMatch(/entry price/i);
     expect(status.reason).toBeUndefined();
   });
 
