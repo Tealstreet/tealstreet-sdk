@@ -325,6 +325,7 @@ export interface CandleSnapshot {
 
 export interface AssetCtx {
   dayNtlVlm: string;
+  dayBaseVlm?: string;
   funding: string;
   impactPxs: [string, string];
   markPx: string;
@@ -402,6 +403,7 @@ export interface SpotMeta {
 
 export interface SpotAssetCtx {
   dayNtlVlm: string;
+  dayBaseVlm?: string;
   markPx: string;
   midPx: string;
   prevDayPx: string;

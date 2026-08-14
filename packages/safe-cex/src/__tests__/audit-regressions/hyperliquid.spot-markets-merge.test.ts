@@ -137,6 +137,17 @@ describe('hyperliquid spot markets merged into the perp container', () => {
     expect(tickerBySymbol['LICK/USDC'].last).toBeCloseTo(0.00005088, 12);
   });
 
+  it('uses spot dayNtlVlm as quote volume without multiplying by price again', async () => {
+    const exchange = createExchange();
+    const { tickers } = await (exchange as any).fetchSpotMarketsAndTickers();
+    exchange.dispose();
+
+    const tickerBySymbol = Object.fromEntries(tickers.map((t: any) => [t.symbol, t]));
+
+    expect(tickerBySymbol['PURR/USDC'].quoteVolume).toBeCloseTo(369448.5, 6);
+    expect(tickerBySymbol['PURR/USDC'].volume).toBeCloseTo(369448.5 / 0.0686925, 6);
+  });
+
   it('displays Unit-bridged tokens under the name Hyperliquid shows', async () => {
     const exchange = createExchange();
     const { markets } = await (exchange as any).fetchSpotMarketsAndTickers();
