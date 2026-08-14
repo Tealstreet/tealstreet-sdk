@@ -571,8 +571,16 @@ export class PhemexExchange extends BaseExchange {
 
     const parseRows = (rows: Array<Record<string, any>>) =>
       rows.reduce<Execution[]>((acc, row) => {
-        const execType = String(row.execType || row.tradeType || '').toLowerCase();
-        if (execType && execType !== 'trade') {
+        // MEASURED 2026-08-14 on sheet row 24: this route returns NO `execType` field, and
+        // `tradeType` is a NUMBER (`1`), not a word. The old test stringified it to `'1'`,
+        // found it !== `'trade'`, and dropped EVERY row — so even a successful response
+        // produced zero executions.
+        //
+        // Only a recognisable STRING may exclude a row. An undecoded numeric code must not
+        // silently discard data: we have not established what phemex's `tradeType` enum
+        // means, and dropping rows on a value we cannot read is how an axis reads as empty.
+        const rawExecType = row.execType ?? row.tradeType;
+        if (typeof rawExecType === 'string' && rawExecType && rawExecType.toLowerCase() !== 'trade') {
           return acc;
         }
 
@@ -581,20 +589,39 @@ export class PhemexExchange extends BaseExchange {
           return acc;
         }
 
-        const sideRaw = String(row.side || row.execSide || '').toUpperCase();
+        // **BLOCKER, deliberately not guessed.** This route returns `side` as a NUMBER (`1`),
+        // not `Buy`/`Sell`. `String(1).toUpperCase()` is `'1'`, matches neither, and drops the
+        // row — which is why a 200-row page produced zero executions.
+        //
+        // The numeric enum is NOT decoded here. Reading it off phemex's docs is exactly what
+        // produced the `execType` defect above: that parameter was doc-derived, had never been
+        // called, and was rejected outright by the venue. An inverted side is also the one
+        // error every reconciliation still passes (see the side invariant), so a wrong guess
+        // here would be invisible rather than loud.
+        //
+        // To settle it: correlate a known e2e order's side against its exec row, the same
+        // ground-truth method used for the fold grader. Until then a numeric side is left
+        // unmapped and the row is skipped, which is honest rather than silently inverted.
+        const sideRaw = String(row.side ?? row.execSide ?? '').toUpperCase();
         const side = sideRaw === 'BUY' ? OrderSide.Buy : sideRaw === 'SELL' ? OrderSide.Sell : undefined;
         if (!side) {
           return acc;
         }
 
         const price = parseFloat(row.execPriceRp || row.execPrice || row.price || row.avgPrice || '0');
-        const qty = parseFloat(row.execQty || row.lastQty || row.qty || row.size || '0');
+        // `execQtyRq` is what this route actually returns — measured, row 24. None of the four
+        // names below it exist on the response, so every row parsed to qty 0 and was dropped
+        // by the guard underneath. Phemex's V2 fields carry the Rq/Rp/Rv suffixes; the older
+        // unsuffixed names are kept only as a fallback for the legacy route.
+        const qty = parseFloat(row.execQtyRq || row.execQty || row.lastQty || row.qty || row.size || '0');
         if (!Number.isFinite(price) || !Number.isFinite(qty) || price <= 0 || qty <= 0) {
           return acc;
         }
 
+        // `createdAt` (milliseconds) is this route's timestamp — measured. None of the other
+        // names are present, so every row resolved to no timestamp and was dropped.
         const timestamp = normalizeToSeconds(
-          row.execTime || row.createTime || row.transactTimeNs || row.transactTime || row.timestamp,
+          row.createdAt || row.execTime || row.createTime || row.transactTimeNs || row.transactTime || row.timestamp,
         );
         if (!timestamp) {
           return acc;
@@ -637,10 +664,12 @@ export class PhemexExchange extends BaseExchange {
     };
 
     const fetchPrimaryRows = async () => {
+      // NO `execType`. Measured: sending it returns `412 Invalid arguments! execType param:
+      // execType`, so this route has never once succeeded. The parameter was never valid
+      // here; without it the same request returns a full page.
       const params = omitUndefined({
         symbol: apiSymbol,
         currency: apiSymbol.endsWith('USDC') ? 'USDC' : 'USDT',
-        execType: 'Trade',
         offset: 0,
         limit: maxLimit,
       });
