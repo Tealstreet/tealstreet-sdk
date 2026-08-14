@@ -220,11 +220,44 @@ const legKey = (symbol: string, leg: PositionSide | 'both') => `${symbol}|${leg}
  * produce a running size that never returns to zero, and every subsequent interval on that
  * symbol is wrong. Callers detect this as intervals that never close.
  */
+/**
+ * Chronological order, with a deterministic tie-break — and the tie-break is load-bearing.
+ *
+ * `Execution.timestamp` is SECONDS, so several fills routinely share one. A plain
+ * `a.timestamp - b.timestamp` is a STABLE sort, which means fills inside the same second keep
+ * whatever order the venue returned them in — and several venues return newest-first
+ * (`paradex.fetchExecutions` sorts `b.timestamp - a.timestamp`). Inside a second, that is
+ * exactly BACKWARDS.
+ *
+ * Harmless almost everywhere, and corrupting at a ZERO CROSSING: if a closing fill and the
+ * next opening fill share a second, processing them reversed attributes the close to the new
+ * position. Measured on paradex — one record's PnL was exactly
+ * `-0.030606148775289 + -0.0100820254789188`, the short's closing BUY plus a LONG-closing
+ * SELL from the previous cycle, matching to all 16 figures. It surfaced as 2 side
+ * CONTRADICTIONS and 1 magnitude MISMATCH, because a record built from two cycles has one
+ * cycle's prices and both cycles' PnL.
+ *
+ * Ties break on `id` ascending. Ids are compared by LENGTH THEN LEXICOGRAPHICALLY rather than
+ * parsed: paradex's are 28-digit strings far beyond `MAX_SAFE_INTEGER`, so `Number()` collapses
+ * distinct ids onto the same float — the same reason `oldestCursorId` avoids parsing.
+ */
+const compareExecutionOrder = (a: Execution, b: Execution): number => {
+  if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+
+  const left = a.id ?? '';
+  const right = b.id ?? '';
+  if (!left || !right) return 0;
+  // Only meaningful when both look like monotonic numeric ids; otherwise leave input order.
+  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return 0;
+  if (left.length !== right.length) return left.length - right.length;
+  return left < right ? -1 : left > right ? 1 : 0;
+};
+
 export const reconstructPositionIntervals = (
   executions: Execution[],
   options: PositionIntervalOptions = {},
 ): PositionInterval[] => {
-  const ordered = [...executions].sort((a, b) => a.timestamp - b.timestamp);
+  const ordered = [...executions].sort(compareExecutionOrder);
   const running = new Map<string, RunningPosition>();
   const intervals: PositionInterval[] = [];
 
