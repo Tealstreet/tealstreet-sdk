@@ -49,12 +49,72 @@ const totalFeeOf = (row: Record<string, any>): number => {
  * leg — reported as `both` rather than guessed, so a one-way account is never described as
  * hedged.
  */
-const positionSideOf = (row: Record<string, any>): PositionSide | 'both' => {
+/**
+ * Leg AND direction, which on this venue are NOT the same question — and conflating them is
+ * what made bitget SKIP.
+ *
+ * **MEASURED 2026-08-14 on sheet row 96.** In hedge mode this account reports `tradeSide` as a
+ * bare `open`/`close` with no leg in it, and reports `side` as the **POSITION side, not the
+ * order direction**. Both fills of one short round trip say `side: "sell"`:
+ *
+ * | cTime         | side | tradeSide | price   | profit  | ledger `businessType` |
+ * | ------------- | ---- | --------- | ------- | ------- | --------------------- |
+ * | 1786693269342 | sell | open      | 0.33424 | 0       | `open_short`          |
+ * | 1786693310040 | sell | close     | 0.33425 | -0.0003 | `close_short`         |
+ *
+ * `(0.33424 - 0.33425) x 30 = -0.0003` exactly, so it is unambiguously a short: opened low,
+ * closed higher, small loss. Yet a naive read of `side` makes the CLOSE another sell — the
+ * fold deepens the short instead of flattening it, the interval never closes, and bitget
+ * reports intervals that never close while the venue says the account is FLAT.
+ *
+ * So the fold's direction must be derived from `(leg, open|close)`, never copied from `side`.
+ *
+ * The old version returned `'both'` for a bare `open`/`close`, which merged hedge longs and
+ * shorts into one bucket where they netted against each other. **A default that silently
+ * merges legs is the same shape as a fabricated zero** — it must be explicit or refuse.
+ */
+type BitgetLeg = { positionSide: PositionSide | 'both'; direction: OrderSide };
+
+const legAndDirectionOf = (row: Record<string, any>): BitgetLeg | null => {
   const tradeSide = String(row?.tradeSide ?? '').toLowerCase();
-  if (tradeSide.endsWith('_single') || !tradeSide) return 'both';
-  if (tradeSide.includes('long')) return PositionSide.Long;
-  if (tradeSide.includes('short')) return PositionSide.Short;
-  return 'both';
+  const rawSide = String(row?.side ?? '').toLowerCase();
+  if (rawSide !== 'buy' && rawSide !== 'sell') return null;
+
+  // ONE-WAY: `buy_single` / `sell_single`. There is no leg, and `side` IS the order
+  // direction — the two modes disagree about what `side` means, which is why they are
+  // separated here rather than sharing a path.
+  if (tradeSide.endsWith('_single')) {
+    return { positionSide: 'both', direction: rawSide === 'buy' ? OrderSide.Buy : OrderSide.Sell };
+  }
+
+  // HEDGE, explicit spelling (`open_long` / `close_short` / ...). The leg is stated.
+  const explicitLeg = tradeSide.includes('long')
+    ? PositionSide.Long
+    : tradeSide.includes('short')
+      ? PositionSide.Short
+      : undefined;
+
+  // HEDGE, bare spelling (`open` / `close`). The leg is `side`, per the table above.
+  const leg = explicitLeg ?? (rawSide === 'buy' ? PositionSide.Long : PositionSide.Short);
+  const opening = tradeSide.startsWith('open');
+  const closing = tradeSide.startsWith('close');
+
+  // Anything else is an unrecognised vocabulary. REFUSE rather than fall through to `'both'`:
+  // guessing here merges legs silently, and the fold cannot tell a merged leg from a real one.
+  if (!opening && !closing) return null;
+
+  // Direction that moves the leg the right way: a long opens by buying and closes by
+  // selling; a short is the mirror.
+  const direction =
+    leg === PositionSide.Long
+      ? opening
+        ? OrderSide.Buy
+        : OrderSide.Sell
+      : opening
+        ? OrderSide.Sell
+        : OrderSide.Buy;
+
+  return { positionSide: leg, direction };
 };
 
 export type BitgetFillDeps = {
@@ -78,6 +138,11 @@ export const mapBitgetFill = (row: Record<string, any>, deps: BitgetFillDeps): E
 
   const fee = totalFeeOf(row);
 
+  // Dropped rather than defaulted: an unrecognised `tradeSide`/`side` combination cannot be
+  // placed on a leg, and placing it on the wrong one corrupts every later interval.
+  const leg = legAndDirectionOf(row);
+  if (!leg) return null;
+
   return {
     timestamp: deps.toTimestamp(ms),
     symbol,
@@ -85,13 +150,16 @@ export const mapBitgetFill = (row: Record<string, any>, deps: BitgetFillDeps): E
     orderId: row?.orderId ? String(row.orderId) : undefined,
     price,
     qty,
-    side: String(row?.side ?? '').toLowerCase() === 'buy' ? OrderSide.Buy : OrderSide.Sell,
+    // DERIVED, never copied from `row.side` — see `legAndDirectionOf`. On hedge fills this
+    // venue puts the POSITION side in `side`, so copying it makes every close look like
+    // another open.
+    side: leg.direction,
     // Canonical `commission` is positive-when-charged; bitget signs `totalFee` negative, so
     // this is a negation, NOT an absolute value — a rebate must survive as a rebate.
     commission: -fee,
     commissionAsset: String(row?.feeDetail?.[0]?.feeCoin ?? 'USDT'),
     realizedPnl: num(row?.profit),
-    positionSide: positionSideOf(row),
+    positionSide: leg.positionSide,
     maker: String(row?.tradeScope ?? '').toLowerCase() === 'maker',
   } as Execution;
 };
