@@ -693,7 +693,8 @@ to public WebSocket reconnection.
   | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | **`/v1/orders?realized_pnl=true`** | **The usable axis.** Per order: `symbol`, `realized_pnl`, `total_fee`/`fee_asset`, `total_rebate`, **`position_side`** (`LONG`/`SHORT`), `side`, `reduce_only`, `executed`, `average_executed_price`, `leverage`, `margin_mode`        |
   | `/v1/client/transaction_history`   | **Not usable for per-position PnL.** Its `REALIZED_PNL` rows carry **no `symbol`**, their `id` EQUALS their `timestamp`, and those timestamps sit exactly 86 400 000 apart on midnight-UTC boundaries — daily ACCOUNT-level aggregates |
-  | `/v1/client/hist_trades`           | All-time fills, `fromId` cursor — fixes the truncation noted below                                                                                                                                                                     |
+  | **`/v1/client/trades`**            | **The fills axis.** Per fill: `id`, `symbol`, `side`, `fee`/`fee_asset`, `executed_price`, `executed_quantity`, `executed_timestamp`, `order_id`, `is_maker`. `realized_pnl` is `null` on every row, same as the v3 route              |
+  | `/v1/client/hist_trades`           | **Answers `500 internal error`** on this account for every parameter shape tried, including none at all. Not usable; not in the fallback chain                                                                                         |
 
   Type vocabulary observed over 400 ledger rows on that account: `TRANSACTION_FEE` (380,
   per-symbol, **negative when charged**), `CONVERT` (10), `REALIZED_PNL` (5), `INTEREST` (5).
@@ -711,6 +712,14 @@ to public WebSocket reconnection.
   Reading v1 routes beside the existing v3 fills is a **v1/v3 hybrid** — normal here, not a
   workaround; bitget already runs 33 `/api/v2` routes next to 3 `/api/v3`.
 
+  **The `hist_trades` row above used to read "All-time fills, `fromId` cursor". That was a
+  THIRD wrong answer on this venue, reached the same way as the first two** — describing a
+  route from its documentation without calling it. Measured 2026-08-14: it 500s on every
+  shape, and `fromId` is accepted-and-ignored on the sibling that does work. The pattern to
+  notice is that all three errors were confident, specific, and cost a week each: the venue
+  was called UNSUPPORTABLE off one route's `realizedPnl`, then pointed at a ledger off a type
+  list, then pointed at a cursor off a docs page. **Call the route.**
+
   Reproduce with:
 
   ```bash
@@ -726,6 +735,38 @@ to public WebSocket reconnection.
   applied as post-fetch filters, not as pagination.
 - These routes are read-only reconciliation paths; the V3 migration target for both legacy trade
   lists is `/v3/trade/transactionHistory`.
+
+### Legacy fills fallback (`GET /v1/client/trades`)
+
+Reached by `fetchLegacyTransactionHistoryRows` when the v3 route returns nothing. Parameter
+builder: `woo.legacy-fills.ts`, pure and exported; regression
+`__tests__/audit-regressions/woo.legacy-fills-params.test.ts`.
+
+**Every parameter name differs from `/v3/trade/transactionHistory`, and a wrong one is
+ignored rather than rejected** — which is why this shipped wrong and nothing ever failed:
+
+| intent    | `/v1/client/trades`      | `/v3/trade/transactionHistory` |
+| --------- | ------------------------ | ------------------------------ |
+| page size | `size`                   | `limit`                        |
+| window    | `start_t` / `end_t` (ms) | `startTime` / `endTime`        |
+| paging    | `page` — **works**       | `page` ignored                 |
+| sort      | newest-first             | oldest-first                   |
+
+The window pair is the one that corrupted data. Sending `startTime`/`endTime` here returns
+the newest page **unfiltered**: a January-2020 window came back holding August-2026 fills,
+and the caller returned them as the answer for the window it asked for — into
+`users_app_trades`, keyed on row id. `limit` fails the same way, quietly serving 100.
+`fromId` is likewise accepted and ignored, so it is **not** a cursor; depth comes from `page`
+or a narrowed window.
+
+**A transport error must not become `[]` here.** The chain used to swallow every failure,
+so a 500 was indistinguishable from an idle window — the exact reason `hist_trades` being
+completely dead went unnoticed while it sat in the fallback list.
+
+`realized_pnl` is `null` on every row of this route too, so it carries **fee only**. The
+`id` is unique per fill (measured 500 distinct / 500 rows); `order_id` also read unique on
+that page, but only because it happened to contain no multi-fill order — the v3 route
+measured 500 fills against 495 order ids, so `order_id` **does** collide. Key on `id`.
 
 ### Order history (`GET /v1/orders`)
 

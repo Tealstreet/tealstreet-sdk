@@ -49,6 +49,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPI } from './woo.api';
+import { buildWooLegacyFillsParams } from './woo.legacy-fills';
 import { mapWooHistoricalOrder } from './woo.order-history';
 import {
   ACCOUNT_RESPONSE,
@@ -444,40 +445,51 @@ export class WOOXExchange extends BaseExchange {
     return [];
   };
 
+  /**
+   * `/v1/client/trades` — the legacy fills fallback, with its parameter vocabulary MEASURED.
+   *
+   * Every name here differs from the v3 route beside it, and each one fails SILENTLY rather
+   * than erroring, which is why this was wrong in the shipping code for as long as it existed:
+   *
+   * - **`size`, not `limit`.** `limit` is accepted and ignored — the page comes back at its
+   *   default 100 whatever you ask for.
+   * - **`start_t` / `end_t` in MILLISECONDS, not `startTime` / `endTime`.** This is the one
+   *   that corrupted data. Measured against row 28: a January-2020 window sent as
+   *   `startTime`/`endTime` returned 100 rows of August-2026 fills, because the venue ignores
+   *   those names entirely and serves the newest page. The caller then treats them as the
+   *   answer for the window it asked for. The same window under `start_t`/`end_t` correctly
+   *   returns 0 rows.
+   * - **`page` works and rows are newest-first**, the opposite of `/v3/trade/transactionHistory`,
+   *   which ignores `page` and returns oldest-first. Do not share a pager between them.
+   *
+   * `/v1/client/hist_trades` is NOT in this chain: it answers `500 internal error` on this
+   * account for every parameter shape tried, including no parameters at all, so calling it
+   * only buys a guaranteed-failing request per attempt.
+   *
+   * Throws rather than returning `[]`. A swallowed transport error here is indistinguishable
+   * from an idle window at the call site, which is exactly how a 500 becomes "no trades".
+   */
   private fetchLegacyTransactionHistoryRows = async (opts: {
     symbol?: string;
     fromMilliseconds?: number;
     toMilliseconds?: number;
     limit: number;
   }): Promise<Record<string, any>[]> => {
-    const endpoints = [ENDPOINTS.CLIENT_TRADES, ENDPOINTS.HIST_TRADES];
     const symbolCandidates = opts.symbol ? this.getTransactionHistorySymbolCandidates(opts.symbol) : [];
-    const paramsFor = (symbolCandidate?: string) => {
-      const params: Record<string, any> = { limit: opts.limit };
-      if (symbolCandidate) params.symbol = symbolCandidate;
-      if (opts.fromMilliseconds !== undefined) params.startTime = opts.fromMilliseconds;
-      if (opts.toMilliseconds !== undefined) params.endTime = opts.toMilliseconds;
-      return params;
-    };
 
-    for (const endpoint of endpoints) {
-      for (const symbolCandidate of symbolCandidates) {
-        try {
-          const { data } = await this.xhr.get<any>(endpoint, { params: paramsFor(symbolCandidate) });
-          const rows = this.parseTransactionRowsFromResponse(data);
-          if (rows.length > 0) return rows;
-        } catch {
-          // Legacy endpoints are best-effort fallback only.
-        }
-      }
+    let lastError: any;
+    for (const symbolCandidate of [...symbolCandidates, undefined]) {
       try {
-        const { data } = await this.xhr.get<any>(endpoint, { params: paramsFor() });
+        const params = buildWooLegacyFillsParams({ ...opts, symbol: symbolCandidate });
+        const { data } = await this.xhr.get<any>(ENDPOINTS.CLIENT_TRADES, { params });
         const rows = this.parseTransactionRowsFromResponse(data);
         if (rows.length > 0) return rows;
-      } catch {
-        // Legacy endpoints are best-effort fallback only.
+      } catch (err) {
+        lastError = err;
       }
     }
+
+    if (lastError) throw lastError;
 
     return [];
   };
