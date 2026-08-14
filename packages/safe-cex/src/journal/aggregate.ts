@@ -46,6 +46,8 @@ export type JournalAggregate = {
 
   /** COUNT-derived. Check `caveats` before presenting any of these as exact. */
   readonly tradeCount: number;
+  /** Round trips that closed at exactly zero — excluded from `winRate`, not counted as losses. */
+  readonly breakevenCount: number;
   readonly winRate?: number;
   readonly avgPnlPerTrade?: number;
   readonly avgHoldTimeMs?: number;
@@ -63,7 +65,17 @@ export type JournalAggregate = {
   readonly ungradedExchanges: readonly ExchangeName[];
 };
 
-const isWin = (record: PositionRecord) => record.realizedPnl > 0;
+/**
+ * A BREAKEVEN round trip is neither a win nor a loss, and must be excluded from the win rate
+ * rather than counted as a loss.
+ *
+ * Found on the first run against real data — fixtures had no zero-PnL records, so nothing
+ * before this could have surfaced it. Measured across three live accounts: 35 positive, 493
+ * negative, **19 exactly zero**. Counting those 19 as losses is the same mistake as counting a
+ * record with no duration as a zero-length hold, which this file already refuses to do.
+ */
+const outcomeOf = (record: PositionRecord): 'win' | 'loss' | 'breakeven' =>
+  record.realizedPnl > 0 ? 'win' : record.realizedPnl < 0 ? 'loss' : 'breakeven';
 
 export const aggregateJournalRecords = (
   records: ReadonlyArray<PositionRecord & { exchange: ExchangeName }>,
@@ -72,6 +84,8 @@ export const aggregateJournalRecords = (
   let fees = 0;
   let funding = 0;
   let wins = 0;
+  let losses = 0;
+  let breakeven = 0;
   let holdTimeTotal = 0;
   let holdTimeCount = 0;
 
@@ -81,7 +95,10 @@ export const aggregateJournalRecords = (
     realizedPnl += record.realizedPnl;
     fees += record.fees;
     funding += record.funding;
-    if (isWin(record)) wins += 1;
+    const outcome = outcomeOf(record);
+    if (outcome === 'win') wins += 1;
+    else if (outcome === 'loss') losses += 1;
+    else breakeven += 1;
     contributing.add(record.exchange);
 
     // Only records that report BOTH ends contribute a hold time. A record missing one is
@@ -116,7 +133,11 @@ export const aggregateJournalRecords = (
     // running balance, not assumed — so net subtracts them. Funding is signed already.
     netPnl: realizedPnl - fees + funding,
     tradeCount,
-    winRate: tradeCount > 0 ? wins / tradeCount : undefined,
+    // Denominator is DECIDED trades only. Including breakevens would report a lower win rate
+    // for an account that simply scratched more trades, which is a claim about skill made out
+    // of a modelling choice.
+    winRate: wins + losses > 0 ? wins / (wins + losses) : undefined,
+    breakevenCount: breakeven,
     avgPnlPerTrade: tradeCount > 0 ? realizedPnl / tradeCount : undefined,
     avgHoldTimeMs: holdTimeCount > 0 ? holdTimeTotal / holdTimeCount : undefined,
     caveats,

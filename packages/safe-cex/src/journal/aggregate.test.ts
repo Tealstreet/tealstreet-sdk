@@ -101,6 +101,27 @@ describe('aggregateJournalRecords', () => {
     expect(result.tradeCount).toBe(2);
   });
 
+  it('excludes a BREAKEVEN trade from the win rate instead of counting it as a loss', () => {
+    // Found on the first run against real data: 35 positive, 493 negative, 19 EXACTLY ZERO.
+    // Counting those as losses reports a worse win rate for an account that simply scratched
+    // more trades — a claim about skill made out of a modelling choice.
+    const result = aggregateJournalRecords([
+      record({ exchange: 'okx' as ExchangeName, realizedPnl: 10 }),
+      record({ exchange: 'okx' as ExchangeName, realizedPnl: -5 }),
+      record({ exchange: 'okx' as ExchangeName, realizedPnl: 0 }),
+    ]);
+    expect(result.winRate).toBe(0.5);
+    expect(result.breakevenCount).toBe(1);
+    // The breakeven still counts as a TRADE — it happened.
+    expect(result.tradeCount).toBe(3);
+  });
+
+  it('returns undefined win rate when every trade was a scratch', () => {
+    const result = aggregateJournalRecords([record({ exchange: 'okx' as ExchangeName, realizedPnl: 0 })]);
+    expect(result.winRate).toBeUndefined();
+    expect(result.breakevenCount).toBe(1);
+  });
+
   it('returns undefined rather than NaN or 0 for an empty set', () => {
     const result = aggregateJournalRecords([]);
     expect(result.tradeCount).toBe(0);
