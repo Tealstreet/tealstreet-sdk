@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BinancePrivateWebsocket } from '../exchanges/phemex/phemex.ws-private';
+import { OrderSide, OrderStatus, OrderType } from '../types';
 
 type MockStore = {
   markets: Array<{ symbol: string }>;
@@ -65,6 +66,22 @@ const createContext = () => {
     },
     emitAndLogError: vi.fn(),
     formatSymbolIn: (symbol?: string) => symbol?.toUpperCase() || '',
+    mapOrderUpdate: vi.fn((order: any) => [
+      {
+        id: order.orderID,
+        status: order.ordStatus?.toLowerCase() === 'filled' ? OrderStatus.Closed : OrderStatus.Open,
+        symbol: order.symbol,
+        type: OrderType.Market,
+        side: OrderSide.Buy,
+        price: 50_000,
+        amount: 1,
+        filled: order.ordStatus?.toLowerCase() === 'new' ? 0 : 1,
+        remaining: order.ordStatus?.toLowerCase() === 'new' ? 1 : 0,
+        reduceOnly: false,
+        lastUpdate: Date.now(),
+        info: order,
+      },
+    ]),
     mapPosition: vi.fn(),
     fetchPositions: vi
       .fn()

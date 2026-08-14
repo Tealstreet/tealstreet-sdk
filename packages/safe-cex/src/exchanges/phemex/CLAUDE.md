@@ -73,9 +73,9 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
      2. Sets `isHedged = true` (hardcoded default)
      3. Calls `tick()` which fetches positions and balance via REST
      4. Logs "Ready to trade on Phemex"
-     5. Order loading is NOT done via REST -- relies entirely on the WebSocket `aop_p` subscription snapshot
+     5. Initial order loading is NOT done via REST -- relies on the WebSocket `aop_p` subscription snapshot
 
-**Note on order loading**: REST `fetchOrders()` is commented out (`phemex.exchange.ts:155-165`). Initial orders come from the private WebSocket snapshot (`type: 'snapshot'` in `aop_p` subscription). The `fetchOrders()` method simply returns `this.store.orders`.
+**Note on order loading**: REST `fetchOrders()` is commented out. Initial orders come from the private WebSocket snapshot (`type: 'snapshot'` in `aop_p` subscription), and `fetchOrders()` simply returns `this.store.orders`. Successful `placeOrder()` REST create responses are also normalized and upserted immediately when they describe an open order, so newly created stop orders do not depend on the private WebSocket echo arriving before the UI assertion window.
 
 ### Tick Loop
 
@@ -220,6 +220,8 @@ After authentication, subscribes to `aop_p.subscribe` (Account/Order/Position).
 
 **Snapshot handling**: On initial `type: 'snapshot'`, replaces all orders in store (only keeps `OrderStatus.Open` orders). Subsequent updates use `addOrUpdateOrders`.
 
+**Order mapping**: Private WebSocket `orders_p` rows and successful REST create response rows both go through `PhemexExchange.mapOrderUpdate()`. The mapper accepts both WS field names (`ordType`, `orderQty`) and REST-create field names (`orderType`, `orderQtyRq`), because `/g-orders/create` can return an already usable open stop row before the WebSocket echo arrives.
+
 **Fill emission**: Fills are emitted only for non-snapshot messages. Fills are deduplicated using `uniqBy` on order ID. Fill price uses `execPriceRp` from raw order info when available, falling back to the formatted order price.
 
 **Duplicate order status handling** (`phemex.ws-private.ts:358-367`): When a single message batch contains the same `orderID` with both open and closed statuses, the code detects the closed status update and overrides the open one. This prevents transient open states from appearing in the UI.
@@ -249,7 +251,7 @@ Defined in `ORDER_TYPE` mapping:
 
 - `GoodTillCancel`, `ImmediateOrCancel`, `FillOrKill`, `PostOnly`
 
-**Stop/TP order type detection** (WebSocket, `phemex.ws-private.ts:370-396`): Uses `stopDirection` and `side` fields:
+**Stop/TP order type detection**: Uses `stopDirection` and `side` fields:
 
 - `Rising` + `Sell` = TakeProfit; `Rising` + `Buy` = StopLoss
 - `Falling` + `Sell` = StopLoss; `Falling` + `Buy` = TakeProfit
@@ -275,6 +277,7 @@ Defined in `ORDER_TYPE` mapping:
    - Attached TP/SL use `stopLossRp` and `takeProfitRp` fields on the same order payload
 3. Each payload sent via PUT to `/g-orders/create`
 4. Checks response: `code !== 0` is an error; `ordStatus: 'Suspended'` with `execStatus: 'PendingAllocate'` indicates insufficient margin
+5. Successful response rows are passed through `mapOrderUpdate()` and open orders are immediately upserted into the store before returning order IDs. The WebSocket remains authoritative later, but this covers the normal CI/UI window where the REST create succeeds and the private WS echo is delayed.
 
 ### Order Update (`updateOrder`, `phemex.exchange.ts:708`)
 
@@ -385,10 +388,11 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 ### Orders
 
 - **Initial state**: Comes from WebSocket `aop_p` subscription snapshot (`type: 'snapshot'`)
+- **Created-order upsert**: Successful `/g-orders/create` responses are normalized through the same mapper as WebSocket order updates and open rows are merged into the store immediately.
 - **Snapshot handling**: On snapshot, replaces entire order store with only `OrderStatus.Open` orders; non-open orders in the snapshot are filtered out (`phemex.ws-private.ts:354`)
 - **Incremental updates**: Subsequent messages use `store.addOrUpdateOrders()` which merges by order ID
 - **Batch deduplication**: Within a single WebSocket message, if the same `orderID` appears with both open and closed statuses, the closed status takes precedence (`phemex.ws-private.ts:358-367`)
-- **REST fallback**: `fetchOrders()` simply returns `this.store.orders` -- there is no REST reconciliation. A `TODO: fetchAndSetPrivateSnapshot` comment exists at `phemex.exchange.ts:428`.
+- **REST fallback**: `fetchOrders()` simply returns `this.store.orders` -- there is no REST reconciliation. The REST-create upsert is only for orders this client just placed; it is not a general open-orders fetch. A `TODO: fetchAndSetPrivateSnapshot` comment exists in `phemex.exchange.ts`.
 
 ### Positions
 
@@ -525,7 +529,7 @@ leverage the exchange never applied.
 
 1. **Legacy class naming**: WebSocket classes are named `BinancePublicWebsocket` and `BinancePrivateWebsocket` (carried over from original fork). The exchange class itself is correctly named `PhemexExchange`.
 2. **Log messages**: Some log messages reference "Binance" instead of "Phemex" (e.g., `_startPublicDataOnly` logs "Ready to watch public data on Binance" at `phemex.exchange.ts:173`).
-3. **fetchOrders not implemented**: REST order fetching is commented out; relies entirely on WebSocket `aop_p` subscription snapshot for initial order state. There is a TODO comment at `phemex.exchange.ts:428` about implementing `fetchAndSetPrivateSnapshot`.
+3. **fetchOrders not implemented**: REST order fetching is commented out; initial order state relies on WebSocket `aop_p` subscription snapshot. `placeOrder()` still upserts successful REST-created open orders so the local store reflects orders this client just created while waiting for the WebSocket echo. There is a TODO comment in `phemex.exchange.ts` about implementing `fetchAndSetPrivateSnapshot`.
 4. **fetchHistoricalTrades**: Returns empty array (not implemented).
 5. **API response format**: Success responses have `code: 0`. Non-zero codes indicate errors with message in `msg` field.
 6. **Suspended orders**: Orders with `ordStatus: 'Suspended'` and `execStatus: 'PendingAllocate'` indicate insufficient margin (`phemex.exchange.ts:763`).

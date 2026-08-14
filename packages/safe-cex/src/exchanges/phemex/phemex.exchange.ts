@@ -52,12 +52,14 @@ import {
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   ORDER_SIDE,
+  ORDER_STATUS,
   ORDER_TYPE,
   POSITIONS_RESPONSE,
   TIME_IN_FORCE,
 } from './phemex.types';
 import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
+import { virtualClock } from '../../utils/virtualClock';
 
 export class PhemexExchange extends BaseExchange {
   xhr: Axios;
@@ -518,6 +520,106 @@ export class PhemexExchange extends BaseExchange {
   // TODO: fetchAndSetPrivateSnapshot
   fetchOrders = async () => {
     return this.store.orders;
+  };
+
+  mapOrderUpdate = (order: Record<string, any>): Order[] => {
+    const rawOrderStatus = `${order.ordStatus || order.orderStatus || ''}`.toLowerCase();
+    let status = ORDER_STATUS[rawOrderStatus] || OrderStatus.Canceled;
+
+    // Market, Limit, Stop, StopLimit, MarketIfTouched, LimitIfTouched.
+    const rawOrderType = order.ordType || order.orderType;
+    let type = OrderType.Market;
+    if (rawOrderType === 'Market') {
+      type = OrderType.Market;
+    } else if (rawOrderType === 'Limit') {
+      type = OrderType.Limit;
+    } else if (
+      rawOrderType === 'Stop' ||
+      rawOrderType === 'StopLimit' ||
+      rawOrderType === 'MarketIfTouched' ||
+      rawOrderType === 'LimitIfTouched'
+    ) {
+      if (order.stopDirection === 'Rising') {
+        type = order.side === 'Sell' ? OrderType.TakeProfit : OrderType.StopLoss;
+      } else if (order.stopDirection === 'Falling') {
+        type = order.side === 'Sell' ? OrderType.StopLoss : OrderType.TakeProfit;
+      }
+    }
+
+    const timeInForce = TIME_IN_FORCE[order.timeInForce];
+    const reduceOnly =
+      order.reduceOnly === true ||
+      order.reduceOnly === 'true' ||
+      ['ReduceOnly', 'CloseOnTrigger'].some((i) => order.execInst?.includes(i));
+    const amount = parseFloat(v(order, 'orderQty') || v(order, 'orderQtyRq') || '0');
+    const filled = status === OrderStatus.Canceled ? 0 : parseFloat(v(order, 'execQty') || '0') || 0;
+    const remaining =
+      parseFloat(v(order, 'leavesQty')) ||
+      parseFloat(v(order, 'orderQty')) ||
+      parseFloat(v(order, 'orderQtyRq')) ||
+      1;
+    const trigger = v(order, 'trigger') || v(order, 'triggerType');
+
+    const formattedOrders = [
+      {
+        id: order.orderID,
+        status,
+        symbol: this.formatSymbolIn(order.symbol),
+        type,
+        side: order.side === 'Buy' ? OrderSide.Buy : OrderSide.Sell,
+        price: parseFloat(v(order, 'stopPxRp')) || parseFloat(v(order, 'priceRp')),
+        amount,
+        reduceOnly,
+        filled,
+        // Stops use orderQty/orderQtyRq because leavesQty is absent before trigger.
+        remaining,
+        lastUpdate: virtualClock.getCurrentTimeMs(),
+        info: order,
+        timeInForce,
+        ...(type === OrderType.TakeProfit && {
+          tpTriggerType: trigger === 'ByLastPrice' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice,
+        }),
+        ...(type === OrderType.StopLoss && {
+          slTriggerType: trigger === 'ByLastPrice' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice,
+        }),
+      },
+    ];
+
+    const sl = parseFloat(v(order, 'stopLossRp'));
+    const tp = parseFloat(v(order, 'takeProfitRp'));
+    const inverseSide = formattedOrders[0].side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+
+    if (sl > 0) {
+      formattedOrders.push({
+        ...formattedOrders[0],
+        id: `${order.orderID}__stop_loss`,
+        type: OrderType.StopLoss,
+        side: inverseSide,
+        price: sl,
+        filled: 0,
+        amount: 0,
+        lastUpdate: virtualClock.getCurrentTimeMs(),
+        slTriggerType:
+          v(order, 'slTrigger') === 'ByLastPrice' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice,
+      });
+    }
+
+    if (tp > 0) {
+      formattedOrders.push({
+        ...formattedOrders[0],
+        id: `${order.orderID}__take_profit`,
+        type: OrderType.TakeProfit,
+        side: inverseSide,
+        price: tp,
+        filled: 0,
+        amount: 0,
+        lastUpdate: virtualClock.getCurrentTimeMs(),
+        tpTriggerType:
+          v(order, 'tpTrigger') === 'ByLastPrice' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice,
+      });
+    }
+
+    return formattedOrders;
   };
 
   fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
@@ -1130,6 +1232,7 @@ export class PhemexExchange extends BaseExchange {
   placeOrder = async (opts: PlaceOrderOpts) => {
     const payloads = await this.formatCreateOrder(opts);
     const orderIds = [];
+    const openOrders: Order[] = [];
     let errMsg = '';
     for (const payload of payloads) {
       const { data } = await this.unlimitedXHR.put(ENDPOINTS.ORDER, undefined, {
@@ -1142,7 +1245,11 @@ export class PhemexExchange extends BaseExchange {
         errMsg = 'Order is suspended. Likely insufficient margin.';
       } else {
         orderIds.push(data.data.orderID);
+        openOrders.push(...this.mapOrderUpdate(data.data).filter((order) => order.status === OrderStatus.Open));
       }
+    }
+    if (openOrders.length > 0) {
+      this.store.addOrUpdateOrders(openOrders);
     }
     if (errMsg) {
       this.emitAndLogError(errMsg);

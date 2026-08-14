@@ -2,7 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { LogSeverity, MarginType, OrderSide, OrderType, PositionMode, PositionSide } from '../../types';
+import {
+  LogSeverity,
+  MarginType,
+  OrderSide,
+  OrderStatus,
+  OrderStopTriggerType,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
 
 const createExchange = () => {
   const store = new DefaultStore();
@@ -100,6 +109,58 @@ describe('audit regression: Phemex dormant orders and public subscription cap', 
     expect(exchange.fetchMarkets).toHaveBeenCalledTimes(1);
     expect(store.marketsBySymbol.ADAUSDT?.symbol).toBe('ADAUSDT');
     expect(payload).toEqual(expect.objectContaining({ symbol: 'ADAUSDT', orderQtyRq: '52.85', ordType: 'Market' }));
+  });
+
+  it('upserts successful REST-created stop orders while waiting for websocket echo', async () => {
+    const exchange = createExchange();
+    vi.spyOn(exchange.unlimitedXHR, 'put').mockResolvedValue({
+      data: {
+        code: 0,
+        msg: '',
+        data: {
+          orderID: 'rest-stop-1',
+          symbol: 'BTCUSDT',
+          side: 'Sell',
+          ordStatus: 'Untriggered',
+          execStatus: 'Registered',
+          orderType: 'Stop',
+          stopDirection: 'Falling',
+          priceRp: '0',
+          stopPxRp: '58000',
+          orderQtyRq: '0.25',
+          execQty: '0',
+          execInst: 'CloseOnTrigger',
+          trigger: 'ByMarkPrice',
+          timeInForce: 'ImmediateOrCancel',
+        },
+      },
+    } as any);
+
+    const ids = await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      amount: 0.25,
+      price: 58_000,
+      reduceOnly: true,
+    });
+
+    expect(ids).toEqual(['rest-stop-1']);
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({
+        id: 'rest-stop-1',
+        status: OrderStatus.Open,
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 58_000,
+        amount: 0.25,
+        remaining: 0.25,
+        filled: 0,
+        reduceOnly: true,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    ]);
   });
 
   it('warns once as active public subscriptions approach the 20-topic cap', () => {

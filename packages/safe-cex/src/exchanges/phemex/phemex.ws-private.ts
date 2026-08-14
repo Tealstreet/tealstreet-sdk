@@ -7,14 +7,13 @@ import uniqBy from 'lodash/uniqBy';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { v } from '@tealstreet/safe-cex/src/utils/get-key';
 import { add, divide1, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { ENABLE_PWS_LOG } from '../../config/config';
-import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, Position } from '../../types';
+import { OrderStatus, Position } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, ORDER_STATUS, TIME_IN_FORCE } from './phemex.types';
+import { BASE_WS_URL, ORDER_STATUS } from './phemex.types';
 
 export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
   requestId: number = 1200;
@@ -447,13 +446,23 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           //   "userID": 2149812
           // }
 
+          const partiallyFilledOrderIds = new Set(
+            orders
+              .filter((order: any) => {
+                const rawOrderStatus = `${order?.ordStatus || ''}`.toLowerCase();
+                return rawOrderStatus === 'partiallyfilled' || rawOrderStatus === 'partially_filled';
+              })
+              .map((order: any) => order.orderID)
+              .filter(Boolean),
+          );
+
           const formattedOrders = orders.flatMap((order: any) => {
             const rawOrderStatus = order.ordStatus.toLowerCase();
             let status = ORDER_STATUS[rawOrderStatus] || OrderStatus.Canceled;
-            const isPartiallyFilled = rawOrderStatus === 'partiallyfilled' || rawOrderStatus === 'partially_filled';
             if (json?.type === 'snapshot' && status !== OrderStatus.Open) return [];
 
             // possible we have another update in same msg which says order is closed, but doesnt have tpsl
+            let orderForMapping = order;
             if (status === OrderStatus.Open) {
               const foundClosedOrder = orders.find(
                 (o: any) =>
@@ -462,114 +471,17 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
               );
               if (foundClosedOrder) {
                 status = ORDER_STATUS[foundClosedOrder.ordStatus.toLowerCase()] || OrderStatus.Canceled;
+                orderForMapping = { ...order, ordStatus: foundClosedOrder.ordStatus };
               }
             }
 
-            // Market, Limit, Stop, StopLimit, MarketIfTouched, LimitIfTouched,
-            let type;
-            if (order.ordType === 'Market') {
-              type = OrderType.Market;
-            } else if (order.ordType === 'Limit') {
-              type = OrderType.Limit;
-            } else if (
-              order.ordType === 'Stop' ||
-              order.ordType === 'StopLimit' ||
-              order.ordType === 'MarketIfTouched' ||
-              order.ordType === 'LimitIfTouched'
-            ) {
-              if (order.stopDirection === 'Rising') {
-                if (order.side === 'Sell') {
-                  type = OrderType.TakeProfit;
-                } else {
-                  type = OrderType.StopLoss;
-                }
-              } else if (order.stopDirection === 'Falling') {
-                if (order.side === 'Sell') {
-                  type = OrderType.StopLoss;
-                } else {
-                  type = OrderType.TakeProfit;
-                }
-              }
-            } else {
-              type = OrderType.Market;
-            }
-
-            const timeInForce = TIME_IN_FORCE[order.timeInForce];
-
-            const formattedOrders = [
-              {
-                id: order.orderID,
-                status,
-                symbol: this.parent.formatSymbolIn(order.symbol),
-                type,
-                side: order.side === 'Buy' ? OrderSide.Buy : OrderSide.Sell,
-                price: parseFloat(v(order, 'stopPxRp')) || parseFloat(v(order, 'priceRp')),
-                amount: parseFloat(v(order, 'orderQty')),
-                reduceOnly:
-                  Boolean(order.reduceOnly) ||
-                  ['ReduceOnly', 'CloseOnTrigger'].some((i) => order.execInst?.includes(i)),
-                filled: status === OrderStatus.Canceled ? 0 : parseFloat(v(order, 'execQty')),
-                // stops use orderQty as no leavesQty before trigger...
-                remaining: parseFloat(v(order, 'leavesQty')) || parseFloat(v(order, 'orderQty')) || 1,
-                lastUpdate: virtualClock.getCurrentTimeMs(),
-                info: order,
-                timeInForce,
-                ...(type === OrderType.TakeProfit && {
-                  tpTriggerType:
-                    v(order, 'trigger') === 'ByLastPrice'
-                      ? OrderStopTriggerType.LastPrice
-                      : OrderStopTriggerType.MarkPrice,
-                }),
-                ...(type === OrderType.StopLoss && {
-                  slTriggerType:
-                    v(order, 'trigger') === 'ByLastPrice'
-                      ? OrderStopTriggerType.LastPrice
-                      : OrderStopTriggerType.MarkPrice,
-                }),
-              },
-            ];
-
-            const sl = parseFloat(v(order, 'stopLossRp'));
-            const tp = parseFloat(v(order, 'takeProfitRp'));
-            const inverseSide = formattedOrders[0].side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
-
-            if (sl > 0) {
-              formattedOrders.push({
-                ...formattedOrders[0],
-                id: `${order.orderID}__stop_loss`,
-                type: OrderType.StopLoss,
-                side: inverseSide,
-                price: sl,
-                filled: 0,
-                amount: 0,
-                lastUpdate: virtualClock.getCurrentTimeMs(),
-                slTriggerType:
-                  v(order, 'slTrigger') === 'ByLastPrice'
-                    ? OrderStopTriggerType.LastPrice
-                    : OrderStopTriggerType.MarkPrice,
-              });
-            }
-
-            if (tp > 0) {
-              formattedOrders.push({
-                ...formattedOrders[0],
-                id: `${order.orderID}__take_profit`,
-                type: OrderType.TakeProfit,
-                side: inverseSide,
-                price: tp,
-                filled: 0,
-                amount: 0,
-                lastUpdate: virtualClock.getCurrentTimeMs(),
-                tpTriggerType:
-                  v(order, 'tpTrigger') === 'ByLastPrice'
-                    ? OrderStopTriggerType.LastPrice
-                    : OrderStopTriggerType.MarkPrice,
-              });
-            }
+            const formattedOrders = this.parent.mapOrderUpdate(orderForMapping);
 
             if (json?.type !== 'snapshot') {
               const fills = uniqBy(
-                formattedOrders.filter((o) => o.filled > 0 && (o.status === OrderStatus.Closed || isPartiallyFilled)),
+                formattedOrders.filter(
+                  (o) => o.filled > 0 && (o.status === OrderStatus.Closed || partiallyFilledOrderIds.has(o.id)),
+                ),
                 'id',
               );
               fills.forEach((order) => {
