@@ -50,6 +50,10 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPI } from './woo.api';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
+import { mapFoldedInterval } from '../../journal/fold.position-adapter';
+import { reconstructPositionIntervals } from '../../journal/position-intervals';
+import type { PositionRecord } from '../../journal/position.types';
+import { wooOrdersToExecutions } from '../../journal/woo.position-adapter';
 import { mapWooHistoricalOrder } from './woo.order-history';
 import {
   ACCOUNT_RESPONSE,
@@ -119,6 +123,34 @@ const isWooRateLimitError = (err: any) =>
 // testable — the parser below is an instance field and unreachable from tests.
 
 export class WOOXExchange extends BaseExchange {
+  /**
+   * Journal records fold from the ORDER axis, not fills.
+   *
+   * `/v1/orders?realized_pnl=true` is the only woo route carrying `realized_pnl`,
+   * `total_fee` and `position_side` on one row. BOTH woo fills axes report
+   * `realizedPnl: null` on every row, so a fills fold refuses every interval and returns
+   * nothing — which is exactly what it did before this override existed.
+   */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+    const to = opts.to ?? Date.now();
+    const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+
+    const orders = await this.fetchOrderHistory({ from, to });
+    const executions = wooOrdersToExecutions(orders);
+    const records: PositionRecord[] = [];
+
+    for (const interval of reconstructPositionIntervals(executions)) {
+      if (interval.closedAt === undefined || interval.closedAt < from) continue;
+      const record = mapFoldedInterval(interval, {
+        account: opts.account,
+        resolveSettleCurrency: (symbol: string) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
+      });
+      if (record) records.push(record);
+    }
+
+    return records;
+  };
+
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
   private static readonly FILL_POSITION_REFRESH_BASE_DELAY_MS = 150;
   private static readonly FUNDING_REFRESH_INTERVAL_MS = 60_000;

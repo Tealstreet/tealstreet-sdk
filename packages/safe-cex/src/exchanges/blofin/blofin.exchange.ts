@@ -57,6 +57,7 @@ import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPo
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './blofin.api';
+import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from './blofin.income';
 import { mapBlofinHistoricalOrder } from './blofin.order-history';
 import {
@@ -803,6 +804,69 @@ export class BlofinExchange extends BaseExchange {
    * Closed positions from `/api/v1/account/positions-history` — a DIFFERENT source from
    * the fills the ledger reads, which is what makes it a real cross-check.
    */
+  /**
+   * RAW positions-history rows. Public so the journal reads the endpoint through a method
+   * rather than the harness scraping it off the URL. Dedupes on `historyId`, NOT
+   * `positionId` — a live sample had 20 rows across 2 positionIds, so keying on the position
+   * would delete 18 real closes. Same trap as okx's posId.
+   */
+  fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
+    if (this.isPublicDataOnly) return [];
+
+    const market = opts.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts.symbol && !market) return [];
+
+    const MAX_PAGES = 100;
+    const PAGE_LIMIT = 100;
+    const collected: Array<Record<string, any>> = [];
+    const seen = new Set<string>();
+    let after: string | undefined;
+
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const params = omitUndefined({
+        instId: market?.id,
+        begin: opts.from,
+        end: opts.to,
+        limit: PAGE_LIMIT,
+        after,
+      });
+      const { data } = await this.xhr.get(ENDPOINTS.POSITIONS_HISTORY, { params });
+      const rows: Array<Record<string, any>> = Array.isArray(data?.data) ? data.data : [];
+      if (rows.length === 0) break;
+
+      let added = 0;
+      for (const row of rows) {
+        const id = String(row.historyId ?? '');
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+        added += 1;
+        collected.push(row);
+      }
+
+      if (added === 0 || rows.length < PAGE_LIMIT) break;
+      const next = oldestCursorId(rows, 'historyId') ?? '';
+      if (!next || next === after) break;
+      after = next;
+    }
+
+    return collected;
+  };
+
+  /** Journal records from the REPORTED closed axis — blofin folds to nothing from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to } as HistoricalTradeOptions);
+    const records = [];
+    for (const row of rows) {
+      const record = mapBlofinPositionHistory(row, {
+        account: opts.account,
+        resolveSymbol: (instId: string) => this.store?.marketsById?.[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store?.marketsById?.[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
+
   fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
     if (this.isPublicDataOnly) {
       return [];

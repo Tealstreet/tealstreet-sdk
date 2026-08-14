@@ -107,6 +107,10 @@ const getBitgetApiErrorMessage = (payload: { code?: string | number; msg?: strin
 };
 
 export class BitgetExchange extends BaseExchange {
+  /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+    this.foldClosedPositionRecords(opts, { symbolScoped: false });
+
   xhr: Axios;
   unlimitedXHR: Axios;
 

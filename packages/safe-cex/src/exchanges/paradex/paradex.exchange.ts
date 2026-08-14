@@ -64,6 +64,10 @@ import { ParadexPrivateWebSocket } from './paradex.ws-private';
 import { ParadexPublicWebSocket } from './paradex.ws-public';
 
 export class ParadexExchange extends BaseExchange {
+  /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+    this.foldClosedPositionRecords(opts, { symbolScoped: true });
+
   xhr: Axios;
 
   publicWebsocket: ParadexPublicWebSocket;

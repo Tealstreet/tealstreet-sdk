@@ -83,6 +83,10 @@ const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined =>
 };
 
 export class KrakenExchange extends BaseExchange {
+  /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+    this.foldClosedPositionRecords(opts, { symbolScoped: false });
+
   xhr: Axios;
   unlimitedXHR: Axios;
   /** `api/history/*` — ledger and order history. Different prefix, same host. */

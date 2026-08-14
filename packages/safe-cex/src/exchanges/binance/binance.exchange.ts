@@ -106,6 +106,11 @@ const REQUEST_WEIGHT_BACKOFF_MS = 60_000;
 
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
+  /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+    this.foldClosedPositionRecords(opts, { symbolScoped: true });
+
+
   private hasLoggedBalanceAggregation = false;
   private positionStateVersion = 0;
   private lastAccountReconciliationAt = 0;

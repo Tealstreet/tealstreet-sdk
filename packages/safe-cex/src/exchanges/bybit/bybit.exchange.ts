@@ -14,6 +14,7 @@ import times from 'lodash/times';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import {
   Balance,
   Candle,
@@ -962,6 +963,90 @@ export class BybitExchange extends BaseExchange {
    * `users_app_history_bybit_closed_pnl` — a table with zero rows and no producer — so it
    * always returned `[]` while looking implemented. It now calls bybit.
    */
+  /**
+   * RAW closed-PnL rows. Public so the journal reads this endpoint through a method rather
+   * than the harness scraping the URL. Bybit caps a query at 7 days, so the window walk lives
+   * here once for both consumers.
+   */
+  fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
+    if (this.isPublicDataOnly) return [];
+
+    const category = this.getCategoryForSymbol(opts.symbol);
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
+    const collected: Array<Record<string, any>> = [];
+
+    for (const window of this.getExecutionQueryWindows(from, to)) {
+      let cursor: string | undefined;
+      let page = 0;
+
+      do {
+        const { data } = await this.xhr.get(ENDPOINTS.USER_CLOSED_PNL, {
+          params: omitUndefined({
+            category,
+            symbol: opts.symbol,
+            startTime: window.startTime,
+            endTime: window.endTime,
+            limit: 100,
+            cursor,
+          }),
+        });
+
+        if (data.retMsg !== 'OK' && +data.retCode !== 0) {
+          // Throws rather than returning what it has: a partial history presented as a
+          // complete one is the failure this whole surface exists to prevent.
+          throw new Error(`bybit closed-PnL fetch failed: ${data.retMsg}`);
+        }
+
+        collected.push(...((data.result?.list || []) as Array<Record<string, any>>));
+        cursor = data.result?.nextPageCursor || undefined;
+        page += 1;
+      } while (cursor && page < MAX_CLOSED_PNL_PAGES);
+    }
+
+    return collected;
+  };
+
+  /**
+   * Journal records from the REPORTED closed axis.
+   *
+   * Uses `aggregateBybitClosedPnl`, which folds bybit's per-partial-close rows into round
+   * trips — bybit is the one venue emitting one row per partial rather than per round trip.
+   * Its known merge caveat (two cycles reopening at an identical entry price) rides on the
+   * venue grading, not here.
+   */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
+    const rows = await this.fetchClosedPositionRows({ from, to } as HistoricalTradeOptions);
+
+    // LEG JOIN, and it is not optional. bybit's closed-PnL rows carry no hedge leg — only
+    // the ORDER axis does, via `positionIdx`. Without it every row buckets as `both`, longs
+    // and shorts merge, and the count comes out short: measured 127 records against the
+    // gate's 150, restored to 150 by the join.
+    //
+    // The venue's separate non-zero gross residual (-0.0596) is NOT evidence for this and did
+    // not move when the join landed — it is the aggregation artefact described in
+    // `docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md`. Two signals were claimed here once; only
+    // the count was ever measuring the leg.
+    const legs = new Map<string, PositionSide | 'both'>();
+    try {
+      for (const order of await this.fetchOrderHistory({ from, to })) {
+        if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
+      }
+    } catch {
+      // A failed leg join must not silently produce merged records. Rethrow: an
+      // under-counted history presented as complete is the failure this surface prevents.
+      throw new Error('bybit: could not read the order axis to resolve hedge legs');
+    }
+
+    return aggregateBybitClosedPnl(rows, {
+      account: opts.account,
+      resolveSettleCurrency: (symbol: string) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
+      resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
+    });
+  };
+
   fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
     if (this.isPublicDataOnly) {
       return [];

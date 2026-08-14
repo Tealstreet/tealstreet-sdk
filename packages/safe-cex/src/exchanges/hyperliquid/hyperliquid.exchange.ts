@@ -109,6 +109,10 @@ import { HyperliquidPublicWebSocket } from './hyperliquid.ws-public';
 export { hasSeenFill, markFillSeen };
 
 export class HyperliquidExchange extends BaseExchange {
+  /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+    this.foldClosedPositionRecords(opts, { symbolScoped: true });
+
   xhr: Axios; // For /exchange endpoint (trading operations)
   infoXhr: Axios; // For /info endpoint (read-only operations)
   unlimitedXHR: Axios;

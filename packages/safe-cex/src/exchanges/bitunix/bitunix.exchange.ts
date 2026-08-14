@@ -54,6 +54,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bitunix.api';
+import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from './bitunix.income';
 import { mapBitunixHistoricalOrder } from './bitunix.order-history';
 import {
@@ -1029,6 +1030,38 @@ export class BitunixExchange extends BaseExchange {
     incomeType?: string,
   ): Promise<IncomeRecord[]> => {
     return await this.fetchIncomeHistory({ startTime, endTime, incomeType });
+  };
+
+  /**
+   * RAW history-position rows. Public because the journal adapter reads fields
+   * `ClosedPnlEntry` does not carry, and the audit harness was scraping them off the URL.
+   * `fetchBitunixHistoryPages` already owned the paging, so this is the same walk both
+   * consumers use rather than a second one.
+   */
+  fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
+    if (this.isPublicDataOnly) return [];
+    return await this.fetchBitunixHistoryPages(
+      ENDPOINTS.HISTORY_POSITIONS,
+      opts.from,
+      opts.to,
+      (r) => parseInt(String(r.mtime ?? r.ctime ?? '0'), 10),
+      (r) => String(r.positionId ?? ''),
+      opts.symbol,
+    );
+  };
+
+  /** Journal records from the REPORTED closed axis — bitunix folds to nothing from fills. */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to } as HistoricalTradeOptions);
+    const records = [];
+    for (const row of rows) {
+      const record = mapBitunixPositionHistory(row, {
+        account: opts.account,
+        resolveSettleCurrency: (symbol: string) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
+      });
+      if (record) records.push(record);
+    }
+    return records;
   };
 
   fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {

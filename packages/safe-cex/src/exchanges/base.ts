@@ -1,6 +1,8 @@
 import type { Axios, AxiosInstance } from 'axios';
 import type { Store } from '../store/store.interface';
-import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
+import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';import { buildFoldedPositionRecords } from '../journal/buildRecords';
+import type { PositionRecord } from '../journal/position.types';
+
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
@@ -825,6 +827,81 @@ export class BaseExchange implements Exchange {
   fetchExecutions = markBaseCapabilityFallback('fetchExecutions', async (_opts: ExecutionsOptions) => {
     return await Promise.resolve([] as Execution[]);
   });
+
+  /**
+   * Closed round trips for the journal, folded from this venue's fills.
+   *
+   * Delegates to `buildFoldedPositionRecords`, the SAME implementation the audit harness has
+   * been grading against venue ledgers all week. A second copy written for the UI is exactly
+   * where the two would drift, and the drift would be invisible because both would look
+   * correct alone.
+   *
+   * **THROWS when the venue has no usable fills axis, and never returns `[]`.** An empty array
+   * is indistinguishable from an account with no trades — the failure this whole surface was
+   * built around — so the caller must be able to tell "we could not ask" from "nothing
+   * happened". The seam turns this into a named, reported state.
+   *
+   * Whether a venue may be shown AT ALL is not decided here. That lives once in
+   * `journal/select.ts`, so a venue is never fetched and then discarded, and no adapter can
+   * answer the question differently from its neighbours.
+   */
+  /**
+   * Closed round trips for the journal.
+   *
+   * **REFUSES BY DEFAULT.** A venue must declare its records path explicitly; there is no
+   * inherited behaviour.
+   *
+   * This started as a fold-from-fills default and that was the structural cause of three
+   * separate silent-empty bugs in one sitting. okx, woo, paradex and hyperliquid each
+   * inherited a fold that is wrong for them and returned `[]` — an empty journal reading as
+   * "you have no trades" for accounts with 134, 263, 64 and 103 real round trips. Each fix
+   * looked complete from inside the case that motivated it, and left its siblings intact.
+   *
+   * A default cannot be right for a venue nobody checked. Refusing makes the siblings RAISE
+   * THEIR HANDS instead of relying on anyone to enumerate them: a new venue with no declared
+   * path fails loudly and is reported as an account we could not read, which is true.
+   */
+  fetchClosedPositionRecords = async (_opts: {
+    account: string;
+    from?: number;
+    to?: number;
+  }): Promise<PositionRecord[]> => {
+    throw new Error(
+      `${this.constructor.name}: no journal records path declared. Override ` +
+        `fetchClosedPositionRecords — fold from fills via foldClosedPositionRecords, or map ` +
+        `this venue's reported closed axis.`,
+    );
+  };
+
+  /**
+   * Fold this venue's FILLS into round trips. Shared with the audit harness, which has been
+   * grading this exact fold against venue ledgers.
+   *
+   * `symbolScoped` where the venue's fills route demands a symbol (binance, paradex,
+   * hyperliquid). Account-wide is one request instead of N and is preferred where allowed.
+   */
+  protected foldClosedPositionRecords = async (
+    opts: { account: string; from?: number; to?: number },
+    config: { symbolScoped?: boolean } = {},
+  ): Promise<PositionRecord[]> => {
+    if (isInertCapability(this.fetchExecutions, 'fetchExecutions')) {
+      throw new Error(`${this.constructor.name}: no fills axis, cannot fold journal records`);
+    }
+
+    const to = opts.to ?? Date.now();
+    const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+
+    const { records } = await buildFoldedPositionRecords(this as never, {
+      account: opts.account,
+      from,
+      to,
+      symbolScoped: config.symbolScoped,
+      resolveSettleCurrency: (symbol) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
+    });
+
+    return records;
+  };
+
 
   fetchHistoricalTrades = markBaseCapabilityFallback('fetchHistoricalTrades', async (_opts: HistoricalTradeOptions) => {
     return await Promise.resolve([] as HistoricalTrade[]);

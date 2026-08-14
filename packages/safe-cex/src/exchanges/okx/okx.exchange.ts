@@ -55,6 +55,7 @@ import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPo
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './okx.api';
+import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { mapOkxClosedPosition } from './okx.closed-pnl';
 import { mapOkxBillToIncomeRecords, OKX_BILL_TYPE_BY_INCOME_TYPE } from './okx.income';
 import { mapOkxHistoricalOrder } from './okx.order-history';
@@ -1012,6 +1013,89 @@ export class OKXExchange extends BaseExchange {
    * is the only reason it can cross-check it. See `okx.closed-pnl.ts` for the field shape
    * and the funding-inclusion difference from bybit.
    */
+  /**
+   * RAW `/api/v5/trade/closed-pnl` rows, paged.
+   *
+   * Public because the journal needs the unmapped row: `mapOkxPositionHistory` reads fields
+   * `ClosedPnlEntry` does not carry, and the audit harness was obtaining them by INSTRUMENTING
+   * the URL. Scraping is fine in a harness and wrong in production, and having two readers of
+   * one endpoint is where they drift — so the paging lives here once and both consumers use it.
+   */
+  fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
+    if (this.isPublicDataOnly) return [];
+
+    const market = opts.symbol ? this.store.marketsBySymbol[opts.symbol] : undefined;
+    if (opts.symbol && !market) return [];
+
+    const MAX_PAGES = 100;
+    const PAGE_LIMIT = 100;
+    const collected: Array<Record<string, any>> = [];
+    let after: string | undefined = opts.to ? String(opts.to) : undefined;
+
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const params = omitUndefined({
+        instType: 'SWAP',
+        instId: market?.id,
+        before: opts.from,
+        after,
+        limit: PAGE_LIMIT,
+      });
+
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.POSITIONS_HISTORY, { params });
+
+      const rows = Array.isArray(data) ? data : [];
+      if (rows.length === 0) break;
+      collected.push(...rows);
+      if (rows.length < PAGE_LIMIT) break;
+
+      const oldest = rows.reduce((acc, row) => {
+        const t = parseInt(String(row.uTime ?? '0'), 10);
+        return Number.isFinite(t) && t > 0 ? Math.min(acc, t) : acc;
+      }, Number.POSITIVE_INFINITY);
+      if (!Number.isFinite(oldest)) break;
+
+      const nextAfter = String(oldest - 1);
+      if (nextAfter === after) break;
+      after = nextAfter;
+      await sleep(100);
+    }
+
+    return collected;
+  };
+
+  /**
+   * Journal records from the REPORTED closed axis, not from folding fills.
+   *
+   * okx folds to NOTHING — measured 0 records against 134 real round trips — because its
+   * records never came from fills. `BaseExchange` now throws rather than folding a venue that
+   * reports closed positions; this is the override that throw asks for.
+   */
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to } as HistoricalTradeOptions);
+    const records = [];
+
+    for (const row of rows) {
+      const market = this.store?.marketsById?.[String(row.instId ?? '')];
+      // An unknown market cannot be converted from contracts, and an INVERSE one needs a
+      // reference price `contractsToBase` lacks here — it returns 0, which the adapter drops
+      // as a zero-size row. Skipped explicitly rather than silently mapped to nothing.
+      if (!market || market.isInverse) continue;
+
+      const record = mapOkxPositionHistory(row, {
+        account: opts.account,
+        toBase: (contracts: number, instId: string) =>
+          this.contractsToBase(contracts, this.store?.marketsById?.[instId] ?? market),
+        resolveSymbol: (instId: string) => this.store?.marketsById?.[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store?.marketsById?.[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+
+    return records;
+  };
+
   fetchClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
     if (this.isPublicDataOnly) {
       return [];
