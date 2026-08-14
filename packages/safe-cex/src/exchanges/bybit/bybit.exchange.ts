@@ -346,6 +346,12 @@ export class BybitExchange extends BaseExchange {
 
     const useExternalPublicData = await this.initExternalPublicData();
 
+    // Margin mode and unified-account status are private, and every position
+    // is stamped with them. They used to be fetched inside the public-data
+    // branch below, so an account sourcing public data from elsewhere kept
+    // reporting cross margin regardless of its real setting.
+    const marginAccountInfos = publicDataOnly ? null : this.fetchMarginAccountInfos();
+
     // Fetch API key info asynchronously without blocking startup
     if (!publicDataOnly) {
       this.fetchAndCacheApiKeyInfo().catch(() => {
@@ -370,7 +376,6 @@ export class BybitExchange extends BaseExchange {
           return markets;
         }),
         this.fetchTickersWithoutParse(),
-        ...(!publicDataOnly ? [this.fetchMarginAccountInfos()] : []),
       ]);
 
       const tickers = this.parseTickers(rawTickers);
@@ -382,6 +387,10 @@ export class BybitExchange extends BaseExchange {
         loaded: { ...this.store.loaded, tickers: true },
       });
     }
+
+    // Awaited here rather than inside the branch above: it must run on both
+    // public-data paths, and it is what stamps margin mode onto positions.
+    if (marginAccountInfos) await marginAccountInfos.catch(() => undefined);
 
     this.log(`Ready to trade on Bybit`);
 
