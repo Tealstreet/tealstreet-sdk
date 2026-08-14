@@ -289,29 +289,24 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
       });
 
-      const midPx = parseFloat(v(sourceTicker, 'midPx'));
-      const markPx = parseFloat(v(sourceTicker, 'markPx')) || midPx;
-      const prevDayPx = parseFloat(v(sourceTicker, 'prevDayPx'));
-      const quoteVolume = parseFloat(v(sourceTicker, 'dayNtlVlm')) || 0;
-      const dayBaseVolume = parseFloat(v(sourceTicker, 'dayBaseVlm'));
-      const volume =
-        Number.isFinite(dayBaseVolume) && dayBaseVolume > 0 ? dayBaseVolume : midPx > 0 ? quoteVolume / midPx : 0;
-
       tickers.push({
         id,
         symbol,
         bid: 0,
         ask: 0,
-        last: midPx,
-        mark: markPx,
+        last: parseFloat(v(sourceTicker, 'midPx')),
+        mark: parseFloat(v(sourceTicker, 'markPx')),
         index: parseFloat(v(sourceTicker, 'oraclePx')),
-        midPrice: midPx,
-        percentage: prevDayPx > 0 ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0,
+        midPrice: parseFloat(v(sourceTicker, 'midPx')),
+        percentage:
+          ((parseFloat(v(sourceTicker, 'midPx')) - parseFloat(v(sourceTicker, 'prevDayPx'))) /
+            parseFloat(v(sourceTicker, 'prevDayPx'))) *
+          100,
         fundingRate: parseFloat(v(sourceTicker, 'funding')),
         fundingTime: 0,
-        volume,
-        quoteVolume,
-        openInterest: 0,
+        volume: parseFloat(v(sourceTicker, 'dayNtlVlm')),
+        quoteVolume: parseFloat(v(sourceTicker, 'dayNtlVlm')) * parseFloat(v(sourceTicker, 'midPx')),
+        openInterest: 0, // Binance doesn't provides all tickers data,
         info: sourceTicker,
       });
     }

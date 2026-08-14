@@ -108,32 +108,6 @@ import { HyperliquidPublicWebSocket } from './hyperliquid.ws-public';
 // Export fill deduplication functions for use by WebSocket handlers
 export { hasSeenFill, markFillSeen };
 
-const parseFiniteNumber = (value: unknown): number => {
-  const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const calculatePriceChangePercentage = (price: number, prevDayPx: number): number => {
-  if (!Number.isFinite(price) || !Number.isFinite(prevDayPx) || prevDayPx <= 0) return 0;
-  return ((price - prevDayPx) / prevDayPx) * 100;
-};
-
-const parseHyperliquidVolumeFields = (
-  sourceTicker: AssetCtx | SpotAssetCtx,
-  price: number,
-): { volume: number; quoteVolume: number } => {
-  const quoteVolume = parseFiniteNumber(v(sourceTicker, 'dayNtlVlm'));
-  const dayBaseVolume = parseFiniteNumber(v(sourceTicker, 'dayBaseVlm'));
-  const volume = dayBaseVolume > 0 ? dayBaseVolume : price > 0 ? quoteVolume / price : 0;
-
-  return { volume, quoteVolume };
-};
-
-const parseHyperliquidOpenInterestNotional = (sourceTicker: AssetCtx, price: number): number => {
-  const openInterestBase = parseFiniteNumber(v(sourceTicker, 'openInterest'));
-  return price > 0 ? openInterestBase * price : 0;
-};
-
 export class HyperliquidExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
@@ -1372,10 +1346,8 @@ export class HyperliquidExchange extends BaseExchange {
         });
 
         // Create ticker in the same loop (price is already parsed as midPx above)
-        const mark = parseFiniteNumber(v(sourceTicker, 'markPx'));
-        const prevDayPx = parseFiniteNumber(v(sourceTicker, 'prevDayPx'));
-        const notionalPrice = mark > 0 ? mark : price;
-        const { volume, quoteVolume } = parseHyperliquidVolumeFields(sourceTicker, price);
+        const prevDayPx = parseFloat(v(sourceTicker, 'prevDayPx'));
+        const volume = parseFloat(v(sourceTicker, 'dayNtlVlm'));
 
         tickers.push({
           id,
@@ -1383,15 +1355,15 @@ export class HyperliquidExchange extends BaseExchange {
           bid: 0,
           ask: 0,
           last: price,
-          mark,
-          index: parseFiniteNumber(v(sourceTicker, 'oraclePx')),
+          mark: parseFloat(v(sourceTicker, 'markPx')),
+          index: parseFloat(v(sourceTicker, 'oraclePx')),
           midPrice: price,
-          percentage: calculatePriceChangePercentage(notionalPrice, prevDayPx),
-          fundingRate: parseFiniteNumber(v(sourceTicker, 'funding')),
+          percentage: ((price - prevDayPx) / prevDayPx) * 100,
+          fundingRate: parseFloat(v(sourceTicker, 'funding')),
           fundingTime: 0,
           volume,
-          quoteVolume,
-          openInterest: parseHyperliquidOpenInterestNotional(sourceTicker, notionalPrice),
+          quoteVolume: volume * price,
+          openInterest: 0,
           info: sourceTicker,
         });
       } catch (e) {
@@ -1513,10 +1485,8 @@ export class HyperliquidExchange extends BaseExchange {
             },
           });
 
-          const mark = parseFiniteNumber(v(sourceTicker, 'markPx'));
-          const prevDayPx = parseFiniteNumber(v(sourceTicker, 'prevDayPx'));
-          const notionalPrice = mark > 0 ? mark : price;
-          const { volume, quoteVolume } = parseHyperliquidVolumeFields(sourceTicker, price);
+          const prevDayPx = parseFloat(v(sourceTicker, 'prevDayPx'));
+          const volume = parseFloat(v(sourceTicker, 'dayNtlVlm'));
 
           tickers.push({
             id,
@@ -1524,15 +1494,15 @@ export class HyperliquidExchange extends BaseExchange {
             bid: 0,
             ask: 0,
             last: price,
-            mark,
-            index: parseFiniteNumber(v(sourceTicker, 'oraclePx')),
+            mark: parseFloat(v(sourceTicker, 'markPx')),
+            index: parseFloat(v(sourceTicker, 'oraclePx')),
             midPrice: price,
-            percentage: calculatePriceChangePercentage(notionalPrice, prevDayPx),
-            fundingRate: parseFiniteNumber(v(sourceTicker, 'funding')),
+            percentage: ((price - prevDayPx) / prevDayPx) * 100,
+            fundingRate: parseFloat(v(sourceTicker, 'funding')),
             fundingTime: 0,
             volume,
-            quoteVolume,
-            openInterest: parseHyperliquidOpenInterestNotional(sourceTicker, notionalPrice),
+            quoteVolume: volume * price,
+            openInterest: 0,
             info: sourceTicker,
           });
         } catch (e) {
@@ -1770,9 +1740,8 @@ export class HyperliquidExchange extends BaseExchange {
         // reference break the day that happens.
         const displayBase = this.resolveSpotDisplayName(token, tokenNames);
         const displaySymbol = `${displayBase}/${quoteAsset}`;
-        const mark = parseFiniteNumber(v(sourceTicker, 'markPx')) || midPx;
-        const prevDayPx = parseFiniteNumber(v(sourceTicker, 'prevDayPx'));
-        const { volume, quoteVolume } = parseHyperliquidVolumeFields(sourceTicker, midPx);
+        const prevDayPx = parseFloat(v(sourceTicker, 'prevDayPx'));
+        const dayNtlVlm = parseFloat(v(sourceTicker, 'dayNtlVlm'));
 
         markets.push({
           id,
@@ -1812,17 +1781,17 @@ export class HyperliquidExchange extends BaseExchange {
           bid: 0,
           ask: 0,
           last: midPx,
-          mark,
+          mark: parseFloat(v(sourceTicker, 'markPx')) || midPx,
           // Spot has no oracle/funding/OI. Zero on the fields below means "not
           // published by the venue", per the Ticker contract — consumers must
           // not read it as a real zero.
           index: 0,
           midPrice: midPx,
-          percentage: calculatePriceChangePercentage(mark, prevDayPx),
+          percentage: prevDayPx > 0 ? ((midPx - prevDayPx) / prevDayPx) * 100 : 0,
           fundingRate: 0,
           fundingTime: 0,
-          volume,
-          quoteVolume,
+          volume: dayNtlVlm,
+          quoteVolume: dayNtlVlm * midPx,
           openInterest: 0,
           info: sourceTicker,
         });

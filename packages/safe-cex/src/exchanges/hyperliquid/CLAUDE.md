@@ -271,15 +271,6 @@ Hyperliquid uses only two REST endpoints. All operations are differentiated by t
 | `spotMetaAndAssetCtxs`          | Spot market metadata                                             | Spot startup                                  |
 | `spotClearinghouseState`        | Spot balances / holds (collateral source for unified/portfolio)  | Spot exchange + perps unified/portfolio       |
 
-### Public ticker field units
-
-`metaAndAssetCtxs` / `spotMetaAndAssetCtxs` field names are easy to misread:
-
-- `dayNtlVlm` is already 24h notional/quote volume. Do **not** multiply it by price again when populating `Ticker.quoteVolume`.
-- `dayBaseVlm` is the base-asset volume. Use it for `Ticker.volume` when present; otherwise derive base volume as `dayNtlVlm / price`.
-- Perp `openInterest` is base units, not USD notional. Convert it with mark price (falling back to mid) before writing `Ticker.openInterest`, because screener/dropdown per-exchange OI is displayed in notional terms and compared against USD aggregate OI.
-- `prevDayPx` is present for the 24h change calculation. Guard malformed/zero previous prices, but do not treat a missing calculation as proof the venue does not publicize the field.
-
 ### Chaser fill reconciliation
 
 `fetchFillsForOrderIds()` is used after a chaser cancel attempt, before a
