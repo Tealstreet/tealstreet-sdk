@@ -34,7 +34,18 @@ export type PositionProvenance = 'reported' | 'derived';
  * one bad fill corrupts every later position. A closed-position row joined to orders is
  * still venue-reported and error-local, hence the separate `closed-positions+orders`.
  */
-export type PositionSourceAxis = 'closed-positions' | 'closed-positions+orders' | 'fills' | 'fills+orders';
+/**
+ * `'orders'` is WOO's, and it is a distinct axis rather than a flavour of `'fills'`: its
+ * round trips are folded from `/v1/orders`, because that is the ONLY woo route carrying
+ * `realized_pnl`, `total_fee` and `position_side` on one row. Both of its fills axes report
+ * `realizedPnl: null` on every row, so a fills fold there refuses every interval.
+ */
+export type PositionSourceAxis =
+  | 'closed-positions'
+  | 'closed-positions+orders'
+  | 'fills'
+  | 'fills+orders'
+  | 'orders';
 
 export type PositionRecord = {
   /**
