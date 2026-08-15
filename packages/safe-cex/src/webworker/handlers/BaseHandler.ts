@@ -5,6 +5,7 @@ import { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 const PENDING_TIMEOUT_MS = 30_000;
+const PENDING_POLL_MS = 500;
 const PENDING_TIMEOUT_REPORT_COOLDOWN_MS = 5 * 60_000;
 
 export abstract class BaseHandler {
@@ -18,7 +19,7 @@ export abstract class BaseHandler {
   // Buffer for messages that arrive before markets are loaded
   private _pendingUntilMarkets: StoreWorkerPayload[] = [];
   private _pendingTimeout: ReturnType<typeof setTimeout> | null = null;
-  private _pendingUnsubscribe: (() => void) | null = null;
+  private _pendingPoll: ReturnType<typeof setInterval> | null = null;
   private _firstPendingAt: number | null = null;
   private _lastPendingTimeoutReportAt: number | null = null;
   private _suppressedPendingTimeoutReports = 0;
@@ -54,17 +55,13 @@ export abstract class BaseHandler {
     this._firstPendingAt ??= Date.now();
     this._pendingUntilMarkets.push(payload);
 
-    // Flush the moment markets land. This used to poll every 500ms, which
-    // spent up to half a second of boot idling after the data it was waiting
-    // for already existed - on the orderbook, the slowest surface to appear.
-    // Subscribing to the store is the fix the original attempt missed: store
-    // updates never route through handle(), but they do notify here.
-    if (!this._pendingUnsubscribe) {
-      this._pendingUnsubscribe = this._exchange.store.subscribe(() => {
+    // Start polling to flush when markets load
+    if (!this._pendingPoll) {
+      this._pendingPoll = setInterval(() => {
         if (this._exchange.store.markets.length > 0) {
           this._flushPending();
         }
-      });
+      }, PENDING_POLL_MS);
     }
 
     // Timeout: drop pending and notify client if markets never load
@@ -129,9 +126,9 @@ export abstract class BaseHandler {
       clearTimeout(this._pendingTimeout);
       this._pendingTimeout = null;
     }
-    if (this._pendingUnsubscribe) {
-      this._pendingUnsubscribe();
-      this._pendingUnsubscribe = null;
+    if (this._pendingPoll) {
+      clearInterval(this._pendingPoll);
+      this._pendingPoll = null;
     }
     this._firstPendingAt = null;
   }

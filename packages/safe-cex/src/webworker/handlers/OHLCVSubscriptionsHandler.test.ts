@@ -43,8 +43,6 @@ describe('OHLCVSubscriptionsHandler', () => {
 
     mockStore = {
       markets: [{ symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }],
-      // Buffered subscriptions flush off this, not a poll.
-      subscribe: vi.fn(() => vi.fn()),
     };
 
     mockExchange = {
