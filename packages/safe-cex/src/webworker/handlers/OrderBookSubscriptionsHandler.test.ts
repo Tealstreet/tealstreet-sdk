@@ -30,6 +30,7 @@ describe('OrderBookSubscriptionsHandler', () => {
   let handler: OrderBookSubscriptionsHandler;
   let mockExchange: Exchange;
   let mockStore: any;
+  let storeListeners: Array<() => void> = [];
   let mockCtx: Worker;
   let mockSettings: AppSettingsWorkerType;
   let mockMetadata: ExchangeMetadataWorkerType;
@@ -48,10 +49,18 @@ describe('OrderBookSubscriptionsHandler', () => {
     mockUnsubscribe = vi.fn();
     mockListenOrderBook = vi.fn().mockReturnValue(mockUnsubscribe);
 
+    storeListeners = [];
     mockStore = {
       markets: [{ symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }],
       tickers: [{ symbol: 'BTCUSDT', ask: 50000, bid: 49999 }],
       updateTicker: vi.fn(),
+      // Buffered subscriptions flush off this, not a poll.
+      subscribe: vi.fn((cb: () => void) => {
+        storeListeners.push(cb);
+        return () => {
+          storeListeners = storeListeners.filter((listener) => listener !== cb);
+        };
+      }),
     };
 
     mockExchange = {
@@ -120,6 +129,26 @@ describe('OrderBookSubscriptionsHandler', () => {
 
         // Should NOT be called immediately — buffered until markets load
         expect(mockListenOrderBook).not.toHaveBeenCalled();
+      });
+
+      it('subscribes as soon as the store reports markets, without waiting for a poll', () => {
+        mockStore.markets = [];
+
+        handler.handle({
+          op: 'subscribeOrderBook',
+          data: { subId: 'sub-4', symbol: 'ANYUSDT' },
+        } as StoreWorkerPayload);
+
+        expect(mockListenOrderBook).not.toHaveBeenCalled();
+        expect(storeListeners).toHaveLength(1);
+
+        mockStore.markets = [{ symbol: 'ANYUSDT' }];
+        storeListeners.forEach((notify) => notify());
+
+        expect(mockListenOrderBook).toHaveBeenCalledTimes(1);
+        // And it stops listening once flushed, so the orderbook's own store
+        // traffic does not keep calling back into the flush path.
+        expect(storeListeners).toHaveLength(0);
       });
 
       it('should post orderbook updates via callback', () => {
