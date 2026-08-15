@@ -1,11 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BaseHandler } from './BaseHandler';
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
-import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
+import type { StoreWorkerPayload } from '../StoreWorkerPayload';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { OrderStopTriggerType } from '../../types';
+import { BaseHandler } from './BaseHandler';
 
 // Concrete implementation for testing
 class TestHandler extends BaseHandler {
@@ -22,7 +24,7 @@ class TestHandler extends BaseHandler {
   }
 
   dispose(): void {
-    // Custom dispose logic if needed
+    super.dispose();
   }
 
   // Expose protected members for testing
@@ -259,6 +261,129 @@ describe('BaseHandler', () => {
         }),
       );
     });
+
+    it('suppresses repeated timeout reports during the same market-load outage', () => {
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'BTCUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(handler.buffer({ op: 'subscribeOHLCV' as any, data: { symbol: 'ETHUSDT', interval: '1m' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(mockCtx.postMessage).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(5 * 60_000);
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'SOLUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(mockCtx.postMessage).toHaveBeenCalledTimes(2);
+      expect(mockCtx.postMessage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          op: 'error',
+          data: expect.arrayContaining([
+            expect.any(String),
+            expect.objectContaining({
+              sentryData: expect.objectContaining({
+                extra: expect.objectContaining({
+                  suppressedPendingTimeoutReports: 1,
+                }),
+              }),
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('resets timeout report suppression after pending subscriptions flush', () => {
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'BTCUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(handler.buffer({ op: 'subscribeOHLCV' as any, data: { symbol: 'ETHUSDT', interval: '1m' } })).toBe(true);
+      (mockExchange.store as any).markets = [{ symbol: 'ETHUSDT' }];
+      (mockExchange.store as any).loaded = { markets: true };
+      vi.advanceTimersByTime(500);
+
+      expect(handler.handleCallCount).toBe(1);
+
+      (mockExchange.store as any).markets = [];
+      (mockExchange.store as any).loaded = { markets: false };
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'SOLUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(mockCtx.postMessage).toHaveBeenCalledTimes(2);
+      expect(mockCtx.postMessage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          op: 'error',
+          data: expect.arrayContaining([
+            expect.any(String),
+            expect.objectContaining({
+              sentryData: expect.objectContaining({
+                extra: expect.objectContaining({
+                  suppressedPendingTimeoutReports: 0,
+                }),
+              }),
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('resets timeout report suppression after markets load between outages', () => {
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'BTCUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      (mockExchange.store as any).markets = [{ symbol: 'ETHUSDT' }];
+      (mockExchange.store as any).loaded = { markets: true };
+      expect(handler.buffer({ op: 'subscribeOHLCV' as any, data: { symbol: 'ETHUSDT', interval: '1m' } })).toBe(false);
+
+      (mockExchange.store as any).markets = [];
+      (mockExchange.store as any).loaded = { markets: false };
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'SOLUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(mockCtx.postMessage).toHaveBeenCalledTimes(2);
+      expect(mockCtx.postMessage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          op: 'error',
+          data: expect.arrayContaining([
+            expect.any(String),
+            expect.objectContaining({
+              sentryData: expect.objectContaining({
+                extra: expect.objectContaining({
+                  suppressedPendingTimeoutReports: 0,
+                }),
+              }),
+            }),
+          ]),
+        }),
+      );
+    });
   });
 
   describe('dispose', () => {
@@ -281,14 +406,7 @@ describe('BaseHandler', () => {
 
     exchanges.forEach((exchangeName) => {
       it(`should support ${exchangeName}`, () => {
-        const handler = new TestHandler(
-          'account',
-          exchangeName,
-          mockExchange,
-          mockCtx,
-          mockSettings,
-          mockMetadata,
-        );
+        const handler = new TestHandler('account', exchangeName, mockExchange, mockCtx, mockSettings, mockMetadata);
         expect(handler.getExchangeName()).toBe(exchangeName);
       });
     });

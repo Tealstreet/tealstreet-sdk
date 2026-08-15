@@ -151,6 +151,13 @@ it drops the pending subscriptions and posts an `op: 'error'` payload with
 `sendToSentry: true`. This is intentionally still app-neutral: safe-cex does
 not import Sentry, it only sends structured data for the web app to sanitize.
 
+Repeated timeout reports from the same handler instance are cooldowned for 5
+minutes. The subscriptions are still dropped on each 30 s timeout; only the
+Sentry/log report is dampened, and the next emitted report carries the number
+of suppressed timeout reports. Once markets load and buffered subscriptions
+flush, the episode resets and a future outage reports normally. A recreated
+worker/handler may report again because it carries new startup context.
+
 That payload carries only bounded, non-user fields: exchange name, handler name,
 pending op counts, market loaded/count state, public-data/testnet flags, and
 socket-health scalars. Do not add raw account names, symbols, topics, payload

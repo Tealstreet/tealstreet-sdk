@@ -6,6 +6,7 @@ import { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 const PENDING_TIMEOUT_MS = 30_000;
 const PENDING_POLL_MS = 500;
+const PENDING_TIMEOUT_REPORT_COOLDOWN_MS = 5 * 60_000;
 
 export abstract class BaseHandler {
   protected _accountName: string;
@@ -20,6 +21,8 @@ export abstract class BaseHandler {
   private _pendingTimeout: ReturnType<typeof setTimeout> | null = null;
   private _pendingPoll: ReturnType<typeof setInterval> | null = null;
   private _firstPendingAt: number | null = null;
+  private _lastPendingTimeoutReportAt: number | null = null;
+  private _suppressedPendingTimeoutReports = 0;
 
   constructor(
     accountName: string,
@@ -44,7 +47,10 @@ export abstract class BaseHandler {
    * false if markets are already loaded (caller should proceed normally).
    */
   protected bufferUntilMarketsLoaded(payload: StoreWorkerPayload): boolean {
-    if (this._exchange.store.markets.length > 0) return false;
+    if (this._exchange.store.markets.length > 0) {
+      this._resetPendingTimeoutReportEpisode();
+      return false;
+    }
 
     this._firstPendingAt ??= Date.now();
     this._pendingUntilMarkets.push(payload);
@@ -62,29 +68,43 @@ export abstract class BaseHandler {
     if (!this._pendingTimeout) {
       this._pendingTimeout = setTimeout(() => {
         if (this._pendingUntilMarkets.length > 0) {
-          const msg = `Markets still not loaded after ${PENDING_TIMEOUT_MS / 1000}s, dropping ${this._pendingUntilMarkets.length} pending subscriptions`;
-          console.error(`[${this.constructor.name}] ${msg}`);
-          const error = new Error(msg);
-          error.name = 'MarketsNotLoadedError';
-          this._ctx.postMessage({
-            op: 'error',
-            data: [
-              msg,
-              {
-                sendToSentry: true,
-                sentryData: {
-                  error,
-                  tags: {
-                    exchange: this._exchange.name,
-                    module: 'BaseHandler',
-                    worker_handler: this.constructor.name,
-                    worker_error_family: 'markets_not_loaded',
+          const now = Date.now();
+          const shouldReport =
+            this._lastPendingTimeoutReportAt === null ||
+            now - this._lastPendingTimeoutReportAt >= PENDING_TIMEOUT_REPORT_COOLDOWN_MS;
+
+          if (shouldReport) {
+            const msg = `Markets still not loaded after ${PENDING_TIMEOUT_MS / 1000}s, dropping ${this._pendingUntilMarkets.length} pending subscriptions`;
+            console.error(`[${this.constructor.name}] ${msg}`);
+            const error = new Error(msg);
+            error.name = 'MarketsNotLoadedError';
+            this._ctx.postMessage({
+              op: 'error',
+              data: [
+                msg,
+                {
+                  sendToSentry: true,
+                  sentryData: {
+                    error,
+                    tags: {
+                      exchange: this._exchange.name,
+                      module: 'BaseHandler',
+                      worker_handler: this.constructor.name,
+                      worker_error_family: 'markets_not_loaded',
+                    },
+                    extra: {
+                      ...this._getPendingTelemetry(),
+                      suppressedPendingTimeoutReports: this._suppressedPendingTimeoutReports,
+                    },
                   },
-                  extra: this._getPendingTelemetry(),
                 },
-              },
-            ],
-          });
+              ],
+            });
+            this._lastPendingTimeoutReportAt = now;
+            this._suppressedPendingTimeoutReports = 0;
+          } else {
+            this._suppressedPendingTimeoutReports += 1;
+          }
           this._pendingUntilMarkets = [];
         }
         this._clearPendingTimers();
@@ -95,6 +115,7 @@ export abstract class BaseHandler {
 
   private _flushPending(): void {
     this._clearPendingTimers();
+    this._resetPendingTimeoutReportEpisode();
     const toReplay = [...this._pendingUntilMarkets];
     this._pendingUntilMarkets = [];
     for (const p of toReplay) this.handle(p);
@@ -146,6 +167,12 @@ export abstract class BaseHandler {
 
   dispose() {
     this._clearPendingTimers();
+    this._resetPendingTimeoutReportEpisode();
     this._pendingUntilMarkets = [];
+  }
+
+  private _resetPendingTimeoutReportEpisode(): void {
+    this._lastPendingTimeoutReportAt = null;
+    this._suppressedPendingTimeoutReports = 0;
   }
 }
