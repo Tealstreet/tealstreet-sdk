@@ -25,7 +25,7 @@
     "create-hmac": "^1.1.7",
     "dayjs": "^1.11.21",
     "lodash": "^4.18.1",
-    "nanoid": "~5.1.16",
+    "nanoid": "~6.0.1",
     "p-iteration": "^1.1.8",
     "qs": "^6.15.3",
     "tiny-emitter": "^2.1.0"
@@ -52,7 +52,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.1.3",
     "vite-tsconfig-paths": "^5.0.1",
-    "vitest": "^4.1.9",
+    "vitest": "^4.1.10",
     "@types/create-hash": "^1.2.2",
     "@types/create-hmac": "^1.1.0",
     "@types/lodash": "^4.17.24",
