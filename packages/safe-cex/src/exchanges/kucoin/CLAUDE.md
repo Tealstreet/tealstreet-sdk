@@ -135,6 +135,7 @@ does not apply to the active Classic `/contractMarket/level2` consumer.
 | `enabledInDev`                                   | `true`                   |
 | `enableInPreview`                                | `true`                   |
 | `supportsTestnet`                                | `false`                  |
+| `supportsTradesHistory`                          | `false`                  |
 | `orderbookTickDelay`                             | `60`                     |
 | `supportsTrailingStopLoss`                       | `false`                  |
 | `supportsChaser`                                 | `true`                   |

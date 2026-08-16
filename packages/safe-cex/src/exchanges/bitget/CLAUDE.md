@@ -531,6 +531,7 @@ The private WS triggers throttled REST fetches (500ms debounce) after receiving 
   requiresCors: true,
   supportsTestnet: false,           // Note: testnet product types exist but feature is disabled
   supportsTrailingStopLoss: false,  // Implementation exists but not exposed
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   tickInterval: 2_000,
   stopOrderPendingUpdateDelay: 4_000,

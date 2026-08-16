@@ -108,7 +108,7 @@ const getBitgetApiErrorMessage = (payload: { code?: string | number; msg?: strin
 
 export class BitgetExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
-  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: false });
 
   xhr: Axios;
@@ -803,7 +803,7 @@ export class BitgetExchange extends BaseExchange {
    * The route is also ACCOUNT-WIDE — unlike binance's `userTrades` it answers without a
    * symbol, so callers need not discover a symbol list first.
    */
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) return [];
 
     const { symbol, from, to, limit = BITGET_FILLS_PAGE_LIMIT } = opts;

@@ -1051,7 +1051,7 @@ export class BitunixExchange extends BaseExchange {
   };
 
   /** Journal records from the REPORTED closed axis — bitunix folds to nothing from fills. */
-  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
     const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to } as HistoricalTradeOptions);
     const records = [];
     for (const row of rows) {
@@ -1099,7 +1099,7 @@ export class BitunixExchange extends BaseExchange {
    * the same defect that cost real fills on hyperliquid. Overlap is absorbed by the id
    * dedupe, and a page that contributes nothing new ends the walk.
    */
-  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1153,7 +1153,7 @@ export class BitunixExchange extends BaseExchange {
 
       if (page >= MAX_PAGES) {
         this.log(
-          `fetchHistoricalOrders stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
           LogSeverity.Warning,
         );
       }
@@ -1245,7 +1245,7 @@ export class BitunixExchange extends BaseExchange {
     return collected;
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1421,7 +1421,7 @@ export class BitunixExchange extends BaseExchange {
 
       return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxLimit);
     } catch (err: any) {
-      this.log(`fetchHistoricalFills failed: ${err?.response?.data?.msg || err?.message}`, LogSeverity.Warning);
+      this.log(`fetchExecutions failed: ${err?.response?.data?.msg || err?.message}`, LogSeverity.Warning);
       return [];
     }
   };

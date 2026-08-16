@@ -36,7 +36,7 @@ const createStore = (markets: any[]) =>
     update: vi.fn(),
   }) as any;
 
-describe('Targeted exchange fetchHistoricalFills mapping', () => {
+describe('Targeted exchange fetchExecutions mapping', () => {
   it('maps OKX fills and falls back to fills-history', async () => {
     const market = {
       id: 'BTC-USDT-SWAP',
@@ -70,7 +70,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
       });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 20 });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 20 });
 
     expect(get.mock.calls[0][0]).toBe(OKX_ENDPOINTS.FILLS);
     expect(get.mock.calls[1][0]).toBe(OKX_ENDPOINTS.FILLS_HISTORY);
@@ -130,7 +130,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
       });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 50 });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 50 });
 
     expect(get.mock.calls[0][0]).toBe(PHEMEX_ENDPOINTS.USER_TRADES);
     expect(executions).toEqual([
@@ -159,7 +159,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     const get = vi.fn().mockResolvedValueOnce({ data: { data: { data: { tradeList: [] } } } });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 100 });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 100 });
 
     expect(get.mock.calls[0][0]).toBe(BITUNIX_ENDPOINTS.HISTORY_TRADES);
     expect(get).toHaveBeenCalledTimes(1);
@@ -195,7 +195,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 100 });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 100 });
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][0]).toBe(BITUNIX_ENDPOINTS.HISTORY_TRADES);
@@ -225,7 +225,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     const get = vi.fn().mockRejectedValueOnce(new Error('Network Error'));
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 100 });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 100 });
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][0]).toBe(BITUNIX_ENDPOINTS.HISTORY_TRADES);
@@ -289,7 +289,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
       });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     expect(get.mock.calls[0][0]).toBe(BLOFIN_ENDPOINTS.FILLS);
     expect(get.mock.calls[1][0]).toBe(BLOFIN_ENDPOINTS.ORDERS_HISTORY);
@@ -336,7 +336,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][0]).toBe(BLOFIN_ENDPOINTS.FILLS);
@@ -389,7 +389,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     expect(executions).toEqual([
       {
@@ -423,7 +423,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
       .mockResolvedValueOnce({ data: { code: '51000', msg: 'This operation is not supported', data: [] } });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     expect(executions).toEqual([]);
     expect(get.mock.calls[0][0]).toBe(BLOFIN_ENDPOINTS.FILLS);
@@ -441,7 +441,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     };
     // Paradex uses key + paradexAddress + subkeyAddress (no secret) — its isPublicDataOnly
     // override requires both paradex creds, so the bare baseOptions fixture would short-circuit
-    // fetchHistoricalFills to []. Provide test-only StarkNet/subkey addresses to exercise the REST path.
+    // fetchExecutions to []. Provide test-only StarkNet/subkey addresses to exercise the REST path.
     const exchange = new ParadexExchange(
       'paradex' as any,
       { ...baseOptions, paradexAddress: '0xPARADEX', subkeyAddress: '0xSUBKEY' } as any,
@@ -449,7 +449,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     );
     // The constructor kicks off real SDK init when paradexAddress is provided, which rejects
     // in the test environment. Replace the promise with an already-resolved no-op so
-    // fetchHistoricalFills can proceed past the `await this.sdkInitPromise` guard, and stub the
+    // fetchExecutions can proceed past the `await this.sdkInitPromise` guard, and stub the
     // jwtManager so the post-init guard also passes.
     (exchange as any).sdkInitPromise = undefined;
     (exchange as any).jwtManager = {} as any;
@@ -474,7 +474,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
       });
     exchange.xhr = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTC-USD-PERP', limit: 10 });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTC-USD-PERP', limit: 10 });
 
     expect(get.mock.calls[0][0]).toBe(PARADEX_ENDPOINTS.FILLS);
     expect(get.mock.calls[1][0]).toBe(PARADEX_ENDPOINTS.ORDERS_HISTORY);
@@ -532,7 +532,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     exchange.xhr = { get } as any;
     exchange.unlimitedXHR = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     const calledEndpoints = get.mock.calls.map((call) => call[0]);
     expect(calledEndpoints).toContain(APEX_ENDPOINTS.FILLS);
@@ -592,7 +592,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     exchange.unlimitedXHR = { get } as any;
 
     const emitAndLogErrorSpy = vi.spyOn(exchange, 'emitAndLogError');
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     const calledEndpoints = get.mock.calls.map((call) => call[0]);
     expect(calledEndpoints).toContain(APEX_ENDPOINTS.FILLS);
@@ -642,7 +642,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
     exchange.xhr = { get } as any;
     exchange.unlimitedXHR = { get } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][0]).toBe(APEX_ENDPOINTS.FILLS);
@@ -684,7 +684,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
       createdAt: 1700000019999,
     });
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
 
     expect(get).toHaveBeenCalled();
     expect(executions).toEqual([
@@ -734,7 +734,7 @@ describe('Targeted exchange fetchHistoricalFills mapping', () => {
         }),
     } as any;
 
-    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTC/USDT' });
+    const executions = await exchange.fetchExecutions({ symbol: 'BTC/USDT' });
 
     expect((exchange as any).lighterApiClient.get.mock.calls[0][0]).toBe(LIGHTER_ENDPOINTS.INACTIVE_ORDERS);
     expect((exchange as any).lighterApiClient.get.mock.calls[1][0]).toBe(LIGHTER_ENDPOINTS.TRADES);

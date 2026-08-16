@@ -88,10 +88,9 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 ## History axes: NONE implemented, but the venue publishes up to three
 
-phemex's history method was an unconditional `return []` — an **unbranded stub**, so
-`isBaseCapabilityFallback` could not see it and it read as a real implementation. Use
-`isInertCapability` when the question is "does this do anything". More importantly, do not
-read that stub as a statement about phemex:
+`fetchHistoricalTrades` here is an unconditional `return []` — an **unbranded stub**, so
+`isBaseCapabilityFallback` cannot see it and it reads as a real implementation. Use
+`isInertCapability`. More importantly, do not read that stub as a statement about phemex:
 
 | Venue route                               | Axis                          | Notes                                                                    |
 | ----------------------------------------- | ----------------------------- | ------------------------------------------------------------------------ |
@@ -107,7 +106,7 @@ without guessing. Do that before assuming a profile.
 **Probing hazard, separate from all of the above and still live:** an earlier probe of the
 executions route wedged unrelated REST on this venue, including public `/products`. That is
 also why `supportsExecutionsHistory` is a deliberate opt-**out** here (`FillsModule` and
-`tradeHistoryController` both gate on it) — phemex must not be invoked through the shared HOW
+`executionsController` both gate on it) — phemex must not be invoked through the shared HOW
 tunnel. Probe narrowly, one route at a time, and expect to need a fresh connection after.
 
 ## REST API Endpoints
@@ -126,7 +125,7 @@ All endpoints are defined in `ENDPOINTS` constant in `phemex.types.ts`:
 | `SET_LEVERAGE`          | `/g-positions/leverage`             | **PUT** | Set leverage for a symbol                                                |
 | `SET_LEVERAGE_CONTRACT` | `/positions/leverage`               | **PUT** | Set leverage (contract endpoint, unused)                                 |
 | `SET_POSITION_MODE`     | `/g-positions/switch-pos-mode-sync` | **PUT** | Switch between Hedged/OneWay position mode                               |
-| `USER_TRADES`           | `/exchange/order/v2/tradingList`    | GET     | User execution history (primary for `fetchHistoricalFills`)                   |
+| `USER_TRADES`           | `/exchange/order/v2/tradingList`    | GET     | User execution history (primary for `fetchExecutions`)                   |
 | `USER_TRADES_LEGACY`    | `/exchange/order/trade`             | GET     | Legacy fallback execution history endpoint                               |
 | `KLINE`                 | `/exchange/public/md/v2/kline/list` | GET     | Fetch OHLCV candlestick data                                             |
 | `ORDERBOOK`             | `/md/v2/fullbook`                   | GET     | Fetch full orderbook snapshot (params: `symbol`, `limit`)                |
@@ -138,7 +137,7 @@ All endpoints are defined in `ENDPOINTS` constant in `phemex.types.ts`:
 
 **Important**: Order placement and leverage changes use HTTP PUT method, not POST.
 
-Execution-history behavior (`fetchHistoricalFills`):
+Execution-history behavior (`fetchExecutions`):
 
 - Calls `USER_TRADES` first, then `USER_TRADES_LEGACY` on fallback path
 - Filters non-trade execution rows (`execType !== trade`) before mapping
@@ -146,11 +145,11 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 **⚠️ Currently opted out via `supportsExecutionsHistory: false` in `exchangeMetadata.ts`.**
 
-The implementation exists and is correct, but invoking it from `tradeHistoryController` /
+The implementation exists and is correct, but invoking it from `executionsController` /
 `FillsModule` was observed to wedge the shared Singapore HOW WebSocket tunnel for
 users in restricted jurisdictions or with incomplete proxy whitelisting. Symptoms:
 unrelated public REST endpoints (`/public/products`) time out at 20s, markets fail
-to load, chart subscriptions get dropped after 30s. Disabling Phemex's `fetchHistoricalFills`
+to load, chart subscriptions get dropped after 30s. Disabling Phemex's `fetchExecutions`
 restores normal behavior. The exact upstream tunnel/proxy interaction has not yet been
 isolated; flip the flag back to `true` after a production canary confirms no regression.
 
@@ -487,18 +486,10 @@ too small. The e2e margin-slider step catches this as `expected 5.45 to be close
 to 55.5675` (22.23 available x 10x x 0.25).
 
 `setLeverageHelper` therefore writes `store.fetchedLeverage[symbol]` after a
-confirmed success, including the confirmed `marginType` and `positionMode`,
-which is the app's documented no-position fallback (blofin's
+confirmed success, which is the app's documented no-position fallback (blofin's
 `fetchLeverageForSymbol` is the reference implementation). The response code is
-checked **before** any store mutation, so a rejected change cannot record
-metadata the exchange never applied.
-
-`changePositionMode` has the same flat-symbol requirement: Phemex can switch a
-zero-size symbol from OneWay to Hedged and then still have no mapped
-`store.positions` row because `mapPosition` intentionally drops size-0 rows.
-After a successful switch, refresh `accountPositions` and persist the confirmed
-`positionMode` / `marginType` in `fetchedLeverage[symbol]` so the UI selector
-does not fall back to stale mode metadata.
+checked **before** any store mutation, so a rejected change cannot record a
+leverage the exchange never applied.
 
 #### Margin Type (`changeMarginType`)
 
@@ -527,6 +518,7 @@ does not fall back to stale mode metadata.
 #### Not Implemented
 
 - `fetchOrders()`: Returns store orders only (no REST call)
+- `fetchHistoricalTrades()`: Returns empty array
 - `changeMarginType()`: Not exposed as independent REST call; uses leverage sign manipulation
 
 ## Testnet / Demo
@@ -542,14 +534,15 @@ does not fall back to stale mode metadata.
 1. **Legacy class naming**: WebSocket classes are named `BinancePublicWebsocket` and `BinancePrivateWebsocket` (carried over from original fork). The exchange class itself is correctly named `PhemexExchange`.
 2. **Log messages**: Some log messages reference "Binance" instead of "Phemex" (e.g., `_startPublicDataOnly` logs "Ready to watch public data on Binance" at `phemex.exchange.ts:173`).
 3. **fetchOrders not implemented**: REST order fetching is commented out; initial order state relies on WebSocket `aop_p` subscription snapshot. `placeOrder()` still upserts successful REST-created open orders so the local store reflects orders this client just created while waiting for the WebSocket echo. There is a TODO comment in `phemex.exchange.ts` about implementing `fetchAndSetPrivateSnapshot`.
-4. **API response format**: Success responses have `code: 0`. Non-zero codes indicate errors with message in `msg` field.
-5. **Suspended orders**: Orders with `ordStatus: 'Suspended'` and `execStatus: 'PendingAllocate'` indicate insufficient margin (`phemex.exchange.ts:763`).
-6. **Position side in orders**: Uses `posSide` field - `Merged` for one-way mode, `Long`/`Short` for hedged mode. For reduce-only/TP/SL orders in hedged mode, the position side is inverted.
-7. **Kline daily+ alignment**: For resolutions >= 86400s (1 day), fetching adjusts the end time to UTC start of day minus one day to align with exchange candle boundaries (`phemex.exchange.ts:463-466`).
-8. **Commented-out code**: Extensive commented-out code blocks in `formatCreateOrder()` and the WS private handler show alternative approaches for TP/SL as separate orders and COIN-M contract handling that were explored but not used.
-9. **Order ID comment references Binance**: Comment at `phemex.exchange.ts:889` says "otherwise Binance will duplicate the IDs" -- leftover from the fork origin.
-10. **Bonus balance excluded**: `bonusBalanceRv` is intentionally excluded from total balance calculation (commented out at `phemex.exchange.ts:407`).
-11. **Position contracts**: The code has a comment about COIN-M contract calculation (`phemex.exchange.ts:324`) but uses raw `size` for USD-M since it is not contract-based.
+4. **fetchHistoricalTrades**: Returns empty array (not implemented).
+5. **API response format**: Success responses have `code: 0`. Non-zero codes indicate errors with message in `msg` field.
+6. **Suspended orders**: Orders with `ordStatus: 'Suspended'` and `execStatus: 'PendingAllocate'` indicate insufficient margin (`phemex.exchange.ts:763`).
+7. **Position side in orders**: Uses `posSide` field - `Merged` for one-way mode, `Long`/`Short` for hedged mode. For reduce-only/TP/SL orders in hedged mode, the position side is inverted.
+8. **Kline daily+ alignment**: For resolutions >= 86400s (1 day), fetching adjusts the end time to UTC start of day minus one day to align with exchange candle boundaries (`phemex.exchange.ts:463-466`).
+9. **Commented-out code**: Extensive commented-out code blocks in `formatCreateOrder()` and the WS private handler show alternative approaches for TP/SL as separate orders and COIN-M contract handling that were explored but not used.
+10. **Order ID comment references Binance**: Comment at `phemex.exchange.ts:889` says "otherwise Binance will duplicate the IDs" -- leftover from the fork origin.
+11. **Bonus balance excluded**: `bonusBalanceRv` is intentionally excluded from total balance calculation (commented out at `phemex.exchange.ts:407`).
+12. **Position contracts**: The code has a comment about COIN-M contract calculation (`phemex.exchange.ts:324`) but uses raw `size` for USD-M since it is not contract-based.
 
 ## Error Handling
 

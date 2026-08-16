@@ -606,6 +606,7 @@ last-known-good orders and loaded state.
 - `trigger_bracket_gtc` / `trigger_bracket_gtd` (types defined but not used)
 - `limit_limit_gtd` (types defined but not used)
 - `sor_limit_ioc` (types defined but not used)
+- `fetchHistoricalTrades` (returns an empty array)
 - `fetchAndSetPrivateSnapshot` (empty method)
 
 ## Symbol Format
@@ -718,6 +719,7 @@ Key metadata settings (from `exchangeMetadata.ts`):
 | `supportsPartialStops`        | `true`                                                                           |
 | `supportsInfinityStops`       | `false`                                                                          |
 | `autoDownSizeReduceOrders`    | `true` (the create-order API has no server-side reduce-only cap)                  |
+| `supportsTradesHistory`       | `false`                                                                          |
 | `tvIntraDayMultipliers`       | `['1', '5', '15', '30', '60', '120', '360']`                                     |
 | `tvMaxGetBarFetches`          | `20`                                                                             |
 | `latencyDomain`               | `api.international.coinbase.com`                                                 |

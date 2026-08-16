@@ -107,8 +107,9 @@ const REQUEST_WEIGHT_BACKOFF_MS = 60_000;
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
-  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: true });
+
 
   private hasLoggedBalanceAggregation = false;
   private positionStateVersion = 0;
@@ -836,7 +837,26 @@ export class BinanceExchange extends BaseExchange {
     }
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalTrades = async (opts: HistoricalTradeOptions) => {
+    // Same 7-day hard reject as fetchExecutions. `fromId` paging is mutually exclusive with
+    // a window, so only a from+to ask is split; leaving the id path untouched.
+    const windows =
+      opts.from !== undefined && opts.to !== undefined
+        ? splitTimeRange(opts.from, opts.to, USER_TRADES_MAX_WINDOW_MS)
+        : [undefined];
+
+    const rows: any[] = [];
+    for (const window of windows) {
+      const { data } = await this.xhr.get<any[]>(ENDPOINTS.USER_TRADES, {
+        params: buildUserTradesParams(window ? { ...opts, from: window.startTime, to: window.endTime } : opts),
+      });
+      if (Array.isArray(data)) rows.push(...data);
+    }
+
+    return rows.map(mapBinanceUserTrade);
+  };
+
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     // Return empty array if in public data only mode
     if (this.isPublicDataOnly) {
       return [];
@@ -922,7 +942,7 @@ export class BinanceExchange extends BaseExchange {
   closedPositionsShareLedgerSource = false;
 
   /** Historical orders, including ones that never filled — see binance.order-history.ts. */
-  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly || !opts?.symbol) {
       // `/fapi/v1/allOrders` requires a symbol, unlike bybit's account-wide history.
       return [];

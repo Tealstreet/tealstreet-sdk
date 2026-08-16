@@ -534,7 +534,7 @@ export class KucoinSpotExchange extends BaseExchange {
     }
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     try {
       const { data } = await this.xhr.get(KUCOIN_SPOT_ENDPOINTS.FILLS, {
         params: omitUndefined({

@@ -1413,7 +1413,7 @@ export class LighterExchange extends BaseExchange {
     return mappedOrders;
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }

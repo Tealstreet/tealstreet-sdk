@@ -76,7 +76,7 @@ describe('BitmexExchange execution history mapping', () => {
       ],
     });
 
-    const executions = await exchange.fetchHistoricalFills({
+    const executions = await exchange.fetchExecutions({
       symbol: 'XBTUSD',
       orderId: 'oid-1',
       limit: 200,
@@ -93,10 +93,6 @@ describe('BitmexExchange execution history mapping', () => {
       price: 50000,
       qty: 100,
       side: OrderSide.Buy,
-      // BitMEX reports no per-fill hedge leg, so the mapper emits the one-way
-      // default rather than leaving it absent — `undefined` would read as "not
-      // reported" to a consumer that can distinguish, and several can.
-      positionSide: 'both',
       commission: 0.075,
       commissionAsset: 'USD',
     });
@@ -123,7 +119,7 @@ describe('BitmexExchange execution history mapping', () => {
       ],
     });
 
-    const historicalTrades = await exchange.fetchHistoricalFills({
+    const historicalTrades = await exchange.fetchHistoricalTrades({
       symbol: 'XBTUSDT',
       limit: 50,
     });
@@ -131,20 +127,14 @@ describe('BitmexExchange execution history mapping', () => {
     expect(historicalTrades).toHaveLength(1);
     expect(historicalTrades[0]).toMatchObject({
       symbol: 'XBTUSDT',
-      // The venue reported no orderID on this row. The removed mapper fell back
-      // to putting the EXECUTION id here, which made a fill id look like the id
-      // of the order it belonged to. It now lands in `id`, where a per-fill
-      // dedupe key belongs, and `orderId` stays absent — which is the honest
-      // answer and the only reason bitmex fills are now storable at all.
-      id: 'exec-1',
+      orderId: 'exec-1',
       price: 62000,
       qty: 0.5,
       side: OrderSide.Sell,
       positionSide: 'both',
       commissionAsset: 'USD',
     });
-    // `Execution.timestamp` is SECONDS; the removed HistoricalTrade shape was ms.
-    expect(historicalTrades[0].timestamp).toBe(Math.floor(time / 1000));
+    expect(historicalTrades[0].time).toBe(time);
     expect(historicalTrades[0].commission).toBeCloseTo(0.00125, 8);
     expect(historicalTrades[0].realizedPnl).toBeCloseTo(0.25, 8);
   });
@@ -170,7 +160,7 @@ describe('BitmexExchange execution history mapping', () => {
       ],
     });
 
-    const historicalTrades = await exchange.fetchHistoricalFills({
+    const historicalTrades = await exchange.fetchHistoricalTrades({
       symbol: 'XBTUSD',
       limit: 50,
     });
@@ -203,7 +193,7 @@ describe('BitmexExchange execution history mapping', () => {
       ],
     });
 
-    const historicalTrades = await exchange.fetchHistoricalFills({
+    const historicalTrades = await exchange.fetchHistoricalTrades({
       symbol: 'XBTUSDT',
       limit: 50,
     });
@@ -236,7 +226,7 @@ describe('BitmexExchange execution history mapping', () => {
       ],
     });
 
-    const historicalTrades = await exchange.fetchHistoricalFills({
+    const historicalTrades = await exchange.fetchHistoricalTrades({
       symbol: 'XBTUSD',
       limit: 50,
     });
@@ -269,7 +259,7 @@ describe('BitmexExchange execution history mapping', () => {
       ],
     });
 
-    const historicalTrades = await exchange.fetchHistoricalFills({
+    const historicalTrades = await exchange.fetchHistoricalTrades({
       symbol: 'XBTUSDT',
       limit: 50,
     });

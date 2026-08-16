@@ -529,6 +529,16 @@ export class BybitSpotExchange extends BaseExchange {
     return markets;
   };
 
+  fetchHistoricalTrades = async (opts: HistoricalTradeOptions) => {
+    if (process.env.NEXT_PUBLIC_DISABLE_EXTRA_APIS_IN_DEV === '1') {
+      return [];
+    }
+    const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
+    return (
+      await axios.get(`${baseUrl}/api/trades-history/bybit?accountName=` + opts.accountName + '&symbol=' + opts.symbol)
+    ).data;
+  };
+
   // No `fetchClosedPnl` on spot. Bybit's closed-PnL endpoint is position-based and does
   // not serve `category: 'spot'`, so there is nothing to call. The dead Tealstreet-cache
   // version that used to live here always returned []. `BybitSpotMetadata` therefore sets

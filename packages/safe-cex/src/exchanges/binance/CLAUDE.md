@@ -588,7 +588,7 @@ The `recvWindow` parameter defaults to `20_000` ms (20 seconds) for all variants
 
 ### User Trades (`/fapi/v1/userTrades`)
 
-`fetchHistoricalFills` builds its query through `buildUserTradesParams` and maps rows through
+`fetchHistoricalTrades` builds its query through `buildUserTradesParams` and maps rows through
 `mapBinanceUserTrade` (both in `binance.utils.ts`) rather than inline, because the exchange method is
 an instance field and cannot be reached from a test. Two fixed defects worth not reintroducing:
 
@@ -603,7 +603,7 @@ an instance field and cannot be reached from a test. Two fixed defects worth not
 Binance rejects `fromId` combined with `startTime`/`endTime`, so a time window wins and `fromId` is
 only sent when neither bound is present. `limit` is clamped to the endpoint's 1000 maximum. Deeper
 history than the most recent 1000 fills per symbol still requires explicit `fromId` paging by the
-caller — `fetchHistoricalFills` issues a single request.
+caller — `fetchHistoricalTrades` issues a single request.
 
 ### Income History Rate Limit
 
@@ -704,6 +704,7 @@ alwaysCalculateUnrealizedPnlFromLastPrice: true
 tickInterval: 500
 latencyDomain: fapi.binance.com
 orderbookTickDelay: 60
+supportsTradesHistory: true
 ```
 
 ### Binance Portfolio Margin (`binancepm`)
@@ -724,6 +725,7 @@ alwaysCalculateUnrealizedPnlFromLastPrice: true
 tickInterval: 500
 latencyDomain: papi.binance.com
 orderbookTickDelay: 60
+supportsTradesHistory: false  (no executions/historical-trades implementation)
 ```
 
 ### Binance Spot (`binancespot`)
@@ -735,6 +737,7 @@ supportsChaser: true
 doesNotSupportOpenInterest: true
 latencyDomain: api.binance.com
 orderbookTickDelay: 60
+supportsTradesHistory: false  (no executions/historical-trades implementation)
 ```
 
 ## Testnet / Demo

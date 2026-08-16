@@ -643,7 +643,7 @@ export class ExchangeWorker {
   private _fetchHistoricalData() {
     if (process.env.NEXT_PUBLIC_DISABLE_EXTRA_APIS_IN_DEV !== '1') {
       if (!this._isMobile && !isNonPrivateDataAccount(this._exchange?.name, this._exchange?.options)) {
-        const methods = ['fetchHistoricalOrders', 'fetchTradeHistory', 'fetchClosedPnL'];
+        const methods = ['fetchOrderHistory', 'fetchTradeHistory', 'fetchClosedPnL'];
         methods.forEach((method) => {
           (this._exchange as any)[`${method}Recursively`]?.(this._accountName);
         });

@@ -56,10 +56,8 @@ export class CallMethodHandler extends BaseHandler {
         case 'fetchOHLCV':
           result = await this._exchange.fetchOHLCV(...(args as Parameters<typeof this._exchange.fetchOHLCV>));
           break;
-        case 'fetchHistoricalFills':
-          result = await this._exchange.fetchHistoricalFills(
-            ...(args as Parameters<typeof this._exchange.fetchHistoricalFills>),
-          );
+        case 'fetchExecutions':
+          result = await this._exchange.fetchExecutions(...(args as Parameters<typeof this._exchange.fetchExecutions>));
           break;
         case 'fetchOrders':
           result = await this._exchange.fetchOrders(...(args as Parameters<typeof this._exchange.fetchOrders>));
@@ -72,11 +70,11 @@ export class CallMethodHandler extends BaseHandler {
         case 'removeOrders':
           await this._exchange.removeOrders(...(args as Parameters<typeof this._exchange.removeOrders>));
           break;
-        case 'fetchHistoricalOrders':
+        case 'fetchOrderHistory':
           // Without a case here the handler falls through to `default` and returns
           // success:false, so the method exists but is unreachable from the web app.
-          result = await this._exchange.fetchHistoricalOrders(
-            ...(args as Parameters<typeof this._exchange.fetchHistoricalOrders>),
+          result = await this._exchange.fetchOrderHistory(
+            ...(args as Parameters<typeof this._exchange.fetchOrderHistory>),
           );
           break;
         case 'fetchClosedPnl':

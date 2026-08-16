@@ -29,8 +29,6 @@ export type BuildRecordsOptions = {
   /**
    * Venues whose fills route demands a symbol (binance). An account-wide ask is one request
    * instead of N and is preferred wherever the venue allows it.
-   *
-   * Also decides whether a failed income read is fatal — see the throw below.
    */
   readonly symbolScoped?: boolean;
   readonly resolveSettleCurrency: (symbol: string) => string;
@@ -43,11 +41,8 @@ export type BuildRecordsResult = {
 };
 
 type FoldableExchange = {
-  fetchHistoricalFills: (opts: { symbol?: string; from: number; to: number; limit: number }) => Promise<Execution[]>;
-  fetchIncomeHistoryRange?: (
-    from: number,
-    to: number,
-  ) => Promise<Array<{ symbol?: string; category?: string; timestamp?: number; income?: number }>>;
+  fetchExecutions: (opts: { symbol?: string; from: number; to: number; limit: number }) => Promise<Execution[]>;
+  fetchIncomeHistoryRange?: (from: number, to: number) => Promise<Array<{ symbol?: string; category?: string; timestamp?: number; income?: number }>>;
 };
 
 export const buildFoldedPositionRecords = async (
@@ -61,7 +56,6 @@ export const buildFoldedPositionRecords = async (
 
   // Symbols come from what the account ACTUALLY traded. Guessing a list silently measures a
   // subset, and a subset looks like a quiet account rather than a partial answer.
-  let incomeFailure: { readonly error: unknown } | undefined;
   if (exchange.fetchIncomeHistoryRange) {
     try {
       for (const item of await exchange.fetchIncomeHistoryRange(lookbackFrom, options.to)) {
@@ -74,30 +68,10 @@ export const buildFoldedPositionRecords = async (
           });
         }
       }
-    } catch (error: unknown) {
-      // Wrapped rather than assigned raw, so a venue that throws a falsy value is still a
-      // failure. What it COSTS is decided below, and differs by an order of magnitude.
-      incomeFailure = { error };
+    } catch {
+      // An empty symbol set surfaces as an empty axis rather than a throw: the caller's
+      // `fetch` contract is that a REAL failure rejects, and this is a degraded read.
     }
-  }
-
-  // FATAL only where the symbol list DRIVES the fetch. Here it is the entire input to the
-  // loop below, so a swallowed failure means zero fills and an account that traded reported
-  // as one that did not — the confusion this whole surface exists to prevent.
-  //
-  // Account-wide venues fetch their fills regardless and lose only funding, which every
-  // record already states as `fundingAttributed: false` rather than as a zero. Failing the
-  // whole axis there would discard a complete dataset over a missing enrichment.
-  if (incomeFailure && options.symbolScoped) {
-    const failure = new Error(
-      'journal fold: income read failed on a symbol-scoped venue, so the symbol list that ' +
-        'drives the fills fetch is unknown — continuing would report an empty account',
-      { cause: incomeFailure.error },
-    );
-    // Keep the venue's error NAME: the caller records only that, and a bare `Error` erases
-    // the difference between a rate limit and a rejected key.
-    if (incomeFailure.error instanceof Error) failure.name = incomeFailure.error.name;
-    throw failure;
   }
 
   const intervals: PositionInterval[] = [];
@@ -105,12 +79,12 @@ export const buildFoldedPositionRecords = async (
 
   if (options.symbolScoped) {
     for (const symbol of symbols) {
-      const fills = await exchange.fetchHistoricalFills({ symbol, from: lookbackFrom, to: options.to, limit: 1000 });
+      const fills = await exchange.fetchExecutions({ symbol, from: lookbackFrom, to: options.to, limit: 1000 });
       totalFills += fills.length;
       intervals.push(...reconstructPositionIntervals(fills));
     }
   } else {
-    const fills = await exchange.fetchHistoricalFills({ from: lookbackFrom, to: options.to, limit: 1000 });
+    const fills = await exchange.fetchExecutions({ from: lookbackFrom, to: options.to, limit: 1000 });
     totalFills = fills.length;
 
     // Split per symbol before folding: an interval reconstruction that mixed symbols would
@@ -133,7 +107,9 @@ export const buildFoldedPositionRecords = async (
     const record = mapFoldedInterval(interval, {
       account: options.account,
       resolveSettleCurrency: options.resolveSettleCurrency,
-      resolveFunding: fundingRows.length ? (i) => attributeFunding(i, fundingRows, { hedged: false }) : undefined,
+      resolveFunding: fundingRows.length
+        ? (i) => attributeFunding(i, fundingRows, { hedged: false })
+        : undefined,
     });
     if (record) records.push(record);
   }

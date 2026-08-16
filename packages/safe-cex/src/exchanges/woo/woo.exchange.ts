@@ -1,5 +1,4 @@
 import type { Axios } from 'axios';
-import type { PositionRecord } from '../../journal/position.types';
 import type { Store } from '../../store/store.interface';
 
 import rateLimit from 'axios-rate-limit';
@@ -8,11 +7,7 @@ import sumBy from 'lodash/sumBy';
 import times from 'lodash/times';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
-import { sleep } from '@tealstreet/sleep/src/sleep';
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
-import { mapFoldedInterval } from '../../journal/fold.position-adapter';
-import { reconstructPositionIntervals } from '../../journal/position-intervals';
-import { wooOrdersToExecutions } from '../../journal/woo.position-adapter';
 import {
   Balance,
   Candle,
@@ -55,6 +50,10 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPI } from './woo.api';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
+import { mapFoldedInterval } from '../../journal/fold.position-adapter';
+import { reconstructPositionIntervals } from '../../journal/position-intervals';
+import type { PositionRecord } from '../../journal/position.types';
+import { wooOrdersToExecutions } from '../../journal/woo.position-adapter';
 import { mapWooHistoricalOrder } from './woo.order-history';
 import {
   ACCOUNT_RESPONSE,
@@ -77,11 +76,8 @@ import { WooPublicWebsocket } from './woo.ws-public';
 // WOO ETH perps cap crossing prices near 1% through fair price; stay below it
 // while still crossing enough spread to fill market-order IOC emulation.
 const DEFAULT_MARKET_IOC_SLIPPAGE_PCT = 0.9;
-const DEFAULT_MARKET_IOC_PRICE_RANGE_PCT = 1;
 const POSITION_METADATA_CACHE_TTL_MS = 30_000;
 const POSITION_METADATA_RATE_LIMIT_BACKOFF_MS = 10_000;
-const POSITION_MODE_READBACK_ATTEMPTS = 3;
-const POSITION_MODE_READBACK_DELAY_MS = 250;
 
 type WooPositionMetadata = Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>;
 
@@ -93,42 +89,15 @@ type CachedWooPositionMetadata = {
 const isPositiveFinitePrice = (price: number | undefined): price is number =>
   typeof price === 'number' && Number.isFinite(price) && price > 0;
 
-const applyMarketIocSlippage = (price: number, side: OrderSide, slippagePct: number) => {
-  const slippageFactor = Math.max(0, slippagePct) / 100;
-  return price * (side === OrderSide.Buy ? 1 + slippageFactor : 1 - slippageFactor);
-};
-
-const chooseMarketIocOrderPrice = (
-  ticker: Ticker | undefined,
-  side: OrderSide,
-  slippagePct: number,
-  priceRangePct: number,
-  touchPrice?: number,
-) => {
-  const sideQuote = touchPrice ?? (side === OrderSide.Buy ? ticker?.ask : ticker?.bid);
+const chooseMarketIocReferencePrice = (ticker: Ticker | undefined, side: OrderSide) => {
+  const sideQuote = side === OrderSide.Buy ? ticker?.ask : ticker?.bid;
   const fairPrice = [ticker?.mark, ticker?.index, ticker?.midPrice, ticker?.last].find(isPositiveFinitePrice);
 
   if (isPositiveFinitePrice(fairPrice)) {
-    const fairCrossingPrice = applyMarketIocSlippage(fairPrice, side, slippagePct);
-
-    if (isPositiveFinitePrice(sideQuote)) {
-      const sideQuoteLimitFactor = Math.max(0, priceRangePct) / 100;
-      const sideQuoteWithinWOOPriceCap =
-        side === OrderSide.Buy
-          ? sideQuote <= fairPrice * (1 + sideQuoteLimitFactor)
-          : sideQuote >= fairPrice * (1 - sideQuoteLimitFactor);
-      const fairCrossingPriceMissesTouch =
-        side === OrderSide.Buy ? fairCrossingPrice < sideQuote : fairCrossingPrice > sideQuote;
-
-      if (sideQuoteWithinWOOPriceCap && fairCrossingPriceMissesTouch) {
-        return sideQuote;
-      }
-    }
-
-    return fairCrossingPrice;
+    return fairPrice;
   }
 
-  const fallbackPrice =
+  return (
     (isPositiveFinitePrice(sideQuote) ? sideQuote : undefined) ||
     (side === OrderSide.Buy
       ? isPositiveFinitePrice(ticker?.bid)
@@ -136,14 +105,8 @@ const chooseMarketIocOrderPrice = (
         : undefined
       : isPositiveFinitePrice(ticker?.ask)
         ? ticker?.ask
-        : undefined);
-
-  return fallbackPrice === undefined ? undefined : applyMarketIocSlippage(fallbackPrice, side, slippagePct);
-};
-
-const getWooMarketPriceRangePct = (market: Market | undefined) => {
-  const priceRange = Number(market?.info?.price_range);
-  return Number.isFinite(priceRange) && priceRange > 0 ? priceRange * 100 : DEFAULT_MARKET_IOC_PRICE_RANGE_PCT;
+        : undefined)
+  );
 };
 
 const isWooRateLimitError = (err: any) =>
@@ -153,26 +116,6 @@ const isWooRateLimitError = (err: any) =>
   String(err?.response?.data?.message || err?.message || '')
     .toLowerCase()
     .includes('rate limit');
-
-const isWooPositionModeAlreadySetError = (err: any) =>
-  String(err?.response?.data?.message || err?.message || '')
-    .toLowerCase()
-    .includes('position mode remains unchanged');
-
-const isPostOnlyCrossingPrice = (side: OrderSide, price: number, touchPrice: number) =>
-  side === OrderSide.Buy ? price >= touchPrice : price <= touchPrice;
-
-const isPostOnlyCrossingFairPrice = (side: OrderSide, price: number, ticker: Ticker | undefined) => {
-  const fairPrice = [ticker?.mark, ticker?.index, ticker?.midPrice, ticker?.last].find(isPositiveFinitePrice);
-  if (!isPositiveFinitePrice(fairPrice)) {
-    return undefined;
-  }
-
-  return {
-    fairPrice,
-    wouldCross: side === OrderSide.Buy ? price >= fairPrice : price <= fairPrice,
-  };
-};
 
 // Hedge-mode `side` values on /v3/trade/transactionHistory. Keys are
 // whitespace-normalized and upper-cased before lookup.
@@ -188,11 +131,11 @@ export class WOOXExchange extends BaseExchange {
    * `realizedPnl: null` on every row, so a fills fold refuses every interval and returns
    * nothing — which is exactly what it did before this override existed.
    */
-  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
+  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
     const to = opts.to ?? Date.now();
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
 
-    const orders = await this.fetchHistoricalOrders({ from, to });
+    const orders = await this.fetchOrderHistory({ from, to });
     const executions = wooOrdersToExecutions(orders);
     const records: PositionRecord[] = [];
 
@@ -1004,7 +947,6 @@ export class WOOXExchange extends BaseExchange {
                 max: maxLeverage,
               },
             },
-            info: r,
           };
         });
 
@@ -1193,48 +1135,6 @@ export class WOOXExchange extends BaseExchange {
     }
   };
 
-  private fetchMarketIocTouchPrice = async (symbol: string, side: OrderSide) => {
-    if (typeof this.xhr.get !== 'function') {
-      return undefined;
-    }
-
-    try {
-      const { data } = await this.xhr.get<{
-        asks?: Array<{ price?: number | string }>;
-        bids?: Array<{ price?: number | string }>;
-      }>(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`);
-      const [bestLevel] = side === OrderSide.Buy ? data?.asks || [] : data?.bids || [];
-      const price = Number(bestLevel?.price);
-      return isPositiveFinitePrice(price) ? price : undefined;
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return undefined;
-    }
-  };
-
-  private confirmPositionModeAndRefreshPositions = async (expectedPositionMode: PositionMode) => {
-    let lastObservedPositionMode: PositionMode | undefined;
-
-    for (let attempt = 0; attempt < POSITION_MODE_READBACK_ATTEMPTS; attempt++) {
-      this._accountPositionMode = null;
-      lastObservedPositionMode = await this.getPositionMode();
-
-      if (lastObservedPositionMode === expectedPositionMode) {
-        this._positionMetadataCache.clear();
-        this._positionMetadataRateLimitedUntil.clear();
-        const positions = await this.fetchPositions();
-        this.store.update({ positions });
-        return;
-      }
-
-      if (attempt + 1 < POSITION_MODE_READBACK_ATTEMPTS) {
-        await sleep(POSITION_MODE_READBACK_DELAY_MS);
-      }
-    }
-
-    throw new Error(`WOO position mode readback stayed ${lastObservedPositionMode}; expected ${expectedPositionMode}`);
-  };
-
   fetchPositionMetadata = async (symbols: string[]): Promise<WooPositionMetadata[]> => {
     try {
       const positionMode = await this.getPositionMode();
@@ -1369,7 +1269,7 @@ export class WOOXExchange extends BaseExchange {
     return [...limitOrders, ...algoOrders];
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1431,7 +1331,7 @@ export class WOOXExchange extends BaseExchange {
         .slice(0, maxLimit);
 
       if (normalizedRequestedSymbol && executions.length === 0) {
-        const historicalTrades = await this.fetchHistoricalTradesInternal({
+        const historicalTrades = await this.fetchHistoricalTrades({
           symbol: normalizedRequestedSymbol,
           orderId: normalizedOrderId,
           from,
@@ -1469,15 +1369,7 @@ export class WOOXExchange extends BaseExchange {
     }
   };
 
-  /**
-   * Internal only — the public fill surface is `fetchHistoricalFills`.
-   *
-   * Kept because this venue's own `fetchHistoricalFills` consumes it: the two methods
-   * read one axis, and here the millisecond-shaped mapper is the one that does
-   * the parsing. Private so nothing outside the class can treat it as a second
-   * public history axis again.
-   */
-  private fetchHistoricalTradesInternal = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
+  fetchHistoricalTrades = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
     if (this.isPublicDataOnly || !opts.symbol) {
       return [];
     }
@@ -1658,7 +1550,7 @@ export class WOOXExchange extends BaseExchange {
    * `page` genuinely advances here (page 2 returned strictly older rows), unlike WOO's
    * trade route, which returns the oldest rows first.
    */
-  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1738,7 +1630,7 @@ export class WOOXExchange extends BaseExchange {
 
       if (page > MAX_PAGES) {
         this.log(
-          `fetchHistoricalOrders stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
           LogSeverity.Warning,
         );
       }
@@ -1983,47 +1875,26 @@ export class WOOXExchange extends BaseExchange {
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     let type = inverseObj(ORDER_TYPE)[opts.type];
     let orderPrice = opts.type === OrderType.Limit ? price : undefined;
-    const ticker = this.store.tickersBySymbol[opts.symbol];
 
     if (opts.timeInForce === OrderTimeInForce.PostOnly && opts.type === OrderType.Limit) {
-      const limitPrice = price ?? undefined;
-      if (isPositiveFinitePrice(limitPrice)) {
-        const fairCross = isPostOnlyCrossingFairPrice(opts.side, limitPrice, ticker);
-        if (fairCross?.wouldCross) {
-          throw new Error(`WOO post-only ${opts.side} order would cross current fair price ${fairCross.fairPrice}`);
-        }
-
-        const touchPrice = await this.fetchMarketIocTouchPrice(opts.symbol, opts.side);
-        if (isPositiveFinitePrice(touchPrice) && isPostOnlyCrossingPrice(opts.side, limitPrice, touchPrice)) {
-          throw new Error(
-            `WOO post-only ${opts.side} order would cross current ${
-              opts.side === OrderSide.Buy ? 'ask' : 'bid'
-            } ${touchPrice}`,
-          );
-        }
-      }
       type = 'POST_ONLY';
     } else if (opts.type === OrderType.Market) {
+      const ticker = this.store.tickersBySymbol[opts.symbol];
+      const referencePrice = chooseMarketIocReferencePrice(ticker, opts.side);
+
+      if (!referencePrice || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+        throw new Error(`Ticker ${opts.symbol} missing valid price for WOO market IOC order`);
+      }
+
       const slippagePct =
         typeof opts.maxSlippagePct === 'number' && Number.isFinite(opts.maxSlippagePct)
           ? opts.maxSlippagePct
           : DEFAULT_MARKET_IOC_SLIPPAGE_PCT;
-      const priceRangePct = getWooMarketPriceRangePct(market);
-      const effectiveSlippagePct = Math.min(slippagePct, priceRangePct);
-      const touchPrice = await this.fetchMarketIocTouchPrice(opts.symbol, opts.side);
-      const crossingPrice = chooseMarketIocOrderPrice(
-        ticker,
-        opts.side,
-        effectiveSlippagePct,
-        priceRangePct,
-        touchPrice,
+      const slippageFactor = Math.max(0, slippagePct) / 100;
+      orderPrice = adjust(
+        referencePrice * (opts.side === OrderSide.Buy ? 1 + slippageFactor : 1 - slippageFactor),
+        pPrice,
       );
-
-      if (!crossingPrice || !Number.isFinite(crossingPrice) || crossingPrice <= 0) {
-        throw new Error(`Ticker ${opts.symbol} missing valid price for WOO market IOC order`);
-      }
-
-      orderPrice = adjust(crossingPrice, pPrice);
       type = 'IOC';
     }
 
@@ -2342,16 +2213,15 @@ export class WOOXExchange extends BaseExchange {
   };
 
   changePositionMode = async (hedged: boolean) => {
-    const expectedPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
     try {
       // ONE_WAY | HEDGE_MODE
       await this.xhr.post(ENDPOINTS.POSITION_MODE, { position_mode: hedged ? 'HEDGE_MODE' : 'ONE_WAY' });
-      await this.confirmPositionModeAndRefreshPositions(expectedPositionMode);
+      this._accountPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
+      this._positionMetadataCache.clear();
+      this._positionMetadataRateLimitedUntil.clear();
+      const positions = await this.fetchPositions();
+      this.store.update({ positions });
     } catch (e: any) {
-      if (isWooPositionModeAlreadySetError(e)) {
-        await this.confirmPositionModeAndRefreshPositions(expectedPositionMode);
-        return;
-      }
       // {
       //   "success": false,
       //   "code": -1005,

@@ -619,7 +619,7 @@ export class PhemexExchange extends BaseExchange {
     return formattedOrders;
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -812,6 +812,10 @@ export class PhemexExchange extends BaseExchange {
     }
   };
 
+  fetchHistoricalTrades = async (_opts: HistoricalTradeOptions) => {
+    return [];
+  };
+
   timeframes = {
     '1m': '60',
     '3m': '180',
@@ -918,22 +922,6 @@ export class PhemexExchange extends BaseExchange {
       this.store.update({
         positions: [...this.store.positions.filter((p) => p.symbol !== symbol), ...symbolPos],
       });
-
-      const context = await this.resolveLeverageContext(symbol);
-      if (context) {
-        const existing = this.store.fetchedLeverage[symbol];
-        this.store.update({
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: {
-              buyLeverage: existing?.buyLeverage ?? context.longLeverage,
-              sellLeverage: existing?.sellLeverage ?? context.shortLeverage,
-              marginType: context.marginType,
-              positionMode: context.positionMode,
-            },
-          },
-        });
-      }
     } catch (e: any) {
       this.emitAndLogError(e, e?.response?.data?.msg || e?.message);
       throw e;
@@ -1111,8 +1099,7 @@ export class PhemexExchange extends BaseExchange {
     // and it falls back to 1x — the order size then comes out `leverage` times
     // too small. fetchedLeverage is the app's documented no-position fallback
     // (see blofin's fetchLeverageForSymbol).
-    const appliedSignedLeverage = prepLeverage(inputLeverage);
-    const appliedLeverage = Math.abs(appliedSignedLeverage);
+    const appliedLeverage = Math.abs(prepLeverage(inputLeverage));
     const existing = this.store.fetchedLeverage[symbol];
     this.store.update({
       fetchedLeverage: {
@@ -1120,8 +1107,6 @@ export class PhemexExchange extends BaseExchange {
         [symbol]: {
           buyLeverage: side === PositionSide.Short ? (existing?.buyLeverage ?? appliedLeverage) : appliedLeverage,
           sellLeverage: side === PositionSide.Long ? (existing?.sellLeverage ?? appliedLeverage) : appliedLeverage,
-          marginType: appliedSignedLeverage < 0 ? MarginType.Cross : MarginType.Isolated,
-          positionMode: context.positionMode,
         },
       },
     });

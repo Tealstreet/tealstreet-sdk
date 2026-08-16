@@ -124,7 +124,7 @@ describe('Bitunix remaining July audit regressions', () => {
     const get = vi.fn().mockResolvedValue({ data: { data: { tradeList: [] } } });
     exchange.xhr = { get } as any;
 
-    await expect(exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' })).resolves.toEqual([]);
+    await expect(exchange.fetchExecutions({ symbol: 'BTCUSDT' })).resolves.toEqual([]);
 
     expect(get).toHaveBeenCalledOnce();
     expect(get.mock.calls[0][0]).toBe(ENDPOINTS.HISTORY_TRADES);

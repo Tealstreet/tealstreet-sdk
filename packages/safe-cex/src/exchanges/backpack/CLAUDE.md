@@ -147,10 +147,10 @@ their subscription refcount plus the matching REST snapshot/delta lifecycle.
 - `GET /api/v1/position` - Futures positions (instruction: `positionQuery`)
 - `GET /api/v1/account` - Account info including leverage limit (instruction: `accountQuery`)
 - `PATCH /api/v1/account` - Update account settings (instruction: `accountUpdate`)
-- `GET /wapi/v1/history/fills` - Fill history (instruction: `fillHistoryQueryAll`); `fetchHistoricalFills()` maps this response into Tealstreet execution records
+- `GET /wapi/v1/history/fills` - Fill history (instruction: `fillHistoryQueryAll`); `fetchExecutions()` maps this response into Tealstreet execution records
 - `GET /wapi/v1/history/orders` - Order history (instruction: `orderHistoryQueryAll`)
 
-`supportsExecutionsHistory` is accurate now that `fetchHistoricalFills()` is implemented.
+`supportsTradesHistory` is accurate now that `fetchExecutions()` is implemented.
 The stricter `supportsExecutionsHistory` controller gate remains off until an
 authenticated request is verified end-to-end through the production proxy.
 

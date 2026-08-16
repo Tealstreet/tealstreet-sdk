@@ -443,6 +443,7 @@ From `exchangeMetadata.ts`:
 | Property                          | Value                   |
 | --------------------------------- | ----------------------- |
 | `supportsTestnet`                 | `false`                 |
+| `supportsTradesHistory`           | `true`                  |
 | `orderbookTickDelay`              | 60ms                    |
 | `tickInterval`                    | 20,000ms                |
 | `orderPendingUpdateDelay`         | 2,000ms                 |
@@ -597,7 +598,7 @@ health and validation paths.
 
 21. **Account identity**: `getAccount()` requests `/user/margin?currency=all` and returns the documented numeric `account` field as a string. It fails clearly if no margin row carries that field.
 
-22. **Execution history compatibility**: `fetchExecutionTradeHistory()` first calls `/execution/tradeHistory`; only a signature/not-found compatibility failure triggers one retry against `/user/executionHistory`. `fetchHistoricalFills()` normalizes trade rows and settlement-currency fees/PnL.
+22. **Execution history compatibility**: `fetchExecutionTradeHistory()` first calls `/execution/tradeHistory`; only a signature/not-found compatibility failure triggers one retry against `/user/executionHistory`. `fetchExecutions()` and `fetchHistoricalTrades()` normalize trade rows and settlement-currency fees/PnL.
 
 23. **Protected market orders**: `maxSlippagePct` is sent on Market, StopMarket, and MarketIfTouched payloads. The value is seeded from a recent order and refreshed from private `execution`/order data.
 

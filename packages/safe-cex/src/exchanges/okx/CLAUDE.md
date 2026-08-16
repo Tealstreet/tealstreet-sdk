@@ -151,8 +151,8 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | `KLINE_HISTORY`        | `/api/v5/market/history-candles`        | GET    | Fetch older OHLCV data when recent candles cannot cover the request           |
 | `UNFILLED_ORDERS`      | `/api/v5/trade/orders-pending`          | GET    | Fetch unfilled regular orders (paginated, 100 per page)                       |
 | `UNFILLED_ALGO_ORDERS` | `/api/v5/trade/orders-algo-pending`     | GET    | Fetch unfilled algo orders (paginated, 100 per page)                          |
-| `FILLS`                | `/api/v5/trade/fills`                   | GET    | Recent fills (primary for `fetchHistoricalFills`)                                  |
-| `FILLS_HISTORY`        | `/api/v5/trade/fills-history`           | GET    | Older fills fallback for `fetchHistoricalFills`                                    |
+| `FILLS`                | `/api/v5/trade/fills`                   | GET    | Recent fills (primary for `fetchExecutions`)                                  |
+| `FILLS_HISTORY`        | `/api/v5/trade/fills-history`           | GET    | Older fills fallback for `fetchExecutions`                                    |
 | `PLACE_ORDERS`         | `/api/v5/trade/batch-orders`            | POST   | Place batch orders (up to 20 per batch)                                       |
 | `PLACE_ALGO_ORDER`     | `/api/v5/trade/order-algo`              | POST   | Place single algo order                                                       |
 | `UPDATE_ORDER`         | `/api/v5/trade/amend-order`             | POST   | Amend an existing order                                                       |
@@ -162,12 +162,12 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | `LEVERAGE`             | `/api/v5/account/leverage-info`         | GET    | Get leverage info (supports comma-separated instIds, batched in groups of 20) |
 | `SET_POSITION_MODE`    | `/api/v5/account/set-position-mode`     | POST   | Switch position mode (`long_short_mode` or `net_mode`)                        |
 
-Execution-history behavior (`fetchHistoricalFills`):
+Execution-history behavior (`fetchExecutions`):
 
 - Fetches `/trade/fills` first, then `/trade/fills-history` if needed
 - Converts contract-size amounts to base qty using `contractsToBase(...)`
 - Normalizes fill timestamps to Unix seconds and resolves symbol from `instId`
-- The corresponding metadata capability is `supportsExecutionsHistory: true`.
+- The corresponding metadata capability is `supportsExecutionsHistory: true`; `supportsTradesHistory` remains false.
 
 ## WebSocket Implementation
 
@@ -680,6 +680,7 @@ Key metadata values from `exchangeMetadata.ts`:
 | `positionModeIsGlobal`            | `true`                                                                |
 | `unifiedMargin`                   | `false`                                                               |
 | `supportsTestnet`                 | `false`                                                               |
+| `supportsTradesHistory`           | `false`                                                               |
 | `supportsExecutionsHistory`       | `true`                                                                |
 | `supportsChaser`                  | `true`                                                                |
 | `supportsTrailingStopLoss`        | `false` (disabled at metadata level despite code support)             |
@@ -852,7 +853,7 @@ BOUNDARY, i.e. within a few window-edge fees rather than a mapping defect.
 
 ## Order history (`/api/v5/trade/orders-history`)
 
-`fetchHistoricalOrders` reads the **7-day** route. Mapper: `okx.order-history.ts`, pure and
+`fetchOrderHistory` reads the **7-day** route. Mapper: `okx.order-history.ts`, pure and
 exported. Measured live over 7 days: 255 orders, **58 of which never filled (22.7%)** —
 invisible to fills, executions and closed positions alike.
 

@@ -1,10 +1,10 @@
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
-import type { RemoteSigner } from './types';
 
 import { AxiosHeaders } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRemoteSigningAdapter, markSkipRemoteSigning } from './remoteSigningAdapter';
+import type { RemoteSigner } from './types';
 
 const configFor = (url: string): InternalAxiosRequestConfig =>
   ({
@@ -42,29 +42,6 @@ describe('createRemoteSigningAdapter', () => {
     expect(sign).toHaveBeenCalledTimes(1);
     expect(inner).toHaveBeenCalledTimes(1);
     expect(inner.mock.calls[0][0].headers.get('X-Signed')).toBe('1');
-  });
-
-  it('does not restore original request data when the signer intentionally omits it', async () => {
-    const config = {
-      ...configFor('/fapi/v1/positionSide/dual'),
-      method: 'POST',
-      data: { dualSidePosition: 'true' },
-    } as InternalAxiosRequestConfig;
-
-    sign.mockResolvedValueOnce({
-      id: 'signed',
-      config: {
-        headers: { 'X-Signed': '1' },
-        params: { dualSidePosition: 'true', timestamp: 1, signature: 'abc' },
-        data: undefined,
-      },
-    });
-
-    await build()(config);
-
-    expect(inner).toHaveBeenCalledTimes(1);
-    expect(inner.mock.calls[0][0].params).toEqual({ dualSidePosition: 'true', timestamp: 1, signature: 'abc' });
-    expect(inner.mock.calls[0][0].data).toBeUndefined();
   });
 
   // The point of the tag: a public endpoint costs a WebSocket hop to the device

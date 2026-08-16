@@ -12,9 +12,9 @@
  * - **Clamp/ignore** (okx `positions-history`, blofin `fills-history`): fewer rows than
  *   asked for, which at least still looks like data.
  *
- * The reject case has now been found three times in this repo — bybit `fetchHistoricalOrders`
+ * The reject case has now been found three times in this repo — bybit `fetchOrderHistory`
  * (hedge legs silently degraded to `both`), bybit `fetchIncomeHistory`, and binance
- * `fetchHistoricalFills`/`fetchHistoricalTrades` — each time as an independent inline loop or a
+ * `fetchExecutions`/`fetchHistoricalTrades` — each time as an independent inline loop or a
  * missing one. Binance already carried a correct copy inside `deriveClosedPositions` while
  * the two methods beside it had none.
  *

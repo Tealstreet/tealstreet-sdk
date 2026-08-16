@@ -40,7 +40,7 @@ describe('paradex fill -> income', () => {
   });
 
   it('reports a charged fee as negative income, not an absolute value', () => {
-    // fetchHistoricalFills in this directory does Math.abs(fee); copying that erases rebates.
+    // fetchExecutions in this directory does Math.abs(fee); copying that erases rebates.
     const commission = mapParadexFillToIncomeRecords(fill(), resolveSymbol).find((r) => r.category === 'commission');
 
     expect(commission!.income).toBeCloseTo(-0.0054846218605318, 12);
@@ -58,7 +58,7 @@ describe('paradex fill -> income', () => {
   });
 
   it('keeps created_at in MILLISECONDS', () => {
-    // fetchHistoricalFills normalises to seconds; IncomeRecord.timestamp is ms on every venue,
+    // fetchExecutions normalises to seconds; IncomeRecord.timestamp is ms on every venue,
     // and a seconds value here would place every row in 1970.
     expect(mapParadexFillToIncomeRecords(fill(), resolveSymbol)[0].timestamp).toBe(1786522543911);
   });

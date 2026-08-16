@@ -497,7 +497,7 @@ describe('KucoinSpotExchange', () => {
       }),
     } as any;
 
-    const executions = await exchange.fetchHistoricalFills({
+    const executions = await exchange.fetchExecutions({
       symbol: 'BTC-USDT',
       orderId: 'order-1',
       limit: 250,

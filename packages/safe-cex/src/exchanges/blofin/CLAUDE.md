@@ -12,6 +12,7 @@ This directory contains the BloFin exchange integration for Tealstreet. BloFin i
 | `requiresApplicationId`                     | `false`              |
 | `enabled`                                   | `true`               |
 | `supportsTestnet`                           | `false`              |
+| `supportsTradesHistory`                     | `false`              |
 | `orderbookTickDelay`                        | `250`                |
 | `requiresCors`                              | `true`               |
 | `hasEmptyPositions`                         | `false`              |
@@ -146,10 +147,10 @@ All endpoints are prefixed with `/api/v1/`. Defined in `ENDPOINTS` object in `bl
 | `UNFILLED_ORDERS`      | `/api/v1/trade/orders-pending`      | GET    | Get pending normal orders                           |
 | `UNFILLED_ALGO_ORDERS` | `/api/v1/trade/orders-tpsl-pending` | GET    | Get pending TP/SL orders                            |
 | `UNFILLED_TRIGGER_ORDERS` | `/api/v1/trade/orders-algo-pending` | GET | Read externally placed opening triggers             |
-| `FILLS`                | `/api/v1/trade/fills-history`       | GET    | User fill history (primary for `fetchHistoricalFills`)   |
-| `ORDERS_HISTORY`       | `/api/v1/trade/orders-history`      | GET    | Filled order history fallback for `fetchHistoricalFills` |
+| `FILLS`                | `/api/v1/trade/fills-history`       | GET    | User fill history (primary for `fetchExecutions`)   |
+| `ORDERS_HISTORY`       | `/api/v1/trade/orders-history`      | GET    | Filled order history fallback for `fetchExecutions` |
 
-Execution-history behavior (`fetchHistoricalFills`):
+Execution-history behavior (`fetchExecutions`):
 
 - REST-first only (no in-memory session cache fallback)
 - Calls `fills-history` with `begin`/`end` millisecond window

@@ -480,7 +480,7 @@ export class WeexExchange extends BaseExchange {
       .filter((trade): trade is PublicTrade => !!trade);
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -490,6 +490,18 @@ export class WeexExchange extends BaseExchange {
       .map((row) => normalizeExecution(row, row.symbol ? this.store.marketsBySymbol[row.symbol] : undefined))
       .filter((execution): execution is Execution => !!execution)
       .sort((a, b) => b.timestamp - a.timestamp);
+  };
+
+  fetchHistoricalTrades = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    const rows = await this.fetchUserTradeRows(opts);
+    return rows
+      .map((row) => normalizeHistoricalTrade(row, row.symbol ? this.store.marketsBySymbol[row.symbol] : undefined))
+      .filter((trade): trade is HistoricalTrade => !!trade)
+      .sort((a, b) => b.time - a.time);
   };
 
   fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {

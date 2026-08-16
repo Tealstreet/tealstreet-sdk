@@ -737,8 +737,6 @@ export type ActiveTWAP = TwapOptions & TwapState & Pick<TwapInstance, 'id'> & { 
 export type FetchedLeverage = {
   buyLeverage: number;
   sellLeverage: number;
-  marginType?: MarginType;
-  positionMode?: PositionMode;
   isFetching?: boolean;
 };
 

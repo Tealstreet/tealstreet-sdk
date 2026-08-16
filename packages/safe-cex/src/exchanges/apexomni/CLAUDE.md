@@ -134,8 +134,8 @@ All endpoints are prefixed with the base URL (`https://omni.apex.exchange/api`):
 | `ACCOUNT`        | `/v3/account`                 | GET    | Fetch account data: positions, l2key, ethereumAddress, wallets                     |
 | `BALANCE`        | `/v3/account-balance`         | GET    | Fetch `totalEquityValue`, `availableBalance`, `initialMargin`, `maintenanceMargin` |
 | `OPEN_ORDERS`    | `/v3/open-orders`             | GET    | Fetch all open/untriggered orders                                                  |
-| `FILLS`          | `/v3/fills`                   | GET    | User fills history (primary for `fetchHistoricalFills`)                                 |
-| `HISTORY_ORDERS` | `/v3/history-orders`          | GET    | Filled-history fallback (`fetchHistoricalFills`)                                        |
+| `FILLS`          | `/v3/fills`                   | GET    | User fills history (primary for `fetchExecutions`)                                 |
+| `HISTORY_ORDERS` | `/v3/history-orders`          | GET    | Filled-history fallback (`fetchExecutions`)                                        |
 | `CREATE_ORDER`   | `/v3/order`                   | POST   | Place a new order (form-urlencoded body with zkLink signature)                     |
 | `CANCEL_ORDER`   | `/v3/delete-order`            | POST   | Cancel a single order by ID (form-urlencoded)                                      |
 | `CANCEL_ORDERS`  | `/v3/delete-open-orders`      | POST   | Cancel all open orders for a symbol (form-urlencoded)                              |
@@ -158,7 +158,7 @@ is not used as a split-order safety mechanism.
 
 The API client has a response interceptor (`apexomni.api.ts:107-115`) that checks for non-zero `code` field in response data and throws with format `[code] msg`.
 
-Execution-history behavior (`fetchHistoricalFills`):
+Execution-history behavior (`fetchExecutions`):
 
 - Calls `/v3/fills` first
 - Uses the rate-limited API client for execution-history polling (to reduce HOW/tunnel timeout bursts from concurrent unlimited requests)

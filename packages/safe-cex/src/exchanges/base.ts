@@ -141,10 +141,11 @@ const baseCapabilityFallback = Symbol('baseCapabilityFallback');
 
 export type BaseCapabilityMethod =
   | 'fetchClosedPnl'
-  | 'fetchHistoricalFills'
+  | 'fetchExecutions'
+  | 'fetchHistoricalTrades'
   | 'fetchIncomeHistory'
   | 'fetchIncomeHistoryRange'
-  | 'fetchHistoricalOrders'
+  | 'fetchOrderHistory'
   | 'placeOrder'
   | 'start';
 
@@ -218,7 +219,7 @@ export type CallableMethodsInWorker =
   | 'fetchAndSetPrivateSnapshot'
   | 'reconnect'
   | 'fetchOHLCV'
-  | 'fetchHistoricalFills'
+  | 'fetchExecutions'
   | 'fetchOrders'
   | 'fetchAndSetOrders'
   | 'updateSymbolMetadata'
@@ -226,7 +227,7 @@ export type CallableMethodsInWorker =
   | 'removeOrders'
   | 'fetchIncomeHistory'
   | 'fetchIncomeHistoryRange'
-  | 'fetchHistoricalOrders'
+  | 'fetchOrderHistory'
   | 'fetchClosedPnl';
 
 export interface Exchange {
@@ -296,15 +297,16 @@ export interface Exchange {
   cancelAllOrders: () => Promise<void>;
   scheduleCancel: (time?: number | null) => Promise<void>;
   fetchOHLCV: (opts: OHLCVOptions) => Promise<Candle[]>;
-  fetchHistoricalFills: (opts: ExecutionsOptions) => Promise<Execution[]>;
+  fetchExecutions: (opts: ExecutionsOptions) => Promise<Execution[]>;
   fetchMarkets?: () => Promise<Market[]>;
   fetchTickers?: () => Promise<Ticker[]>;
   fetchSymbolMaxLeverage?: (symbol: string) => Promise<number>;
   fetchLeverageForSymbol: (symbol: string) => Promise<FetchedLeverage | null>;
   updateSymbolMetadata: (symbol: string) => Promise<void>;
+  fetchHistoricalTrades: (opts: HistoricalTradeOptions) => Promise<HistoricalTrade[]>;
   fetchClosedPnl: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
   fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
-  fetchHistoricalOrders: (opts?: OrderHistoryOptions) => Promise<HistoricalOrder[]>;
+  fetchOrderHistory: (opts?: OrderHistoryOptions) => Promise<HistoricalOrder[]>;
   fetchIncomeHistoryRange: (startTime: number, endTime: number, incomeType?: string) => Promise<IncomeRecord[]>;
   fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
   getActiveTickerSymbols: () => string[];
@@ -831,7 +833,7 @@ export class BaseExchange implements Exchange {
     return await Promise.resolve([] as Candle[]);
   };
 
-  fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async (_opts: ExecutionsOptions) => {
+  fetchExecutions = markBaseCapabilityFallback('fetchExecutions', async (_opts: ExecutionsOptions) => {
     return await Promise.resolve([] as Execution[]);
   });
 
@@ -868,14 +870,14 @@ export class BaseExchange implements Exchange {
    * THEIR HANDS instead of relying on anyone to enumerate them: a new venue with no declared
    * path fails loudly and is reported as an account we could not read, which is true.
    */
-  fetchHistoricalPositions = async (_opts: {
+  fetchClosedPositionRecords = async (_opts: {
     account: string;
     from?: number;
     to?: number;
   }): Promise<PositionRecord[]> => {
     throw new Error(
       `${this.constructor.name}: no journal records path declared. Override ` +
-        `fetchHistoricalPositions — fold from fills via foldClosedPositionRecords, or map ` +
+        `fetchClosedPositionRecords — fold from fills via foldClosedPositionRecords, or map ` +
         `this venue's reported closed axis.`,
     );
   };
@@ -891,7 +893,7 @@ export class BaseExchange implements Exchange {
     opts: { account: string; from?: number; to?: number },
     config: { symbolScoped?: boolean } = {},
   ): Promise<PositionRecord[]> => {
-    if (isInertCapability(this.fetchHistoricalFills, 'fetchHistoricalFills')) {
+    if (isInertCapability(this.fetchExecutions, 'fetchExecutions')) {
       throw new Error(`${this.constructor.name}: no fills axis, cannot fold journal records`);
     }
 
@@ -909,6 +911,10 @@ export class BaseExchange implements Exchange {
     return records;
   };
 
+
+  fetchHistoricalTrades = markBaseCapabilityFallback('fetchHistoricalTrades', async (_opts: HistoricalTradeOptions) => {
+    return await Promise.resolve([] as HistoricalTrade[]);
+  });
 
   // Branded so support can be detected. `typeof exchange.fetchIncomeHistory` is TRUE
   // on every venue because this field always exists — any consumer duck-typing on that
@@ -946,8 +952,8 @@ export class BaseExchange implements Exchange {
    * Historical orders, including ones that never filled. Base returns [] and is
    * branded, so an unimplemented venue is distinguishable from one with no orders.
    */
-  fetchHistoricalOrders = markBaseCapabilityFallback(
-    'fetchHistoricalOrders',
+  fetchOrderHistory = markBaseCapabilityFallback(
+    'fetchOrderHistory',
     async (_opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
       return await Promise.resolve([] as HistoricalOrder[]);
     },

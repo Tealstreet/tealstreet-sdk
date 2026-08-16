@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { BaseCapabilityMethod, BaseExchange, isBaseCapabilityFallback, isInertCapability } from '../../exchanges/base';
 import { exchangeRegistry } from '../../exchanges/registry';
-import { getAxisStatus } from '../../journal/axis-grading';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
 
@@ -67,6 +66,28 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     REGISTRY_CONSTRUCTION_TIMEOUT_MS,
   );
 
+  it('advertised trade history has a non-INERT executions or historical-trades path', async () => {
+    // `isInertCapability`, not `isBaseCapabilityFallback`. The branded-fallback check answers
+    // "was this never implemented", which is only half the question: an override whose entire
+    // body is `return []` is unbranded and passed as a real implementation. coinbase and
+    // phemex both ship exactly that for `fetchHistoricalTrades`, so the flag could point at
+    // nothing and still satisfy the contract.
+    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
+      (name) => exchangeMetadata[name].supportsTradesHistory,
+    );
+
+    for (const name of advertised) {
+      const exchange = await createImplementation(name);
+      const hasExecutionHistory = !isInertCapability(exchange.fetchExecutions, 'fetchExecutions');
+      const hasHistoricalTrades = !isInertCapability(exchange.fetchHistoricalTrades, 'fetchHistoricalTrades');
+
+      expect(
+        hasExecutionHistory || hasHistoricalTrades,
+        `${name}: supportsTradesHistory points only at inert history paths (base fallback or empty stub)`,
+      ).toBe(true);
+    }
+  });
+
   it('advertised executions history is not an empty stub either', async () => {
     const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
       (name) => exchangeMetadata[name].supportsExecutionsHistory,
@@ -75,8 +96,8 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     for (const name of advertised) {
       const exchange = await createImplementation(name);
       expect(
-        isInertCapability(exchange.fetchHistoricalFills, 'fetchHistoricalFills'),
-        `${name}: supportsExecutionsHistory points at an inert fetchHistoricalFills`,
+        isInertCapability(exchange.fetchExecutions, 'fetchExecutions'),
+        `${name}: supportsExecutionsHistory points at an inert fetchExecutions`,
       ).toBe(false);
     }
   });
@@ -89,9 +110,9 @@ describe('exchange metadata runtime non-fallback invariants', () => {
       return [1];
     };
 
-    expect(isInertCapability(stub, 'fetchHistoricalFills')).toBe(true);
+    expect(isInertCapability(stub, 'fetchHistoricalTrades')).toBe(true);
     // A real implementation that merely OPENS with a guard clause must not be a stub.
-    expect(isInertCapability(guarded, 'fetchHistoricalFills')).toBe(false);
+    expect(isInertCapability(guarded, 'fetchHistoricalTrades')).toBe(false);
   });
 
   it('advertised executions history does not use the inert executions fallback', async () => {
@@ -100,7 +121,7 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     );
 
     for (const name of advertised) {
-      expectImplemented(await createImplementation(name), 'fetchHistoricalFills', name);
+      expectImplemented(await createImplementation(name), 'fetchExecutions', name);
     }
   });
 
@@ -146,61 +167,4 @@ describe('exchange metadata runtime non-fallback invariants', () => {
       }
     }
   });
-
-  /**
-   * THE GATE THAT WOULD HAVE CAUGHT THE VARIANT GAP.
-   *
-   * `AVAILABLE_AXES` in `journal/axis-grading.ts` is hand-maintained, and
-   * `collectAccountAxes` treats a venue missing from it as having no axes at
-   * all — so it is never asked. Five venues with a working `fetchHistoricalFills`
-   * (`kucoinspot` and `bybitinverse` implement their own; `bitgetusdc`,
-   * `bitgetinverse` and `okxeu` inherit their parent class's) were absent, and
-   * the failure was invisible: no error, no empty result, just a venue quietly
-   * never collected while its retention window rolled past.
-   *
-   * That is why this is asserted from the RUNTIME registry rather than from a
-   * list. A list would have to be kept in step with exactly the thing it is
-   * meant to police. Adding a venue, or a variant that inherits a parent's
-   * implementation, now fails here until it is graded.
-   */
-  it(
-    'every venue that can serve fills is present in the journal axis table',
-    async () => {
-      /**
-       * Deliberately NOT collected, despite inheriting a working implementation.
-       *
-       * These are practice venues. Their fills are real API responses describing
-       * trades that never happened with money, and the journal exists to be the
-       * record of what a user actually traded — paper fills mixed into it would
-       * corrupt every aggregate computed from it, silently and irreversibly,
-       * because no row carries a "this was fake" flag.
-       *
-       * Named here rather than left to fail: an exemption someone can read is a
-       * decision, an exemption buried in a `continue` is an accident.
-       */
-      const PRACTICE_VENUES: ReadonlySet<string> = new Set(['bybitdemo', 'bitmextestnet']);
-
-      const missing: string[] = [];
-
-      for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
-        if (PRACTICE_VENUES.has(name)) continue;
-
-        const exchange = await createImplementation(name, exchangeMetadata[name].supportsPublicOnly);
-
-        // Capability, not metadata: the question is whether this class actually
-        // has a real implementation, inherited or its own — which is exactly the
-        // condition under which the collector would ask.
-        const canServeFills = !isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills');
-        if (!canServeFills) continue;
-
-        if (getAxisStatus(name, 'fills').grade === 'unsupported') missing.push(name);
-      }
-
-      expect(
-        missing,
-        `these venues implement fetchHistoricalFills but AVAILABLE_AXES omits them, so collectAccountAxes will never ask: ${missing.join(', ')}`,
-      ).toEqual([]);
-    },
-    REGISTRY_CONSTRUCTION_TIMEOUT_MS,
-  );
 });

@@ -68,18 +68,19 @@ export type ExchangeMetadata = {
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
   /** Whether the exchange API supports fetching trade history */
+  supportsTradesHistory: boolean;
   /**
-   * Whether the exchange's `fetchHistoricalFills(opts)` REST path is safe to invoke
+   * Whether the exchange's `fetchExecutions(opts)` REST path is safe to invoke
    * from the executions controller / FillsModule.
    *
    * Default: false. Opt-in per exchange by setting this to true once the
-   * fetchHistoricalFills implementation has been validated end-to-end through the
+   * fetchExecutions implementation has been validated end-to-end through the
    * production tunnel/proxy infrastructure.
    *
-   * Why this exists (not duck-typed on `exchange.fetchHistoricalFills`):
+   * Why this exists (not duck-typed on `exchange.fetchExecutions`):
    * Some exchanges with `enforceWsTunnel`/`requiresCors` (e.g. Phemex via the
    * Singapore HOW tunnel) can have their public REST endpoints (e.g.
-   * `/public/products`) wedged when fetchHistoricalFills hits a geo-restricted
+   * `/public/products`) wedged when fetchExecutions hits a geo-restricted
    * private endpoint and the upstream proxy / tunnel state machine doesn't
    * recover cleanly. Gating on an explicit metadata flag lets us keep the
    * implementation in place but disable invocation per-exchange without
@@ -262,6 +263,7 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
   prettyName: '',
@@ -339,6 +341,7 @@ const BybitMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Bybit',
@@ -442,6 +445,7 @@ const BinanceMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: true,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Binance',
@@ -482,7 +486,8 @@ const BinancePMMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: true,
-  // No fetchHistoricalFills/fetchHistoricalTrades implementation in the PM adapter.
+  // No fetchExecutions/fetchHistoricalTrades implementation in the PM adapter.
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'Binance Portfolio Margin',
   privateProxyIps: privateProxyIpsTokyo,
@@ -523,6 +528,7 @@ const BitunixMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Bitunix',
@@ -567,6 +573,7 @@ const WeexMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: false,
   supportsTestnet: false,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'WEEX',
@@ -615,7 +622,8 @@ const BinanceSpotMetadata: ExchangeMetadata = {
   enabled: false,
   enabledInDev: true,
   supportsTestnet: true,
-  // No fetchHistoricalFills/fetchHistoricalTrades implementation in the Spot adapter.
+  // No fetchExecutions/fetchHistoricalTrades implementation in the Spot adapter.
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   privateProxyIps: privateProxyIpsTokyo,
   supportsChaser: true,
@@ -649,6 +657,7 @@ const BackpackMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: true,
   orderbookTickDelay: 100,
   prettyName: 'Backpack',
   defaultQuote: 'USDC',
@@ -711,6 +720,7 @@ const BitgetMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   supportsTrailingStopLoss: false,
   orderbookTickDelay: 60,
@@ -788,6 +798,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
+  supportsTradesHistory: false,
   orderbookTickDelay: 100,
   prettyName: 'Crypto.com',
   defaultQuote: 'USD',
@@ -856,6 +867,7 @@ const BingxMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'BingX',
@@ -910,6 +922,7 @@ const BitrueMetadata: ExchangeMetadata = {
   enabledInDev: false,
   enableInPreview: false,
   supportsTestnet: false,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Bitrue',
@@ -963,6 +976,7 @@ const BreakoutpropMetadata: ExchangeMetadata = {
   enableInPreview: false,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   orderbookTickDelay: 100,
   prettyName: 'Breakout',
   privateProxyIps: privateProxyIpsSingapore,
@@ -1011,6 +1025,7 @@ const BlofinMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 250,
   prettyName: 'BloFin',
@@ -1056,6 +1071,7 @@ const OkxMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 250,
   prettyName: 'OKX',
@@ -1102,6 +1118,7 @@ const WooMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
@@ -1150,6 +1167,7 @@ const WooFiMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
   orderbookTickDelay: 60,
   prettyName: 'WOOFi',
@@ -1188,6 +1206,7 @@ const KodiakFIMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
   orderbookTickDelay: 60,
   prettyName: 'Kodiak',
@@ -1226,6 +1245,7 @@ const MODEMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
   orderbookTickDelay: 60,
   prettyName: 'Mode',
@@ -1268,6 +1288,7 @@ const SalsaDEXMetadata: ExchangeMetadata = {
   enabledInDev: false,
   enableInPreview: false,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
   orderbookTickDelay: 60,
   prettyName: 'SalsaDEX',
@@ -1306,6 +1327,7 @@ const WhatMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
   orderbookTickDelay: 60,
   prettyName: 'What',
@@ -1349,6 +1371,7 @@ const TealstreetDEXMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
   orderbookTickDelay: 60,
   prettyName: 'TSDEX',
@@ -1393,6 +1416,7 @@ const HyperliquidMetadata: ExchangeMetadata = {
   defaultSymbol: 'BTC-PERP',
   enabledInDev: true,
   supportsTestnet: true,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
@@ -1442,6 +1466,7 @@ const HyperliquidSpotMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
   prettyName: 'Hyperliquid Spot',
@@ -1483,6 +1508,7 @@ const GrvtMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
+  supportsTradesHistory: false,
   leverageMagnets: [1, 5, 10, 20, 50, 100],
   orderbookTickDelay: 100,
   prettyName: 'Grvt',
@@ -1553,6 +1579,7 @@ const ApexOmniMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
@@ -1600,6 +1627,7 @@ const BitMEXMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: true,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'BitMEX',
@@ -1681,12 +1709,13 @@ const PhemexMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
-  // Phemex's fetchHistoricalFills implementation exists in phemex.exchange.ts but invoking
+  supportsTradesHistory: true,
+  // Phemex's fetchExecutions implementation exists in phemex.exchange.ts but invoking
   // it (e.g. /exchange/order/v2/tradingList via the Singapore HOW tunnel) has been
   // observed to wedge unrelated REST traffic — including the public /public/products
   // markets endpoint — for users in restricted jurisdictions or with incomplete proxy
   // whitelisting. Until the upstream tunnel/proxy interaction is validated end-to-end
-  // for Phemex, keep this opt-out so the FillsModule and tradeHistoryController don't
+  // for Phemex, keep this opt-out so the FillsModule and executionsController don't
   // invoke it. Flip to true after a production canary confirms no regression.
   supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
@@ -1729,6 +1758,7 @@ const CoinbaseMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   requiresCors: true,
   orderbookTickDelay: 60,
   prettyName: 'Coinbase',
@@ -1783,6 +1813,7 @@ const KucoinMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'Kucoin',
   privateProxyIps: privateProxyIpsTokyo,
@@ -1817,6 +1848,7 @@ const KucoinSpotMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   supportsTrailingStopLoss: false,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -1847,6 +1879,7 @@ const KrakenMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'Kraken Futures',
   privateProxyIps: privateProxyIpsTokyo,
@@ -1890,6 +1923,7 @@ const KrakenSpotMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'Kraken Spot',
   privateProxyIps: privateProxyIpsTokyo,
@@ -1937,6 +1971,7 @@ const ParadexMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
+  supportsTradesHistory: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 100,
   prettyName: 'Paradex',
@@ -2012,6 +2047,7 @@ const AsterDEXMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 5, 10, 20, 50, 100, 125],
   orderbookTickDelay: 60,
@@ -2072,6 +2108,7 @@ const PolymarketMetadata: ExchangeMetadata = {
   enableInPreview: false, // Disabled in preview
   supportsTestnet: false, // Polymarket only has mainnet
   // Upstream has a trades endpoint, but this adapter does not map it yet.
+  supportsTradesHistory: false,
   orderbookTickDelay: 100,
   prettyName: 'Polymarket',
   defaultQuote: 'pUSD',
@@ -2130,6 +2167,7 @@ const LighterMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
+  supportsTradesHistory: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 100,
   prettyName: 'Lighter',

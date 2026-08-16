@@ -1724,7 +1724,7 @@ export class BingxExchange extends BaseExchange {
     return orderIds;
   };
 
-  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     // Return empty array if in public data only mode
     if (this.isPublicDataOnly) {
       return [];
@@ -1759,11 +1759,11 @@ export class BingxExchange extends BaseExchange {
         params.endTime = to;
       }
 
-      this.log(`fetchHistoricalFills params: ${JSON.stringify(params)}`, LogSeverity.Debug);
+      this.log(`fetchExecutions params: ${JSON.stringify(params)}`, LogSeverity.Debug);
 
       const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, { params });
 
-      this.log(`fetchHistoricalFills response: ${JSON.stringify(data)}`, LogSeverity.Debug);
+      this.log(`fetchExecutions response: ${JSON.stringify(data)}`, LogSeverity.Debug);
 
       if (data.code !== 0) {
         this.log(`Failed to fetch executions: ${data.msg}`, LogSeverity.Warning);
@@ -1780,7 +1780,7 @@ export class BingxExchange extends BaseExchange {
             ? responseData
             : [];
 
-      this.log(`fetchHistoricalFills found ${fills.length} fills`, LogSeverity.Debug);
+      this.log(`fetchExecutions found ${fills.length} fills`, LogSeverity.Debug);
 
       for (const fill of fills) {
         // BingX uses filledTime in ISO format (e.g., "2026-01-13T17:13:17.000+08:00") or filledTm in ms

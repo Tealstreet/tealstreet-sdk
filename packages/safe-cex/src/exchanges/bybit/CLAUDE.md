@@ -669,8 +669,8 @@ described in `apps/web/src/components/componentWorkers/CLAUDE.md`.
 **Until 2026-08 all three variants GETed Tealstreet's own
 `/api/trades-history/bybit/closed-pnl`**, backed by `users_app_history_bybit_*` — tables
 with 0 rows and no producer — so the method looked implemented and always returned `[]`.
-`bybitspot` was still that same trap against `/api/trades-history/bybit` until the
-history unification deleted the method 2026-08-16.
+`bybitspot.fetchHistoricalTrades` is still that same trap against
+`/api/trades-history/bybit`.
 
 The mapper is the pure, exported `mapBybitClosedPnl` in `bybit.closed-pnl.ts`. Its
 consumer casts the result `as unknown[] as ClosedPosition[]`, **so TypeScript catches no
