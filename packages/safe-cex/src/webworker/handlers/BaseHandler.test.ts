@@ -384,6 +384,26 @@ describe('BaseHandler', () => {
         }),
       );
     });
+
+    it('does not run pending market checks after dispose', () => {
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'BTCUSDT' } })).toBe(true);
+      handler.dispose();
+      (mockExchange.store as any).markets = [{ symbol: 'BTCUSDT' }];
+      (mockExchange.store as any).loaded = { markets: true };
+      vi.advanceTimersByTime(30_000);
+
+      expect(handler.handleCallCount).toBe(0);
+      expect(mockCtx.postMessage).not.toHaveBeenCalled();
+    });
   });
 
   describe('dispose', () => {

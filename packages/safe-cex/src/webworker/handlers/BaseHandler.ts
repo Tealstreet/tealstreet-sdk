@@ -19,7 +19,7 @@ export abstract class BaseHandler {
   // Buffer for messages that arrive before markets are loaded
   private _pendingUntilMarkets: StoreWorkerPayload[] = [];
   private _pendingTimeout: ReturnType<typeof setTimeout> | null = null;
-  private _pendingPoll: ReturnType<typeof setInterval> | null = null;
+  private _pendingCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private _firstPendingAt: number | null = null;
   private _lastPendingTimeoutReportAt: number | null = null;
   private _suppressedPendingTimeoutReports = 0;
@@ -55,14 +55,7 @@ export abstract class BaseHandler {
     this._firstPendingAt ??= Date.now();
     this._pendingUntilMarkets.push(payload);
 
-    // Start polling to flush when markets load
-    if (!this._pendingPoll) {
-      this._pendingPoll = setInterval(() => {
-        if (this._exchange.store.markets.length > 0) {
-          this._flushPending();
-        }
-      }, PENDING_POLL_MS);
-    }
+    this._schedulePendingMarketsCheck();
 
     // Timeout: drop pending and notify client if markets never load
     if (!this._pendingTimeout) {
@@ -113,6 +106,19 @@ export abstract class BaseHandler {
     return true;
   }
 
+  private _schedulePendingMarketsCheck(): void {
+    if (this._pendingCheckTimer || this._pendingUntilMarkets.length === 0) return;
+    this._pendingCheckTimer = setTimeout(() => {
+      this._pendingCheckTimer = null;
+      if (this._pendingUntilMarkets.length === 0) return;
+      if (this._exchange.store.markets.length > 0) {
+        this._flushPending();
+        return;
+      }
+      this._schedulePendingMarketsCheck();
+    }, PENDING_POLL_MS);
+  }
+
   private _flushPending(): void {
     this._clearPendingTimers();
     this._resetPendingTimeoutReportEpisode();
@@ -126,9 +132,9 @@ export abstract class BaseHandler {
       clearTimeout(this._pendingTimeout);
       this._pendingTimeout = null;
     }
-    if (this._pendingPoll) {
-      clearInterval(this._pendingPoll);
-      this._pendingPoll = null;
+    if (this._pendingCheckTimer) {
+      clearTimeout(this._pendingCheckTimer);
+      this._pendingCheckTimer = null;
     }
     this._firstPendingAt = null;
   }
