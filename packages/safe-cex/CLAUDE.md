@@ -378,6 +378,25 @@ Three constraints, each load-bearing:
   far too expensive per request. `network` (no response at all) is deliberately
   distinct from `other` (venue answered non-2xx).
 
+**`auth` is one bucket, and it cannot tell you which KIND of auth failure.**
+This is the asymmetry to know about before reaching for it: the web
+`exchangeAccountController` classifies auth failures richly
+(`auth_invalid` / `auth_expired` / `auth_permissions`) but only in memory, to
+decide whether to keep reloading an account — while `requestStats`, the only
+thing that persists and aggregates across users, sees nothing but a 4xx status.
+So "phemex is failing auth" is answerable and "phemex keys are being rejected
+for scope rather than being expired" is not. A 2026-08 production hour landed
+12 auth failures from a **single** user against 3 successes, and no query could
+separate a dead credential from a signature bug.
+
+If you need the finer signal, it has to be a **closed-set enum decided at the
+interceptor** — never a venue message, and never a call into `errorPatterns.ts`.
+The store is structured-cloned across the worker boundary _and_ persisted to
+IndexedDB by `exchangeStoreCache`, so a free-text reason would carry venue error
+strings (which embed client IPs and signed query strings) into both. Widening
+the enum also changes the counter table's primary key, the record RPC's
+signature, the route's row normalizer, and the rollup's `group by`.
+
 Counters are monotonic per exchange-instance lifetime and are **not** reset on
 reconnect — a counter that resets is indistinguishable from one that never
 moved. Consumers diff against their own baseline and must treat a decrease as
@@ -409,7 +428,7 @@ sees a flag name, only a number.
   `AUTH_FAILURE_MAX_TICK_INTERVAL` rather than multiplying past it.
 - **It does not reach hosted (exchange-server) accounts, and the reason is
   earlier than it looks.** `createStoreWorker` returns the exchange-server port
-  *before* it reaches `applyWorkerConfig`, so the setter is never called on that
+  _before_ it reaches `applyWorkerConfig`, so the setter is never called on that
   path at all — this is not a question of which ops the server forwards.
   Independently, `ExchangeServerWorker`'s `INIT_FIELDS` omits `extra`, so the
   hosted server already ticks on raw metadata regardless. If rate limits show up
