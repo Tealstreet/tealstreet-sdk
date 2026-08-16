@@ -524,7 +524,7 @@ name}` footer segment auto-runs the named script ~1×/sec
   `scripts/generate-script-types-bundle.ts`, a monorepo-root script that
   is **not** in the `tealstreet-sdk` mirror slice. The block loads the
   generator via a Vite partial-dynamic specifier
-  (`` import(`../../../scripts/${generatorName}.ts`) ``): the glob matches
+  (``import(`../../../scripts/${generatorName}.ts`)``): the glob matches
   in the monorepo (gate runs, 0 skipped) and matches nothing in the mirror,
   where the dir is absent (import rejects → `describe.skipIf` skips). The
   template specifier also stops tsc binding the missing module, keeping the
@@ -553,7 +553,7 @@ name}` footer segment auto-runs the named script ~1×/sec
   rebuilds if reconnect swaps the account exchange object. Keep
   `api.getHistoricalPosition` out of the CLI target descriptor: web/mobile
   read an app position-history store, while CLI has no equivalent store.
-  An on-demand `fetchHistoricalTrades` call would be a thinner,
+  An on-demand `fetchHistoricalFills` call would be a thinner,
   venue-limited contract, not parity.
 - **Script retry idempotency is checked before the first attempt.**
   `retry N script:<name>` must refuse a non-idempotent script before

@@ -588,7 +588,7 @@ export class ApexOmniExchange extends BaseExchange {
       .slice(0, limit);
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }

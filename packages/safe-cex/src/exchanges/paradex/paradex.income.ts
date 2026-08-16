@@ -12,11 +12,11 @@ import type { IncomeRecord } from '../../types';
  * funding all ride on the fill, and no separate funding request is needed (hyperliquid
  * needs one, and its `/funding/payments` answered 401 under our JWT scope anyway).
  *
- * `created_at` is epoch MILLISECONDS — do not reuse `fetchExecutions`'s
+ * `created_at` is epoch MILLISECONDS — do not reuse `fetchHistoricalFills`'s
  * `normalizeToSeconds` in this file; `IncomeRecord.timestamp` is ms on every venue.
  *
  * `fee` is positive when charged, so the emitted income is `-fee` and its sign decides
- * `commission` vs `rebate`. Do not copy `fetchExecutions`'s `Math.abs(fee)` — that erases
+ * `commission` vs `rebate`. Do not copy `fetchHistoricalFills`'s `Math.abs(fee)` — that erases
  * maker rebates, the same defect found on hyperliquid.
  */
 

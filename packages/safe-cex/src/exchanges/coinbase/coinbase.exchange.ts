@@ -1018,11 +1018,6 @@ export class CoinbaseExchange extends BaseExchange {
     }
   };
 
-  // TODO: implement
-  fetchHistoricalTrades = async (_opts: HistoricalTradeOptions) => {
-    return [];
-  };
-
   dailyCandles: { [key: string]: Candle } = {};
 
   fetchOHLCV = async (opts: OHLCVOptions) => {

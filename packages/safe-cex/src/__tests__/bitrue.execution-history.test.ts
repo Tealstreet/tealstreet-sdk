@@ -82,7 +82,7 @@ describe('BitrueExchange execution history mapping', () => {
       },
     });
 
-    const trades = await exchange.fetchHistoricalTrades({
+    const trades = await exchange.fetchHistoricalFills({
       symbol: 'E-BTC-USDT',
       from: 1_700_000_004,
       to: 1_700_000_008,
@@ -106,11 +106,12 @@ describe('BitrueExchange execution history mapping', () => {
       qty: 0.5,
       side: OrderSide.Sell,
       maker: true,
-      buyer: false,
       commission: 0.2,
       commissionAsset: 'USDT',
       positionSide: 'both',
-      time: 1_700_000_007_000,
+      // `Execution.timestamp` is SECONDS. The removed `HistoricalTrade` shape
+      // carried the same instant in milliseconds.
+      timestamp: 1_700_000_007,
     });
     expect(trades[1]).toMatchObject({
       symbol: 'E-BTC-USDT',
@@ -120,7 +121,7 @@ describe('BitrueExchange execution history mapping', () => {
       side: OrderSide.Buy,
       commission: 0.5,
       commissionAsset: 'USDT',
-      time: 1_700_000_005_000,
+      timestamp: 1_700_000_005,
     });
   });
 
@@ -155,7 +156,7 @@ describe('BitrueExchange execution history mapping', () => {
       },
     });
 
-    const executions = await exchange.fetchExecutions({
+    const executions = await exchange.fetchHistoricalFills({
       symbol: 'E-BTC-USDT',
       orderId: 'oid-1',
       limit: 100,
@@ -169,6 +170,9 @@ describe('BitrueExchange execution history mapping', () => {
         price: 60000,
         qty: 0.25,
         side: OrderSide.Buy,
+        // Carried across the re-map now. bitrue reports no per-fill hedge leg,
+        // so the inner mapper emits the one-way default.
+        positionSide: 'both',
         commission: 0.1,
         commissionAsset: 'USDT',
       },
@@ -187,7 +191,7 @@ describe('BitrueExchange execution history mapping', () => {
       },
     });
 
-    const trades = await exchange.fetchHistoricalTrades({ symbol: 'E-BTC-USDT' });
+    const trades = await exchange.fetchHistoricalFills({ symbol: 'E-BTC-USDT' });
 
     expect(trades).toEqual([]);
     expect(emitAndLogError).toHaveBeenCalledWith('request failed');

@@ -42,7 +42,7 @@ describe('hyperliquid fill -> income', () => {
   });
 
   it('treats a negative fee as a rebate, not an absolute-valued commission', () => {
-    // `fetchExecutions` in the same directory does Math.abs(fee), which is wrong for
+    // `fetchHistoricalFills` in the same directory does Math.abs(fee), which is wrong for
     // maker rebates. This mapper must not copy that.
     const records = mapHyperliquidFillToIncomeRecords(fill({ fee: '-0.002', closedPnl: '0' }), resolveSymbol);
 

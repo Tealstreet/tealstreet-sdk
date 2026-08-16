@@ -15,7 +15,7 @@ import { PositionSide } from '../../types';
  *
  * Two traps that a careless mapper hits and that no typecheck catches:
  *
- * - **`fee` can be NEGATIVE** (maker rebate). `fetchExecutions` in this directory does
+ * - **`fee` can be NEGATIVE** (maker rebate). `fetchHistoricalFills` in this directory does
  *   `Math.abs(feeRaw)`, which is already wrong for rebates — do not copy it. The emitted
  *   income is `-fee`, and its sign decides `commission` vs `rebate`.
  * - **REST and WS funding rows have DIFFERENT SHAPES.** REST `UserFundingEntry` nests
@@ -25,7 +25,7 @@ import { PositionSide } from '../../types';
  *   `readFundingRow` normalises both.
  *
  * `tranId` uses the fill's `tid` and funding's `hash`+`coin`, never a
- * price/size/time composite: `fetchExecutions` dedupes on
+ * price/size/time composite: `fetchHistoricalFills` dedupes on
  * `orderId:ts:price:qty:side`, which collapses genuine identical partial fills.
  */
 

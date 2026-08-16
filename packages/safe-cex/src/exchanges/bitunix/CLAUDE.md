@@ -125,7 +125,7 @@ Defined by `BitunixExchange.tick()`:
 | `CANCEL_ORDER_TP_SL`   | `/api/v1/futures/tpsl/cancel_order`                | Cancel TP/SL orders                                                                                                                                                                                                                            |
 | `TP_SL_ORDER`          | `/api/v1/futures/tpsl/place_order`                 | Place partial TP/SL order                                                                                                                                                                                                                      |
 | `POSITION_TP_SL_ORDER` | `/api/v1/futures/tpsl/position/place_order`        | Place full-position TP/SL                                                                                                                                                                                                                      |
-| `HISTORY_TRADES`       | `/api/v1/futures/trade/get_history_trades`         | User fills history (primary for `fetchExecutions`)                                                                                                                                                                                             |
+| `HISTORY_TRADES`       | `/api/v1/futures/trade/get_history_trades`         | User fills history (primary for `fetchHistoricalFills`)                                                                                                                                                                                             |
 | `KLINE`                | `/api/v1/futures/market/kline`                     | Kline/candlestick data (public)                                                                                                                                                                                                                |
 | `POSITIONS`            | `/api/v1/futures/position/get_pending_positions`   | Fetch open positions                                                                                                                                                                                                                           |
 
@@ -139,7 +139,7 @@ Additional TP/SL modify endpoints:
   `/api/v1/futures/tpsl/position/modify_order` for full-position TP/SL rows by
   symbol and `positionId`.
 
-Execution-history behavior (`fetchExecutions`):
+Execution-history behavior (`fetchHistoricalFills`):
 
 - Uses the documented `HISTORY_TRADES` endpoint with symbol/time-window params.
 - Defensively parses mixed payload shapes (`data.data`, `tradeList`, `list`, `rows`).
@@ -516,7 +516,7 @@ Similarly, TP/SL orders may be direct arrays or wrapped in `orderList`.
 
 ## Order history (`/api/v1/futures/trade/get_history_orders`)
 
-`fetchOrderHistory` reads this endpoint. Mapper: `bitunix.order-history.ts`, pure and
+`fetchHistoricalOrders` reads this endpoint. Mapper: `bitunix.order-history.ts`, pure and
 exported. Rows nest under **`data.orderList`** — the row key is per-endpoint here
 (`orderList`, `tradeList`, `positionList`).
 
@@ -526,7 +526,7 @@ than an error:**
 - **`skip` does NOT work on this endpoint, unlike `get_history_trades` where it does.**
   `skip=100` returns a byte-identical first page. Routing this axis through the shared
   `fetchBitunixHistoryPages` therefore caps it at 100 orders and reads as a small account
-  — it fetched 200 raw rows for 100 distinct ids before the fix. `fetchOrderHistory` walks
+  — it fetched 200 raw rows for 100 distinct ids before the fix. `fetchHistoricalOrders` walks
   the `startTime`/`endTime` window backwards instead, and recovered 164 of the venue's own
   reported `total: "164"` for a 30-day window.
 - **`status` is ignored outright.** `status=CANCELED` returned 100/100 rows reading

@@ -673,11 +673,11 @@ to public WebSocket reconnection.
 
 ### Executions and trade history
 
-- `fetchExecutions` reads `/v3/trade/transactionHistory`, normalizes both current camelCase and
+- `fetchHistoricalFills` reads `/v3/trade/transactionHistory`, normalizes both current camelCase and
   legacy snake_case fields, applies symbol/order/time filters, sorts ascending, and caps the result.
-- `fetchHistoricalTrades` also reads `/v3/trade/transactionHistory` (not the legacy
+- `fetchHistoricalFills` reads `/v3/trade/transactionHistory` (not the legacy
   `/v1/client/trades` pair this doc previously claimed) and shares
-  `parseTransactionHistoryRow` with `fetchExecutions`.
+  `parseTransactionHistoryRow` with `fetchHistoricalFills`.
 - **`side` has two vocabularies.** One-way accounts return `BUY`/`SELL`; hedge accounts return
   `OPEN LONG` / `CLOSE LONG` / `OPEN SHORT` / `CLOSE SHORT`. The mapper understood only BUY/SELL
   and returned `null` for everything else, so **every hedge-mode fill was silently dropped** —
@@ -781,7 +781,7 @@ measured 500 fills against 495 order ids, so `order_id` **does** collide. Key on
 
 ### Order history (`GET /v1/orders`)
 
-`fetchOrderHistory` reads this route. Mapper: `woo.order-history.ts`, pure and exported.
+`fetchHistoricalOrders` reads this route. Mapper: `woo.order-history.ts`, pure and exported.
 Measured live over 30 days: **617 orders, 169 of which never filled (27.4%)** — invisible
 to `/v3/trade/transactionHistory` and to every other axis.
 
@@ -789,7 +789,7 @@ Three things that make this route unlike the trade route beside it:
 
 - **`start_t` / `end_t` are MILLISECONDS on the request, while the response reports
   fractional SECONDS** (`created_time: "1786536593.515"`). Sending seconds is rejected with
-  `400 end_t must be greater than or equal to 1000000000000`, which `fetchOrderHistory`'s
+  `400 end_t must be greater than or equal to 1000000000000`, which `fetchHistoricalOrders`'s
   own catch turns into an empty list — so the unit mismatch reads as an account with no
   orders rather than as a rejected request. Passing the response value through unscaled
   puts the account in January 1970, where a window filter then discards all of it.

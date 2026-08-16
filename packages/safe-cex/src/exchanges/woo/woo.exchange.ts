@@ -188,11 +188,11 @@ export class WOOXExchange extends BaseExchange {
    * `realizedPnl: null` on every row, so a fills fold refuses every interval and returns
    * nothing — which is exactly what it did before this override existed.
    */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
     const to = opts.to ?? Date.now();
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
 
-    const orders = await this.fetchOrderHistory({ from, to });
+    const orders = await this.fetchHistoricalOrders({ from, to });
     const executions = wooOrdersToExecutions(orders);
     const records: PositionRecord[] = [];
 
@@ -1369,7 +1369,7 @@ export class WOOXExchange extends BaseExchange {
     return [...limitOrders, ...algoOrders];
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1431,7 +1431,7 @@ export class WOOXExchange extends BaseExchange {
         .slice(0, maxLimit);
 
       if (normalizedRequestedSymbol && executions.length === 0) {
-        const historicalTrades = await this.fetchHistoricalTrades({
+        const historicalTrades = await this.fetchHistoricalTradesInternal({
           symbol: normalizedRequestedSymbol,
           orderId: normalizedOrderId,
           from,
@@ -1469,7 +1469,15 @@ export class WOOXExchange extends BaseExchange {
     }
   };
 
-  fetchHistoricalTrades = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
+  /**
+   * Internal only — the public fill surface is `fetchHistoricalFills`.
+   *
+   * Kept because this venue's own `fetchHistoricalFills` consumes it: the two methods
+   * read one axis, and here the millisecond-shaped mapper is the one that does
+   * the parsing. Private so nothing outside the class can treat it as a second
+   * public history axis again.
+   */
+  private fetchHistoricalTradesInternal = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
     if (this.isPublicDataOnly || !opts.symbol) {
       return [];
     }
@@ -1650,7 +1658,7 @@ export class WOOXExchange extends BaseExchange {
    * `page` genuinely advances here (page 2 returned strictly older rows), unlike WOO's
    * trade route, which returns the oldest rows first.
    */
-  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1730,7 +1738,7 @@ export class WOOXExchange extends BaseExchange {
 
       if (page > MAX_PAGES) {
         this.log(
-          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          `fetchHistoricalOrders stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
           LogSeverity.Warning,
         );
       }

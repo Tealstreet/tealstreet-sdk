@@ -65,7 +65,7 @@ import { ParadexPublicWebSocket } from './paradex.ws-public';
 
 export class ParadexExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: true });
 
   xhr: Axios;
@@ -874,7 +874,7 @@ export class ParadexExchange extends BaseExchange {
    * back `results: []`), which is worth stating because four other venues in this epic
    * answered a windowed request with their full history and no error.
    */
-  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -915,7 +915,7 @@ export class ParadexExchange extends BaseExchange {
 
       if (page >= MAX_PAGES) {
         this.log(
-          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          `fetchHistoricalOrders stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
           LogSeverity.Warning,
         );
       }
@@ -928,7 +928,7 @@ export class ParadexExchange extends BaseExchange {
     }
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -947,7 +947,7 @@ export class ParadexExchange extends BaseExchange {
       await this.sdkInitPromise;
     }
     if (!this.jwtManager) {
-      this.log('Skipping fetchExecutions: JWT manager not initialized', LogSeverity.Warning);
+      this.log('Skipping fetchHistoricalFills: JWT manager not initialized', LogSeverity.Warning);
       return [];
     }
 

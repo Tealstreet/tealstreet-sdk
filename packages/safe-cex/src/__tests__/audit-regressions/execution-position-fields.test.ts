@@ -5,7 +5,7 @@ import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPo
 
 /**
  * `Execution` carries `positionSide` / `realizedPnl` / `maker` so the journal can read
- * fills from `fetchExecutions` — implemented on every target venue — instead of
+ * fills from `fetchHistoricalFills` — implemented on every target venue — instead of
  * `fetchHistoricalTrades`, which only four venues implement.
  *
  * These lock the two decisions that are silently wrong rather than loudly broken:

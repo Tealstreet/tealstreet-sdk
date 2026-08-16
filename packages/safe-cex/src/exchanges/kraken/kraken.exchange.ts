@@ -84,7 +84,7 @@ const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined =>
 
 export class KrakenExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: false });
 
   xhr: Axios;
@@ -927,7 +927,7 @@ export class KrakenExchange extends BaseExchange {
    * Completeness is EXPLICIT — the page cap — not inferred from a span, because with only an
    * upper bound there is no span the venue can confirm.
    */
-  fetchExecutions = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
     if (this.isPublicDataOnly) return [];
 
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
@@ -1008,7 +1008,7 @@ export class KrakenExchange extends BaseExchange {
 
       if (!reachedWindowStart) {
         this.log(
-          `fetchExecutions stopped after ${page} page(s) without reaching ${new Date(from).toISOString()} — ` +
+          `fetchHistoricalFills stopped after ${page} page(s) without reaching ${new Date(from).toISOString()} — ` +
             `the result is a lower bound, not the whole window.`,
           LogSeverity.Warning,
         );

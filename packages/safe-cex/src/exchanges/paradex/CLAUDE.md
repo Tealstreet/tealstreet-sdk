@@ -201,7 +201,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/orders`                          | DELETE | Cancel all orders (optional `?market=` filter)                      |
 | `/orders/{id}`                     | DELETE | Cancel specific order                                               |
 | `/orders/by_client_id/{client_id}` | DELETE | Cancel by client ID                                                 |
-| `/fills`                           | GET    | Private fills history (`fetchExecutions` primary; cursor-paginated) |
+| `/fills`                           | GET    | Private fills history (`fetchHistoricalFills` primary; cursor-paginated) |
 
 ### Positions
 
@@ -210,7 +210,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/positions`          | GET    | Get all positions                |
 | `/positions/{market}` | GET    | Get position for specific market |
 
-Execution-history behavior (`fetchExecutions`):
+Execution-history behavior (`fetchHistoricalFills`):
 
 - Uses authenticated `/fills` with cursor pagination for primary execution history
 - Falls back to `/orders-history` rows where filled size is positive (`size - remaining_size > 0`)
@@ -628,7 +628,6 @@ For order signatures, size and price are scaled by `1e8`:
 | `supportsChaser`                            | `true`                                        |
 | `supportsPartialStops`                      | `true`                                        |
 | `supportsInfinityStops`                     | `false`                                       |
-| `supportsTradesHistory`                     | `false`                                       |
 | `supportsFeeRates`                          | `false`                                       |
 | `supportsTrailingStopLoss`                  | `false`                                       |
 | `supportsOpeningTriggerOrders`              | `true`                                        |
@@ -663,7 +662,7 @@ For order signatures, size and price are scaled by `1e8`:
 
 ## Order history (`GET /orders-history`)
 
-`fetchOrderHistory` reads this endpoint with cursor pagination. Mapper:
+`fetchHistoricalOrders` reads this endpoint with cursor pagination. Mapper:
 `paradex.order-history.ts`, pure and exported. Measured live over 7 days: 301 orders,
 **184 of which never filled (61.1%)** — the highest never-filled share of any venue in
 the epic, and entirely invisible to `/fills`.

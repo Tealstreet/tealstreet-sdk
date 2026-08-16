@@ -58,9 +58,9 @@ Keep JSON body normalization in `polymarket.api.ts` and HMAC construction in `po
 
 Official private paths include `GET /data/orders`, `GET /data/trades`, `GET /data/order/{id}`, `DELETE /order`, and `DELETE /orders`. Cursor pagination ends at `LTE=`; it is independent from Gamma/Data offset pagination.
 
-`supportsTradesHistory` remains false. Although the upstream CLOB exposes
+Although the upstream CLOB exposes
 `GET /data/trades`, this adapter does not implement safe-cex's
-`fetchExecutions` or `fetchHistoricalTrades` contract yet; documenting an
+`fetchHistoricalFills` contract yet; documenting an
 endpoint constant is not an implementation.
 
 ## CLOB V2 orders

@@ -510,7 +510,6 @@ Position mode (hedge/one-way) is cached in `_accountPositionMode` to avoid repea
   requiresPassphrase: false,
   requiresCors: true,
   supportsTestnet: false,
-  supportsTradesHistory: false,
   orderbookTickDelay: 60,
   tickInterval: 2_000,
   orderPendingUpdateDelay: 2_000,
@@ -611,7 +610,7 @@ Position mode (hedge/one-way) is cached in `_accountPositionMode` to avoid repea
 - `fetchMarkets` returns existing store markets on error instead of throwing
 - `fetchOpenPositions` returns existing store positions on error
 - `fetchOrders` returns existing store orders when API returns an error code
-- `fetchExecutions` returns empty array on error with `LogSeverity.Warning`
+- `fetchHistoricalFills` returns empty array on error with `LogSeverity.Warning`
 
 ### Network Retry
 

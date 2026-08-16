@@ -841,18 +841,18 @@ mapping `closedPnl` alone drops every fee from the ledger. Mapper:
 
 Three traps, none of which a typecheck catches:
 
-- **`fee` can be NEGATIVE** (maker rebate). `fetchExecutions` in this directory does
+- **`fee` can be NEGATIVE** (maker rebate). `fetchHistoricalFills` in this directory does
   `Math.abs(feeRaw)`, which is already wrong for rebates — do not copy it into new code.
 - **REST and WS funding rows have different shapes.** REST `UserFundingEntry` nests under
   `delta` (`{ time, hash, delta: { coin, usdc, … } }`); the WS `WsUserFunding` is flat.
   A mapper written against one silently yields `undefined` against the other.
 - **`tranId` keys on the fill's `tid`**, never a price/size/time composite.
-  `fetchExecutions` dedupes on `orderId:ts:price:qty:side`, which collapses genuine
+  `fetchHistoricalFills` dedupes on `orderId:ts:price:qty:side`, which collapses genuine
   identical partial fills.
 
-`fetchIncomeHistory` deliberately diverges from `fetchExecutions` in the same file:
+`fetchIncomeHistory` deliberately diverges from `fetchHistoricalFills` in the same file:
 
-|        | `fetchExecutions`                                                              | `fetchIncomeHistory`                     |
+|        | `fetchHistoricalFills`                                                              | `fetchIncomeHistory`                     |
 | ------ | ------------------------------------------------------------------------------ | ---------------------------------------- |
 | client | `xhr` (3 RPS)                                                                  | `infoXhr`, like every other private read |
 | user   | `applicationId` only — **returns the master wallet's data on a vault account** | `vault \|\| applicationId`               |
@@ -890,7 +890,7 @@ would be a fake oracle that always agrees.
 
 ## Order history (`historicalOrders`) — one row per TRANSITION, and no time filter
 
-`fetchOrderHistory` reads `POST /info { type: "historicalOrders", user }`. Mappers:
+`fetchHistoricalOrders` reads `POST /info { type: "historicalOrders", user }`. Mappers:
 `hyperliquid.order-history.ts` (`collapseHyperliquidOrderHistory` +
 `mapHyperliquidHistoricalOrder`), both pure and exported.
 
@@ -1088,7 +1088,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 
 ## `Execution` position fields — `dir` is NOT a hedge leg
 
-`fetchExecutions` populates `realizedPnl` (from `closedPnl`, gross of fees) and `maker`
+`fetchHistoricalFills` populates `realizedPnl` (from `closedPnl`, gross of fees) and `maker`
 (from `!crossed`), but deliberately leaves `positionSide` **absent**.
 
 Hyperliquid is one-way only (`positionModes: [PositionMode.OneWay]`,

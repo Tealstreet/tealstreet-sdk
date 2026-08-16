@@ -68,7 +68,7 @@ describe('Backpack execution history audit regression', () => {
   });
 
   it('requests the official fill-history endpoint and maps documented fields', async () => {
-    const executions = await exchange.fetchExecutions({
+    const executions = await exchange.fetchHistoricalFills({
       symbol,
       orderId: 'order-1',
       from: 1_721_000_000,
@@ -101,9 +101,12 @@ describe('Backpack execution history audit regression', () => {
     ]);
   });
 
-  it('advertises implemented trade history without bypassing the production-validation gate', () => {
+  // The subject here is the production-validation GATE, not a capability claim.
+  // backpack has a real `fetchHistoricalFills` above, and the flag stays false until
+  // an authenticated request is verified end-to-end through the production
+  // proxy — so a working implementation must NOT be enough to flip it.
+  it('keeps the production-validation gate closed despite a real implementation', () => {
     expect(getExchangeMetadata('backpack')).toMatchObject({
-      supportsTradesHistory: true,
       supportsExecutionsHistory: false,
     });
   });

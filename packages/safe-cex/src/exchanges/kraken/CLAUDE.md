@@ -111,7 +111,7 @@ Uses `virtualClock.getCurrentTimeMs()` for nonce generation. No explicit server 
 ## History axes live on a DIFFERENT base URL — that is why they look absent
 
 `fetchIncomeHistory` / `fetchIncomeHistoryRange` are **implemented** (see below);
-`fetchHistoricalTrades`, `fetchExecutions` and `fetchClosedPnl` still fall through to the
+`fetchHistoricalFills` and `fetchClosedPnl` still fall through to the
 inert `BaseExchange` stubs.
 
 All five used to, and the venue survey recorded that as "kraken has no history axis of any
@@ -237,7 +237,7 @@ compared with itself.
 **Supplying `lastFillTime` silently strips the PnL fields.** Measured: the route returns
 **11 keys with no parameters and 9 with the window applied** — `realized_pnl` and
 `realized_funding` simply vanish. The venue offers windowing OR PnL, never both, so
-`fetchExecutions` takes its FIRST page unwindowed even when `to` is supplied, and later
+`fetchHistoricalFills` takes its FIRST page unwindowed even when `to` is supplied, and later
 cursor pages report PnL as ABSENT rather than zero. That distinction is load-bearing: a fill
 that realized nothing and a page that cannot say are different facts.
 
