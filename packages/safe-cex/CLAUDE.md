@@ -80,6 +80,13 @@ documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
 
+`src/health/errorPatterns.ts` is not just toast labeling. The web controller
+uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
+pause automatic account reloads after terminal credential/permission failures.
+When an exchange emits a known bad-key, expired-key, signature, or IP-allowlist
+message, keep the health patterns aligned so it enters that terminal family.
+Do not classify transient network, 5xx, timeout, or rate-limit messages as auth.
+
 ## Metadata capability non-fallback baseline
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
@@ -409,7 +416,7 @@ sees a flag name, only a number.
   `AUTH_FAILURE_MAX_TICK_INTERVAL` rather than multiplying past it.
 - **It does not reach hosted (exchange-server) accounts, and the reason is
   earlier than it looks.** `createStoreWorker` returns the exchange-server port
-  *before* it reaches `applyWorkerConfig`, so the setter is never called on that
+  _before_ it reaches `applyWorkerConfig`, so the setter is never called on that
   path at all — this is not a question of which ops the server forwards.
   Independently, `ExchangeServerWorker`'s `INIT_FIELDS` omits `extra`, so the
   hosted server already ticks on raw metadata regardless. If rate limits show up

@@ -43,6 +43,22 @@ describe('errorPatterns', () => {
         );
         expect(matches).toBe(true);
       });
+
+      it('should match Phemex private websocket auth rejection', () => {
+        const message = 'Phemex websocket error - wrong api key or secret';
+        const matches = authPattern.patterns.some((p) =>
+          typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message),
+        );
+        expect(matches).toBe(true);
+      });
+
+      it('should match API_KEY_INVALID responses', () => {
+        const message = 'Exchange Error: The request is unauthorized. [API_KEY_INVALID]';
+        const matches = authPattern.patterns.some((p) =>
+          typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message),
+        );
+        expect(matches).toBe(true);
+      });
     });
 
     describe('network patterns', () => {
@@ -58,6 +74,18 @@ describe('errorPatterns', () => {
       it('should match "timeout"', () => {
         const matches = networkPattern.patterns.some((p) =>
           typeof p === 'string' ? 'timeout'.includes(p.toLowerCase()) : p.test('timeout'),
+        );
+        expect(matches).toBe(true);
+      });
+    });
+
+    describe('auth_permissions patterns', () => {
+      const permissionsPattern = DEFAULT_ERROR_PATTERNS.find((p) => p.category === 'auth_permissions')!;
+
+      it('should match unmatched IP API-key allowlist failures', () => {
+        const message = 'Unmatched IP, please check your API key';
+        const matches = permissionsPattern.patterns.some((p) =>
+          typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message),
         );
         expect(matches).toBe(true);
       });
