@@ -147,7 +147,6 @@ export const stubStore: StoreData = {
   activeChasers: [stubActiveChaser],
   activeTWAPs: [stubActiveTWAP],
   orders: [stubOrder],
-  requestStats: { ok: 0, rateLimit: 0, auth: 0, network: 0, other: 0 },
   fetchedLeverage: { stub: { buyLeverage: 0, sellLeverage: 0 } },
   loaded: {
     balance: false,

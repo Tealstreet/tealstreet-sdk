@@ -1,4 +1,4 @@
-import type { ExchangeName, ExchangeOptions, RequestOutcome } from './types';
+import type { ExchangeName, ExchangeOptions } from './types';
 
 import axios, { AxiosInstance, CreateAxiosDefaults } from 'axios';
 
@@ -8,7 +8,6 @@ import { createRemoteSigningAdapter } from './remoteSigningAdapter';
 import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
-import { isSigningCaptureRequest } from './utils/signingCapture';
 import { getPublicCorsProxy } from './utils/transportResolution';
 
 /**
@@ -162,51 +161,6 @@ export const isNodeOrBunRuntime = (): boolean =>
 
 export const LAST_LOG_PERIODICY = 30 * 1_000;
 
-/**
- * Classify a REST outcome from the HTTP status alone, then record it on the
- * exchange's store.
- *
- * Status-only is deliberate. `health/errorPatterns.ts` classifies far more
- * precisely, but it is a linear regex sweep over ~20 pattern groups against a
- * stringified message and it lives on the main thread inside
- * `ExchangeHealthMonitor` — unreachable from here and far too expensive for a
- * path that runs on every request.
- *
- * An error with NO response (timeout, DNS, CORS, tunnel drop) is `network`,
- * not `other`: the venue never answered, which is a different incident from a
- * venue answering 500, and collapsing them loses that permanently.
- *
- * Never throws. A counter must not be able to fail a request.
- */
-const recordRequestOutcome = (
-  exchange: BaseExchange,
-  status: number | undefined,
-  hadResponse: boolean,
-  config: unknown,
-) => {
-  try {
-    // A signing-capture round trip never touches the network — counting its
-    // synthetic 200 would report one phantom `ok` per signature, and in hosted
-    // mode that is every request twice over.
-    if (isSigningCaptureRequest(config)) return;
-
-    const outcome: RequestOutcome = !hadResponse
-      ? 'network'
-      : status === undefined
-        ? 'other'
-        : status === 429 || status === 418
-          ? 'rateLimit'
-          : status === 401 || status === 403
-            ? 'auth'
-            : status >= 200 && status < 300
-              ? 'ok'
-              : 'other';
-    exchange.store?.recordRequestOutcome(outcome);
-  } catch {
-    /* counting must never break a request */
-  }
-};
-
 export const safeCexAxiosCreateNoProxy = (
   config: CreateAxiosDefaults,
   options: ExchangeOptions,
@@ -228,13 +182,9 @@ export const safeCexAxiosCreateNoProxy = (
 
   // Add error interceptor for enhanced error messages
   axiosInstance.interceptors.response.use(
-    (response) => {
-      recordRequestOutcome(exchange, response.status, true, response.config);
-      return response;
-    },
+    (response) => response,
     (error) => {
       httpStats.recordError();
-      recordRequestOutcome(exchange, error?.response?.status, Boolean(error?.response), error?.config);
       // Enhance the error with more context
       const enhancedError = enhanceAxiosError(error, exchange.name);
       return Promise.reject(enhancedError);
@@ -376,7 +326,6 @@ export const safeCexAxiosCreate = (
   });
   axiosInstance.interceptors.response.use(
     async (response) => {
-      recordRequestOutcome(exchange, response.status, true, response.config);
       let shouldLog = isDevelopment;
       /* Logging */
       if (!shouldLog) {
@@ -426,8 +375,6 @@ export const safeCexAxiosCreate = (
       const enhancedError = enhanceAxiosError(error, exchange.name);
 
       const status = error?.response?.status;
-
-      recordRequestOutcome(exchange, status, Boolean(error?.response), error?.config);
 
       // Detect proxy/tunnel failures — surface them clearly instead of letting
       // them cascade into cryptic downstream errors or silent broken state.

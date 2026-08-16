@@ -9,22 +9,6 @@ throttled postMessage.
 must not depend on postprocessors happening to reconstruct a field after
 serialization.
 
-**A field added to `store.stub.ts` MUST also be added to `serialize()`.**
-`apps/web`'s IndexedDB warm-boot cache validates snapshots with
-`shapesCompatible(stubStore, storeData)`, which requires every stub key to be
-present — so a stub-only field silently invalidates every cached snapshot and
-cold-boots every account, with no error anywhere, because a cache miss is
-indistinguishable from a cold start. `requestStats` shipped that way once;
-`store.base.test.ts` now asserts the parity so the next one cannot.
-
-### `requestStats` — REST outcome counters
-
-Cumulative per-outcome REST counts written by the response interceptors in
-`safeCexAxiosCreate.ts`. `recordRequestOutcome` mutates in place and
-**deliberately does not `notify()`** — it runs on every request, and the 250 ms
-throttled worker ship already carries the field. See
-`packages/safe-cex/CLAUDE.md` → "REST request counters ride the store".
-
 For exchange WS dispatch and per-frame patterns that interact with
 this store, see `../exchanges/CLAUDE.md` → "Public WebSocket
 Hot-Path Patterns". This doc covers the **store contracts** —

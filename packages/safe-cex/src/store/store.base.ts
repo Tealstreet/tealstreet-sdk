@@ -2,7 +2,7 @@ import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import uniqBy from 'lodash/uniqBy';
 
-import { Market, Order, OrderStatus, Position, RequestOutcome, StoreData, Ticker, Writable } from '../types';
+import { Market, Order, OrderStatus, Position, StoreData, Ticker, Writable } from '../types';
 import { clone } from '../utils/clone';
 
 export const PACKED_TICKER_FIELDS = [
@@ -34,7 +34,6 @@ export const defaultStore: StoreData = {
   activeTWAPs: [],
   orders: [],
   messageHandlerStats: {},
-  requestStats: { ok: 0, rateLimit: 0, auth: 0, network: 0, other: 0 },
   fetchedLeverage: {},
   loaded: {
     balance: false,
@@ -147,10 +146,6 @@ export class DefaultStore implements Store {
       orders: [...this.orders],
       starkConfig: this.starkConfig ? { ...this.starkConfig } : undefined,
       messageHandlerStats: this.messageHandlerStats ? { ...this.messageHandlerStats } : undefined,
-      // MUST be serialized. `stubStore` carries it, and `exchangeStoreCache`'s
-      // `shapesCompatible` requires every stub key to be present — omitting it here
-      // invalidates every warm-boot snapshot and silently cold-boots every account.
-      requestStats: this.requestStats ? { ...this.requestStats } : undefined,
       fetchedLeverage: { ...this.fetchedLeverage },
       loaded: {
         balance: this.loaded.balance,
@@ -431,29 +426,6 @@ export class DefaultStore implements Store {
       ...data,
     };
     this.notify();
-  }
-
-  get requestStats() {
-    return this.state.requestStats;
-  }
-
-  /**
-   * One increment, in place, no notify.
-   *
-   * This runs on EVERY REST request across every account, so the two things it
-   * must not do are allocate and notify. `update()` would run the whole
-   * ticker/market/order merge pipeline and then `notify()`, manufacturing a
-   * store delta per request — the exact main-thread churn that made request
-   * logging too expensive to keep in the first place.
-   *
-   * Getting the value out is free instead: the throttled store ship already
-   * serializes the whole state, so the counters ride along on a cadence that
-   * exists whether or not anyone is counting.
-   */
-  recordRequestOutcome(outcome: RequestOutcome) {
-    const stats = this.state.requestStats;
-    if (!stats) return;
-    stats[outcome] += 1;
   }
 
   auditPositions = (removeDupes = false) => {

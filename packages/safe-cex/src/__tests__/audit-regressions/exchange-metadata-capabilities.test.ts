@@ -7,18 +7,7 @@ import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
 
 const liveInstances: BaseExchange[] = [];
-/**
- * This test dynamically imports and constructs EVERY registered exchange, so its
- * wall time is dominated by vitest's transform of ~40 exchange module graphs and
- * therefore scales with how loaded the worker pool is, not with anything the test
- * does. Measured on one machine: 4.3 s standalone, 11.3 s under moderate suite
- * load, and it tripped a 15 s cap once the suite grew by three unrelated tests.
- *
- * Raised rather than trimmed because the coverage — every venue constructs
- * without starting I/O — is the point of the file, and a cap that fails on
- * neighbouring tests being added is a flaky gate rather than a strict one.
- */
-const REGISTRY_CONSTRUCTION_TIMEOUT_MS = 60_000;
+const REGISTRY_CONSTRUCTION_TIMEOUT_MS = 15_000;
 
 const createImplementation = async (exchangeName: ExchangeName, publicDataOnly = false): Promise<BaseExchange> => {
   const Exchange = await exchangeRegistry[exchangeName]();

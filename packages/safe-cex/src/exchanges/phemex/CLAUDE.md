@@ -467,11 +467,15 @@ distinct user-visible failures came out of that: the margin switch silently
 never happened, and `setLeverage` fell through to a **positive** `leverageRr`,
 which flips a cross account to isolated as a side effect.
 
-`resolveLeverageContext` prefers the store row (only when it carries both
-`marginType` and `positionMode` — guessing a default is what flips the mode)
-and otherwise reads the raw `accountPositions` row, which is present at size 0
-with `leverageRr` and `crossMargin` populated. Read that row **raw**, not via
-`mapPosition`, which would discard it.
+`resolveLeverageContext` reads the raw `accountPositions` row first, because it
+is the current exchange state and is present at size 0 with `leverageRr` and
+`crossMargin` populated. Only fall back to the store row if the raw read fails
+or omits the symbol, and only when the store row carries both `marginType` and
+`positionMode` — guessing a default is what flips the mode. This order matters:
+symbol-scoped empty fetches cannot clear stale open rows via
+`addOrUpdatePositions([])`, so a stale store row can otherwise override a
+fresh flat-row margin switch. Read the raw row **raw**, not via `mapPosition`,
+which would discard it.
 
 #### A leverage change on a flat symbol must record `fetchedLeverage`
 
@@ -482,10 +486,18 @@ too small. The e2e margin-slider step catches this as `expected 5.45 to be close
 to 55.5675` (22.23 available x 10x x 0.25).
 
 `setLeverageHelper` therefore writes `store.fetchedLeverage[symbol]` after a
-confirmed success, which is the app's documented no-position fallback (blofin's
+confirmed success, including the confirmed `marginType` and `positionMode`,
+which is the app's documented no-position fallback (blofin's
 `fetchLeverageForSymbol` is the reference implementation). The response code is
-checked **before** any store mutation, so a rejected change cannot record a
-leverage the exchange never applied.
+checked **before** any store mutation, so a rejected change cannot record
+metadata the exchange never applied.
+
+`changePositionMode` has the same flat-symbol requirement: Phemex can switch a
+zero-size symbol from OneWay to Hedged and then still have no mapped
+`store.positions` row because `mapPosition` intentionally drops size-0 rows.
+After a successful switch, refresh `accountPositions` and persist the confirmed
+`positionMode` / `marginType` in `fetchedLeverage[symbol]` so the UI selector
+does not fall back to stale mode metadata.
 
 #### Margin Type (`changeMarginType`)
 

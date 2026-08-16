@@ -114,10 +114,4 @@ export interface StoreWorkerPayload {
 export interface WorkerConfig {
   // ENABLE_AWS_PROXY_MIGRATION — false (default) => legacy AWS CORS host; true => read fleet.
   awsProxyMigration?: boolean;
-  /**
-   * Per-exchange polling slowdown, keyed by exchange name. The break-glass lever
-   * for a venue that has started rate-limiting us. Values below 1 are ignored —
-   * this may only ever reduce request pressure. See `utils/tickIntervalOverride`.
-   */
-  tickIntervalMultipliers?: Record<string, number>;
 }

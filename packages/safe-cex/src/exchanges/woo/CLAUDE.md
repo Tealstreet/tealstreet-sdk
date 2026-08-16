@@ -151,6 +151,17 @@ open-interest and 24-hour statistics remain authoritative and are retained in ty
 The active legacy market-order IOC emulation must not blindly trust legacy REST bid/ask fields,
 because they are initialized from `24h_close`; when side quotes drift materially from mark/index, use
 mark/index/mid/last as the protected IOC reference before applying bounded slippage.
+Market IOC placement reads the current `/v1/public/orderbook/:symbol` touch before falling back to
+ticker state. When that touch is inside the market's documented `price_range`, use it if fair-price
+slippage would not actually cross. WOO perps can publish asks just above the 0.9% fair-slippage price
+but still inside the venue cap; pricing those IOC buys below the ask produces an accepted-but-flat
+order. Do not use a touch outside `price_range`: WOO rejects it with the price-range error instead of
+creating the order.
+The same touch read preflights post-only limits. WOO has accepted a marketable `POST_ONLY` buy and
+opened a position instead of canceling maker-only, so the adapter rejects crossing post-only limits
+before sending them. The guard also rejects buys at/above fair price and sells at/below fair price,
+because WOO filled a buy that was below the public ask but above mark/index, likely through hidden
+or stale liquidity not visible in `/v1/public/orderbook`.
 Legacy futures leverage reads are rate-limit sensitive. `fetchPositions()` may need leverage metadata
 only to synthesize zero-size rows for symbols with pending orders, so cache those per symbol/position
 mode, share concurrent readbacks, and keep cached metadata when Woo answers 429 instead of replacing
@@ -850,9 +861,12 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 #### Position Mode (`changePositionMode`)
 
 - POST to `/v1/client/position_mode` with `position_mode: 'HEDGE_MODE' | 'ONE_WAY'`
-- Updates cached `_accountPositionMode`
-- Refetches positions after change
+- Confirms the account mode through `/v3/accountinfo` before updating cached `_accountPositionMode`
+- Refetches positions after confirmed readback
 - Known error: `error_code: 111000` -- "Position mode cannot be altered while there are pending orders"
+- WOO also returns `error_code: 111000` with "Position mode remains unchanged as it is already set to
+  your selection." That exact already-set message is a successful no-op only after the same account
+  readback confirms the requested mode.
 
 #### Position Metadata (`fetchPositionMetadata`)
 
@@ -879,7 +893,7 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 ## Known Quirks / Implementation Notes
 
 1. **Dual signature methods**: V1 endpoints use `params|timestamp` format, V3 endpoints use `timestamp+METHOD+url+body` format. The request interceptor auto-selects based on URL.
-2. **POST_ONLY as order type**: WooX treats `POST_ONLY` as a separate order type rather than a time-in-force value. Code maps PostOnly TIF to `type: 'POST_ONLY'` when placing orders, and maps `POST_ONLY` type back to `OrderTimeInForce.PostOnly` when reading.
+2. **POST_ONLY as order type**: WooX treats `POST_ONLY` as a separate order type rather than a time-in-force value. Code maps PostOnly TIF to `type: 'POST_ONLY'` when placing orders, and maps `POST_ONLY` type back to `OrderTimeInForce.PostOnly` when reading. Marketable post-only orders must be blocked client-side using fair price plus the current orderbook touch before the POST, because WOO can fill instead of canceling them.
 3. **V1 body handling**: For V1 POST/DELETE/PUT, all params are signed as a sorted form string and sent in the request body. Do not move mutation params into the URL with an empty body; WOO can reject that before application-level order validation with `411 Length Required`.
 4. **No uPNL in account endpoint**: WooX does not provide unrealized PnL in the account endpoint. uPNL is computed from positions polling and added to balance. This causes a timing issue where `fetchBalance()` alone returns stale `upnl`.
 5. **Historical kline from separate domain**: Historical legacy kline data uses `https://api-pub.woox.io` via `_proxyEnforcedXhr`, while recent kline data uses the main API. `fetchOHLCV` selects it when the requested candle is more than 100 intervals old.
@@ -911,7 +925,9 @@ in-flight marker, and expected signature. Preserve this lifecycle when changing 
 
 - **Account mode check** (`fetchBalance`): Throws `"WOO X account is in ${mode} mode, only FUTURES mode is supported"` if not in FUTURES mode
 - **Isolated margin warning** (`fetchOpenPositions`): Emits an error when an isolated-margin position is detected
-- **Position mode change** (`changePositionMode`): Error code `111000` / code `-1005` means "Position mode cannot be altered while there are pending orders"
+- **Position mode change** (`changePositionMode`): Error code `111000` / code `-1005` means
+  "Position mode cannot be altered while there are pending orders" unless the message is the
+  already-set no-op described above; do not key only on numeric codes.
 - **Cancel already-canceled** (`cancelAlgoOrder`): Silently handles "already canceled" by updating store status instead of throwing
 - **Failed positions fetch** (`fetchOpenPositions`): Checks `success` and throws with `data.message` if false
 

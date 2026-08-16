@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { MarginType } from '../../types';
+import { MarginType, PositionMode, PositionSide } from '../../types';
 
 // A flat ADAUSDT row as accountPositions actually returns it: size 0, but
 // carrying the leverage and margin fields the leverage endpoint needs.
@@ -18,7 +18,19 @@ const flatCrossRow = {
   liquidationPriceRp: '0',
 };
 
-const buildExchange = () => {
+const flatIsolatedRow = {
+  ...flatCrossRow,
+  leverageRr: '10',
+  crossMargin: false,
+};
+
+const flatHedgedRow = {
+  ...flatIsolatedRow,
+  posSide: 'Long',
+  posMode: 'Hedged',
+};
+
+const buildExchange = (positionRows = [flatCrossRow]) => {
   const store = new DefaultStore();
   store.update({
     markets: [
@@ -36,7 +48,7 @@ const buildExchange = () => {
   const put = vi.fn().mockResolvedValue({ data: { code: 0, msg: '' } });
   // The store stays empty: loaded.positions is false on the hosted-mode mirror,
   // and mapPosition drops size-0 rows anyway, so a flat symbol is never in it.
-  const get = vi.fn().mockResolvedValue({ data: { data: { positions: [flatCrossRow] } } });
+  const get = vi.fn().mockResolvedValue({ data: { data: { positions: positionRows } } });
   exchange.xhr = { put, get } as any;
   return { exchange, put, get };
 };
@@ -88,6 +100,8 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
     expect(exchange.store.fetchedLeverage.ADAUSDT).toMatchObject({
       buyLeverage: 10,
       sellLeverage: 10,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.OneWay,
     });
   });
 
@@ -101,6 +115,21 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
     expect(exchange.store.fetchedLeverage.ADAUSDT).toBeUndefined();
   });
 
+  it('records the confirmed position mode for a flat symbol', async () => {
+    const { exchange, put } = buildExchange([flatHedgedRow]);
+
+    await exchange.changePositionMode(true, 'ADAUSDT');
+
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][2].params.targetPosMode).toBe('Hedged');
+    expect(exchange.store.fetchedLeverage.ADAUSDT).toMatchObject({
+      buyLeverage: 10,
+      sellLeverage: 10,
+      marginType: MarginType.Isolated,
+      positionMode: PositionMode.Hedged,
+    });
+  });
+
   it('reads margin mode off the raw row, which mapPosition would have dropped', async () => {
     // mapPosition returns undefined for size-0 rows on purpose, so the leverage
     // context has to read accountPositions directly.
@@ -110,5 +139,24 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
 
     const context = await (exchange as any).resolveLeverageContext('ADAUSDT');
     expect(context).toMatchObject({ marginType: MarginType.Cross, longLeverage: 10 });
+  });
+
+  it('prefers the current raw row over stale stored margin metadata', async () => {
+    const { exchange } = buildExchange([flatIsolatedRow]);
+    exchange.store.addOrUpdatePositions([
+      {
+        id: 'ADAUSDT-long',
+        symbol: 'ADAUSDT',
+        side: PositionSide.Long,
+        contracts: 1,
+        leverage: 10,
+        marginType: MarginType.Cross,
+        positionMode: PositionMode.OneWay,
+      } as any,
+    ]);
+
+    const context = await (exchange as any).resolveLeverageContext('ADAUSDT');
+
+    expect(context).toMatchObject({ marginType: MarginType.Isolated, longLeverage: 10 });
   });
 });

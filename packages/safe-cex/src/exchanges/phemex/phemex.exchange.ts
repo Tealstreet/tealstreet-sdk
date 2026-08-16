@@ -45,6 +45,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { roundUSD } from '../../utils/roundUSD';
 import { adjust, multiply1, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BROKER_ID, createAPI } from './phemex.api';
 import {
@@ -59,7 +60,6 @@ import {
 } from './phemex.types';
 import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
-import { virtualClock } from '../../utils/virtualClock';
 
 export class PhemexExchange extends BaseExchange {
   xhr: Axios;
@@ -554,10 +554,7 @@ export class PhemexExchange extends BaseExchange {
     const amount = parseFloat(v(order, 'orderQty') || v(order, 'orderQtyRq') || '0');
     const filled = status === OrderStatus.Canceled ? 0 : parseFloat(v(order, 'execQty') || '0') || 0;
     const remaining =
-      parseFloat(v(order, 'leavesQty')) ||
-      parseFloat(v(order, 'orderQty')) ||
-      parseFloat(v(order, 'orderQtyRq')) ||
-      1;
+      parseFloat(v(order, 'leavesQty')) || parseFloat(v(order, 'orderQty')) || parseFloat(v(order, 'orderQtyRq')) || 1;
     const trigger = v(order, 'trigger') || v(order, 'triggerType');
 
     const formattedOrders = [
@@ -925,6 +922,22 @@ export class PhemexExchange extends BaseExchange {
       this.store.update({
         positions: [...this.store.positions.filter((p) => p.symbol !== symbol), ...symbolPos],
       });
+
+      const context = await this.resolveLeverageContext(symbol);
+      if (context) {
+        const existing = this.store.fetchedLeverage[symbol];
+        this.store.update({
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: {
+              buyLeverage: existing?.buyLeverage ?? context.longLeverage,
+              sellLeverage: existing?.sellLeverage ?? context.shortLeverage,
+              marginType: context.marginType,
+              positionMode: context.positionMode,
+            },
+          },
+        });
+      }
     } catch (e: any) {
       this.emitAndLogError(e, e?.response?.data?.msg || e?.message);
       throw e;
@@ -943,19 +956,22 @@ export class PhemexExchange extends BaseExchange {
   // fully loaded worker. Both callers then threw "Position not found" before
   // issuing any request — the margin switch never happened, and setLeverage
   // fell through to a positive leverageRr that flipped cross accounts to
-  // isolated. accountPositions returns the flat row with leverageRr and
-  // crossMargin populated, so read it raw rather than through mapPosition.
+  // isolated. accountPositions returns the current row with leverageRr and
+  // crossMargin populated even while flat, so prefer it over possibly stale
+  // symbol-scoped store rows.
   private resolveLeverageContext = async (
     symbol: string,
   ): Promise<
     { marginType: MarginType; positionMode: PositionMode; longLeverage: number; shortLeverage: number } | undefined
   > => {
-    const stored = this.store.positions.filter((p) => p.symbol === symbol);
-    const storedMarginType = stored[0]?.marginType;
-    const storedPositionMode = stored[0]?.positionMode;
-    // Fall through to the REST row if the store row is missing either field —
-    // guessing a default here is what flips margin mode by accident.
-    if (storedMarginType !== undefined && storedPositionMode !== undefined) {
+    const readStoredContext = () => {
+      const stored = this.store.positions.filter((p) => p.symbol === symbol);
+      const storedMarginType = stored[0]?.marginType;
+      const storedPositionMode = stored[0]?.positionMode;
+      // Use the store only as a fallback and only when it carries both fields —
+      // guessing a default here is what flips margin mode by accident.
+      if (storedMarginType === undefined || storedPositionMode === undefined) return undefined;
+
       const long = stored.find((p) => p.side === PositionSide.Long) ?? stored[0];
       const short = stored.find((p) => p.side === PositionSide.Short) ?? stored[0];
       return {
@@ -964,7 +980,7 @@ export class PhemexExchange extends BaseExchange {
         longLeverage: Math.abs(long.leverage),
         shortLeverage: Math.abs(short.leverage),
       };
-    }
+    };
 
     try {
       const {
@@ -977,7 +993,7 @@ export class PhemexExchange extends BaseExchange {
       });
 
       const rows = (data?.positions || []).filter((r: any) => this.formatSymbolIn(r.symbol) === symbol);
-      if (rows.length === 0) return undefined;
+      if (rows.length === 0) return readStoredContext();
 
       const leverageOf = (row: any) => Math.abs(parseFloat(v(row, 'leverageRr'))) || 0;
       const long = rows.find((r: any) => v(r, 'posSide') === 'Long') ?? rows[0];
@@ -992,7 +1008,7 @@ export class PhemexExchange extends BaseExchange {
       };
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
-      return undefined;
+      return readStoredContext();
     }
   };
 
@@ -1099,7 +1115,8 @@ export class PhemexExchange extends BaseExchange {
     // and it falls back to 1x — the order size then comes out `leverage` times
     // too small. fetchedLeverage is the app's documented no-position fallback
     // (see blofin's fetchLeverageForSymbol).
-    const appliedLeverage = Math.abs(prepLeverage(inputLeverage));
+    const appliedSignedLeverage = prepLeverage(inputLeverage);
+    const appliedLeverage = Math.abs(appliedSignedLeverage);
     const existing = this.store.fetchedLeverage[symbol];
     this.store.update({
       fetchedLeverage: {
@@ -1107,6 +1124,8 @@ export class PhemexExchange extends BaseExchange {
         [symbol]: {
           buyLeverage: side === PositionSide.Short ? (existing?.buyLeverage ?? appliedLeverage) : appliedLeverage,
           sellLeverage: side === PositionSide.Long ? (existing?.sellLeverage ?? appliedLeverage) : appliedLeverage,
+          marginType: appliedSignedLeverage < 0 ? MarginType.Cross : MarginType.Isolated,
+          positionMode: context.positionMode,
         },
       },
     });
