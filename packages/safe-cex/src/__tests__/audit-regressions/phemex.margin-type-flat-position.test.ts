@@ -24,6 +24,12 @@ const flatIsolatedRow = {
   crossMargin: false,
 };
 
+const flatHedgedRow = {
+  ...flatIsolatedRow,
+  posSide: 'Long',
+  posMode: 'Hedged',
+};
+
 const buildExchange = (positionRows = [flatCrossRow]) => {
   const store = new DefaultStore();
   store.update({
@@ -94,6 +100,8 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
     expect(exchange.store.fetchedLeverage.ADAUSDT).toMatchObject({
       buyLeverage: 10,
       sellLeverage: 10,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.OneWay,
     });
   });
 
@@ -105,6 +113,21 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
     await expect(exchange.setLeverage('ADAUSDT', 25)).rejects.toThrow();
 
     expect(exchange.store.fetchedLeverage.ADAUSDT).toBeUndefined();
+  });
+
+  it('records the confirmed position mode for a flat symbol', async () => {
+    const { exchange, put } = buildExchange([flatHedgedRow]);
+
+    await exchange.changePositionMode(true, 'ADAUSDT');
+
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][2].params.targetPosMode).toBe('Hedged');
+    expect(exchange.store.fetchedLeverage.ADAUSDT).toMatchObject({
+      buyLeverage: 10,
+      sellLeverage: 10,
+      marginType: MarginType.Isolated,
+      positionMode: PositionMode.Hedged,
+    });
   });
 
   it('reads margin mode off the raw row, which mapPosition would have dropped', async () => {

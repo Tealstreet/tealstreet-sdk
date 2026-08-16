@@ -486,10 +486,18 @@ too small. The e2e margin-slider step catches this as `expected 5.45 to be close
 to 55.5675` (22.23 available x 10x x 0.25).
 
 `setLeverageHelper` therefore writes `store.fetchedLeverage[symbol]` after a
-confirmed success, which is the app's documented no-position fallback (blofin's
+confirmed success, including the confirmed `marginType` and `positionMode`,
+which is the app's documented no-position fallback (blofin's
 `fetchLeverageForSymbol` is the reference implementation). The response code is
-checked **before** any store mutation, so a rejected change cannot record a
-leverage the exchange never applied.
+checked **before** any store mutation, so a rejected change cannot record
+metadata the exchange never applied.
+
+`changePositionMode` has the same flat-symbol requirement: Phemex can switch a
+zero-size symbol from OneWay to Hedged and then still have no mapped
+`store.positions` row because `mapPosition` intentionally drops size-0 rows.
+After a successful switch, refresh `accountPositions` and persist the confirmed
+`positionMode` / `marginType` in `fetchedLeverage[symbol]` so the UI selector
+does not fall back to stale mode metadata.
 
 #### Margin Type (`changeMarginType`)
 
