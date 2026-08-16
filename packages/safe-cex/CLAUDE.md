@@ -144,8 +144,12 @@ Exchange API factories must install HOW and other transport adapters through
 `setInnerAdapterForRemoteSigning(instance, adapter)`, never by assigning
 `instance.defaults.adapter` directly. Hosted exchange-server instances keep the
 remote-signing adapter as the outer layer and execute the exchange-selected
-transport only after the browser returns a signed request. A trusted audit
-regression scans every `*.api.ts` factory for direct replacement.
+transport only after the browser returns a signed request. The returned signed
+config is authoritative: if the browser signer omits `data` because an exchange
+requires signed POST bodies to move into query params (Binance futures hedge
+mode is the regression case), the adapter must not restore the original body or
+the exchange will validate a different payload than the signature covered. A
+trusted audit regression scans every `*.api.ts` factory for direct replacement.
 
 Private-proxy REST header injection is Node/Bun-only. Browser workers also lack
 `window`, so use `isNodeOrBunRuntime()` rather than `typeof window` when deciding
