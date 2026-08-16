@@ -356,6 +356,66 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
   words such as `expired`, `timestamp`, or `clock` as global patterns.
 - `src/exchanges/*/` — Per-exchange implementations
 
+## REST request counters ride the store, like `socketHealth`
+
+`store.requestStats` holds cumulative per-outcome REST counts
+(`ok` / `rateLimit` / `auth` / `network` / `other`), incremented from the
+response interceptors in `safeCexAxiosCreate.ts` — **both** factories
+(`safeCexAxiosCreate` and `safeCexAxiosCreateNoProxy`), success and error.
+
+Three constraints, each load-bearing:
+
+- **The store is the only channel out.** This package ships in the OSS mirror,
+  so it must not import a telemetry client. Same rule as `socketHealth`; the
+  consuming app reads the field and reports.
+- **`recordRequestOutcome` must never `notify()`.** It runs on every request.
+  The throttled store ship already carries the field, so notifying here would
+  manufacture a store delta per request — which is the main-thread churn that
+  made per-request logging too expensive to keep.
+- **Classification is HTTP-status-only.** `health/errorPatterns.ts` is a linear
+  regex sweep over ~20 pattern groups and lives on the main thread inside
+  `ExchangeHealthMonitor`; it is both unreachable from a worker interceptor and
+  far too expensive per request. `network` (no response at all) is deliberately
+  distinct from `other` (venue answered non-2xx).
+
+Counters are monotonic per exchange-instance lifetime and are **not** reset on
+reconnect — a counter that resets is indistinguishable from one that never
+moved. Consumers diff against their own baseline and must treat a decrease as
+"the instance restarted", not as a negative delta.
+
+## Server-pushed polling slowdown (`tickIntervalOverride`)
+
+`getTickInterval()` multiplies its base by `getTickIntervalMultiplier(exchange)`.
+The host app derives the map from a per-user feature flag and pushes it through
+`__workerConfig`, exactly like `setAwsProxyMigrationEnabled` — safe-cex never
+sees a flag name, only a number.
+
+- **The map is keyed by exchange, with a reserved `'*'` wildcard.** The flag
+  engine folds rules to one boolean per user, so there is nothing per-venue to
+  express today and the producer pushes the wildcard. It is a map rather than a
+  scalar so a future per-venue signal needs no migration, and an exact key beats
+  the wildcard. Do not "simplify" the producer into enumerating the user's
+  accounts — that means importing the exchange controller into the module that
+  builds its workers, which closes an import cycle, and it reads the account
+  list before the account is registered — `_exchanges.set(...)` runs AFTER
+  `createStoreWorker()`, so an enumeration returns `undefined` for the very
+  account being created, ships an empty map, and never self-corrects because the
+  re-push subscribes to flags rather than to accounts.
+- **It can only ever slow polling down.** Values below 1 are neutralised and the
+  map is capped. A lever that could also speed polling up is one bad flag value
+  away from causing the incident it was reached for.
+- **The multiplier applies to the BASE, before the auth-failure backoff**, so a
+  slowed venue with a rejected key still tops out at
+  `AUTH_FAILURE_MAX_TICK_INTERVAL` rather than multiplying past it.
+- **It does not reach hosted (exchange-server) accounts, and the reason is
+  earlier than it looks.** `createStoreWorker` returns the exchange-server port
+  *before* it reaches `applyWorkerConfig`, so the setter is never called on that
+  path at all — this is not a question of which ops the server forwards.
+  Independently, `ExchangeServerWorker`'s `INIT_FIELDS` omits `extra`, so the
+  hosted server already ticks on raw metadata regardless. If rate limits show up
+  in hosted mode the lever has to be built server-side; do not assume this one
+  covers it.
+
 ## Debugging exchange REST traffic
 
 REST routed through the HOW adapter appears as WS frames, not XHRs.

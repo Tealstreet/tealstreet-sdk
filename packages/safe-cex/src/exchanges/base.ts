@@ -1,6 +1,8 @@
 import type { Axios, AxiosInstance } from 'axios';
 import type { Store } from '../store/store.interface';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';import { buildFoldedPositionRecords } from '../journal/buildRecords';
+import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
+import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import type { PositionRecord } from '../journal/position.types';
 
 
@@ -496,7 +498,14 @@ export class BaseExchange implements Exchange {
    */
   protected getTickInterval(): number | undefined {
     const override = this.options.extra?.tickInterval;
-    const base = override && override > 0 ? override : getExchangeMetadata(this._exchangeName).tickInterval;
+    const configured = override && override > 0 ? override : getExchangeMetadata(this._exchangeName).tickInterval;
+
+    // Server-pushed slowdown for a venue that is rate-limiting us. Applied to the
+    // BASE, before the auth-failure backoff, so the two compose the way you would
+    // want during an incident: a slowed venue with a rejected key still tops out
+    // at the same ceiling rather than multiplying past it.
+    const base = configured ? configured * getTickIntervalMultiplier(this._exchangeName) : configured;
+
     if (!base || this._authFailureStreak === 0) return base;
 
     return Math.min(base * 2 ** this._authFailureStreak, AUTH_FAILURE_MAX_TICK_INTERVAL);
@@ -1780,6 +1789,10 @@ export class BaseExchange implements Exchange {
       params: tryParseJson(request.config!.params),
       data: tryParseJson(request.config!.data),
       headers: request.config!.headers,
+      // Nothing leaves the browser here — the adapter below short-circuits with
+      // a synthetic 200. Interceptors still run, so telemetry must be able to
+      // tell this apart from a real request. See `utils/signingCapture.ts`.
+      [SIGNING_CAPTURE_FLAG]: true,
       adapter: (config: any) => {
         captured = config;
         return Promise.resolve({ data: null, status: 200, statusText: 'OK', headers: {}, config });

@@ -1,4 +1,5 @@
 import { ExchangeName } from '../types';
+import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { setAwsProxyMigrationEnabled } from '../utils/transportResolution';
 import { virtualClock } from '../utils/virtualClock';
 import { ExchangeWorker } from './ExchangeWorker';
@@ -279,6 +280,7 @@ const start = (ctx: Worker, shared = false) => {
     if (payload?.op === '__workerConfig') {
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('awsProxyMigration' in cfg) setAwsProxyMigrationEnabled(Boolean(cfg.awsProxyMigration));
+      if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       return;
     }
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Market, Order, OrderSide, OrderStatus, OrderType, Position, PositionSide, Ticker } from '../types';
 import { DefaultStore, defaultStore } from './store.base';
+import { stubStore } from './store.stub';
 
 // Helper factories
 const createOrder = (overrides?: Partial<Order>): Order => ({
@@ -720,6 +721,65 @@ describe('DefaultStore', () => {
       expect(serialized.displayedMargin).toEqual(store.displayedMargin);
       expect(serialized.displayedMargin).not.toBe(store.displayedMargin);
     });
+  });
+});
+
+describe('serialize() shape parity with stubStore', () => {
+  /**
+   * `apps/web`'s IndexedDB warm-boot cache validates a cached snapshot with
+   * `shapesCompatible(stubStore, storeData)`, which requires EVERY stub key to
+   * be present in the serialized store. A field added to `stubStore` but not to
+   * `serialize()` therefore invalidates every snapshot and silently cold-boots
+   * every account — with no error anywhere, because a cache miss looks exactly
+   * like a cold start.
+   *
+   * `requestStats` shipped that way once. This asserts the general invariant so
+   * the next field cannot.
+   */
+  it('serializes every top-level key present in stubStore', () => {
+    /**
+     * Shallow on purpose. The AUTHORITATIVE check is
+     * `apps/web/src/utils/storage/exchangeStoreCache.test.ts`, which runs the
+     * real `validateCachedStoreShape` against a real `serialize()` — including
+     * its dictionary carve-out (a stub object keyed only `'stub'` is a
+     * `Record<string, T>` and its keys are not required).
+     *
+     * Reimplementing that rule here would drift from it silently, and safe-cex
+     * cannot import from `apps/web` — it ships in the OSS mirror. So this file
+     * asserts only the part that needs no knowledge of the consumer.
+     */
+    const serialized = new DefaultStore().serialize() as Record<string, unknown>;
+    const missing = Object.keys(stubStore).filter((key) => !(key in serialized));
+
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('recordRequestOutcome', () => {
+  it('increments the named outcome and leaves the others alone', () => {
+    const store = new DefaultStore();
+
+    store.recordRequestOutcome('ok');
+    store.recordRequestOutcome('ok');
+    store.recordRequestOutcome('rateLimit');
+
+    expect(store.requestStats).toEqual({ ok: 2, rateLimit: 1, auth: 0, network: 0, other: 0 });
+  });
+
+  /**
+   * It runs on EVERY request. Notifying here would manufacture a store delta
+   * per request — the main-thread churn that made per-request logging too
+   * expensive to keep. The throttled store ship carries the field instead.
+   */
+  it('does NOT notify subscribers', () => {
+    const store = new DefaultStore();
+    const listener = vi.fn();
+    store.subscribe(listener);
+    listener.mockClear();
+
+    store.recordRequestOutcome('other');
+
+    expect(listener).not.toHaveBeenCalled();
   });
 });
 

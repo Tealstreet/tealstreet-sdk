@@ -1,4 +1,13 @@
-import type { Market, Order, OrderRiskProfile, OrderStatus, Position, StoreData, Ticker } from '../types';
+import type {
+  Market,
+  Order,
+  OrderRiskProfile,
+  OrderStatus,
+  Position,
+  RequestOutcome,
+  StoreData,
+  Ticker,
+} from '../types';
 
 export type PackedTickerDelta = [index: number, mask: number, ...values: number[]];
 export type StoreUpdate = Partial<StoreData> & {
@@ -94,6 +103,15 @@ export interface Store {
   get socketHealth(): StoreData['socketHealth'];
 
   updateSocketHealth(data: Partial<NonNullable<StoreData['socketHealth']>>): void;
+
+  get requestStats(): StoreData['requestStats'];
+
+  /**
+   * Increment one REST outcome counter. Runs on EVERY request, so it must stay
+   * O(1) and must NOT notify — the throttled store ship already carries the
+   * field, and notifying here would manufacture a store delta per request.
+   */
+  recordRequestOutcome(outcome: RequestOutcome): void;
 
   serialize(): StoreData;
 }

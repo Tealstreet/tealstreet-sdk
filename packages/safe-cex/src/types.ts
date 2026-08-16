@@ -852,6 +852,23 @@ export type HistoricalOrder = {
 
 export type MessageHandlerStatsType = 'public' | 'private' | 'futures' | 'business';
 
+/**
+ * REST request outcomes, classified from the HTTP status alone.
+ *
+ * Status-only on purpose. The fuzzy classifier in `health/errorPatterns.ts` is
+ * a linear regex scan over ~20 pattern groups against a stringified message —
+ * correct for a toast, far too expensive for a counter that runs on every
+ * request. Anything needing nuance reads the response itself.
+ *
+ * `network` is separate from `other` because a request that never got a
+ * response (timeout, DNS, CORS, tunnel drop) is a different incident from one
+ * the venue answered with a 5xx, and collapsing them makes the distinction
+ * unrecoverable downstream.
+ */
+export type RequestOutcome = 'ok' | 'rateLimit' | 'auth' | 'network' | 'other';
+
+export type RequestOutcomeCounts = Record<RequestOutcome, number>;
+
 export type StoreUpdateIds = {
   positions: number;
   orders: number;
@@ -896,6 +913,19 @@ export type StoreData = {
   readonly options: StoreOptions;
   readonly updateIds: StoreUpdateIds;
   readonly messageHandlerStats?: Partial<Record<MessageHandlerStatsType, MessageHandlersStats>>;
+  /**
+   * Cumulative REST request counts for this exchange instance, by outcome.
+   *
+   * Rides the store for the same reason `socketHealth` does: safe-cex ships in
+   * the OSS mirror and must not gain a dependency on any app's telemetry, so
+   * the store is the only channel out. The consuming app diffs these against
+   * its own last-sent snapshot and reports; the package only counts.
+   *
+   * Monotonic per exchange-instance lifetime, and deliberately NOT reset on
+   * reconnect — a counter that resets is indistinguishable from one that never
+   * moved, which is the failure this whole surface exists to avoid.
+   */
+  readonly requestStats?: RequestOutcomeCounts;
   readonly fetchedLeverage: Record<string, FetchedLeverage>;
   readonly socketHealth?: {
     publicHealthy: boolean;
