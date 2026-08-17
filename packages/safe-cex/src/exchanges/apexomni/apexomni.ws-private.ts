@@ -297,7 +297,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
     // The pre-PR Apex private WS only emitted 'fill' from handleOrderTopic
     // (gated by `shouldNotify` = within 5s of order update AND >5s after
     // connect). Our PR added handleFillTopic to capture per-fill rows for
-    // the new fetchExecutions / chart fill-arrows cache via
+    // the new fetchHistoricalFills / chart fill-arrows cache via
     // recordWsExecution — that part is correct and needed.
     //
     // However, this handler initially also emitted 'fill' events, which

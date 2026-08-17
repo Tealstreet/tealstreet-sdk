@@ -91,7 +91,7 @@ const mockExecutionsPayload = {
 const assertTradeOnly = async (exchange: TestExchange, get: ReturnType<typeof vi.fn>, symbol: string) => {
   get.mockResolvedValueOnce({ data: mockExecutionsPayload });
 
-  const executions = await exchange.fetchExecutions({ symbol, limit: 50 });
+  const executions = await exchange.fetchHistoricalFills({ symbol, limit: 50 });
 
   expect(executions).toEqual([
     {
@@ -151,7 +151,7 @@ const assertOrderHistoryFallback = async (exchange: TestExchange, get: ReturnTyp
     return Promise.reject(new Error(`Unexpected URL ${url}`));
   });
 
-  const executions = await exchange.fetchExecutions({ symbol, limit: 50 });
+  const executions = await exchange.fetchHistoricalFills({ symbol, limit: 50 });
 
   expect(executions).toEqual([
     {
@@ -212,7 +212,7 @@ const assertChunkedRangeRequests = async (exchange: TestExchange, get: ReturnTyp
     return Promise.reject(new Error(`Unexpected URL ${url}`));
   });
 
-  const executions = await exchange.fetchExecutions({ symbol, from, to, limit: 1 });
+  const executions = await exchange.fetchHistoricalFills({ symbol, from, to, limit: 1 });
   expect(executions.length).toBe(1);
 
   const rangedCalls = get.mock.calls.filter((call) => {

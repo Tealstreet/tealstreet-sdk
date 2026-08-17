@@ -1024,7 +1024,7 @@ export class BybitExchange extends BaseExchange {
    * Its known merge caveat (two cycles reopening at an identical entry price) rides on the
    * venue grading, not here.
    */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
     const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
     const rows = await this.fetchClosedPositionRows({ from, to } as HistoricalTradeOptions);
@@ -1040,7 +1040,7 @@ export class BybitExchange extends BaseExchange {
     // the count was ever measuring the leg.
     const legs = new Map<string, PositionSide | 'both'>();
     try {
-      for (const order of await this.fetchOrderHistory({ from, to })) {
+      for (const order of await this.fetchHistoricalOrders({ from, to })) {
         if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
       }
     } catch {
@@ -1337,7 +1337,7 @@ export class BybitExchange extends BaseExchange {
     return orderBy(executions, ['timestamp'], ['desc']).slice(0, limit || 50);
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     // Return empty array if in public data only mode
     if (this.isPublicDataOnly) {
       return [];
@@ -1361,7 +1361,7 @@ export class BybitExchange extends BaseExchange {
     ): Promise<void> => {
       // Limit recursion depth to prevent excessive API calls
       if (depth >= MAX_RECURSION_DEPTH) {
-        this.log(`fetchExecutions reached max recursion depth of ${MAX_RECURSION_DEPTH}`, LogSeverity.Warning);
+        this.log(`fetchHistoricalFills reached max recursion depth of ${MAX_RECURSION_DEPTH}`, LogSeverity.Warning);
         return;
       }
 
@@ -1473,7 +1473,7 @@ export class BybitExchange extends BaseExchange {
     }
 
     try {
-      const fallbackWarning = `fetchExecutions primary path produced no valid fills for ${symbol}; falling back to ${ENDPOINTS.USER_ORDERS} (rawRows=${primaryRowsCount}, windows=${queryWindows.length}, limit=${limit}, hasOrderId=${Boolean(orderId)})`;
+      const fallbackWarning = `fetchHistoricalFills primary path produced no valid fills for ${symbol}; falling back to ${ENDPOINTS.USER_ORDERS} (rawRows=${primaryRowsCount}, windows=${queryWindows.length}, limit=${limit}, hasOrderId=${Boolean(orderId)})`;
       this.log(fallbackWarning, LogSeverity.Warning);
       if (typeof console !== 'undefined' && typeof console.warn === 'function') {
         console.warn(`[${this.name}] ${fallbackWarning}`);
@@ -1485,7 +1485,7 @@ export class BybitExchange extends BaseExchange {
 
       const EXTENDED_FALLBACK_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
       if (to === undefined && this.DEFAULT_EXECUTIONS_LOOKBACK_MS < EXTENDED_FALLBACK_LOOKBACK_MS) {
-        const extendedWarning = `fetchExecutions short fallback returned no rows for ${symbol}; retrying ${Math.floor(
+        const extendedWarning = `fetchHistoricalFills short fallback returned no rows for ${symbol}; retrying ${Math.floor(
           EXTENDED_FALLBACK_LOOKBACK_MS / (24 * 60 * 60 * 1000),
         )}d order-history lookup for recovery`;
         this.log(extendedWarning, LogSeverity.Warning);
@@ -1496,7 +1496,7 @@ export class BybitExchange extends BaseExchange {
       }
 
       if (fallbackExecutions.length === 0) {
-        this.log(`fetchExecutions fallback returned no rows for ${symbol}`, LogSeverity.Warning);
+        this.log(`fetchHistoricalFills fallback returned no rows for ${symbol}`, LogSeverity.Warning);
       }
       return fallbackExecutions;
     } catch (fallbackErr: any) {
@@ -1524,7 +1524,7 @@ export class BybitExchange extends BaseExchange {
    * the normal shape for backfilling this axis, and requiring a symbol would force
    * per-symbol fan-out across every market.
    */
-  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1591,7 +1591,7 @@ export class BybitExchange extends BaseExchange {
       if (page >= MAX_PAGES) {
         // Newest-first, so a cap that bites drops the OLDEST orders of the window.
         this.log(
-          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          `fetchHistoricalOrders stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
           LogSeverity.Warning,
         );
       }

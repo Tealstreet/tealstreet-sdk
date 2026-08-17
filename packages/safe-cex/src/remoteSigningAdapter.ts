@@ -160,7 +160,7 @@ export const createRemoteSigningAdapter = (
       headers: new AxiosHeaders(response.config!.headers),
       ...(response.config!.url ? { url: response.config!.url } : {}),
       params: response.config!.params,
-      data: response.config!.data ?? config.data,
+      data: response.config!.data,
     };
 
     // Integrity check: warn if the signed URL has params baked in but params object is also set

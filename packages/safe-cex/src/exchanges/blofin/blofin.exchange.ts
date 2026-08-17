@@ -853,7 +853,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   /** Journal records from the REPORTED closed axis — blofin folds to nothing from fills. */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
     const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to } as HistoricalTradeOptions);
     const records = [];
     for (const row of rows) {
@@ -933,7 +933,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   /** Historical orders, including ones that never filled — see blofin.order-history.ts. */
-  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -966,7 +966,7 @@ export class BlofinExchange extends BaseExchange {
     }
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }

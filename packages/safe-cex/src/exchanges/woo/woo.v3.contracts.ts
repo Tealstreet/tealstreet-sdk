@@ -267,7 +267,7 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Method: 'GET',
     v3Path: WOO_V3_ENDPOINTS.TRANSACTION_HISTORY,
     gate: 'privateReadParity',
-    consumer: 'fetchExecutions',
+    consumer: 'fetchHistoricalFills',
   },
   {
     id: 'historical-trades',
@@ -285,7 +285,7 @@ export const WOO_V3_MIGRATION_ROUTES = [
     v3Method: 'GET',
     v3Path: WOO_V3_ENDPOINTS.TRANSACTION_HISTORY,
     gate: 'privateReadParity',
-    consumer: 'fetchExecutions',
+    consumer: 'fetchHistoricalFills',
     runtimeLifecycle: 'already-v3',
   },
   {

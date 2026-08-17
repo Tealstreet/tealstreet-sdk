@@ -40,7 +40,6 @@ import {
   UpdateOrderOpts,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
-import { mapBitmexWalletHistory } from './bitmex.income';
 import { v } from '../../utils/get-key';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
@@ -51,6 +50,7 @@ import { getPublicCorsProxy } from '../../utils/transportResolution';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bitmex.api';
+import { mapBitmexWalletHistory } from './bitmex.income';
 import { aggregateBitmexCandles, getBitmexOHLCVPlan } from './bitmex.ohlcv-helpers';
 import {
   Currency,
@@ -1265,7 +1265,7 @@ export class BitmexExchange extends BaseExchange {
     return [];
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly || !opts.symbol) {
       return [];
     }
@@ -1284,14 +1284,26 @@ export class BitmexExchange extends BaseExchange {
           }
 
           const commission = this.parseExecutionCommissionUsd(entry);
+          // Ported from `fetchHistoricalTrades`, which read the SAME rows through
+          // a second mapper. The two drifted: this one silently omitted realized
+          // PnL and the hedge leg, so anything reading fills here saw a venue
+          // that reports no PnL rather than one whose mapper forgot to carry it.
+          const realizedPnl = this.parseExecutionRealizedPnlUsd(entry);
 
           return omitUndefined({
+            // `execID` is the venue's own fill id. Absent, a fill has no
+            // idempotent key and cannot be stored or de-duplicated at all.
+            id: entry.execID ? String(entry.execID) : undefined,
             timestamp: Math.floor(parsed.time / 1000),
             symbol: parsed.symbol,
             orderId: entry.orderID ? String(entry.orderID) : undefined,
             price: parsed.price,
             qty: parsed.qty,
             side: parsed.side,
+            realizedPnl,
+            // BitMEX reports no per-fill hedge leg; `both` is the one-way default
+            // the rest of the model uses for an unreported leg.
+            positionSide: 'both' as const,
             commission,
             commissionAsset: commission !== undefined ? 'USD' : undefined,
           });
@@ -1301,52 +1313,6 @@ export class BitmexExchange extends BaseExchange {
       return executions;
     } catch (err: any) {
       return this.handleExecutionHistoryError<Execution>(err);
-    }
-  };
-
-  fetchHistoricalTrades = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
-    if (this.isPublicDataOnly || !opts.symbol) {
-      return [];
-    }
-
-    try {
-      const count = Math.min(Math.max(opts.limit || 500, 1), 500);
-
-      const rawEntries = await this.fetchExecutionTradeHistory(opts.symbol, count);
-      const tradeEntries = this.filterTradeExecutions(rawEntries, opts.orderId);
-
-      const historicalTrades = tradeEntries
-        .map((entry): HistoricalTrade | null => {
-          const parsed = this.parseBitmexExecution(entry);
-          if (!parsed) {
-            return null;
-          }
-
-          const realizedPnl = this.parseExecutionRealizedPnlUsd(entry);
-          const commission = this.parseExecutionCommissionUsd(entry);
-
-          const orderId = entry.orderID
-            ? String(entry.orderID)
-            : String(entry.execID || `${parsed.symbol}-${parsed.time}`);
-
-          return omitUndefined({
-            symbol: parsed.symbol,
-            orderId,
-            price: parsed.price,
-            qty: parsed.qty,
-            realizedPnl,
-            positionSide: 'both' as const,
-            side: parsed.side,
-            commission,
-            commissionAsset: commission !== undefined ? 'USD' : undefined,
-            time: parsed.time,
-          });
-        })
-        .filter((entry): entry is HistoricalTrade => !!entry);
-
-      return historicalTrades;
-    } catch (err: any) {
-      return this.handleExecutionHistoryError<HistoricalTrade>(err);
     }
   };
 

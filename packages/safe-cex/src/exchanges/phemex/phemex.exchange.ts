@@ -619,7 +619,7 @@ export class PhemexExchange extends BaseExchange {
     return formattedOrders;
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -810,10 +810,6 @@ export class PhemexExchange extends BaseExchange {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return [];
     }
-  };
-
-  fetchHistoricalTrades = async (_opts: HistoricalTradeOptions) => {
-    return [];
   };
 
   timeframes = {

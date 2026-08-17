@@ -231,13 +231,6 @@ describe('exchangeMetadata', () => {
       expect(lighter.requiresApiKeyIndex).toBe(true);
     });
 
-    it('should keep bitrue trade history support enabled', () => {
-      const bitrue = exchangeMetadata.bitrue;
-
-      expect(bitrue.exchangeName).toBe('bitrue');
-      expect(bitrue.supportsTradesHistory).toBe(true);
-    });
-
     it('should preserve executions-history gating for key exchanges', () => {
       expect(exchangeMetadata.bybit.supportsExecutionsHistory).toBe(true);
       expect(exchangeMetadata.bybitdemo.supportsExecutionsHistory).toBe(true);

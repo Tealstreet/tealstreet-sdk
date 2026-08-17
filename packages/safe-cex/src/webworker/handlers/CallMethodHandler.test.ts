@@ -33,7 +33,7 @@ describe('CallMethodHandler', () => {
       fetchAndSetPrivateSnapshot: vi.fn().mockResolvedValue(undefined),
       reconnect: vi.fn(),
       fetchOHLCV: vi.fn().mockResolvedValue([]),
-      fetchExecutions: vi.fn().mockResolvedValue([]),
+      fetchHistoricalFills: vi.fn().mockResolvedValue([]),
       fetchOrders: vi.fn().mockResolvedValue([]),
       fetchAndSetOrders: vi.fn().mockResolvedValue([]),
       removeOrders: vi.fn().mockResolvedValue(undefined),

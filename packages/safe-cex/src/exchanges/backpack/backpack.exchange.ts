@@ -423,7 +423,7 @@ export class BackpackExchange extends BaseExchange {
     }
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly || !opts.symbol) {
       return [];
     }

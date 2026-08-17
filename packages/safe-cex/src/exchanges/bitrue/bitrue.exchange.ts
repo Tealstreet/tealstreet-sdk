@@ -839,7 +839,15 @@ export class BitrueExchange extends BaseExchange {
     }
   };
 
-  fetchHistoricalTrades = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
+  /**
+   * Internal only — the public fill surface is `fetchHistoricalFills`.
+   *
+   * Kept because this venue's own `fetchHistoricalFills` consumes it: the two methods
+   * read one axis, and here the millisecond-shaped mapper is the one that does
+   * the parsing. Private so nothing outside the class can treat it as a second
+   * public history axis again.
+   */
+  private fetchHistoricalTradesInternal = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
     if (this.isPublicDataOnly || !opts.symbol) {
       return [];
     }
@@ -916,13 +924,13 @@ export class BitrueExchange extends BaseExchange {
     }
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly || !opts.symbol) {
       return [];
     }
 
     try {
-      const trades = await this.fetchHistoricalTrades({
+      const trades = await this.fetchHistoricalTradesInternal({
         symbol: opts.symbol,
         orderId: opts.orderId,
         from: opts.from,
@@ -941,6 +949,12 @@ export class BitrueExchange extends BaseExchange {
           price: trade.price,
           qty: trade.qty,
           side: trade.side,
+          // Carried across the re-map for the same reason as `id`: dropping a
+          // field the inner mapper populated is exactly the drift that let the
+          // two history methods diverge in the first place.
+          realizedPnl: trade.realizedPnl,
+          positionSide: trade.positionSide,
+          maker: trade.maker,
           commission: trade.commission,
           commissionAsset: trade.commissionAsset,
         });

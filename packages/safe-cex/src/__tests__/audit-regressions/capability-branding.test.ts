@@ -17,7 +17,12 @@ import { DefaultStore } from '../../store/store.base';
  * The same trap waits for every axis added later, so this tests the mechanism rather
  * than one method.
  */
-const BRANDED_STUBS = ['fetchIncomeHistory', 'fetchIncomeHistoryRange', 'fetchOrderHistory', 'fetchClosedPnl'] as const;
+const BRANDED_STUBS = [
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
+  'fetchHistoricalOrders',
+  'fetchClosedPnl',
+] as const;
 
 const options: ExchangeOptions = {
   key: 'capability-branding-key',
@@ -80,7 +85,7 @@ describe('base capability stubs are branded', () => {
 
   it('branding is method-specific, so one stub cannot answer for another', async () => {
     const exchange = await construct(NO_LEDGER_VENUE as ExchangeName);
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchOrderHistory')).toBe(false);
+    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchHistoricalOrders')).toBe(false);
   });
 
   it.each(['binance', 'bybit', 'okx', 'weex', 'hyperliquid', 'paradex', 'blofin', 'bitunix'])(
@@ -107,7 +112,7 @@ describe('base capability stubs are branded', () => {
     '%s implements order history against the venue',
     async (name) => {
       const exchange = await construct(name as ExchangeName);
-      expect(isBaseCapabilityFallback(exchange.fetchOrderHistory, 'fetchOrderHistory')).toBe(false);
+      expect(isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(false);
     },
   );
 

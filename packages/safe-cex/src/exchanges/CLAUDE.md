@@ -83,8 +83,9 @@ independentlyVerifiable }`.
 **Provenance rides ON the data** (`ClosedPnlEntry.provenance`), not in a capability table.
 Derived data is indistinguishable from reported data at the call site — a fold of fills
 does not look derived, it looks like a closed position — and a table someone must remember
-to consult is the same shape as `supportsTradesHistory`, which advertises `true` on three
-venues that always return empty and has no production consumer at all.
+to consult is the same shape as the former `supportsTradesHistory`, which drifted to
+advertising `true` on three venues that always returned empty and `false` on one that
+worked, precisely because nothing in production ever read it. It was deleted 2026-08-16.
 
 Consumers branch on provenance, never on whether a method exists:
 
@@ -198,8 +199,12 @@ deterministic regression is the only thing standing there.
 exchange class extends `BaseExchange` and overrides the methods it needs.
 Most unsupported action/fetch methods throw `'Not implemented'` and fail at
 runtime if called. The base implementations of `fetchOHLCV`,
-`fetchExecutions`, `fetchHistoricalTrades`, `fetchIncomeHistory`, and
-`fetchIncomeHistoryRange` deliberately resolve to empty arrays;
+`fetchHistoricalFills`, `fetchIncomeHistory`,
+`fetchIncomeHistoryRange`, `fetchHistoricalOrders` and `fetchClosedPnl` deliberately
+resolve to empty arrays **and are branded**, so a caller can tell that empty apart from a real one — callers must
+check `isBaseCapabilityFallback` and convert, rather than storing the `[]`
+(`requestExecutions` returns `undefined`, `collectAccountAxes` records
+`unsupported`);
 `updateSymbolMetadata` is a no-op; and `listenOHLCV`, `listenOHLCVs`, and
 `listenOrderBook` return without subscribing unless an external public-data
 provider is configured. Missing overrides for those methods therefore fail
@@ -213,7 +218,7 @@ Key methods exchanges typically override:
 - `fetchPositions()`, `fetchBalance()`, `fetchOrders()`
 - `placeOrder()`, `updateOrder()`, `cancelOrder()`, `cancelOrders()`
 - `setLeverage()`, `changePositionMode()`, `changeMarginType()`
-- `fetchOHLCV()`, `fetchExecutions()`
+- `fetchOHLCV()`, `fetchHistoricalFills()`
 
 Check `Exchange` interface in `base.ts` for the full surface.
 

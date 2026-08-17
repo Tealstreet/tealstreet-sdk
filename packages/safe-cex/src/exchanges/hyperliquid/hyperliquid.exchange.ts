@@ -136,7 +136,7 @@ const parseHyperliquidOpenInterestNotional = (sourceTicker: AssetCtx, price: num
 
 export class HyperliquidExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) =>
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: true });
 
   xhr: Axios; // For /exchange endpoint (trading operations)
@@ -2630,14 +2630,14 @@ export class HyperliquidExchange extends BaseExchange {
    * Hyperliquid emits no separate fee row — the fee rides on the fill next to that fill's
    * `closedPnl` — so one fill becomes up to two records. See `hyperliquid.income.ts`.
    *
-   * Three deliberate departures from `fetchExecutions` in this same file:
+   * Three deliberate departures from `fetchHistoricalFills` in this same file:
    *
    * - **Uses `infoXhr`, not `xhr`.** Every other private read here goes through the
-   *   unlimited info client; `fetchExecutions` is the odd one out.
-   * - **Uses `vault || applicationId`.** `fetchExecutions` reads `applicationId` alone, so
+   *   unlimited info client; `fetchHistoricalFills` is the odd one out.
+   * - **Uses `vault || applicationId`.** `fetchHistoricalFills` reads `applicationId` alone, so
    *   on a vault account it returns the MASTER WALLET's data. Every other private read in
    *   this file uses the pair.
-   * - **No 30-day floor and no 7-day chunking.** Those constants in `fetchExecutions` are
+   * - **No 30-day floor and no 7-day chunking.** Those constants in `fetchHistoricalFills` are
    *   ours, bybit-shaped, with no upstream citation. Hyperliquid is address-queryable with
    *   no retention ceiling — that is the entire reason this venue matters for a journal —
    *   so the range is walked by row-cap exhaustion instead, and warns if it stops early.
@@ -2773,14 +2773,14 @@ export class HyperliquidExchange extends BaseExchange {
    * The 2000-row ceiling is a retention limit, not a page size — there is no cursor to
    * walk past it, so a window older than the snapshot returns nothing rather than paging.
    */
-  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
 
     const user = this.options.vault || this.options.applicationId;
     if (!user) {
-      this.log('Skipping fetchOrderHistory: no vault/applicationId', LogSeverity.Warning);
+      this.log('Skipping fetchHistoricalOrders: no vault/applicationId', LogSeverity.Warning);
       return [];
     }
 
@@ -2797,14 +2797,14 @@ export class HyperliquidExchange extends BaseExchange {
       // A rejected `/info` comes back 200 with a STRING body, so a bare isArray guard turns
       // it into "this account has no orders" with nothing logged.
       if (!Array.isArray(data)) {
-        this.log(`fetchOrderHistory got a non-array historicalOrders response`, LogSeverity.Warning);
+        this.log(`fetchHistoricalOrders got a non-array historicalOrders response`, LogSeverity.Warning);
         return [];
       }
 
       const rows: Array<Record<string, any>> = data;
       if (rows.length >= SNAPSHOT_CAP) {
         this.log(
-          `fetchOrderHistory received the full ${SNAPSHOT_CAP}-row historicalOrders snapshot; older orders are not retrievable`,
+          `fetchHistoricalOrders received the full ${SNAPSHOT_CAP}-row historicalOrders snapshot; older orders are not retrievable`,
           LogSeverity.Warning,
         );
       }
@@ -2872,7 +2872,7 @@ export class HyperliquidExchange extends BaseExchange {
     return await this.fetchIncomeHistory({ startTime, endTime, incomeType });
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -2903,7 +2903,7 @@ export class HyperliquidExchange extends BaseExchange {
 
     if (requestedFromMilliseconds !== undefined && requestedFromMilliseconds < minimumAllowedFromMilliseconds) {
       this.log(
-        `fetchExecutions capped to last 30 days for ${symbol} (requestedFrom=${requestedFromMilliseconds}, cappedFrom=${effectiveFromMilliseconds})`,
+        `fetchHistoricalFills capped to last 30 days for ${symbol} (requestedFrom=${requestedFromMilliseconds}, cappedFrom=${effectiveFromMilliseconds})`,
         LogSeverity.Warning,
       );
     }
@@ -2932,7 +2932,7 @@ export class HyperliquidExchange extends BaseExchange {
 
     const user = this.options.applicationId;
     if (!user) {
-      this.log('Skipping fetchExecutions: applicationId missing', LogSeverity.Warning);
+      this.log('Skipping fetchHistoricalFills: applicationId missing', LogSeverity.Warning);
       return [];
     }
 

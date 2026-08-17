@@ -1075,7 +1075,7 @@ export class AsterDEXExchange extends BaseExchange {
     }
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -1101,14 +1101,24 @@ export class AsterDEXExchange extends BaseExchange {
         params,
       });
       const trades = Array.isArray(response.data) ? response.data : [];
+      // Ported from `fetchHistoricalTrades`, which read the SAME `userTrades`
+      // rows through a second mapper that had drifted ahead of this one. The
+      // venue reports realized PnL as a running total rather than per fill, so
+      // the deltas must be normalized — reading the raw field per row would
+      // attribute the whole position's PnL to every fill in it.
+      const normalizedRealizedPnls = normalizeAsterDEXRealizedPnlDeltas(trades);
       const executions: Execution[] = [];
 
-      for (const trade of trades) {
+      for (const [index, trade] of trades.entries()) {
         const price = parseFloat(trade.price);
         const qty = parseFloat(trade.qty);
         if (!Number.isFinite(price) || !Number.isFinite(qty) || qty <= 0) {
           continue;
         }
+
+        const rawPositionSide = String(trade.positionSide || '').toUpperCase();
+        const positionSide: PositionSide | 'both' =
+          rawPositionSide === 'LONG' ? PositionSide.Long : rawPositionSide === 'SHORT' ? PositionSide.Short : 'both';
 
         executions.push({
           // Per-fill dedupe key. orderId cannot serve: one order fills across many rows.
@@ -1120,6 +1130,9 @@ export class AsterDEXExchange extends BaseExchange {
           price,
           qty,
           side: trade.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
+          realizedPnl: normalizedRealizedPnls[index],
+          positionSide,
+          maker: trade.maker,
           commission: trade.commission ? parseFloat(trade.commission) : undefined,
           commissionAsset: trade.commissionAsset,
         });
@@ -1128,59 +1141,6 @@ export class AsterDEXExchange extends BaseExchange {
       return executions;
     } catch (error: any) {
       this.log(`Failed to fetch executions: ${error.message}`, LogSeverity.Error);
-      return [];
-    }
-  };
-
-  fetchHistoricalTrades = async (opts: HistoricalTradeOptions): Promise<HistoricalTrade[]> => {
-    try {
-      const params: Record<string, string | number> = {
-        symbol: opts.symbol,
-        limit: Math.min(opts.limit || 1000, 1000),
-      };
-
-      if (opts.from) {
-        params.startTime = opts.from;
-      }
-      if (opts.to) {
-        params.endTime = opts.to;
-      }
-      if (opts.fromId) {
-        params.fromId = opts.fromId;
-      }
-
-      const response = await this.primaryAPI.get<AsterDEXUserTradeResponse[]>(this.getFapiPath('userTrades'), {
-        params,
-      });
-      const trades = Array.isArray(response.data) ? response.data : [];
-      const normalizedRealizedPnls = normalizeAsterDEXRealizedPnlDeltas(trades);
-
-      return trades.map((trade, index) => {
-        const rawPositionSide = String(trade.positionSide || '').toUpperCase();
-        const positionSide: PositionSide | 'both' =
-          rawPositionSide === 'LONG' ? PositionSide.Long : rawPositionSide === 'SHORT' ? PositionSide.Short : 'both';
-
-        return {
-          // Distinct from orderId, which falls back to this same value: the fill id is
-          // the only thing that separates two fills of one order.
-          id: trade.id != null ? String(trade.id) : undefined,
-          symbol: trade.symbol,
-          orderId: trade.orderId?.toString() || trade.id?.toString() || '',
-          price: parseFloat(trade.price),
-          qty: parseFloat(trade.qty),
-          quoteQty: trade.quoteQty ? parseFloat(trade.quoteQty) : undefined,
-          realizedPnl: normalizedRealizedPnls[index],
-          positionSide,
-          side: trade.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
-          buyer: trade.buyer,
-          maker: trade.maker,
-          commission: trade.commission !== undefined ? parseFloat(trade.commission) : undefined,
-          commissionAsset: trade.commissionAsset,
-          time: trade.time,
-        };
-      });
-    } catch (error: any) {
-      this.log(`Failed to fetch historical trades: ${error.message}`, LogSeverity.Error);
       return [];
     }
   };

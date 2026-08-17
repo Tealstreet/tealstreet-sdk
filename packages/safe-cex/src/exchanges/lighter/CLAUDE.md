@@ -154,7 +154,7 @@ Additional account-related endpoints used in discovery/integration:
 | Endpoint                        | Method | Description                                                    |
 | ------------------------------- | ------ | -------------------------------------------------------------- |
 | `/api/v1/accountActiveOrders`   | GET    | Open-order reconciliation                                      |
-| `/api/v1/accountInactiveOrders` | GET    | Account inactive order history (primary for `fetchExecutions`) |
+| `/api/v1/accountInactiveOrders` | GET    | Account inactive order history (primary for `fetchHistoricalFills`) |
 
 ### Transactions
 
@@ -170,7 +170,7 @@ Additional account-related endpoints used in discovery/integration:
 - OHLCV backfill uses REST candles (`/api/v1/candles`) and is layered under WS streaming in `listenOHLCV()`.
 - Execution-history fetches for chart fills use `/api/v1/accountInactiveOrders` first, then `/api/v1/trades` as a fallback source.
 - `/api/v1/trades` requests must include `sort_by=timestamp` and `limit` within `1..100`; `sort_dir=desc` is used.
-- Fill side mapping in `fetchExecutions` supports both direct side flags (`side`, `isAsk`, `is_ask`) and account-scoped inference from `ask_account_id` / `bid_account_id`.
+- Fill side mapping in `fetchHistoricalFills` supports both direct side flags (`side`, `isAsk`, `is_ask`) and account-scoped inference from `ask_account_id` / `bid_account_id`.
 
 ## WebSocket Implementation
 
@@ -530,7 +530,6 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 - `supportsChaser`: `true`
 - `supportsPartialStops`: `true`
 - `supportsInfinityStops`: `false`
-- `supportsTradesHistory`: `true`
 - `supportsFeeRates`: `true`
 - `tvMaxGetBarFetches`: `10`
 - `candleApiCountLimit`: `500`

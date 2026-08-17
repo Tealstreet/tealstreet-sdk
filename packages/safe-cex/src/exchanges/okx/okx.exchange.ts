@@ -677,7 +677,7 @@ export class OKXExchange extends BaseExchange {
     return this.mapOrders(okxOrders);
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -936,7 +936,7 @@ export class OKXExchange extends BaseExchange {
    * returned 0 rows from the archive and 58 from this route, and a matched 2-day window
    * gave 100/0 filled/canceled there against 80/20 here.
    */
-  fetchOrderHistory = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
+  fetchHistoricalOrders = async (opts?: OrderHistoryOptions): Promise<HistoricalOrder[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
@@ -995,7 +995,7 @@ export class OKXExchange extends BaseExchange {
       if (page >= MAX_PAGES) {
         // Newest-first, so a cap that bites drops the OLDEST orders of the window.
         this.log(
-          `fetchOrderHistory stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
+          `fetchHistoricalOrders stopped at the ${MAX_PAGES}-page cap; older orders were not fetched`,
           LogSeverity.Warning,
         );
       }
@@ -1072,7 +1072,7 @@ export class OKXExchange extends BaseExchange {
    * records never came from fills. `BaseExchange` now throws rather than folding a venue that
    * reports closed positions; this is the override that throw asks for.
    */
-  fetchClosedPositionRecords = async (opts: { account: string; from?: number; to?: number }) => {
+  fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
     const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to } as HistoricalTradeOptions);
     const records = [];
 

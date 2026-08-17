@@ -61,7 +61,7 @@ describe('WOOXExchange execution history mapping', () => {
       },
     });
 
-    const executions = await exchange.fetchExecutions({
+    const executions = await exchange.fetchHistoricalFills({
       symbol: 'BTCUSDT',
       orderId: '60780383217',
       limit: 5000,
@@ -124,7 +124,7 @@ describe('WOOXExchange execution history mapping', () => {
       },
     });
 
-    const executions = await exchange.fetchExecutions({
+    const executions = await exchange.fetchHistoricalFills({
       from: 1_752_055_100_000,
       to: 1_752_055_400,
       limit: 10,
@@ -182,7 +182,7 @@ describe('WOOXExchange execution history mapping', () => {
       },
     });
 
-    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 100 });
+    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 100 });
 
     expect(get).toHaveBeenCalledTimes(2);
     expect(get.mock.calls[0][1]).toEqual({ params: { symbol: 'PERP_BTC_USDT', limit: 100 } });
@@ -222,7 +222,7 @@ describe('WOOXExchange execution history mapping', () => {
       },
     });
 
-    const trades = await exchange.fetchHistoricalTrades({ symbol: 'BTCUSDT' });
+    const trades = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
 
     expect(get).toHaveBeenCalledWith(ENDPOINTS.TRANSACTION_HISTORY, {
       params: { symbol: 'PERP_BTC_USDT', limit: 500 },
@@ -238,7 +238,8 @@ describe('WOOXExchange execution history mapping', () => {
         side: OrderSide.Buy,
         commission: 0.0001,
         commissionAsset: 'USDT',
-        time: 1752055173630,
+        // `Execution.timestamp` is SECONDS; the removed shape carried ms.
+        timestamp: 1752055173,
       },
     ]);
   });
@@ -261,7 +262,7 @@ describe('WOOXExchange execution history mapping', () => {
       },
     });
 
-    const executions = await exchange.fetchExecutions({ symbol: 'woo:BTCUSDT.P', limit: 50 });
+    const executions = await exchange.fetchHistoricalFills({ symbol: 'woo:BTCUSDT.P', limit: 50 });
 
     expect(get).toHaveBeenCalledWith(ENDPOINTS.TRANSACTION_HISTORY, {
       params: { symbol: 'PERP_BTC_USDT', limit: 50 },
@@ -298,7 +299,7 @@ describe('WOOXExchange execution history mapping', () => {
       },
     });
 
-    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT', limit: 10 });
+    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 10 });
 
     expect(executions).toEqual([
       {
@@ -319,7 +320,7 @@ describe('WOOXExchange execution history mapping', () => {
   it('falls back to historical trades mapping when executions are empty', async () => {
     const { exchange, get } = createExchangeLike();
 
-    // fetchExecutions -> transaction history returns empty for all attempts
+    // fetchHistoricalFills -> transaction history returns empty for all attempts
     get.mockResolvedValue({ data: { rows: [] } });
 
     const trades = [
@@ -337,9 +338,9 @@ describe('WOOXExchange execution history mapping', () => {
       },
     ];
 
-    const spy = vi.spyOn(exchange, 'fetchHistoricalTrades').mockResolvedValueOnce(trades as any);
+    const spy = vi.spyOn(exchange as any, 'fetchHistoricalTradesInternal').mockResolvedValueOnce(trades as any);
 
-    const executions = await exchange.fetchExecutions({ symbol: 'BTCUSDT' });
+    const executions = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT' });
 
     expect(spy).toHaveBeenCalledWith({
       symbol: 'BTCUSDT',

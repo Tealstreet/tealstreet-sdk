@@ -506,7 +506,7 @@ the dedicated Aster clock uses the same REST constant.
 - **Builder reads are not account execution history**:
   `builder/userTrades` returns every approved user's activity under the
   authenticated builder identity, while `builder/approvedUserList` is builder
-  administration data. Neither maps to `fetchExecutions()` for the current
+  administration data. Neither maps to `fetchHistoricalFills()` for the current
   account, and safe-cex has no builder-admin result surface, so these endpoints
   remain outside the exchange runtime rather than contaminating user history.
 - **STP is available only through the typed Aster runtime surface**: the
@@ -514,7 +514,7 @@ the dedicated Aster clock uses the same REST constant.
   there is no generic cross-exchange UI setting yet.
 - **Orderbook snapshots fail closed**: `handleDepthSnapshot` consumes only documented partial-book streams. Every level must be an exact two-string pair; it drops boolean, numeric, array, object, malformed, zero-quantity, empty-side, or crossed frames rather than treating diffs as snapshots, trimming levels, or synthesizing a spread.
 - **Orderbook registrations are counted, not deduplicated**: subscribing the same callback twice creates two independent registrations. Each returned unsubscribe removes only its own registration; the upstream stream closes only after the final registration is removed.
-- **Historical trades disabled**: `fetchHistoricalTrades` currently returns an empty array with a warning.
+- **Historical trades**: served by `fetchHistoricalFills`; the separate `fetchHistoricalTrades` method was deleted 2026-08-16 after its normalized realized-PnL, hedge-leg and maker fields were ported across.
 - **Virtual clock**: uses dedicated Aster clock with proxy fallback and V1/V3
   time endpoint fallback in browser windows, WebWorkers, and other non-window
   runtimes. A failed retry keeps the last good offset; lifecycle generations

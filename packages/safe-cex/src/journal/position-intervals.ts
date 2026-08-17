@@ -226,7 +226,7 @@ const legKey = (symbol: string, leg: PositionSide | 'both') => `${symbol}|${leg}
  * `Execution.timestamp` is SECONDS, so several fills routinely share one. A plain
  * `a.timestamp - b.timestamp` is a STABLE sort, which means fills inside the same second keep
  * whatever order the venue returned them in — and several venues return newest-first
- * (`paradex.fetchExecutions` sorts `b.timestamp - a.timestamp`). Inside a second, that is
+ * (`paradex.fetchHistoricalFills` sorts `b.timestamp - a.timestamp`). Inside a second, that is
  * exactly BACKWARDS.
  *
  * Harmless almost everywhere, and corrupting at a ZERO CROSSING: if a closing fill and the

@@ -1096,7 +1096,7 @@ export class BybitInverseExchange extends BaseExchange {
     return orderBy(executions, ['timestamp'], ['desc']).slice(0, limit || 50);
   };
 
-  fetchExecutions = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+  fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     // Return empty array if in public data only mode
     if (this.isPublicDataOnly) {
       return [];
@@ -1119,7 +1119,7 @@ export class BybitInverseExchange extends BaseExchange {
     ): Promise<void> => {
       // Keep parity with linear bybit adapter to avoid unbounded cursor walks.
       if (depth >= MAX_RECURSION_DEPTH) {
-        this.log(`fetchExecutions reached max recursion depth of ${MAX_RECURSION_DEPTH}`, LogSeverity.Warning);
+        this.log(`fetchHistoricalFills reached max recursion depth of ${MAX_RECURSION_DEPTH}`, LogSeverity.Warning);
         return;
       }
 

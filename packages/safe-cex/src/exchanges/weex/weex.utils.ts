@@ -381,12 +381,23 @@ export const normalizeExecution = (raw: Record<string, any>, market?: Market): E
   }
 
   return omitUndefined({
+    // The venue's own fill id. Without it a fill has no idempotent key and
+    // cannot be stored or de-duplicated — orderId cannot serve, since one order
+    // fills across many rows.
+    id: raw.tradeId ?? raw.fillId ?? raw.id ? toIntegerString(raw.tradeId ?? raw.fillId ?? raw.id) : undefined,
     timestamp,
     symbol,
     orderId: raw.orderId ? toIntegerString(raw.orderId) : undefined,
     price,
     qty,
     side,
+    // Ported up from `normalizeHistoricalTrade`, which wrapped this function and
+    // added them. The two had drifted, so anything reading the execution shape
+    // saw a venue reporting no PnL and no hedge leg rather than a mapper that
+    // simply never carried them.
+    realizedPnl: toNumber(raw.realizedPnl ?? raw.realizePnl, undefined as any),
+    positionSide: POSITION_SIDE[String(raw.positionSide || '').toUpperCase()] || 'both',
+    maker: raw.maker,
     commission: Math.abs(toNumber(raw.commission ?? raw.fillFee, Number.NaN)) || undefined,
     commissionAsset: raw.commissionAsset ?? raw.coin ?? market?.quote,
   });
@@ -398,17 +409,20 @@ export const normalizeHistoricalTrade = (raw: Record<string, any>, market?: Mark
     return null;
   }
 
+  // Now purely the millisecond-shaped view of the same execution: everything
+  // except `time`, `quoteQty` and `buyer` comes straight off it.
   return omitUndefined({
+    id: execution.id,
     symbol: execution.symbol,
     orderId: execution.orderId,
     price: execution.price,
     qty: execution.qty,
     quoteQty: toNumber(raw.quoteQty, undefined as any),
-    realizedPnl: toNumber(raw.realizedPnl ?? raw.realizePnl, undefined as any),
-    positionSide: POSITION_SIDE[String(raw.positionSide || '').toUpperCase()] || 'both',
+    realizedPnl: execution.realizedPnl,
+    positionSide: execution.positionSide ?? 'both',
     side: execution.side,
     buyer: raw.buyer,
-    maker: raw.maker,
+    maker: execution.maker,
     commission: execution.commission,
     commissionAsset: execution.commissionAsset,
     time: normalizeTimestampToMs(raw.time ?? raw.createdTime ?? raw.updatedTime),

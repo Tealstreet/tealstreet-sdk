@@ -106,7 +106,7 @@ describe('audit regression: Paradex current REST and lifecycle contracts', () =>
     });
     exchange.xhr = { get } as any;
 
-    await expect(exchange.fetchExecutions({ symbol: 'BTC-USD-PERP' })).resolves.toEqual([
+    await expect(exchange.fetchHistoricalFills({ symbol: 'BTC-USD-PERP' })).resolves.toEqual([
       expect.objectContaining({ orderId: 'order-1', price: 100, qty: 1.5, timestamp: 1_750_000_000 }),
     ]);
     expect(get.mock.calls.map(([endpoint]) => endpoint)).toEqual([ENDPOINTS.FILLS, ENDPOINTS.ORDERS_HISTORY]);
