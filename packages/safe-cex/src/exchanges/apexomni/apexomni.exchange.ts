@@ -20,9 +20,9 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
+  ExchangeOptions,
   Execution,
   ExecutionsOptions,
-  ExchangeOptions,
   LogSeverity,
   MarginType,
   Market,
@@ -327,6 +327,25 @@ export class ApexOmniExchange extends BaseExchange {
 
   fetchRawBalance = async (): Promise<Balance> => {
     const { data } = await this.xhr.get(ENDPOINTS.BALANCE);
+
+    // The cast below is a LIE whenever the venue answers with anything but the
+    // balance envelope — an error body, a throttle, a truncated response — and
+    // apexomni does that on roughly a fifth of its calls (measured 2026-08-17).
+    // Dereferencing it produced `Cannot read properties of undefined (reading
+    // 'totalEquityValue')` for 85 users and 2k events, from inside a worker, so
+    // the stack pointed at the Sentry sanitiser rather than at this line.
+    //
+    // Returning the LAST KNOWN balance, not a zeroed one. A fabricated zero
+    // equity is the `exitPrice: 0` failure in a place a user acts on: it renders
+    // as a wiped account and feeds margin display. Truth-as-of-last-success is
+    // the honest answer for a transient venue hiccup, and the poll retries in
+    // seconds. Logged rather than thrown so it stays visible without spamming
+    // every user for something that self-heals.
+    if (!data?.data) {
+      this.log(`Balance response carried no account payload; keeping the last known balance`, LogSeverity.Warning);
+      return this.store.balance;
+    }
+
     const balance = data.data as AccountBalanceObject;
 
     // this is no longer compatible with our approach to USDC pnl. Need to sum up position pnl
@@ -489,7 +508,9 @@ export class ApexOmniExchange extends BaseExchange {
         );
       });
 
-    const normalizedSide = String(row.side || row.S || '').trim().toUpperCase();
+    const normalizedSide = String(row.side || row.S || '')
+      .trim()
+      .toUpperCase();
     const side =
       normalizedSide === 'BUY' || normalizedSide === 'B' || normalizedSide === 'LONG'
         ? OrderSide.Buy
@@ -522,7 +543,18 @@ export class ApexOmniExchange extends BaseExchange {
 
     const price = Number.parseFloat(String(row.price || row.p || row.fillPrice || row.fillPx || row.execPrice || '0'));
     const qty = Number.parseFloat(
-      String(row.fillSize || row.execQty || row.matchFillSize || row.lastFillSize || row.qty || row.q || row.size || row.v || row.amount || '0'),
+      String(
+        row.fillSize ||
+          row.execQty ||
+          row.matchFillSize ||
+          row.lastFillSize ||
+          row.qty ||
+          row.q ||
+          row.size ||
+          row.v ||
+          row.amount ||
+          '0',
+      ),
     );
     if (!Number.isFinite(price) || !Number.isFinite(qty) || price <= 0 || qty <= 0) {
       return;
@@ -645,7 +677,9 @@ export class ApexOmniExchange extends BaseExchange {
     const firstDefined = (...values: Array<unknown>) =>
       values.find((value) => value !== undefined && value !== null && `${value}`.length > 0);
     const mapExecutionSide = (value: unknown): OrderSide | undefined => {
-      const normalized = String(value || '').trim().toUpperCase();
+      const normalized = String(value || '')
+        .trim()
+        .toUpperCase();
       if (!normalized) {
         return undefined;
       }
@@ -658,7 +692,10 @@ export class ApexOmniExchange extends BaseExchange {
       return ORDER_SIDE[normalized];
     };
 
-    const expectedSymbolKeys = new Set([this.normalizeApexSymbolKey(market.id), this.normalizeApexSymbolKey(market.symbol)]);
+    const expectedSymbolKeys = new Set([
+      this.normalizeApexSymbolKey(market.id),
+      this.normalizeApexSymbolKey(market.symbol),
+    ]);
 
     const parseRows = (rows: Array<Record<string, any>>, isFallback = false) =>
       rows.reduce<Execution[]>((acc, row) => {
@@ -667,7 +704,9 @@ export class ApexOmniExchange extends BaseExchange {
         if (rawRowSymbol !== undefined && rawRowSymbol !== null && `${rawRowSymbol}`.length > 0) {
           const rowSymbol = String(rawRowSymbol);
           const resolvedRowMarket = this.store.marketsById[rowSymbol] || this.store.marketsBySymbol[rowSymbol];
-          const normalizedRowSymbol = this.normalizeApexSymbolKey(resolvedRowMarket?.id || resolvedRowMarket?.symbol || rowSymbol);
+          const normalizedRowSymbol = this.normalizeApexSymbolKey(
+            resolvedRowMarket?.id || resolvedRowMarket?.symbol || rowSymbol,
+          );
           if (!expectedSymbolKeys.has(normalizedRowSymbol)) {
             return acc;
           }
@@ -750,7 +789,9 @@ export class ApexOmniExchange extends BaseExchange {
         }
 
         const fee = parseFloat(
-          String(firstDefined(row.fee, row.fillFee, row.execFee, row.cumSuccessFillFee, row.cumMatchFillFee, '0') || '0'),
+          String(
+            firstDefined(row.fee, row.fillFee, row.execFee, row.cumSuccessFillFee, row.cumMatchFillFee, '0') || '0',
+          ),
         );
         acc.push(
           omitUndefined({
@@ -880,7 +921,10 @@ export class ApexOmniExchange extends BaseExchange {
         primaryRows = await fetchFillRows();
       } catch (primaryErr: any) {
         const primaryErrorMessage = primaryErr?.response?.data?.msg || primaryErr?.message || String(primaryErr);
-        this.log(`Execution history fills request failed, falling back to history-orders: ${primaryErrorMessage}`, LogSeverity.Warning);
+        this.log(
+          `Execution history fills request failed, falling back to history-orders: ${primaryErrorMessage}`,
+          LogSeverity.Warning,
+        );
       }
       let fallbackRows: Array<Record<string, any>> = [];
       if (primaryRows.length === 0) {
