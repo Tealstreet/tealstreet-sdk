@@ -1,4 +1,5 @@
 import type { Axios } from 'axios';
+import { isAxiosError } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 
@@ -91,8 +92,13 @@ export class BitgetExchange extends BaseExchange {
   // populated on Classic too). Set definitively by `_detectAccountType()`
   // which probes a cheap v3 endpoint once during `start()`. Every v3-routing
   // method (current: setLeverage; future: anything else under /api/v3/) reads
-  // this flag — keep it the single source of truth.
+  // `isUta`; confirmed execution also requires the probe to have completed.
   protected isUta = false;
+  private accountTypeDetected = false;
+
+  public get isClassicV2Account(): boolean {
+    return this.accountTypeDetected && !this.isUta;
+  }
 
   // Short-lived dedup + cache for resolveSymbolPositioning's account-endpoint
   // fallback. A single order resolves BOTH position-mode (in formatCreateOrder)
@@ -337,21 +343,30 @@ export class BitgetExchange extends BaseExchange {
   };
 
   // One-time probe: GET a cheap v3 endpoint and observe whether Bitget routes
-  // the call (UTA) or returns 40084 "Classic Account mode" (Classic). Result
-  // is sticky for the worker's lifetime; a probe failure other than 40084
-  // (network, timeout) leaves `isUta=false` so we degrade safely to v2.
-  private _detectAccountType = async (): Promise<void> => {
+  // the call (UTA) or returns 40084 "Classic Account mode" (Classic). Only
+  // those two documented outcomes prove the account mode; a transient failure
+  // stays unconfirmed and therefore cannot admit confirmed execution.
+  protected _detectAccountType = async (): Promise<void> => {
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT_SETTINGS_V3);
-      this.isUta = parseInt(data?.code || '0') === 0;
-    } catch (err: any) {
-      const code = err?.response?.data?.code;
+      const code = String(data?.code ?? '');
+      if (code === '0' || code === '00000') {
+        this.isUta = true;
+        this.accountTypeDetected = true;
+      } else if (code === '40084') {
+        this.isUta = false;
+        this.accountTypeDetected = true;
+      } else {
+        this.log(`Bitget account type probe returned unrecognized code ${code}; account mode remains unconfirmed`);
+      }
+    } catch (error: unknown) {
+      const code = isAxiosError(error) ? String(error.response?.data?.code ?? '') : '';
       if (code === '40084') {
         this.isUta = false;
+        this.accountTypeDetected = true;
       } else {
-        // Network or transient error — leave default (false) so we don't
-        // mistakenly route Classic accounts to v3.
-        this.log(`Bitget account type probe failed; assuming Classic: ${err?.message ?? err}`);
+        const detail = error instanceof Error ? error.message : String(error);
+        this.log(`Bitget account type probe failed; account mode remains unconfirmed: ${detail}`);
       }
     }
   };
@@ -868,6 +883,32 @@ export class BitgetExchange extends BaseExchange {
     }, []);
 
     return tickers;
+  };
+
+  /** Read-only Classic-v2 lookup for one exact wire client order ID. */
+  getOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<unknown> => {
+    if (typeof symbol !== 'string' || symbol.length === 0) {
+      throw new Error('Bitget exact-ID lookup requires a non-empty symbol');
+    }
+    if (typeof clientOrderId !== 'string' || clientOrderId.length === 0) {
+      throw new Error('Bitget exact-ID lookup requires a non-empty wire client order ID');
+    }
+    const venueSymbol = this.store.marketsBySymbol[symbol]?.id ?? symbol;
+    try {
+      const { data } = await this.xhr.get(ENDPOINTS.ORDER_DETAIL, {
+        params: {
+          symbol: venueSymbol,
+          productType: this.apiProductType,
+          clientOid: clientOrderId,
+        },
+      });
+      return data;
+    } catch (error: unknown) {
+      if (isAxiosError(error) && error.response?.data !== undefined) {
+        return error.response.data;
+      }
+      throw error;
+    }
   };
 
   fetchOrders = async () => {

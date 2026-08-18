@@ -20,6 +20,7 @@ export const ENDPOINTS = {
   POSITIONS_V2: '/api/v2/mix/position/all-position',
   KLINE: '/api/v2/mix/market/candles',
   ORDERS: '/api/v2/mix/order/orders-pending',
+  ORDER_DETAIL: '/api/v2/mix/order/detail',
   CANCEL_ALGO_ORDER: '/api/v2/mix/order/cancel-plan-order',
   CANCEL_ORDERS: '/api/v2/mix/order/batch-cancel-orders',
   CANCEL_ALL_ORDERS: '/api/v2/mix/order/cancel-all-orders',

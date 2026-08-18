@@ -2516,4 +2516,25 @@ export class BybitExchange extends BaseExchange {
     const positionIdx = await this.getOrderPositionIdx(omit(opts, ['reduceOnly']));
     return { 0: 0, 1: 2, 2: 1 }[positionIdx];
   };
+
+  getOrderByClientOrderId = async (symbol: string, wireClientOrderId: string): Promise<unknown> => {
+    if (typeof symbol !== 'string' || symbol.length === 0) {
+      throw new Error('Bybit exact-ID lookup requires a nonempty symbol');
+    }
+    if (!BYBIT_CLIENT_ORDER_ID_RE.test(wireClientOrderId)) {
+      throw new Error('Bybit exact-ID lookup requires a valid 1-36 character wire client order ID');
+    }
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market ${symbol} not found on Bybit`);
+    const common = { category: 'linear' as const, symbol: market.id, orderLinkId: wireClientOrderId };
+    const { data: realtime } = await this.xhr.get(ENDPOINTS.UNFILLED_ORDERS, {
+      params: { ...common, openOnly: 0 },
+    });
+    const list = realtime?.result?.list;
+    if (Array.isArray(list) && list.length > 0) {
+      return realtime;
+    }
+    const { data: history } = await this.xhr.get(ENDPOINTS.USER_ORDERS, { params: common });
+    return history;
+  };
 }

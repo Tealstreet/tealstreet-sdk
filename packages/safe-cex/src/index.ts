@@ -302,3 +302,15 @@ export type {
  * The composed value is the wire ID sent to the venue.
  */
 export { CLIENT_ORDER_ID_BROKER_PREFIXES, composeClientOrderId } from './composeClientOrderId';
+
+/**
+ * Session-confirmed regular-order capability: exact lookup + placement
+ * classification for eligible linear markets. Stock `placeOrder` remains the
+ * only write path.
+ */
+export { trackedRegularOrderCapabilityFor } from './tracked';
+export type {
+  TrackedLookupResult,
+  TrackedPlacementOutcome,
+  TrackedRegularOrderCapability,
+} from './tracked';

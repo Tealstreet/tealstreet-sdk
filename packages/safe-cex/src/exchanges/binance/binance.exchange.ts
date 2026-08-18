@@ -1737,4 +1737,35 @@ export class BinanceExchange extends BaseExchange {
 
     return orderIds;
   };
+
+  getOrderByClientOrderId = async (symbol: string, wireClientOrderId: string): Promise<unknown> => {
+    if (typeof symbol !== 'string' || symbol.length === 0) {
+      throw new Error('Binance exact-ID lookup requires a nonempty symbol');
+    }
+    if (!/^[.A-Z:/a-z0-9_-]{1,36}$/.test(wireClientOrderId)) {
+      throw new Error('Binance exact-ID lookup requires a valid 1-36 character wire client order ID');
+    }
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market ${symbol} not found on Binance`);
+    try {
+      const { data } = await this.xhr.get(ENDPOINTS.ORDER, {
+        params: { symbol: market.symbol, origClientOrderId: wireClientOrderId },
+      });
+      return data;
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'data' in error.response &&
+        error.response.data !== undefined
+      ) {
+        return error.response.data;
+      }
+      throw error;
+    }
+  };
+
 }

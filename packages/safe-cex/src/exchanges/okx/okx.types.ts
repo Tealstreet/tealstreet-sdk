@@ -72,6 +72,7 @@ export const ENDPOINTS = {
   SET_POSITION_MODE: '/api/v5/account/set-position-mode',
   ACCOUNT_CONFIG: '/api/v5/account/config',
   UPDATE_ORDER: '/api/v5/trade/amend-order',
+  ORDER: '/api/v5/trade/order',
 };
 
 export const GRAFANA_ENDPOINTS_EVERY = [

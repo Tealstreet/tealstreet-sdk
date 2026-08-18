@@ -1832,4 +1832,35 @@ export class OKXExchange extends BaseExchange {
 
     return triggerPrice < referencePrice ? OrderType.TakeProfit : OrderType.StopLoss;
   };
+
+  getOrderByClientOrderId = async (symbol: string, wireClientOrderId: string): Promise<unknown> => {
+    if (typeof symbol !== 'string' || symbol.length === 0) {
+      throw new Error('OKX exact-ID lookup requires a nonempty symbol');
+    }
+    if (!/^[A-Za-z0-9]{1,32}$/.test(wireClientOrderId)) {
+      throw new Error('OKX exact-ID lookup requires a 1-32 character alphanumeric wire client order ID');
+    }
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market ${symbol} not found on OKX`);
+    try {
+      const { data } = await this.xhr.get(ENDPOINTS.ORDER, {
+        params: { instId: market.id, clOrdId: wireClientOrderId },
+      });
+      return data;
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'data' in error.response &&
+        error.response.data !== undefined
+      ) {
+        return error.response.data;
+      }
+      throw error;
+    }
+  };
+
 }

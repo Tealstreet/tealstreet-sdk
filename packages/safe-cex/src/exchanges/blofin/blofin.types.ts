@@ -35,6 +35,7 @@ export const ENDPOINTS = {
   CANCEL_ALGO_ORDER: '/api/v1/trade/cancel-tpsl',
   CANCEL_TRIGGER_ORDER: '/api/v1/trade/cancel-algo',
   PLACE_ORDERS: '/api/v1/trade/order',
+  ORDER_DETAIL: '/api/v1/trade/order-detail',
   PLACE_ORDERS_BATCH: '/api/v1/trade/batch-orders',
   PLACE_TPSL_ORDER: '/api/v1/trade/order-tpsl',
   PLACE_TRIGGER_ORDER: '/api/v1/trade/order-algo',

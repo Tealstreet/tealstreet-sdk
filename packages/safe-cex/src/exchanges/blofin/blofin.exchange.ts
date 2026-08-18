@@ -9,7 +9,7 @@ import partition from 'lodash/partition';
 import sumBy from 'lodash/sumBy';
 import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
-import { nanoid } from 'nanoid';
+import { customAlphabet, nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
@@ -45,7 +45,6 @@ import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { roundUSD } from '../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../utils/safe-math';
-import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPI } from './blofin.api';
@@ -71,6 +70,11 @@ import { BlofinPrivateWebsocket } from './blofin.ws-private';
 import { BlofinPublicWebsocket } from './blofin.ws-public';
 
 const BLOFIN_SUPPORTED_INST_TYPE = 'SWAP';
+const createClientOrderIdSuffix = customAlphabet(
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+  16,
+);
+const createGeneratedClientOrderId = (): string => `${BROKER_ID}${createClientOrderIdSuffix()}`;
 const BLOFIN_SUPPORTED_CONTRACT_TYPE = 'linear';
 const BLOFIN_ACTIVE_ORDERS_PAGE_SIZE = 100;
 // Safety cap on order pagination. BloFin caps orders-pending / orders-tpsl-pending
@@ -1703,7 +1707,7 @@ export class BlofinExchange extends BaseExchange {
       positionSide,
       side: inverseObj(ORDER_SIDE)[opts.side],
       size: `${amount}`,
-      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      clientOrderId: createGeneratedClientOrderId(),
       orderPrice: `${orderPrice}`,
       orderType: 'trigger',
       triggerPrice: `${triggerPrice}`,
@@ -1745,7 +1749,7 @@ export class BlofinExchange extends BaseExchange {
     const req: Record<string, any> = omitUndefined({
       instId: market.id,
       marginMode: await this.getOrFetchMarginType(market.symbol),
-      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      clientOrderId: createGeneratedClientOrderId(),
       ...(process.env.NODE_ENV === 'production' || this.options.tealstreetProxy
         ? {
             brokerId: BROKER_ID,
@@ -1824,7 +1828,7 @@ export class BlofinExchange extends BaseExchange {
 
     const req: Record<string, any> = omitUndefined({
       instId: market.id,
-      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      clientOrderId: createGeneratedClientOrderId(),
       side: inverseObj(ORDER_SIDE)[opts.side],
       orderType:
         opts.timeInForce === OrderTimeInForce.PostOnly && opts.type === 'limit'
@@ -1884,7 +1888,7 @@ export class BlofinExchange extends BaseExchange {
       return {
         ...req,
         size: `${lotSizePerBatch}`,
-        clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+        clientOrderId: createGeneratedClientOrderId(),
       };
     });
 
@@ -1892,7 +1896,7 @@ export class BlofinExchange extends BaseExchange {
       payloads.push({
         ...req,
         size: `${rest}`,
-        clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+        clientOrderId: createGeneratedClientOrderId(),
       });
 
     return payloads;
@@ -2249,4 +2253,35 @@ export class BlofinExchange extends BaseExchange {
 
     return side;
   };
+
+  getOrderByClientOrderId = async (symbol: string, wireClientOrderId: string): Promise<unknown> => {
+    if (typeof symbol !== 'string' || symbol.length === 0) {
+      throw new Error('BloFin exact-ID lookup requires a nonempty symbol');
+    }
+    if (!/^[A-Za-z0-9]{1,32}$/.test(wireClientOrderId)) {
+      throw new Error('BloFin exact-ID lookup requires a 1-32 character alphanumeric wire client order ID');
+    }
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market ${symbol} not found on BloFin`);
+    try {
+      const { data } = await this.xhr.get(ENDPOINTS.ORDER_DETAIL, {
+        params: { instId: market.id, clientOrderId: wireClientOrderId },
+      });
+      return data;
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'data' in error.response &&
+        error.response.data !== undefined
+      ) {
+        return error.response.data;
+      }
+      throw error;
+    }
+  };
+
 }
