@@ -4,6 +4,7 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { BaseCapabilityMethod, BaseExchange, isBaseCapabilityFallback, isInertCapability } from '../../exchanges/base';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { getAxisStatus } from '../../journal/axis-grading';
+import { isPracticeVenue } from '../../journal/practiceVenues';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
 
@@ -166,24 +167,14 @@ describe('exchange metadata runtime non-fallback invariants', () => {
   it(
     'every venue that can serve fills is present in the journal axis table',
     async () => {
-      /**
-       * Deliberately NOT collected, despite inheriting a working implementation.
-       *
-       * These are practice venues. Their fills are real API responses describing
-       * trades that never happened with money, and the journal exists to be the
-       * record of what a user actually traded — paper fills mixed into it would
-       * corrupt every aggregate computed from it, silently and irreversibly,
-       * because no row carries a "this was fake" flag.
-       *
-       * Named here rather than left to fail: an exemption someone can read is a
-       * decision, an exemption buried in a `continue` is an accident.
-       */
-      const PRACTICE_VENUES: ReadonlySet<string> = new Set(['bybitdemo', 'bitmextestnet']);
-
+      // Practice venues are excluded by the RUNTIME registry, imported rather
+      // than redeclared. This test used to carry its own copy, which is how the
+      // exclusion came to exist only here: the fills axis skipped those venues
+      // for the wrong reason while the orders axis collected them.
       const missing: string[] = [];
 
       for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
-        if (PRACTICE_VENUES.has(name)) continue;
+        if (isPracticeVenue(name)) continue;
 
         const exchange = await createImplementation(name, exchangeMetadata[name].supportsPublicOnly);
 
