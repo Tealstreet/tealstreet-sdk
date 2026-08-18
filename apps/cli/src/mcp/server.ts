@@ -21,6 +21,7 @@ import {
   writeScript,
 } from '../scripts-store';
 import { createDryRunAdapter } from './dryRunAdapter';
+import { cliDataTools } from './dataTools';
 import { disconnectAll, ensureConnected, getExchangeManager, listAccountSummaries } from './liveState';
 import { getProtocolStdout } from './stdoutGuard';
 import type { CLISession } from '@tealstreet/cli-core';
@@ -30,7 +31,7 @@ import type { CLISession } from '@tealstreet/cli-core';
  *  surface than the one in the user's editor. */
 const TYPES_BUNDLE = SCRIPT_TYPES_BUNDLE;
 
-const SERVER_INSTRUCTIONS = `tealstreet-scripts — author and inspect Tealstreet custom scripts.
+const SERVER_INSTRUCTIONS = `tealstreet-scripts — author and inspect Tealstreet custom scripts, local account state, and Tealstreet data.
 
 Scripts are headless TypeScript that automate trading actions. They live one-file-per-script
 in ~/.tealstreet/scripts/ and are invoked from the Tealstreet CLI as \`script:<name>\`.
@@ -67,6 +68,13 @@ RUNNING SCRIPTS:
 (placeOrder, cancelOrder, runCommand, …) is RECORDED and returned as an intent
 rather than executed. Nothing this server can do places a real order. To run a
 script for real the user runs \`script:<name>\` in their own REPL.
+
+DATA TOOLS:
+The public market-data tools read Tealstreet publicdata, exchange-services candles, and
+public DEX routes over outbound HTTPS. Hyperliquid analytics tools read Tealstreet's
+crawled analytics database when the local process has HYPERLIQUID_ANALYTICS_DATABASE_URL
+or HYPERLIQUID_ANALYTICS_POSTGRES_* configured. These tools are read-only and do not use
+exchange API credentials.
 
 SHARING:
 \`export_scripts\` produces a portable bundle of the user's OWN scripts, for backup
@@ -140,6 +148,10 @@ const fullCheck = (source: string): ValidationIssue[] => [
   ...validate(source, { typesBundle: TYPES_BUNDLE }).errors,
   ...checkTopLevelEffects(source),
 ];
+
+for (const tool of cliDataTools) {
+  defineTool(tool.name, tool.description, tool.shape, tool.handler);
+}
 
 defineTool(
   'list_scripts',

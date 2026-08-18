@@ -711,7 +711,8 @@ Source: `apps/cli/src/index.ts`.
 
 `tealstreet mcp` runs the CLI as an [MCP](https://modelcontextprotocol.io)
 server over stdio, so an AI assistant (Claude Code, Claude Desktop, …) can
-read, write, and validate your scripts directly.
+read, write, and validate your scripts, inspect local account state, and read
+Tealstreet data tools.
 
 Register it with your MCP client — for Claude Code:
 
@@ -728,18 +729,27 @@ reports the server as failed, check your login first — tokens expire.
 
 ### Tools
 
-| Tool                                                          | Purpose                                                                             |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `list_scripts`                                                | Every script on disk, including ones that currently fail to load                    |
-| `read_script`                                                 | One script's source — works even when the script is broken                          |
-| `get_api_types`                                               | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `all`)  |
-| `validate_script`                                             | Typecheck + capability check without writing. Fast, local, free                     |
-| `write_script`                                                | Create or replace a script. **Validates first and refuses to write invalid source** |
-| `delete_script`                                               | Delete a script                                                                     |
-| `export_scripts`                                              | Export your own scripts as a portable JSON bundle (backup / moving machines)        |
-| `list_accounts`                                               | Configured accounts — names and exchanges only, never credentials                   |
-| `get_positions` / `get_orders` / `get_balance` / `get_ticker` | Live reads for an account                                                           |
-| `run_script`                                                  | **Dry run only** — see below                                                        |
+| Tool                                                                                                        | Purpose                                                                                |
+| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `list_scripts`                                                                                              | Every script on disk, including ones that currently fail to load                       |
+| `read_script`                                                                                               | One script's source — works even when the script is broken                             |
+| `get_api_types`                                                                                             | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `all`)     |
+| `validate_script`                                                                                           | Typecheck + capability check without writing. Fast, local, free                        |
+| `write_script`                                                                                              | Create or replace a script. **Validates first and refuses to write invalid source**    |
+| `delete_script`                                                                                             | Delete a script                                                                        |
+| `export_scripts`                                                                                            | Export your own scripts as a portable JSON bundle (backup / moving machines)           |
+| `list_accounts`                                                                                             | Configured accounts — names and exchanges only, never credentials                      |
+| `get_positions` / `get_orders` / `get_balance` / `get_ticker`                                               | Live reads for an account                                                              |
+| `run_script`                                                                                                | **Dry run only** — see below                                                           |
+| `list_market_data_sources`                                                                                  | Public Tealstreet data sources and publicdata exchange health                          |
+| `get_public_tickers` / `get_public_ticker`                                                                  | Public ticker snapshots from Tealstreet publicdata                                     |
+| `get_top_movers` / `get_top_volume` / `get_top_funding`                                                     | Public market top lists from Tealstreet publicdata                                     |
+| `get_exchange_proxy_candles`                                                                                | Historical candles through exchange.tealstreet.io's public candle service              |
+| `get_safe_cex_markets` / `get_safe_cex_market`                                                              | Safe-cex market metadata through exchange.tealstreet.io's public candle service        |
+| `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
+| `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                   | Public Polymarket CLOB data, with bounded book depth                                   |
+| `get_hyperliquid_leaderboard`                                                                               | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured        |
+| `get_hyperliquid_wallet_positions` / `get_hyperliquid_wallet_fills` / `get_hyperliquid_account_value_curve` | Crawled public Hyperliquid wallet analytics, when analytics DB env vars are configured |
 
 ### What it will refuse
 
@@ -797,6 +807,11 @@ lands.
 
 - **Local only.** stdio transport, no network listener. It does not expose your
   accounts to anything but the MCP client you launched it from.
+- **Data reads may call Tealstreet services.** Public market tools make outbound
+  HTTPS calls to Tealstreet publicdata. Hyperliquid analytics tools read a
+  Postgres analytics database only when you set `HYPERLIQUID_ANALYTICS_DATABASE_URL`
+  or `HYPERLIQUID_ANALYTICS_POSTGRES_*`; otherwise they return a configuration
+  error.
 - **Credentials are never exposed.** `list_accounts` returns an explicit
   allowlist (name, exchange, testnet, connected) — never the stored keys.
 - Script writes, deletions, **and dry runs** are recorded in the audit log

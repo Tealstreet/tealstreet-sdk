@@ -10,9 +10,10 @@ hide_table_of_contents: false
 ---
 
 Tealstreet hosts an **MCP connector**, so an AI assistant you already use can
-write [Custom Modules](./custom-module.mdx) directly into your account. You
-bring your own assistant and pay for your own usage; Tealstreet provides the
-module API, the safety screen, and the storage.
+write [Custom Modules](./custom-module.mdx) directly into your account. The
+same connector is being expanded into Tealstreet's read-only data connector;
+available permissions are always shown on the consent screen before anything
+is granted.
 
 ---
 
@@ -41,16 +42,83 @@ API keys.
 
 ### What it can and cannot do
 
-Two permissions exist, and both are shown on the consent screen:
+Available permissions are shown on the consent screen:
 
-| Permission      | What it allows                           |
-| --------------- | ---------------------------------------- |
-| `modules:read`  | List and read your modules               |
-| `modules:write` | Create, change and delete your modules   |
+| Permission       | What it allows                              |
+| ---------------- | ------------------------------------------- |
+| `modules:read`   | List and read your modules                  |
+| `modules:write`  | Create, change and delete your modules      |
+| `market:read`    | Read public market data                     |
+| `analytics:read` | Read Tealstreet market and trader analytics |
+| `wallet:read`    | Read public wallet and onchain data         |
 
-Neither reaches a trading surface. There is no scope that lets a connected
-assistant trade, and the module it writes is subject to the same sandbox and
-the same safety screen as code you type yourself.
+None of these scopes can place orders, move funds, or reveal exchange API
+keys. The public data scopes are being rolled out for read-only data tools; a
+client granted only those scopes may see no tools until that rollout reaches
+your account. Private account and third-party scopes require constrained
+grants: the authorization request must name the exact account/source set with
+`mcp_grant_constraints`, for example
+`{"version":1,"accounts":[{"source":"bybit","accountId":"main"}],"thirdParty":[{"source":"arkham"}]}`.
+Wildcard or user-wide private data grants are refused. A module the assistant
+writes is still subject to the same sandbox and the same safety screen as code
+you type yourself.
+
+Hosted private CEX account tools currently include:
+
+| Tool                                   | What it returns                                           |
+| -------------------------------------- | --------------------------------------------------------- |
+| `list_cex_accounts`                    | Granted CEX accounts and latest snapshot timestamps       |
+| `get_cex_account_balance_snapshot`     | Latest cached balance/equity snapshot for one account     |
+| `get_cex_account_position_snapshot`    | Latest cached position-history snapshot for one account   |
+| `get_cex_account_order_snapshot`       | Latest cached order-history snapshot for one account      |
+| `get_cex_account_historical_fills`     | Bounded venue-keyed historical fill rows for one account  |
+| `get_cex_account_historical_orders`    | Bounded venue-keyed historical order rows for one account |
+| `get_cex_account_historical_positions` | Bounded historical closed-position rows for one account   |
+
+These tools read cached account-history rows by constrained `source` plus
+`accountId`. They do not return encrypted exchange configs, API keys, or
+account-sync blobs. Historical tools read `historical_fills`,
+`historical_orders`, and `historical_positions`; `historical_coverage` remains
+ingestion-private and is not exposed.
+
+Public market data tools currently include:
+
+| Tool                           | What it returns                                                           |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| `list_market_data_sources`     | Publicdata source metadata and exchange health                            |
+| `get_public_tickers`           | A bounded ticker snapshot for one publicdata exchange                     |
+| `get_public_ticker`            | One symbol on one publicdata exchange                                     |
+| `get_top_movers`               | Top 24h percentage movers across publicdata exchanges                     |
+| `get_top_volume`               | Top 24h quote-volume markets across publicdata exchanges                  |
+| `get_top_funding`              | Top absolute funding-rate markets across publicdata                       |
+| `get_exchange_proxy_candles`   | Historical candles through exchange.tealstreet.io's public candle service |
+| `get_safe_cex_markets`         | Safe-cex market metadata through exchange.tealstreet.io's candle service  |
+| `get_safe_cex_market`          | One safe-cex market by symbol or id through the candle service            |
+| `get_polymarket_events`        | Public Polymarket events with compact market rows                         |
+| `search_polymarket_events`     | Public Polymarket event and tag search                                    |
+| `get_polymarket_midpoints`     | Batched public Polymarket CLOB midpoint prices                            |
+| `get_polymarket_order_book`    | Depth-bounded public Polymarket CLOB book levels                          |
+| `get_polymarket_price_history` | Public Polymarket CLOB price-history points                               |
+
+The safe-cex market tools use exchange-services'
+`/candles/api/market-data/markets` route and return warnings when a metadata
+snapshot is missing or stale.
+`get_exchange_proxy_candles` is a strict read-only adapter for the
+exchange-services `/candles/api/market-data/candles` route. It accepts only
+validated candle query fields and is not a generic URL proxy.
+Polymarket tools are public read-only DEX tools. They use Tealstreet's
+Polymarket `/v1/*` public route contract when configured, return read/cache
+metadata instead of claiming exchange freshness, and never expose account data,
+API keys, or order placement.
+
+Hyperliquid analytics tools currently include:
+
+| Tool                                  | Permission       | What it returns                                     |
+| ------------------------------------- | ---------------- | --------------------------------------------------- |
+| `get_hyperliquid_leaderboard`         | `analytics:read` | Crawled Hyperliquid leaderboard rows                |
+| `get_hyperliquid_wallet_positions`    | `wallet:read`    | Latest crawled clearinghouse positions for a wallet |
+| `get_hyperliquid_wallet_fills`        | `wallet:read`    | Recent crawled fills for a wallet                   |
+| `get_hyperliquid_account_value_curve` | `wallet:read`    | Crawled account-value curve points for a wallet     |
 
 ---
 
@@ -81,16 +149,16 @@ reload the tab if you want to see it immediately.
 
 Refusals are normal and specific; your assistant is told which one it hit.
 
-| Refusal                         | Why                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------ |
-| No top-level `Component`        | The runtime looks up a function binding called `Component`. Without it a module loads and renders nothing. |
-| Does not compile                | Checked before anything is stored, and before the screen is asked. Free and unlimited.           |
-| Reserved name                   | `Global Module` and `Override…` are system-managed.                                              |
-| Too long                        | A module has to be small enough to typecheck and screen.                                         |
-| Safety screen refused it        | The module did something it should not. Your previously committed version is untouched.          |
-| Can only run locally            | The screen allowed it but not for storage, so it is not synced. Nothing is lost — the draft stays. |
-| Daily limit reached             | A cap on automated changes, so a stuck assistant cannot fill or empty your library.              |
-| A newer version exists          | Something else changed the module since your assistant last saw it.                              |
+| Refusal                  | Why                                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| No top-level `Component` | The runtime looks up a function binding called `Component`. Without it a module loads and renders nothing. |
+| Does not compile         | Checked before anything is stored, and before the screen is asked. Free and unlimited.                     |
+| Reserved name            | `Global Module` and `Override…` are system-managed.                                                        |
+| Too long                 | A module has to be small enough to typecheck and screen.                                                   |
+| Safety screen refused it | The module did something it should not. Your previously committed version is untouched.                    |
+| Can only run locally     | The screen allowed it but not for storage, so it is not synced. Nothing is lost — the draft stays.         |
+| Daily limit reached      | A cap on automated changes, so a stuck assistant cannot fill or empty your library.                        |
+| A newer version exists   | Something else changed the module since your assistant last saw it.                                        |
 
 Every refusal leaves both the draft and the last committed version intact. An
 assistant that is told "no" has not lost your work.
@@ -99,9 +167,8 @@ assistant that is told "no" has not lost your work.
 
 ### Disconnecting
 
-Remove the server from your assistant's configuration. There is no
-disconnect button in Tealstreet settings yet; if you need a connection revoked
-server-side, contact support.
+Remove the server from your assistant's configuration, or revoke the connection
+from Tealstreet's Connected apps settings tab.
 
 ---
 

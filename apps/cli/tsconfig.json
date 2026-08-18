@@ -9,6 +9,10 @@
     "rootDir": "../..",
     "outDir": "./dist",
     "resolveJsonModule": true,
+    "paths": {
+      "@tealstreet/mcp-data": ["../../packages/mcp-data/src/index.ts"],
+      "@tealstreet/mcp-data/*": ["../../packages/mcp-data/src/*"]
+    },
     "types": ["bun-types", "node"]
   },
   "include": ["src/**/*"],

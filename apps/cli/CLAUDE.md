@@ -110,7 +110,10 @@ src/
 │   ├── server.ts            # Tool definitions; validates via @tealstreet/script-authoring
 │   ├── stdoutGuard.ts       # Redirects ALL stdout to stderr; hands the real stdout to the transport
 │   ├── dryRunAdapter.ts     # CoreAdapter that RECORDS writes instead of executing them (run_script)
-│   └── liveState.ts         # Lazy connect with persistActive:false + credential-free account projection
+│   ├── liveState.ts         # Lazy connect with persistActive:false + credential-free account projection
+│   ├── dataTools.ts         # Read-only publicdata, exchange-services candles/market metadata, Polymarket, and crawled Hyperliquid analytics MCP registry
+│   ├── publicdata.ts        # CLI-local publicdata REST fallback client
+│   └── hyperliquidAnalyticsDb.ts # Optional HYPERLIQUID_ANALYTICS_* Postgres adapter, read-only queries
 └── utils/
 ```
 
@@ -195,6 +198,39 @@ non-interactively but not _used_ through the proxy until the OAuth flow has run.
 2. User authenticates via Auth0
 3. Browser redirects back with JWT
 4. CLI stores token in config
+
+## MCP data tools
+
+`tealstreet mcp` now exposes the same read-only public data surfaces as the
+hosted MCP connector: publicdata ticker/top-list snapshots plus crawled
+Hyperliquid leaderboard, wallet fills, public wallet positions, account
+value curves, and public Polymarket DEX reads. The CLI registry in
+`src/mcp/dataTools.ts` is an explicit
+allowlist; do not import the hosted web MCP `tools.ts` registry into the CLI,
+because that file mixes public reads with module write/publish/delete tools and
+OAuth-scoped behavior the stdio runtime does not have.
+
+CLI MCP scopes are metadata for parity with the shared contract, not an OAuth
+authorization layer. The stdio server is still gated only by local login and the
+MCP client the user configured. Public market tools make outbound HTTPS calls
+to Tealstreet publicdata (`TEALSTREET_PUBLICDATA_REST_URL` may override the
+primary endpoint; the Singapore fallback remains). Hyperliquid analytics tools
+use only the dedicated `HYPERLIQUID_ANALYTICS_DATABASE_URL` or
+`HYPERLIQUID_ANALYTICS_POSTGRES_*` env vars and never fall back to the user's
+web Supabase config or exchange account config.
+Polymarket tools use the shared `/v1/*` route contract. If
+`TEALSTREET_POLYMARKET_API_ORIGIN` or `NEXT_PUBLIC_POLY_API_ORIGIN` is set, the
+CLI calls that Worker origin with `TEALSTREET_POLYMARKET_ORIGIN_HEADER`
+(default `https://v3.tealstreet.io`); otherwise it maps the same contract
+directly to public Gamma/CLOB upstreams. These tools are public-only and must
+not expose Polymarket account, key, or order data.
+`get_exchange_proxy_candles` is the CLI parity surface for the exchange-services
+candle route. It defaults to `https://exchange.tealstreet.io/candles` and may be
+overridden with `TEALSTREET_EXCHANGE_PROXY_ORIGIN`,
+`TEALSTREET_CANDLE_SERVER_URL`, or `NEXT_PUBLIC_CANDLE_SERVER_URL`. Keep it as a
+strict adapter for `/api/market-data/candles`; do not add a user-supplied path or
+host argument, and do not route it through the exchange-server `/account`
+WebSocket.
 
 ## Startup checkin (web mount gate)
 

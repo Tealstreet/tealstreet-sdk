@@ -46,6 +46,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sentry/bun": "^10.69.0",
     "@tealstreet/cli-core": "*",
+    "@tealstreet/mcp-data": "*",
     "@tealstreet/safe-cex": "*",
     "@tealstreet/script-api-cli": "*",
     "@tealstreet/script-api-core": "*",
@@ -57,6 +58,7 @@
     "fast-json-patch": "^3.1.1",
     "open": "^11.0.0",
     "ora": "^9.4.1",
+    "pg": "^8.22.0",
     "tcp-websocket": "^1.0.0",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
