@@ -5,6 +5,8 @@ import * as os from 'os';
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
 import type { CommandContext } from '../../../packages/cli-core/src/commands/Command';
+import { listTasks } from '../../../packages/cli-core/src/commands/utility/TasksCommand';
+import type { PreprocessedStep } from '@tealstreet/cli-core';
 import {
   executeCommand as cliExecuteCommand,
   connectToAccount,
@@ -77,6 +79,33 @@ import { loadConfig, saveConfig, getAccount } from './config';
 // TWAP support for taskAction handling
 import { twapManager } from '../../../packages/safe-cex/src/webworker/twap/TwapManager';
 import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/TwapInstance';
+import {
+  confirmedStartCursor,
+  confirmedStartsSince,
+  confirmedTwapHosts,
+  quiesceConfirmedTwaps,
+  startConfirmedTwap,
+} from './execution/tasks/twap/startConfirmed';
+import { twapTotalInNativeContracts } from './execution/tasks/twap/nativeQuantity';
+import {
+  ACCOUNT_DISABLE_ERROR,
+  FLATTEN_WARNING,
+  activeConfirmedForSymbol,
+  formatConfirmedList,
+  formatConfirmedFinalReport,
+  hostHasLiveWork,
+  killAllConfirmed,
+  listConfirmedReports,
+  oneShotExitCode,
+  tryStopConfirmed,
+} from './execution/tasks/twap/confirmedControls';
+import {
+  createExecLifecycle,
+  drainUntilInterrupted,
+  raceWithDeadline,
+  waitForOutcomesThenFence,
+} from './exec-lifecycle';
+import type { ExecLifecycle, ShutdownRequest } from './exec-lifecycle';
 import { createStandalonePlatformAdapter } from './platform-adapter';
 import { logger, originalConsoleLog, setPromptController } from './logger';
 import type { ExchangeLike, ExchangeAccountConfig } from '../../../packages/cli-core/src/types';
@@ -178,6 +207,18 @@ const chartCommand = new ChartCommand();
 let stopMonitorFn: (() => void) | null = null;
 let chartUnsubscribe: (() => void) | null = null;
 let commandQueue: Promise<void> = Promise.resolve();
+const commandWorkInFlight = new Set<Promise<boolean>>();
+let activeInteractiveLifecycle: ExecLifecycle | undefined;
+let initiateInteractiveShutdown: ((exitCode: number, countAsInterrupt: boolean) => void) | undefined;
+
+async function drainCommandWork(deadlineAtMs: number): Promise<boolean> {
+  while (commandWorkInFlight.size > 0) {
+    const batch = Promise.allSettled([...commandWorkInFlight]);
+    const result = await raceWithDeadline(batch, deadlineAtMs);
+    if (result.kind === 'deadline') return false;
+  }
+  return true;
+}
 
 // Track critical errors that have already been shown (account:category)
 const shownCriticalErrors = new Set<string>();
@@ -373,27 +414,36 @@ export function recreateReadline(): void {
   hookFooterRepaint(newRl);
 
   // Re-setup event handlers
+  newRl.on('SIGINT', () => {
+    adapter.printWarning(
+      'SIGINT — no new confirmed slices will start; draining entered work until the shared 15-second deadline. Press Ctrl+C again to exit immediately.',
+    );
+    initiateInteractiveShutdown?.(1, true);
+  });
   newRl.on('line', (line: string) => {
     const trimmedLine = line.trim();
     if (trimmedLine) {
       appendToHistory(trimmedLine);
-      commandQueue = commandQueue.then(() => processCommand(trimmedLine)).catch(console.error);
+      commandQueue = commandQueue
+        .then(async () => {
+          if (trimmedLine === 'exit' || trimmedLine === 'quit') {
+            adapter.printInfo('Goodbye!');
+            initiateInteractiveShutdown?.(0, false);
+            return;
+          }
+          await processCommand(trimmedLine, activeInteractiveLifecycle);
+        })
+        .catch(console.error);
     }
     commandQueue.then(() => {
+      if (activeInteractiveLifecycle?.isShutdownRequested()) return;
       newRl.setPrompt(getPrompt());
       newRl.prompt();
     });
   });
-
   newRl.on('close', () => {
-    // Skip if we're recreating readline (not a real close)
     if (isRecreatingReadline) return;
-
-    if (stopMonitorFn) {
-      stopMonitorFn();
-    }
-    originalConsoleLog('\nGoodbye!');
-    process.exit(0);
+    initiateInteractiveShutdown?.(0, false);
   });
 
   newRl.prompt();
@@ -1281,6 +1331,70 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     return;
   }
 
+  const head = command.trim().split(/\s+/)[0]?.toLowerCase();
+  if (command === 'tasks' || command === 'twap list') {
+    const confirmed = formatConfirmedList();
+    const stockRows = listTasks();
+    const legacy = stockRows.filter((row) => row.type === 'twap');
+    const chasers = command === 'tasks' ? stockRows.filter((row) => row.type === 'chase') : [];
+    if (confirmed.length > 0) {
+      adapter.printInfo('CONFIRMED tasks:');
+      for (const line of confirmed) adapter.printInfo(line);
+    }
+    if (legacy.length > 0) {
+      adapter.printInfo('LEGACY tasks:');
+      for (const row of legacy) {
+        adapter.printInfo(`  LEGACY [${row.id.slice(0, 8)}] ${row.side} ${row.symbol} ${row.status} ${row.progress}`);
+      }
+    }
+    if (chasers.length > 0) {
+      adapter.printInfo('CHASER tasks:');
+      for (const row of chasers) {
+        adapter.printInfo(`  CHASER [${row.id.slice(0, 8)}] ${row.side} ${row.symbol} ${row.status} ${row.progress}`);
+      }
+    }
+    if (confirmed.length === 0 && legacy.length === 0 && chasers.length === 0) {
+      adapter.printInfo(command === 'tasks' ? '(no active tasks)' : 'No TWAP orders running');
+    }
+    return;
+  }
+  if (command.startsWith('twap stop ')) {
+    const target = command.slice('twap stop '.length).trim();
+    if (target.toLowerCase() === 'all') {
+      const count = await killAllConfirmed();
+      if (count > 0) adapter.printSuccess(`Stopped ${count} CONFIRMED TWAP(s)`);
+    } else {
+      const stopped = await tryStopConfirmed(target);
+      if (stopped !== undefined) {
+        adapter.printSuccess(`CONFIRMED TWAP [${stopped.taskId}] stopped`);
+        return;
+      }
+    }
+  }
+  if (head === 'kill' || head === 'fuck' || head === 'terminate') {
+    const target = command.trim().split(/\s+/)[1];
+    if (target === 'all') {
+      const n = await killAllConfirmed();
+      if (n > 0) adapter.printSuccess(`Killed ${n} CONFIRMED TWAP(s)`);
+    } else if (target) {
+      const stopped = await tryStopConfirmed(target);
+      if (stopped !== undefined) {
+        adapter.printSuccess(`Killed CONFIRMED TWAP [${stopped.taskId}]`);
+        return;
+      }
+    }
+  }
+  if (head === 'close' || head === 'flatten' || head === 'nuke') {
+    const overrideSymbol = getAdapterContext()?.symbolOverride;
+    const requested = command
+      .trim()
+      .split(/\s+/)
+      .find((token) => session.currentExchange?.store?.markets?.some((market) => market.symbol === token));
+    const symbol = requested ?? overrideSymbol ?? session.currentSymbol;
+    const ids = activeConfirmedForSymbol(symbol);
+    if (ids.length > 0) adapter.printWarning(FLATTEN_WARNING(ids.join(','), symbol));
+  }
+
   if (command === 'logs clear' || command === 'clearlogs') {
     logger.clear();
     adapter.printSuccess('Logs cleared');
@@ -1847,12 +1961,15 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
           }
         }
       } else if (action === 'disable') {
+        if (hostHasLiveWork(name)) {
+          adapter.printError(ACCOUNT_DISABLE_ERROR(name));
+          continue;
+        }
         // Disable the account - stop streaming
         if (!exchangeManager.isConnected(name)) {
           adapter.printInfo(`Account "${name}" is already disabled`);
         } else {
           try {
-            // If disabling the primary account, clear the session first
             if (name === session.currentAccountName) {
               session.currentExchange = null;
               session.currentAccountName = undefined;
@@ -1898,7 +2015,33 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
               timeoutPct?: number;
               timeoutAction?: 'market' | 'next';
               failAction?: 'market' | 'next';
+              legacy?: boolean;
+              sizeIsNative?: boolean;
             };
+
+            if (twapParams.useChaserOrders === true) {
+              // Confirmed engine is market-slice only.
+            } else {
+              const confirmed = await startConfirmedTwap({
+                accountName: effectiveAccount || 'default',
+                exchange,
+                market,
+                side: params.side as OrderSide,
+                totalSize: twapParams.totalSize,
+                sizeIsNative: twapParams.sizeIsNative === true,
+                slices: twapParams.slices,
+                durationMs: twapParams.duration,
+                reduceOnly: twapParams.reduceOnly,
+                explicitLegacy: twapParams.legacy === true,
+              });
+              if (confirmed.engine === 'error') {
+                throw new Error(`${confirmed.message}. To use standard TWAP explicitly: ${command.trim()} legacy`);
+              }
+              if (confirmed.engine === 'confirmed') {
+                adapter.printSuccess(`${confirmed.banner}\nTWAP started [${confirmed.taskId}]`);
+                return;
+              }
+            }
 
             // Create TWAP instance with proper options
             // Cast to Worker since TwapInstance only uses postMessage
@@ -1914,7 +2057,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
               {
                 accountName: effectiveAccount || 'default',
                 activeMarket: market,
-                size: twapParams.totalSize,
+                size: twapTotalInNativeContracts(market, twapParams.totalSize, twapParams.sizeIsNative === true),
                 duration: twapParams.duration,
                 ordersCount: twapParams.slices,
                 side: params.side as OrderSide,
@@ -1941,18 +2084,30 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
           }
         } catch (error) {
           adapter.printError(`Failed to start TWAP: ${(error as Error).message}`);
+          throw error;
         }
       }
     } else if (action === 'stop' && type === 'twap') {
       // Stop TWAP(s)
       const idsToStop = taskIds || (taskId ? [taskId] : []);
       for (const id of idsToStop) {
+        let stoppedConfirmed = false;
+        for (const host of confirmedTwapHosts.values()) {
+          const match = host.list().find((report) => report.taskId === id || report.taskId.startsWith(id));
+          if (match !== undefined) {
+            const report = await host.stop(match.taskId);
+            adapter.printSuccess(`CONFIRMED TWAP [${report.taskId}] stopped`);
+            stoppedConfirmed = true;
+            break;
+          }
+        }
+        if (stoppedConfirmed) continue;
         const twap = twapManager.getById(id);
         if (twap) {
           twap.terminate();
-          adapter.printSuccess(`TWAP [${id.slice(0, 8)}] stopped`);
+          adapter.printSuccess(`LEGACY TWAP [${id.slice(0, 8)}] stopped`);
         } else {
-          adapter.printError(`TWAP [${id.slice(0, 8)}] not found`);
+          adapter.printError(`TWAP [${id.slice(0, 8)}] not found. Use a CONFIRMED or LEGACY id.`);
         }
       }
     }
@@ -1983,13 +2138,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
  * (stripped + one warning per invocation) for backwards compatibility;
  * users should migrate to `&`.
  */
-export async function processCommand(commandString: string): Promise<void> {
-  // Per-call overrides from the listener's `cmd:exec` handler. When a
-  // web tab dispatches a command with `account`/`symbol` set, scope the
-  // run to those values instead of the REPL's long-lived session — so
-  // `buy 100` from a web tab on bybit-main always hits bybit-main even
-  // if the local REPL is currently switched to hl-main. Overrides do
-  // NOT mutate `session.*`; the REPL stays on whatever it was.
+export async function processCommand(commandString: string, lifecycle?: ExecLifecycle): Promise<void> {
   const ctx = getAdapterContext();
   const effectiveAccount = ctx?.accountOverride ?? session.currentAccountName;
   const effectiveSymbol = ctx?.symbolOverride ?? session.currentSymbol;
@@ -2006,126 +2155,112 @@ export async function processCommand(commandString: string): Promise<void> {
       accountName: effectiveAccount,
       store: preprocessStore,
     });
-  } catch (e) {
-    adapter.printError((e as Error).message);
+  } catch (error) {
+    lifecycle?.markFailure();
+    adapter.printError((error as Error).message);
     return;
   }
 
-  for (const w of result.warnings) {
-    adapter.printWarning(w.message);
-  }
+  for (const warning of result.warnings) adapter.printWarning(warning.message);
 
-  // Chain execution with `;` / `&` semantics. Fire-and-forget steps
-  // (`&`, and the default) are tracked in `inFlight`. A `;`-separated
-  // step (awaitPrior) is a barrier: drain all in-flight steps before
-  // dispatching it, so `close all; buy $1000` waits for the close to
-  // finish before buying. `&` steps don't drain. block/retry/capture
-  // steps are awaited inline as before (pacing / capture ordering).
-  //
-  // The whole chain runs under one audit correlation id (TSBUG-107
-  // slice 3) so every write — including a `repeat`'s expanded steps and
-  // a script's internal orders — shares a `runId`. The id flows via
-  // AsyncLocalStorage, so even `&`/default steps that settle after this
-  // function returns still carry it (they were spawned inside the scope).
   await runWithAuditRunId(newRunId(), async () => {
-    const inFlight: Array<Promise<unknown>> = [];
+    const inFlight: Array<Promise<boolean>> = [];
     for (const step of result.steps) {
+      if (lifecycle?.isShutdownRequested()) break;
       if (step.awaitPrior && inFlight.length > 0) {
         await Promise.allSettled(inFlight.splice(0));
+        if (lifecycle?.isShutdownRequested()) break;
       }
-      const p = runStep(step);
+
+      const work = runStep(step, lifecycle);
+      const tracked = lifecycle?.track(work) ?? work;
+      commandWorkInFlight.add(tracked);
+      void tracked.then(
+        () => commandWorkInFlight.delete(tracked),
+        () => commandWorkInFlight.delete(tracked),
+      );
       if (step.block || step.retry !== undefined || step.captureTo !== undefined) {
-        await p;
+        await tracked;
       } else {
-        inFlight.push(p);
+        inFlight.push(tracked);
       }
     }
   });
 }
 
-async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): Promise<void> {
-  // Finalize forward-reference `@<name>` capture tokens against the
-  // store now that the capturing step's writeback has run. Capture vars
-  // hold an order-ID list; a name that resolved to "" means the capture
-  // produced ZERO IDs — fail the step closed instead of letting the
-  // token vanish, so `cancel @o1` with an empty @o1 can't widen into
-  // "cancel every order on the focused symbol" (TSBUG-103).
+async function runStep(step: PreprocessedStep, lifecycle?: ExecLifecycle): Promise<boolean> {
+  const fail = (error: Error): false => {
+    lifecycle?.markFailure();
+    reportStepError(step, error);
+    return false;
+  };
+
   let resolvedCommand = step.command;
   if (step.deferredSubstitution) {
     const { command, emptyCaptures } = resolveDeferredCaptures(step.command, step.deferredSubstitution, (name) =>
       preprocessStore.getVar(name),
     );
     if (emptyCaptures.length > 0) {
-      reportStepError(
-        step,
+      return fail(
         new Error(
-          `${emptyCaptures.map((n) => `@${n}`).join(', ')} captured 0 order IDs — skipping "${step.command}" rather than running it with an empty target list.`,
+          `${emptyCaptures.map((name) => `@${name}`).join(', ')} captured 0 order IDs — skipping \"${step.command}\" rather than running it with an empty target list.`,
         ),
       );
-      return;
     }
     resolvedCommand = command;
   }
 
-  // Phase 5 — `script:<name>` prefix dispatch. See SPEC §6.1.
-  // Routes loaded scripts via `runScriptFromHost`, honoring the same
-  // retry / capture / error-mode semantics as regular commands. The
-  // arm lives in `runStep` (not `processSingleCommand`) so the retry
-  // loop can preflight idempotency before user code runs.
   if (resolvedCommand.startsWith('script:')) {
-    await runScriptStep(resolvedCommand, step);
-    return;
+    try {
+      await runScriptStep(resolvedCommand, step);
+      return true;
+    } catch (error) {
+      return fail(error as Error);
+    }
   }
 
   const fire = () => processSingleCommand(resolvedCommand, step.captureTo);
-
-  // Sleep — block the chain.
   if (step.block) {
     try {
       await fire();
-    } catch (e) {
-      reportStepError(step, e as Error);
+      return true;
+    } catch (error) {
+      return fail(error as Error);
     }
-    return;
   }
 
-  // `retry N <body>` — await + retry up to N times. The first attempt
-  // is "try 0", so retry: 3 means up to 4 total attempts.
   if (step.retry !== undefined) {
-    let lastErr: Error | undefined;
-    for (let attempt = 0; attempt <= step.retry; attempt++) {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= step.retry; attempt += 1) {
+      if (lifecycle?.isShutdownRequested()) return false;
       try {
         await fire();
-        return;
-      } catch (e) {
-        lastErr = e as Error;
+        return true;
+      } catch (error) {
+        lastError = error as Error;
       }
     }
-    if (lastErr) {
-      reportStepError(step, new Error(`(after ${step.retry} retries) ${lastErr.message}`));
-    }
-    return;
+    return fail(new Error(`(after ${step.retry} retries) ${lastError?.message ?? 'Command failed'}`));
   }
 
-  // Capture — `@<var> = <body>` MUST be awaited so subsequent steps
-  // can reference @<var>. processSingleCommand does the writeback
-  // internally when its captureTo arg is set.
   if (step.captureTo !== undefined) {
     try {
       await fire();
-    } catch (e) {
-      reportStepError(step, e as Error);
+      return true;
+    } catch (error) {
+      return fail(error as Error);
     }
-    return;
   }
 
-  // Default: fire-and-don't-await. Errors print but don't block the
-  // chain. Return the promise so the chain runner can track it in
-  // `inFlight` and drain it at the next `;` barrier.
-  return fire().catch((e) => reportStepError(step, e as Error));
+  try {
+    await fire();
+    return true;
+  } catch (error) {
+    return fail(error as Error);
+  }
 }
 
-function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, err: Error): void {
+function reportStepError(step: PreprocessedStep, err: Error): void {
   if (step.errorMode === 'continue') {
     adapter.printWarning(`(continue-on-error) ${err.message}`);
   } else {
@@ -2147,7 +2282,7 @@ function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, 
  * - On capture, passes `{ captureTo, preprocessStore }` so the §7.4
  *   writeback inside the runner sets the user var.
  */
-async function runScriptStep(command: string, step: import('@tealstreet/cli-core').PreprocessedStep): Promise<void> {
+async function runScriptStep(command: string, step: PreprocessedStep): Promise<void> {
   const parsed = parseScriptInvocation(command);
   if (!parsed) {
     reportStepError(
@@ -2494,72 +2629,93 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
   });
   networkMonitor.start(5000); // Check every 5 seconds
 
+  const lifecycle = createExecLifecycle({
+    onSecondInterrupt: () => process.exit(130),
+  });
+  let shutdownPromise: Promise<void> | undefined;
+  const initiateShutdown = (requestedExitCode: number, countAsInterrupt: boolean): void => {
+    let deadlineAtMs = lifecycle.deadlineAtMs();
+    if (countAsInterrupt || deadlineAtMs === undefined) {
+      const request = lifecycle.requestShutdown();
+      if (!request.first) return;
+      deadlineAtMs = request.deadlineAtMs;
+    }
+    if (shutdownPromise !== undefined) return;
+
+    rl.pause();
+    stopListener();
+    if (connectionMonitor) {
+      connectionMonitor.stop();
+      connectionMonitor = null;
+    }
+    if (networkMonitor) {
+      networkMonitor.stop();
+      networkMonitor = null;
+    }
+    const quiescence = quiesceConfirmedTwaps(deadlineAtMs);
+    shutdownPromise = (async () => {
+      let timedOut = false;
+      try {
+        const settled = await raceWithDeadline(Promise.all([drainCommandWork(deadlineAtMs), quiescence]), deadlineAtMs);
+        timedOut = settled.kind === 'deadline';
+      } catch (error) {
+        adapter.printError(`Ordered shutdown failed: ${(error as Error).message}`);
+      }
+
+      const reports = listConfirmedReports();
+      const unresolved = reports.some((report) => oneShotExitCode([report]) === 3);
+      if (timedOut || unresolved) {
+        for (const report of reports) {
+          for (const line of formatConfirmedFinalReport(report)) adapter.printInfo(line);
+        }
+        adapter.printWarning('This process makes no further claim after exit.');
+      }
+      const exitCode = unresolved ? 3 : requestedExitCode;
+      const disposal = exchangeManager.stopAll().catch((error: unknown) => {
+        adapter.printError(`Exchange shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      await raceWithDeadline(disposal, deadlineAtMs);
+      process.exit(exitCode);
+    })();
+    void shutdownPromise.catch((error: unknown) => {
+      adapter.printError(`Forced shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(requestedExitCode === 0 ? 1 : requestedExitCode);
+    });
+  };
+  activeInteractiveLifecycle = lifecycle;
+  initiateInteractiveShutdown = initiateShutdown;
+
   rl.prompt();
-
-  await startListener({ adapter, processCommand });
-
+  await startListener({ adapter, processCommand: (command) => processCommand(command, lifecycle) });
+  rl.on('SIGINT', () => {
+    adapter.printWarning(
+      'SIGINT — no new confirmed slices will start; draining entered work until the shared 15-second deadline. Press Ctrl+C again to exit immediately.',
+    );
+    initiateShutdown(1, true);
+  });
   rl.on('line', (line) => {
     const command = line.trim();
-
     if (!command) {
       rl.prompt();
       return;
     }
-
-    // Save command to history file (append immediately for persistence)
     appendToHistory(command);
-
-    // Chain commands to ensure sequential processing
     commandQueue = commandQueue.then(async () => {
       if (command === 'exit' || command === 'quit') {
         adapter.printInfo('Goodbye!');
-        if (connectionMonitor) {
-          connectionMonitor.stop();
-          connectionMonitor = null;
-        }
-        if (networkMonitor) {
-          networkMonitor.stop();
-          networkMonitor = null;
-        }
-        stopListener();
-        // Stop all exchanges (primary and enabled)
-        await exchangeManager.stopAll();
-        process.exit(0);
+        initiateShutdown(0, false);
+        return;
       }
-
-      // Process command
-      await processCommand(command);
-
-      // Update prompt with latest status (symbol, price, position, connection)
-      // But NOT if we're in monitor/serve mode - those handle their own display
-      if (!isMonitorMode) {
+      await processCommand(command, lifecycle);
+      if (!isMonitorMode && !lifecycle.isShutdownRequested()) {
         rl.setPrompt(getPrompt());
         rl.prompt();
       }
     });
   });
-
-  rl.on('close', async () => {
-    // Skip if we're recreating readline (not a real close)
+  rl.on('close', () => {
     if (isRecreatingReadline) return;
-
-    // Stop connection monitor
-    if (connectionMonitor) {
-      connectionMonitor.stop();
-      connectionMonitor = null;
-    }
-
-    // Stop network monitor
-    if (networkMonitor) {
-      networkMonitor.stop();
-      networkMonitor = null;
-    }
-
-    stopListener();
-
-    // Stop all exchanges (primary and enabled)
-    await exchangeManager.stopAll();
-    process.exit(0);
+    initiateShutdown(0, false);
   });
 }
 
@@ -2622,13 +2778,10 @@ export function getSessionInfo(): {
 
 export async function runSingleCommand(commandString: string, accountName?: string, symbol?: string): Promise<void> {
   const config = loadConfig();
-
-  // Check auth token on startup and warn if expiring soon
   if (isLoggedIn() && tokenNeedsRefresh()) {
     const daysLeft = getTokenExpiryDays();
     adapter.printWarning(`Your authentication token expires in ${daysLeft} days. Run "login" to refresh.`);
   }
-
   if (config.accounts.length === 0) {
     adapter.printWarning('No accounts configured.');
     adapter.printInfo('Run: tealstreet account add --help');
@@ -2640,7 +2793,6 @@ export async function runSingleCommand(commandString: string, accountName?: stri
     adapter.printError(`Account "${accountName || 'default'}" not found`);
     process.exit(1);
   }
-
   session.currentSymbol = symbol || config.defaultSymbol || 'BTCUSDT';
 
   try {
@@ -2659,14 +2811,95 @@ export async function runSingleCommand(commandString: string, accountName?: stri
     }
     process.exit(1);
   }
+  if (!session.currentExchange) process.exit(1);
 
-  if (!session.currentExchange) {
-    process.exit(1);
+  const exchange = session.currentExchange;
+  setupExchangeListeners(exchange, session.currentAccountName);
+  const cursor = confirmedStartCursor();
+  const interrupted = Promise.withResolvers<number>();
+  let wasInterrupted = false;
+  let confirmedQuiescence: Promise<readonly unknown[]> | undefined;
+  const lifecycle = createExecLifecycle({
+    onSecondInterrupt: () => process.exit(130),
+  });
+  const beginQuiescence = (deadlineAtMs: number): void => {
+    confirmedQuiescence ??= quiesceConfirmedTwaps(deadlineAtMs);
+    interrupted.resolve(deadlineAtMs);
+  };
+  const onSigint = (): void => {
+    const request = lifecycle.requestShutdown();
+    if (!request.first) return;
+    wasInterrupted = true;
+    adapter.printWarning(
+      'SIGINT — no new confirmed slices will start; draining entered work until the shared 15-second deadline. Press Ctrl+C again to exit immediately.',
+    );
+    beginQuiescence(request.deadlineAtMs);
+  };
+
+  process.on('SIGINT', onSigint);
+  let exitCode = 0;
+  try {
+    const command = processCommand(commandString, lifecycle);
+    const dispatch = await Promise.race([
+      command.then(() => 'settled' as const),
+      interrupted.promise.then(() => 'interrupted' as const),
+    ]);
+    if (dispatch === 'settled' && !wasInterrupted) {
+      await drainUntilInterrupted(lifecycle, interrupted.promise);
+    } else {
+      await lifecycle.drain(lifecycle.deadlineAtMs()!);
+    }
+
+    let started = confirmedStartsSince(cursor);
+    let outcomeFence: ShutdownRequest | undefined;
+    if (!wasInterrupted && started.length > 0) {
+      const waitResult = await waitForOutcomesThenFence({
+        handles: started.map(({ handle }) => handle),
+        interrupted: interrupted.promise,
+        fence: () =>
+          lifecycle.deadlineAtMs() === undefined
+            ? lifecycle.requestShutdown()
+            : { first: true, deadlineAtMs: lifecycle.deadlineAtMs()! },
+      });
+      outcomeFence = waitResult.fenceResult;
+      if (waitResult.reason === 'deadline') {
+        adapter.printWarning(
+          'Confirmed outcome deadline reached; fencing the task and reporting unresolved venue truth.',
+        );
+      }
+    }
+    started = confirmedStartsSince(cursor);
+
+    const shutdown =
+      outcomeFence ??
+      (lifecycle.deadlineAtMs() === undefined
+        ? lifecycle.requestShutdown()
+        : { first: true, deadlineAtMs: lifecycle.deadlineAtMs()! });
+    beginQuiescence(shutdown.deadlineAtMs);
+    const orderedTeardown = Promise.all([lifecycle.drain(shutdown.deadlineAtMs), confirmedQuiescence]);
+    try {
+      await raceWithDeadline(orderedTeardown, shutdown.deadlineAtMs);
+    } catch (error) {
+      lifecycle.markFailure();
+      adapter.printError(`Confirmed shutdown failed: ${(error as Error).message}`);
+    }
+
+    const reports = started.map(({ handle }) => handle.report());
+    for (const report of reports) {
+      for (const line of formatConfirmedFinalReport(report)) adapter.printInfo(line);
+    }
+    const taskCode = reports.length > 0 ? oneShotExitCode(reports) : 0;
+    exitCode = taskCode === 3 ? 3 : lifecycle.hasFailures() ? 1 : wasInterrupted && taskCode === 0 ? 1 : taskCode;
+
+    const disposal = adapter.stopExchange(exchange).catch((error: unknown) => {
+      if (exitCode === 0) exitCode = 1;
+      adapter.printError(`Exchange shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    await raceWithDeadline(disposal, shutdown.deadlineAtMs);
+  } finally {
+    process.off('SIGINT', onSigint);
   }
 
-  // Setup event listeners
-  setupExchangeListeners(session.currentExchange, session.currentAccountName);
-
-  await processCommand(commandString);
-  await adapter.stopExchange(session.currentExchange);
+  if (exitCode !== 0) adapter.printWarning('This process makes no further claim after exit.');
+  process.exit(exitCode);
 }
