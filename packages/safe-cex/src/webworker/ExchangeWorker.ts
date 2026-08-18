@@ -565,6 +565,7 @@ export class ExchangeWorker {
       chaserOrderManagerInstance.cleanupExchange(this._exchange);
     }
     this._exchange?.dispose();
+    this._clearRuntimePipeline();
   }
 
   private _clearRuntimePipeline() {

@@ -251,6 +251,7 @@ const start = (ctx: Worker, shared = false) => {
       if (getMyExchangeWorker() === exchangeWorker) {
         deleteMyExchangeWorker();
       }
+      exchangeWorker.dispose();
       return;
     }
   };

@@ -135,6 +135,24 @@ describe('ExchangeWorker store payloads', () => {
     cleanupSpy.mockRestore();
   });
 
+  it('clears handler timers and runtime pipelines on dispose', () => {
+    const { worker } = createWorker();
+    const handler = { dispose: vi.fn() };
+    const cancel = vi.spyOn((worker as any)._throttledStoreUpdate, 'cancel');
+    (worker as any)._exchange = { dispose: vi.fn() };
+    (worker as any)._handlers = [handler];
+    (worker as any)._postprocessors = [{ process: vi.fn() }];
+    (worker as any)._exchangeDependentPostprocessors = [{ process: vi.fn() }];
+
+    worker.dispose();
+
+    expect(cancel).toHaveBeenCalled();
+    expect(handler.dispose).toHaveBeenCalled();
+    expect((worker as any)._handlers).toEqual([]);
+    expect((worker as any)._postprocessors).toEqual([]);
+    expect((worker as any)._exchangeDependentPostprocessors).toEqual([]);
+  });
+
   it('cancels trailing store work and clears both processor pipelines on deactivate', () => {
     const { worker, messages } = createWorker();
     const handler = { dispose: vi.fn() };
