@@ -22,6 +22,8 @@ describe('CLI MCP data tools', () => {
     });
 
     expect(tools.map((tool) => tool.name)).toEqual([
+      'list_mcp_context_planes',
+      'plan_mcp_context_query',
       'list_market_data_sources',
       'get_public_tickers',
       'get_public_ticker',
@@ -58,11 +60,45 @@ describe('CLI MCP data tools', () => {
       'market:read',
       'market:read',
       'market:read',
+      'market:read',
+      'market:read',
       'analytics:read',
       'wallet:read',
       'wallet:read',
       'wallet:read',
     ]);
+  });
+
+  it('plans refreshable context queries in the CLI runtime without executing them', async () => {
+    const tools = createCliDataTools({
+      fetchJson: vi.fn(),
+      fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
+      fetchPolymarketJson: vi.fn(),
+      queryHyperliquidAnalytics: vi.fn(),
+    });
+    const tool = tools.find((entry) => entry.name === 'plan_mcp_context_query')!;
+
+    const body = jsonOf(
+      await tool.handler({
+        query: `
+          plane curve = hyperliquid.account_value_curve(wallet: "${WALLET}", timeframe: "1W")
+          plane tweets = news.recent(source: "twitter", symbol: "BTC")
+          render timeline(x: "curve.pointsByTimeframe", markers: "tweets.items", refreshMs: 60000)
+        `,
+      }),
+    );
+
+    expect(body.data).toMatchObject({
+      requiredScopes: ['wallet:read', 'market:read'],
+      dashboardWidget: {
+        kind: 'context',
+        queryMeta: {
+          toolName: 'plan_mcp_context_query',
+          refresh: { intervalMs: 60_000, mode: 'poll' },
+        },
+      },
+    });
   });
 
   it('normalizes public ticker snapshots through the shared handler', async () => {

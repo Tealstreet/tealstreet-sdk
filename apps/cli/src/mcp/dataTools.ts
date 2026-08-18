@@ -5,6 +5,7 @@ import {
   getHyperliquidLeaderboardData,
   getHyperliquidWalletFillsData,
   getHyperliquidWalletPositionsData,
+  describeMcpContextPlanesData,
   getExchangeProxyCandlesData,
   getNewsGatewayRecentData,
   getPolymarketEventsData,
@@ -20,6 +21,7 @@ import {
   getTopVolumeData,
   searchPolymarketEventsData,
   listMarketDataSourcesData,
+  planMcpContextQueryData,
   type HyperliquidAnalyticsQuery,
   type ExchangeProxyJsonFetch,
   type McpDataHandlerResult,
@@ -129,6 +131,28 @@ export const createCliDataTools = ({
   fetchPolymarketJson,
   queryHyperliquidAnalytics: query,
 }: CliDataToolDeps): readonly CliDataToolDefinition[] => [
+  {
+    name: 'list_mcp_context_planes',
+    description:
+      'List composable MCP context-query planes available in the CLI runtime, including dashboard widget syntax.',
+    scope: 'market:read',
+    shape: {},
+    handler: async () => renderDataResult(describeMcpContextPlanesData('cli-stdio')),
+  },
+  {
+    name: 'plan_mcp_context_query',
+    description:
+      'Compile a composable context-query DSL into scoped MCP tool calls and a refreshable dashboard widget payload. This plans only; it does not execute data reads.',
+    scope: 'market:read',
+    shape: {
+      query: z
+        .union([z.string(), z.record(z.string(), z.unknown())])
+        .describe(
+          'A v1 context query string or structured JSON object with planes, view, and optional refresh interval.',
+        ),
+    },
+    handler: async (args) => renderDataResult(planMcpContextQueryData(args, { runtime: 'cli-stdio' })),
+  },
   {
     name: 'list_market_data_sources',
     description:

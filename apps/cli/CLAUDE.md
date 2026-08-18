@@ -237,6 +237,13 @@ WebSocket.
 only `/news/recent` in anonymous mode and must not expose the hosted-only
 `get_personal_recent_news` path, because stdio CLI MCP has no source-constrained
 third-party grant identity to mint a news-gateway proxy token from.
+`list_mcp_context_planes` and `plan_mcp_context_query` expose the shared
+`mcp-context/v1` DSL in stdio for parity with hosted MCP. They are planning
+tools only: the planner compiles allowlisted planes into bounded MCP tool steps,
+server-derived `queryHash` / refresh / scope metadata, and a dashboard
+`kind: "context"` widget payload, but it does not execute the steps. The CLI
+runtime rejects hosted-only private/third-party planes and must not treat MCP
+scope metadata as OAuth authorization.
 
 ## Startup checkin (web mount gate)
 

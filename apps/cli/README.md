@@ -67,7 +67,8 @@ High-level entry points:
 - `src/listener/` — loopback `127.0.0.1:53219` WS + HTTP side-car for the web app
 - `src/mcp/` — stdio MCP server for scripts, local account reads, publicdata
   snapshots, exchange-services candles and safe-cex market metadata, public
-  Polymarket DEX reads, and optional crawled Hyperliquid analytics reads
+  Polymarket DEX reads, context-query dashboard planning, and optional crawled
+  Hyperliquid analytics reads
 - `src/commands/` — command implementations (shared logic in `@tealstreet/cli-core`)
 - `src/config.ts` — `~/.tealstreet/config.json` (accounts, listener kill-switches, footer layout)
 - `src/logger.ts` + `src/log-classify.ts` — console interception, severity taxonomy, operational-noise routing
