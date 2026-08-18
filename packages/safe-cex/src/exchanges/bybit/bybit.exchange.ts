@@ -91,6 +91,14 @@ const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
 const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
+const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
+
+class BybitTradingMarketsRequestError extends Error {
+  constructor(readonly cause: unknown) {
+    super('Failed to fetch Bybit Trading markets');
+    this.name = 'BybitTradingMarketsRequestError';
+  }
+}
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
 
@@ -877,22 +885,15 @@ export class BybitExchange extends BaseExchange {
   };
 
   fetchMarkets = async () => {
-    let markets: Array<Market | null>;
     try {
-      markets = await this.fetchMarketsHelper('linear');
+      return await this.fetchMarketsHelper('linear');
     } catch (e) {
-      if (this.store.markets.length > 0) {
+      if (e instanceof BybitTradingMarketsRequestError && this.store.markets.length > 0) {
         this.log('Failed to refresh Bybit markets, using cached markets', LogSeverity.Warning);
         return this.store.markets;
       }
       throw e;
     }
-
-    if (markets.some((m) => m === null)) {
-      this.emitAndLogError('Failed to fetch markets');
-      return this.store.markets;
-    }
-    return markets as Market[];
   };
 
   fetchFees = async (
@@ -917,36 +918,50 @@ export class BybitExchange extends BaseExchange {
   fetchMarketsHelper = async (category: string) => {
     const fees = this.isPublicDataOnly ? [] : await this.fetchFees(category);
 
-    const [tradingResult, preLaunchResult] = await Promise.allSettled([
-      this.xhr.get(ENDPOINTS.MARKETS, {
-        params: { category, limit: 1000 },
-      }),
-      this.xhr.get(ENDPOINTS.MARKETS, {
+    let preLaunchTimedOut = false;
+    const preLaunchMarketsPromise = this.xhr
+      .get(ENDPOINTS.MARKETS, {
         params: { category, limit: 1000, status: 'PreLaunch' },
+      })
+      .then(({ data: data2 }) => {
+        if (v(data2, 'retMsg') === 'OK') {
+          return data2.result.list || [];
+        }
+        if (!preLaunchTimedOut) {
+          this.log('Failed to fetch Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
+        }
+        return [];
+      })
+      .catch(() => {
+        if (!preLaunchTimedOut) {
+          this.log('Failed to fetch Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
+        }
+        return [];
+      });
+
+    const tradingResponse = await this.xhr
+      .get(ENDPOINTS.MARKETS, {
+        params: { category, limit: 1000 },
+      })
+      .catch((error) => {
+        throw new BybitTradingMarketsRequestError(error);
+      });
+
+    const { data } = tradingResponse;
+    if (v(data, 'retMsg') !== 'OK') {
+      const msg = v(data, 'retMsg') || 'Failed to fetch Bybit Trading markets';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    const preLaunchMarkets: Array<Record<string, any>> = await Promise.race([
+      preLaunchMarketsPromise,
+      sleep(BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS).then(() => {
+        preLaunchTimedOut = true;
+        this.log('Timed out waiting for Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
+        return [];
       }),
     ]);
-
-    if (tradingResult.status === 'rejected') {
-      throw tradingResult.reason;
-    }
-
-    const { data } = tradingResult.value;
-    if (v(data, 'retMsg') !== 'OK') {
-      this.emitAndLogError(v(data, 'retMsg'));
-      return [null];
-    }
-
-    let preLaunchMarkets: Array<Record<string, any>> = [];
-    if (preLaunchResult.status === 'fulfilled') {
-      const { data: data2 } = preLaunchResult.value;
-      if (v(data2, 'retMsg') === 'OK') {
-        preLaunchMarkets = data2.result.list || [];
-      } else {
-        this.log('Failed to fetch Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
-      }
-    } else {
-      this.log('Failed to fetch Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
-    }
 
     const markets: Market[] = [...data.result.list, ...preLaunchMarkets].map((market: Record<string, any>) => {
       const fee = fees.find((f) => f.symbol === market.symbol);

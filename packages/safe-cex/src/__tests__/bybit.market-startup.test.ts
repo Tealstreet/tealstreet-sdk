@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
@@ -35,6 +35,10 @@ const marketPayload = (symbol: string, status = 'Trading') => ({
 const ok = (list: Array<Record<string, any>>) => ({ data: { retMsg: 'OK', result: { list } } });
 
 describe('Bybit market startup', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('keeps Trading markets when optional PreLaunch markets time out', async () => {
     const { exchange } = createExchange();
     const tradingMarket = marketPayload('BTCUSDT');
@@ -73,5 +77,57 @@ describe('Bybit market startup', () => {
 
     await expect(exchange.fetchMarkets()).resolves.toEqual([cachedMarket]);
     expect(log).toHaveBeenCalledWith('Failed to refresh Bybit markets, using cached markets', expect.any(String));
+  });
+
+  it('fails startup when the required Trading response is not OK', async () => {
+    const { exchange, store } = createExchange();
+    store.update({ markets: [marketPayload('ETHUSDT') as any] });
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') return Promise.resolve(ok([]));
+      return Promise.resolve({ data: { retMsg: 'rate limit', result: { list: [] } } });
+    });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
+    const log = vi.spyOn(exchange, 'log');
+
+    await expect(exchange.fetchMarkets()).rejects.toThrow('rate limit');
+    expect(emitAndLogError).toHaveBeenCalledWith('rate limit');
+    expect(log).not.toHaveBeenCalledWith('Failed to refresh Bybit markets, using cached markets', expect.any(String));
+  });
+
+  it('does not use cached markets for Trading market mapper errors', async () => {
+    const { exchange, store } = createExchange();
+    store.update({ markets: [marketPayload('ETHUSDT') as any] });
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') return Promise.resolve(ok([]));
+      return Promise.resolve(ok([{ symbol: 'BROKENUSDT' }]));
+    });
+    const log = vi.spyOn(exchange, 'log');
+
+    await expect(exchange.fetchMarkets()).rejects.toThrow();
+    expect(log).not.toHaveBeenCalledWith('Failed to refresh Bybit markets, using cached markets', expect.any(String));
+  });
+
+  it('does not let slow PreLaunch markets consume the startup budget', async () => {
+    vi.useFakeTimers();
+    const { exchange } = createExchange();
+    const tradingMarket = marketPayload('BTCUSDT');
+    const preLaunchMarket = marketPayload('NEWUSDT', 'PreLaunch');
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') {
+        return new Promise((resolve) => setTimeout(() => resolve(ok([preLaunchMarket])), 20_000));
+      }
+      return Promise.resolve(ok([tradingMarket]));
+    });
+
+    const marketsPromise = exchange.fetchMarkets();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(marketsPromise).resolves.toMatchObject([{ symbol: 'BTCUSDT' }]);
   });
 });

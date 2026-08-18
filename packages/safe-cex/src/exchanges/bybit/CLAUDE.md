@@ -81,7 +81,7 @@ Each request gets a unique `requestId` param via `nanoid()`.
 
 The KLINE endpoint is **unsigned** (headers stripped for public market data) -- `bybit.api.ts:63`.
 
-**Retry logic** (`bybit.api.ts:49-52`): Retries up to 3 times on network errors or `"error sign!"` responses. The `isErrorSignature()` function checks both `ret_msg` and `retMsg` response fields.
+**Retry logic** (`bybit.api.ts:49-52`): Retries up to 3 times on network errors or `"error sign!"` responses, except `MARKETS` (`/v5/market/instruments-info`) network errors, which are not retried inside worker startup. The `shouldRetryBybitRequest()` function checks both `ret_msg` and `retMsg` response fields for signature drift.
 
 **Time sync** (`bybit.api.ts:92-105`): On `recv_window` errors (response `retMsg` containing `'recv'`), automatically calls `virtualClock.syncBybitClientServerTime()`. Also logs server unavailability when the raw response includes "too much traffic or a configuration error".
 
@@ -453,7 +453,7 @@ The update path depends on the order type:
 - **Inverse**: Raw symbol (e.g., `BTCUSD`, `ETHUSD`)
 - **Spot**: Raw symbol (e.g., `BTCUSDT`, `ETHUSDT`)
 - Market ID uses `market.symbol` directly (not the `base/quote:settle` format)
-- PreLaunch markets are fetched separately with `status: 'PreLaunch'` and included
+- PreLaunch markets are fetched separately with `status: 'PreLaunch'` and included when they resolve within the startup grace window
 
 ## Data Precision & Conversion
 
@@ -614,12 +614,12 @@ normal startup no longer depends on it.
 
 ### Markets Include PreLaunch
 
-The `fetchMarketsHelper` method makes **two** parallel requests (`bybit.exchange.ts:703-709`):
+The `fetchMarketsHelper` method starts **two** market requests:
 
 1. Normal markets: `{ category, limit: 1000 }`
 2. PreLaunch markets: `{ category, limit: 1000, status: 'PreLaunch' }`
 
-Both are merged into the final market list. Active markets have `status === 'Trading' || status === 'PreLaunch'`.
+Normal Trading markets are required. PreLaunch markets are optional during startup: they are merged when they resolve within the short startup grace window, otherwise startup continues with Trading markets only. Active markets have `status === 'Trading' || status === 'PreLaunch'`.
 
 **Note**: Inverse variant fetches markets sequentially, not in parallel (`bybitinverse.exchange.ts:754-759`).
 
