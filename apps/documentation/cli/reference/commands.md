@@ -211,23 +211,41 @@ Source: `ChasersCommand.ts`.
 Spread an order over time. Three forms accepted.
 
 ```text
-twap buy <size> [SYMBOL] into <N> over <minutes> [reduce] [chaser]
+twap buy <size> [SYMBOL] into <N> over <minutes> [reduce] [chaser] [legacy]
 twap chase buy <size> into <N> over <M> [reduce] [timeout <pct> <action>] [fail <action>]
-twap buy <size> duration=1h slices=10        # legacy key=value form
+twap buy <size> duration=1h slices=10        # key=value form
 ```
 
 `twap chase` runs a chaser per slice. Defaults: `timeout 50% market`, `fail market`.
+
+These exact USDT-linear capabilities default to confirmed session-bound TWAP:
+`binance:usdt-linear-perp:twap-market`, `bybit:usdt-linear-perp:twap-market`,
+`okx:usdt-linear-perp:twap-market`, `bitget:usdt-linear-perp:twap-market` (Classic V2),
+and `blofin:usdt-linear-perp:twap-market`. Noneligible markets keep the standard
+engine; append `legacy` to select it explicitly. A listed capability that cannot
+initialize errors with that exact `legacy` command and never silently falls
+back. Restart never resumes a confirmed task; orders already sent remain live.
+
+`twap list` / `tasks` label `CONFIRMED` versus `LEGACY`. `kill` is the only
+cross-engine panic verb. Flatten/close still executes but warns when an active
+confirmed TWAP can reopen the position. One-shot exit codes: `0` all slices
+exact-ID confirmed filled, `1` command/startup error, `2` terminal
+partial/rejected/stopped, `3` unresolved/ambiguous/incident, `130` second
+SIGINT. With `audit on`, confirmed slices append pre-placement and
+post-classification diagnostics; they are never recovery input.
+One-shot execution waits through the scheduled end plus a 15-second outcome
+grace before fencing and reporting any remaining quantity as exit `3`.
+
 Action ∈ `{market, next}`. `<pct>` ∈ `(0, 100]`.
 
-| Management              | Result            |
-| ----------------------- | ----------------- |
-| `twap list`             | List all TWAPs    |
-| `twap stop <id-prefix>` | Stop by id-prefix |
-| `twap stop all`         | Stop all TWAPs    |
+| Management              | Result                          |
+| ----------------------- | ------------------------------- |
+| `twap list` / `tasks`   | List confirmed and legacy TWAPs |
+| `twap stop <id-prefix>` | Stop by id-prefix               |
+| `twap stop all`         | Stop all TWAPs                  |
 
-> **Gotcha**: `reduce` is parsed and gates fatfinger checks, but is not yet
-> threaded through to slice placement. Treat `twap … reduce` as a
-> fatfinger-bypass marker, not a hard guarantee per slice.
+`reduce` is threaded to every slice as reduce-only and skips the
+exposure-increasing fatfinger gate.
 
 Source: `TwapCommand.ts`.
 

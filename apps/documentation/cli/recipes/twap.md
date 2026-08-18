@@ -64,12 +64,55 @@ twap stop all
 
 Management. `<id-prefix>` is any unique leading substring of the run id.
 
+## Confirmed vs legacy
+
+These exact USDT-linear capabilities default to **confirmed** market TWAP:
+
+- `binance:usdt-linear-perp:twap-market`
+- `bybit:usdt-linear-perp:twap-market`
+- `okx:usdt-linear-perp:twap-market`
+- `bitget:usdt-linear-perp:twap-market` (Classic V2 only; UTA stays ineligible)
+- `blofin:usdt-linear-perp:twap-market`
+
+Confirmed TWAP gives every slice one stable logical ID, writes through stock
+`placeOrder({ clientOrderId })`, and derives fill truth from exact client-ID
+reads. It is session-bound: if this CLI exits, scheduling and observation stop;
+orders already sent remain live at the venue. No task is resumed on restart.
+
+```text
+twap buy $100 into 5 over 1
+twap buy $100 into 5 over 1 legacy
+```
+
+`legacy` forces the standard `TwapInstance` path. Noneligible markets keep the
+standard behavior. A listed capability that cannot initialize errors with the
+exact `legacy` command and never silently falls back.
+
+One-shot `exec twap` waits for confirmed settlement. Exit `0` means every slice
+is exact-ID confirmed filled; `1` means command/startup failure; `2` means
+terminal partial/rejected/stopped work without unresolved quantity; `3` means
+unresolved, ambiguous, or incident quantity; the second SIGINT exits `130`.
+It waits through the scheduled end plus a 15-second outcome grace; after that
+deadline it fences the task, drains entered work for the shared shutdown
+deadline, and reports any remaining quantity as exit `3`.
+Every nonzero confirmed result states that the process makes no further claim.
+
+`twap list` and `tasks` label `CONFIRMED` versus `LEGACY`; `kill` is the only
+cross-engine panic verb. Flatten/close still executes while a confirmed TWAP is
+active, but prints that later slices may reopen the position. Stop or kill the
+TWAP first when flatness must persist.
+
+When `audit on` is already enabled, each confirmed slice adds one diagnostic
+event immediately before placement and one after placement classification,
+including its logical, caller, and wire IDs. Confirmed execution never reads
+the audit log as recovery state.
+
+
 ## Gotchas
 
-- **`reduce` doesn't filter slice placement yet.** The keyword is parsed
-  and gates fatfinger (per [fatfinger](../reference/safety.md#fatfinger)),
-  but slices still go through the same buy/sell path. Treat it as a
-  fatfinger bypass, not a hard reduce-only guarantee.
+- `reduce` sends every slice as reduce-only and skips the exposure-increasing
+  fatfinger gate. The venue remains authoritative: an invalid reduce-only slice
+  can still reject.
 - `timeout <pct> <action>` — pct is `(0, 100]`, action is `market` or
   `next`. `market` crosses at slice timeout; `next` skips the slice and
   carries its size into the schedule.
