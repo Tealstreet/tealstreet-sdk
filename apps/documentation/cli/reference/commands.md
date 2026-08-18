@@ -745,6 +745,7 @@ reports the server as failed, check your login first — tokens expire.
 | `get_public_tickers` / `get_public_ticker`                                                                  | Public ticker snapshots from Tealstreet publicdata                                     |
 | `get_top_movers` / `get_top_volume` / `get_top_funding`                                                     | Public market top lists from Tealstreet publicdata                                     |
 | `get_exchange_proxy_candles`                                                                                | Historical candles through exchange.tealstreet.io's public candle service              |
+| `get_recent_news`                                                                                           | Public normalized TealNews items through news.tealstreet.io's recent-news endpoint     |
 | `get_safe_cex_markets` / `get_safe_cex_market`                                                              | Safe-cex market metadata through exchange.tealstreet.io's public candle service        |
 | `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
 | `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                   | Public Polymarket CLOB data, with bounded book depth                                   |

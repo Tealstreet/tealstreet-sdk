@@ -16,6 +16,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -28,6 +29,7 @@ describe('CLI MCP data tools', () => {
       'get_top_volume',
       'get_top_funding',
       'get_exchange_proxy_candles',
+      'get_recent_news',
       'get_safe_cex_markets',
       'get_safe_cex_market',
       'get_polymarket_events',
@@ -41,6 +43,7 @@ describe('CLI MCP data tools', () => {
       'get_hyperliquid_account_value_curve',
     ]);
     expect(tools.map((tool) => tool.scope)).toEqual([
+      'market:read',
       'market:read',
       'market:read',
       'market:read',
@@ -73,6 +76,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson,
       fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -94,6 +98,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson,
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -140,6 +145,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson,
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -172,6 +178,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson,
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -191,6 +198,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson,
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -225,6 +233,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics,
     });
@@ -240,6 +249,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(async () => ({ ok: false as const, reason: 'not-configured' as const })),
     });
@@ -266,6 +276,7 @@ describe('CLI MCP data tools', () => {
     const tools = createCliDataTools({
       fetchJson: vi.fn(),
       fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
       fetchPolymarketJson,
       queryHyperliquidAnalytics: vi.fn(),
     });
@@ -281,5 +292,44 @@ describe('CLI MCP data tools', () => {
       markets: [expect.objectContaining({ id: 'market-1' })],
     });
     expect(body.data.readAt).toBe('2026-08-17T00:00:00.000Z');
+  });
+
+  it('reads public recent news through the news gateway allowlist tool', async () => {
+    const fetchNewsGatewayJson = vi.fn(async () => ({
+      feedSource: 'tealnews',
+      mode: 'public',
+      generatedAt: '2026-08-18T00:00:00.000Z',
+      returned: 1,
+      items: [
+        {
+          id: 'news-1',
+          ts: 1_800_000_000_000,
+          custom: false,
+          tags: {
+            source: 'twitter',
+            author: { handle: 'tealstreet' },
+            text: 'BTC moving',
+            symbols: ['BINANCE:BTCUSDT'],
+          },
+          raw: { vendor: 'hidden' },
+        },
+      ],
+    }));
+    const tools = createCliDataTools({
+      fetchJson: vi.fn(),
+      fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson,
+      fetchPolymarketJson: vi.fn(),
+      queryHyperliquidAnalytics: vi.fn(),
+    });
+    const tool = tools.find((entry) => entry.name === 'get_recent_news')!;
+
+    const body = jsonOf(await tool.handler({ limit: 1, source: 'twitter', symbol: 'btcusdt' }));
+
+    expect(fetchNewsGatewayJson).toHaveBeenCalledWith('/news/recent?limit=1&source=twitter&symbol=BTCUSDT', {
+      authorizationToken: undefined,
+    });
+    expect(body.data).toMatchObject({ feedSource: 'tealnews', mode: 'public', returned: 1 });
+    expect(JSON.stringify(body)).not.toContain('vendor');
   });
 });

@@ -231,6 +231,12 @@ overridden with `TEALSTREET_EXCHANGE_PROXY_ORIGIN`,
 strict adapter for `/api/market-data/candles`; do not add a user-supplied path or
 host argument, and do not route it through the exchange-server `/account`
 WebSocket.
+`get_recent_news` is the public TealNews parity surface. It defaults to
+`https://news.tealstreet.io` and may be overridden with
+`TEALSTREET_NEWS_GATEWAY_ORIGIN` or `NEXT_PUBLIC_NEWS_GATEWAY_ORIGIN`. It calls
+only `/news/recent` in anonymous mode and must not expose the hosted-only
+`get_personal_recent_news` path, because stdio CLI MCP has no source-constrained
+third-party grant identity to mint a news-gateway proxy token from.
 
 ## Startup checkin (web mount gate)
 

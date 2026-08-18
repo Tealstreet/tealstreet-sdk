@@ -6,6 +6,7 @@ import {
   getHyperliquidWalletFillsData,
   getHyperliquidWalletPositionsData,
   getExchangeProxyCandlesData,
+  getNewsGatewayRecentData,
   getPolymarketEventsData,
   getPolymarketMidpointsData,
   getPolymarketOrderBookData,
@@ -23,6 +24,7 @@ import {
   type ExchangeProxyJsonFetch,
   type McpDataHandlerResult,
   type McpDataScope,
+  type NewsGatewayJsonFetch,
   type PolymarketJsonFetch,
   type PublicdataJsonFetch,
   type SafeCexMarketMetadataReadRequest,
@@ -30,6 +32,7 @@ import {
 } from '@tealstreet/mcp-data';
 import { queryHyperliquidAnalytics } from './hyperliquidAnalyticsDb';
 import { exchangeProxyJson } from './exchangeProxy';
+import { newsGatewayJson } from './newsGateway';
 import { polymarketJson } from './polymarket';
 import { publicdataJson } from './publicdata';
 
@@ -46,6 +49,7 @@ export interface CliDataToolDefinition<S extends ZodRawShape = ZodRawShape> {
 interface CliDataToolDeps {
   fetchJson: PublicdataJsonFetch;
   fetchExchangeProxyJson: ExchangeProxyJsonFetch;
+  fetchNewsGatewayJson: NewsGatewayJsonFetch;
   fetchPolymarketJson: PolymarketJsonFetch;
   queryHyperliquidAnalytics: HyperliquidAnalyticsQuery;
 }
@@ -121,6 +125,7 @@ const readSafeCexMarketSnapshot = async (
 export const createCliDataTools = ({
   fetchJson,
   fetchExchangeProxyJson,
+  fetchNewsGatewayJson,
   fetchPolymarketJson,
   queryHyperliquidAnalytics: query,
 }: CliDataToolDeps): readonly CliDataToolDefinition[] => [
@@ -201,6 +206,27 @@ export const createCliDataTools = ({
     handler: async (args) =>
       runDataTool('Exchange proxy', async () =>
         renderDataResult(await getExchangeProxyCandlesData(args, fetchExchangeProxyJson)),
+      ),
+  },
+  {
+    name: 'get_recent_news',
+    description: 'Read normalized public recent news from the Tealstreet news gateway.',
+    scope: 'market:read',
+    shape: {
+      limit: z.number().optional().describe('Maximum news items to return. Defaults to 50; max 200.'),
+      source: z
+        .enum(['twitter', 'telegram', 'phoenix', 'truthSocial', 'onchain', 'other'])
+        .optional()
+        .describe('Optional normalized content source filter.'),
+      handle: z.string().optional().describe('Optional Twitter/X handle filter, with or without @.'),
+      symbol: z.string().optional().describe('Optional market symbol filter, for example BTCUSDT.'),
+      custom: z.boolean().optional().describe('Optional custom-list/community visibility filter.'),
+      sinceTs: z.number().optional().describe('Optional replay cursor timestamp in epoch milliseconds.'),
+      sinceId: z.string().optional().describe('Optional replay cursor item id.'),
+    },
+    handler: async (args) =>
+      runDataTool('TealNews', async () =>
+        renderDataResult(await getNewsGatewayRecentData(args, fetchNewsGatewayJson, { mode: 'public' })),
       ),
   },
   {
@@ -364,6 +390,7 @@ export const createCliDataTools = ({
 export const cliDataTools = createCliDataTools({
   fetchJson: publicdataJson,
   fetchExchangeProxyJson: exchangeProxyJson,
+  fetchNewsGatewayJson: newsGatewayJson,
   fetchPolymarketJson: polymarketJson,
   queryHyperliquidAnalytics,
 });
