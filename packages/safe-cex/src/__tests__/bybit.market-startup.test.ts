@@ -1,0 +1,77 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
+import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
+import { DefaultStore } from '../store/store.base';
+
+const createExchange = () => {
+  const store = new DefaultStore();
+  const exchange = new BybitExchange('bybit', { testnet: false, tuning: { consoleLogging: false } } as any, store);
+  vi.spyOn(exchange as any, 'fetchFees').mockResolvedValue([]);
+  return { exchange, store };
+};
+
+const marketPayload = (symbol: string, status = 'Trading') => ({
+  symbol,
+  baseCoin: symbol.replace(/USDT$/, ''),
+  quoteCoin: 'USDT',
+  settleCoin: 'USDT',
+  status,
+  lotSizeFilter: {
+    qtyStep: '0.001',
+    minOrderQty: '0.001',
+    maxOrderQty: '100',
+  },
+  priceFilter: {
+    tickSize: '0.1',
+  },
+  leverageFilter: {
+    minLeverage: '1',
+    maxLeverage: '100',
+  },
+  deliveryTime: '0',
+});
+
+const ok = (list: Array<Record<string, any>>) => ({ data: { retMsg: 'OK', result: { list } } });
+
+describe('Bybit market startup', () => {
+  it('keeps Trading markets when optional PreLaunch markets time out', async () => {
+    const { exchange } = createExchange();
+    const tradingMarket = marketPayload('BTCUSDT');
+    const preLaunchTimeout = new Error('Request timeout to /v5/market/instruments-info');
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') return Promise.reject(preLaunchTimeout);
+      return Promise.resolve(ok([tradingMarket]));
+    });
+    const log = vi.spyOn(exchange, 'log');
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
+
+    const markets = await exchange.fetchMarkets();
+
+    expect(markets).toHaveLength(1);
+    expect(markets[0].symbol).toBe('BTCUSDT');
+    expect(log).toHaveBeenCalledWith(
+      'Failed to fetch Bybit PreLaunch markets, continuing with Trading markets',
+      expect.any(String),
+    );
+    expect(emitAndLogError).not.toHaveBeenCalled();
+  });
+
+  it('falls back to cached markets when the required Trading request fails', async () => {
+    const { exchange, store } = createExchange();
+    const cachedMarket = marketPayload('ETHUSDT');
+    store.update({ markets: [cachedMarket as any] });
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') return Promise.resolve(ok([]));
+      return Promise.reject(new Error('Request timeout to /v5/market/instruments-info'));
+    });
+    const log = vi.spyOn(exchange, 'log');
+
+    await expect(exchange.fetchMarkets()).resolves.toEqual([cachedMarket]);
+    expect(log).toHaveBeenCalledWith('Failed to refresh Bybit markets, using cached markets', expect.any(String));
+  });
+});

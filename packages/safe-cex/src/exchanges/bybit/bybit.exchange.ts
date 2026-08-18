@@ -877,7 +877,17 @@ export class BybitExchange extends BaseExchange {
   };
 
   fetchMarkets = async () => {
-    const markets = await this.fetchMarketsHelper('linear');
+    let markets: Array<Market | null>;
+    try {
+      markets = await this.fetchMarketsHelper('linear');
+    } catch (e) {
+      if (this.store.markets.length > 0) {
+        this.log('Failed to refresh Bybit markets, using cached markets', LogSeverity.Warning);
+        return this.store.markets;
+      }
+      throw e;
+    }
+
     if (markets.some((m) => m === null)) {
       this.emitAndLogError('Failed to fetch markets');
       return this.store.markets;
@@ -907,7 +917,7 @@ export class BybitExchange extends BaseExchange {
   fetchMarketsHelper = async (category: string) => {
     const fees = this.isPublicDataOnly ? [] : await this.fetchFees(category);
 
-    const [{ data }, { data: data2 }] = await Promise.all([
+    const [tradingResult, preLaunchResult] = await Promise.allSettled([
       this.xhr.get(ENDPOINTS.MARKETS, {
         params: { category, limit: 1000 },
       }),
@@ -916,17 +926,29 @@ export class BybitExchange extends BaseExchange {
       }),
     ]);
 
+    if (tradingResult.status === 'rejected') {
+      throw tradingResult.reason;
+    }
+
+    const { data } = tradingResult.value;
     if (v(data, 'retMsg') !== 'OK') {
       this.emitAndLogError(v(data, 'retMsg'));
       return [null];
     }
 
-    if (v(data2, 'retMsg') !== 'OK') {
-      this.emitAndLogError(v(data2, 'retMsg'));
-      return [null];
+    let preLaunchMarkets: Array<Record<string, any>> = [];
+    if (preLaunchResult.status === 'fulfilled') {
+      const { data: data2 } = preLaunchResult.value;
+      if (v(data2, 'retMsg') === 'OK') {
+        preLaunchMarkets = data2.result.list || [];
+      } else {
+        this.log('Failed to fetch Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
+      }
+    } else {
+      this.log('Failed to fetch Bybit PreLaunch markets, continuing with Trading markets', LogSeverity.Warning);
     }
 
-    const markets: Market[] = [...data.result.list, ...data2.result.list].map((market: Record<string, any>) => {
+    const markets: Market[] = [...data.result.list, ...preLaunchMarkets].map((market: Record<string, any>) => {
       const fee = fees.find((f) => f.symbol === market.symbol);
       return {
         // old id isn't unique with expiring usdc futs

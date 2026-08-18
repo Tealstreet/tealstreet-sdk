@@ -33,11 +33,15 @@ const isSignedRequest = (config: { headers?: any } | undefined) => Boolean(confi
 // whether or not a signature rides along.
 const isPublicEndpoint = (url?: string) => Boolean(url?.includes('/v5/market/'));
 
-const isErrorSignature = (error: any) => {
+const isInstrumentsInfoRequest = (error: any) => error?.config?.url === ENDPOINTS.MARKETS;
+
+export const shouldRetryBybitRequest = (error: any) => {
   const isNetwork = isNetworkError(error);
-  const isErrSign =
-    error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!');
-  return isNetwork || isErrSign;
+  const isErrSign = Boolean(
+    error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!'),
+  );
+  if (!isNetwork) return isErrSign;
+  return !isInstrumentsInfoRequest(error);
 };
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
@@ -66,7 +70,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // and some signature errors
   retry(xhr, {
     retries: 3,
-    retryCondition: isErrorSignature,
+    retryCondition: shouldRetryBybitRequest,
   });
 
   // Add requestId, skip auth for public endpoints, and sign requests.

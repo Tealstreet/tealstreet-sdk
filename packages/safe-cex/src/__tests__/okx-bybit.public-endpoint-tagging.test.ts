@@ -2,7 +2,7 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI as createBybitAPI } from '../exchanges/bybit/bybit.api';
+import { createAPI as createBybitAPI, shouldRetryBybitRequest } from '../exchanges/bybit/bybit.api';
 import { createAPI as createOkxAPI } from '../exchanges/okx/okx.api';
 
 const stubExchange = (name: string) =>
@@ -109,5 +109,24 @@ describe('bybit public endpoint tagging', () => {
 
   it('tags /v5/market/tickers in the hosted keyless shape', async () => {
     expect(isTagged(await capture(bybit(HOSTED), '/v5/market/tickers'))).toBe(true);
+  });
+
+  it('does not retry instruments-info network errors inside the worker startup budget', () => {
+    expect(
+      shouldRetryBybitRequest({
+        code: 'ERR_NETWORK',
+        config: { url: '/v5/market/instruments-info' },
+        request: {},
+      }),
+    ).toBe(false);
+  });
+
+  it('still retries signature drift responses', () => {
+    expect(
+      shouldRetryBybitRequest({
+        config: { url: '/v5/order/realtime' },
+        response: { data: { retMsg: 'error sign!' } },
+      }),
+    ).toBe(true);
   });
 });
