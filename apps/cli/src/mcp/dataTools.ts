@@ -6,6 +6,7 @@ import {
   getHyperliquidWalletFillsData,
   getHyperliquidWalletPositionsData,
   describeMcpContextPlanesData,
+  describeMcpContextReferenceData,
   getExchangeProxyCandlesData,
   getNewsGatewayRecentData,
   getPolymarketEventsData,
@@ -131,6 +132,14 @@ export const createCliDataTools = ({
   fetchPolymarketJson,
   queryHyperliquidAnalytics: query,
 }: CliDataToolDeps): readonly CliDataToolDefinition[] => [
+  {
+    name: 'get_mcp_context_dsl_reference',
+    description:
+      'Return the self-contained mcp-context/v1 DSL, refresh, callback, dashboard piping, scope semantics, and examples reference.',
+    scope: 'market:read',
+    shape: {},
+    handler: async () => renderDataResult(describeMcpContextReferenceData('cli-stdio')),
+  },
   {
     name: 'list_mcp_context_planes',
     description:
@@ -374,7 +383,7 @@ export const createCliDataTools = ({
   {
     name: 'get_hyperliquid_wallet_positions',
     description: 'Read the latest crawled Hyperliquid clearinghouse positions for a public wallet.',
-    scope: 'wallet:read',
+    scope: 'onchain:read',
     shape: { wallet: z.string().describe('0x Hyperliquid wallet address.') },
     handler: async (args) =>
       runDataTool('Hyperliquid analytics', async () =>
@@ -384,7 +393,7 @@ export const createCliDataTools = ({
   {
     name: 'get_hyperliquid_wallet_fills',
     description: 'Read recent crawled Hyperliquid fills for a public wallet.',
-    scope: 'wallet:read',
+    scope: 'onchain:read',
     shape: {
       wallet: z.string().describe('0x Hyperliquid wallet address.'),
       coin: z.string().optional().describe('Optional Hyperliquid coin filter, for example BTC.'),
@@ -398,7 +407,7 @@ export const createCliDataTools = ({
   {
     name: 'get_hyperliquid_account_value_curve',
     description: 'Read crawled Hyperliquid account-value curve points for one public wallet.',
-    scope: 'wallet:read',
+    scope: 'onchain:read',
     shape: {
       wallet: z.string().describe('0x Hyperliquid wallet address.'),
       timeframe: z.enum(['24H', '1W', '1M', 'all']).optional().describe('Defaults to all.'),

@@ -22,6 +22,7 @@ describe('CLI MCP data tools', () => {
     });
 
     expect(tools.map((tool) => tool.name)).toEqual([
+      'get_mcp_context_dsl_reference',
       'list_mcp_context_planes',
       'plan_mcp_context_query',
       'list_market_data_sources',
@@ -62,11 +63,37 @@ describe('CLI MCP data tools', () => {
       'market:read',
       'market:read',
       'market:read',
+      'market:read',
       'analytics:read',
-      'wallet:read',
-      'wallet:read',
-      'wallet:read',
+      'onchain:read',
+      'onchain:read',
+      'onchain:read',
     ]);
+  });
+
+  it('returns the shared context DSL reference in the CLI runtime', async () => {
+    const tools = createCliDataTools({
+      fetchJson: vi.fn(),
+      fetchExchangeProxyJson: vi.fn(),
+      fetchNewsGatewayJson: vi.fn(),
+      fetchPolymarketJson: vi.fn(),
+      queryHyperliquidAnalytics: vi.fn(),
+    });
+    const tool = tools.find((entry) => entry.name === 'get_mcp_context_dsl_reference')!;
+
+    const body = jsonOf(await tool.handler({}));
+
+    expect(body).toMatchObject({
+      data: {
+        version: 'mcp-context/v1',
+        plannerTool: 'plan_mcp_context_query',
+        callbacks: { targetModes: ['event'] },
+      },
+      meta: { source: 'mcp-context:reference', backend: 'third-party' },
+    });
+    expect(body.data.planes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ requiredScope: 'onchain:read' })]),
+    );
   });
 
   it('plans refreshable context queries in the CLI runtime without executing them', async () => {
@@ -90,7 +117,7 @@ describe('CLI MCP data tools', () => {
     );
 
     expect(body.data).toMatchObject({
-      requiredScopes: ['wallet:read', 'market:read'],
+      requiredScopes: ['onchain:read', 'market:read'],
       dashboardWidget: {
         kind: 'context',
         queryMeta: {

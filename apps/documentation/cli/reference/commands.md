@@ -458,7 +458,7 @@ already-streamed state — no extra API calls. Each segment can set `group` (`le
 `color` override in the config file.
 
 **`script` segments** show the return value of one of your
-[custom scripts](./scripts.md): `footer add script <name>` runs the named
+[custom scripts](#scripts): `footer add script <name>` runs the named
 script ~once a second and renders the string it returns. These runs are
 **hard read-only** — capabilities are forced so the script cannot place or
 cancel orders or call `runCommand` (any such call fails); only reads work.
@@ -747,6 +747,7 @@ reports the server as failed, check your login first — tokens expire.
 | `get_exchange_proxy_candles`                                                                                | Historical candles through exchange.tealstreet.io's public candle service              |
 | `get_recent_news`                                                                                           | Public normalized TealNews items through news.tealstreet.io's recent-news endpoint     |
 | `get_safe_cex_markets` / `get_safe_cex_market`                                                              | Safe-cex market metadata through exchange.tealstreet.io's public candle service        |
+| `get_mcp_context_dsl_reference`                                                                             | Self-contained `mcp-context/v1` DSL, scope, refresh, callback and dashboard reference  |
 | `list_mcp_context_planes` / `plan_mcp_context_query`                                                        | Plan composable `mcp-context/v1` dashboard queries into bounded MCP tool steps         |
 | `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
 | `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                   | Public Polymarket CLOB data, with bounded book depth                                   |
@@ -814,7 +815,10 @@ lands.
   Postgres analytics database only when you set `HYPERLIQUID_ANALYTICS_DATABASE_URL`
   or `HYPERLIQUID_ANALYTICS_POSTGRES_*`; otherwise they return a configuration
   error.
-- **Context-query tools plan, they do not execute.** `plan_mcp_context_query`
+- **Context-query tools plan, they do not execute.** Start with
+  `get_mcp_context_dsl_reference` when an MCP client needs the self-contained
+  DSL, scope semantics, callback contract, refresh metadata and dashboard
+  piping instructions. `plan_mcp_context_query`
   compiles the allowlisted `mcp-context/v1` DSL into MCP tool steps plus
   dashboard widget metadata (`queryHash`, refresh policy and required scopes)
   so an agent can pipe results into an MCP dashboard or refresh it on a polling

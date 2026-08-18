@@ -22,7 +22,7 @@ is granted.
 Add this URL as an MCP server in your assistant:
 
 ```
-https://v3.tealstreet.io/api/mcp
+https://preview.tealstreet.io/api/mcp
 ```
 
 There is nothing to generate and no key to copy. The first time your assistant
@@ -44,24 +44,38 @@ API keys.
 
 Available permissions are shown on the consent screen:
 
-| Permission       | What it allows                              |
-| ---------------- | ------------------------------------------- |
-| `modules:read`   | List and read your modules                  |
-| `modules:write`  | Create, change and delete your modules      |
-| `market:read`    | Read public market data                     |
-| `analytics:read` | Read Tealstreet market and trader analytics |
-| `wallet:read`    | Read public wallet and onchain data         |
+| Permission        | What it allows                              |
+| ----------------- | ------------------------------------------- |
+| `modules:read`    | List and read your modules                  |
+| `modules:write`   | Create, change and delete your modules      |
+| `market:read`     | Read public market data                     |
+| `analytics:read`  | Read Tealstreet market and trader analytics |
+| `onchain:read`    | Read public onchain/address-keyed data      |
+| `dashboard:write` | Create MCP dashboard sessions and widgets   |
 
 None of these scopes can place orders, move funds, or reveal exchange API
-keys. The public data scopes are being rolled out for read-only data tools; a
-client granted only those scopes may see no tools until that rollout reaches
-your account. Private account and third-party scopes require constrained
-grants: the authorization request must name the exact account/source set with
+keys. `onchain:read` is for public address-keyed analytics, not a user's
+private wallet history. Private CEX positions, balances, fills, orders, ledger,
+and reconciliation inputs require `account:read` plus constrained grants: the
+authorization request must name the exact account/source set with
 `mcp_grant_constraints`, for example
 `{"version":1,"accounts":[{"source":"bybit","accountId":"main"}],"thirdParty":[{"source":"arkham"}]}`.
 Wildcard or user-wide private data grants are refused. A module the assistant
 writes is still subject to the same sandbox and the same safety screen as code
 you type yourself.
+
+Self-discovery tools:
+
+| Tool                            | Permission        | What it returns                                                                    |
+| ------------------------------- | ----------------- | ---------------------------------------------------------------------------------- |
+| `get_mcp_context_dsl_reference` | `dashboard:write` | The `mcp-context/v1` DSL, scopes, callback contract, dashboard piping and examples |
+| `list_mcp_context_planes`       | `dashboard:write` | Available context-query planes for the hosted runtime                              |
+| `plan_mcp_context_query`        | `dashboard:write` | Bounded MCP tool steps plus dashboard widget metadata for a query                  |
+
+Agents should call `get_mcp_context_dsl_reference` before composing dashboard
+queries. It is the canonical in-protocol reference for the DSL, polling refresh
+metadata, callback events, and how planned query results are piped into MCP
+dashboard widgets.
 
 Hosted private CEX account tools currently include:
 
@@ -116,9 +130,9 @@ Hyperliquid analytics tools currently include:
 | Tool                                  | Permission       | What it returns                                     |
 | ------------------------------------- | ---------------- | --------------------------------------------------- |
 | `get_hyperliquid_leaderboard`         | `analytics:read` | Crawled Hyperliquid leaderboard rows                |
-| `get_hyperliquid_wallet_positions`    | `wallet:read`    | Latest crawled clearinghouse positions for a wallet |
-| `get_hyperliquid_wallet_fills`        | `wallet:read`    | Recent crawled fills for a wallet                   |
-| `get_hyperliquid_account_value_curve` | `wallet:read`    | Crawled account-value curve points for a wallet     |
+| `get_hyperliquid_wallet_positions`    | `onchain:read`   | Latest crawled clearinghouse positions for a wallet |
+| `get_hyperliquid_wallet_fills`        | `onchain:read`   | Recent crawled fills for a wallet                   |
+| `get_hyperliquid_account_value_curve` | `onchain:read`   | Crawled account-value curve points for a wallet     |
 
 ---
 
