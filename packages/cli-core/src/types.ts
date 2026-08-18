@@ -266,6 +266,10 @@ export interface TwapTaskParams {
   nextOrderAt?: number;
   useChaserOrders?: boolean;
   reduceOnly?: boolean;
+  /** Force the stock TWAP engine instead of confirmed session execution. */
+  legacy?: boolean;
+  /** True when totalSize is already placeOrder-native (USD/$ path). */
+  sizeIsNative?: boolean;
   /** `twap chase` only: % of slice interval before per-slice timeout. */
   timeoutPct?: number;
   /** What to do when a slice's chaser times out. */

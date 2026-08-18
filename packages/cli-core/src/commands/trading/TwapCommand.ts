@@ -1,4 +1,5 @@
 import { OrderSide } from '@tealstreet/safe-cex/src/types';
+import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager';
@@ -64,7 +65,7 @@ export class TwapCommand extends TradingBaseCommand {
     'twap buy $1000 into 10 over 60',
     'twap buy $1000 BTCUSDT into 10 over 60',
     'twap sell $500 into 5 over 30 reduce',
-    'twap sell $500 into 5 over 30 chaser',
+    'twap sell $500 into 5 over 30 reduce legacy',
     // Phase 4: chaser-per-slice with timeout/fail policy.
     'twap chase buy $1000 into 10 over 60',
     'twap chase buy $1000 BTCUSDT into 10 over 60',
@@ -324,6 +325,7 @@ export class TwapCommand extends TradingBaseCommand {
     // the check on close-style TWAPs. Must be threaded into the emitted
     // task params below or the runtime never sees it.
     let reduceOnly = false;
+    let legacy = false;
 
     // Positional form (spec, Phase 3): `into <n> over <minutes>`.
     const intoIdx = args.indexOf('into');
@@ -353,6 +355,8 @@ export class TwapCommand extends TradingBaseCommand {
         useChaserOrders = true;
       } else if (arg === 'reduce') {
         reduceOnly = true;
+      } else if (arg === 'legacy') {
+        legacy = true;
       }
     }
 
@@ -373,18 +377,24 @@ export class TwapCommand extends TradingBaseCommand {
     if (symbolsAtStart.length > 0) {
       symbol = symbolsAtStart[0];
       sizeArg = args[3];
-    } else if (args[2] && this.looksLikeSize(args[2])) {
-      // "twap buy $100 ..."
+    } else if (args[2] && (this.looksLikeSize(args[2]) || isBareBaseQuantity(args[2]))) {
+      // "twap buy $100 ..." or the live-proof/base-quantity form "twap buy 0.05 ..."
       sizeArg = args[2];
       // Check for trailing symbol
       for (let i = args.length - 1; i >= 3; i--) {
         if (
+          i === intoIdx ||
+          i === intoIdx + 1 ||
+          i === overIdx ||
+          i === overIdx + 1 ||
           args[i].startsWith('duration=') ||
           args[i].startsWith('slices=') ||
           args[i] === 'chaser' ||
-          args[i] === 'reduce'
-        )
+          args[i] === 'reduce' ||
+          args[i] === 'legacy'
+        ) {
           continue;
+        }
         const validated = this.validateSymbols(exchange, [args[i]]);
         if (validated.length > 0) {
           symbol = validated[0];
@@ -395,8 +405,8 @@ export class TwapCommand extends TradingBaseCommand {
       return this.error('Size argument missing. Usage: twap buy $100 duration=1h slices=10');
     }
 
-    if (!sizeArg || !this.looksLikeSize(sizeArg)) {
-      return this.error('Size must be in USD format (e.g., $100). Usage: twap buy $100 duration=1h');
+    if (!sizeArg || (!this.looksLikeSize(sizeArg) && !isBareBaseQuantity(sizeArg))) {
+      return this.error('Size must be a base quantity or USD amount (for example 0.05 or $100).');
     }
 
     // Get market for the symbol
@@ -413,14 +423,29 @@ export class TwapCommand extends TradingBaseCommand {
       if (blocked) return this.error(blocked);
     }
 
-    // Convert USD to contract size
-    const totalSize = this.parseSizeAndConvertIfUsd(exchange, symbol, sizeArg);
+    // USD spellings convert at the current ticker into placeOrder-native contracts.
+    // Bare decimals are already base quantity.
+    const sizeIsNative = !isBareBaseQuantity(sizeArg);
+    const totalSize = sizeIsNative ? this.parseSizeAndConvertIfUsd(exchange, symbol, sizeArg) : Number(sizeArg);
+    if (!sizeIsNative && market.isInverse === true) {
+      return this.error(
+        `Bare base quantities are not supported for inverse TWAP market ${symbol}; use a USD amount instead`,
+      );
+    }
 
-    // Fatfinger — gate on per-slice size. Total / slices is the
-    // amount each individual order will request. Skip on reduce-only.
+    // Fatfinger limits are venue-native contract counts. Bare TWAP sizes stay
+    // base-denominated until engine admission, so convert only for this guard.
     if (!reduceOnly && slices > 0) {
+      if (
+        !sizeIsNative &&
+        market.contractSize !== undefined &&
+        (!Number.isFinite(market.contractSize) || market.contractSize <= 0)
+      ) {
+        return this.error(`Cannot enforce fatfinger for ${symbol}: invalid contract size`);
+      }
       try {
-        this.enforceFatfinger(ctx, symbol, totalSize / slices);
+        const nativeTotal = sizeIsNative ? totalSize : baseToNativeContracts(market, totalSize);
+        this.enforceFatfinger(ctx, symbol, nativeTotal / slices);
       } catch (e) {
         return this.error((e as Error).message);
       }
@@ -458,6 +483,8 @@ export class TwapCommand extends TradingBaseCommand {
             ordersExecuted: 0,
             useChaserOrders,
             reduceOnly,
+            legacy,
+            sizeIsNative,
           },
         },
       },
@@ -465,6 +492,8 @@ export class TwapCommand extends TradingBaseCommand {
   }
 }
 
+const isBareBaseQuantity = (value: string): boolean =>
+  /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) && Number(value) > 0 && Number.isFinite(Number(value));
 /** Drop runs of `<key> X [Y...]` from `args`. `skipNext` says how many
  *  tokens to drop after the key. Used by `twap chase` to cleanly remove
  *  `timeout 30% market` / `fail next` from the argv before reusing
