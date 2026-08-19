@@ -303,12 +303,14 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
         timeoutId = null;
       }
 
-      const nextHandlers = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
-      if (nextHandlers.length) {
-        this.messageHandlers[topic] = nextHandlers;
-      } else {
-        delete this.messageHandlers[topic];
-      }
+      // Keep the key with an empty array rather than deleting it. `base.ws.ts`
+      // -> `recordMessageHandlerStats` falls back to a count of 1 for an absent
+      // handler key, so a deleted key reads as a live subscription; an empty one
+      // reads as 0. Resubscribe is driven off `this.topics`, not this map.
+      // Unconditional, so a teardown that runs before the subscription ever
+      // connected now materializes an empty key where the old `delete` was a
+      // no-op — inert, since no stats entry exists without a frame.
+      this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
 
       if (!subscribed) return;
       subscribed = false;
@@ -448,12 +450,14 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
       if (!isActive) return;
       isActive = false;
 
-      const nextHandlers = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
-      if (nextHandlers.length) {
-        this.messageHandlers[topic] = nextHandlers;
-      } else {
-        delete this.messageHandlers[topic];
-      }
+      // Keep the key with an empty array rather than deleting it. `base.ws.ts`
+      // -> `recordMessageHandlerStats` falls back to a count of 1 for an absent
+      // handler key, so a deleted key reads as a live subscription; an empty one
+      // reads as 0. Resubscribe is driven off `this.topics`, not this map.
+      // Unconditional, so a teardown that runs before the subscription ever
+      // connected now materializes an empty key where the old `delete` was a
+      // no-op — inert, since no stats entry exists without a frame.
+      this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
 
       orderBook.asks = [];
       orderBook.bids = [];

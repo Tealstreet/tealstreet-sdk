@@ -155,7 +155,18 @@ describe('audit regression: Bitget public websocket product types', () => {
         vi.runOnlyPendingTimers();
 
         expect(websocket.topics).toEqual({});
-        expect(websocket.messageHandlers).toEqual({});
+        // No parser survives the cleanup — the original point of this
+        // regression. The keys themselves are RETAINED with empty arrays:
+        // `base.ws.ts` -> `recordMessageHandlerStats` counts an absent handler
+        // key as a live subscription, so deleting them made a torn-down topic
+        // report as an active feed until it aged into a false stale warning.
+        expect(Object.values(websocket.messageHandlers).every((handlers: unknown[]) => handlers.length === 0)).toBe(
+          true,
+        );
+        expect(Object.keys(websocket.messageHandlers).sort()).toEqual([
+          `candle_${symbols.candle}_1m`,
+          `orderBook_${symbols.orderBook}`,
+        ]);
       } finally {
         vi.useRealTimers();
       }

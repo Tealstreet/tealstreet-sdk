@@ -270,7 +270,9 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
   private removeHandler = (key: string, handler: MessageHandler) => {
     this.messageHandlers[key] = (this.messageHandlers[key] || []).filter((item) => item !== handler);
     if (!this.messageHandlers[key].length) {
-      delete this.messageHandlers[key];
+      // Left as an empty array, not deleted: `recordMessageHandlerStats` treats
+      // an absent handler key as a live subscription (count 1). Resubscribe is
+      // driven off the `topics` Set, so the empty key costs nothing.
       this.cleanupMessageHandlerStats(key);
     }
   };
