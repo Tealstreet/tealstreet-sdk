@@ -171,15 +171,19 @@ these back to repeated `.some()` / `.findIndex()` loops or unconditional
 notifications; the store bridge already posts at 4 Hz, so no-op wakes
 are pure overhead.
 
-### `recordMessageHandlerStats` only touches the current topic
+### `recordMessageHandlerStats` touches one topic; the map walk is throttled
 
 Lives in `../exchanges/base.ws.ts`, not the store, but worth
 flagging here because it's the most-frequently-hit shared method.
-The prior shape walked **every** key in `messageHandlersStats` per
-WS frame to refresh `lastCallbacksCount` — N×N work. Now it
-mutates only the current topic's entry. `cleanupMessageHandlerStats`
-deletes when handlers go to zero, and consumers only treat
-`lastCallbacksCount` as truthy/falsy, so stale-by-one is fine.
+The original shape refreshed `lastCallbacksCount` for **every** key
+in `messageHandlersStats` per WS frame — N×N work. The frame path
+now mutates only the current topic's entry, and the map-wide refresh
+moved to `reconcileMessageHandlerStats`, throttled to 5 s.
+
+**Do not delete that walk as redundant** — it was removed once on
+exactly that reasoning and had to be restored. Optimise the frame
+path, not the reconcile. Why, in full: `../exchanges/CLAUDE.md` →
+"`messageHandlerStats` checks SUBSCRIPTIONS, not the connection".
 
 ## `notify` semantics
 

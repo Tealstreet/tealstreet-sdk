@@ -249,6 +249,15 @@ Data frames record channel-level `messageHandlersStats` (`ticker`, `mark`,
 these stats updates even though Crypto.com mostly routes through store updates
 rather than per-topic callbacks.
 
+**Those keys are knowingly non-compliant with the stats-key invariant** in
+`../CLAUDE.md` → "`messageHandlerStats` checks SUBSCRIPTIONS, not the
+connection": the recorded key is the bare `result.channel` while handlers live
+at `book.{instrument_name}` / `update.subscription`, so `book` and
+`candlestick` can never be reconciled and a torn-down orderbook or candle
+subscription stays on the popover until it ages into a warning. The per-symbol
+fix is blocked, not merely unwritten — read `apps/web/CLAUDE.md` →
+"Per-symbol stats keys can produce an INFINITE staleness threshold" first.
+
 Crypto.com's `funding` value is the decimal rate settling at the end of the
 current hour, so it maps to `Ticker.fundingRate` without scaling. The distinct
 `estimatedfunding` channel is a next-interval estimate; safe-cex has no

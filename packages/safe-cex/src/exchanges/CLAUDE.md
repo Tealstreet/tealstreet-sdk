@@ -742,19 +742,67 @@ conditional on whatever state governs its traffic — or to clear its entry via
 harmless never-recorded case. The fix is not to stop watching it, because then a
 failed subscribe for that topic can never be detected again.
 
-### Reconnect-banner stats are append-only — never walk the full map
+**The stats key MUST be the `messageHandlers` key.** This is the invariant the
+whole watchdog rests on. `reconcileMessageHandlerStats` can only mark a topic
+idle by looking its key up in `messageHandlers`; a key that lives nowhere in
+that map gets `hadHandlers: false`, is never reconciled, and reports a dead
+subscription as a live feed forever. Bybit states the positive form of this rule
+in `bybit/CLAUDE.md` — record the handler key that matched.
+
+Two shapes break it, and both shipped:
+
+- **A bare shared channel name.** Hyperliquid recorded `json.channel`, so every
+  symbol shared one `bbo` entry while handlers lived at `bbo.{coin}`. Record at
+  the dispatch site, under the key you just looked up.
+- **Recording before the no-listeners guard.** Kraken recorded in `onMessage`,
+  ahead of `handleBookDelta`'s `handlers.length === 0` return — so the frame
+  right after a teardown put the entry straight back, and with `hadHandlers`
+  unset it was then permanently beyond reconcile. Kraken Futures is never sent
+  an unsubscribe, so those frames never stop. Record inside the handler, after
+  the guard.
+
+Where a venue genuinely cannot use a `messageHandlers` key — kraken keeps
+subscriptions in private `orderBookHandlers` / `ohlcvHandlers` maps — clear the
+entry explicitly when the last symbol stops listening.
+
+**Knowingly non-compliant, deliberately:** cryptocom (bare `result.channel`),
+binance (bare `eventType` in `dispatchBinanceMessage`), paradex
+(`order_book.{symbol}` against a bare `order_book` handler key), and kraken's
+`ticker`. The first two are blocked on a threshold bug, not on effort — see
+`apps/web/CLAUDE.md` → "Per-symbol stats keys can produce an INFINITE staleness
+threshold" before "finishing" the migration. `asterdex`'s
+`cleanupMessageHandlerStats(stream)` calls target keys that are never recorded;
+dead, but harmless.
+
+**`blofin`, `breakoutprop` and `orderly` never call `recordMessageHandlerStats`
+at all** — only the cleanup side. Their datafeed list in the connection popup is
+therefore empty and this watchdog is blind on them: a subscription that silently
+stops delivering there produces no signal of any kind. That is a bigger gap than
+a mis-keyed entry, and it is invisible precisely because nothing ever warns.
+
+### Reconnect-banner stats: one topic on the frame path, map walk on a throttle
 
 `base.ws.ts → recordMessageHandlerStats(topic)` is called on every
-WS frame. The earlier shape walked **every** key in
-`messageHandlersStats` per call to refresh `lastCallbacksCount` —
-N×N work where N = subscription count (Bybit linear has ~600). The
-walk was redundant: `cleanupMessageHandlerStats(topic)` deletes the
-entry on handler-removal, and the only consumer
-(`getGroupedMessageTopicStats`) treats `lastCallbacksCount` as
-truthy/falsy. Stale-by-one between frames is harmless.
+WS frame, so it refreshes only the topic that just arrived. The
+map-wide refresh of `lastCallbacksCount` lives in
+`reconcileMessageHandlerStats`, throttled to 5 s (250 ms floor on
+the forced path that `cleanupMessageHandlerStats` triggers).
 
-**Rule:** when adding stats-touching code on the WS hot path, only
-update the current topic's entry. Don't iterate the stats map.
+**Rule:** don't iterate the stats map on the frame path. Iterating
+it on the throttle is the design, not a regression.
+
+That distinction is the whole entry. The walk was once deleted
+outright as redundant, on the reasoning that
+`cleanupMessageHandlerStats(topic)` already removes the entry when
+handlers go to zero and that the only consumer treats
+`lastCallbacksCount` as truthy/falsy. Both premises were wrong:
+those cleanup calls are hand-written per venue and were missing,
+mis-keyed or unreachable on close to a dozen of them — see the
+non-compliant list below — and the truthiness IS
+the mechanism — a stuck non-zero count is what kept a torn-down
+subscription showing as a live feed in the connection-status popup
+until it aged into a warning nobody could act on. Optimise the
+frame path; leave the reconcile alone.
 
 ### Hot-path lookups — `tickersBySymbol` / `tickersById` over `tickers.find`
 
