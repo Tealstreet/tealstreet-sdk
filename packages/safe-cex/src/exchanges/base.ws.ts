@@ -40,6 +40,14 @@ const lifecycleLog = (...args: unknown[]): void => {
   }
 };
 
+// How often the whole stats map is re-read against `messageHandlers`. Cheap at
+// this cadence (~600 keys on bybit linear) and off the per-frame path.
+const STATS_RECONCILE_INTERVAL_MS = 5000;
+// Floor for the forced walk. `cleanupMessageHandlerStats` has ~69 call sites and
+// several fire in a single teardown, so closing many panels at once would
+// otherwise be O(panels x topics).
+const STATS_RECONCILE_FORCE_MIN_MS = 250;
+
 const TEALSTREET_WS_HEADERS = {
   Origin: 'https://preview.tealstreet.io',
   'User-Agent':
@@ -218,6 +226,7 @@ export class BaseWebSocket<T extends BaseExchange> {
 
   messageHandlers: MessageHandlers = {};
   messageHandlersStats: MessageHandlersStats = {};
+  private lastStatsReconcileAt = 0;
   reconnecting = false;
   private reconnectBackoffAttempts = 0;
   private reconnectBackoffCloseCode: number | undefined;
@@ -313,27 +322,66 @@ export class BaseWebSocket<T extends BaseExchange> {
     }
 
     // Hot path: only touch the current topic. Mutate an existing entry rather
-    // than allocating a fresh object per frame. The previous full-map walk
-    // refreshing `lastCallbacksCount` for every other topic ran on every WS
-    // frame (N×N with subscription count); `cleanupMessageHandlerStats`
-    // already deletes entries when handlers go to zero, and downstream
-    // consumers only treat `lastCallbacksCount` as truthy/falsy.
+    // than allocating a fresh object per frame. The full-map walk this replaced
+    // ran on every WS frame (N×N with subscription count); the map-wide
+    // refresh it provided now happens in `reconcileMessageHandlerStats` at
+    // `STATS_RECONCILE_INTERVAL_MS`, which is what keeps torn-down topics from
+    // being reported as live subscriptions.
+    const now = Date.now();
     const handlers = this.messageHandlers[topic];
+    const hasHandlers = Boolean(handlers && handlers.length);
     const callbacksCount = handlers ? handlers.length : 1;
     const existing = this.messageHandlersStats[topic];
     if (existing) {
-      existing.lastMessageTimestamp = Date.now();
+      existing.lastMessageTimestamp = now;
       existing.lastCallbacksCount = callbacksCount;
+      if (hasHandlers) existing.hadHandlers = true;
     } else {
       this.messageHandlersStats[topic] = {
-        lastMessageTimestamp: Date.now(),
+        lastMessageTimestamp: now,
         lastCallbacksCount: callbacksCount,
+        hadHandlers: hasHandlers,
       };
+    }
+
+    this.reconcileMessageHandlerStats(now);
+  }
+
+  /**
+   * Re-reads handler counts for the whole stats map.
+   *
+   * `recordMessageHandlerStats` only ever refreshes the topic that just
+   * received a frame, so a topic whose subscription is torn down keeps its last
+   * non-zero `lastCallbacksCount` forever and goes on being reported as a live
+   * feed by `getGroupedMessageTopicStats` until it ages past its staleness
+   * threshold and raises a warning nobody can act on. Per-exchange
+   * `cleanupMessageHandlerStats` calls were meant to cover that and are
+   * inconsistent across venues, so this walk is the general guard.
+   *
+   * Only `hadHandlers` entries are touched. Topics that never had a
+   * `messageHandlers` key (`pong`, bare `ticker`) legitimately have no handler
+   * count and must keep the `: 1` presumption, or the socket's only liveness
+   * signals would be silently dropped.
+   */
+  private reconcileMessageHandlerStats(now: number, force = false) {
+    const minInterval = force ? STATS_RECONCILE_FORCE_MIN_MS : STATS_RECONCILE_INTERVAL_MS;
+    if (now - this.lastStatsReconcileAt < minInterval) return;
+    this.lastStatsReconcileAt = now;
+
+    for (const key in this.messageHandlersStats) {
+      const entry = this.messageHandlersStats[key];
+      if (!entry.hadHandlers) continue;
+      const handlers = this.messageHandlers[key];
+      entry.lastCallbacksCount = handlers ? handlers.length : 0;
     }
   }
 
   protected cleanupMessageHandlerStats(topic: string) {
     delete this.messageHandlersStats[topic];
+    // An exchange that unsubscribes one topic has usually just dropped handlers
+    // for others in the same teardown, and its socket may now be quiet enough
+    // that no frame arrives to trigger the throttled walk.
+    this.reconcileMessageHandlerStats(Date.now(), true);
   }
 
   sendWithLog = (data: string) => {

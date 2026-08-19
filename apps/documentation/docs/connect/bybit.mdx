@@ -10,7 +10,6 @@ hide_table_of_contents: false
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import Admonition from '@theme/Admonition';
 import ThemedImage from '@theme/ThemedImage';
 import BybitPermissions from '/img/connect/bybit/bybit-permissions-1-mar2024.png';
 import BybitPermissions2 from '/img/connect/bybit/bybit-permissions-2-mar2024.png';
@@ -103,24 +102,27 @@ This guide assumes you will use the **SG** region for Tealstreet. If you instead
     - A popup will appear next and prompt you to submit your 2FA code if its linked to your Bybit account.
     - Once you submit the 2FA code, you will see a new popup from Bybit with your API Key details. You need to paste those details into the API Key page of Tealstreet.
 
-<details>
+<details hide>
     <summary>Unified Account API permissions</summary>
-    <div>
-        Unified Margin accounts have a slightly different screen.
-        <div class="text--center">
-            <img src={BybitPermissionsUM} alt="Bybit Permissions UM" style={{ width: 1000 }} />
-        </div>
-        <br />
+    Unified Margin accounts have a slightly different screen.
+    <div class="text--center">
+        <img src={BybitPermissionsUM} alt="Bybit Permissions UM" style={{ width: 1000 }} />
+    </div>
+    <br />
+    <br />
+    <p>
         <br />
         Select ‘Orders’ 'Positions' 'USDC Derivatives Trading' and ‘Trade’ in the permission section.
-    </div>
+    </p>
 </details>
 
 <!-- :::tip
 Read more about Tealstreet's password encryption system **[here](/docs/connect/api-encryption)**.
 ::: -->
 
-<Admonition type="caution">Never share your API Keys with anyone.</Admonition>
+:::caution
+Never share your API Keys with anyone.
+:::
 
 ---
 
