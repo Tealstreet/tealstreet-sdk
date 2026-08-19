@@ -114,6 +114,9 @@ Public market data tools currently include:
 | `get_polymarket_midpoints`     | Batched public Polymarket CLOB midpoint prices                            |
 | `get_polymarket_order_book`    | Depth-bounded public Polymarket CLOB book levels                          |
 | `get_polymarket_price_history` | Public Polymarket CLOB price-history points                               |
+| `list_market_data_sources`     | Which public market-data sources this runtime can reach                   |
+| `list_news_sources`            | Which news sources are available to you                                   |
+| `get_recent_news`              | Recent TealNews headlines, filterable by source, handle or symbol         |
 
 The safe-cex market tools use exchange-services'
 `/candles/api/market-data/markets` route and return warnings when a metadata
@@ -125,6 +128,31 @@ Polymarket tools are public read-only DEX tools. They use Tealstreet's
 Polymarket `/v1/*` public route contract when configured, return read/cache
 metadata instead of claiming exchange freshness, and never expose account data,
 API keys, or order placement.
+
+### Tools that read your private data
+
+These only appear when the grant carries the matching permission, and the
+private CEX tools additionally require the grant to name the specific accounts
+they may read.
+
+| Tool                                | Permission        | What it returns                                       |
+| ----------------------------------- | ----------------- | ----------------------------------------------------- |
+| `list_cex_accounts`                 | `account:read`    | The connected accounts this grant may read            |
+| `get_cex_account_equity_curve`      | `account:read`    | Hourly equity-curve points for one granted account    |
+| `summarize_cex_account_performance` | `account:read`    | Aggregate performance summary for granted accounts    |
+| `reconcile_cex_account_fills`       | `account:read`    | Hedge-match reconciliation across granted accounts    |
+| `get_personal_recent_news`          | `thirdparty:read` | Your personal news feed from sources you connected    |
+| `get_arkham_alerts`                 | `thirdparty:read` | Alerts delivered to your Arkham webhook               |
+
+### Dashboard tools
+
+`dashboard:write` lets an assistant build a dashboard you can open in the
+browser: `create_mcp_dashboard_session`, `list_mcp_dashboard_sessions`,
+`get_mcp_dashboard_session`, `add_mcp_dashboard_widget`,
+`update_mcp_dashboard_widget` and `refresh_mcp_dashboard_widgets`. Widgets hold
+query results, not code. Turning one into a real custom module needs
+`modules:write` as well and goes through the normal module safety screen —
+and a widget built from private account data cannot be exported at all.
 
 Hyperliquid analytics tools currently include:
 
