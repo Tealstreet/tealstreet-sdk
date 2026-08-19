@@ -366,7 +366,7 @@ export const createCliDataTools = ({
   {
     name: 'get_hyperliquid_leaderboard',
     description: 'Read the crawled Hyperliquid trader leaderboard from Tealstreet analytics.',
-    scope: 'analytics:read',
+    scope: 'onchain:read',
     shape: {
       limit: z.number().optional().describe('Maximum traders to return. Defaults to 20; max 100.'),
       sortBy: z
@@ -381,21 +381,21 @@ export const createCliDataTools = ({
       ),
   },
   {
-    name: 'get_hyperliquid_wallet_positions',
-    description: 'Read the latest crawled Hyperliquid clearinghouse positions for a public wallet.',
+    name: 'get_hyperliquid_address_positions',
+    description: 'Read the latest crawled Hyperliquid clearinghouse positions for a public address.',
     scope: 'onchain:read',
-    shape: { wallet: z.string().describe('0x Hyperliquid wallet address.') },
+    shape: { address: z.string().describe('Public 0x Hyperliquid address.') },
     handler: async (args) =>
       runDataTool('Hyperliquid analytics', async () =>
         renderDataResult(await getHyperliquidWalletPositionsData(args, query)),
       ),
   },
   {
-    name: 'get_hyperliquid_wallet_fills',
-    description: 'Read recent crawled Hyperliquid fills for a public wallet.',
+    name: 'get_hyperliquid_address_fills',
+    description: 'Read recent crawled Hyperliquid fills for a public address.',
     scope: 'onchain:read',
     shape: {
-      wallet: z.string().describe('0x Hyperliquid wallet address.'),
+      address: z.string().describe('Public 0x Hyperliquid address.'),
       coin: z.string().optional().describe('Optional Hyperliquid coin filter, for example BTC.'),
       limit: z.number().optional().describe('Maximum fills to return. Defaults to 100; max 500.'),
     },
@@ -405,11 +405,11 @@ export const createCliDataTools = ({
       ),
   },
   {
-    name: 'get_hyperliquid_account_value_curve',
-    description: 'Read crawled Hyperliquid account-value curve points for one public wallet.',
+    name: 'get_hyperliquid_address_value_curve',
+    description: 'Read crawled Hyperliquid account-value curve points for one public address.',
     scope: 'onchain:read',
     shape: {
-      wallet: z.string().describe('0x Hyperliquid wallet address.'),
+      address: z.string().describe('Public 0x Hyperliquid address.'),
       timeframe: z.enum(['24H', '1W', '1M', 'all']).optional().describe('Defaults to all.'),
       limit: z.number().optional().describe('Maximum points to return. Defaults to 2000; max 5000.'),
     },

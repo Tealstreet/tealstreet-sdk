@@ -733,7 +733,7 @@ reports the server as failed, check your login first — tokens expire.
 | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `list_scripts`                                                                                              | Every script on disk, including ones that currently fail to load                       |
 | `read_script`                                                                                               | One script's source — works even when the script is broken                             |
-| `get_api_types`                                                                                             | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `all`)     |
+| `get_api_types`                                                                                             | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `mobile` / `all`)     |
 | `validate_script`                                                                                           | Typecheck + capability check without writing. Fast, local, free                        |
 | `write_script`                                                                                              | Create or replace a script. **Validates first and refuses to write invalid source**    |
 | `delete_script`                                                                                             | Delete a script                                                                        |
@@ -752,7 +752,7 @@ reports the server as failed, check your login first — tokens expire.
 | `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
 | `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                   | Public Polymarket CLOB data, with bounded book depth                                   |
 | `get_hyperliquid_leaderboard`                                                                               | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured        |
-| `get_hyperliquid_wallet_positions` / `get_hyperliquid_wallet_fills` / `get_hyperliquid_account_value_curve` | Crawled public Hyperliquid wallet analytics, when analytics DB env vars are configured |
+| `get_hyperliquid_address_positions` / `get_hyperliquid_address_fills` / `get_hyperliquid_address_value_curve` | Crawled public Hyperliquid address analytics (take a public `address`), when analytics DB env vars are configured |
 
 ### What it will refuse
 

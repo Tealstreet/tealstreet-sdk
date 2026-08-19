@@ -49,8 +49,9 @@ Available permissions are shown on the consent screen:
 | `modules:read`    | List and read your modules                  |
 | `modules:write`   | Create, change and delete your modules      |
 | `market:read`     | Read public market data                     |
-| `analytics:read`  | Read Tealstreet market and trader analytics |
-| `onchain:read`    | Read public onchain/address-keyed data      |
+| `onchain:read`    | Read public onchain and address-keyed analytics |
+| `account:read`    | Read your private balances, positions, orders, fills and ledger from connected exchange accounts |
+| `thirdparty:read` | Read private data from third-party sources you connect |
 | `dashboard:write` | Create MCP dashboard sessions and widgets   |
 
 None of these scopes can place orders, move funds, or reveal exchange API
@@ -129,10 +130,13 @@ Hyperliquid analytics tools currently include:
 
 | Tool                                  | Permission       | What it returns                                     |
 | ------------------------------------- | ---------------- | --------------------------------------------------- |
-| `get_hyperliquid_leaderboard`         | `analytics:read` | Crawled Hyperliquid leaderboard rows                |
-| `get_hyperliquid_wallet_positions`    | `onchain:read`   | Latest crawled clearinghouse positions for a wallet |
-| `get_hyperliquid_wallet_fills`        | `onchain:read`   | Recent crawled fills for a wallet                   |
-| `get_hyperliquid_account_value_curve` | `onchain:read`   | Crawled account-value curve points for a wallet     |
+| `get_hyperliquid_leaderboard`          | `onchain:read` | Crawled Hyperliquid leaderboard rows                    |
+| `get_hyperliquid_large_positions`      | `onchain:read` | Bounded scan for large public positions                 |
+| `get_hyperliquid_address_positions`    | `onchain:read` | Latest crawled clearinghouse positions for an address   |
+| `get_hyperliquid_address_fills`        | `onchain:read` | Recent crawled fills for an address                     |
+| `get_hyperliquid_address_value_curve`  | `onchain:read` | Crawled account-value curve points for an address       |
+
+The three `get_hyperliquid_address_*` tools take a public `address`; none of these read a user's own wallet or any connected exchange account.
 
 ---
 

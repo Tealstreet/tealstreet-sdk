@@ -111,8 +111,11 @@ src/
 │   ├── stdoutGuard.ts       # Redirects ALL stdout to stderr; hands the real stdout to the transport
 │   ├── dryRunAdapter.ts     # CoreAdapter that RECORDS writes instead of executing them (run_script)
 │   ├── liveState.ts         # Lazy connect with persistActive:false + credential-free account projection
-│   ├── dataTools.ts         # Read-only publicdata, exchange-services candles/market metadata, Polymarket, and crawled Hyperliquid analytics MCP registry
+│   ├── dataTools.ts         # Read-only MCP registry: publicdata, exchange-services candles/market metadata, Polymarket, TealNews, crawled Hyperliquid analytics, and the mcp-context/v1 planner
 │   ├── publicdata.ts        # CLI-local publicdata REST fallback client
+│   ├── exchangeProxy.ts     # exchange-services candles/market-metadata client (plain HTTPS; honors TEALSTREET_CANDLE_SERVER_URL)
+│   ├── newsGateway.ts       # news-gateway REST client for TealNews reads
+│   ├── polymarket.ts        # Public Polymarket gamma/CLOB client, path-allowlisted
 │   └── hyperliquidAnalyticsDb.ts # Optional HYPERLIQUID_ANALYTICS_* Postgres adapter, read-only queries
 └── utils/
 ```

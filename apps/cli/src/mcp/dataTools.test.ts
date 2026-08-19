@@ -41,9 +41,9 @@ describe('CLI MCP data tools', () => {
       'get_polymarket_order_book',
       'get_polymarket_price_history',
       'get_hyperliquid_leaderboard',
-      'get_hyperliquid_wallet_positions',
-      'get_hyperliquid_wallet_fills',
-      'get_hyperliquid_account_value_curve',
+      'get_hyperliquid_address_positions',
+      'get_hyperliquid_address_fills',
+      'get_hyperliquid_address_value_curve',
     ]);
     expect(tools.map((tool) => tool.scope)).toEqual([
       'market:read',
@@ -64,7 +64,7 @@ describe('CLI MCP data tools', () => {
       'market:read',
       'market:read',
       'market:read',
-      'analytics:read',
+      'onchain:read',
       'onchain:read',
       'onchain:read',
       'onchain:read',
@@ -109,7 +109,7 @@ describe('CLI MCP data tools', () => {
     const body = jsonOf(
       await tool.handler({
         query: `
-          plane curve = hyperliquid.account_value_curve(wallet: "${WALLET}", timeframe: "1W")
+          plane curve = hyperliquid.address_value_curve(address: "${WALLET}", timeframe: "1W")
           plane tweets = news.recent(source: "twitter", symbol: "BTC")
           render timeline(x: "curve.pointsByTimeframe", markers: "tweets.items", refreshMs: 60000)
         `,
@@ -316,9 +316,9 @@ describe('CLI MCP data tools', () => {
       fetchPolymarketJson: vi.fn(),
       queryHyperliquidAnalytics: vi.fn(async () => ({ ok: false as const, reason: 'not-configured' as const })),
     });
-    const tool = tools.find((entry) => entry.name === 'get_hyperliquid_wallet_positions')!;
+    const tool = tools.find((entry) => entry.name === 'get_hyperliquid_address_positions')!;
 
-    const result = await tool.handler({ wallet: WALLET });
+    const result = await tool.handler({ address: WALLET });
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Hyperliquid analytics database is not configured');
