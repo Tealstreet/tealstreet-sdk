@@ -101,8 +101,21 @@ export class HyperliquidSpotPublicWebSocket extends BaseWebSocket<HyperliquidSpo
 
       try {
         const json = jsonParse(data);
-        // Don't track l2book or error channels in stats
-        if (json?.channel !== 'l2book' && json?.channel !== 'error') {
+        // The exclusion read 'l2book' while the channel is 'l2Book', so a bare
+        // shared `l2Book` entry was recorded after all — matching no
+        // `messageHandlers` key, therefore invisible to
+        // `reconcileMessageHandlerStats` and reported as a live feed forever.
+        // `candle` is the same shape and is recorded per (symbol, interval) in
+        // the listenOHLCV parser instead.
+        //
+        // Recording `l2Book.{coin}` instead was tried and reverted: per-symbol
+        // keys let `getWarningThreshold` resolve a ticker, and its
+        // `Math.log(Math.max(1, quoteVolume / 10_000))` denominator is 0 for any
+        // pair under ~$10k daily volume, giving an INFINITE threshold. That is
+        // strictly worse than no signal. Until that is fixed this venue has no
+        // orderbook liveness — the perp side is in the same position minus bbo,
+        // which spot does not have.
+        if (json?.channel !== 'l2Book' && json?.channel !== 'candle' && json?.channel !== 'error') {
           this.recordMessageHandlerStats(json?.channel);
         }
         this.recordMessageHandlerStats('pong');
@@ -399,7 +412,10 @@ export class HyperliquidSpotPublicWebSocket extends BaseWebSocket<HyperliquidSpo
         waitingTimeout = undefined;
       }
 
-      this.cleanupMessageHandlerStats(`l2Book.${subSymbol}`);
+      // No `cleanupMessageHandlerStats` here: l2Book is not stats-tracked on this
+      // venue at all, so there is no entry to clear. The call that used to sit
+      // here targeted `l2Book.<symbol>`, a key that was never written.
+
       // Clean up orderbook inner state to prevent memory leak
       delete this.orderBookInnerState[innerId];
 

@@ -87,8 +87,15 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
           return;
         }
 
-        // Only record stats for ongoing feeds, not one-time snapshots
-        if (feed !== 'book_snapshot') {
+        // Only record stats for ongoing feeds, not one-time snapshots. `book` is
+        // recorded inside `handleBookDelta` instead, AFTER its no-listeners
+        // guard: this venue keeps subscriptions in private handler maps, so the
+        // stats key matches no `messageHandlers` key and
+        // `reconcileMessageHandlerStats` can never mark it idle. Recording here
+        // would also resurrect the entry on the very next frame after the
+        // disposer cleared it — and Kraken Futures is never sent an unsubscribe,
+        // so those frames keep arriving.
+        if (feed !== 'book_snapshot' && feed !== 'book') {
           this.recordMessageHandlerStats(feed);
         }
 
@@ -165,6 +172,28 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
     // This handler is not used since Kraken Futures doesn't provide OHLC via WebSocket
   };
 
+  /**
+   * Clears the shared stats entry for a feed once no symbol is listening.
+   *
+   * This venue keeps its subscriptions in private `orderBookHandlers` /
+   * `ohlcvHandlers` maps and never touches `messageHandlers`, so the bare feed
+   * name it records stats under matches no handler key. That makes it invisible
+   * to `reconcileMessageHandlerStats` in base.ws.ts, and the entry would keep
+   * its final timestamp, age past the staleness threshold and report a dead feed
+   * on a healthy socket. Clearing it returns the topic to the harmless
+   * never-recorded case.
+   *
+   * Pairs with recording the feed inside its handler, after the no-listeners
+   * guard: without that, a frame arriving right after this call puts the entry
+   * straight back — and with `hadHandlers` unset, permanently beyond reconcile.
+   */
+  private clearFeedStatsIfIdle = (feed: string, handlers: { [key: string]: Array<unknown> }) => {
+    for (const key in handlers) {
+      if (handlers[key]?.length) return;
+    }
+    this.cleanupMessageHandlerStats(feed);
+  };
+
   // Public OrderBook (lightweight: emits snapshots per message)
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
     this.orderBookHandlers[symbol] = [...(this.orderBookHandlers[symbol] || []), callback];
@@ -195,6 +224,7 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
     return () => {
       this.orderBookHandlers[symbol] = (this.orderBookHandlers[symbol] || []).filter((cb) => cb !== callback);
+      this.clearFeedStatsIfIdle('book', this.orderBookHandlers);
     };
   };
 
@@ -247,6 +277,8 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
     if (handlers.length === 0) {
       return;
     }
+
+    this.recordMessageHandlerStats('book');
 
     // Make sure we have a cache for this symbol
     if (!this.orderBookCache[symbol]) {

@@ -166,9 +166,16 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
           this.parent.log(`Subscription response: ${JSON.stringify(json)}`, LogSeverity.Debug);
         }
 
-        // Don't track l2Book, error, or subscriptionResponse channels in stats
+        // Per-symbol channels are recorded under their exact handler key at the
+        // dispatch site instead (`bbo.{coin}`, `candle.{s}.{i}`). Recording the
+        // bare channel here would key every symbol to one entry that matches no
+        // `messageHandlers` key, so `reconcileMessageHandlerStats` could never
+        // see it go idle and the topic would be reported as a live feed forever.
+        // l2Book/error/subscriptionResponse are not stats-tracked at all.
         if (
           json?.channel !== 'l2Book' &&
+          json?.channel !== 'bbo' &&
+          json?.channel !== 'candle' &&
           json?.channel !== 'error' &&
           json?.channel !== 'subscriptionResponse' &&
           json?.channel !== 'SubscriptionResponse'
@@ -246,8 +253,10 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
             const coin = json?.data?.coin;
             if (!coin) break;
 
-            const handlers = this.messageHandlers[`bbo.${coin}`];
+            const bboTopic = `bbo.${coin}`;
+            const handlers = this.messageHandlers[bboTopic];
             if (handlers) {
+              this.recordMessageHandlerStats(bboTopic);
               const payload = json?.data;
               for (let i = 0; i < handlers.length; i++) {
                 try {
@@ -593,24 +602,11 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         this.sendUnsubscription({ type: 'bbo', coin: subSymbol });
       }
 
-      // Stats are keyed by the bare channel (`recordMessageHandlerStats` is
-      // handed `json.channel`), so every symbol shares ONE `bbo` entry, and
-      // nothing used to clear it. The previous `l2Book.${subSymbol}` cleanup
-      // could not: l2Book is excluded from stats above, so that key is never
-      // written. Once the last bbo subscription went away the entry kept its
-      // final timestamp, aged past the staleness threshold, and the reconnect
-      // banner reported Bbo dead on a socket where every other feed was fine —
-      // bbo being the only orderbook liveness signal, since l2Book is excluded.
-      //
-      // Clearing it returns the topic to the harmless never-recorded case, as
-      // getGroupedMessageTopicStats prescribes. Guarded on the shared key: only
-      // drop it once no symbol has a bbo handler left.
-      const bboStillSubscribed = Object.keys(this.messageHandlers).some(
-        (key) => key.startsWith('bbo.') && this.messageHandlers[key]?.length,
-      );
-      if (!bboStillSubscribed) {
-        this.cleanupMessageHandlerStats('bbo');
-      }
+      // No bespoke bbo stats cleanup here any more. Stats are keyed by the exact
+      // `bbo.{coin}` handler key, and the handler array above is emptied rather
+      // than deleted, so `reconcileMessageHandlerStats` in base.ws.ts zeroes it
+      // on the next walk. bbo remains the only orderbook liveness signal on this
+      // venue, since l2Book is not stats-tracked.
     };
   };
 

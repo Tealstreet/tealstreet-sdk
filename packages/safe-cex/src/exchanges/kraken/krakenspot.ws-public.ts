@@ -115,8 +115,14 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
         const channel = json?.channel;
         if (!channel) return;
 
-        // Record stats for ongoing feeds
-        if (json.type !== 'snapshot') {
+        // Record stats for ongoing feeds. `book` and `ohlc` are recorded in
+        // their handlers instead, AFTER the no-listeners guard: this venue keeps
+        // subscriptions in private handler maps, so those stats keys match no
+        // `messageHandlers` key and `reconcileMessageHandlerStats` can never
+        // mark them idle. Recording here would also resurrect the entry from
+        // frames still in flight between the disposer's cleanup and the
+        // server's unsubscribe ack.
+        if (json.type !== 'snapshot' && channel !== 'book' && channel !== 'ohlc') {
           this.recordMessageHandlerStats(channel);
         }
 
@@ -226,6 +232,8 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
     const handlers = this.orderBookHandlers[symbol] || [];
     if (handlers.length === 0) return;
 
+    this.recordMessageHandlerStats('book');
+
     if (!this.orderBookCache[symbol]) return;
 
     const rawBids = item.bids || [];
@@ -296,6 +304,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
 
     return () => {
       this.ohlcvHandlers[key] = (this.ohlcvHandlers[key] || []).filter((cb) => cb !== callback);
+      this.clearFeedStatsIfIdle('ohlc', this.ohlcvHandlers);
 
       if (this.ohlcvHandlers[key]?.length === 0 && this.isConnected) {
         this.send(
@@ -330,6 +339,8 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
       const handlers = this.ohlcvHandlers[key] || [];
       if (handlers.length === 0) continue;
 
+      this.recordMessageHandlerStats('ohlc');
+
       const candle: Candle = {
         timestamp: new Date(item.interval_begin).getTime() / 1000,
         open: parseFloat(item.open),
@@ -341,6 +352,28 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
 
       handlers.forEach((cb) => cb(candle));
     }
+  };
+
+  /**
+   * Clears the shared stats entry for a feed once no symbol is listening.
+   *
+   * This venue keeps its subscriptions in private `orderBookHandlers` /
+   * `ohlcvHandlers` maps and never touches `messageHandlers`, so the bare feed
+   * name it records stats under matches no handler key. That makes it invisible
+   * to `reconcileMessageHandlerStats` in base.ws.ts, and the entry would keep
+   * its final timestamp, age past the staleness threshold and report a dead feed
+   * on a healthy socket. Clearing it returns the topic to the harmless
+   * never-recorded case.
+   *
+   * Pairs with recording the feed inside its handler, after the no-listeners
+   * guard: without that, a frame arriving right after this call puts the entry
+   * straight back — and with `hadHandlers` unset, permanently beyond reconcile.
+   */
+  private clearFeedStatsIfIdle = (feed: string, handlers: { [key: string]: Array<unknown> }) => {
+    for (const key in handlers) {
+      if (handlers[key]?.length) return;
+    }
+    this.cleanupMessageHandlerStats(feed);
   };
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
@@ -379,6 +412,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
 
     return () => {
       this.orderBookHandlers[symbol] = (this.orderBookHandlers[symbol] || []).filter((cb) => cb !== callback);
+      this.clearFeedStatsIfIdle('book', this.orderBookHandlers);
 
       if (this.orderBookHandlers[symbol]?.length === 0 && this.isConnected) {
         this.send(

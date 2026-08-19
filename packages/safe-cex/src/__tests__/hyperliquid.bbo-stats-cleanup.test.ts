@@ -30,38 +30,53 @@ const createSocket = () => {
   return ws;
 };
 
-// A bbo frame carries no symbol at this layer: the stats recorder is handed
-// `json.channel`, so every symbol shares one `bbo` entry.
-const recordBboFrame = (ws: any) => ws.recordMessageHandlerStats('bbo');
+// Drives a real bbo frame through onMessage so the stats key comes from the
+// dispatch site, not the test. It is `bbo.{coin}` — the exact `messageHandlers`
+// key — which is what lets base.ws.ts reconcile it. The bare `bbo` key it
+// replaced was shared by every symbol and matched no handler key, so nothing
+// could ever mark it idle.
+const recordBboFrame = (ws: any, coin: string) =>
+  ws.onMessage({ data: JSON.stringify({ channel: 'bbo', data: { coin, bbo: [] } }) });
 
-describe('hyperliquid bbo stats cleanup', () => {
-  it('clears the shared bbo stats entry once the last orderbook listener goes', () => {
+// The reconcile walk is throttled — including the forced path, which has its own
+// 250ms floor — so teardown does not zero the entry on the spot. Drive it with a
+// later timestamp rather than sleeping.
+const forceReconcile = (ws: any) => ws.reconcileMessageHandlerStats(Date.now() + 10_000, true);
+
+describe('hyperliquid bbo stats', () => {
+  it('stops counting bbo as a live feed once the last orderbook listener goes', () => {
     const ws = createSocket();
 
     const dispose = ws.listenOrderBook('BTC-PERP', () => undefined);
-    recordBboFrame(ws);
-    expect(ws.messageHandlersStats.bbo).toBeDefined();
+    recordBboFrame(ws, 'BTC');
+    expect(ws.messageHandlersStats['bbo.BTC'].lastCallbacksCount).toBe(1);
+    // The shared bare key is no longer recorded at all.
+    expect(ws.messageHandlersStats.bbo).toBeUndefined();
 
     dispose();
+    forceReconcile(ws);
 
-    // Left behind, the entry keeps its final timestamp, ages past the staleness
+    // Left counted, the entry keeps its final timestamp, ages past the staleness
     // threshold and reports Bbo dead on a healthy socket — bbo is the only
-    // orderbook liveness signal, since l2Book is excluded from stats.
-    expect(ws.messageHandlersStats.bbo).toBeUndefined();
+    // orderbook liveness signal, since l2Book is not stats-tracked.
+    expect(ws.messageHandlersStats['bbo.BTC'].lastCallbacksCount).toBe(0);
   });
 
-  it('keeps the entry while another symbol is still subscribed', () => {
+  it('tracks each symbol independently', () => {
     const ws = createSocket();
 
     const disposeBtc = ws.listenOrderBook('BTC-PERP', () => undefined);
-    const disposeEth = ws.listenOrderBook('ETH-PERP', () => undefined);
-    recordBboFrame(ws);
+    ws.listenOrderBook('ETH-PERP', () => undefined);
+    recordBboFrame(ws, 'BTC');
+    recordBboFrame(ws, 'ETH');
 
     disposeBtc();
-    expect(ws.messageHandlersStats.bbo).toBeDefined();
+    forceReconcile(ws);
 
-    disposeEth();
-    expect(ws.messageHandlersStats.bbo).toBeUndefined();
+    // Per-symbol keys are the point: one symbol going away must not silence the
+    // other, and the other staying must not keep the first one counted.
+    expect(ws.messageHandlersStats['bbo.BTC'].lastCallbacksCount).toBe(0);
+    expect(ws.messageHandlersStats['bbo.ETH'].lastCallbacksCount).toBe(1);
   });
 
   // The cleanup this replaced. l2Book is excluded from stats at record time, so
