@@ -6,6 +6,7 @@ export const RECV_WINDOW = 20_000;
 export const BROKER_ID = 'e847386590ce4dBC'; // tealstreet
 
 export type OkxRegion = 'okx' | 'okxeu';
+export type OkxInstrumentType = 'SWAP' | 'FUTURES';
 
 type OkxWsUrls = {
   public: { livenet: string; testnet: string };

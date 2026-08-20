@@ -84,6 +84,7 @@ describe('private WebSocket auth and reconnect subscriptions', () => {
       ...commonParent(),
       name: 'okx',
       region: 'global',
+      getInstrumentTypes: () => ['SWAP'],
     } as unknown as OKXExchange;
     const socket = new OKXPrivateWebsocket(parent);
     const send = attachOpenSocket(socket);
