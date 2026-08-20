@@ -489,19 +489,16 @@ export class GrvtExchange extends BaseExchange {
     }
 
     const maxRetries = 3;
-    const subAccountId = this.grvtTradingAccountId || this.apiExtras?.subAccountId || '0';
     const builderAddress = getGrvtBuilderAddress(this.options.testnet ?? false);
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         this.log(
-          `Checking builder authorization for ${builderAddress} (subAccount: ${subAccountId}, attempt ${attempt}/${maxRetries})`,
+          `Checking builder authorization for ${builderAddress} (attempt ${attempt}/${maxRetries})`,
           LogSeverity.Debug,
         );
 
-        const response = await this.tradingXhr.post(ENDPOINTS.GET_AUTHORIZED_BUILDERS, {
-          sub_account_id: subAccountId,
-        });
+        const response = await this.tradingXhr.post(ENDPOINTS.GET_AUTHORIZED_BUILDERS, {});
 
         const data = response.data;
         // Response format: { results: [...] } (full) or { r: [...] } (lite)

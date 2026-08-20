@@ -480,6 +480,14 @@ If the user has authorized the Tealstreet builder:
    - API payload (full and lite formats)
 3. Builder fee: default `0.03` (3 bps) -> `builderFeeInt = 300` for EIP-712 as uint32 (via `grvtBuilderFeeRateToRaw`, which is `percent * 10000`)
 
+Builder authorization is main-account scoped, not sub-account scoped. The check
+endpoint expects an empty request body and uses the authenticated session's main
+account. The browser-wallet authorization body must use the authenticated
+`funding_account_address` / `X-Grvt-Account-Id` as `main_account_id` and the
+EIP-712 `mainAccountID`; if the connected wallet differs from that funding
+address, fail in the UI with an actionable wallet-switch message rather than
+sending a payload GRVT rejects as `invalid main account ID`.
+
 ## Symbol Format
 
 GRVT uses underscore-separated format:

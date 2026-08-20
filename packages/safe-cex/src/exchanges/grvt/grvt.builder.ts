@@ -207,7 +207,13 @@ const authenticateGrvt = async (
   apiKey: string,
   testnet: boolean,
   proxyToken: string,
-): Promise<{ success: boolean; accountId?: string; sessionCookie?: string; message?: string }> => {
+): Promise<{
+  success: boolean;
+  accountId?: string;
+  fundingAccountAddress?: string;
+  sessionCookie?: string;
+  message?: string;
+}> => {
   const edgeUrl = getGrvtEdgeApiUrl(testnet);
 
   const controller = new AbortController();
@@ -240,8 +246,11 @@ const authenticateGrvt = async (
       };
     }
 
+    const responseData = (await response.json().catch(() => ({}))) as Record<string, any>;
     // Get the account ID from response header
     const accountId = response.headers.get('x-grvt-account-id');
+    const fundingAccountAddress =
+      typeof responseData.funding_account_address === 'string' ? responseData.funding_account_address : undefined;
     // Get session cookie from proxy's custom header (browser can't read Set-Cookie due to CORS)
     const sessionCookie = response.headers.get('x-ts-grvt-session');
 
@@ -252,7 +261,12 @@ const authenticateGrvt = async (
       };
     }
 
-    return { success: true, accountId, sessionCookie: sessionCookie || undefined };
+    return {
+      success: true,
+      accountId,
+      fundingAccountAddress,
+      sessionCookie: sessionCookie || undefined,
+    };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
     const error = err as { name?: string; message?: string };
@@ -350,7 +364,7 @@ export const requestWalletConnection = async (): Promise<string | null> => {
  *
  * **Request Body**:
  * ```json
- * { "sub_account_id": "0" }
+ * {}
  * ```
  *
  * **Success Response (full format)**:
@@ -377,7 +391,8 @@ export const requestWalletConnection = async (): Promise<string | null> => {
  * `max_fee_rate` is converted to a percentage string (e.g., 10000 → "0.0100%").
  *
  * @param apiKey - The GRVT API key for authentication
- * @param subAccountId - The sub-account ID to check
+ * @param subAccountId - Retained for call-site compatibility. GRVT now scopes
+ * builder authorization to the authenticated main account and expects an empty request body.
  * @param builderAddress - The builder address to check (defaults to Tealstreet based on network)
  * @param testnet - Whether to use testnet API
  * @returns `{ authorized: true, maxFeeRate: "0.0300%", maxFeeRateRaw: 300 }` if authorized
@@ -385,7 +400,7 @@ export const requestWalletConnection = async (): Promise<string | null> => {
  */
 export const checkGrvtBuilderAuthorized = async (
   apiKey: string,
-  subAccountId: string,
+  _subAccountId: string,
   builderAddress?: string,
   testnet: boolean = false,
 ): Promise<GrvtBuilderCheckResult> => {
@@ -416,7 +431,7 @@ export const checkGrvtBuilderAuthorized = async (
       requestHeaders['X-Ts-Grvt-Session'] = authResult.sessionCookie;
     }
 
-    const requestBody = { sub_account_id: subAccountId };
+    const requestBody = {};
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
@@ -523,7 +538,7 @@ export function createGrvtBuilderInfo(
  * **Types**:
  * ```
  * AuthorizeBuilder {
- *   mainAccountID:    address,  // User's wallet address
+ *   mainAccountID:    address,  // User's funding account address
  *   builderAccountID: address,  // Tealstreet builder: 0x79a52a6658c23cF7e7Fe4fE43Ff91c5195Eb86Ca
  *   maxFutureFeeRate: uint32,   // Fee rate as integer: feeRate * 10000 (e.g., 0.0001 → 1)
  *   maxSpotFeeRate:   uint32,   // Fee rate as integer: feeRate * 10000 (e.g., 0.0001 → 1)
@@ -549,7 +564,7 @@ export function createGrvtBuilderInfo(
  * **Request Body**:
  * ```json
  * {
- *   "main_account_id": "0xUserWalletAddress",
+ *   "main_account_id": "0xFundingAccountAddress",
  *   "builder_account_id": "0x79a52a6658c23cF7e7Fe4fE43Ff91c5195Eb86Ca",
  *   "max_futures_fee_rate": "0.0001",
  *   "max_spot_fee_rate": "0.0001",
@@ -667,8 +682,21 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
 
     // Prepare EIP-712 typed data
     const domain = getEIP712Domain(testnet);
+    const mainAccountId = authResult.fundingAccountAddress || authResult.accountId;
+    if (!mainAccountId || !isAddress(mainAccountId)) {
+      return { success: false, message: 'GRVT authentication did not return a valid main account ID' };
+    }
+
+    if (signerAddress.toLowerCase() !== mainAccountId.toLowerCase()) {
+      return {
+        success: false,
+        message:
+          'Connected wallet does not match the GRVT main account for this API key. Switch to the funding wallet and try again.',
+      };
+    }
+
     const message: AuthorizeBuilderMessage = {
-      mainAccountID: signerAddress,
+      mainAccountID: mainAccountId,
       builderAccountID: builderAddress,
       maxFutureFeeRate: feeRateInt,
       maxSpotFeeRate: feeRateInt,
@@ -705,7 +733,7 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
 
     const chainId = testnet ? '326' : '325';
     const requestBody = {
-      main_account_id: signerAddress,
+      main_account_id: mainAccountId,
       builder_account_id: builderAddress,
       max_futures_fee_rate: maxFeeRate,
       max_spot_fee_rate: maxFeeRate,
