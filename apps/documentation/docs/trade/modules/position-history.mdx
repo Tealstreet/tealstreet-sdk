@@ -56,13 +56,17 @@ The Position History module displays a comprehensive table of your closed positi
 - **Closed Time** - When the position was closed
 - **Account** - The exchange account used for the trade
 
-### Position History Master Feature
+### Where the history comes from
 
-The module includes a **Position History Master** toggle that enables advanced synchronization:
+Closed positions are recorded on Tealstreet's servers from your exchange's own
+trade history. There is nothing to enable and nothing to leave running: the
+history is collected for you and is the same on every device you sign in from.
 
-- **Enable on a single desktop device** - This feature should be enabled on only one desktop device
-- **Cross-device synchronization** - When enabled, it records position history and syncs across all your devices
-- **Continuous recording** - The device should remain running to maintain the position history database
+This replaced the old **Position History Master** toggle, which asked you to
+nominate one desktop to watch your positions and record them. Because it worked
+by noticing a position disappear, it could only estimate the exit price, and it
+missed anything that closed while the app was shut. A close now takes about a
+minute to appear rather than being instant, and the figures are the exchange's.
 
 ### Additional Features
 
@@ -72,13 +76,11 @@ The module includes a **Position History Master** toggle that enables advanced s
 - **Responsive Design** - The table adapts to different screen sizes
 
 :::caution
-At the time of this writing, the Position History module is only fully working for Bybit, other exchanges will get improved support in the future.
+Support varies by exchange. Where your exchange does not publish a closed-position
+history, this module will stay empty even though your trades went through — the
+Fills module still shows the individual executions.
 :::
 
 :::note
 Not every exchange provides the data needed to calculate the position history. If you are using an exchange that does not provide this data, you will not be able to use this module for the time being.
 :::
-
-<!-- :::tip
-The Position History Master feature is particularly useful for traders who use multiple devices and want to maintain a complete record of their trading history across all platforms.
-::: -->
