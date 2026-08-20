@@ -18,6 +18,7 @@ import { ChaserOrderInstance } from './ChaserOrderInstance';
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
 const CHASER_MISSING_ORDER_CONFIRMATIONS = 2;
+const BYBIT_DEMO_PRIVATE_WS_UNSAFE_STOP_REASON = 'Bybit Demo private WebSocket degraded';
 
 // After observing a partial fill on the tracked order, freeze the
 // cancel+replace path for this long. The order is at the touch and
@@ -37,6 +38,43 @@ export class ChaserOrderManager {
   log(message: string, instance: ChaserOrderInstance) {
     instance.exchange.emitter.emit('log', `[CHASER${instance.id}] ${message}`);
     // console.log(`[CHASER${instance.id}] ${message}`);
+  }
+
+  private getBybitDemoPrivateWsRisk(exchange: Exchange) {
+    if (exchange.name !== 'bybitdemo') {
+      return undefined;
+    }
+
+    const socketHealth = exchange.store.socketHealth;
+    if (!socketHealth) {
+      return 'Bybit Demo private WebSocket health is unavailable';
+    }
+
+    const isPrivateReady = socketHealth.privateInitialized === true && socketHealth.privateHealthy === true;
+    if (isPrivateReady && socketHealth.privateReconnectPaused !== true) {
+      return undefined;
+    }
+
+    const details: string[] = [];
+    if (socketHealth.privateInitialized !== true) details.push('not initialized');
+    if (socketHealth.privateHealthy === false) details.push('unhealthy');
+    if (socketHealth.privateReconnectPaused === true) details.push('reconnect paused');
+    if (socketHealth.privateCloseCode !== undefined) details.push(`last close code ${socketHealth.privateCloseCode}`);
+
+    return `Bybit Demo private WebSocket is degraded${details.length ? ` (${details.join(', ')})` : ''}`;
+  }
+
+  private async stopForBybitDemoPrivateWsRisk(
+    instance: ChaserOrderInstance,
+    phase: 'startup' | 'runtime',
+    risk: string,
+  ) {
+    const action = phase === 'startup' ? 'not started' : 'stopped';
+    const message = `Chaser ${action}: ${risk}. Chaser requires live private order updates and is not safe in REST-only mode from this network.`;
+    this.log(message, instance);
+    instance.markComplete(BYBIT_DEMO_PRIVATE_WS_UNSAFE_STOP_REASON);
+    instance.exchange.emitter.emit('error', message);
+    await this.cleanupInstance(instance);
   }
 
   add(instance: ChaserOrderInstance) {
@@ -198,6 +236,12 @@ export class ChaserOrderManager {
     const exchange = instance.exchange;
 
     this.log(`processInstance starting for ${instance.options.symbol}`, instance);
+    const startupPrivateWsRisk = this.getBybitDemoPrivateWsRisk(exchange);
+    if (startupPrivateWsRisk) {
+      await this.stopForBybitDemoPrivateWsRisk(instance, 'startup', startupPrivateWsRisk);
+      return;
+    }
+
     instance.currentOrderIds = await this.tryPlaceOrders(instance);
     this.log(`initial orderIds: ${JSON.stringify(instance.currentOrderIds)}`, instance);
     await sleep(1000);
@@ -518,6 +562,12 @@ export class ChaserOrderManager {
 
       onUpdate = async (data: StoreData) => {
         try {
+          const runtimePrivateWsRisk = this.getBybitDemoPrivateWsRisk(exchange);
+          if (runtimePrivateWsRisk) {
+            await this.stopForBybitDemoPrivateWsRisk(instance, 'runtime', runtimePrivateWsRisk);
+            return;
+          }
+
           if (instance.isStopped) {
             this.log('instance is stopped from outside, unsubbing', instance);
             instance.markComplete();

@@ -95,6 +95,15 @@ the canonical normalized view, and the `'update'` event is
 exchange-agnostic. The chaser doesn't need to know how Bybit
 reports a fill vs how Hyperliquid does.
 
+**Bybit Demo private WS is a hard safety gate.** `bybitdemo` can keep trading
+usable through REST snapshots while its private WebSocket is unavailable or
+geo-blocked, but Chaser needs live private order updates to avoid stale
+cancel/replace decisions. The manager refuses to start, and stops an active
+instance, when `store.socketHealth.privateInitialized/privateHealthy` or
+`privateReconnectPaused` says the Bybit Demo private WS is not good. Do not
+weaken this to a warning-only path unless Chaser gets an authoritative
+fill/order reconciliation model for Bybit Demo.
+
 ## Hold-steady window after partial fills
 
 `updateOrders` short-circuits the cancel+replace path when

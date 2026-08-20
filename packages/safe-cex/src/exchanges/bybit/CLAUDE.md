@@ -742,6 +742,11 @@ URL selection logic (`bybit.api.ts:27-29`):
 
 - Demo testnet fallback: `DEMO_URL.testnet` falls through to `api-testnet.bybit.com` (same as regular testnet)
 - Demo only supports `linear` category (no inverse or spot)
+- Bybit Demo private WS is not a Chaser-compatible degraded mode. REST snapshots
+  keep normal account state partially usable, but Chaser is fail-closed in
+  `webworker/chaserOrder` whenever `store.socketHealth` says the demo private
+  WS is not initialized/healthy or is reconnect-paused. This protects
+  geo-restricted users from running a cancel/replace loop on stale order events.
 
 ## Known Quirks / Implementation Notes
 

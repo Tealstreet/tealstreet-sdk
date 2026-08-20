@@ -72,6 +72,12 @@ const createMockExchange = () => {
     tickers: [ticker],
     markets: [market],
     positions: [],
+    socketHealth: {
+      publicHealthy: true,
+      privateHealthy: true,
+      publicInitialized: true,
+      privateInitialized: true,
+    },
     updateIds: {
       orders: 0,
       positions: 0,
@@ -357,6 +363,71 @@ describe('ChaserOrderManager', () => {
     expect(exchange.emitter.emit).toHaveBeenCalledWith(
       'error',
       expect.stringMatching(/supervisor failed during startup/i),
+    );
+  });
+
+  it('refuses to start a bybitdemo chaser when the private websocket is degraded', async () => {
+    const { exchange, store } = createMockExchange();
+    (exchange as any).name = 'bybitdemo';
+    (store as any).socketHealth = {
+      publicHealthy: true,
+      privateHealthy: false,
+      publicInitialized: true,
+      privateInitialized: true,
+      privateCloseCode: 1006,
+    };
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+    expect(instance.state.stopReason).toBe('Bybit Demo private WebSocket degraded');
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith(
+      'error',
+      expect.stringMatching(/Bybit Demo private WebSocket is degraded.*last close code 1006/i),
+    );
+  });
+
+  it('stops an active bybitdemo chaser when the private websocket degrades', async () => {
+    const { emit, exchange, order, store } = createMockExchange();
+    (exchange as any).name = 'bybitdemo';
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    (store as any).socketHealth = {
+      ...store.socketHealth!,
+      privateHealthy: false,
+      privateReconnectPaused: true,
+      privateCloseCode: 1006,
+    };
+    await emit('update', store);
+
+    expect(instance.state.stopReason).toBe('Bybit Demo private WebSocket degraded');
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([order]);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith(
+      'error',
+      expect.stringMatching(/Chaser stopped: Bybit Demo private WebSocket is degraded/i),
     );
   });
 
