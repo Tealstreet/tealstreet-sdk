@@ -327,8 +327,7 @@ describe('Bybit adapter-only advanced order parameters', () => {
     expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
   });
 
-  it('forces an order snapshot after cancellation so stale TP/SL rows do not linger without WS', async () => {
-    vi.useFakeTimers();
+  it('does not force an order snapshot after generic cancellation', async () => {
     const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
     const post = vi.fn().mockResolvedValue({
       data: {
@@ -355,9 +354,5 @@ describe('Bybit adapter-only advanced order parameters', () => {
       request: [{ symbol: 'BTCUSDT', orderId: 'stop-order-1' }],
     });
     expect(fetchAndSetPrivateSnapshotHelper).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(251);
-
-    expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
   });
 });

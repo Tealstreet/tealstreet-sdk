@@ -331,12 +331,6 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 
 6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
 
-7. **Demo reconciliation**: After initial orders are loaded, successful create /
-   batch / amend mutations on `BybitDemoExchange` force a debounced
-   order-inclusive REST snapshot. Demo private WS can remain generically healthy
-   while missing order topic events, so do not gate this backstop solely on
-   `privateWebsocket.isHealthy`.
-
 ### Native Market Slippage Protection
 
 All Bybit variants map `PlaceOrderOpts.maxSlippagePct` to V5
@@ -433,18 +427,15 @@ The update path depends on the order type:
 
 6. **Fallback path** (`bybit.exchange.ts:1601-1638`): For position-bound TP/SL when cancel+replace could not run (e.g., mark price unavailable), falls through to `SET_TRADING_STOP` with `tpslMode` and size parameters
 
-7. **Demo reconciliation**: Plain limit / conditional amend success uses the
-   same demo-only debounced order snapshot backstop as order creation. This is
-   intentionally narrower than live Bybit, where private WS order events should
-   remain the primary reconciliation path.
-
 ### Cancel Order Logic
 
 - **UNIFIED accounts** (`bybit.exchange.ts:1668-1681`): Use batch cancel (`CANCEL_ORDERS`) with up to 10 orders per batch. Uses `unlimitedXHR` (no rate limiting). Checks `retExtInfo.list` for individual order errors.
 - **CONTRACT accounts** (`bybit.exchange.ts:1682-1698`): Fall back to individual `CANCEL_ORDER` calls via `forEachSeries`. Errors are collected and thrown as a joined string.
 - **Cancel all for symbol** (`cancelSymbolOrders` at `bybit.exchange.ts:1702-1726`): When `cancelTpSl=false`, preserves TP/SL orders by saving them, canceling all, then re-placing the TP/SL orders with flipped sides.
-- Successful cancels force an order-inclusive REST snapshot so stale TP/SL rows
-  do not linger when Bybit demo/private WS is degraded.
+- Successful generic cancels do not force an order-inclusive REST snapshot.
+  Chaser depends on private WS order events; injecting REST snapshots after every
+  cancel/create/amend was observed to wipe just-placed Bybit Demo chaser orders
+  from the local store and make the chaser stop and cancel itself.
 - **Inter-batch delay**: 1000ms between cancel batches (`bybit.exchange.ts:1666`)
 
 ## Symbol Format
@@ -747,6 +738,10 @@ URL selection logic (`bybit.api.ts:27-29`):
   `webworker/chaserOrder` whenever `store.socketHealth` says the demo private
   WS is not initialized/healthy or is reconnect-paused. This protects
   geo-restricted users from running a cancel/replace loop on stale order events.
+- Do not reintroduce a generic create/amend/cancel REST snapshot backstop to make
+  Bybit Demo Chaser work during private-WS degradation. That path caused
+  snapshot/order-event races; Chaser must rely on live private order updates or
+  refuse to run.
 
 ## Known Quirks / Implementation Notes
 

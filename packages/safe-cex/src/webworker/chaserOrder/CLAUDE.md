@@ -104,6 +104,14 @@ instance, when `store.socketHealth.privateInitialized/privateHealthy` or
 weaken this to a warning-only path unless Chaser gets an authoritative
 fill/order reconciliation model for Bybit Demo.
 
+Do not compensate by forcing Bybit Demo REST order snapshots after generic
+create/amend/cancel mutations. Those snapshots can be fetched before the
+chaser's just-placed order is visible and applied after it, making the tracked
+order disappear from the store and causing the chaser to stop and cancel itself.
+The only Bybit REST snapshot backstop that should remain is the
+`SET_TRADING_STOP` path, because that endpoint returns no concrete order IDs and
+is not the Chaser limit-order loop.
+
 ## Hold-steady window after partial fills
 
 `updateOrders` short-circuits the cancel+replace path when

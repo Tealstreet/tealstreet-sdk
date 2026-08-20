@@ -87,8 +87,8 @@ import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFro
 const MAX_CLOSED_PNL_PAGES = 20;
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
-const WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS = 250;
-const WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS = 1_200;
+const PRIVATE_SNAPSHOT_REFRESH_DEBOUNCE_MS = 250;
+const PRIVATE_SNAPSHOT_REFRESH_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
@@ -165,7 +165,7 @@ export class BybitExchange extends BaseExchange {
   private marginType: MarginType = MarginType.Cross;
 
   private needsReinit = false;
-  private readonly debouncedDegradedSnapshotRefresh = debounce(
+  private readonly debouncedPrivateSnapshotRefresh = debounce(
     async () => {
       if (this.isDisposed || this.isPublicDataOnly) {
         return;
@@ -177,8 +177,8 @@ export class BybitExchange extends BaseExchange {
         this.emitAndLogError(err);
       }
     },
-    WS_DEGRADED_SNAPSHOT_DEBOUNCE_MS,
-    { maxWait: WS_DEGRADED_SNAPSHOT_MAX_WAIT_MS },
+    PRIVATE_SNAPSHOT_REFRESH_DEBOUNCE_MS,
+    { maxWait: PRIVATE_SNAPSHOT_REFRESH_MAX_WAIT_MS },
   );
 
   positionMode: PositionMode | null = null;
@@ -266,40 +266,14 @@ export class BybitExchange extends BaseExchange {
   }
 
   dispose = () => {
-    this.debouncedDegradedSnapshotRefresh.cancel();
+    this.debouncedPrivateSnapshotRefresh.cancel();
     super.dispose();
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
   };
 
-  private shouldUseDegradedPrivateRestFastPath = () => {
-    if (this.isPublicDataOnly) {
-      return false;
-    }
-
-    const ws = this.privateWebsocket;
-    if (!ws) {
-      return false;
-    }
-
-    // Prefer snappier REST reconciliation when WS is in a reconnect pause window
-    // or when it initialized previously but is now unhealthy.
-    return ws.isReconnectPauseActive || (ws.isInitialized && !ws.isHealthy);
-  };
-
-  private scheduleDegradedPrivateSnapshotRefresh = (force = false) => {
-    if (!force && !this.shouldUseDegradedPrivateRestFastPath()) {
-      return;
-    }
-
-    this.debouncedDegradedSnapshotRefresh();
-  };
-
-  private scheduleOrderMutationPrivateSnapshotRefresh = () => {
-    // Bybit demo can keep the private WS connected enough to look healthy while
-    // still missing order events. Once orders have loaded, force the same
-    // debounced REST backstop used by cancel / SET_TRADING_STOP flows.
-    this.scheduleDegradedPrivateSnapshotRefresh(this.isDemo && this.store.loaded?.orders === true);
+  private scheduleSetTradingStopSnapshotRefresh = () => {
+    this.debouncedPrivateSnapshotRefresh();
   };
 
   getAccount = async () => {
@@ -1931,9 +1905,7 @@ export class BybitExchange extends BaseExchange {
       throw new Error(errMsg);
     }
 
-    const orderIds = fullfilled.map((resp) => resp.result.orderId);
-    this.scheduleOrderMutationPrivateSnapshotRefresh();
-    return orderIds;
+    return fullfilled.map((resp) => resp.result.orderId);
   };
 
   placeStopLossOrTakeProfit = async (opts: PlaceOrderOpts) => {
@@ -1983,7 +1955,7 @@ export class BybitExchange extends BaseExchange {
     // SET_TRADING_STOP returns no orderId. Force an order snapshot so partial
     // TP/SL rows from /v5/order/realtime can replace optimistic UI rows even
     // when private WS looks healthy but is degraded or geo-flaky.
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
+    this.scheduleSetTradingStopSnapshotRefresh();
     return [];
   };
 
@@ -2015,7 +1987,7 @@ export class BybitExchange extends BaseExchange {
     }
 
     // SET_TRADING_STOP returns no orderId; see placeStopLossOrTakeProfit.
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
+    this.scheduleSetTradingStopSnapshotRefresh();
     return [];
   };
 
@@ -2067,7 +2039,6 @@ export class BybitExchange extends BaseExchange {
       allOrderIds.push(...batchOrderIds);
     }
 
-    this.scheduleOrderMutationPrivateSnapshotRefresh();
     return allOrderIds;
   };
 
@@ -2413,7 +2384,6 @@ export class BybitExchange extends BaseExchange {
       }
     }
 
-    this.scheduleOrderMutationPrivateSnapshotRefresh();
     return updatedOrderIds;
   };
 
@@ -2441,8 +2411,6 @@ export class BybitExchange extends BaseExchange {
     await forEachSeries(Object.entries(ordersByCategory), async ([category, orders]) => {
       await this.cancelOrdersHelper(orders, category);
     });
-
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
   };
 
   cancelOrdersHelper = async (orders: Order[], category: string) => {
@@ -2493,8 +2461,6 @@ export class BybitExchange extends BaseExchange {
     if (v(data, 'retMsg') !== 'OK') {
       this.emitAndLogError(v(data, 'retMsg'));
     }
-
-    this.scheduleDegradedPrivateSnapshotRefresh(true);
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {
