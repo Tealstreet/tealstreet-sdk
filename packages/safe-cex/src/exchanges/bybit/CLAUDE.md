@@ -438,7 +438,8 @@ The update path depends on the order type:
   from the local store and make the chaser stop and cancel itself.
 - `cancelOrders` calls `markOrderSeen` for every id up front, so the
   recently-placed grace window can never resurrect an order we deliberately
-  cancelled.
+  cancelled. On success it then calls `retireCancelledOrders`, which removes the
+  rows from the store **on demo only** — see "Demo has to retire its own rows".
 - `"order not exists or too late to cancel"` is treated as success, both as a
   top-level `retMsg` and per-row in `retExtInfo.list`. The chaser cancels at the
   touch, so an order can fill inside the cancel round trip; throwing there made
@@ -783,6 +784,39 @@ Guarded by `__tests__/audit-regressions/bybit.recently-placed-order-preservation
 That file and the code it covers were both silently deleted once by an SDK
 mirror-sync commit (`3fd8301610`), which is how this regressed for two weeks —
 keep them together.
+
+## Demo has to retire its own rows
+
+`recordRecentlyPlacedOrder` injecting a row into the store on demo is only half a
+lifecycle. The other half was missing and produced phantom orders.
+
+`handleOrderTopic` is the **only** path that removes an order row, and it needs a
+private `order` frame. Demo drops those, and the periodic `tick` calls
+`fetchAndSetPrivateSnapshotHelper(false)` — positions and balance, deliberately
+not orders. So nothing retired a cancelled row: it was injected at placement and
+then outlived the real order indefinitely. Symptoms were a stuck resting order
+the venue no longer had, and a cancel button that looked dead, because the UI
+removed the row optimistically and the next store broadcast restored it. No error
+toast appeared, because Bybit's `"order not exists or too late to cancel"` reply
+is treated as success. Every chaser reprice cancels and replaces, so the debris
+accumulated one row per attempt.
+
+`retireCancelledOrders` closes it: `markOrderSeen` for every id (so the shield
+cannot resurrect them from any cancel path), plus `store.removeOrders` when
+`isDemo`. It runs from `cancelOrdersHelper` after a successful lot **and** on the
+already-gone branch, and from `cancelSymbolOrders`.
+
+- **Keep the `isDemo` guard.** Live Bybit's WS-driven removal owns the row there;
+  removing locally would race it.
+- **Do not "fix" this with a periodic order refetch instead.** Bybit ticks at
+  500ms and `fetchOrders` is cursor-paginated per settle coin.
+- `cancelSymbolOrders` snapshots the symbol's ids *before* the cancel, because it
+  re-places TP/SL afterwards and those new rows must survive.
+- A genuine cancel failure must leave the row in place — never hide real state.
+
+Still open by design: a manual (non-chaser) demo limit order that *fills* leaves
+its row behind, since nothing attempts a cancel on it. Chaser orders are covered
+because `cleanupInstance` and the reprice path both cancel by id.
 
 ## `fetchFillsForOrderIds` exists for degraded-WS chasers
 

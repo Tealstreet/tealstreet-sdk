@@ -326,6 +326,36 @@ export class BybitExchange extends BaseExchange {
   };
 
   /**
+   * Retire orders we know are gone, locally, because on demo nothing else will.
+   *
+   * `handleOrderTopic` is the only path that removes an order row, and it needs
+   * a private `order` frame. Demo drops those, and the periodic `tick` refetches
+   * positions and balance but deliberately NOT orders
+   * (`fetchAndSetPrivateSnapshotHelper(false)`), so a cancelled row has nothing
+   * to retire it: `recordRecentlyPlacedOrder` injected it into the store at
+   * placement and it then outlives the real order indefinitely. The symptoms are
+   * a stuck resting order the venue no longer has, and a cancel click that seems
+   * to do nothing — the UI removes the row optimistically and the next store
+   * broadcast puts it straight back.
+   *
+   * Every chaser reprice cancels and replaces, so without this the debris
+   * accumulates one row per attempt.
+   *
+   * Live Bybit keeps its WS-driven removal untouched.
+   */
+  private retireCancelledOrders = (orders: Array<Pick<Order, 'id'>>) => {
+    if (orders.length === 0) return;
+
+    // A cancelled id must never be resurrected by the snapshot shield, whichever
+    // cancel path we came through.
+    for (const order of orders) this.markOrderSeen(order.id);
+
+    if (this.isDemo) {
+      this.store.removeOrders(orders.map(({ id }) => ({ id })));
+    }
+  };
+
+  /**
    * Re-add not-yet-sighted recent orders that a REST snapshot omitted. Runs on
    * the successful `fetchOrders` result so every wholesale replacement honors
    * it, whatever triggered the fetch.
@@ -2592,6 +2622,8 @@ export class BybitExchange extends BaseExchange {
       });
       if (data.retMsg !== 'OK') {
         if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
+          // Already gone is still gone — retire the rows.
+          this.retireCancelledOrders(orders);
           return;
         }
         this.emitAndLogError(data.retMsg);
@@ -2604,6 +2636,8 @@ export class BybitExchange extends BaseExchange {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);
       }
+
+      this.retireCancelledOrders(orders);
     });
   };
 
@@ -2611,6 +2645,10 @@ export class BybitExchange extends BaseExchange {
     const tpOrSLOrders = cancelTpSl
       ? []
       : this.store.orders.filter((o) => o.symbol === symbol && o.type !== OrderType.Limit);
+
+    // Snapshot the rows this cancel is about to invalidate, before the TP/SL
+    // re-placement below introduces new ones that must survive.
+    const cancelledRows = this.store.orders.filter((o) => o.symbol === symbol).map(({ id }) => ({ id }));
 
     const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
       category: this.getCategoryForSymbol(symbol),
@@ -2630,7 +2668,10 @@ export class BybitExchange extends BaseExchange {
 
     if (v(data, 'retMsg') !== 'OK') {
       this.emitAndLogError(v(data, 'retMsg'));
+      return;
     }
+
+    this.retireCancelledOrders(cancelledRows);
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {

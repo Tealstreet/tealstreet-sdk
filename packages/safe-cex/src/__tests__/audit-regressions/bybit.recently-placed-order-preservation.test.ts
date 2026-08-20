@@ -199,6 +199,91 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     await expect(exchange.fetchFillsForOrderIds(['filled-1'])).rejects.toThrow('bad request');
   });
 
+  // Demo drops private `order` frames and the periodic tick refetches positions
+  // and balance but NOT orders, so `handleOrderTopic` — the only path that
+  // removes an order row — never runs. A cancelled row injected at placement
+  // then sticks forever: a phantom resting order whose cancel button appears
+  // dead, because the UI's optimistic removal is undone by the next broadcast.
+  // Each chaser reprice cancels and replaces, so the debris accumulates.
+  it('retires cancelled rows from the demo store, since no WS frame will', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('stale-1'), makeOrder('keep-1')]);
+    exchange.unlimitedXHR = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
+    };
+
+    await exchange.cancelOrders([makeOrder('stale-1')]);
+
+    expect(store.orders.map((o: Order) => o.id)).toEqual(['keep-1']);
+  });
+
+  it('retires the row when Bybit reports the order was already gone', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('stale-1')]);
+    exchange.unlimitedXHR = {
+      post: async () => ({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: {},
+          retExtInfo: { list: [{ code: 110001, msg: 'order not exists or too late to cancel' }] },
+        },
+      }),
+    };
+
+    await exchange.cancelOrders([makeOrder('stale-1')]);
+
+    expect(store.orders).toEqual([]);
+  });
+
+  it('leaves the row alone when a cancel genuinely fails', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('live-1')]);
+    exchange.unlimitedXHR = {
+      post: async () => ({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: {},
+          retExtInfo: { list: [{ code: 10001, msg: 'insufficient permissions' }] },
+        },
+      }),
+    };
+
+    await expect(exchange.cancelOrders([makeOrder('live-1')])).rejects.toThrow('insufficient permissions');
+
+    expect(store.orders.map((o: Order) => o.id)).toEqual(['live-1']);
+  });
+
+  // Live Bybit has working `order` frames; removing locally there would race
+  // the WS-driven reconciliation that owns the row.
+  it('does not retire rows locally on live bybit', async () => {
+    const { exchange, store } = makeExchange(false);
+    store.addOrUpdateOrders([makeOrder('live-1')]);
+    exchange.unlimitedXHR = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
+    };
+
+    await exchange.cancelOrders([makeOrder('live-1')]);
+
+    expect(store.orders.map((o: Order) => o.id)).toEqual(['live-1']);
+  });
+
+  it('cancelSymbolOrders retires that symbol only, and marks the ids seen', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('eth-1', { symbol: 'ETHUSDT' }), makeOrder('btc-1')]);
+    seedRecentlyPlaced(exchange, makeOrder('eth-1', { symbol: 'ETHUSDT' }));
+    exchange.unlimitedXHR = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {} } }),
+    };
+
+    await exchange.cancelSymbolOrders('ETHUSDT');
+
+    expect(store.orders.map((o: Order) => o.id)).toEqual(['btc-1']);
+    // The shield must not resurrect it on the next snapshot.
+    expect(exchange.preserveRecentlyPlacedOrders([]).map((o: Order) => o.id)).toEqual([]);
+  });
+
   it('recordRecentlyPlacedOrder adds the row to the store on demo only', () => {
     const demo = makeExchange(true);
     demo.exchange.recordRecentlyPlacedOrder(makeOrder('demo-1'));
