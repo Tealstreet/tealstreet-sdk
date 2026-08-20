@@ -482,11 +482,12 @@ If the user has authorized the Tealstreet builder:
 
 Builder authorization is main-account scoped, not sub-account scoped. The check
 endpoint expects an empty request body and uses the authenticated session's main
-account. The browser-wallet authorization body must use the authenticated
-`funding_account_address` / `X-Grvt-Account-Id` as `main_account_id` and the
-EIP-712 `mainAccountID`; if the connected wallet differs from that funding
-address, fail in the UI with an actionable wallet-switch message rather than
-sending a payload GRVT rejects as `invalid main account ID`.
+account. The browser-wallet authorization body must use `X-Grvt-Account-Id`
+(falling back to `funding_account_address` only if needed) as `main_account_id`
+and the EIP-712 `mainAccountID`. Do not require the connected wallet address to
+equal that account id: API-key setups can sign with a wallet associated with the
+main account. The request body was the source of GRVT's `invalid main account
+ID` rejection, not signer-address inequality.
 
 ## Symbol Format
 

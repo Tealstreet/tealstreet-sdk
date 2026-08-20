@@ -682,17 +682,13 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
 
     // Prepare EIP-712 typed data
     const domain = getEIP712Domain(testnet);
-    const mainAccountId = authResult.fundingAccountAddress || authResult.accountId;
+    // `main_account_id` is the authenticated GRVT account, while
+    // `signature.signer` is the wallet that produced this signature. API-key
+    // setups can use a signer wallet that is associated with, but not equal to,
+    // the main account, so do not preflight equality here.
+    const mainAccountId = authResult.accountId || authResult.fundingAccountAddress;
     if (!mainAccountId || !isAddress(mainAccountId)) {
       return { success: false, message: 'GRVT authentication did not return a valid main account ID' };
-    }
-
-    if (signerAddress.toLowerCase() !== mainAccountId.toLowerCase()) {
-      return {
-        success: false,
-        message:
-          'Connected wallet does not match the GRVT main account for this API key. Switch to the funding wallet and try again.',
-      };
     }
 
     const message: AuthorizeBuilderMessage = {
