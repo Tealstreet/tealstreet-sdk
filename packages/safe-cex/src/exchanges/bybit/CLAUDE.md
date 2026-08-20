@@ -436,6 +436,13 @@ The update path depends on the order type:
   Chaser depends on private WS order events; injecting REST snapshots after every
   cancel/create/amend was observed to wipe just-placed Bybit Demo chaser orders
   from the local store and make the chaser stop and cancel itself.
+- `cancelOrders` calls `markOrderSeen` for every id up front, so the
+  recently-placed grace window can never resurrect an order we deliberately
+  cancelled.
+- `"order not exists or too late to cancel"` is treated as success, both as a
+  top-level `retMsg` and per-row in `retExtInfo.list`. The chaser cancels at the
+  touch, so an order can fill inside the cancel round trip; throwing there made
+  the chaser stop and abandon the chase. Genuine cancel errors still throw.
 - **Inter-batch delay**: 1000ms between cancel batches (`bybit.exchange.ts:1666`)
 
 ## Symbol Format
@@ -733,15 +740,49 @@ URL selection logic (`bybit.api.ts:27-29`):
 
 - Demo testnet fallback: `DEMO_URL.testnet` falls through to `api-testnet.bybit.com` (same as regular testnet)
 - Demo only supports `linear` category (no inverse or spot)
-- Bybit Demo private WS is not a Chaser-compatible degraded mode. REST snapshots
-  keep normal account state partially usable, but Chaser is fail-closed in
-  `webworker/chaserOrder` whenever `store.socketHealth` says the demo private
-  WS is not initialized/healthy or is reconnect-paused. This protects
-  geo-restricted users from running a cancel/replace loop on stale order events.
+- Demo's private WS drops `order` frames. `recordRecentlyPlacedOrder`
+  therefore upserts the just-placed row into the store on `isDemo` only
+  (`this.store.addOrUpdateOrders([order])`). Without it the row may never reach
+  the store at all: the UI shows nothing and the Chaser supervisor idles beside
+  an unmanaged resting order, so a second click places a DUPLICATE. Live Bybit
+  keeps its WS-driven flow untouched.
+- Chaser gates on demo private-WS health at **startup only**, and only when the
+  socket is genuinely dead (reconnect-paused, or never initialized after a short
+  grace window). See `webworker/chaserOrder/CLAUDE.md`; do not restore the
+  per-store-update runtime check, which killed live chases on routine `1006`
+  blips, and do not treat `privateHealthy === false` alone as fatal.
 - Do not reintroduce a generic create/amend/cancel REST snapshot backstop to make
   Bybit Demo Chaser work during private-WS degradation. That path caused
-  snapshot/order-event races; Chaser must rely on live private order updates or
-  refuse to run.
+  snapshot/order-event races. The correct protection is the recently-placed-order
+  shield below, not more snapshots.
+
+### Recently-placed order shielding
+
+`/v5/order/realtime` lags order creation, worst on `api-demo`. Several paths
+wholesale-replace `store.orders` from it — private-WS reconnect housekeeping
+(`base.ws.ts setupHouseKeepEventListener`), a `needsReinit` startup refetch, and
+the `SET_TRADING_STOP` backstop. A snapshot fetched before the venue indexed a
+just-placed order used to erase it from the store; the Chaser supervisor saw its
+live order "disappear", stopped itself, and cancelled that order on the exchange.
+
+`recentlyPlacedOrders` holds each just-placed id, and `fetchOrders` runs its
+result through `preserveRecentlyPlacedOrders`, so every wholesale replacement
+honors the shield regardless of what triggered the fetch. Rules that make this
+safe rather than dangerous:
+
+- An id leaves the map on its **first sighting anywhere** — REST snapshot,
+  private-WS frame (`markOrderSeen` in `bybit.ws-private.ts`), or our own cancel.
+- Protection also expires after `RECENTLY_PLACED_ORDER_GRACE_MS` (8s).
+- **Never widen this to already-sighted orders.** Once an order has been seen, a
+  later absence means filled or cancelled and MUST be honored, or the chaser will
+  re-place on top of a fill and overfill the user's target.
+- `preserveRecentlyPlacedOrders` prefers the live store row over the constructed
+  placement row, so observed fills are not rolled back.
+
+Guarded by `__tests__/audit-regressions/bybit.recently-placed-order-preservation.test.ts`.
+That file and the code it covers were both silently deleted once by an SDK
+mirror-sync commit (`3fd8301610`), which is how this regressed for two weeks —
+keep them together.
 
 ## Known Quirks / Implementation Notes
 

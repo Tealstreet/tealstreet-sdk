@@ -36,6 +36,7 @@ import {
   OrderBook,
   OrderHistoryOptions,
   OrderSide,
+  OrderStatus,
   OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
@@ -92,6 +93,11 @@ const PRIVATE_SNAPSHOT_REFRESH_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
+// How long a just-placed order is shielded from wholesale REST order-snapshot
+// replacement while no REST/WS sighting has confirmed it. Covers api-demo's
+// order-indexing lag with margin; short enough that a phantom row for an order
+// that filled before its first sighting cannot linger.
+const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
 
 class BybitTradingMarketsRequestError extends Error {
   constructor(readonly cause: unknown) {
@@ -101,6 +107,15 @@ class BybitTradingMarketsRequestError extends Error {
 }
 
 const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && BYBIT_POSITION_TPSL_MODES.has(mode);
+
+// An order that filled or was already cancelled between our decision to cancel
+// and the request landing. The chaser races this constantly: it cancels at the
+// touch, and the order can complete in the round trip. Treating it as a hard
+// failure made the chaser stop itself and abandon the chase.
+const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
+  const normalized = `${message || ''}`.toLowerCase();
+  return normalized.includes('order not exists') || normalized.includes('too late to cancel');
+};
 
 const isBybitLeverageNotModified = (data: Record<string, any>) => {
   const retCode = Number(v(data, 'retCode'));
@@ -274,6 +289,68 @@ export class BybitExchange extends BaseExchange {
 
   private scheduleSetTradingStopSnapshotRefresh = () => {
     this.debouncedPrivateSnapshotRefresh();
+  };
+
+  /**
+   * Orders placed moments ago that no REST snapshot or private-WS frame has
+   * confirmed yet. `/v5/order/realtime` lags order creation (worst on
+   * `api-demo`), so any wholesale order-snapshot replacement — private-WS
+   * reconnect housekeeping, a startup reinit, the SET_TRADING_STOP backstop —
+   * can fetch a list WITHOUT an order placed moments earlier and replace it out
+   * of the store. The chaser supervisor then sees its live order "disappear",
+   * stops itself, and cancels that order on the exchange: the demo "chaser does
+   * nothing" bug.
+   *
+   * An id leaves this map on its FIRST sighting anywhere (REST snapshot,
+   * private-WS order frame, or our own cancel) or after
+   * `RECENTLY_PLACED_ORDER_GRACE_MS`. Once an order has been seen, a later
+   * absence means filled/cancelled and MUST be honored — otherwise the chaser
+   * would re-place on top of a fill and overfill the user's target.
+   */
+  private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
+
+  /** First sighting via private WS or an explicit cancel — stop protecting the id. */
+  markOrderSeen = (orderId: string) => {
+    this.recentlyPlacedOrders.delete(orderId);
+  };
+
+  private recordRecentlyPlacedOrder = (order: Order) => {
+    this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
+    // Demo's private WS drops order events, so without this the row may never
+    // reach the store at all: the UI shows nothing and the chaser supervisor
+    // idles next to an unmanaged resting order (a second click would then place
+    // a DUPLICATE). Live bybit keeps its WS-driven flow untouched.
+    if (this.isDemo) {
+      this.store.addOrUpdateOrders([order]);
+    }
+  };
+
+  /**
+   * Re-add not-yet-sighted recent orders that a REST snapshot omitted. Runs on
+   * the successful `fetchOrders` result so every wholesale replacement honors
+   * it, whatever triggered the fetch.
+   */
+  private preserveRecentlyPlacedOrders = (fetched: Order[]): Order[] => {
+    if (this.recentlyPlacedOrders.size === 0) return fetched;
+
+    const now = virtualClock.getCurrentTimeMs();
+    const fetchedIds = new Set(fetched.map((o) => o.id));
+    const preserved: Order[] = [];
+
+    for (const [id, entry] of this.recentlyPlacedOrders) {
+      if (fetchedIds.has(id)) {
+        // REST has indexed it — normal reconciliation owns it from here on.
+        this.recentlyPlacedOrders.delete(id);
+        continue;
+      }
+      if (now - entry.placedAt > RECENTLY_PLACED_ORDER_GRACE_MS) {
+        this.recentlyPlacedOrders.delete(id);
+        continue;
+      }
+      preserved.push(this.store.orders.find((o) => o.id === id) ?? entry.order);
+    }
+
+    return preserved.length > 0 ? [...fetched, ...preserved] : fetched;
   };
 
   getAccount = async () => {
@@ -644,7 +721,9 @@ export class BybitExchange extends BaseExchange {
     const orders = await mapSeries(settleCoins, async (settleCoin) => {
       return this.fetchOrdersHelper('linear', settleCoin);
     });
-    return orders.flat();
+    // Every consumer of this result wholesale-replaces store.orders, so shield
+    // just-placed orders REST hasn't indexed yet (worst on api-demo).
+    return this.preserveRecentlyPlacedOrders(orders.flat());
   };
 
   fetchOrdersHelper = async (category: string, settleCoin?: string) => {
@@ -1884,20 +1963,20 @@ export class BybitExchange extends BaseExchange {
     const responses = await mapSeries(payloads, async (p) => {
       try {
         const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, p);
-        return data;
+        return { data, payload: p };
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.retMsg || err.message);
         return undefined;
       }
     });
 
-    const fullfilled = responses.filter((r) => r !== undefined);
+    const fullfilled = responses.filter((r): r is NonNullable<(typeof responses)[number]> => r !== undefined);
 
     let errMsg = '';
     fullfilled.forEach((resp) => {
-      if (v(resp, 'retMsg') !== 'OK') {
-        this.emitAndLogError(v(resp, 'retMsg'));
-        errMsg = v(resp, 'retMsg');
+      if (v(resp.data, 'retMsg') !== 'OK') {
+        this.emitAndLogError(v(resp.data, 'retMsg'));
+        errMsg = v(resp.data, 'retMsg');
       }
     });
 
@@ -1905,7 +1984,28 @@ export class BybitExchange extends BaseExchange {
       throw new Error(errMsg);
     }
 
-    return fullfilled.map((resp) => resp.result.orderId);
+    const placedAt = virtualClock.getCurrentTimeMs();
+    return fullfilled.map((resp) => {
+      const orderId = resp.data.result.orderId;
+      if (orderId) {
+        const qty = parseFloat(resp.payload.qty as string) || 0;
+        this.recordRecentlyPlacedOrder({
+          id: orderId,
+          status: OrderStatus.Open,
+          symbol: opts.symbol,
+          type,
+          side: opts.side,
+          price: price ?? triggerPrice ?? 0,
+          amount: qty,
+          filled: 0,
+          remaining: qty,
+          reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
+          timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
+          lastUpdate: placedAt,
+        });
+      }
+      return orderId;
+    });
   };
 
   placeStopLossOrTakeProfit = async (opts: PlaceOrderOpts) => {
@@ -2394,6 +2494,9 @@ export class BybitExchange extends BaseExchange {
     // fields hang off the parent limit order, so the parent's cancellation
     // already drops them. Without this filter, batch cancels containing
     // bracket-attached limits throw entirely on UNIFIED accounts.
+    // An explicit cancel counts as a sighting: the snapshot-preserve grace
+    // window must never resurrect an order we deliberately cancelled.
+    for (const order of orders) this.markOrderSeen(order.id);
     const filteredOrders = orders.filter((o) => !o.id.endsWith('__stop_loss') && !o.id.endsWith('__take_profit'));
     if (filteredOrders.length === 0) return;
 
@@ -2426,10 +2529,15 @@ export class BybitExchange extends BaseExchange {
         request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
       });
       if (data.retMsg !== 'OK') {
+        if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
+          return;
+        }
         this.emitAndLogError(data.retMsg);
         throw new Error(data.retMsg);
       }
-      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
+      const foundErr = data.retExtInfo?.list.find(
+        (l: any) => l.code !== 0 && !isBybitOrderAlreadyGoneCancelMessage(l.msg),
+      );
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);

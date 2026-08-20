@@ -47,6 +47,9 @@ const createStore = (symbol: string, quote: string, isInverse = false) => {
     tickersBySymbol: {},
     orders: [],
     positions: [],
+    // Demo placement optimistically upserts the just-placed row so the chaser
+    // can see its own order when the private WS drops the event.
+    addOrUpdateOrders: vi.fn(),
   } as any;
 };
 

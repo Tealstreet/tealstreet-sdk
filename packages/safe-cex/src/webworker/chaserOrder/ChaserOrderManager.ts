@@ -1,5 +1,6 @@
-import { sleep } from '@tealstreet/sleep/src/sleep';
 import type { Exchange } from '../../exchanges/base';
+
+import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Order,
   OrderFillEvent,
@@ -18,7 +19,9 @@ import { ChaserOrderInstance } from './ChaserOrderInstance';
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
 const CHASER_MISSING_ORDER_CONFIRMATIONS = 2;
-const BYBIT_DEMO_PRIVATE_WS_UNSAFE_STOP_REASON = 'Bybit Demo private WebSocket degraded';
+const BYBIT_DEMO_PRIVATE_WS_DEAD_STOP_REASON = 'Bybit Demo private WebSocket is not running';
+const BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_ATTEMPTS = 4;
+const BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_INTERVAL_MS = 500;
 
 // After observing a partial fill on the tracked order, freeze the
 // cancel+replace path for this long. The order is at the touch and
@@ -40,41 +43,70 @@ export class ChaserOrderManager {
     // console.log(`[CHASER${instance.id}] ${message}`);
   }
 
-  private getBybitDemoPrivateWsRisk(exchange: Exchange) {
+  /**
+   * Refuse to start a Bybit Demo chase only when its private WebSocket is
+   * genuinely not running — never merely unhealthy.
+   *
+   * `privateReconnectPaused` means the socket crossed its failure-streak
+   * threshold and stopped retrying, so no order event will ever arrive.
+   * `privateInitialized` stays false until the socket's first inbound frame, so
+   * it catches a socket that never came up (`waitForBybitDemoPrivateWs` below
+   * separates that from a cold start).
+   *
+   * Deliberately NOT refusal reasons:
+   * - `privateHealthy === false` alone. That is a socket that is down but still
+   *   retrying, and it recovers within seconds. This check used to also run on
+   *   every store update, so one routine 1006 close killed a live chase and
+   *   cancelled its resting order, turning a self-healing gap into certain
+   *   failure. What keeps the order safe across that gap is Bybit's
+   *   `recentlyPlacedOrders` snapshot shield, not stopping the chase.
+   * - Absent `socketHealth`. Missing telemetry is not evidence of a dead
+   *   socket; treating it as one blocked the chaser outright.
+   */
+  private getBybitDemoDeadPrivateWsReason(exchange: Exchange) {
     if (exchange.name !== 'bybitdemo') {
       return undefined;
     }
 
     const socketHealth = exchange.store.socketHealth;
     if (!socketHealth) {
-      return 'Bybit Demo private WebSocket health is unavailable';
-    }
-
-    const isPrivateReady = socketHealth.privateInitialized === true && socketHealth.privateHealthy === true;
-    if (isPrivateReady && socketHealth.privateReconnectPaused !== true) {
       return undefined;
     }
 
-    const details: string[] = [];
-    if (socketHealth.privateInitialized !== true) details.push('not initialized');
-    if (socketHealth.privateHealthy === false) details.push('unhealthy');
-    if (socketHealth.privateReconnectPaused === true) details.push('reconnect paused');
-    if (socketHealth.privateCloseCode !== undefined) details.push(`last close code ${socketHealth.privateCloseCode}`);
+    if (socketHealth.privateReconnectPaused === true) {
+      const closeCode = socketHealth.privateCloseCode;
+      return `reconnects are paused after repeated failures${
+        closeCode !== undefined ? ` (last close code ${closeCode})` : ''
+      }`;
+    }
 
-    return `Bybit Demo private WebSocket is degraded${details.length ? ` (${details.join(', ')})` : ''}`;
+    if (socketHealth.privateInitialized !== true) {
+      return 'it has never delivered a message';
+    }
+
+    return undefined;
   }
 
-  private async stopForBybitDemoPrivateWsRisk(
-    instance: ChaserOrderInstance,
-    phase: 'startup' | 'runtime',
-    risk: string,
-  ) {
-    const action = phase === 'startup' ? 'not started' : 'stopped';
-    const message = `Chaser ${action}: ${risk}. Chaser requires live private order updates and is not safe in REST-only mode from this network.`;
-    this.log(message, instance);
-    instance.markComplete(BYBIT_DEMO_PRIVATE_WS_UNSAFE_STOP_REASON);
-    instance.exchange.emitter.emit('error', message);
-    await this.cleanupInstance(instance);
+  /**
+   * `store.socketHealth` only republishes on the socket's first message and
+   * then on the 10s watchdog, so a just-connected account momentarily looks
+   * uninitialized. Give it a short grace window to prove itself instead of
+   * refusing a chase that would have been fine. A paused socket is
+   * already-decided and short-circuits.
+   */
+  private async waitForBybitDemoPrivateWs(exchange: Exchange) {
+    let reason = this.getBybitDemoDeadPrivateWsReason(exchange);
+
+    for (let attempt = 1; reason && attempt <= BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_ATTEMPTS; attempt++) {
+      if (exchange.store.socketHealth?.privateReconnectPaused === true) {
+        return reason;
+      }
+
+      await sleep(BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_INTERVAL_MS);
+      reason = this.getBybitDemoDeadPrivateWsReason(exchange);
+    }
+
+    return reason;
   }
 
   add(instance: ChaserOrderInstance) {
@@ -236,9 +268,18 @@ export class ChaserOrderManager {
     const exchange = instance.exchange;
 
     this.log(`processInstance starting for ${instance.options.symbol}`, instance);
-    const startupPrivateWsRisk = this.getBybitDemoPrivateWsRisk(exchange);
-    if (startupPrivateWsRisk) {
-      await this.stopForBybitDemoPrivateWsRisk(instance, 'startup', startupPrivateWsRisk);
+    const deadPrivateWsReason = await this.waitForBybitDemoPrivateWs(exchange);
+    if (deadPrivateWsReason) {
+      const message = `Chaser not started: the Bybit Demo private WebSocket is not running - ${deadPrivateWsReason}. Chaser needs live private order updates.`;
+      this.log(message, instance);
+      instance.markComplete(BYBIT_DEMO_PRIVATE_WS_DEAD_STOP_REASON);
+      exchange.emitter.emit('error', message);
+      await this.cleanupInstance(instance);
+      return;
+    }
+
+    if (instance.isStopped) {
+      await this.cleanupInstance(instance);
       return;
     }
 
@@ -378,10 +419,7 @@ export class ChaserOrderManager {
             // Order is currently filling — don't yank it out from under
             // an in-flight fill. See the constant's comment above for
             // the race this guards against.
-            this.log(
-              `hold steady: ${Date.now() - instance.lastPartialFillAt}ms since last partial fill`,
-              instance,
-            );
+            this.log(`hold steady: ${Date.now() - instance.lastPartialFillAt}ms since last partial fill`, instance);
             return;
           } else if (orderPrice !== lastPrice) {
             const ordersToCancel = orders.filter(
@@ -484,6 +522,10 @@ export class ChaserOrderManager {
 
           this.log('tracked orders absent across confirmed order updates; stopping safely', instance);
           instance.markComplete('Tracked orders disappeared from store');
+          exchange?.emitter.emit(
+            'warning',
+            `Chaser for ${instance.options.symbol} stopped: its order left the order book (filled or cancelled externally); any resting remainder was cancelled`,
+          );
           cleanup();
           await this.cleanupInstance(instance);
         }
@@ -562,12 +604,6 @@ export class ChaserOrderManager {
 
       onUpdate = async (data: StoreData) => {
         try {
-          const runtimePrivateWsRisk = this.getBybitDemoPrivateWsRisk(exchange);
-          if (runtimePrivateWsRisk) {
-            await this.stopForBybitDemoPrivateWsRisk(instance, 'runtime', runtimePrivateWsRisk);
-            return;
-          }
-
           if (instance.isStopped) {
             this.log('instance is stopped from outside, unsubbing', instance);
             instance.markComplete();
@@ -643,8 +679,14 @@ export class ChaserOrderManager {
       return;
     }
 
-    // We didn't manage to even start a chaser, marking complete
-    instance.markComplete();
+    // We didn't manage to even start a chaser. `tryPlaceOrders` returns [] for
+    // user-stop and after its own error-emitting failure paths (which already
+    // set a stop reason), but if we get here with the instance NOT stopped, the
+    // chaser is dying without anything having told the user.
+    if (!instance.isStopped) {
+      exchange.emitter.emit('warning', `Chaser for ${instance.options.symbol} could not start - no order was placed`);
+      instance.markComplete('No order placed');
+    }
     // cleanup routine
     await this.cleanupInstance(instance);
   }

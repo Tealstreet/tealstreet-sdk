@@ -366,7 +366,43 @@ describe('ChaserOrderManager', () => {
     );
   });
 
-  it('refuses to start a bybitdemo chaser when the private websocket is degraded', async () => {
+  it('refuses to start a bybitdemo chaser when private websocket reconnects are paused', async () => {
+    const { exchange, store } = createMockExchange();
+    (exchange as any).name = 'bybitdemo';
+    (store as any).socketHealth = {
+      publicHealthy: true,
+      privateHealthy: false,
+      publicInitialized: true,
+      privateInitialized: true,
+      privateReconnectPaused: true,
+      privateCloseCode: 1006,
+    };
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+    expect(instance.state.stopReason).toBe('Bybit Demo private WebSocket is not running');
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith(
+      'error',
+      expect.stringMatching(/reconnects are paused after repeated failures.*last close code 1006/i),
+    );
+  });
+
+  // A socket that is down but still retrying recovers on its own within
+  // seconds. Refusing here made every routine `1006` blip a failed chase; the
+  // Bybit snapshot shield is what keeps the resting order safe meanwhile.
+  it('still starts a bybitdemo chaser when the private websocket is unhealthy but retrying', async () => {
     const { exchange, store } = createMockExchange();
     (exchange as any).name = 'bybitdemo';
     (store as any).socketHealth = {
@@ -387,19 +423,51 @@ describe('ChaserOrderManager', () => {
     });
 
     manager.add(instance);
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
 
-    expect(exchange.placeOrder).not.toHaveBeenCalled();
-    expect(instance.state.stopReason).toBe('Bybit Demo private WebSocket degraded');
-    expect(manager.instances).not.toContain(instance);
-    expect(exchange.emitter.emit).toHaveBeenCalledWith(
-      'error',
-      expect.stringMatching(/Bybit Demo private WebSocket is degraded.*last close code 1006/i),
-    );
+    expect(exchange.placeOrder).toHaveBeenCalled();
+    expect(instance.isStopped).toBe(false);
+    expect(manager.instances).toContain(instance);
   });
 
-  it('stops an active bybitdemo chaser when the private websocket degrades', async () => {
-    const { emit, exchange, order, store } = createMockExchange();
+  it('starts a bybitdemo chaser once a cold private websocket initializes within the grace window', async () => {
+    const { exchange, store } = createMockExchange();
+    (exchange as any).name = 'bybitdemo';
+    (store as any).socketHealth = {
+      publicHealthy: true,
+      privateHealthy: false,
+      publicInitialized: true,
+      privateInitialized: false,
+    };
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+
+    (store as any).socketHealth = {
+      ...store.socketHealth!,
+      privateHealthy: true,
+      privateInitialized: true,
+    };
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(exchange.placeOrder).toHaveBeenCalled();
+    expect(instance.isStopped).toBe(false);
+  });
+
+  // The runtime health check used to run on every store update, so a single
+  // transient close killed a live chase and cancelled its resting order.
+  it('does not stop an active bybitdemo chaser when the private websocket blips', async () => {
+    const { emit, exchange, store } = createMockExchange();
     (exchange as any).name = 'bybitdemo';
     const manager = new ChaserOrderManager();
     const instance = new ChaserOrderInstance(exchange, {
@@ -422,13 +490,9 @@ describe('ChaserOrderManager', () => {
     };
     await emit('update', store);
 
-    expect(instance.state.stopReason).toBe('Bybit Demo private WebSocket degraded');
-    expect(manager.instances).not.toContain(instance);
-    expect(exchange.cancelOrders).toHaveBeenCalledWith([order]);
-    expect(exchange.emitter.emit).toHaveBeenCalledWith(
-      'error',
-      expect.stringMatching(/Chaser stopped: Bybit Demo private WebSocket is degraded/i),
-    );
+    expect(instance.isStopped).toBe(false);
+    expect(manager.instances).toContain(instance);
+    expect(exchange.cancelOrders).not.toHaveBeenCalled();
   });
 
   it('contains store-update failures instead of leaking an unhandled rejection', async () => {
@@ -539,9 +603,32 @@ describe('ChaserOrderManager', () => {
 
     expect(instance.state.stopReason).toBe('Tracked orders disappeared from store');
     expect(manager.instances).not.toContain(instance);
-    expect(exchange.cancelOrders).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
-    ]);
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' })]);
+    // This path completing silently is how the Bybit demo bug went unreported
+    // for two weeks. It must always tell the user why the chase ended.
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('warning', expect.stringMatching(/left the order book/i));
+  });
+
+  it('warns the user when a chaser cannot place its first order', async () => {
+    const { exchange } = createMockExchange();
+    (exchange.placeOrder as any).mockReset();
+    (exchange.placeOrder as any).mockResolvedValue([]);
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(instance.isStopped).toBe(true);
+    expect(manager.instances).not.toContain(instance);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringMatching(/failed to place orders/i));
   });
 
   it('cancels orders placed during the user-cancel window so STOP fully clears the book', async () => {
@@ -648,9 +735,7 @@ describe('ChaserOrderManager', () => {
     expect(instance.isStopped).toBe(true);
     expect(manager.instances).not.toContain(instance);
     expect(exchange.off).toHaveBeenCalledWith('update', expect.any(Function));
-    expect(exchange.cancelOrders).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' }),
-    ]);
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([expect.objectContaining({ id: 'order-1', symbol: 'BTCUSDT' })]);
     expect(exchange.emitter.emit).toHaveBeenCalledWith(
       'warning',
       expect.stringMatching(/stopped because the exchange connection was disposed/i),

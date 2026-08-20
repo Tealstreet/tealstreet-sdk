@@ -78,6 +78,15 @@ notifications do not count, and seeing the order again resets the confirmation.
 On confirmed loss it uses `cleanupInstance`, so the last known IDs are cancelled
 instead of leaving a resting order without a supervisor.
 
+## A chase must never die silently
+
+Two paths end a chase without any error having been emitted: confirmed loss of
+the tracked orders, and falling off the end of `processInstance` with no order
+placed. Both emit a `'warning'` on the exchange emitter. Keep it that way — the
+Bybit demo bug went unreported for two weeks precisely because these paths were
+quiet, and the user could not tell a stopped chaser from a working one. Paths
+that already emitted their own error, and user-initiated stops, stay quiet.
+
 ## Supervisor failures are contained locally
 
 `processInstance`, store-update handlers, queued ticker checks, and fill
@@ -95,14 +104,29 @@ the canonical normalized view, and the `'update'` event is
 exchange-agnostic. The chaser doesn't need to know how Bybit
 reports a fill vs how Hyperliquid does.
 
-**Bybit Demo private WS is a hard safety gate.** `bybitdemo` can keep trading
-usable through REST snapshots while its private WebSocket is unavailable or
-geo-blocked, but Chaser needs live private order updates to avoid stale
-cancel/replace decisions. The manager refuses to start, and stops an active
-instance, when `store.socketHealth.privateInitialized/privateHealthy` or
-`privateReconnectPaused` says the Bybit Demo private WS is not good. Do not
-weaken this to a warning-only path unless Chaser gets an authoritative
-fill/order reconciliation model for Bybit Demo.
+**Bybit Demo private WS gates startup only, and only when the socket is dead.**
+Chaser needs live private order updates, so `getBybitDemoDeadPrivateWsReason`
+refuses to start a `bybitdemo` chase when `store.socketHealth` reports
+`privateReconnectPaused` (the socket crossed its failure-streak threshold and
+stopped retrying) or `privateInitialized !== true` after the short
+`waitForBybitDemoPrivateWs` grace window.
+
+Three things this check must NOT do, each of which broke chasers in production:
+
+- **Do not treat `privateHealthy === false` alone as a refusal.** That is a
+  socket that is down but still retrying, and it recovers within seconds.
+- **Do not run the check on every store update.** It used to, so a single
+  routine `1006` close stopped a live chase and cancelled its resting order —
+  converting a self-healing gap into certain failure.
+- **Do not treat missing `socketHealth` as a dead socket.** Absent telemetry is
+  not evidence of failure; `privateInitialized` only flips true on the socket's
+  first inbound frame and the store republishes health on a 10s watchdog, so a
+  cold start momentarily looks dead.
+
+What keeps an order safe across a WS gap is not stopping the chase — it is
+Bybit's `recentlyPlacedOrders` snapshot shield (see `exchanges/bybit/CLAUDE.md`),
+which prevents a wholesale REST order snapshot from erasing a just-placed order
+before its first sighting.
 
 Do not compensate by forcing Bybit Demo REST order snapshots after generic
 create/amend/cancel mutations. Those snapshots can be fetched before the
