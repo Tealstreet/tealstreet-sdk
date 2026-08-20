@@ -181,6 +181,15 @@ Both surfaces now accept the same three names; keep them in sync if either moves
 "token expired" — the proxy rejects both identically, but the second reports
 `Logged in … Token expires in: 0 days`.
 
+### `account add` must use the shared account contract
+
+Manual `account add` and account import surfaces must call
+`@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig` before saving.
+That safe-cex module owns exchange-specific required fields (for example
+Paradex `apiKey` + `paradexAddress` + `subkeyAddress`) and routing
+normalization. Do not add CLI-local `SUPPORTED_EXCHANGES` maps or hand-built
+credential schemas.
+
 ### `account add` must be able to set routing
 
 `platform-adapter.ts` has always honored `tealstreetProxy` / `tealstreetTunnel` /

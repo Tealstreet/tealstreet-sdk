@@ -1,113 +1,22 @@
 import { createExchangeFromAccount } from '../../../packages/safe-cex/src/createExchangeFromAccount';
 import type { BaseExchange } from '../../../packages/safe-cex/src/exchanges/base';
+import {
+  getExchangeAccountCredentialSchema,
+  getSupportedExchangeAccountNames,
+} from '../../../packages/safe-cex/src/accounts/buildExchangeAccountConfig';
 import type { AccountConfig } from './config';
 
-// Supported exchanges with their required fields
-export const SUPPORTED_EXCHANGES: Record<
-  string,
-  {
-    displayName: string;
-    requiredFields: ('apiKey' | 'apiSecret' | 'passphrase' | 'privateKey' | 'walletAddress')[];
-    optionalFields: ('testnet' | 'passphrase')[];
-  }
-> = {
-  bybit: {
-    displayName: 'Bybit',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: ['testnet'],
-  },
-  binance: {
-    displayName: 'Binance Futures',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: ['testnet'],
-  },
-  hyperliquid: {
-    displayName: 'Hyperliquid',
-    requiredFields: ['privateKey', 'walletAddress'],
-    optionalFields: ['testnet'],
-  },
-  blofin: {
-    displayName: 'BloFin',
-    requiredFields: ['apiKey', 'apiSecret', 'passphrase'],
-    optionalFields: [],
-  },
-  bitget: {
-    displayName: 'Bitget',
-    requiredFields: ['apiKey', 'apiSecret', 'passphrase'],
-    optionalFields: [],
-  },
-  woo: {
-    displayName: 'WOO X',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: [],
-  },
-  okx: {
-    displayName: 'OKX',
-    requiredFields: ['apiKey', 'apiSecret', 'passphrase'],
-    optionalFields: ['testnet'],
-  },
-  okxeu: {
-    displayName: 'OKX EU',
-    requiredFields: ['apiKey', 'apiSecret', 'passphrase'],
-    optionalFields: ['testnet'],
-  },
-  bitmex: {
-    displayName: 'BitMEX',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: ['testnet'],
-  },
-  coinbase: {
-    displayName: 'Coinbase',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: [],
-  },
-  kraken: {
-    displayName: 'Kraken',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: [],
-  },
-  kucoin: {
-    displayName: 'KuCoin',
-    requiredFields: ['apiKey', 'apiSecret', 'passphrase'],
-    optionalFields: [],
-  },
-  phemex: {
-    displayName: 'Phemex',
-    requiredFields: ['apiKey', 'apiSecret'],
-    optionalFields: ['testnet'],
-  },
-  paradex: {
-    displayName: 'Paradex',
-    requiredFields: ['privateKey', 'walletAddress'],
-    optionalFields: ['testnet'],
-  },
-};
-
 export function getSupportedExchangeNames(): string[] {
-  return Object.keys(SUPPORTED_EXCHANGES);
+  return getSupportedExchangeAccountNames();
 }
 
 export function getExchangeInfo(name: string) {
-  return SUPPORTED_EXCHANGES[name.toLowerCase()];
+  return getExchangeAccountCredentialSchema(name);
 }
 
 /**
- * Build a `BaseExchange` from a CLI account config. This file's
- * `SUPPORTED_EXCHANGES` map is unused by other apps/cli modules (only its own
- * `getSupportedExchangeNames` / `getExchangeInfo` helpers reach it, and those
- * have no external consumers — `apps/cli/src/index.ts` carries its own
- * duplicate map for the Commander-level UX). The exchange create/start/stop
- * helpers below are also unconsumed today; kept in place because the file is
- * load-bearing for callers that might surface in the embedded-CLI / serve
- * paths. Marked as dead-but-preserved per root CLAUDE.md ("Mention unrelated
- * dead code — don't delete it").
- *
- * Implementation note: the original handwritten `ExchangeOptions` mapping was
- * incomplete (it carried `privateKey` / `walletAddress` top-level fields that
- * never existed in the canonical `ExchangeOptions` shape). Replaced with the
- * canonical `createExchangeFromAccount` helper from safe-cex so wallet-based
- * exchanges (Hyperliquid and Paradex) get their auth fields routed
- * through the same translation layer the web app uses.
+ * Build a `BaseExchange` from a CLI account config using the same account →
+ * exchange-options conversion used by web and every other runtime.
  */
 export async function createExchangeFromConfig(account: AccountConfig): Promise<BaseExchange> {
   return createExchangeFromAccount(account);
