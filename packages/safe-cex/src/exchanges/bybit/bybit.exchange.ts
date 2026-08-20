@@ -98,6 +98,8 @@ const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
 // order-indexing lag with margin; short enough that a phantom row for an order
 // that filled before its first sighting cannot linger.
 const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
+const RETIRED_ORDER_SYMBOL_TTL_MS = 60_000;
+const FILL_RECONCILIATION_MAX_PAGES = 20;
 
 class BybitTradingMarketsRequestError extends Error {
   constructor(readonly cause: unknown) {
@@ -343,16 +345,50 @@ export class BybitExchange extends BaseExchange {
    *
    * Live Bybit keeps its WS-driven removal untouched.
    */
-  private retireCancelledOrders = (orders: Array<Pick<Order, 'id'>>) => {
+  private retireCancelledOrders = (orders: Array<Pick<Order, 'id' | 'symbol'>>) => {
     if (orders.length === 0) return;
 
-    // A cancelled id must never be resurrected by the snapshot shield, whichever
-    // cancel path we came through.
-    for (const order of orders) this.markOrderSeen(order.id);
+    const retiredAt = virtualClock.getCurrentTimeMs();
+    for (const order of orders) {
+      // A cancelled id must never be resurrected by the snapshot shield,
+      // whichever cancel path we came through.
+      this.markOrderSeen(order.id);
+      // Retiring the row removes the only record of the order's symbol, which
+      // fill reconciliation needs immediately afterwards. See
+      // `resolveOrderSymbolForFills`.
+      if (order.symbol) {
+        this.retiredOrderSymbols.set(order.id, { symbol: order.symbol, retiredAt });
+      }
+    }
 
     if (this.isDemo) {
       this.store.removeOrders(orders.map(({ id }) => ({ id })));
     }
+  };
+
+  /**
+   * Symbol memory for orders we just retired, so `fetchFillsForOrderIds` can
+   * still resolve a category after the row has left the store.
+   *
+   * The chaser cancels, then reconciles fills, then replaces. On demo the cancel
+   * now removes the row, so a store-only symbol lookup returned nothing, every
+   * requested id was skipped, and the empty result read as "no fills" —
+   * replacing on top of a fill and overfilling the target.
+   */
+  private retiredOrderSymbols = new Map<string, { symbol: string; retiredAt: number }>();
+
+  private resolveOrderSymbolForFills = (orderId: string) => {
+    const live = this.store.orders.find((order) => order.id === orderId)?.symbol;
+    if (live) return live;
+
+    const now = virtualClock.getCurrentTimeMs();
+    for (const [id, entry] of this.retiredOrderSymbols) {
+      if (now - entry.retiredAt > RETIRED_ORDER_SYMBOL_TTL_MS) {
+        this.retiredOrderSymbols.delete(id);
+      }
+    }
+
+    return this.retiredOrderSymbols.get(orderId)?.symbol ?? this.recentlyPlacedOrders.get(orderId)?.order.symbol;
   };
 
   /**
@@ -1633,8 +1669,13 @@ export class BybitExchange extends BaseExchange {
    *
    * The chaser needs this on Bybit Demo, where the private WebSocket may never
    * deliver an order update: without a fill source the manager cannot tell a
-   * filled order from a vanished one. Orders absent from `store.orders` are
-   * skipped, since the symbol is required to pick a category.
+   * filled order from a vanished one.
+   *
+   * Fails closed in both directions, because the chaser replaces orders on the
+   * strength of this result — an under-report reads as "no fills" and overfills
+   * the user's target:
+   * - An id whose symbol cannot be resolved throws rather than being skipped.
+   * - Executions are paged to exhaustion, not read one page deep.
    */
   fetchFillsForOrderIds = async (orderIds: string[]): Promise<Map<string, number>> => {
     const fillsByOrderId = new Map<string, number>();
@@ -1642,45 +1683,48 @@ export class BybitExchange extends BaseExchange {
       return fillsByOrderId;
     }
 
-    const requestedOrderIds = new Set(orderIds.map((orderId) => String(orderId)));
-    const symbolByOrderId = new Map<string, string>();
-    for (const order of this.store.orders) {
-      if (requestedOrderIds.has(order.id)) {
-        symbolByOrderId.set(order.id, order.symbol);
-      }
-    }
+    const requestedOrderIds = [...new Set(orderIds.map((orderId) => String(orderId)))];
 
     try {
-      await mapSeries([...requestedOrderIds], async (orderId) => {
-        const symbol = symbolByOrderId.get(orderId);
+      await mapSeries(requestedOrderIds, async (orderId) => {
+        const symbol = this.resolveOrderSymbolForFills(orderId);
         if (!symbol) {
-          return;
+          throw new Error(`cannot resolve a symbol for order ${orderId}`);
         }
 
-        const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, {
-          params: {
-            category: this.getCategoryForSymbol(symbol),
-            symbol,
-            orderId,
-            limit: 50,
-          },
-        });
-        const retMsg = `${v(data, 'retMsg') || 'UNKNOWN'}`;
-        if (retMsg !== 'OK') {
-          throw new Error(retMsg);
-        }
+        const category = this.getCategoryForSymbol(symbol);
+        let cursor = '';
 
-        const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
-        for (const exec of executionsList) {
-          if (`${exec.orderId ?? ''}` !== orderId) {
-            continue;
+        for (let page = 1; page <= FILL_RECONCILIATION_MAX_PAGES; page++) {
+          const params: Record<string, any> = { category, symbol, orderId, limit: 50 };
+          if (cursor) params.cursor = cursor;
+
+          const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, { params });
+          const retMsg = `${v(data, 'retMsg') || 'UNKNOWN'}`;
+          if (retMsg !== 'OK') {
+            throw new Error(retMsg);
           }
 
-          const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
-          if (Number.isFinite(qty) && qty > 0) {
-            fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + qty);
+          const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
+          for (const exec of executionsList) {
+            if (`${exec.orderId ?? ''}` !== orderId) {
+              continue;
+            }
+
+            const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
+            if (Number.isFinite(qty) && qty > 0) {
+              fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + qty);
+            }
           }
+
+          const nextCursor = `${data?.result?.nextPageCursor || ''}`;
+          if (!nextCursor || nextCursor === cursor) {
+            return;
+          }
+          cursor = nextCursor;
         }
+
+        throw new Error(`fill history for order ${orderId} exceeded ${FILL_RECONCILIATION_MAX_PAGES} pages`);
       });
 
       return fillsByOrderId;
@@ -2648,7 +2692,9 @@ export class BybitExchange extends BaseExchange {
 
     // Snapshot the rows this cancel is about to invalidate, before the TP/SL
     // re-placement below introduces new ones that must survive.
-    const cancelledRows = this.store.orders.filter((o) => o.symbol === symbol).map(({ id }) => ({ id }));
+    const cancelledRows = this.store.orders
+      .filter((o) => o.symbol === symbol)
+      .map(({ id, symbol: orderSymbol }) => ({ id, symbol: orderSymbol }));
 
     const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
       category: this.getCategoryForSymbol(symbol),

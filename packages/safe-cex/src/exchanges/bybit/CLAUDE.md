@@ -825,12 +825,23 @@ chaser's cancel-replace reconciliation and the Bybit Demo REST fallback both
 depend on it: when the private WebSocket never delivers order frames, this is
 the only way to tell a filled order from a vanished one.
 
-- Orders missing from `store.orders` are skipped, because the symbol is required
-  to resolve a category.
-- It **fails closed** — a non-`OK` `retMsg` throws rather than reporting zero
-  fills. A silent zero would let the chaser replace on top of a fill.
+The chaser replaces orders on the strength of this result, so **every failure
+mode has to be loud**. An under-report is indistinguishable from "no fills" and
+makes the chaser replace on top of a fill, overfilling the user's target.
+
+- **A symbol it cannot resolve throws, it is never skipped.** The symbol comes
+  from `store.orders`, then `retiredOrderSymbols`, then `recentlyPlacedOrders`.
+  The middle one exists because the chaser cancels, reconciles, then replaces —
+  and on demo the cancel retires the row, so a store-only lookup found nothing
+  and silently skipped every id. That returned an empty map and overfilled.
+- **Executions are paged to exhaustion**, capped by
+  `FILL_RECONCILIATION_MAX_PAGES`; blowing the cap throws. A single-page read
+  under-reports an order filled in more than 50 tranches.
+- A non-`OK` `retMsg` throws rather than reporting zero fills.
 - Rows are filtered by exact `orderId` match; `USER_TRADES` can return
   neighbouring executions for the symbol.
+- Cost is one paged `USER_TRADES` walk per requested id, sequential via
+  `mapSeries`. Normally one id per reprice.
 
 ## Known Quirks / Implementation Notes
 

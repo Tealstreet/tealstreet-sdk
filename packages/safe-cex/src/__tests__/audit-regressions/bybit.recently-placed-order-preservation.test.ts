@@ -189,6 +189,63 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     await expect(exchange.fetchFillsForOrderIds(['filled-1'])).resolves.toEqual(new Map([['filled-1', 1]]));
   });
 
+  // The chaser cancels, reconciles fills, then replaces. Demo retirement removes
+  // the row in step one, so a store-only symbol lookup found nothing in step two
+  // and every id was silently skipped — the empty map read as "no fills" and the
+  // replacement overfilled the target.
+  it('still reconciles fills for an order whose row was just retired', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('chased-1')]);
+    exchange.unlimitedXHR = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
+    };
+    exchange.xhr = {
+      get: async () => ({
+        data: { retCode: 0, retMsg: 'OK', result: { list: [{ orderId: 'chased-1', execQty: '0.25' }] } },
+      }),
+    };
+
+    await exchange.cancelOrders([makeOrder('chased-1')]);
+    expect(store.orders).toEqual([]);
+
+    await expect(exchange.fetchFillsForOrderIds(['chased-1'])).resolves.toEqual(new Map([['chased-1', 0.25]]));
+  });
+
+  it('throws rather than under-reporting when a symbol cannot be resolved', async () => {
+    const { exchange } = makeExchange(true);
+
+    await expect(exchange.fetchFillsForOrderIds(['never-seen'])).rejects.toThrow(/cannot resolve a symbol/i);
+  });
+
+  it('pages execution history to exhaustion before reporting fills', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('big-1')]);
+    const pages = [
+      { list: [{ orderId: 'big-1', execQty: '0.5' }], nextPageCursor: 'page-2' },
+      { list: [{ orderId: 'big-1', execQty: '0.25' }], nextPageCursor: '' },
+    ];
+    let call = 0;
+    exchange.xhr = {
+      get: async () => ({ data: { retCode: 0, retMsg: 'OK', result: pages[call++] } }),
+    };
+
+    await expect(exchange.fetchFillsForOrderIds(['big-1'])).resolves.toEqual(new Map([['big-1', 0.75]]));
+    expect(call).toBe(2);
+  });
+
+  it('fails closed when execution history will not stop paging', async () => {
+    const { exchange, store } = makeExchange(true);
+    store.addOrUpdateOrders([makeOrder('loop-1')]);
+    let cursor = 0;
+    exchange.xhr = {
+      get: async () => ({
+        data: { retCode: 0, retMsg: 'OK', result: { list: [], nextPageCursor: `cursor-${cursor++}` } },
+      }),
+    };
+
+    await expect(exchange.fetchFillsForOrderIds(['loop-1'])).rejects.toThrow(/exceeded 20 pages/i);
+  });
+
   it('fails closed when Bybit fill reconciliation errors', async () => {
     const { exchange, store } = makeExchange();
     store.addOrUpdateOrders([makeOrder('filled-1')]);
