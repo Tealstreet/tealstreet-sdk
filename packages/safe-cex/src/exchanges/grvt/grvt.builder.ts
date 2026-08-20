@@ -147,6 +147,11 @@ interface AuthorizeBuilderMessage {
 // GRVT proxy — requires Tealstreet-Authorization header
 const GRVT_PROXY_URL = PRIVATE_PROXY_GRVT_TINY;
 
+const getStringField = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+
+const getValidAddress = (...values: Array<string | undefined>): string | undefined =>
+  values.find((value) => value !== undefined && isAddress(value));
+
 /**
  * Get GRVT Edge API base URL for authentication endpoints (via proxy)
  */
@@ -250,7 +255,10 @@ const authenticateGrvt = async (
     // Get the account ID from response header
     const accountId = response.headers.get('x-grvt-account-id');
     const fundingAccountAddress =
-      typeof responseData.funding_account_address === 'string' ? responseData.funding_account_address : undefined;
+      getStringField(responseData.funding_account_address) ??
+      getStringField(responseData.fundingAccountAddress) ??
+      getStringField(responseData.main_account_id) ??
+      getStringField(responseData.ma);
     // Get session cookie from proxy's custom header (browser can't read Set-Cookie due to CORS)
     const sessionCookie = response.headers.get('x-ts-grvt-session');
 
@@ -275,6 +283,51 @@ const authenticateGrvt = async (
         ? 'GRVT authentication timed out (10s)'
         : error.message || 'Failed to authenticate with GRVT';
     return { success: false, message };
+  }
+};
+
+const fetchGrvtMainAccountId = async (
+  testnet: boolean,
+  proxyToken: string,
+  authResult: { accountId?: string; sessionCookie?: string },
+): Promise<string | undefined> => {
+  const apiUrl = getGrvtTradingApiUrl(testnet);
+  const requestHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Tealstreet-Authorization': `Bearer ${proxyToken}`,
+  };
+
+  if (authResult.accountId) {
+    requestHeaders['X-Grvt-Account-Id'] = authResult.accountId;
+  }
+  if (authResult.sessionCookie) {
+    requestHeaders['X-Ts-Grvt-Session'] = authResult.sessionCookie;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${apiUrl}/full/v1/aggregated_account_summary`, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: JSON.stringify({}),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const data = (await response.json().catch(() => ({}))) as Record<string, any>;
+    const result = data.result || data.r || data;
+    return getValidAddress(
+      getStringField(result.main_account_id),
+      getStringField(result.ma),
+      getStringField(data.main_account_id),
+      getStringField(data.ma),
+    );
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 
@@ -682,12 +735,14 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
 
     // Prepare EIP-712 typed data
     const domain = getEIP712Domain(testnet);
-    // `main_account_id` is the authenticated GRVT account, while
-    // `signature.signer` is the wallet that produced this signature. API-key
-    // setups can use a signer wallet that is associated with, but not equal to,
-    // the main account, so do not preflight equality here.
-    const mainAccountId = authResult.accountId || authResult.fundingAccountAddress;
-    if (!mainAccountId || !isAddress(mainAccountId)) {
+    // `main_account_id` is the authenticated GRVT funding/main account, while
+    // `signature.signer` is the wallet that produced this signature. Some auth
+    // responses put a non-address account id in `X-Grvt-Account-Id`, so prefer
+    // address-shaped values and fall back to account summary when auth omits one.
+    const mainAccountId =
+      getValidAddress(authResult.fundingAccountAddress, authResult.accountId) ||
+      (await fetchGrvtMainAccountId(testnet, proxyToken, authResult));
+    if (!mainAccountId) {
       return { success: false, message: 'GRVT authentication did not return a valid main account ID' };
     }
 
