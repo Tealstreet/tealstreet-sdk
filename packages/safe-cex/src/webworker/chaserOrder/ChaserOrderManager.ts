@@ -19,7 +19,6 @@ import { ChaserOrderInstance } from './ChaserOrderInstance';
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
 const CHASER_MISSING_ORDER_CONFIRMATIONS = 2;
-const BYBIT_DEMO_PRIVATE_WS_DEAD_STOP_REASON = 'Bybit Demo private WebSocket is not running';
 const BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_ATTEMPTS = 4;
 const BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_INTERVAL_MS = 500;
 
@@ -44,8 +43,14 @@ export class ChaserOrderManager {
   }
 
   /**
-   * Refuse to start a Bybit Demo chase only when its private WebSocket is
-   * genuinely not running — never merely unhealthy.
+   * Detect that a Bybit Demo private WebSocket is genuinely not running, so the
+   * chase can announce that it is reconciling over REST instead.
+   *
+   * This is a diagnostic, **not** a refusal. Degraded or absent private
+   * connectivity is an expected mode on Bybit Demo in geo-restricted regions,
+   * and refusing to chase there simply removed the feature for those users. The
+   * REST fallback — `fetchFillsForOrderIds` plus the target-position completion
+   * check — exists precisely so a chase still works without private frames.
    *
    * `privateReconnectPaused` means the socket crossed its failure-streak
    * threshold and stopped retrying, so no order event will ever arrive.
@@ -53,7 +58,7 @@ export class ChaserOrderManager {
    * it catches a socket that never came up (`waitForBybitDemoPrivateWs` below
    * separates that from a cold start).
    *
-   * Deliberately NOT refusal reasons:
+   * Deliberately NOT signals:
    * - `privateHealthy === false` alone. That is a socket that is down but still
    *   retrying, and it recovers within seconds. This check used to also run on
    *   every store update, so one routine 1006 close killed a live chase and
@@ -127,6 +132,32 @@ export class ChaserOrderManager {
 
   private getCurrentOrders(instance: ChaserOrderInstance) {
     return instance.exchange.store.orders.filter((order) => instance.currentOrderIds.includes(order.id)) || [];
+  }
+
+  /**
+   * Position-size completion check for Bybit Demo.
+   *
+   * When the private WebSocket never delivers order updates, the order-status
+   * path can never observe a fill, so the chase would run forever against an
+   * order that is already done. The position row still arrives over REST
+   * polling, so reaching the target contract count is treated as completion.
+   * Entry-only: a reduce-only chase has its own position-gone check.
+   */
+  private hasReachedTargetPosition(instance: ChaserOrderInstance) {
+    if (
+      instance.exchange.name !== 'bybitdemo' ||
+      instance.options.reduceOnly ||
+      instance.targetPositionContracts === undefined
+    ) {
+      return false;
+    }
+
+    const targetSide = instance.options.side === OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+    const position = (instance.exchange.store.positions || []).find(
+      (p) => p.symbol === instance.options.symbol && p.side === targetSide,
+    );
+    const contracts = Math.abs(position?.contracts || 0);
+    return contracts >= instance.targetPositionContracts - 1e-12;
   }
 
   private findBestPrice(instance: ChaserOrderInstance) {
@@ -270,12 +301,12 @@ export class ChaserOrderManager {
     this.log(`processInstance starting for ${instance.options.symbol}`, instance);
     const deadPrivateWsReason = await this.waitForBybitDemoPrivateWs(exchange);
     if (deadPrivateWsReason) {
-      const message = `Chaser not started: the Bybit Demo private WebSocket is not running - ${deadPrivateWsReason}. Chaser needs live private order updates.`;
+      const message =
+        `Chaser for ${instance.options.symbol} is reconciling over REST: the Bybit Demo private WebSocket is not running - ${deadPrivateWsReason}. ` +
+        `Fills are recovered from REST fill history and position size, so completion can lag by a poll interval. ` +
+        `A VPN or Tealstreet IP routing usually restores the private socket.`;
       this.log(message, instance);
-      instance.markComplete(BYBIT_DEMO_PRIVATE_WS_DEAD_STOP_REASON);
-      exchange.emitter.emit('error', message);
-      await this.cleanupInstance(instance);
-      return;
+      exchange.emitter.emit('warning', message);
     }
 
     if (instance.isStopped) {
@@ -290,7 +321,8 @@ export class ChaserOrderManager {
     if (instance.currentOrderIds.length > 0) {
       // Use fill-based tracking for exchanges where order status updates may be delayed
       // or missed during cancel/replace cycles (pendingOrdersUpdate race condition)
-      const useFillBasedTracking = exchange.name === 'hyperliquid' || exchange.name === 'grvt';
+      const useFillBasedTracking =
+        exchange.name === 'hyperliquid' || exchange.name === 'grvt' || exchange.name === 'bybitdemo';
       this.log(`monitoring started, useFillBasedTracking=${useFillBasedTracking}`, instance);
       let priceCheckTimeout: ReturnType<typeof setTimeout> | undefined;
       let queuedOrdersTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -379,7 +411,7 @@ export class ChaserOrderManager {
           // check if reduce only and position is already gone
           if (instance.options.reduceOnly) {
             if (
-              !exchange?.store.positions.find(
+              !(exchange?.store.positions || []).find(
                 (position) =>
                   position.symbol === instance.options.symbol &&
                   position.side ===
@@ -422,6 +454,13 @@ export class ChaserOrderManager {
             this.log(`hold steady: ${Date.now() - instance.lastPartialFillAt}ms since last partial fill`, instance);
             return;
           } else if (orderPrice !== lastPrice) {
+            instance.incrementAttempts();
+            if (instance.isStopped) {
+              cleanup();
+              await this.cleanupInstance(instance);
+              return;
+            }
+
             const ordersToCancel = orders.filter(
               (order) => order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
             );
@@ -500,6 +539,7 @@ export class ChaserOrderManager {
       };
 
       let lastOrdersUpdateId = -1;
+      let lastPositionsUpdateId = -1;
       let lastPriceCheckAt = 0;
 
       const handleTrackedOrders = async (orders: Order[], confirmMissingOrders: boolean) => {
@@ -556,6 +596,14 @@ export class ChaserOrderManager {
             await this.cleanupInstance(instance);
             return;
           }
+        }
+
+        if (this.hasReachedTargetPosition(instance)) {
+          this.log('target position reached - marking ourselves completed', instance);
+          instance.markComplete();
+          cleanup();
+          await this.cleanupInstance(instance);
+          return;
         }
 
         await handleTrackedOrders(orders, confirmMissingOrders);
@@ -617,8 +665,17 @@ export class ChaserOrderManager {
           if (ordersUpdateId !== undefined) {
             lastOrdersUpdateId = ordersUpdateId;
           }
+          // Position mutations drive the Bybit Demo target-position completion
+          // check, which is the only fill signal when private order frames
+          // never arrive. `confirmMissingOrders` stays tied to order updates —
+          // a position-only notify is not evidence an order vanished.
+          const positionsUpdateId = data.updateIds?.positions;
+          const hasPositionUpdate = positionsUpdateId === undefined || positionsUpdateId !== lastPositionsUpdateId;
+          if (positionsUpdateId !== undefined) {
+            lastPositionsUpdateId = positionsUpdateId;
+          }
 
-          if (hasOrderUpdate) {
+          if (hasOrderUpdate || hasPositionUpdate) {
             if (priceCheckTimeout) {
               clearTimeout(priceCheckTimeout);
               priceCheckTimeout = undefined;
@@ -627,7 +684,7 @@ export class ChaserOrderManager {
               clearTimeout(queuedOrdersTimeout);
               queuedOrdersTimeout = undefined;
             }
-            await runPriceCheck(filterCurrentOrders(data.orders), true);
+            await runPriceCheck(filterCurrentOrders(data.orders), hasOrderUpdate);
             return;
           }
 

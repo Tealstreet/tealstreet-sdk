@@ -104,16 +104,26 @@ the canonical normalized view, and the `'update'` event is
 exchange-agnostic. The chaser doesn't need to know how Bybit
 reports a fill vs how Hyperliquid does.
 
-**Bybit Demo private WS gates startup only, and only when the socket is dead.**
-Chaser needs live private order updates, so `getBybitDemoDeadPrivateWsReason`
-refuses to start a `bybitdemo` chase when `store.socketHealth` reports
-`privateReconnectPaused` (the socket crossed its failure-streak threshold and
-stopped retrying) or `privateInitialized !== true` after the short
-`waitForBybitDemoPrivateWs` grace window.
+**A dead Bybit Demo private WS degrades the chase to REST reconciliation — it
+never refuses it.** `getBybitDemoDeadPrivateWsReason` classifies the socket as
+not running when `store.socketHealth` reports `privateReconnectPaused` (it
+crossed its failure-streak threshold and stopped retrying) or
+`privateInitialized !== true` after the short `waitForBybitDemoPrivateWs` grace
+window. On that signal `processInstance` emits one `'warning'` naming the
+degraded connectivity and the VPN / Tealstreet-IP remediation, then chases
+anyway.
 
-Three things this check must NOT do, each of which broke chasers in production:
+Refusing was tried and was wrong: absent private connectivity is an *expected*
+mode on Bybit Demo in geo-restricted regions, so the gate deleted the feature
+for exactly the users who needed the REST path. The fallback that makes chasing
+viable without private frames is `bybitdemo` in `useFillBasedTracking` plus the
+target-position completion check below.
 
-- **Do not treat `privateHealthy === false` alone as a refusal.** That is a
+Four things this check must NOT do, each of which broke chasers in production:
+
+- **Do not turn it back into a refusal.** Warn and degrade; the REST fill and
+  position-size paths exist to carry the chase.
+- **Do not treat `privateHealthy === false` alone as a dead socket.** That is a
   socket that is down but still retrying, and it recovers within seconds.
 - **Do not run the check on every store update.** It used to, so a single
   routine `1006` close stopped a live chase and cancelled its resting order —
@@ -122,6 +132,15 @@ Three things this check must NOT do, each of which broke chasers in production:
   not evidence of failure; `privateInitialized` only flips true on the socket's
   first inbound frame and the store republishes health on a 10s watchdog, so a
   cold start momentarily looks dead.
+
+**Target-position completion is the Bybit Demo fill signal of last resort.**
+`ChaserOrderInstance` snapshots `existing same-side contracts + size` as
+`targetPositionContracts` at construction (entry chases only; reduce-only has
+its own position-gone check). `hasReachedTargetPosition` completes the chase
+once the live position reaches it, because position rows still arrive over REST
+polling when order frames do not. Position `updateIds` therefore also trigger a
+price check, but a position-only notify must never set `confirmMissingOrders` —
+it is not evidence that an order vanished.
 
 What keeps an order safe across a WS gap is not stopping the chase — it is
 Bybit's `recentlyPlacedOrders` snapshot shield (see `exchanges/bybit/CLAUDE.md`),

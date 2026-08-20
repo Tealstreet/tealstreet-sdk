@@ -1599,6 +1599,68 @@ export class BybitExchange extends BaseExchange {
   };
 
   /**
+   * Per-order executed quantity read straight from REST, keyed by order id.
+   *
+   * The chaser needs this on Bybit Demo, where the private WebSocket may never
+   * deliver an order update: without a fill source the manager cannot tell a
+   * filled order from a vanished one. Orders absent from `store.orders` are
+   * skipped, since the symbol is required to pick a category.
+   */
+  fetchFillsForOrderIds = async (orderIds: string[]): Promise<Map<string, number>> => {
+    const fillsByOrderId = new Map<string, number>();
+    if (orderIds.length === 0) {
+      return fillsByOrderId;
+    }
+
+    const requestedOrderIds = new Set(orderIds.map((orderId) => String(orderId)));
+    const symbolByOrderId = new Map<string, string>();
+    for (const order of this.store.orders) {
+      if (requestedOrderIds.has(order.id)) {
+        symbolByOrderId.set(order.id, order.symbol);
+      }
+    }
+
+    try {
+      await mapSeries([...requestedOrderIds], async (orderId) => {
+        const symbol = symbolByOrderId.get(orderId);
+        if (!symbol) {
+          return;
+        }
+
+        const { data } = await this.xhr.get(ENDPOINTS.USER_TRADES, {
+          params: {
+            category: this.getCategoryForSymbol(symbol),
+            symbol,
+            orderId,
+            limit: 50,
+          },
+        });
+        const retMsg = `${v(data, 'retMsg') || 'UNKNOWN'}`;
+        if (retMsg !== 'OK') {
+          throw new Error(retMsg);
+        }
+
+        const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
+        for (const exec of executionsList) {
+          if (`${exec.orderId ?? ''}` !== orderId) {
+            continue;
+          }
+
+          const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
+          if (Number.isFinite(qty) && qty > 0) {
+            fillsByOrderId.set(orderId, (fillsByOrderId.get(orderId) || 0) + qty);
+          }
+        }
+      });
+
+      return fillsByOrderId;
+    } catch (error: any) {
+      this.log(`Error fetching fills for order IDs: ${error.message}`, LogSeverity.Warning);
+      throw error;
+    }
+  };
+
+  /**
    * Fetch income/transaction history from Bybit.
    * Maps Bybit transaction log to the generic IncomeRecord format.
    *

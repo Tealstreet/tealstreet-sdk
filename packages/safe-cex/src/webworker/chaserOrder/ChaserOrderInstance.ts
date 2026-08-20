@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { Exchange } from '../../exchanges/base';
-import { Order, OrderSide } from '../../types';
+import { Order, OrderSide, PositionSide } from '../../types';
 import { clone } from '../../utils/clone';
 import { ChaserOrderOptions } from './ChaserOrderOptions';
 import { ChaserOrderState } from './ChaserOrderState';
@@ -22,6 +22,7 @@ export class ChaserOrderInstance {
   private _pendingOrdersUpdate = false;
   private _freshOrder = false;
   private _disposers: Array<() => void> = [];
+  private _targetPositionContracts: number | undefined;
   // Wall-clock ms of the most recent partial fill we observed.
   // Used by the manager to skip cancel+replace immediately after a
   // fill — see `ChaserOrderManager.updateOrders` for the rationale.
@@ -34,6 +35,14 @@ export class ChaserOrderInstance {
     this._id = nanoid();
     this._state = clone(defaultChaserState);
     this._remainingSize = options.size;
+    if (!options.reduceOnly) {
+      const targetSide = options.side === OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+      const existingContracts =
+        (exchange.store?.positions || []).find(
+          (position) => position.symbol === options.symbol && position.side === targetSide,
+        )?.contracts || 0;
+      this._targetPositionContracts = Math.abs(existingContracts) + options.size;
+    }
   }
 
   /**
@@ -166,6 +175,10 @@ export class ChaserOrderInstance {
 
   get remainingSize() {
     return this._remainingSize;
+  }
+
+  get targetPositionContracts() {
+    return this._targetPositionContracts;
   }
 
   get minTickDistance() {

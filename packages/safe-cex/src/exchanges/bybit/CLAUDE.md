@@ -784,6 +784,20 @@ That file and the code it covers were both silently deleted once by an SDK
 mirror-sync commit (`3fd8301610`), which is how this regressed for two weeks —
 keep them together.
 
+## `fetchFillsForOrderIds` exists for degraded-WS chasers
+
+Returns executed quantity per order id from `USER_TRADES`, keyed by id. The
+chaser's cancel-replace reconciliation and the Bybit Demo REST fallback both
+depend on it: when the private WebSocket never delivers order frames, this is
+the only way to tell a filled order from a vanished one.
+
+- Orders missing from `store.orders` are skipped, because the symbol is required
+  to resolve a category.
+- It **fails closed** — a non-`OK` `retMsg` throws rather than reporting zero
+  fills. A silent zero would let the chaser replace on top of a fill.
+- Rows are filtered by exact `orderId` match; `USER_TRADES` can return
+  neighbouring executions for the symbol.
+
 ## Known Quirks / Implementation Notes
 
 ### Virtual TP/SL Orders

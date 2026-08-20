@@ -164,6 +164,41 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     await expect(exchange.cancelOrders([makeOrder('new-1')])).rejects.toThrow('insufficient permissions');
   });
 
+  // The chaser's only fill signal when the Bybit Demo private WS never
+  // delivers order frames. Without it the manager cannot distinguish a filled
+  // order from a vanished one, so a degraded-WS chase never completes.
+  it('fetches fills for chaser order reconciliation by order id', async () => {
+    const { exchange, store } = makeExchange();
+    store.addOrUpdateOrders([makeOrder('filled-1')]);
+    exchange.xhr = {
+      get: async () => ({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: {
+            list: [
+              { orderId: 'filled-1', execQty: '0.4' },
+              { orderId: 'filled-1', execQty: '0.6' },
+              { orderId: 'other', execQty: '5' },
+            ],
+          },
+        },
+      }),
+    };
+
+    await expect(exchange.fetchFillsForOrderIds(['filled-1'])).resolves.toEqual(new Map([['filled-1', 1]]));
+  });
+
+  it('fails closed when Bybit fill reconciliation errors', async () => {
+    const { exchange, store } = makeExchange();
+    store.addOrUpdateOrders([makeOrder('filled-1')]);
+    exchange.xhr = {
+      get: async () => ({ data: { retCode: 10001, retMsg: 'bad request', result: { list: [] } } }),
+    };
+
+    await expect(exchange.fetchFillsForOrderIds(['filled-1'])).rejects.toThrow('bad request');
+  });
+
   it('recordRecentlyPlacedOrder adds the row to the store on demo only', () => {
     const demo = makeExchange(true);
     demo.exchange.recordRecentlyPlacedOrder(makeOrder('demo-1'));
