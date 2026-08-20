@@ -1,6 +1,5 @@
 import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
-import { setAwsProxyMigrationEnabled } from '../utils/transportResolution';
 import { virtualClock } from '../utils/virtualClock';
 import { ExchangeWorker } from './ExchangeWorker';
 import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
@@ -280,7 +279,6 @@ const start = (ctx: Worker, shared = false) => {
     // the start. Applied via typed setters — safe-cex never sees flag names.
     if (payload?.op === '__workerConfig') {
       const cfg = (payload.data ?? {}) as WorkerConfig;
-      if ('awsProxyMigration' in cfg) setAwsProxyMigrationEnabled(Boolean(cfg.awsProxyMigration));
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       return;
     }

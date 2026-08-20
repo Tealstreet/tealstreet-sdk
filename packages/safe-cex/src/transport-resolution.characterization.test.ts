@@ -12,8 +12,8 @@ import { getProxyForAxios } from './safeCexAxiosCreate';
 // hoist of this logic into a single source of truth — so the refactor can be
 // proven behavior-preserving (snapshot must not move). It uses the REAL
 // exchangeMetadata (not a mock) so a metadata change that shifts any exchange's
-// routing surfaces here. Intentional behavior changes (the AWS->Vultr CORS
-// migration, the secondary-key gate) update this snapshot deliberately.
+// routing surfaces here. Intentional behavior changes (e.g. the secondary-key
+// gate) update this snapshot deliberately.
 
 const ALL_EXCHANGES = Object.keys(exchangeMetadata) as ExchangeName[];
 const BOOL = [false, true];

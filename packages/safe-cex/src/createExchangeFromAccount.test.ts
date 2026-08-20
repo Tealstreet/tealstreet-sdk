@@ -1,9 +1,8 @@
 import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
-import { setAwsProxyMigrationEnabled } from './utils/transportResolution';
 
 // Partial metadata for testing - only fields used by accountToExchangeOptions
 interface TestMetadata {
@@ -21,7 +20,7 @@ interface TestMetadata {
 }
 
 // Mock the exchangeMetadata module. Keep the real `exchangeMetadata` record (the routing
-// table needs its keys, now reachable via getReadFleetProxy) and only override the
+// table needs its keys) and only override the
 // getExchangeMetadata function this suite controls.
 vi.mock('./exchangeMetadata', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./exchangeMetadata')>()),
@@ -220,12 +219,9 @@ describe('accountToExchangeOptions', () => {
       expect(options.secondary_secret).toBeUndefined();
     });
 
-    // End-to-end: the per-exchange read-fleet region must thread from the account through
-    // getReadFleetProxyUrl into options.secondaryProxyUrl (the unit test covers the region
-    // function in isolation; this proves the wiring).
-    describe('secondaryProxyUrl read-fleet region wiring (migration on)', () => {
-      afterEach(() => setAwsProxyMigrationEnabled(false));
-
+    // End-to-end: a configured secondary key must thread the AWS public CORS host into
+    // options.secondaryProxyUrl, and must NOT set it when no secondary key exists.
+    describe('secondaryProxyUrl wiring', () => {
       const withSecondary = (
         exchange: ExchangeAccountConfig['exchange'],
         proxyRegion?: string,
@@ -239,20 +235,13 @@ describe('accountToExchangeOptions', () => {
         ...(proxyRegion ? { proxyRegion } : {}),
       });
 
-      it('threads the per-exchange region into secondaryProxyUrl', () => {
-        setAwsProxyMigrationEnabled(true);
-        // okx declares the jp pool — SG must NOT override it to Singapore (parity with AWS).
-        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(
-          'https://read-fleet-jp.tealstreet.io/api/exchange_proxy',
-        );
-        // bybit declares the asia pool — unset region egresses Singapore.
-        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(
-          'https://read-fleet-sg.tealstreet.io/api/exchange_proxy',
-        );
+      it('threads the AWS public CORS host into secondaryProxyUrl, regardless of region', () => {
+        const AWS = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
+        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(AWS);
+        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(AWS);
       });
 
-      it('sets no secondaryProxyUrl without a secondary key, even with migration on', () => {
-        setAwsProxyMigrationEnabled(true);
+      it('sets no secondaryProxyUrl without a secondary key', () => {
         const account: ExchangeAccountConfig = { exchange: 'bybit', name: 't', apiKey: 'k', apiSecret: 's' };
         expect(accountToExchangeOptions(account).secondaryProxyUrl).toBeUndefined();
       });

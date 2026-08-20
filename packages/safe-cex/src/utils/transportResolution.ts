@@ -5,44 +5,27 @@ import type { ExchangeAccountConfig } from '../types';
 // was previously scattered across createExchangeFromAccount.ts (preference →
 // option resolution), safeCexAxiosCreate.ts (getProxyForAxios) and
 // getPrivateProxy.ts. Hoisted so routing is traceable in one place: the
-// AWS→Vultr CORS migration and the secondary-key "is this Direct?" gate both
-// build on it. Behavior is locked by transport-resolution.characterization.test.ts.
+// secondary-key "is this Direct?" gate builds on it. Behavior is locked by
+// transport-resolution.characterization.test.ts.
 
 // --- Proxy endpoints -------------------------------------------------------
 
 // AWS whitelisted private proxy pool. These IPs are whitelisted by users on the
 // exchange side (embedded in exchange partnerships), so this traffic MUST stay
-// on AWS — it cannot move to Vultr without breaking the allowlists.
+// on AWS — it cannot move to another provider without breaking the allowlists.
 export const PRIVATE_PROXY_GRVT_TINY = 'https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy';
 export const PRIVATE_PROXY_JP = 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy';
 export const PRIVATE_PROXY_ASIA = 'https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy';
 
-// Vultr read-fleet: cheap commodity VPS HAProxy CORS proxies behind Cloudflare,
-// region-split (jp/sg), unwhitelisted/tokenless. The single source of truth for the
-// read-fleet hosts — getReadFleetProxy.ts (secondary-key reads) imports these.
-export const READ_FLEET_JP = 'https://read-fleet-jp.tealstreet.io/api/exchange_proxy';
-export const READ_FLEET_SG = 'https://read-fleet-sg.tealstreet.io/api/exchange_proxy';
+// AWS public CORS proxy. The ONLY host for unwhitelisted public browser reads and for
+// a secondary read-only key's reads. A Vultr read fleet was built as a cheaper
+// alternative in June 2026 and abandoned 2026-08-20 having never carried traffic.
+export const AWS_PUBLIC_CORS_PROXY = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
 
-// Legacy AWS public CORS proxy — the pre-migration host the read fleet replaced.
-// This is the OFF / default value of the ENABLE_AWS_PROXY_MIGRATION rollout.
-export const LEGACY_AWS_PUBLIC_CORS = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
-
-// ENABLE_AWS_PROXY_MIGRATION rollout gate. The unwhitelisted/public CORS proxy and
-// the secondary-key read host are the only transport that moved AWS -> Vultr; this
-// flag gates that whole switch (+ the secondary-key UI, gated app-side). Default OFF
-// = legacy AWS, the zero-impact pre-migration baseline. safe-cex NEVER reads feature
-// flags — the host app (web worker) flips this once at startup from the per-user
-// flag; non-web runtimes (CLI / exchange-server) leave it OFF and stay on AWS.
-let awsProxyMigrationEnabled = false;
-export const setAwsProxyMigrationEnabled = (enabled: boolean): void => {
-  awsProxyMigrationEnabled = enabled;
-};
-export const isAwsProxyMigrationEnabled = (): boolean => awsProxyMigrationEnabled;
-
-// Public CORS proxy (CORS-unblocks public/unwhitelisted browser requests). Resolved
-// at CALL time so the startup flip is always reflected — never cache it into a
-// module-eval string. ON -> read-fleet-jp; OFF -> legacy AWS exchange-proxy.jp.
-export const getPublicCorsProxy = (): string => (awsProxyMigrationEnabled ? READ_FLEET_JP : LEGACY_AWS_PUBLIC_CORS);
+// Public CORS proxy (CORS-unblocks public/unwhitelisted browser requests). A getter,
+// not an inlined const, because every call site resolves at CALL time — that is the
+// seam any future host rollout would need, and callers must not cache the string.
+export const getPublicCorsProxy = (): string => AWS_PUBLIC_CORS_PROXY;
 
 // --- Preference resolution -------------------------------------------------
 

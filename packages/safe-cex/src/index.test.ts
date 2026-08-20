@@ -15,7 +15,7 @@ const testState = vi.hoisted(() => {
 });
 
 // Keep the real `exchangeMetadata` record (routing table needs its keys, now reachable
-// via getReadFleetProxy); only override the getExchangeMetadata function this suite controls.
+// via the routing table); only override the getExchangeMetadata function this suite controls.
 vi.mock('./exchangeMetadata', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./exchangeMetadata')>()),
   getExchangeMetadata: vi.fn((exchangeName: string) => ({

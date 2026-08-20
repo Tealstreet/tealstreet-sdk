@@ -411,8 +411,8 @@ name}` footer segment auto-runs the named script ~1×/sec
 - **Feature-flag values from `/api/feature-flags` are mixed-type.** A flag value is now `boolean`
   OR a residual rule object (the server partial-evaluates flag rules; client-only-context leaves
   arrive unresolved). The CLI doesn't run the rule engine, so read a flag with a strict
-  `flags?.FOO === true` (NOT `Boolean(flags?.FOO)` — a residual object is truthy). See
-  `src/aws-proxy-migration.ts`. Engine: `@tealstreet/feature-flags-core/src/rules.ts`.
+  `flags?.FOO === true` (NOT `Boolean(flags?.FOO)` — a residual object is truthy).
+  Engine: `@tealstreet/feature-flags-core/src/rules.ts`.
 - Logger rate-limits to 5 msg/sec with 10s dedup window
 - Exchange integration delegates to `@tealstreet/safe-cex`
 - Build inlines env vars via `--define` (TEALSTREET_CLI_VERSION, URLs)

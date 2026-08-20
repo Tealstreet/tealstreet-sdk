@@ -3,8 +3,8 @@ import { getPublicCorsProxy } from '../../utils/transportResolution';
 
 export const RECV_WINDOW = 20_000;
 
-// Resolved at CALL time (not a module-eval const) so the ENABLE_AWS_PROXY_MIGRATION
-// startup flip is reflected — the public CORS host prefix changes legacy AWS <-> read-fleet.
+// Resolved at CALL time (not a module-eval const) so the public CORS host is never
+// baked into a module-eval string.
 export const getBaseUrl = (net: 'livenet' | 'testnet'): string =>
   `${getPublicCorsProxy()}/${net === 'livenet' ? 'https://mainnet.zklighter.elliot.ai' : 'https://testnet-api.lighter.xyz'}`;
 

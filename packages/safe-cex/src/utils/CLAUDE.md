@@ -199,7 +199,7 @@ it inflates the e2e load-gate's diagnostic counters.
   CORS proxy. If both fail it uses the local UTC clock; do not add an
   unmaintained third-party time dependency to this signing path.
 - `fetchBybitTime` (bybit-specific, wants Bybit's real clock) leads with the
-  **public CORS proxy** (`read-fleet-jp.tealstreet.io/...` — the Vultr read fleet,
+  **public CORS proxy** (`getPublicCorsProxy()` → `exchange-proxy.jp.tealstreet.io`,
   Bybit's real time via non-blocked egress), then `/api/time`.
 
 If you "simplify" either chain back to a direct Bybit lead, you reintroduce
@@ -218,5 +218,5 @@ drift measurement.
   Scientific notation precision includes both mantissa decimals and the signed
   exponent (`2.5e-7` has eight decimal places); do not reduce it to the
   exponent's absolute value.
-- `transportResolution.ts` — Proxy pool hosts + public CORS-proxy resolver (`PRIVATE_PROXY_JP` / `PRIVATE_PROXY_ASIA` / `PRIVATE_PROXY_GRVT_TINY`, `READ_FLEET_JP`/`_SG`, `getPublicCorsProxy`); consumed by the routing resolver (`../routing/resolveExchangeRouting.ts`)
+- `transportResolution.ts` — Proxy pool hosts + public CORS-proxy resolver (`PRIVATE_PROXY_JP` / `PRIVATE_PROXY_ASIA` / `PRIVATE_PROXY_GRVT_TINY`, `AWS_PUBLIC_CORS_PROXY`, `getPublicCorsProxy`); consumed by the routing resolver (`../routing/resolveExchangeRouting.ts`)
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges

@@ -91,9 +91,9 @@ exercised on first order) — same caveat as the other non-binance HMAC exchange
 
 **Egress.** `createAPI` takes its transport from a per-call `transportOptions`
 argument (default = the primary account). The secondary read client passes its own
-`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the Vultr read fleet
-(`getReadFleetProxyUrl`, region-matched, gated by `ENABLE_AWS_PROXY_MIGRATION`) —
-reads egress through the read fleet while writes stay on the primary transport. This
+`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the AWS public CORS
+proxy (`AWS_PUBLIC_CORS_PROXY`) — reads egress there while writes stay on the
+primary transport. This
 is the same handling as the tunnelled CORS HMAC exchanges (bitget et al.); Aster's
 `createAPI` previously read transport from `exchange.options` and ignored the override,
 which is why the split had to thread `transportOptions` through. Default-off: with no
@@ -115,7 +115,7 @@ Both V1 and V3 public prefixes are treated as public (examples):
 - attempts preferred version first, then fallback:
   - preferred `v1`: `/fapi/v1/time` then `/fapi/v3/time`
   - preferred `v3`: `/fapi/v3/time` then `/fapi/v1/time`
-- also attempts proxy fallback via `read-fleet-jp.tealstreet.io`
+- also attempts proxy fallback via the public CORS proxy (`getPublicCorsProxy()`)
 - falls back to local UTC time if all attempts fail
 
 ## Startup Sequence

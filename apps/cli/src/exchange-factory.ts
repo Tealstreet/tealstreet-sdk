@@ -1,6 +1,5 @@
 import { createExchangeFromAccount } from '../../../packages/safe-cex/src/createExchangeFromAccount';
 import type { BaseExchange } from '../../../packages/safe-cex/src/exchanges/base';
-import { ensureAwsProxyMigrationFlag } from './aws-proxy-migration';
 import type { AccountConfig } from './config';
 
 // Supported exchanges with their required fields
@@ -111,9 +110,6 @@ export function getExchangeInfo(name: string) {
  * through the same translation layer the web app uses.
  */
 export async function createExchangeFromConfig(account: AccountConfig): Promise<BaseExchange> {
-  // Resolve the AWS->Vultr proxy-migration gate (once per process) before any exchange
-  // is built, so safe-cex picks the right public CORS host before virtualClock/REST start.
-  await ensureAwsProxyMigrationFlag();
   return createExchangeFromAccount(account);
 }
 

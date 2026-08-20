@@ -469,7 +469,7 @@ From `exchangeMetadata.ts`:
 | Public WS          | `wss://ws.bitmex.com/realtime`                                                                      | `wss://ws.testnet.bitmex.com/realtime`                                                                  |
 | Private WS         | `wss://ws.bitmex.com/realtime`                                                                      | `wss://ws.testnet.bitmex.com/realtime`                                                                  |
 | Private WS (proxy) | `wss://fsjnpy143pbz.{jp,asia}.tealstreet.io/bitmex/private` — chosen by `options.proxyRegion`       | N/A                                                                                                     |
-| OHLCV Proxy        | `https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://www.bitmex.com/api/udf/history` | `https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://testnet.bitmex.com/api/udf/history` |
+| OHLCV Proxy        | `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://www.bitmex.com/api/udf/history` | `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet.bitmex.com/api/udf/history` |
 
 ### Known Differences
 
@@ -703,8 +703,8 @@ Positions include `extra.contractsNative` (pre-conversion quantity) and `extra.u
 
 Uses a **proxy endpoint** rather than direct BitMEX API:
 
-- Livenet: `https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://www.bitmex.com/api/udf/history`
-- Testnet: `https://read-fleet-jp.tealstreet.io/api/exchange_proxy/https://testnet.bitmex.com/api/udf/history`
+- Livenet: `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://www.bitmex.com/api/udf/history`
+- Testnet: `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet.bitmex.com/api/udf/history`
 
 Uses native `fetch()` (not axios) for the proxy request. Native-source requests are capped at 1500 candles.
 

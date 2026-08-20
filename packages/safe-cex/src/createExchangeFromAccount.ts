@@ -2,8 +2,7 @@ import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
 import { getExchangeMetadata } from './exchangeMetadata';
 import { createExchange } from './index';
-import { getReadFleetProxyUrl } from './utils/getReadFleetProxy';
-import { resolveAccountTransport } from './utils/transportResolution';
+import { getPublicCorsProxy, resolveAccountTransport } from './utils/transportResolution';
 
 /**
  * Convert an ExchangeAccountConfig to ExchangeOptions.
@@ -35,9 +34,9 @@ export function accountToExchangeOptions(
   // of truth — see utils/transportResolution.ts).
   const { tealstreetProxy, tealstreetTunnel, proxyRegion } = resolveAccountTransport(account, metadata);
 
-  // When a secondary (read-only) key is configured, route its reads through the
-  // live regional read fleet selected by the account's resolved proxy region.
-  const secondaryProxyUrl = account.secondary_apiKey ? getReadFleetProxyUrl(account.exchange, proxyRegion) : undefined;
+  // When a secondary (read-only) key is configured, its reads egress the public AWS
+  // CORS proxy while writes stay on the primary/whitelisted transport.
+  const secondaryProxyUrl = account.secondary_apiKey ? getPublicCorsProxy() : undefined;
 
   const options: ExchangeOptions = {
     key: account.apiKey,

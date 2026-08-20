@@ -5,7 +5,7 @@ import type { ExchangeName } from '../types';
  * venue that has started rate-limiting us.
  *
  * The host app derives this from per-user feature flags and pushes it through
- * `__workerConfig`, exactly like `setAwsProxyMigrationEnabled`. safe-cex never
+ * `__workerConfig` as a typed setter. safe-cex never
  * sees a flag name; it only sees a number.
  *
  * **A multiplier below 1 is refused.** This exists to reduce request pressure

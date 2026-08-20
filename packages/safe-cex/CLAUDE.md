@@ -195,32 +195,25 @@ the extension is absent.
 a `secondary_apiKey`, `createApiWithSecondaryKey.ts` routes all REST **GET (read)**
 requests to a second axios client built from the `secondary_*` credentials, while
 writes stay on the primary. That secondary client's transport is set by
-`ExchangeOptions.secondaryProxyUrl` (resolved by `src/utils/getReadFleetProxy.ts`
-from exchange/region), so reads can later egress through a separate cheap proxy
-fleet while writes keep the primary/whitelisted transport. The feature is
+`ExchangeOptions.secondaryProxyUrl`, so reads can later egress through a separate
+proxy while writes keep the primary/whitelisted transport. The feature is
 **default-off**: with **no** `secondary_apiKey`, `createApiWithSecondaryKey` returns
 three references to the _same_ primary client (the read Proxy is never built), so
 routing is **byte-identical** to before. Precedence for the secondary read transport:
 `options.secondaryProxyUrl || otherOptions.proxyUrl || <jp default>`, applied as the
-secondary client's `overrideProxyUrl`. `getReadFleetProxyUrl` returns the live
-**read fleet** endpoint, region-matched to the **same region the primary REST pool uses
-for that exchange** via `restEgressRegion` (`routing/resolveExchangeRouting.ts`) — the
-per-exchange declared pool + the `JA` override: the jp/okx/bitget pool **and** grvt's
-`tiny` pool → `read-fleet-jp.tealstreet.io`, every `asia`-pool exchange →
-`read-fleet-sg.tealstreet.io`, both `/api/exchange_proxy`. This is **true parity** with
-`getPrivateProxy`/`resolveExchangeRouting`, not a coarse `SG`-or-Tokyo split — e.g.
-`binance`+`SG` stays Tokyo (its declared jp pool; only `JA` overrides), and `bybit` with
-no region goes Singapore (its `asia` pool). These are cheap commodity
-Vultr VPS running the same HAProxy CORS forwarding proxy as the AWS exchange-proxy
-boxes, fronted by Cloudflare (orange-cloud, zone SSL "Full" so CF accepts the boxes'
-self-signed certs) — so an **opted-in** account's reads egress from the fleet's many
-IPs (rate-limit spreading) while writes stay on the primary/whitelisted transport.
-The fleet is public/tokenless, so no proxy Bearer token is required. The shared
-public CORS proxy for unwhitelisted/public requests (`PUBLIC_CORS_PROXY` in
-`utils/transportResolution.ts`) was migrated off AWS `exchange-proxy.jp` to the same
-`read-fleet-jp` endpoint, so that hostname is no longer used in code. Terraform for the
-fleet lives in `terraform/vultr-read-fleet/` (isolated local state, not the prod AWS
-workspace). Still **default-off**: with no `secondary_apiKey`, none of this is reached.
+secondary client's `overrideProxyUrl`. `createExchangeFromAccount` sets
+`secondaryProxyUrl` to `AWS_PUBLIC_CORS_PROXY` — the same
+`exchange-proxy.jp.tealstreet.io` host `getPublicCorsProxy()` returns.
+
+**A Vultr "read fleet" was built for this in June 2026 and abandoned 2026-08-20.**
+Twenty HAProxy boxes (jp/sg) behind Cloudflare were meant to carry the public CORS
+proxy and these secondary-key reads off AWS, gated by `ENABLE_AWS_PROXY_MIGRATION`.
+The flag never left 0%, the fleet never carried production traffic, and the cost win
+it targeted was captured another way (VPC peering + tunnel compression, July 2026).
+The flag, both `READ_FLEET_*` hosts, `getReadFleetProxy.ts` and `restEgressRegion`
+were all deleted; there is now exactly ONE public CORS host and no region split on
+this path. Do not reintroduce a second host without a rollout plan.
+Still **default-off**: with no `secondary_apiKey`, none of this is reached.
 
 **Wiring is per-exchange, gated by `exchangeSupportsSecondaryKey()`.** Every HMAC
 exchange builds its authed `this.xhr` via the base helper
@@ -427,8 +420,8 @@ moved. Consumers diff against their own baseline and must treat a decrease as
 
 `getTickInterval()` multiplies its base by `getTickIntervalMultiplier(exchange)`.
 The host app derives the map from a per-user feature flag and pushes it through
-`__workerConfig`, exactly like `setAwsProxyMigrationEnabled` — safe-cex never
-sees a flag name, only a number.
+`__workerConfig` as a typed setter — safe-cex never sees a flag name, only a
+number.
 
 - **The map is keyed by exchange, with a reserved `'*'` wildcard.** The flag
   engine folds rules to one boolean per user, so there is nothing per-venue to

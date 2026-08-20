@@ -2,14 +2,9 @@ import type { AxiosInstance, AxiosRequestConfig } from 'axios';
 import type { BaseExchange } from './exchanges/base';
 import type { ExchangeOptions } from './types';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApiWithSecondaryKey } from './createApiWithSecondaryKey';
-import { setAwsProxyMigrationEnabled } from './utils/transportResolution';
-
-// Default-off secondary read transport is the legacy AWS host; the read-fleet host
-// only applies under ENABLE_AWS_PROXY_MIGRATION. Always reset the module global.
-afterEach(() => setAwsProxyMigrationEnabled(false));
 
 type CreateApiFn = (options: ExchangeOptions, exchange: BaseExchange) => AxiosInstance;
 
@@ -114,19 +109,11 @@ describe('createApiWithSecondaryKey', () => {
       expect(secondCallOptions.secret).toBe('secondary-secret');
     });
 
-    it('defaults the secondary read transport to legacy AWS (migration off)', () => {
+    it('routes the secondary read transport to the AWS public CORS proxy', () => {
       createApiWithSecondaryKey(optionsWithSecondary, mockExchange, mockCreateApi);
 
       const secondCallOptions = mockCreateApi.mock.calls[1][0];
       expect(secondCallOptions.overrideProxyUrl).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
-    });
-
-    it('routes the secondary read transport to the read fleet when migration is on', () => {
-      setAwsProxyMigrationEnabled(true);
-      createApiWithSecondaryKey(optionsWithSecondary, mockExchange, mockCreateApi);
-
-      const secondCallOptions = mockCreateApi.mock.calls[1][0];
-      expect(secondCallOptions.overrideProxyUrl).toBe('https://read-fleet-jp.tealstreet.io/api/exchange_proxy');
     });
 
     it('should use custom proxyUrl when provided', () => {
@@ -141,17 +128,17 @@ describe('createApiWithSecondaryKey', () => {
     });
 
     it('should prefer options.secondaryProxyUrl over otherOptions.proxyUrl for the read transport', () => {
-      const readFleetUrl = 'https://read-fleet.tealstreet.io/api/exchange_proxy';
+      const customSecondaryUrl = 'https://secondary-proxy.example.com/api/exchange_proxy';
 
       createApiWithSecondaryKey(
-        { ...optionsWithSecondary, secondaryProxyUrl: readFleetUrl },
+        { ...optionsWithSecondary, secondaryProxyUrl: customSecondaryUrl },
         mockExchange,
         mockCreateApi,
         { proxyUrl: 'https://custom-proxy.example.com' },
       );
 
       const secondCallOptions = mockCreateApi.mock.calls[1][0];
-      expect(secondCallOptions.overrideProxyUrl).toBe(readFleetUrl);
+      expect(secondCallOptions.overrideProxyUrl).toBe(customSecondaryUrl);
     });
 
     it('should apply secondary rate limiter to secondary instance', () => {

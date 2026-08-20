@@ -7,7 +7,6 @@
 
 import { createExchange } from '../../../../../packages/safe-cex/src/index';
 import type { BaseExchange } from '../../../../../packages/safe-cex/src/exchanges/base';
-import { ensureAwsProxyMigrationFlag } from '../../aws-proxy-migration';
 import type { ExchangeName, OrderBook } from '../../../../../packages/safe-cex/src/types';
 import { BaseRecorder } from './base-recorder';
 import type { DataType, RecordingOptions } from '../types';
@@ -40,9 +39,6 @@ export class OrderbookRecorder extends BaseRecorder {
     );
 
     try {
-      // Resolve the AWS->Vultr proxy-migration gate before building the exchange
-      // (memoized, once per process).
-      await ensureAwsProxyMigrationFlag();
       // Create exchange in public-only mode (no API credentials needed)
       this.exchange_instance = await createExchange(this.exchange as ExchangeName, {
         key: '',

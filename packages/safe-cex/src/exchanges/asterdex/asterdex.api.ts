@@ -170,7 +170,7 @@ export const createAPI = (
   options: AsterDEXAPIOptions = {},
   // Transport (proxy/tunnel/overrideProxyUrl) is read from here, defaulting to the
   // primary account. The secondary read-only client passes its own ExchangeOptions so
-  // its GETs pick up overrideProxyUrl (read fleet) — mirrors bitget's createAPI.
+  // its GETs pick up overrideProxyUrl (secondary read transport) — mirrors bitget's createAPI.
   transportOptions: ExchangeOptions = exchange.options,
 ): AxiosInstance => {
   const baseURL = options.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
