@@ -51,6 +51,10 @@ GRVT requires you to use an **Ethereum private key** to sign orders. This privat
 Tealstreet now also asks you to complete a one-time **Builder Fee Authorization** for GRVT to support ongoing development. This authorization is done in your browser wallet and is network-specific (mainnet vs testnet).
 :::
 
+:::caution
+Builder Fee Authorization must be signed by the wallet that owns your GRVT **main/funding account**. If you created your GRVT account with email or social login, GRVT may control an embedded wallet for that main account, and an external browser wallet may not be able to sign the approval from Tealstreet.
+:::
+
 <IntroTealstreet exchangeName="GRVT" />
 
 <!-- -   -   -   -
@@ -150,7 +154,7 @@ Now back to where we left the Tealstreet API page:
 After adding your GRVT key in Tealstreet, you may see an **Authorize Builder Fee** prompt in the account form.
 
 - Click **Authorize Builder Fee**
-- Connect your browser wallet when prompted
+- Connect the browser wallet that owns your GRVT main/funding account when prompted
 - Approve network switch/add request in your wallet
   - **GRVT Mainnet**: Chain ID `325` (RPC: `https://rpc.grvt.io`)
     - **GRVT Testnet**: Chain ID `326` (RPC: `https://rpc.testnet.grvt.io`)
@@ -164,6 +168,10 @@ If your wallet does not already have the required GRVT network configured, it wi
 
 :::caution
 Builder fee authorization requires a browser wallet integration (for example, MetaMask). If you are using desktop mode without an injected browser wallet, complete this step in the web app.
+:::
+
+:::caution
+If GRVT says the signer is not authorized to represent the main account, check that the selected browser wallet matches the GRVT main/funding address shown on the GRVT API Keys page. Email-created GRVT accounts may use an embedded wallet that is not available to MetaMask or Rabby; those accounts may need GRVT-side wallet export/connection support or a wallet-backed GRVT account before this approval can succeed.
 :::
 
 ---
@@ -243,6 +251,9 @@ If you want to test without risking real funds:
   - Yes. GRVT builder authorization uses GRVT EVM chain IDs and must match your selected network:
         - Mainnet uses chain ID `325`
         - Testnet uses chain ID `326`
+
+- **I signed up to GRVT with email. Can I approve the builder fee in Tealstreet?**
+  - Maybe not. The approval must be signed by the wallet that owns your GRVT main/funding account. Email or social-login accounts may use an embedded GRVT wallet that is not exposed to your browser wallet extension, so MetaMask/Rabby cannot sign for it. Use a wallet-backed GRVT account, or ask GRVT how to connect/export the owning wallet.
 
 - **What if I reject the chain switch or signature request?**
   - The authorization will fail and your builder fee remains unapproved. Re-open the account settings and run **Authorize Builder Fee** again.
