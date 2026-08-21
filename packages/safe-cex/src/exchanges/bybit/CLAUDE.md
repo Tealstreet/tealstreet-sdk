@@ -119,6 +119,11 @@ The KLINE endpoint is **unsigned** (headers stripped for public market data) -- 
        fetchPositions()                           -- Per settleCoin (USDT, optionally USDC for UNIFIED)
        fetchRawBalance()                          -- Account type-aware balance fetch
      ])
+   If the private WS publishes positions before this REST snapshot finishes,
+   merge the REST result with the recent WS-updated store using
+   `mergeUpdatesUsingLastUpdate()` before `addOrUpdatePositionsFull()`. The
+   follow-up snapshot path already does this; startup must match it or a stale
+   empty REST result can briefly clear fresh WS positions on first load.
 9. tick()                                         -- Start periodic refresh loop
 ```
 

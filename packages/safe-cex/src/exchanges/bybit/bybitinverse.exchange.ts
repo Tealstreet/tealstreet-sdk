@@ -350,8 +350,14 @@ export class BybitInverseExchange extends BaseExchange {
           });
           return orders;
         }),
-        this.fetchPositions().then((positions) => {
+        this.fetchPositions().then((fetchedPositions) => {
           if (this.isDisposed) return [];
+          const positions =
+            this.lastWebsocketPositionsUpdate !== undefined &&
+            virtualClock.getCurrentTimeMs() - this.lastWebsocketPositionsUpdate <
+              INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY
+              ? mergeUpdatesUsingLastUpdate(fetchedPositions, this.store.positions)
+              : fetchedPositions;
           this.store.addOrUpdatePositionsFull(positions);
           this.store.update({
             loaded: { ...this.store.loaded, positions: true },
