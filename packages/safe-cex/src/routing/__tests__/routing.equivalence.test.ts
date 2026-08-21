@@ -51,7 +51,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   lighter: 'https://mainnet.zklighter.elliot.ai',
   mode: 'https://api-evm.orderly.org',
   okx: 'https://www.okx.com',
-  okxdemo: 'https://www.okx.com',
+  okxdemo: 'https://openapi.okx.com',
   okxeu: 'https://eea.okx.com',
   paradex: 'https://api.prod.paradex.trade/v1',
   phemex: 'https://api.phemex.com',

@@ -18,16 +18,15 @@ type OkxWsUrls = {
 export const BASE_URLS: Record<OkxRegion, OkxRestUrls> = {
   okx: {
     livenet: 'https://www.okx.com',
-    // OKX demo trading uses the same REST host plus `x-simulated-trading: 1`.
-    // `https://openapi.okx.com` is also documented, but `www.okx.com` preserves
-    // the browser/CORS behavior already exercised by the live adapter.
-    testnet: 'https://www.okx.com',
+    // Official OKX Demo REST host. Demo requests still require
+    // `x-simulated-trading: 1` and route through the OKX REST proxy path.
+    testnet: 'https://openapi.okx.com',
   },
   okxeu: {
     livenet: 'https://eea.okx.com',
     // OKX EU has no exposed demo variant; this dormant slot intentionally
     // points at the global demo host behavior inherited by okxdemo.
-    testnet: 'https://www.okx.com',
+    testnet: 'https://openapi.okx.com',
   },
 };
 

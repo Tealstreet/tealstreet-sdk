@@ -1116,7 +1116,7 @@ const OkxDemoMetadata: ExchangeMetadata = {
   // REST on the existing OKX proxy path while leaving demo WebSockets direct.
   requiresCors: true,
   forbidCors: false,
-  latencyDomain: 'www.okx.com',
+  latencyDomain: 'openapi.okx.com',
   // OKX Demo uses direct `wspap.okx.com` sockets and authenticates with a
   // post-connect login frame, so it must not inherit Bybit Demo's WS tunnel flag.
   enforceWsTunnel: false,

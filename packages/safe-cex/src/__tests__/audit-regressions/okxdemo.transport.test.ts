@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { OKXDemoExchange } from '../../exchanges/okx/okxdemo.exchange';
-import { BASE_WS_URLS } from '../../exchanges/okx/okx.types';
+import { BASE_URLS, BASE_WS_URLS } from '../../exchanges/okx/okx.types';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { DefaultStore } from '../../store/store.base';
@@ -29,6 +29,7 @@ describe('OKX Demo transport and metadata', () => {
   });
 
   it('uses official direct OKX demo websocket endpoints', () => {
+    expect(BASE_URLS.okx.testnet).toBe('https://openapi.okx.com');
     expect(BASE_WS_URLS.okx.public.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/public');
     expect(BASE_WS_URLS.okx.private.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/private');
     expect(BASE_WS_URLS.okx.business.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/business');
@@ -44,7 +45,7 @@ describe('OKX Demo transport and metadata', () => {
       requiresCors: true,
       forbidCors: false,
       enforceWsTunnel: false,
-      latencyDomain: 'www.okx.com',
+      latencyDomain: 'openapi.okx.com',
     });
 
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).restProxyHost).toBe(
