@@ -34,18 +34,22 @@ describe('OKX Demo transport and metadata', () => {
     expect(BASE_WS_URLS.okx.business.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/business');
   });
 
-  it('is registered as a direct-only separate exchange variant', async () => {
+  it('is registered as a REST-proxied, WS-direct separate exchange variant', async () => {
     await expect(exchangeRegistry.okxdemo()).resolves.toBe(OKXDemoExchange);
 
     expect(exchangeMetadata.okxdemo).toMatchObject({
       exchangeName: 'okxdemo',
       prettyName: 'OKX Demo',
       supportsTestnet: false,
-      forbidCors: true,
+      requiresCors: true,
+      forbidCors: false,
       enforceWsTunnel: false,
       latencyDomain: 'www.okx.com',
     });
 
+    expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).restProxyHost).toBe(
+      'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+    );
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
   });

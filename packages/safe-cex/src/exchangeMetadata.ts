@@ -1112,7 +1112,10 @@ const OkxDemoMetadata: ExchangeMetadata = {
   exchangeName: 'okxdemo' as ExchangeName,
   prettyName: 'OKX Demo',
   supportsTestnet: false,
-  forbidCors: true,
+  // OKX Demo REST keys are third-party linked through Tealstreet routing; keep
+  // REST on the existing OKX proxy path while leaving demo WebSockets direct.
+  requiresCors: true,
+  forbidCors: false,
   latencyDomain: 'www.okx.com',
   // OKX Demo uses direct `wspap.okx.com` sockets and authenticates with a
   // post-connect login frame, so it must not inherit Bybit Demo's WS tunnel flag.
