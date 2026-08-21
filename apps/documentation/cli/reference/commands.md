@@ -763,6 +763,8 @@ reports the server as failed, check your login first — tokens expire.
 | `find_prediction_arbitrage` / `get_prediction_resolution_calendar`                                          | Mutually exclusive sets buyable below 1.00 at the ask; where settlements cluster       |
 | `get_prediction_liquidity_profile`                                                                          | Spread, resting depth and exitable size for one outcome token                          |
 | `get_hyperliquid_leaderboard`                                                                               | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured        |
+| `get_onchain_address_portfolio`                                                                            | Public positions held by one address at one venue, in a venue-neutral shape with a bounded max-loss summary |
+| `get_prediction_address_exposure`                                                                          | One public Polymarket address as exposure: holdings, worst case, same-market offsets and a resolution calendar |
 | `get_hyperliquid_address_positions` / `get_hyperliquid_address_fills` / `get_hyperliquid_address_value_curve` | Crawled public Hyperliquid address analytics (take a public `address`), when analytics DB env vars are configured |
 
 ### What it will refuse

@@ -224,11 +224,16 @@ value curves, and public Polymarket DEX reads. The CLI registry in
 which reshape wire fields only. Two consequences for this surface:
 `CliDataToolDefinition` has no `rateLimit` field, so the hosted per-tool limits
 (10-40/min) do NOT apply in stdio — accepted, because the CLI runs on the user's
-own machine against public endpoints. And the tool-name parity test now asserts
-scopes as a PROPERTY (`get_hyperliquid_*` is `onchain:read`, everything else
-`market:read`) instead of a positional list, because a column of 22 identical
-strings said nothing about which tool carried which scope and every addition
-rewrote it.
+own machine against public endpoints. And the tool-name parity test asserts scopes as a
+PROPERTY instead of a positional list, because a column of identical strings
+said nothing about which tool carried which scope and every addition rewrote it.
+
+That property used to key on the `get_hyperliquid_` name prefix, which silently
+also asserted that anything NOT so prefixed is `market:read`. The rule broke as
+soon as an address-scoped tool arrived under a different name
+(`get_onchain_address_portfolio`), and it failed looking like a scope regression
+rather than the missing list entry it was. The `onchain:read` set is now named
+explicitly — add to it when you add an address-scoped tool.
 
 `src/mcp/dataTools.ts` is an explicit
 allowlist; do not import the hosted web MCP `tools.ts` registry into the CLI,

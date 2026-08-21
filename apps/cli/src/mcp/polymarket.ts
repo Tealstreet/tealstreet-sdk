@@ -2,6 +2,8 @@ import type { PolymarketFetchResult } from '@tealstreet/mcp-data';
 
 const GAMMA_API = 'https://gamma-api.polymarket.com';
 const CLOB_API = 'https://clob.polymarket.com';
+// Positions live on a THIRD base, beside Gamma and the CLOB.
+const DATA_API = 'https://data-api.polymarket.com';
 const POLYMARKET_FETCH_TIMEOUT_MS = 10_000;
 
 const configuredOrigin = process.env.TEALSTREET_POLYMARKET_API_ORIGIN ?? process.env.NEXT_PUBLIC_POLY_API_ORIGIN;
@@ -26,6 +28,7 @@ const directFetchForPath = (path: string): FetchInitForPath => {
   if (url.pathname === '/v1/events') return { url: `${GAMMA_API}/events?${search}` };
   if (url.pathname === '/v1/search') return { url: `${GAMMA_API}/public-search?${search}` };
   if (url.pathname === '/v1/book') return { url: `${CLOB_API}/book?${search}` };
+  if (url.pathname === '/v1/positions') return { url: `${DATA_API}/positions?${search}` };
   if (url.pathname === '/v1/price-history') return { url: `${CLOB_API}/prices-history?${search}` };
   if (url.pathname === '/v1/midpoints') {
     const tokenIds = (url.searchParams.get('token_ids') ?? '')

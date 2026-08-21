@@ -10,6 +10,8 @@
     "outDir": "./dist",
     "resolveJsonModule": true,
     "paths": {
+      "@tealstreet/onchain-core": ["../../packages/onchain-core/src/index.ts"],
+      "@tealstreet/onchain-core/*": ["../../packages/onchain-core/src/*"],
       "@tealstreet/prediction-core": ["../../packages/prediction-core/src/index.ts"],
       "@tealstreet/prediction-core/*": ["../../packages/prediction-core/src/*"],
       "@tealstreet/mcp-data": ["../../packages/mcp-data/src/index.ts"],

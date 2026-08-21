@@ -15,6 +15,8 @@ import {
   getPolymarketOrderBookData,
   getPolymarketPriceHistoryData,
   getPredictionEventData,
+  getOnchainAddressPortfolioData,
+  getPredictionAddressExposureData,
   getPredictionLiquidityProfileData,
   getPredictionResolutionCalendarData,
   getPublicTickerData,
@@ -425,6 +427,38 @@ export const createCliDataTools = ({
     handler: async (args) =>
       runDataTool('Polymarket DEX', async () =>
         renderDataResult(await getPredictionLiquidityProfileData(args, fetchPolymarketJson)),
+      ),
+  },
+  // Address-scoped reads of PUBLIC onchain data. `onchain:read` rather than
+  // `account:read`: the hosted grant flow DROPS `account:read` without
+  // per-account constraints a standard client cannot send, and this data needs
+  // no user credential either way.
+  {
+    name: 'get_onchain_address_portfolio',
+    description:
+      'Read the public positions held by one onchain address at one venue, in a venue-neutral shape with a bounded max-loss summary.',
+    scope: 'onchain:read',
+    shape: {
+      venue: z.string().describe('Venue id, for example polymarket or hyperliquid.'),
+      address: z.string().describe('Public address, validated against the venue chain.'),
+    },
+    handler: async (args) =>
+      runDataTool('Onchain address', async () =>
+        renderDataResult(await getOnchainAddressPortfolioData(args, { polymarketFetch: fetchPolymarketJson })),
+      ),
+  },
+  {
+    name: 'get_prediction_address_exposure',
+    description:
+      'Read one public Polymarket address as prediction-market exposure: holdings, bounded worst case, same-market offsets and a resolution calendar. Netting is NOT applied across a neg-risk event.',
+    scope: 'onchain:read',
+    shape: {
+      address: z.string().describe('Public 0x Polygon address.'),
+      limit: z.number().optional().describe('Maximum positions to read. Defaults to 500; max 500.'),
+    },
+    handler: async (args) =>
+      runDataTool('Onchain address', async () =>
+        renderDataResult(await getPredictionAddressExposureData(args, fetchPolymarketJson)),
       ),
   },
   {

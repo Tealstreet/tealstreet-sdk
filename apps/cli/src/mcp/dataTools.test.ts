@@ -43,6 +43,8 @@ describe('CLI MCP data tools', () => {
       'find_prediction_arbitrage',
       'get_prediction_resolution_calendar',
       'get_prediction_liquidity_profile',
+      'get_onchain_address_portfolio',
+      'get_prediction_address_exposure',
       'get_polymarket_order_book',
       'get_polymarket_price_history',
       'get_hyperliquid_leaderboard',
@@ -51,12 +53,30 @@ describe('CLI MCP data tools', () => {
       'get_hyperliquid_address_value_curve',
     ]);
     // Asserted as a PROPERTY rather than a positional list: a bare column of
-    // 22 identical strings said nothing about which tool carried which scope,
-    // and every addition rewrote it.
-    const onchain = tools.filter((tool) => tool.name.startsWith('get_hyperliquid_'));
-    expect(onchain.every((tool) => tool.scope === 'onchain:read')).toBe(true);
+    // identical strings said nothing about which tool carried which scope, and
+    // every addition rewrote it.
+    //
+    // The set is named explicitly rather than derived from a name prefix. It
+    // used to key on `get_hyperliquid_`, which silently asserted that anything
+    // NOT so prefixed is `market:read` — a rule that broke the moment an
+    // address-scoped tool arrived under a different name, and would have failed
+    // as a scope regression rather than as the missing-entry it actually was.
+    const ONCHAIN_SCOPED = [
+      'get_hyperliquid_leaderboard',
+      'get_hyperliquid_address_positions',
+      'get_hyperliquid_address_fills',
+      'get_hyperliquid_address_value_curve',
+      'get_onchain_address_portfolio',
+      'get_prediction_address_exposure',
+    ];
     expect(
-      tools.filter((tool) => !tool.name.startsWith('get_hyperliquid_')).every((tool) => tool.scope === 'market:read'),
+      tools
+        .filter((tool) => tool.scope === 'onchain:read')
+        .map((tool) => tool.name)
+        .sort(),
+    ).toEqual([...ONCHAIN_SCOPED].sort());
+    expect(
+      tools.filter((tool) => !ONCHAIN_SCOPED.includes(tool.name)).every((tool) => tool.scope === 'market:read'),
     ).toBe(true);
   });
 
