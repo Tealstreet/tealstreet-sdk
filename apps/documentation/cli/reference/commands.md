@@ -759,6 +759,9 @@ reports the server as failed, check your login first — tokens expire.
 | `list_mcp_context_planes` / `plan_mcp_context_query`                                                        | Plan composable `mcp-context/v1` dashboard queries into bounded MCP tool steps         |
 | `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
 | `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                   | Public Polymarket CLOB data, with bounded book depth                                   |
+| `screen_prediction_markets` / `get_prediction_event`                                                        | Prediction markets filtered by implied probability, window and liquidity; one event with normalized probabilities |
+| `find_prediction_arbitrage` / `get_prediction_resolution_calendar`                                          | Mutually exclusive sets buyable below 1.00 at the ask; where settlements cluster       |
+| `get_prediction_liquidity_profile`                                                                          | Spread, resting depth and exitable size for one outcome token                          |
 | `get_hyperliquid_leaderboard`                                                                               | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured        |
 | `get_hyperliquid_address_positions` / `get_hyperliquid_address_fills` / `get_hyperliquid_address_value_curve` | Crawled public Hyperliquid address analytics (take a public `address`), when analytics DB env vars are configured |
 

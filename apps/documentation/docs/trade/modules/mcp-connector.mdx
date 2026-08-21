@@ -129,6 +129,24 @@ Polymarket `/v1/*` public route contract when configured, return read/cache
 metadata instead of claiming exchange freshness, and never expose account data,
 API keys, or order placement.
 
+### Prediction-market tools
+
+Built on Tealstreet's prediction-market model rather than raw Polymarket
+fields, so they answer trader questions instead of returning wire data.
+
+| Tool                                  | Permission    | What it returns                                                  |
+| ------------------------------------- | ------------- | ---------------------------------------------------------------- |
+| `screen_prediction_markets`           | `market:read` | Markets filtered by implied probability, resolution window, liquidity |
+| `get_prediction_event`                | `market:read` | One event, its outcomes, and probabilities normalized across them |
+| `find_prediction_arbitrage`           | `market:read` | Mutually exclusive sets buyable below 1.00 at the best ask        |
+| `get_prediction_resolution_calendar`  | `market:read` | Where upcoming settlements cluster by date                        |
+| `get_prediction_liquidity_profile`    | `market:read` | Spread, resting depth, and how much of a position could exit      |
+
+An arbitrage result is deliberately conservative: it is only reported when the
+full candidate set is present, every market is still trading, and every leg has
+a real ask. Edge is quoted per complete set before fees, slippage, and the size
+actually resting on the book.
+
 ### Tools that read your private data
 
 These only appear when the grant carries the matching permission, and the

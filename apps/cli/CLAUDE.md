@@ -116,6 +116,7 @@ src/
 │   ├── exchangeProxy.ts     # exchange-services candles/market-metadata client (plain HTTPS; honors TEALSTREET_CANDLE_SERVER_URL)
 │   ├── newsGateway.ts       # news-gateway REST client for TealNews reads
 │   ├── polymarket.ts        # Public Polymarket gamma/CLOB client, path-allowlisted
+│   │                        #   (also backs the prediction-market trader tools)
 │   └── hyperliquidAnalyticsDb.ts # Optional HYPERLIQUID_ANALYTICS_* Postgres adapter, read-only queries
 └── utils/
 ```
@@ -217,6 +218,18 @@ non-interactively but not _used_ through the proxy until the OAuth flow has run.
 hosted MCP connector: publicdata ticker/top-list snapshots plus crawled
 Hyperliquid leaderboard, wallet fills, public wallet positions, account
 value curves, and public Polymarket DEX reads. The CLI registry in
+**Prediction-market tools compute rather than passthrough.** The five
+`*_prediction_*` tools map raw Polymarket bodies through
+`@tealstreet/prediction-core`, unlike the `get_polymarket_*` tools beside them
+which reshape wire fields only. Two consequences for this surface:
+`CliDataToolDefinition` has no `rateLimit` field, so the hosted per-tool limits
+(10-40/min) do NOT apply in stdio — accepted, because the CLI runs on the user's
+own machine against public endpoints. And the tool-name parity test now asserts
+scopes as a PROPERTY (`get_hyperliquid_*` is `onchain:read`, everything else
+`market:read`) instead of a positional list, because a column of 22 identical
+strings said nothing about which tool carried which scope and every addition
+rewrote it.
+
 `src/mcp/dataTools.ts` is an explicit
 allowlist; do not import the hosted web MCP `tools.ts` registry into the CLI,
 because that file mixes public reads with module write/publish/delete tools and

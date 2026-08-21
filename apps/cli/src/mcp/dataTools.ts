@@ -1,6 +1,7 @@
 import { z, type ZodRawShape } from 'zod';
 
 import {
+  findPredictionArbitrageData,
   getHyperliquidAccountValueCurveData,
   getHyperliquidLeaderboardData,
   getHyperliquidWalletFillsData,
@@ -13,10 +14,14 @@ import {
   getPolymarketMidpointsData,
   getPolymarketOrderBookData,
   getPolymarketPriceHistoryData,
+  getPredictionEventData,
+  getPredictionLiquidityProfileData,
+  getPredictionResolutionCalendarData,
   getPublicTickerData,
   getPublicTickersData,
   getSafeCexMarketData,
   getSafeCexMarketsData,
+  screenPredictionMarketsData,
   getTopFundingData,
   getTopMoversData,
   getTopVolumeData,
@@ -335,6 +340,91 @@ export const createCliDataTools = ({
     handler: async (args) =>
       runDataTool('Polymarket DEX', async () =>
         renderDataResult(await getPolymarketMidpointsData(args, fetchPolymarketJson)),
+      ),
+  },
+  // Prediction-market trader tools. The Polymarket tools above reshape wire
+  // fields and compute nothing; these map into `@tealstreet/prediction-core`
+  // and answer what is mispriced, what settles when, and how much can exit.
+  //
+  // `scope` is inert here — `CliDataToolDefinition` has no rateLimit field
+  // either, so the hosted per-tool limits do not apply in stdio. Accepted: the
+  // CLI runs on the user's own machine against public endpoints.
+  {
+    name: 'screen_prediction_markets',
+    description:
+      'Screen public prediction markets by implied probability, resolution window, liquidity and tag. Returns the affirmative leg of each match.',
+    scope: 'market:read',
+    shape: {
+      minProbability: z.number().optional().describe('Lowest implied probability to include, 0..1.'),
+      maxProbability: z.number().optional().describe('Highest implied probability to include, 0..1.'),
+      withinDays: z.number().optional().describe('Only markets resolving within this many days. Undated markets are excluded.'),
+      minLiquidity: z.number().optional().describe('Minimum event liquidity.'),
+      tagSlug: z.string().optional().describe('Optional Polymarket tag slug.'),
+      limit: z.number().optional().describe('Maximum rows. Defaults to 20; max 100.'),
+      scan: z.number().optional().describe('Events to scan. Defaults to 100; max 200.'),
+    },
+    handler: async (args) =>
+      runDataTool('Polymarket DEX', async () =>
+        renderDataResult(await screenPredictionMarketsData(args, fetchPolymarketJson)),
+      ),
+  },
+  {
+    name: 'get_prediction_event',
+    description:
+      'Read one prediction event with every outcome, whether its outcomes are mutually exclusive, and probabilities normalized across them.',
+    scope: 'market:read',
+    shape: {
+      slug: z.string().optional().describe('Event slug.'),
+      eventId: z.string().optional().describe('Event id, with or without the venue prefix.'),
+    },
+    handler: async (args) =>
+      runDataTool('Polymarket DEX', async () =>
+        renderDataResult(await getPredictionEventData(args, fetchPolymarketJson)),
+      ),
+  },
+  {
+    name: 'find_prediction_arbitrage',
+    description:
+      'Scan mutually exclusive prediction events for a complete outcome set buyable below 1.00 at the best ask. Reports edge per set before fees and slippage.',
+    scope: 'market:read',
+    shape: {
+      minEdge: z.number().optional().describe('Minimum edge per complete set. Defaults to 0.01.'),
+      scan: z.number().optional().describe('Events to scan. Defaults to 100; max 200.'),
+    },
+    handler: async (args) =>
+      runDataTool('Polymarket DEX', async () =>
+        renderDataResult(await findPredictionArbitrageData(args, fetchPolymarketJson)),
+      ),
+  },
+  {
+    name: 'get_prediction_resolution_calendar',
+    description:
+      'Bucket upcoming prediction-market resolutions by date to show where settlement clusters. Counts markets, not capital.',
+    scope: 'market:read',
+    shape: {
+      bucketDays: z.number().optional().describe('Days per bucket. Defaults to 7; max 90.'),
+      buckets: z.number().optional().describe('Number of buckets. Defaults to 8; max 52.'),
+      scan: z.number().optional().describe('Events to scan. Defaults to 100; max 200.'),
+    },
+    handler: async (args) =>
+      runDataTool('Polymarket DEX', async () =>
+        renderDataResult(await getPredictionResolutionCalendarData(args, fetchPolymarketJson)),
+      ),
+  },
+  {
+    name: 'get_prediction_liquidity_profile',
+    description:
+      'Read spread, resting depth and how much of a position could actually be exited for one prediction-market outcome token.',
+    scope: 'market:read',
+    shape: {
+      tokenId: z.string().describe('Polymarket CLOB token id.'),
+      shares: z.number().optional().describe('Position size to quote an exit for. Omit for depth only.'),
+      side: z.enum(['bid', 'ask']).optional().describe('bid exits a long by hitting bids (default); ask models buying.'),
+      depth: z.number().optional().describe('Book levels per side. Defaults to 25; max 100.'),
+    },
+    handler: async (args) =>
+      runDataTool('Polymarket DEX', async () =>
+        renderDataResult(await getPredictionLiquidityProfileData(args, fetchPolymarketJson)),
       ),
   },
   {

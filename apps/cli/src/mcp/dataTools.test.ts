@@ -38,6 +38,11 @@ describe('CLI MCP data tools', () => {
       'get_polymarket_events',
       'search_polymarket_events',
       'get_polymarket_midpoints',
+      'screen_prediction_markets',
+      'get_prediction_event',
+      'find_prediction_arbitrage',
+      'get_prediction_resolution_calendar',
+      'get_prediction_liquidity_profile',
       'get_polymarket_order_book',
       'get_polymarket_price_history',
       'get_hyperliquid_leaderboard',
@@ -45,30 +50,14 @@ describe('CLI MCP data tools', () => {
       'get_hyperliquid_address_fills',
       'get_hyperliquid_address_value_curve',
     ]);
-    expect(tools.map((tool) => tool.scope)).toEqual([
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'market:read',
-      'onchain:read',
-      'onchain:read',
-      'onchain:read',
-      'onchain:read',
-    ]);
+    // Asserted as a PROPERTY rather than a positional list: a bare column of
+    // 22 identical strings said nothing about which tool carried which scope,
+    // and every addition rewrote it.
+    const onchain = tools.filter((tool) => tool.name.startsWith('get_hyperliquid_'));
+    expect(onchain.every((tool) => tool.scope === 'onchain:read')).toBe(true);
+    expect(
+      tools.filter((tool) => !tool.name.startsWith('get_hyperliquid_')).every((tool) => tool.scope === 'market:read'),
+    ).toBe(true);
   });
 
   it('returns the shared context DSL reference in the CLI runtime', async () => {
