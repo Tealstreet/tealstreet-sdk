@@ -8,44 +8,56 @@ export const BROKER_ID = 'e847386590ce4dBC'; // tealstreet
 export type OkxRegion = 'okx' | 'okxeu';
 export type OkxInstrumentType = 'SWAP' | 'FUTURES';
 
+type OkxRestUrls = { livenet: string; testnet: string };
 type OkxWsUrls = {
   public: { livenet: string; testnet: string };
   private: { livenet: string; testnet: string };
   business: { livenet: string; testnet: string };
 };
 
-export const BASE_URLS: Record<OkxRegion, string> = {
-  okx: 'https://www.okx.com',
-  okxeu: 'https://eea.okx.com',
+export const BASE_URLS: Record<OkxRegion, OkxRestUrls> = {
+  okx: {
+    livenet: 'https://www.okx.com',
+    // OKX demo trading uses the same REST host plus `x-simulated-trading: 1`.
+    // `https://openapi.okx.com` is also documented, but `www.okx.com` preserves
+    // the browser/CORS behavior already exercised by the live adapter.
+    testnet: 'https://www.okx.com',
+  },
+  okxeu: {
+    livenet: 'https://eea.okx.com',
+    // OKX EU has no exposed demo variant; this dormant slot intentionally
+    // points at the global demo host behavior inherited by okxdemo.
+    testnet: 'https://www.okx.com',
+  },
 };
 
 export const BASE_WS_URLS: Record<OkxRegion, OkxWsUrls> = {
   okx: {
     public: {
       livenet: 'wss://ws.okx.com:8443/ws/v5/public',
-      testnet: 'wss://ws.okx.com:8443/ws/v5/public?brokerId=9999',
+      testnet: 'wss://wspap.okx.com:8443/ws/v5/public',
     },
     private: {
       livenet: 'wss://ws.okx.com:8443/ws/v5/private',
-      testnet: 'wss://ws.okx.com:8443/ws/v5/private?brokerId=9999',
+      testnet: 'wss://wspap.okx.com:8443/ws/v5/private',
     },
     business: {
       livenet: 'wss://ws.okx.com:8443/ws/v5/business',
-      testnet: 'wss://ws.okx.com:8443/ws/v5/business?brokerId=9999',
+      testnet: 'wss://wspap.okx.com:8443/ws/v5/business',
     },
   },
   okxeu: {
     public: {
       livenet: 'wss://wseea.okx.com:8443/ws/v5/public',
-      testnet: 'wss://wseea.okx.com:8443/ws/v5/public?brokerId=9999',
+      testnet: 'wss://wspap.okx.com:8443/ws/v5/public',
     },
     private: {
       livenet: 'wss://wseea.okx.com:8443/ws/v5/private',
-      testnet: 'wss://wseea.okx.com:8443/ws/v5/private?brokerId=9999',
+      testnet: 'wss://wspap.okx.com:8443/ws/v5/private',
     },
     business: {
       livenet: 'wss://wseea.okx.com:8443/ws/v5/business',
-      testnet: 'wss://wseea.okx.com:8443/ws/v5/business?brokerId=9999',
+      testnet: 'wss://wspap.okx.com:8443/ws/v5/business',
     },
   },
 };

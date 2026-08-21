@@ -55,6 +55,7 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'hyperliquidspot',
   'lighter',
   'okx',
+  'okxdemo',
   'paradex',
   'phemex',
   'polymarket',
@@ -229,5 +230,13 @@ describe('convertSymbol', () => {
         });
       }
     }
+  });
+});
+
+describe('OKX demo symbol parity', () => {
+  it('uses the same compact symbol behavior as OKX', () => {
+    expect(toBinance('BTCUSDT', 'okxdemo')).toBe(toBinance('BTCUSDT', 'okx'));
+    expect(toBinance('BTCUSD_UM', 'okxdemo')).toBe(toBinance('BTCUSD_UM', 'okx'));
+    expect(fromBinance('BTCUSDT', 'okxdemo')).toBe(fromBinance('BTCUSDT', 'okx'));
   });
 });

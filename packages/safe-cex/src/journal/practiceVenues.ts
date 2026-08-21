@@ -34,6 +34,7 @@ export const PRACTICE_VENUES: ReadonlySet<ExchangeName> = new Set([
   'bybitdemo',
   'bitmextestnet',
   'hyrotrader',
+  'okxdemo',
 ] as ExchangeName[]);
 
 /**

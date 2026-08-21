@@ -43,6 +43,7 @@ const REST_JP: ExchangeName[] = [
   'binancepm',
   'binancespot',
   'okx',
+  'okxdemo',
   'okxeu',
   'bitget',
   'bitgetinverse',

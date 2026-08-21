@@ -73,6 +73,16 @@ describe('okx public endpoint tagging', () => {
   it('tags /api/v5/market/tickers in the hosted keyless shape', async () => {
     expect(isTagged(await capture(okx(HOSTED), '/api/v5/market/tickers'))).toBe(true);
   });
+
+  it.each(['/api/v5/public/instruments', '/api/v5/market/tickers', '/api/v5/account/config'])(
+    'adds the simulated trading header for demo %s',
+    async (url) => {
+      const config = await capture(okx({ ...LOCAL_KEYS, testnet: true }), url);
+
+      expect(config.baseURL).toBe('https://www.okx.com');
+      expect(config.headers['x-simulated-trading']).toBe('1');
+    },
+  );
 });
 
 describe('bybit public endpoint tagging', () => {

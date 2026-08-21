@@ -132,6 +132,7 @@ describe('exchangeMetadata', () => {
       expect(exchangeMetadata.bybitinverse.supportsOpeningTriggerOrders).toBe(true);
       expect(exchangeMetadata.bybitspot.supportsOpeningTriggerOrders).toBe(false);
       expect(exchangeMetadata.okx.supportsOpeningTriggerOrders).toBe(true);
+      expect(exchangeMetadata.okxdemo.supportsOpeningTriggerOrders).toBe(true);
       expect(exchangeMetadata.okxeu.supportsOpeningTriggerOrders).toBe(true);
     });
   });
@@ -238,6 +239,7 @@ describe('exchangeMetadata', () => {
       expect(exchangeMetadata.bybitspot.supportsExecutionsHistory).toBe(false);
       expect(exchangeMetadata.binance.supportsExecutionsHistory).toBe(true);
       expect(exchangeMetadata.binancepm.supportsExecutionsHistory).toBe(false);
+      expect(exchangeMetadata.okxdemo.supportsExecutionsHistory).toBe(true);
       expect(exchangeMetadata.hyperliquid.supportsExecutionsHistory).toBe(true);
       expect(exchangeMetadata.phemex.supportsExecutionsHistory).toBe(false);
     });
@@ -346,6 +348,7 @@ describe('exchangeMetadata', () => {
         'kucoinspot',
         'lighter',
         'okx',
+        'okxdemo',
         'paradex',
         'phemex',
         'polymarket',

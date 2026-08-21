@@ -1,0 +1,52 @@
+import type { ExchangeOptions } from '../../types';
+
+import { describe, expect, it } from 'vitest';
+
+import { exchangeMetadata } from '../../exchangeMetadata';
+import { OKXDemoExchange } from '../../exchanges/okx/okxdemo.exchange';
+import { BASE_WS_URLS } from '../../exchanges/okx/okx.types';
+import { exchangeRegistry } from '../../exchanges/registry';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { DefaultStore } from '../../store/store.base';
+
+const options: ExchangeOptions = {
+  key: 'test-key',
+  secret: 'test-secret',
+  passphrase: 'test-passphrase',
+  testnet: false,
+  tuning: { consoleLogging: false },
+};
+
+describe('OKX Demo transport and metadata', () => {
+  it('uses the OKX runtime with demo mode forced on', () => {
+    const exchange = new OKXDemoExchange('okxdemo', options, new DefaultStore());
+
+    expect(exchange.isDemo).toBe(true);
+    expect(exchange.options.testnet).toBe(true);
+    expect(exchange.region).toBe('okx');
+
+    exchange.dispose();
+  });
+
+  it('uses official direct OKX demo websocket endpoints', () => {
+    expect(BASE_WS_URLS.okx.public.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/public');
+    expect(BASE_WS_URLS.okx.private.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/private');
+    expect(BASE_WS_URLS.okx.business.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/business');
+  });
+
+  it('is registered as a direct-only separate exchange variant', async () => {
+    await expect(exchangeRegistry.okxdemo()).resolves.toBe(OKXDemoExchange);
+
+    expect(exchangeMetadata.okxdemo).toMatchObject({
+      exchangeName: 'okxdemo',
+      prettyName: 'OKX Demo',
+      supportsTestnet: false,
+      forbidCors: true,
+      enforceWsTunnel: false,
+      latencyDomain: 'www.okx.com',
+    });
+
+    expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
+  });
+});

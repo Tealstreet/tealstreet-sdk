@@ -44,6 +44,7 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   kucoinspot: load(() => require('./kucoin/kucoinspot.exchange').KucoinSpotExchange),
   lighter: load(() => require('./lighter/lighter.exchange').LighterExchange),
   okx: load(() => require('./okx/okx.exchange').OKXExchange),
+  okxdemo: load(() => require('./okx/okxdemo.exchange').OKXDemoExchange),
   okxeu: load(() => require('./okx/okxeu.exchange').OKXEUExchange),
   paradex: load(() => require('./paradex/paradex.exchange').ParadexExchange),
   phemex: load(() => require('./phemex/phemex.exchange').PhemexExchange),

@@ -67,7 +67,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
       const result = await this.parent.options.remoteSigner.sign({
         id: nanoid(),
         type: 'ws-auth',
-        exchangeName: 'okx',
+        exchangeName: this.parent.name,
         accountName: this.parent.options.remoteSigner.accountName,
         wsAuth: {
           toSign: `${timestamp}GET/users/self/verify`,

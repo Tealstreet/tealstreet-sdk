@@ -1107,6 +1107,18 @@ const OkxEUMetadata: ExchangeMetadata = {
   latencyDomain: 'eea.okx.com',
 };
 
+const OkxDemoMetadata: ExchangeMetadata = {
+  ...OkxMetadata,
+  exchangeName: 'okxdemo' as ExchangeName,
+  prettyName: 'OKX Demo',
+  supportsTestnet: false,
+  forbidCors: true,
+  latencyDomain: 'www.okx.com',
+  // OKX Demo uses direct `wspap.okx.com` sockets and authenticates with a
+  // post-connect login frame, so it must not inherit Bybit Demo's WS tunnel flag.
+  enforceWsTunnel: false,
+};
+
 const WooMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2224,6 +2236,7 @@ export const exchangeMetadata: {
   blofin: BlofinMetadata,
   lighter: LighterMetadata,
   okx: OkxMetadata,
+  okxdemo: OkxDemoMetadata,
   okxeu: OkxEUMetadata,
   woo: WooMetadata,
   woofi: WooFiMetadata,

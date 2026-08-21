@@ -174,6 +174,10 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   // OKX
   okx: () => import(/* webpackChunkName: "exchange-okx" */ './okx/okx.exchange').then((m) => m.OKXExchange),
 
+  // OKX Demo
+  okxdemo: () =>
+    import(/* webpackChunkName: "exchange-okxdemo" */ './okx/okxdemo.exchange').then((m) => m.OKXDemoExchange),
+
   // OKX EU (European entity, separate API host)
   okxeu: () => import(/* webpackChunkName: "exchange-okxeu" */ './okx/okxeu.exchange').then((m) => m.OKXEUExchange),
 

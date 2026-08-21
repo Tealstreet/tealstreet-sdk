@@ -26,7 +26,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   }
 
   const region = (exchange as OKXExchange).region ?? 'okx';
-  const baseURL = BASE_URLS[region];
+  const baseURL = BASE_URLS[region][options.testnet ? 'testnet' : 'livenet'];
 
   const xhr = safeCexAxiosCreate(
     {

@@ -51,6 +51,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   lighter: 'https://mainnet.zklighter.elliot.ai',
   mode: 'https://api-evm.orderly.org',
   okx: 'https://www.okx.com',
+  okxdemo: 'https://www.okx.com',
   okxeu: 'https://eea.okx.com',
   paradex: 'https://api.prod.paradex.trade/v1',
   phemex: 'https://api.phemex.com',
@@ -187,6 +188,8 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('okx', proxy).wsPrivate.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/okx/private',
     );
+    expect(resolveExchangeRouting('okxdemo', proxy).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('okxdemo', proxy).wsBusiness).toEqual({ tunnelled: false });
     // bitget{inverse,usdc} extend BitgetExchange -> same fallback hosts.
     for (const v of ['bitgetinverse', 'bitgetusdc'] as ExchangeName[]) {
       expect(resolveExchangeRouting(v, offProxy).wsPrivate).toEqual(
