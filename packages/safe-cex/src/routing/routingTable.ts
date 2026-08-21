@@ -97,8 +97,9 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
 // (bitmex always; bybit when tunnelling) -> howEgress is 'regionConditional'. Their
 // variants that extend the same class inherit it.
 // bybit.api.ts's createAPI region-pins the HOW adapter; its consumers are bybit,
-// bybitinverse, bybitspot, and bybitdemo (extends BybitExchange {}). bitmex.api.ts
-// likewise -> bitmex + bitmextestnet.
+// bybitinverse, bybitspot, and bybitdemo (extends BybitExchange {}). HyroTrader
+// is Bybit-compatible but direct to a first-party simulator, so it intentionally
+// stays out of this list. bitmex.api.ts likewise -> bitmex + bitmextestnet.
 const HOW_REGION_CONDITIONAL: ExchangeName[] = [
   'bitmex',
   'bitmextestnet',

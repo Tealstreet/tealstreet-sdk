@@ -57,8 +57,9 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
 
   connectAndSubscribe = (_isReconnect = false) => {
     if (!this.isDisposed) {
+      const network = this.parent.options.testnet ? 'testnet' : 'livenet';
       this.ws = this.createWebsocket(
-        BASE_WS_URL.public[this.category][this.parent.options.testnet ? 'testnet' : 'livenet'] +
+        (this.parent.getBybitPublicWsUrl?.(this.category, network) ?? BASE_WS_URL.public[this.category][network]) +
           '?requestId=' +
           nanoid(),
       );

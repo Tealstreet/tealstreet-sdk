@@ -333,6 +333,7 @@ describe('exchangeMetadata', () => {
         'breakoutprop',
         'bybit',
         'bybitdemo',
+        'hyrotrader',
         'bybitspot',
         'bybitinverse',
         'coinbase',

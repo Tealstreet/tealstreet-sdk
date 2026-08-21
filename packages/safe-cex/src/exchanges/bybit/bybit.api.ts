@@ -46,9 +46,12 @@ export const shouldRetryBybitRequest = (error: any) => {
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
-  const baseURL = exchange.name.includes('demo')
-    ? DEMO_URL[options.testnet ? 'testnet' : 'livenet']
-    : BASE_URL[options.testnet ? 'testnet' : 'livenet'];
+  const network = options.testnet ? 'testnet' : 'livenet';
+  const bybitCompatibleExchange = exchange as BaseExchange & {
+    getBybitRestBaseUrl?: (network: 'livenet' | 'testnet') => string;
+  };
+  const baseURL =
+    bybitCompatibleExchange.getBybitRestBaseUrl?.(network) ?? (exchange.isDemo ? DEMO_URL[network] : BASE_URL[network]);
   const xhr = safeCexAxiosCreate(
     {
       baseURL,

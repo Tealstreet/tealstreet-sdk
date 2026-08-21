@@ -5,7 +5,10 @@ declare const require: <T = any>(id: string) => T;
 
 type ExchangeLoader = () => Promise<typeof BaseExchange>;
 
-const load = (loader: () => typeof BaseExchange): ExchangeLoader => () => Promise.resolve(loader());
+const load =
+  (loader: () => typeof BaseExchange): ExchangeLoader =>
+  () =>
+    Promise.resolve(loader());
 
 export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   apexomni: load(() => require('./apexomni/apexomni.exchange').ApexOmniExchange),
@@ -26,6 +29,7 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   breakoutprop: load(() => require('./breakoutprop/breakoutprop.exchange').BreakoutpropExchange),
   bybit: load(() => require('./bybit/bybit.exchange').BybitExchange),
   bybitdemo: load(() => require('./bybit/bybitdemo.exchange').BybitDemoExchange),
+  hyrotrader: load(() => require('./bybit/hyrotrader.exchange').HyrotraderExchange),
   bybitinverse: load(() => require('./bybit/bybitinverse.exchange').BybitInverseExchange),
   bybitspot: load(() => require('./bybit/bybitspot.exchange').BybitSpotExchange),
   coinbase: load(() => require('./coinbase/coinbase.exchange').CoinbaseExchange),

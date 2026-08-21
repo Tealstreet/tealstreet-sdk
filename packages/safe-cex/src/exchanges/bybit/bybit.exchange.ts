@@ -11,6 +11,7 @@ import debounce from 'lodash/debounce';
 import omit from 'lodash/omit';
 import orderBy from 'lodash/orderBy';
 import times from 'lodash/times';
+import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
@@ -66,9 +67,13 @@ import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
 import {
+  BASE_URL,
+  BASE_WS_URL,
   BybitApiKeyInfo,
   BybitTransactionHistoryOptions,
   BybitTransactionRecord,
+  DEMO_URL,
+  DEMO_WS_URL,
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
@@ -243,6 +248,22 @@ export class BybitExchange extends BaseExchange {
 
   get cachedApiKeyInfo() {
     return this.apiKeyInfo;
+  }
+
+  getBybitRestBaseUrl(network: 'livenet' | 'testnet') {
+    return this.isDemo ? DEMO_URL[network] : BASE_URL[network];
+  }
+
+  getBybitPublicWsUrl(category: 'linear' | 'inverse', network: 'livenet' | 'testnet') {
+    return BASE_WS_URL.public[category][network];
+  }
+
+  getBybitPrivateWsUrl(network: 'livenet' | 'testnet') {
+    return (this.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network];
+  }
+
+  protected requiresOrderLinkId() {
+    return false;
   }
 
   getSettleCoinsForCategory(category: string) {
@@ -2091,10 +2112,10 @@ export class BybitExchange extends BaseExchange {
       // because they are already set on the first one
       const payload = idx > 0 ? omit(req, ['stopLoss', 'takeProfit', 'slTriggerBy', 'tpTriggerBy']) : req;
 
-      return { ...payload, qty: `${lotSize}` };
+      return { ...payload, qty: `${lotSize}`, orderLinkId: this.requiresOrderLinkId() ? nanoid() : undefined };
     });
 
-    if (rest) payloads.push({ ...req, qty: `${rest}` });
+    if (rest) payloads.push({ ...req, qty: `${rest}`, orderLinkId: this.requiresOrderLinkId() ? nanoid() : undefined });
 
     const responses = await mapSeries(payloads, async (p) => {
       try {

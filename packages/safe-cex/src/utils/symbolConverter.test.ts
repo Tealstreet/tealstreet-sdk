@@ -44,6 +44,7 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'breakoutprop',
   'bybit',
   'bybitdemo',
+  'hyrotrader',
   'bybitinverse',
   'bybitspot',
   'coinbase',

@@ -30,7 +30,11 @@ import type { ExchangeName } from '../types';
  * against real money on the admin dashboard, which is exactly what `bybitdemo`
  * was doing when it held the second-largest position in the table.
  */
-export const PRACTICE_VENUES: ReadonlySet<ExchangeName> = new Set(['bybitdemo', 'bitmextestnet'] as ExchangeName[]);
+export const PRACTICE_VENUES: ReadonlySet<ExchangeName> = new Set([
+  'bybitdemo',
+  'bitmextestnet',
+  'hyrotrader',
+] as ExchangeName[]);
 
 /**
  * Whether this venue's trading is paper.

@@ -1,9 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { BybitBboOrderOpts, BybitTickSizeMarketOrderOpts } from '../../index';
 
-import type {
-  BybitBboOrderOpts,
-  BybitTickSizeMarketOrderOpts,
-} from '../../index';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { getBybitOrderExecutionParams } from '../../exchanges/bybit/bybit.order-params';
@@ -12,6 +9,12 @@ import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
 import { OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
+
+class BybitOrderLinkIdExchange extends BybitExchange {
+  protected requiresOrderLinkId() {
+    return true;
+  }
+}
 
 const bboOrder = (symbol = 'BTCUSDT'): BybitBboOrderOpts => ({
   symbol,
@@ -84,44 +87,35 @@ describe('Bybit adapter-only advanced order parameters', () => {
     'rejects invalid TickSize tolerance %s',
     (bybitSlippageToleranceTicks) => {
       expect(() =>
-        getBybitOrderExecutionParams(
-          { ...tickSizeOrder(), bybitSlippageToleranceTicks } as any,
-          'linear',
-        ),
+        getBybitOrderExecutionParams({ ...tickSizeOrder(), bybitSlippageToleranceTicks } as any, 'linear'),
       ).toThrow('Bybit TickSize slippage must be an integer from 1 to 10000');
     },
   );
 
   it('rejects non-plain and ambiguous TickSize market orders', () => {
-    expect(() =>
-      getBybitOrderExecutionParams({ ...tickSizeOrder(), type: OrderType.Limit } as any, 'linear'),
-    ).toThrow('Bybit TickSize slippage is only supported for plain market orders');
-    expect(() =>
-      getBybitOrderExecutionParams({ ...tickSizeOrder(), triggerPrice: 30_000 } as any, 'linear'),
-    ).toThrow('Bybit TickSize slippage is only supported for plain market orders');
-    expect(() =>
-      getBybitOrderExecutionParams({ ...tickSizeOrder(), maxSlippagePct: 1 } as any, 'linear'),
-    ).toThrow('Bybit TickSize slippage is only supported for plain market orders');
+    expect(() => getBybitOrderExecutionParams({ ...tickSizeOrder(), type: OrderType.Limit } as any, 'linear')).toThrow(
+      'Bybit TickSize slippage is only supported for plain market orders',
+    );
+    expect(() => getBybitOrderExecutionParams({ ...tickSizeOrder(), triggerPrice: 30_000 } as any, 'linear')).toThrow(
+      'Bybit TickSize slippage is only supported for plain market orders',
+    );
+    expect(() => getBybitOrderExecutionParams({ ...tickSizeOrder(), maxSlippagePct: 1 } as any, 'linear')).toThrow(
+      'Bybit TickSize slippage is only supported for plain market orders',
+    );
   });
 
   it('rejects malformed, incompatible, and unsupported-category BBO intent', () => {
+    expect(() => getBybitOrderExecutionParams({ ...bboOrder(), price: 30_000 } as any, 'linear')).toThrow(
+      'Bybit BBO cannot include price, conditional, attached TP/SL, or slippage fields',
+    );
     expect(() =>
-      getBybitOrderExecutionParams({ ...bboOrder(), price: 30_000 } as any, 'linear'),
-    ).toThrow('Bybit BBO cannot include price, conditional, attached TP/SL, or slippage fields');
-    expect(() =>
-      getBybitOrderExecutionParams(
-        { ...bboOrder(), timeInForce: OrderTimeInForce.PostOnly } as any,
-        'linear',
-      ),
+      getBybitOrderExecutionParams({ ...bboOrder(), timeInForce: OrderTimeInForce.PostOnly } as any, 'linear'),
     ).toThrow('Bybit BBO currently supports only GoodTillCancel time in force');
     expect(() =>
       getBybitOrderExecutionParams({ ...bboOrder(), bybitBbo: { sideType: 'Queue', level: 6 } } as any, 'linear'),
     ).toThrow('Bybit BBO level must be an integer from 1 to 5');
     expect(() =>
-      getBybitOrderExecutionParams(
-        { ...bboOrder(), bybitBbo: { sideType: 'Nearest', level: 1 } } as any,
-        'linear',
-      ),
+      getBybitOrderExecutionParams({ ...bboOrder(), bybitBbo: { sideType: 'Nearest', level: 1 } } as any, 'linear'),
     ).toThrow('Bybit BBO sideType must be Queue or Counterparty');
     expect(() => getBybitOrderExecutionParams(bboOrder(), 'spot')).toThrow(
       'Bybit BBO orders are only supported for linear and inverse products',
@@ -130,10 +124,7 @@ describe('Bybit adapter-only advanced order parameters', () => {
 
   it('rejects BBO and TickSize controls together', () => {
     expect(() =>
-      getBybitOrderExecutionParams(
-        { ...bboOrder(), bybitSlippageToleranceTicks: 10 } as any,
-        'linear',
-      ),
+      getBybitOrderExecutionParams({ ...bboOrder(), bybitSlippageToleranceTicks: 10 } as any, 'linear'),
     ).toThrow('Bybit BBO and TickSize slippage options are mutually exclusive');
   });
 
@@ -152,11 +143,7 @@ describe('Bybit adapter-only advanced order parameters', () => {
         order: tickSizeOrder('BTCUSD'),
       },
       {
-        exchange: new BybitDemoExchange(
-          'bybitdemo',
-          { key: 'key', secret: 'secret' },
-          createStore('BTCUSDT', 'USDT'),
-        ),
+        exchange: new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT')),
         order: tickSizeOrder(),
       },
       {
@@ -202,6 +189,43 @@ describe('Bybit adapter-only advanced order parameters', () => {
     expect(payload).not.toHaveProperty('bboLevel');
   });
 
+  it('adds orderLinkId only for Bybit-compatible venues that require it', async () => {
+    const variants = [
+      {
+        exchange: new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT')),
+        hasLinkId: false,
+      },
+      {
+        exchange: new BybitOrderLinkIdExchange(
+          'hyrotrader',
+          { key: 'key', secret: 'secret' },
+          createStore('BTCUSDT', 'USDT'),
+        ),
+        hasLinkId: true,
+      },
+    ];
+
+    for (const { exchange, hasLinkId } of variants) {
+      mockPositionMode(exchange);
+      const post = vi.fn().mockResolvedValue({ data: { retMsg: 'OK', result: { orderId: 'order-1' } } });
+      exchange.xhr = { post } as any;
+
+      await exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Market,
+        side: OrderSide.Buy,
+        amount: 0.5,
+      });
+
+      const payload = post.mock.calls[0][1];
+      if (hasLinkId) {
+        expect(payload.orderLinkId).toEqual(expect.any(String));
+      } else {
+        expect(payload.orderLinkId).toBeUndefined();
+      }
+    }
+  });
+
   it('sends price-less BBO orders through linear, inverse, and demo single-order endpoints', async () => {
     const variants = [
       {
@@ -217,11 +241,7 @@ describe('Bybit adapter-only advanced order parameters', () => {
         order: bboOrder('BTCUSD'),
       },
       {
-        exchange: new BybitDemoExchange(
-          'bybitdemo',
-          { key: 'key', secret: 'secret' },
-          createStore('BTCUSDT', 'USDT'),
-        ),
+        exchange: new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT')),
         order: bboOrder(),
       },
     ];
@@ -284,10 +304,7 @@ describe('Bybit adapter-only advanced order parameters', () => {
     exchange.xhr = { post } as any;
 
     await expect(
-      exchange.placeOrders([
-        tickSizeOrder(),
-        { ...tickSizeOrder(), bybitSlippageToleranceTicks: 10_001 } as any,
-      ]),
+      exchange.placeOrders([tickSizeOrder(), { ...tickSizeOrder(), bybitSlippageToleranceTicks: 10_001 } as any]),
     ).rejects.toThrow('Bybit TickSize slippage must be an integer from 1 to 10000');
     expect(post).not.toHaveBeenCalled();
   });

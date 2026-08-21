@@ -45,6 +45,7 @@ const EXCHANGE_NAMES = [
   'bybitdemo',
   'bybitinverse',
   'bybitspot',
+  'hyrotrader',
   'coinbase',
   'coinbasespot',
   'cryptocom',
@@ -76,8 +77,7 @@ const EXCHANGE_NAMES = [
 // If safe-cex adds/removes an exchange, this line forces a script-api-core
 // follow-up commit.
 type _ExchangeNameDrift =
-  | Exclude<ExchangeName, (typeof EXCHANGE_NAMES)[number]>
-  | Exclude<(typeof EXCHANGE_NAMES)[number], ExchangeName>;
+  Exclude<ExchangeName, (typeof EXCHANGE_NAMES)[number]> | Exclude<(typeof EXCHANGE_NAMES)[number], ExchangeName>;
 const _check: _ExchangeNameDrift extends never ? true : false = true;
 void _check;
 

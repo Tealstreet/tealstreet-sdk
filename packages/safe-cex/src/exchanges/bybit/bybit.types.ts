@@ -45,6 +45,46 @@ export const DEMO_WS_URL = {
   },
 };
 
+const normalizeConfiguredOrigin = (origin: string | undefined) => origin?.trim().replace(/\/+$/, '') || '';
+const restOriginToWsUrl = (origin: string, path: string) => {
+  if (!origin) return '';
+  return `${origin.replace(/^http/i, 'ws')}${path}`;
+};
+
+const HYROTRADER_SIMULATOR_REST_ORIGIN = normalizeConfiguredOrigin(
+  process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL,
+);
+const HYROTRADER_SIMULATOR_PUBLIC_WS_URL = normalizeConfiguredOrigin(
+  process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL,
+);
+const HYROTRADER_SIMULATOR_PRIVATE_WS_URL = normalizeConfiguredOrigin(
+  process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL,
+);
+
+export const HYROTRADER_SIMULATOR_URL = {
+  livenet: HYROTRADER_SIMULATOR_REST_ORIGIN,
+  testnet: HYROTRADER_SIMULATOR_REST_ORIGIN,
+};
+
+export const HYROTRADER_SIMULATOR_WS_URL = {
+  public: {
+    linear: {
+      livenet:
+        HYROTRADER_SIMULATOR_PUBLIC_WS_URL || restOriginToWsUrl(HYROTRADER_SIMULATOR_REST_ORIGIN, '/v5/public/linear'),
+      testnet:
+        HYROTRADER_SIMULATOR_PUBLIC_WS_URL || restOriginToWsUrl(HYROTRADER_SIMULATOR_REST_ORIGIN, '/v5/public/linear'),
+    },
+    inverse: {
+      livenet: '',
+      testnet: '',
+    },
+  },
+  private: {
+    livenet: HYROTRADER_SIMULATOR_PRIVATE_WS_URL || restOriginToWsUrl(HYROTRADER_SIMULATOR_REST_ORIGIN, '/v5/private'),
+    testnet: HYROTRADER_SIMULATOR_PRIVATE_WS_URL || restOriginToWsUrl(HYROTRADER_SIMULATOR_REST_ORIGIN, '/v5/private'),
+  },
+};
+
 export const ENDPOINTS = {
   ACCOUNT_MARGIN: '/v5/account/info',
   ACCOUNT: '/v5/user/query-api',

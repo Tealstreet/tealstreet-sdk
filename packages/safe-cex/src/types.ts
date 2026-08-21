@@ -28,6 +28,7 @@ export type ExchangeName =
   | 'bybitdemo'
   | 'bybitinverse'
   | 'bybitspot'
+  | 'hyrotrader'
   | 'coinbase'
   | 'coinbasespot'
   | 'cryptocom'

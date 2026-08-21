@@ -88,9 +88,10 @@ export function toBinance(symbol: string, from: ExchangeName): string {
       return idx > 0 ? symbol.slice(0, idx) : symbol;
     }
 
-    // -- Bybit/BybitDemo: BTCUSDT passthrough, BCHPERP → BCHUSDC -----------
+    // -- Bybit/BybitDemo/HyroTrader: BTCUSDT passthrough, BCHPERP → BCHUSDC -
     case 'bybit':
-    case 'bybitdemo': {
+    case 'bybitdemo':
+    case 'hyrotrader': {
       // Strip expiry date: MNTUSDT-03APR26 → MNTUSDT
       const dashIdx = symbol.indexOf('-');
       const clean = dashIdx > 0 ? symbol.slice(0, dashIdx) : symbol;
@@ -258,9 +259,10 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'phemex':
       return symbol;
 
-    // -- Bybit/BybitDemo: BCHUSDC → BCHPERP, BTCUSDT stays -----------------
+    // -- Bybit/BybitDemo/HyroTrader: BCHUSDC → BCHPERP, BTCUSDT stays -------
     case 'bybit':
-    case 'bybitdemo': {
+    case 'bybitdemo':
+    case 'hyrotrader': {
       if (symbol.endsWith('USDC')) {
         return symbol.slice(0, -4) + 'PERP';
       }

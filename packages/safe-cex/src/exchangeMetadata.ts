@@ -389,6 +389,25 @@ const BybitDemoMetadata: ExchangeMetadata = {
   hideMarginTypeSelector: true,
 };
 
+const HyrotraderMetadata: ExchangeMetadata = {
+  ...BybitDemoMetadata,
+  exchangeName: 'hyrotrader' as ExchangeName,
+  prettyName: 'HyroTrader',
+  logo: '/static/exchanges/logos/HYROTRADER/logo.svg',
+  lightLogo: '/static/exchanges/logos/HYROTRADER/logo.svg',
+  darkLogo: '/static/exchanges/logos/HYROTRADER/logo.svg',
+  refLink: undefined,
+  refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
+  enabled: true,
+  enabledInDev: true,
+  forbidCors: false,
+  enforceWsTunnel: false,
+  supportsTunnel: false,
+  privateProxyIps: [],
+  privateProxyRegions: {},
+  latencyDomain: 'hyrotrader-simulator',
+};
+
 const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitspot' as ExchangeName,
@@ -2182,6 +2201,7 @@ export const exchangeMetadata: {
   backpack: BackpackMetadata,
   bybit: BybitMetadata,
   bybitdemo: BybitDemoMetadata,
+  hyrotrader: HyrotraderMetadata,
   bybitspot: BybitSpotMetadata,
   bybitinverse: BybitInverseMetadata,
   binance: BinanceMetadata,

@@ -32,6 +32,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   breakoutprop: 'https://breakout.prosp.devexperts.com/dxsca-web',
   bybit: 'https://api.bybit.com',
   bybitdemo: 'https://api-demo.bybit.com',
+  hyrotrader: 'https://hyrotrader-simulator',
   bybitinverse: 'https://api.bybit.com',
   bybitspot: 'https://api.bybit.com',
   coinbase: 'https://api.coinbase.com',

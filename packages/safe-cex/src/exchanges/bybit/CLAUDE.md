@@ -714,26 +714,39 @@ renders the tab permanently empty.
 
 ## Testnet/Demo
 
-### Demo Trading (`bybitdemo.exchange.ts`)
+### Demo Trading (`bybitdemo.exchange.ts`, `hyrotrader.exchange.ts`)
 
-A minimal subclass of `BybitExchange` with only two changes:
+`BybitDemoExchange` is a minimal subclass of `BybitExchange` with only two changes:
 
 - `isDemo = true` -- triggers demo URL selection for REST and the private WebSocket; public data intentionally uses mainnet
 - `get supportedCategories()` returns `['linear']`
 
-All logic (order placement, position management, etc.) is inherited from `BybitExchange`.
+`HyrotraderExchange` is a first-party Bybit-compatible simulator variant. It keeps
+the Bybit parsers/order lifecycle, but uses explicit URL override hooks instead
+of pretending its exchange name is `bybitdemo`:
+
+- REST origin comes from `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`
+- public/private WS URLs come from `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL`
+  and `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL`, or are derived from the
+  REST origin as `/v5/public/linear` and `/v5/private`
+- reconciliation is USDT-only (`linear`, `settleCoin=USDT`) because the simulator
+  contract does not support Bybit's USDC linear branch
+- order placement sends a generated `orderLinkId` because the simulator requires
+  idempotent client order IDs; regular Bybit remains unchanged
 
 ### URL Differences
 
-| Component  | Livenet            | Testnet                    | Demo                    |
-| ---------- | ------------------ | -------------------------- | ----------------------- |
-| REST       | `api.bybit.com`    | `api-testnet.bybit.com`    | `api-demo.bybit.com`    |
-| Public WS  | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream.bybit.com`      |
-| Private WS | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream-demo.bybit.com` |
+| Component  | Livenet            | Testnet                    | Bybit Demo              | HyroTrader       |
+| ---------- | ------------------ | -------------------------- | ----------------------- | ---------------- |
+| REST       | `api.bybit.com`    | `api-testnet.bybit.com`    | `api-demo.bybit.com`    | env-configured   |
+| Public WS  | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream.bybit.com`      | env/REST-derived |
+| Private WS | `stream.bybit.com` | `stream-testnet.bybit.com` | `stream-demo.bybit.com` | env/REST-derived |
 
-URL selection logic (`bybit.api.ts:27-29`):
+URL selection logic:
 
-- Demo: checks `exchange.name.includes('demo')`
+- Bybit-compatible subclasses can override `getBybitRestBaseUrl`,
+  `getBybitPublicWsUrl`, and `getBybitPrivateWsUrl`
+- Demo fallback checks `exchange.isDemo`
 - Testnet: checks `options.testnet`
 - Livenet: default
 
@@ -741,6 +754,9 @@ URL selection logic (`bybit.api.ts:27-29`):
 
 - Demo testnet fallback: `DEMO_URL.testnet` falls through to `api-testnet.bybit.com` (same as regular testnet)
 - Demo only supports `linear` category (no inverse or spot)
+- HyroTrader only supports `linear` USDT perpetuals and a documented subset of
+  Bybit V5 endpoints. Unsupported inherited Bybit calls such as API-key info are
+  best-effort and must not block startup.
 - Demo's private WS drops `order` frames. `recordRecentlyPlacedOrder`
   therefore upserts the just-placed row into the store on `isDemo` only
   (`this.store.addOrUpdateOrders([order])`). Without it the row may never reach

@@ -100,6 +100,12 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   bybitdemo: () =>
     import(/* webpackChunkName: "exchange-bybitdemo" */ './bybit/bybitdemo.exchange').then((m) => m.BybitDemoExchange),
 
+  // HyroTrader
+  hyrotrader: () =>
+    import(/* webpackChunkName: "exchange-hyrotrader" */ './bybit/hyrotrader.exchange').then(
+      (m) => m.HyrotraderExchange,
+    ),
+
   // Bybit Inverse
   bybitinverse: () =>
     import(/* webpackChunkName: "exchange-bybitinverse" */ './bybit/bybitinverse.exchange').then(
