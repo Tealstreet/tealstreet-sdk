@@ -53,6 +53,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   okx: 'https://www.okx.com',
   okxdemo: 'https://openapi.okx.com',
   okxeu: 'https://eea.okx.com',
+  okxeudemo: 'https://eea.okx.com',
   paradex: 'https://api.prod.paradex.trade/v1',
   phemex: 'https://api.phemex.com',
   polymarket: 'https://clob.polymarket.com',
@@ -190,6 +191,8 @@ describe('routing table / resolver (Epic 1 net)', () => {
     );
     expect(resolveExchangeRouting('okxdemo', proxy).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxdemo', proxy).wsBusiness).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('okxeudemo', proxy).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('okxeudemo', proxy).wsBusiness).toEqual({ tunnelled: false });
     // bitget{inverse,usdc} extend BitgetExchange -> same fallback hosts.
     for (const v of ['bitgetinverse', 'bitgetusdc'] as ExchangeName[]) {
       expect(resolveExchangeRouting(v, offProxy).wsPrivate).toEqual(

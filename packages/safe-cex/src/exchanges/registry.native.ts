@@ -46,6 +46,7 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   okx: load(() => require('./okx/okx.exchange').OKXExchange),
   okxdemo: load(() => require('./okx/okxdemo.exchange').OKXDemoExchange),
   okxeu: load(() => require('./okx/okxeu.exchange').OKXEUExchange),
+  okxeudemo: load(() => require('./okx/okxeudemo.exchange').OKXEUDemoExchange),
   paradex: load(() => require('./paradex/paradex.exchange').ParadexExchange),
   phemex: load(() => require('./phemex/phemex.exchange').PhemexExchange),
   polymarket: load(() => require('./polymarket/polymarket.exchange').PolymarketExchange),

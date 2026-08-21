@@ -8,9 +8,9 @@ This directory contains the OKX exchange integration for Tealstreet. Regular OKX
 - **Type**: Centralized Exchange (CEX)
 - **Supported products**: Linear and inverse perpetual swaps (`ctType === 'linear' || ctType === 'inverse'`); OKX EU also includes X-Perp `FUTURES` rows where `ruleType === 'xperp'`
 - **API version**: v5
-- **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`; `okxdemo` uses the official Demo REST host `https://openapi.okx.com` with `x-simulated-trading: 1`, routed through Tealstreet's OKX REST proxy path). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported for live global REST.
-- **Latency domain**: `www.okx.com` (`okxdemo`: `openapi.okx.com`; `okxeu`: `eea.okx.com`)
-- **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. `okxdemo` requires the Tealstreet REST proxy route for third-party-linked demo keys, while demo WebSockets stay direct to `wspap.okx.com`. Keep `okxeu.requiresCors = true` and `okxdemo.requiresCors = true`; regular `okx` remains direct-capable by metadata.
+- **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`; `okxdemo` uses the official Demo REST host `https://openapi.okx.com`; `okxeudemo` uses `https://eea.okx.com`; demo variants add `x-simulated-trading: 1` and route REST through Tealstreet's OKX REST proxy path). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported for live global REST.
+- **Latency domain**: `www.okx.com` (`okxdemo`: `openapi.okx.com`; `okxeu` / `okxeudemo`: `eea.okx.com`)
+- **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. `okxdemo` and `okxeudemo` require the Tealstreet REST proxy route, while demo WebSockets stay direct to `wspap.okx.com` / `wseeapap.okx.com`. Keep `okxeu.requiresCors = true` and demo metadata `requiresCors = true`; regular `okx` remains direct-capable by metadata.
 - **okxeu WS tunnel paths**: private/business sockets tunnel via dedicated `okxeu/private` / `okxeu/business` paths (see `routing/routingTable.ts`), which the python ws-proxy terminates on `wss://wseea.okx.com:8443`. Do NOT reuse the global `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
 
 ## API Documentation
@@ -34,6 +34,7 @@ When working with OKX exchange integration, consult the official API documentati
 | `okx.api.ts`         | `createAPI()`          | REST API client factory with HMAC-SHA256 signing via axios interceptors                                      |
 | `okx.exchange.ts`    | `OKXExchange`          | Main exchange class extending `BaseExchange`; all trading logic                                              |
 | `okxdemo.exchange.ts` | `OKXDemoExchange`      | Minimal subclass that forces `testnet: true` / `isDemo = true` while reusing global OKX trading logic        |
+| `okxeudemo.exchange.ts` | `OKXEUDemoExchange` | Minimal subclass that forces `testnet: true` / `isDemo = true` while reusing OKX EU trading logic            |
 | `okx.ws-public.ts`   | `OKXPublicWebsocket`   | Public WebSocket for market data (tickers, mark price, index, OI, funding, order book)                       |
 | `okx.ws-private.ts`  | `OKXPrivateWebsocket`  | Private WebSocket for account, positions, and regular order updates                                          |
 | `okx.ws-business.ts` | `OKXBusinessWebsocket` | Business WebSocket for candles (OHLCV), algo orders, and algo-advance updates; extends `OKXPrivateWebsocket` |
@@ -98,7 +99,7 @@ Promise.all([
 ])
 ```
 
-- **Markets** (`/api/v5/public/instruments?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetches supported instruments, keeps linear/inverse contracts, and stores them. For OKX EU, regular dated futures are ignored unless `ruleType === 'xperp'`.
+- **Markets** (`/api/v5/public/instruments?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetches supported instruments, keeps linear/inverse contracts, and stores them. Signed OKX EU / OKX EU Demo sessions use the account-scoped `/api/v5/account/instruments` endpoint instead, because EEA demo/live accounts can have generic `trade` permission while only being entitled to a subset of public markets. For OKX EU, regular dated futures are ignored unless `ruleType === 'xperp'`.
 - **Tickers** (`/api/v5/market/tickers?instType=SWAP`; OKX EU also `instType=FUTURES`): Fetched in parallel with markets
 
 ### Phase 2: Parse & Connect Public WS (sequential)
@@ -143,6 +144,7 @@ All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 | ---------------------- | --------------------------------------- | ------ | ----------------------------------------------------------------------------- |
 | `ACCOUNT`              | `/api/v5/account/config`                | GET    | Get account configuration (position mode, account level)                      |
 | `ACCOUNT_CONFIG`       | `/api/v5/account/config`                | GET    | Same path as ACCOUNT (used for position mode/account level fetch)             |
+| `ACCOUNT_INSTRUMENTS`  | `/api/v5/account/instruments`           | GET    | Account-available instruments for signed OKX EU / OKX EU Demo market discovery |
 | `PARTNER`              | `/api/v5/users/partner/if-rebate`       | GET    | Check partner rebate status                                                   |
 | `MARKETS`              | `/api/v5/public/instruments`            | GET    | Fetch available instruments (`instType=SWAP`)                                 |
 | `TICKERS`              | `/api/v5/market/tickers`                | GET    | Fetch ticker data (`instType=SWAP`)                                           |
@@ -176,11 +178,11 @@ OKX uses **three separate WebSocket connections**, all on port 8443.
 
 ### URLs
 
-| Type     | Production                             | OKX Demo                                      |
-| -------- | -------------------------------------- | --------------------------------------------- |
-| Public   | `wss://ws.okx.com:8443/ws/v5/public`   | `wss://wspap.okx.com:8443/ws/v5/public`       |
-| Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://wspap.okx.com:8443/ws/v5/private`      |
-| Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://wspap.okx.com:8443/ws/v5/business`     |
+| Type     | Production                             | OKX Demo                                      | OKX EU Demo                                      |
+| -------- | -------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| Public   | `wss://ws.okx.com:8443/ws/v5/public`   | `wss://wspap.okx.com:8443/ws/v5/public`       | `wss://wseeapap.okx.com:8443/ws/v5/public`       |
+| Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://wspap.okx.com:8443/ws/v5/private`      | `wss://wseeapap.okx.com:8443/ws/v5/private`      |
+| Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://wspap.okx.com:8443/ws/v5/business`     | `wss://wseeapap.okx.com:8443/ws/v5/business`     |
 
 `okxdemo` is a separate exchange variant because OKX Demo Trading uses separate
 demo API credentials. It forces `options.testnet = true`, which selects the
@@ -191,12 +193,39 @@ OKX Demo environment instead. Demo REST is intentionally proxied through the
 existing OKX/Tokyo Tealstreet REST proxy pool so third-party-linked keys validate
 from Tealstreet routing rather than the user's browser IP.
 
-Do NOT route `okxdemo` private/business sockets through the Tealstreet WS proxy.
-Unlike Bybit Demo, OKX Demo authenticates with a normal post-connect `login`
-frame, so browser-native WebSocket connections to `wspap.okx.com` are the
-intended path. `OkxDemoMetadata` sets `requiresCors: true` for REST, but not
-`enforceWsTunnel: true`, and `routingTable.ts` intentionally leaves `okxdemo`
-out of the OKX private/business WS override group.
+`okxeudemo` follows the same separate-credential pattern for EEA demo keys.
+Those keys validate on `https://eea.okx.com` with `x-simulated-trading: 1`;
+global `openapi.okx.com` returns `50119` for EEA-scoped demo keys.
+
+### Demo Validation Status (2026-08-21)
+
+- `okxdemo` is functionally ready in code, but still needs confirmation
+  validation with a known-good Global OKX Demo key. In particular, verify that
+  Global demo credentials authenticate and trade against the documented
+  `https://openapi.okx.com` REST host with `x-simulated-trading: 1`. If
+  `openapi.okx.com` fails for a valid Global demo key, re-test `https://www.okx.com`
+  before changing product assumptions.
+- `okxeudemo` is functionally working with an EEA-scoped demo key: account
+  linking, charts, balance loading, and market order placement succeeded on the
+  account-available X-Perp instrument
+  (`BTC-USD_UM_XPERP-310328` / compact `BTCUSD_UM_XPERP310328`).
+- Do not treat the observed OKX EU product scope as globally proven yet. The
+  tested EEA demo account reported generic `read_only,trade` API permissions,
+  but `/api/v5/account/instruments?instType=SWAP` returned no BTC SWAP markets
+  and `/api/v5/account/instruments?instType=FUTURES` returned BTC USD_UM dated
+  futures plus one X-Perp. More OKX EU live/demo accounts are needed to decide
+  whether this is universal OKX EU behavior, jurisdiction/account-specific
+  entitlement, or demo-only scope. Use `/api/v5/account/instruments` as the
+  account-scoped source of truth; public `/api/v5/public/instruments` only proves
+  that a product exists on the venue, not that a given account may trade it.
+
+Do NOT route `okxdemo` or `okxeudemo` private/business sockets through the
+Tealstreet WS proxy. Unlike Bybit Demo, OKX Demo authenticates with a normal
+post-connect `login` frame, so browser-native WebSocket connections to
+`wspap.okx.com` / `wseeapap.okx.com` are the intended path. Demo metadata sets
+`requiresCors: true` for REST, but not `enforceWsTunnel: true`, and
+`routingTable.ts` intentionally leaves demo variants out of the OKX
+private/business WS override groups.
 
 Private and business WebSockets support Tealstreet proxy routing. Both
 `connectAndSubscribe` methods resolve their host from the shared routing
@@ -775,19 +804,22 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
   credentials.
 - **`okxdemo`**: separate first-class variant. It subclasses `OKXExchange`, sets
   `isDemo = true`, and forces `options.testnet = true` in the constructor.
-- **REST behavior**: demo REST uses `https://openapi.okx.com` plus
-  `x-simulated-trading: 1` on public and authenticated requests, routed through
-  the existing OKX/Tokyo Tealstreet REST proxy pool. This is REST proxying only,
-  not HOW/WS tunnelling.
-- **Proxy dependency**: `openapi.okx.com` must be present in both
-  `terraform/private-exchange-proxy/haproxy-sg-running.cfg` and
-  `infra/tradetunnel/src/config.rs`; otherwise the browser request reaches
-  CloudFront/HAProxy and fails with a proxy-level 503 before OKX can return an
-  auth response.
-- **WebSocket behavior**: demo public/private/business sockets connect directly
-  to `wss://wspap.okx.com:8443/ws/v5/{public|private|business}`. The routing
-  table intentionally does not give `okxdemo` the OKX private/business proxy
-  override.
+- **`okxeudemo`**: separate first-class variant. It subclasses
+  `OKXEUExchange`, sets `isDemo = true`, and forces `options.testnet = true` in
+  the constructor.
+- **REST behavior**: global demo REST uses `https://openapi.okx.com` plus
+  `x-simulated-trading: 1`; EEA demo REST uses `https://eea.okx.com` plus the
+  same header. Both route through the existing OKX/Tokyo Tealstreet REST proxy
+  pool. This is REST proxying only, not HOW/WS tunnelling.
+- **Proxy dependency**: global demo's `openapi.okx.com` host must be present in
+  the private-proxy fleet before browser-proxied global demo requests can reach
+  OKX. EEA demo uses the existing `eea.okx.com` proxy route.
+- **WebSocket behavior**: global demo sockets connect directly to
+  `wss://wspap.okx.com:8443/ws/v5/{public|private|business}`; EEA demo sockets
+  connect directly to
+  `wss://wseeapap.okx.com:8443/ws/v5/{public|private|business}`. The routing
+  table intentionally does not give demo variants OKX private/business proxy
+  overrides.
 - **Order-state safeguards**: do not copy Bybit Demo's recently-placed-order
   shield into OKX Demo speculatively. As of implementation, no in-repo probe
   evidence shows OKX Demo dropping private `orders` / algo-order frames. If a

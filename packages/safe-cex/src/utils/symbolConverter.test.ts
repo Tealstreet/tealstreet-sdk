@@ -239,4 +239,10 @@ describe('OKX demo symbol parity', () => {
     expect(toBinance('BTCUSD_UM', 'okxdemo')).toBe(toBinance('BTCUSD_UM', 'okx'));
     expect(fromBinance('BTCUSDT', 'okxdemo')).toBe(fromBinance('BTCUSDT', 'okx'));
   });
+
+  it('uses the same compact symbol behavior as OKX EU', () => {
+    expect(toBinance('BTCUSDT', 'okxeudemo')).toBe(toBinance('BTCUSDT', 'okxeu'));
+    expect(toBinance('BTCUSD_UM', 'okxeudemo')).toBe(toBinance('BTCUSD_UM', 'okxeu'));
+    expect(fromBinance('BTCUSDT', 'okxeudemo')).toBe(fromBinance('BTCUSDT', 'okxeu'));
+  });
 });

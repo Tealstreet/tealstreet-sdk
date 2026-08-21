@@ -132,7 +132,7 @@ export class OKXExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
 
-    this.region = exchangeName === 'okxeu' ? 'okxeu' : 'okx';
+    this.region = exchangeName === 'okxeu' || exchangeName === 'okxeudemo' ? 'okxeu' : 'okx';
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
     this.publicWebsocket = new OKXPublicWebsocket(this);
@@ -153,6 +153,10 @@ export class OKXExchange extends BaseExchange {
   getMarketInstrumentType(market: { info?: any; instType?: unknown }): OkxInstrumentType {
     const instType = String(market.info?.instType || market.instType || 'SWAP');
     return instType === 'FUTURES' ? 'FUTURES' : 'SWAP';
+  }
+
+  protected getMarketInstrumentsEndpoint(): string {
+    return ENDPOINTS.MARKETS;
   }
 
   getIndexTickerInstId(market: Market): string {
@@ -303,7 +307,9 @@ export class OKXExchange extends BaseExchange {
     try {
       const responses = await Promise.all(
         this.getInstrumentTypes().map((instType) =>
-          this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS, { params: { instType } }),
+          this.xhr.get<{ data: Array<Record<string, any>> }>(this.getMarketInstrumentsEndpoint(), {
+            params: { instType },
+          }),
         ),
       );
       const data = responses.flatMap(({ data }) => data.data);

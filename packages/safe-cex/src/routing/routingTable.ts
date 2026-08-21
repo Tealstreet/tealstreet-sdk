@@ -45,6 +45,7 @@ const REST_JP: ExchangeName[] = [
   'okx',
   'okxdemo',
   'okxeu',
+  'okxeudemo',
   'bitget',
   'bitgetinverse',
   'bitgetusdc',
@@ -79,6 +80,8 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
   grvt: { private: { kind: 'alwaysProxy', host: WS.grvt } },
   okx: okxWs,
   okxeu: okxeuWs, // OKXEUExchange extends OKXExchange {} but tunnels to wseea.okx.com
+  // OKX EU Demo intentionally stays direct: testnet endpoints are wseeapap.okx.com
+  // and authenticate with a normal OKX login frame after connect.
   blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
   coinbase: coinbaseWs,
   coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange

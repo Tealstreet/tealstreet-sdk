@@ -84,7 +84,8 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     // -- OKX: strip special suffixes like _UM --------------------------------
     case 'okx':
     case 'okxdemo':
-    case 'okxeu': {
+    case 'okxeu':
+    case 'okxeudemo': {
       const idx = symbol.indexOf('_');
       return idx > 0 ? symbol.slice(0, idx) : symbol;
     }
@@ -234,6 +235,7 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'okx':
     case 'okxdemo':
     case 'okxeu':
+    case 'okxeudemo':
     case 'blofin':
     case 'breakoutprop':
     case 'bitgetinverse':

@@ -24,9 +24,9 @@ export const BASE_URLS: Record<OkxRegion, OkxRestUrls> = {
   },
   okxeu: {
     livenet: 'https://eea.okx.com',
-    // OKX EU has no exposed demo variant; this dormant slot intentionally
-    // points at the global demo host behavior inherited by okxdemo.
-    testnet: 'https://openapi.okx.com',
+    // OKX EU demo keys are entity-scoped and validate on the EEA REST host with
+    // `x-simulated-trading: 1`; global `openapi.okx.com` returns 50119 for them.
+    testnet: 'https://eea.okx.com',
   },
 };
 
@@ -48,21 +48,22 @@ export const BASE_WS_URLS: Record<OkxRegion, OkxWsUrls> = {
   okxeu: {
     public: {
       livenet: 'wss://wseea.okx.com:8443/ws/v5/public',
-      testnet: 'wss://wspap.okx.com:8443/ws/v5/public',
+      testnet: 'wss://wseeapap.okx.com:8443/ws/v5/public',
     },
     private: {
       livenet: 'wss://wseea.okx.com:8443/ws/v5/private',
-      testnet: 'wss://wspap.okx.com:8443/ws/v5/private',
+      testnet: 'wss://wseeapap.okx.com:8443/ws/v5/private',
     },
     business: {
       livenet: 'wss://wseea.okx.com:8443/ws/v5/business',
-      testnet: 'wss://wspap.okx.com:8443/ws/v5/business',
+      testnet: 'wss://wseeapap.okx.com:8443/ws/v5/business',
     },
   },
 };
 
 export const ENDPOINTS = {
   ACCOUNT: '/api/v5/account/config',
+  ACCOUNT_INSTRUMENTS: '/api/v5/account/instruments',
   PARTNER: '/api/v5/users/partner/if-rebate',
   MARKETS: '/api/v5/public/instruments',
   TICKERS: '/api/v5/market/tickers',

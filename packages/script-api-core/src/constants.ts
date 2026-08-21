@@ -56,6 +56,7 @@ const EXCHANGE_NAMES = [
   'okx',
   'okxdemo',
   'okxeu',
+  'okxeudemo',
   'paradex',
   'phemex',
   'polymarket',

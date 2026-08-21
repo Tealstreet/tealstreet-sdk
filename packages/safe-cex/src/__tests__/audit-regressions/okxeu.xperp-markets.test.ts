@@ -101,8 +101,41 @@ afterEach(() => {
 });
 
 describe('OKX EU X-Perp market support', () => {
-  it('loads SWAP markets plus FUTURES X-Perps without regular dated futures', async () => {
+  it('loads private markets from account-available instruments', async () => {
     const exchange = createExchange();
+    const get = vi.fn(async (endpoint: string, opts?: { params?: Record<string, string> }) => {
+      if (endpoint === ENDPOINTS.ACCOUNT_INSTRUMENTS && opts?.params?.instType === 'SWAP') {
+        return { data: { data: [] } };
+      }
+      if (endpoint === ENDPOINTS.ACCOUNT_INSTRUMENTS && opts?.params?.instType === 'FUTURES') {
+        return { data: { data: [xperpInstrument, regularFutureInstrument] } };
+      }
+      return { data: { data: [] } };
+    });
+    exchange.xhr.get = get as any;
+
+    const markets = await exchange.fetchMarkets();
+
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_INSTRUMENTS, { params: { instType: 'SWAP' } });
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_INSTRUMENTS, { params: { instType: 'FUTURES' } });
+    expect(markets.map((market) => market.id)).toEqual(['ETH-USD_UM_XPERP-310404']);
+    expect(markets[0]).toMatchObject({
+      symbol: 'ETHUSD_UM_XPERP310404',
+      prettySymbol: 'ETH/USD XPERP',
+      base: 'ETH',
+      quote: 'USD',
+      active: true,
+      isInverse: false,
+    });
+    expect('isExpiring' in markets[0]).toBe(false);
+  });
+
+  it('keeps public OKX EU market discovery available for public-only sessions', async () => {
+    const exchange = new OKXEUExchange(
+      'okxeu',
+      { ...options, publicDataOnly: true },
+      new DefaultStore(),
+    );
     const get = vi.fn(async (endpoint: string, opts?: { params?: Record<string, string> }) => {
       if (endpoint === ENDPOINTS.MARKETS && opts?.params?.instType === 'SWAP') {
         return { data: { data: [swapInstrument] } };
@@ -119,25 +152,16 @@ describe('OKX EU X-Perp market support', () => {
     expect(get).toHaveBeenCalledWith(ENDPOINTS.MARKETS, { params: { instType: 'SWAP' } });
     expect(get).toHaveBeenCalledWith(ENDPOINTS.MARKETS, { params: { instType: 'FUTURES' } });
     expect(markets.map((market) => market.id)).toEqual(['BTC-USDT-SWAP', 'ETH-USD_UM_XPERP-310404']);
-    expect(markets[1]).toMatchObject({
-      symbol: 'ETHUSD_UM_XPERP310404',
-      prettySymbol: 'ETH/USD XPERP',
-      base: 'ETH',
-      quote: 'USD',
-      active: true,
-      isInverse: false,
-    });
-    expect('isExpiring' in markets[1]).toBe(false);
   });
 
   it('fetches and parses FUTURES X-Perp tickers for stored OKX EU markets', async () => {
     const exchange = createExchange();
     const markets = await (async () => {
       exchange.xhr.get = vi.fn(async (endpoint: string, opts?: { params?: Record<string, string> }) => {
-        if (endpoint === ENDPOINTS.MARKETS && opts?.params?.instType === 'SWAP') {
+        if (endpoint === ENDPOINTS.ACCOUNT_INSTRUMENTS && opts?.params?.instType === 'SWAP') {
           return { data: { data: [swapInstrument] } };
         }
-        if (endpoint === ENDPOINTS.MARKETS && opts?.params?.instType === 'FUTURES') {
+        if (endpoint === ENDPOINTS.ACCOUNT_INSTRUMENTS && opts?.params?.instType === 'FUTURES') {
           return { data: { data: [xperpInstrument] } };
         }
         return { data: { data: [] } };

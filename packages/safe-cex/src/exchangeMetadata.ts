@@ -1122,6 +1122,21 @@ const OkxDemoMetadata: ExchangeMetadata = {
   enforceWsTunnel: false,
 };
 
+const OkxEUDemoMetadata: ExchangeMetadata = {
+  ...OkxEUMetadata,
+  exchangeName: 'okxeudemo' as ExchangeName,
+  prettyName: 'OKX EU Demo',
+  supportsTestnet: false,
+  // EEA demo REST uses the live EEA host with `x-simulated-trading: 1`, and
+  // browser REST still needs the existing OKX EU proxy path.
+  requiresCors: true,
+  forbidCors: false,
+  latencyDomain: 'eea.okx.com',
+  // EEA demo WebSockets authenticate with the standard OKX login frame against
+  // direct `wseeapap.okx.com` sockets, not the Tealstreet WS proxy.
+  enforceWsTunnel: false,
+};
+
 const WooMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2241,6 +2256,7 @@ export const exchangeMetadata: {
   okx: OkxMetadata,
   okxdemo: OkxDemoMetadata,
   okxeu: OkxEUMetadata,
+  okxeudemo: OkxEUDemoMetadata,
   woo: WooMetadata,
   woofi: WooFiMetadata,
   coinbasespot: CoinbaseSpotMetadata,

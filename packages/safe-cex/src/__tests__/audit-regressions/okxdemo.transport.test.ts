@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { OKXDemoExchange } from '../../exchanges/okx/okxdemo.exchange';
+import { OKXEUDemoExchange } from '../../exchanges/okx/okxeudemo.exchange';
 import { BASE_URLS, BASE_WS_URLS } from '../../exchanges/okx/okx.types';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
@@ -35,6 +36,23 @@ describe('OKX Demo transport and metadata', () => {
     expect(BASE_WS_URLS.okx.business.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/business');
   });
 
+  it('uses the OKX EU runtime with EEA demo mode forced on', () => {
+    const exchange = new OKXEUDemoExchange('okxeudemo', options, new DefaultStore());
+
+    expect(exchange.isDemo).toBe(true);
+    expect(exchange.options.testnet).toBe(true);
+    expect(exchange.region).toBe('okxeu');
+
+    exchange.dispose();
+  });
+
+  it('uses official direct OKX EU demo websocket endpoints', () => {
+    expect(BASE_URLS.okxeu.testnet).toBe('https://eea.okx.com');
+    expect(BASE_WS_URLS.okxeu.public.testnet).toBe('wss://wseeapap.okx.com:8443/ws/v5/public');
+    expect(BASE_WS_URLS.okxeu.private.testnet).toBe('wss://wseeapap.okx.com:8443/ws/v5/private');
+    expect(BASE_WS_URLS.okxeu.business.testnet).toBe('wss://wseeapap.okx.com:8443/ws/v5/business');
+  });
+
   it('is registered as a REST-proxied, WS-direct separate exchange variant', async () => {
     await expect(exchangeRegistry.okxdemo()).resolves.toBe(OKXDemoExchange);
 
@@ -53,5 +71,25 @@ describe('OKX Demo transport and metadata', () => {
     );
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
+  });
+
+  it('registers OKX EU Demo as REST-proxied and WS-direct', async () => {
+    await expect(exchangeRegistry.okxeudemo()).resolves.toBe(OKXEUDemoExchange);
+
+    expect(exchangeMetadata.okxeudemo).toMatchObject({
+      exchangeName: 'okxeudemo',
+      prettyName: 'OKX EU Demo',
+      supportsTestnet: false,
+      requiresCors: true,
+      forbidCors: false,
+      enforceWsTunnel: false,
+      latencyDomain: 'eea.okx.com',
+    });
+
+    expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).restProxyHost).toBe(
+      'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+    );
+    expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
   });
 });

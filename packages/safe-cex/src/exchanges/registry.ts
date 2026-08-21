@@ -181,6 +181,12 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   // OKX EU (European entity, separate API host)
   okxeu: () => import(/* webpackChunkName: "exchange-okxeu" */ './okx/okxeu.exchange').then((m) => m.OKXEUExchange),
 
+  // OKX EU Demo
+  okxeudemo: () =>
+    import(/* webpackChunkName: "exchange-okxeudemo" */ './okx/okxeudemo.exchange').then(
+      (m) => m.OKXEUDemoExchange,
+    ),
+
   // Paradex (heavy - StarkEx/Starknet dependencies)
   paradex: () =>
     import(/* webpackChunkName: "exchange-paradex" */ './paradex/paradex.exchange').then((m) => m.ParadexExchange),

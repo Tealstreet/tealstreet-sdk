@@ -8,6 +8,10 @@ export class OKXEUExchange extends OKXExchange {
     return ['SWAP', 'FUTURES'];
   }
 
+  protected getMarketInstrumentsEndpoint(): string {
+    return this.isPublicDataOnly ? ENDPOINTS.MARKETS : ENDPOINTS.ACCOUNT_INSTRUMENTS;
+  }
+
   isSupportedMarketInstrument(market: Record<string, any>): boolean {
     if (market.instType === 'FUTURES') {
       return market.ruleType === 'xperp' && (market.ctType === 'linear' || market.ctType === 'inverse');

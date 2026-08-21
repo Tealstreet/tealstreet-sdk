@@ -39,6 +39,7 @@ export type ExchangeName =
   | 'okx'
   | 'okxdemo'
   | 'okxeu'
+  | 'okxeudemo'
   | 'paradex'
   | 'phemex'
   | 'polymarket'
