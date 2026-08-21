@@ -772,11 +772,14 @@ available during parent construction.
   Bybit V5 endpoints. Unsupported inherited Bybit calls such as API-key info are
   best-effort and must not block startup.
 - Demo's private WS drops `order` frames. `recordRecentlyPlacedOrder`
-  therefore upserts the just-placed row into the store on `isDemo` only
-  (`this.store.addOrUpdateOrders([order])`). Without it the row may never reach
-  the store at all: the UI shows nothing and the Chaser supervisor idles beside
-  an unmanaged resting order, so a second click places a DUPLICATE. Live Bybit
-  keeps its WS-driven flow untouched.
+  therefore upserts just-placed **resting** rows into the store on `isDemo`
+  only (`this.store.addOrUpdateOrders([order])`). Without it a limit/chaser row
+  may never reach the store at all: the UI shows nothing and the Chaser
+  supervisor idles beside an unmanaged resting order, so a second click places a
+  DUPLICATE. Plain `OrderType.Market` is excluded: Bybit returns an `orderId`
+  for market orders, but they execute as IOC and must not become local open rows
+  that demo has no private frame to retire. Live Bybit keeps its WS-driven flow
+  untouched.
 - Chaser gates on demo private-WS health at **startup only**, and only when the
   socket is genuinely dead (reconnect-paused, or never initialized after a short
   grace window). See `webworker/chaserOrder/CLAUDE.md`; do not restore the
@@ -817,8 +820,14 @@ keep them together.
 
 ## Demo has to retire its own rows
 
-`recordRecentlyPlacedOrder` injecting a row into the store on demo is only half a
-lifecycle. The other half was missing and produced phantom orders.
+`recordRecentlyPlacedOrder` injecting a resting row into the store on demo is
+only half a lifecycle. The other half was missing and produced phantom orders.
+
+Plain market orders are not part of this lifecycle. Bybit's create-order
+acknowledgement can include an `orderId` for a market order, but the matching
+engine treats it as IOC; adding that id to `store.orders` produced phantom
+open-order/depth markers after reduce-only market closes when demo never sent a
+terminal `Filled` frame.
 
 `handleOrderTopic` is the **only** path that removes an order row, and it needs a
 private `order` frame. Demo drops those, and the periodic `tick` calls

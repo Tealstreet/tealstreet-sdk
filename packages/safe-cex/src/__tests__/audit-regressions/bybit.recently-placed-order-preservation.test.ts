@@ -352,4 +352,22 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     // Live still gets grace-window preservation against degraded-mode wipes.
     expect(live.exchange.preserveRecentlyPlacedOrders([]).map((o: Order) => o.id)).toEqual(['live-1']);
   });
+
+  it('does not inject or preserve plain market orders on demo', () => {
+    const { exchange, store } = makeExchange(true);
+
+    exchange.recordRecentlyPlacedOrder(makeOrder('market-1', { type: OrderType.Market }));
+
+    expect(store.orders).toEqual([]);
+    expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
+  });
+
+  it('still injects conditional market triggers because they are resting orders', () => {
+    const { exchange, store } = makeExchange(true);
+
+    exchange.recordRecentlyPlacedOrder(makeOrder('conditional-1', { type: OrderType.Conditional }));
+
+    expect(store.orders.map((order: Order) => order.id)).toEqual(['conditional-1']);
+    expect(exchange.preserveRecentlyPlacedOrders([]).map((order: Order) => order.id)).toEqual(['conditional-1']);
+  });
 });

@@ -342,6 +342,14 @@ export class BybitExchange extends BaseExchange {
   };
 
   private recordRecentlyPlacedOrder = (order: Order) => {
+    // Bybit market orders return an orderId, but they execute as IOC and do
+    // not represent resting open orders. On demo, injecting them locally turns
+    // a completed close into a phantom open row because private order frames
+    // may never arrive to retire it.
+    if (order.type === OrderType.Market) {
+      return;
+    }
+
     this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
     // Demo's private WS drops order events, so without this the row may never
     // reach the store at all: the UI shows nothing and the chaser supervisor
@@ -2160,7 +2168,7 @@ export class BybitExchange extends BaseExchange {
           id: orderId,
           status: OrderStatus.Open,
           symbol: opts.symbol,
-          type,
+          type: opts.type,
           side: opts.side,
           price: price ?? triggerPrice ?? 0,
           amount: qty,
