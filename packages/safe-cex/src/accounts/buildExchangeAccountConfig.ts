@@ -1,6 +1,7 @@
 import type { ExchangeAccountConfig, ExchangeName } from '../types';
 
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
+import { normalizeBybitSiteId } from '../exchanges/bybit/bybit.site';
 import { normalizeExchangeAccountConfig } from './normalizeExchangeAccountConfig';
 
 export type ExchangeAccountCredentialField =
@@ -153,6 +154,7 @@ export function buildExchangeAccountConfig(input: ExchangeAccountCredentialInput
     lastSymbol: optionalString(input.lastSymbol),
     telegramBotToken: optionalString(input.telegramBotToken),
     proxyRegion: optionalString(input.proxyRegion),
+    bybitSiteId: normalizeBybitSiteId(exchange, input.bybitSiteId),
   };
 
   const schema = getExchangeAccountCredentialSchema(exchange);

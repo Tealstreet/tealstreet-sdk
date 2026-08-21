@@ -6,10 +6,12 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { OrderStatus, Position, Writable } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
+import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybit.types';
 
 export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
@@ -18,11 +20,15 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const network = this.parent.options.testnet ? 'testnet' : 'livenet';
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      const directUrl =
+        this.parent.getBybitPrivateWsUrl?.(network) ?? (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network];
+      const baseUrl = route.tunnelled && route.host ? route.host : directUrl;
+      const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
       this.ws = this.createWebsocket(
-        (this.parent.getBybitPrivateWsUrl?.(network) ??
-          (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network]) +
-          '?requestId=' +
-          nanoid(),
+        baseUrl + '?requestId=' + nanoid(),
+        undefined,
+        webSocketOptions,
       );
 
       this.ws.addEventListener('open', this.onOpen);

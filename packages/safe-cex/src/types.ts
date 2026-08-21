@@ -92,6 +92,8 @@ export type ExchangeOptions = {
   readonly testnet?: boolean;
   /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
   readonly enableSpotMarkets?: boolean;
+  /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
+  readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
   readonly privateOnly?: boolean;
   readonly tealstreetProxy?: boolean;
@@ -221,6 +223,12 @@ export interface ExchangeAccountConfig {
    * must be unchanged unless they explicitly ask for spot.
    */
   enableSpotMarkets?: boolean;
+
+  /**
+   * Bybit Brazil accounts use the global Bybit hosts but require
+   * `x-site-id: BRA_BTL` on REST and WebSocket connection requests.
+   */
+  bybitSiteId?: 'BRA_BTL';
 
   // Exchange-specific authentication fields
   applicationId?: string;

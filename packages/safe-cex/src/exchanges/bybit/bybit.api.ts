@@ -13,6 +13,7 @@ import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeC
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { getBybitResponseMeta } from './bybit.response';
+import { getBybitSiteHeaders } from './bybit.site';
 import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.types';
 
 // Credential failures that will not self-heal on retry, so the tick backoff
@@ -52,6 +53,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   };
   const baseURL =
     bybitCompatibleExchange.getBybitRestBaseUrl?.(network) ?? (exchange.isDemo ? DEMO_URL[network] : BASE_URL[network]);
+  const usesBybitSiteHeaders =
+    exchange.name === 'bybit' || exchange.name === 'bybitinverse' || exchange.name === 'bybitspot';
+  const bybitSiteHeaders = usesBybitSiteHeaders ? getBybitSiteHeaders(options) : {};
   const xhr = safeCexAxiosCreate(
     {
       baseURL,
@@ -63,6 +67,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         'X-Referer': BROKER_ID,
         'X-BAPI-RECV-WINDOW': recvWindow,
         'Content-Type': 'application/json, charset=utf-8',
+        ...bybitSiteHeaders,
       },
     },
     options,
@@ -96,7 +101,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     if (isPublicEndpoint(nextConfig.url)) markSkipRemoteSigning(nextConfig);
 
     if (nextConfig.method === 'get' && nextConfig.url === ENDPOINTS.KLINE) {
-      return { ...nextConfig, headers: new AxiosHeaders({}) };
+      return { ...nextConfig, headers: new AxiosHeaders(bybitSiteHeaders) };
     }
 
     // Skip signing when remote signer handles it

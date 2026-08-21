@@ -101,4 +101,54 @@ describe('buildExchangeAccountConfig', () => {
   it('lists Paradex as an addable exchange from safe-cex metadata', () => {
     expect(getSupportedExchangeAccountNames()).toContain('paradex');
   });
+
+  it('preserves Bybit Brazil site id only for non-demo Bybit account variants', () => {
+    expect(
+      buildExchangeAccountConfig({
+        exchange: 'bybit',
+        name: 'bybit-main',
+        apiKey: 'key',
+        apiSecret: 'secret',
+        bybitSiteId: 'BRA_BTL',
+      }).bybitSiteId,
+    ).toBe('BRA_BTL');
+    expect(
+      buildExchangeAccountConfig({
+        exchange: 'bybitinverse',
+        name: 'bybit-inverse',
+        apiKey: 'key',
+        apiSecret: 'secret',
+        bybitSiteId: 'BRA_BTL',
+      }).bybitSiteId,
+    ).toBe('BRA_BTL');
+    expect(
+      buildExchangeAccountConfig({
+        exchange: 'bybitspot',
+        name: 'bybit-spot',
+        apiKey: 'key',
+        apiSecret: 'secret',
+        bybitSiteId: 'BRA_BTL',
+      }).bybitSiteId,
+    ).toBe('BRA_BTL');
+    expect(
+      buildExchangeAccountConfig({
+        exchange: 'bybitdemo',
+        name: 'bybit-demo',
+        apiKey: 'key',
+        apiSecret: 'secret',
+        bybitSiteId: 'BRA_BTL',
+      }),
+    ).not.toHaveProperty('bybitSiteId');
+  });
+
+  it('does not add a Bybit Brazil field when it is unset', () => {
+    expect(
+      buildExchangeAccountConfig({
+        exchange: 'bybit',
+        name: 'bybit-main',
+        apiKey: 'key',
+        apiSecret: 'secret',
+      }),
+    ).not.toHaveProperty('bybitSiteId');
+  });
 });

@@ -1,5 +1,6 @@
 import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
+import { normalizeBybitSiteId } from './exchanges/bybit/bybit.site';
 import { getExchangeMetadata } from './exchangeMetadata';
 import { createExchange } from './index';
 import { getPublicCorsProxy, resolveAccountTransport } from './utils/transportResolution';
@@ -37,6 +38,7 @@ export function accountToExchangeOptions(
   // When a secondary (read-only) key is configured, its reads egress the public AWS
   // CORS proxy while writes stay on the primary/whitelisted transport.
   const secondaryProxyUrl = account.secondary_apiKey ? getPublicCorsProxy() : undefined;
+  const bybitSiteId = normalizeBybitSiteId(account.exchange, account.bybitSiteId);
 
   const options: ExchangeOptions = {
     key: account.apiKey,
@@ -59,6 +61,7 @@ export function accountToExchangeOptions(
 
     // Testnet
     ...(account.testnet ? { testnet: account.testnet } : {}),
+    ...(bybitSiteId ? { bybitSiteId } : {}),
 
     // Spot opt-in, for venues that serve spot + derivatives from one
     // connection. Only forwarded when the venue actually offers the toggle,

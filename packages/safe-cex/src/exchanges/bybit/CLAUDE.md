@@ -76,10 +76,36 @@ Authentication uses HMAC-SHA256 with the following process:
    - `X-BAPI-RECV-WINDOW`: configurable, defaults to `20000` ms (via `options.extra.recvWindow` or `RECV_WINDOW` constant)
    - `X-Referer`: `Tealstreet` (broker ID)
    - `Content-Type`: `application/json, charset=utf-8`
+   - `x-site-id`: `BRA_BTL` only when `options.bybitSiteId === 'BRA_BTL'`
 
 Each request gets a unique `requestId` param via `nanoid()`.
 
-The KLINE endpoint is **unsigned** (headers stripped for public market data) -- `bybit.api.ts:63`.
+The KLINE endpoint is **unsigned** (auth headers stripped for public market data) but must keep site headers such as `x-site-id: BRA_BTL`.
+
+### Bybit Brazil Account Mode
+
+Bybit Brazil accounts use the normal global Bybit REST/WS hosts, but Bybit requires the official `x-site-id: BRA_BTL` header. The user opts into this with `ExchangeAccountConfig.bybitSiteId`, which is forwarded to `ExchangeOptions.bybitSiteId` only for `bybit`, `bybitinverse`, and `bybitspot`.
+
+Current status for beta:
+
+- Functionally implemented in account shape, account creation/editing, sync/runtime fingerprints, REST headers, and Bybit WS connection options.
+- Covered by focused safe-cex/web tests, package-local typechecks, and root lint during implementation.
+- Not venue-validated yet because we do not have a real Bybit Brazil account/API key. Treat the first Brazil-account rollout as beta validation rather than fully proven production behavior.
+
+Rules:
+
+- Keep this as the specific `bybitSiteId` field. Do not replace it with a user-controlled generic header bag.
+- Explicitly drop the field for `bybitdemo`; demo uses `api-demo.bybit.com` credentials and has no Brazil KYC/site concept.
+- REST requests include the header on signed and unsigned routes. Public KLINE strips auth but preserves `x-site-id`.
+- WS classes pass the header option to `createWebsocket()` and resolve the routing table before falling back to direct Bybit URLs. Browser-native direct WebSockets cannot set custom upgrade headers; if Bybit enforces the header there, a CTO-confirmed Tealstreet/tradetunnel WS route must be added to the routing table instead of inventing an unbacked host here.
+
+Beta validation checklist:
+
+- Add or edit a non-demo Bybit account, enable "Bybit Brazil account", and confirm validation succeeds.
+- Confirm REST activity works for the account mode the user actually trades: account info, balance, orders, positions, order history, executions, order placement/amend/cancel, and KLINE.
+- Confirm public and private WS behavior separately. If REST works but direct browser WS does not, collect the WS close/auth details and route it to proxy infra; do not remove the user-facing caveat until a header-capable tunnel route is confirmed.
+- Do not assume Brazil accounts are spot-only. Product availability is a venue/account-permission question; let Bybit errors prove unsupported derivatives before hiding perps/inverse in the UI.
+- Regression-check a normal non-Brazil Bybit account to ensure the unset `bybitSiteId` remains a no-op and does not cause reload/sync churn.
 
 **Retry logic** (`bybit.api.ts:49-52`): Retries up to 3 times on network errors or `"error sign!"` responses, except `MARKETS` (`/v5/market/instruments-info`) network errors, which are not retried inside worker startup. The `shouldRetryBybitRequest()` function checks both `ret_msg` and `retMsg` response fields for signature drift.
 

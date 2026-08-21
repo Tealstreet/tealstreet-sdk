@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import {
   Candle,
   OHLCVOptions,
@@ -22,6 +23,7 @@ import { inverseObj } from '../../utils/inverseObj';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
+import { getBybitWebSocketOptions } from './bybit.site';
 import { INTERVAL } from './bybit.types';
 import { BASE_WS_URL } from './bybitspot.types';
 
@@ -87,8 +89,14 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
 
   connectAndSubscribe = (_isReconnect = false) => {
     if (!this.isDisposed) {
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic;
+      const directUrl = BASE_WS_URL.public['spot'][this.parent.options.testnet ? 'testnet' : 'livenet'];
+      const baseUrl = route.tunnelled && route.host ? route.host : directUrl;
+      const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
       this.ws = this.createWebsocket(
-        BASE_WS_URL.public['spot'][this.parent.options.testnet ? 'testnet' : 'livenet'] + '?requestId=' + nanoid(),
+        baseUrl + '?requestId=' + nanoid(),
+        undefined,
+        webSocketOptions,
       );
 
       this.ws.addEventListener('open', this.onOpen);

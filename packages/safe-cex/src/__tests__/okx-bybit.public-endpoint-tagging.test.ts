@@ -106,6 +106,21 @@ describe('bybit public endpoint tagging', () => {
     expect(isTagged(config)).toBe(true);
   });
 
+  it('sends the Bybit Brazil site header on signed REST requests', async () => {
+    const config = await capture(bybit({ ...LOCAL_KEYS, bybitSiteId: 'BRA_BTL' }), '/v5/position/list');
+
+    expect(config.headers['x-site-id']).toBe('BRA_BTL');
+    expect(config.headers['X-BAPI-SIGN']).toBeDefined();
+  });
+
+  it('keeps the Bybit Brazil site header when kline strips auth headers', async () => {
+    const config = await capture(bybit({ ...LOCAL_KEYS, bybitSiteId: 'BRA_BTL' }), '/v5/market/kline');
+
+    expect(config.headers['x-site-id']).toBe('BRA_BTL');
+    expect(config.headers['X-BAPI-SIGN']).toBeUndefined();
+    expect(isTagged(config)).toBe(true);
+  });
+
   it.each(['/v5/order/realtime', '/v5/position/list', '/v5/account/wallet-balance'])(
     'never tags %s in the hosted keyless shape',
     async (url) => {

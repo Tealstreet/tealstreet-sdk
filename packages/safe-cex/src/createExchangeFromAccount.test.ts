@@ -359,6 +359,33 @@ describe('accountToExchangeOptions', () => {
     });
   });
 
+  describe('Bybit Brazil site id', () => {
+    it('forwards bybitSiteId for non-demo Bybit variants', () => {
+      const base = {
+        name: 'test-account',
+        apiKey: 'test-key',
+        apiSecret: 'test-secret',
+        bybitSiteId: 'BRA_BTL' as const,
+      };
+
+      expect(accountToExchangeOptions({ ...base, exchange: 'bybit' }).bybitSiteId).toBe('BRA_BTL');
+      expect(accountToExchangeOptions({ ...base, exchange: 'bybitinverse' }).bybitSiteId).toBe('BRA_BTL');
+      expect(accountToExchangeOptions({ ...base, exchange: 'bybitspot' }).bybitSiteId).toBe('BRA_BTL');
+    });
+
+    it('drops bybitSiteId for Bybit demo and other exchanges', () => {
+      const base = {
+        name: 'test-account',
+        apiKey: 'test-key',
+        apiSecret: 'test-secret',
+        bybitSiteId: 'BRA_BTL' as const,
+      };
+
+      expect(accountToExchangeOptions({ ...base, exchange: 'bybitdemo' }).bybitSiteId).toBeUndefined();
+      expect(accountToExchangeOptions({ ...base, exchange: 'okx', passphrase: 'pass' }).bybitSiteId).toBeUndefined();
+    });
+  });
+
   describe('exchange-specific fields', () => {
     it('should include applicationId when exchange requires it', () => {
       const account: ExchangeAccountConfig = {
