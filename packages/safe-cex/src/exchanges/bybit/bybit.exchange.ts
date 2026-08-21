@@ -250,8 +250,12 @@ export class BybitExchange extends BaseExchange {
     return this.apiKeyInfo;
   }
 
+  private usesBybitDemoEnvironment() {
+    return this.name === 'bybitdemo' || this.isDemo;
+  }
+
   getBybitRestBaseUrl(network: 'livenet' | 'testnet') {
-    return this.isDemo ? DEMO_URL[network] : BASE_URL[network];
+    return this.usesBybitDemoEnvironment() ? DEMO_URL[network] : BASE_URL[network];
   }
 
   getBybitPublicWsUrl(category: 'linear' | 'inverse', network: 'livenet' | 'testnet') {
@@ -259,7 +263,7 @@ export class BybitExchange extends BaseExchange {
   }
 
   getBybitPrivateWsUrl(network: 'livenet' | 'testnet') {
-    return (this.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network];
+    return (this.usesBybitDemoEnvironment() ? DEMO_WS_URL : BASE_WS_URL).private[network];
   }
 
   protected requiresOrderLinkId() {

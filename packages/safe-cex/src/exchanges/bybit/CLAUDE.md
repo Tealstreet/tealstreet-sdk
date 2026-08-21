@@ -751,9 +751,18 @@ URL selection logic:
 
 - Bybit-compatible subclasses can override `getBybitRestBaseUrl`,
   `getBybitPublicWsUrl`, and `getBybitPrivateWsUrl`
-- Demo fallback checks `exchange.isDemo`
+- Demo fallback checks stable exchange identity plus `exchange.isDemo`
 - Testnet: checks `options.testnet`
 - Livenet: default
+
+Constructor-order guardrail: `BybitExchange` creates REST clients inside its own
+constructor, before subclass field initializers such as
+`BybitDemoExchange.isDemo = true` have run. Built-in demo URL selection must
+therefore key off the stable exchange identity (`name === 'bybitdemo'`) as well
+as `isDemo`; otherwise demo keys are signed against `api.bybit.com` and Bybit
+returns `10003 API key is invalid`. Bybit-compatible subclasses that need a
+custom origin should override the URL methods, because prototype methods are
+available during parent construction.
 
 ### Feature Limitations
 
