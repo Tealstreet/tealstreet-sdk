@@ -10,7 +10,7 @@ import { OrderStatus, OrderType } from '../../types';
 import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { ORDER_STATUS } from './bitget.types';
+import { BASE_WS_PRIVATE_UTA_URL, BASE_WS_PRIVATE_URL, ORDER_STATUS } from './bitget.types';
 
 
 export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
@@ -65,8 +65,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.lastMessageCount = this.messageCount;
       this.messageCount = 0; // Reset message counter on new connection
 
-      const url = this.useFallbackUrl ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.fallback! : 'wss://ws.bitget.com/v2/ws/private';
-      if (this.useFallbackUrl) {
+      const useUtaRouting = this.parent.usesUtaRouting;
+      const useFallbackUrl = !useUtaRouting && this.useFallbackUrl;
+      const url = useFallbackUrl
+        ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.fallback!
+        : useUtaRouting
+          ? BASE_WS_PRIVATE_UTA_URL
+          : BASE_WS_PRIVATE_URL;
+      if (useFallbackUrl) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bitget proxy (private)');
         } catch (_e) {}
@@ -120,6 +126,24 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       } else if (json.msg || json.code) {
         this.emitAndLogError(`Bitget private WS login failed: ${json.msg || json.code}`);
       }
+      return;
+    }
+
+    if (json?.arg?.topic === 'order' && json?.event !== 'subscribe') {
+      this.recordMessageHandlerStats('order');
+      this.handleUtaOrderTopic(json);
+      return;
+    }
+
+    if (json?.arg?.topic === 'position' && json?.event !== 'subscribe') {
+      this.recordMessageHandlerStats('position');
+      this.handleUtaPositionsTopic(json);
+      return;
+    }
+
+    if (json?.arg?.topic === 'account' && json?.event !== 'subscribe') {
+      this.recordMessageHandlerStats('account');
+      this.handleUtaAccountTopic(json);
       return;
     }
 
@@ -215,6 +239,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     this.throttledFetchOrders();
   };
 
+  handleUtaOrderTopic = (data: Record<string, any>) => {
+    const rawOrders = Array.isArray(data?.data) ? data.data : [];
+    this.handleOrderTopic({
+      ...data,
+      data: rawOrders.map((rawOrder: Record<string, any>) => ({
+        ...rawOrder,
+        status: rawOrder.orderStatus,
+        baseVolume: rawOrder.baseVolume ?? rawOrder.cumExecQty,
+        priceAvg: rawOrder.avgPrice,
+      })),
+    });
+  };
+
   handleAlgoOrdersTopic = (data: Record<string, any>) => {
     const rawOrders = data.data;
 
@@ -301,6 +338,35 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     this.throttledFetchBalance();
   };
 
+  handleUtaPositionsTopic = (data: Record<string, any>) => {
+    const action = typeof data?.action === 'string' ? data.action : undefined;
+    const rawList = Array.isArray(data?.data) ? (data.data as Array<Record<string, any>>) : [];
+    const validItems = rawList.filter((p) => p && typeof p === 'object');
+
+    if (validItems.length === 0) {
+      if (action === 'snapshot') {
+        this.store.addOrUpdatePositionsFull([]);
+      }
+      this.hasPendingPositionEvents = true;
+      this.throttledFetchPositions();
+      this.throttledFetchBalance();
+      return;
+    }
+
+    const positions = validItems.map((rawPosition) => this.parent.mapUtaPosition(rawPosition));
+    if (action === 'snapshot') {
+      this.store.addOrUpdatePositionsFull(positions);
+    } else {
+      for (const position of positions) {
+        this.store.addOrUpdatePosition(position);
+      }
+    }
+
+    this.hasPendingPositionEvents = true;
+    this.throttledFetchPositions();
+    this.throttledFetchBalance();
+  };
+
   handleAccountTopic = (data: Record<string, any>) => {
     const rawList = Array.isArray(data?.data) ? (data.data as Array<Record<string, any>>) : [];
     const acct = rawList.find((b) => b.marginCoin === this.parent.apiMarginCoin);
@@ -327,6 +393,36 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         info: acct,
       },
     });
+  };
+
+  handleUtaAccountTopic = (data: Record<string, any>) => {
+    const raw = Array.isArray(data?.data) ? data.data[0] : data?.data;
+    if (!raw || typeof raw !== 'object') {
+      this.throttledFetchBalance();
+      return;
+    }
+
+    const accountEquity = this.toFiniteNumber(raw.accountEquity, NaN);
+    const available = this.toFiniteNumber(raw.effEquity, NaN);
+    const apiUpnl = this.toFiniteNumber(raw.unrealisedPnl, this.toFiniteNumber(raw.usdtUnrealisedPnl));
+
+    if (isNaN(accountEquity) || isNaN(available)) {
+      this.throttledFetchBalance();
+      return;
+    }
+
+    const upnl = this.parent.calculateAccountUpnl(apiUpnl);
+    this.store.update({
+      balance: {
+        used: subtract(accountEquity, available),
+        free: available,
+        total: subtract(accountEquity, upnl),
+        upnl,
+        info: raw,
+      },
+    });
+    this.hasPendingBalanceEvents = true;
+    this.throttledFetchBalance();
   };
 
   private throttledFetchPositions = () => {
@@ -598,6 +694,29 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   private subscribe = () => {
+    if (this.parent.usesUtaRouting) {
+      this.sendWithLog(
+        JSON.stringify({
+          op: 'subscribe',
+          args: [
+            {
+              instType: 'UTA',
+              topic: 'account',
+            },
+            {
+              instType: 'UTA',
+              topic: 'position',
+            },
+            {
+              instType: 'UTA',
+              topic: 'order',
+            },
+          ],
+        }),
+      );
+      return;
+    }
+
     const payload = {
       op: 'subscribe',
       args: [

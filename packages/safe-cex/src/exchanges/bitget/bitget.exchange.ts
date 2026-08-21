@@ -54,7 +54,14 @@ import { mapBitgetBills } from './bitget.income';
 import { mapBitgetFills } from './bitget.fills';
 import { splitTimeRange } from '../../utils/splitTimeRange';
 import {
+  BITGET_UTA_CATEGORY,
+  BITGET_UTA_ORDER,
+  BITGET_UTA_POSITION,
   ENDPOINTS,
+  FETCH_UTA_ACCOUNT_ASSETS_RESPONSE,
+  FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE,
+  FETCH_UTA_ORDERS_RESPONSE,
+  FETCH_UTA_POSITIONS_RESPONSE,
   FETCH_POSITIONS_V2_RESPONSE,
   FETCH_SINGLE_ACCOUNT_RESPONSE,
   GRAFANA_ENDPOINTS_EVERY,
@@ -131,6 +138,11 @@ export class BitgetExchange extends BaseExchange {
   // method (current: setLeverage; future: anything else under /api/v3/) reads
   // this flag — keep it the single source of truth.
   protected isUta = false;
+  protected supportsUtaRouting = true;
+
+  get usesUtaRouting(): boolean {
+    return this.isUta && this.supportsUtaRouting && !this.options.testnet;
+  }
 
   // Short-lived dedup + cache for resolveSymbolPositioning's account-endpoint
   // fallback. A single order resolves BOTH position-mode (in formatCreateOrder)
@@ -169,6 +181,10 @@ export class BitgetExchange extends BaseExchange {
 
   get apiMarginCoin() {
     return this.options.testnet ? 'SUSDT' : 'USDT';
+  }
+
+  get apiUtaCategory(): BITGET_UTA_CATEGORY {
+    return this.apiProductType.toUpperCase() as BITGET_UTA_CATEGORY;
   }
 
   private toFiniteNumber(value: unknown, fallback = 0): number {
@@ -237,6 +253,7 @@ export class BitgetExchange extends BaseExchange {
 
   validateAccount = async () => {
     try {
+      await this._detectAccountType();
       // fetchBalance hits the BALANCE endpoint (validating the key) and throws on
       // auth failure, so it doubles as the validation call — one round-trip.
       const balance = await this.fetchBalance();
@@ -309,9 +326,12 @@ export class BitgetExchange extends BaseExchange {
       return;
     }
 
+    await this._detectAccountType();
+    if (this.isDisposed) return;
+
     this.privateWebsocket.connectAndSubscribe();
 
-    await Promise.all([this.tick(), this._detectAccountType()]);
+    await this.tick();
     if (this.isDisposed) return;
 
     this.log(`Ready to trade on Bitget`);
@@ -399,6 +419,10 @@ export class BitgetExchange extends BaseExchange {
 
   fetchBalance = async ({ preferFast = false }: { preferFast?: boolean } = {}) => {
     const client = preferFast ? this.unlimitedXHR : this.xhr;
+    if (this.usesUtaRouting) {
+      return this.fetchUtaBalance(client);
+    }
+
     const { data: response } = await client.get<{
       code?: string | number;
       msg?: string;
@@ -467,9 +491,41 @@ export class BitgetExchange extends BaseExchange {
     return balance;
   };
 
+  private fetchUtaBalance = async (client: Axios): Promise<Balance> => {
+    const { data: response } = await client.get<FETCH_UTA_ACCOUNT_ASSETS_RESPONSE>(ENDPOINTS.UTA_ACCOUNT_ASSETS);
+
+    if (!isBitgetSuccessCode(response.code)) {
+      throw new Error(getBitgetApiErrorMessage(response, 'Bitget UTA account assets request failed'));
+    }
+
+    const data = response.data;
+    if (!data) return this.store.balance;
+
+    const asset = data.assets?.find((a) => a.coin === this.apiMarginCoin);
+    const accountEquity = this.toFiniteNumber(
+      data.accountEquity,
+      this.toFiniteNumber(data.usdtEquity, this.toFiniteNumber(asset?.usdValue, this.toFiniteNumber(asset?.equity))),
+    );
+    const available = this.toFiniteNumber(data.effEquity, this.toFiniteNumber(asset?.available));
+    const apiUpnl = this.toFiniteNumber(data.unrealisedPnl, this.toFiniteNumber(data.usdtUnrealisedPnl));
+    const upnl = this.calculateAccountUpnl(apiUpnl);
+
+    return {
+      used: subtract(accountEquity, available),
+      free: available,
+      total: subtract(accountEquity, upnl),
+      upnl,
+      info: data,
+    };
+  };
+
   fetchPositionMetadata = async (
     symbols: string[],
   ): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
+    if (this.usesUtaRouting) {
+      return this.fetchUtaPositionMetadata(symbols);
+    }
+
     try {
       return flatten(
         await mapSeries(
@@ -548,6 +604,63 @@ export class BitgetExchange extends BaseExchange {
     }
   };
 
+  private fetchUtaPositionMetadata = async (
+    symbols: string[],
+  ): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
+    try {
+      const { data } = await this.xhr.get<FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE>(ENDPOINTS.ACCOUNT_SETTINGS_V3);
+      if (!isBitgetSuccessCode(data.code)) {
+        this.emitAndLogError(data.msg);
+        return [];
+      }
+
+      const settings = data.data;
+      if (!settings) return [];
+
+      const positionMode = settings.holdMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
+      const rows = settings.symbolConfigList ?? [];
+      const metadata: Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[] = [];
+
+      for (const symbol of symbols) {
+        const market = this.store.marketsBySymbol[symbol];
+        const venueSymbol = market?.id ?? symbol;
+        const config = rows.find(
+          (row) =>
+            row.symbol === venueSymbol &&
+            (!row.category || row.category.toUpperCase() === this.apiUtaCategory.toUpperCase()),
+        );
+        if (!config?.marginMode) continue;
+
+        const marginType = config.marginMode === 'crossed' ? MarginType.Cross : MarginType.Isolated;
+        const longLeverage = this.toFiniteNumber(config.longLeverage, this.toFiniteNumber(config.leverage, 1));
+        const shortLeverage = this.toFiniteNumber(config.shortLeverage, this.toFiniteNumber(config.leverage, 1));
+
+        metadata.push({
+          symbol,
+          side: PositionSide.Long,
+          leverage: longLeverage,
+          positionMode,
+          marginType,
+        });
+
+        if (positionMode === PositionMode.Hedged) {
+          metadata.push({
+            symbol,
+            side: PositionSide.Short,
+            leverage: shortLeverage,
+            positionMode,
+            marginType,
+          });
+        }
+      }
+
+      return metadata;
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
+      return [];
+    }
+  };
+
   fetchPositions = async (symbols?: string[]) => {
     const openPositions = await this.fetchOpenPositions();
     if (!symbols) return openPositions;
@@ -588,6 +701,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   fetchOpenPositions = async () => {
+    if (this.usesUtaRouting) {
+      return this.fetchUtaOpenPositions();
+    }
+
     const { data } = await this.xhr.get<FETCH_POSITIONS_V2_RESPONSE>(ENDPOINTS.POSITIONS_V2, {
       params: {
         productType: this.apiProductType,
@@ -644,6 +761,22 @@ export class BitgetExchange extends BaseExchange {
       return position;
     });
     return positions;
+  };
+
+  private fetchUtaOpenPositions = async (): Promise<Position[]> => {
+    const { data } = await this.xhr.get<FETCH_UTA_POSITIONS_RESPONSE>(ENDPOINTS.UTA_POSITIONS, {
+      params: {
+        category: this.apiUtaCategory,
+      },
+    });
+
+    if (!isBitgetSuccessCode(data.code)) {
+      this.emitAndLogError(getBitgetApiErrorMessage(data, 'Bitget UTA positions request failed'));
+      return [];
+    }
+
+    const rawPositions = Array.isArray(data.data?.list) ? data.data.list : [];
+    return rawPositions.map(this.mapUtaPosition);
   };
 
   protected resolveLiquidationPrice = (positionId: string, rawLiquidationPrice: unknown): number => {
@@ -1020,6 +1153,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   fetchOrders = async () => {
+    if (this.usesUtaRouting) {
+      return this.fetchUtaOrders();
+    }
+
     const normalOrders = await this.fetchNormalOrders();
     const algoOrders = await this.fetchAlgoOrders();
     const tslOrders = await this.fetchTrailingStopOrders();
@@ -1028,6 +1165,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   fetchNormalOrders = async () => {
+    if (this.usesUtaRouting) {
+      return this.fetchUtaOrders();
+    }
+
     const allOrders: Array<Record<string, any>> = [];
     let endId: string | undefined;
     const maxIterations = 20; // Safety limit to prevent infinite loops
@@ -1062,6 +1203,37 @@ export class BitgetExchange extends BaseExchange {
 
       endId = data.endId;
       iterations++;
+    }
+
+    return allOrders.flatMap(this.mapOrder);
+  };
+
+  private fetchUtaOrders = async (): Promise<Order[]> => {
+    const allOrders: BITGET_UTA_ORDER[] = [];
+    let cursor: string | undefined;
+    const maxIterations = 20;
+
+    for (let iterations = 0; iterations < maxIterations; iterations += 1) {
+      const params: Record<string, any> = {
+        category: this.apiUtaCategory,
+        limit: '100',
+      };
+      if (cursor) params.cursor = cursor;
+
+      const { data } = await this.xhr.get<FETCH_UTA_ORDERS_RESPONSE>(ENDPOINTS.UTA_ORDERS, { params });
+
+      if (!isBitgetSuccessCode(data.code)) {
+        this.emitAndLogError(getBitgetApiErrorMessage(data, 'Bitget UTA open orders request failed'));
+        return allOrders.flatMap(this.mapOrder);
+      }
+
+      const list = Array.isArray(data.data?.list) ? data.data.list : [];
+      if (!list.length) break;
+      allOrders.push(...list);
+
+      const nextCursor = data.data?.cursor;
+      if (!nextCursor || nextCursor === cursor) break;
+      cursor = nextCursor;
     }
 
     return allOrders.flatMap(this.mapOrder);
@@ -1218,6 +1390,12 @@ export class BitgetExchange extends BaseExchange {
 
   cancelAllOrders = async () => {
     try {
+      if (this.usesUtaRouting) {
+        const orders = await this.fetchUtaOrders();
+        await this.cancelUtaNormalOrders(orders);
+        return;
+      }
+
       await this.unlimitedXHR.post(ENDPOINTS.CANCEL_ALL_ORDERS, {
         productType: this.apiProductType,
         marginCoin: this.apiMarginCoin,
@@ -1237,6 +1415,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   cancelNormalOrders = async (orders: Order[]) => {
+    if (this.usesUtaRouting) {
+      return this.cancelUtaNormalOrders(orders);
+    }
+
     // might include virtual TPSL
     orders = orders.map((o) => ({
       ...o,
@@ -1263,6 +1445,35 @@ export class BitgetExchange extends BaseExchange {
           this.emitAndLogError(err?.response?.data?.msg || err?.message);
           throw err;
         }
+      }
+    }
+  };
+
+  private cancelUtaNormalOrders = async (orders: Order[]) => {
+    const normalizedOrders = uniqBy(
+      orders.map((order) => ({
+        ...order,
+        id: order.id.split('__')[0],
+      })),
+      'id',
+    );
+
+    for (const order of normalizedOrders) {
+      try {
+        const orderId = order.info?.orderId || (order.info?.clientOid === order.id ? undefined : order.id);
+        const clientOid = order.info?.clientOid || (!orderId ? order.id : undefined);
+
+        await this.unlimitedXHR.post(
+          ENDPOINTS.UTA_CANCEL_ORDER,
+          omitUndefined({
+            category: this.apiUtaCategory,
+            orderId,
+            clientOid,
+          }),
+        );
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw err;
       }
     }
   };
@@ -1340,7 +1551,9 @@ export class BitgetExchange extends BaseExchange {
   async getOrFetchPositionMode(symbol: string): Promise<PositionMode> {
     const { positionMode } = await this.resolveSymbolPositioning(symbol);
     if (!positionMode) {
-      const msg = `Could not determine position mode for symbol ${symbol}`;
+      const msg = this.usesUtaRouting
+        ? `Could not determine Bitget UTA position mode for symbol ${symbol}`
+        : `Could not determine position mode for symbol ${symbol}`;
       this.emitAndLogError(msg);
       throw new Error(msg);
     }
@@ -1350,7 +1563,9 @@ export class BitgetExchange extends BaseExchange {
   async getOrFetchMarginType(symbol: string): Promise<MarginType> {
     const { marginType } = await this.resolveSymbolPositioning(symbol);
     if (!marginType) {
-      const msg = `Could not determine margin type for symbol ${symbol}`;
+      const msg = this.usesUtaRouting
+        ? `Could not determine Bitget UTA margin type for symbol ${symbol}`
+        : `Could not determine margin type for symbol ${symbol}`;
       this.emitAndLogError(msg);
       throw new Error(msg);
     }
@@ -1358,6 +1573,17 @@ export class BitgetExchange extends BaseExchange {
   }
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    if (this.usesUtaRouting) {
+      if (this.isAlgoOrder(opts)) {
+        const msg = 'Bitget UTA TP/SL and trailing-stop orders are not supported yet.';
+        this.emitAndLogError(msg);
+        throw new Error(msg);
+      }
+
+      const payloads = await this.formatUtaCreateOrder(opts);
+      return await this.placeUtaOrders(payloads);
+    }
+
     if (this.isAlgoOrder(opts)) {
       const payload = await this.formatAlgoOrder(opts);
       return await this.placeAlgoOrders([payload]);
@@ -1370,6 +1596,18 @@ export class BitgetExchange extends BaseExchange {
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     const [algoOrders, normalOrders] = partition(orders, this.isAlgoOrder);
 
+    if (this.usesUtaRouting) {
+      if (algoOrders.length > 0) {
+        const msg = 'Bitget UTA TP/SL and trailing-stop orders are not supported yet.';
+        this.emitAndLogError(msg);
+        throw new Error(msg);
+      }
+
+      const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatUtaCreateOrder(o)))).flat();
+      const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => this.toFiniteNumber(o.qty) > 0);
+      return await this.placeUtaOrders(normalOrdersOpts);
+    }
+
     const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatCreateOrder(o)))).flat();
     const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => o.size > 0);
 
@@ -1380,6 +1618,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   formatCreateOrder = async (opts: PlaceOrderOpts) => {
+    if (this.usesUtaRouting) {
+      return this.formatUtaCreateOrder(opts);
+    }
+
     // there are some hacks in here like TIF parsing, etc to support v2 quickly
 
     const market = this.store.marketsBySymbol[opts.symbol];
@@ -1437,6 +1679,69 @@ export class BitgetExchange extends BaseExchange {
       // override `size` (req already carries the full `amount` as `size`), else
       // the remainder would re-place the full amount.
       payloads.push({ ...req, size: `${rest}` });
+    }
+
+    for (const payload of payloads) {
+      payload.clientOid = uuid();
+    }
+
+    return payloads;
+  };
+
+  private formatUtaCreateOrder = async (opts: PlaceOrderOpts): Promise<Array<Record<string, any>>> => {
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) {
+      const msg = 'Bitget UTA currently supports only normal market and limit orders.';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    if (opts.takeProfit || opts.stopLoss) {
+      const msg = 'Bitget UTA attached TP/SL fields are not supported yet.';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) throw new Error(`Market ${opts.symbol} not found`);
+
+    const positionMode = await this.getOrFetchPositionMode(opts.symbol);
+    const marginType = await this.getOrFetchMarginType(opts.symbol);
+    const { side, posSide } = this.getOrderSideUta(opts, positionMode);
+
+    const maxSize = market.limits.amount.max;
+    const pPrice = market.precision.price;
+    const pAmount = market.precision.amount;
+    const price = opts.price && opts.type !== OrderType.Market ? adjust(opts.price, pPrice) : undefined;
+    const timeInForce = opts.timeInForce
+      ? inverseObj(TIME_IN_FORCE)[opts.timeInForce]
+      : inverseObj(TIME_IN_FORCE)[OrderTimeInForce.GoodTillCancel];
+    const amount = adjust(opts.amount, pAmount);
+
+    const req = omitUndefined({
+      category: this.apiUtaCategory,
+      symbol: market.id,
+      qty: amount ? `${amount}` : undefined,
+      price: price ? `${price}` : undefined,
+      side,
+      posSide,
+      orderType: inverseObj(ORDER_TYPE)[opts.type],
+      timeInForce: opts.type !== OrderType.Market ? (timeInForce === 'normal' ? 'gtc' : timeInForce) : undefined,
+      reduceOnly: positionMode === PositionMode.Hedged ? undefined : opts.reduceOnly ? 'yes' : 'no',
+      marginMode: marginType === MarginType.Cross ? 'crossed' : 'isolated',
+    });
+
+    const shouldSplit = maxSize > 0 && amount > maxSize;
+    const lots = shouldSplit ? Math.ceil(amount / maxSize) : 1;
+    const rest = shouldSplit ? adjust(amount % maxSize, pAmount) : 0;
+    const lotSize = adjust((amount - rest) / lots, pAmount);
+
+    const payloads: Array<Record<string, any>> = times(lots, () => ({
+      ...req,
+      qty: `${lotSize}`,
+    }));
+
+    if (rest) {
+      payloads.push({ ...req, qty: `${rest}` });
     }
 
     for (const payload of payloads) {
@@ -1545,6 +1850,28 @@ export class BitgetExchange extends BaseExchange {
           this.emitAndLogError(err?.response?.data?.msg || err?.message);
           throw err;
         }
+      }
+    }
+
+    return newOrderIds;
+  };
+
+  private placeUtaOrders = async (payloads: Array<Record<string, any>>) => {
+    const newOrderIds: string[] = [];
+
+    for (const payload of payloads) {
+      try {
+        const { data } = await this.unlimitedXHR.post(ENDPOINTS.UTA_PLACE_ORDER, payload);
+
+        if (!isBitgetSuccessCode(data?.code)) {
+          throw new Error(data?.msg || 'Bitget UTA place order request failed');
+        }
+
+        const orderId = data?.data?.orderId || data?.data?.clientOid || payload.clientOid;
+        if (orderId) newOrderIds.push(orderId);
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw err;
       }
     }
 
@@ -1678,7 +2005,7 @@ export class BitgetExchange extends BaseExchange {
     }
 
     const shouldUseLegacyBitgetDragUpdate = Boolean(order.info?.__tealstreetUseLegacyBitgetDragUpdate);
-    if (order.type === OrderType.Limit && !shouldUseLegacyBitgetDragUpdate) {
+    if (order.type === OrderType.Limit && !shouldUseLegacyBitgetDragUpdate && !this.usesUtaRouting) {
       const amendedOrderIds = await this.tryAmendLimitOrder(order, update);
       if (amendedOrderIds !== null) {
         return amendedOrderIds;
@@ -1767,7 +2094,7 @@ export class BitgetExchange extends BaseExchange {
         // v3 only when both conditions hold; v2 stays the default for cross / one-way
         // / classic accounts.
         const isPerSide = position.positionMode === PositionMode.Hedged && position.marginType === MarginType.Isolated;
-        const useV3 = this.isUta && isPerSide;
+        const useV3 = this.usesUtaRouting && isPerSide;
 
         const { data } = useV3
           ? await this.xhr.post(ENDPOINTS.SET_LEVERAGE_V3, {
@@ -1810,6 +2137,30 @@ export class BitgetExchange extends BaseExchange {
       throw new Error('Symbol is required');
     }
     try {
+      if (this.usesUtaRouting) {
+        const market = this.store.marketsBySymbol[symbol];
+        if (!market) throw new Error(`Market ${symbol} not found`);
+
+        const [metadata] = await this.fetchUtaPositionMetadata([symbol]);
+        const leverage = metadata?.leverage || market.limits.leverage.min;
+        const { data } = await this.xhr.post(ENDPOINTS.SET_LEVERAGE_V3, {
+          category: this.apiUtaCategory,
+          symbol: market.id,
+          leverage: String(leverage),
+          marginMode: isolated ? 'isolated' : 'crossed',
+        });
+
+        if (!isBitgetSuccessCode(data.code)) {
+          throw new Error(data.msg);
+        }
+
+        delete this._positioningCache[symbol];
+        delete this._positioningInflight[symbol];
+        const positions = await this.fetchPositions([symbol]);
+        this.store.addOrUpdatePositions(positions);
+        return;
+      }
+
       const { data } = await this.xhr.post(ENDPOINTS.SET_MARGIN_MODE, {
         productType: this.apiProductType,
         marginCoin: this.apiMarginCoin,
@@ -1834,6 +2185,22 @@ export class BitgetExchange extends BaseExchange {
 
   changePositionMode = async (hedged: boolean) => {
     try {
+      if (this.usesUtaRouting) {
+        const { data } = await this.xhr.post(ENDPOINTS.UTA_SET_HOLD_MODE, {
+          holdMode: hedged ? 'hedge_mode' : 'one_way_mode',
+        });
+
+        if (!isBitgetSuccessCode(data.code)) {
+          throw new Error(data.msg);
+        }
+
+        this._positioningCache = {};
+        this._positioningInflight = {};
+        const positions = await this.fetchPositions();
+        this.store.update({ positions });
+        return;
+      }
+
       const { data } = await this.xhr.post(ENDPOINTS.SET_POSITION_MODE, {
         productType: this.apiProductType,
         posMode: hedged ? 'hedge_mode' : 'one_way_mode',
@@ -1884,21 +2251,21 @@ export class BitgetExchange extends BaseExchange {
   // }
 
   mapOrder = (o: Record<string, any>): Order[] => {
+    const rawAmount = o.size || o.sz || o.qty || o.amount || '0';
+    const rawFilled = o.baseVolume || o.filledQty || o.accFillSz || o.cumExecQty || '0';
+    const symbol = (o.symbol || o.instId || '').replace(`_${this.apiProductType.toUpperCase()}`, '');
     const order: Writable<Order> = {
-      id: o.orderId || o.ordId || o.id,
-      status: ORDER_STATUS[o.status || o.state || o.planStatus],
-      symbol: (o.symbol || o.instId).replace(`_${this.apiProductType.toUpperCase()}`, ''),
+      id: o.orderId || o.clientOid || o.ordId || o.id,
+      status: ORDER_STATUS[o.status || o.state || o.planStatus || o.orderStatus],
+      symbol,
       type: ORDER_TYPE[o.orderType || o.ordType || o.planType],
       side: ORDER_SIDE[o.tradeSide || o.tS || o.side] || o.side,
       price: parseFloat(o.price || o.px || '0'),
-      amount: parseFloat(o.size || o.sz || '0'),
-      filled: parseFloat(o.baseVolume || o.filledQty || o.accFillSz || '0'),
+      amount: parseFloat(rawAmount),
+      filled: parseFloat(rawFilled),
       lastUpdate: virtualClock.getCurrentTimeMs(),
-      reduceOnly: o.reduceOnly?.toUpperCase?.() === 'YES',
-      remaining: subtract(
-        parseFloat(o.size || o.sz || '0'),
-        parseFloat(o.baseVolume || o.filledQty || o.accFillSz || '0'),
-      ),
+      reduceOnly: ['YES', 'yes', 'true'].includes(`${o.reduceOnly}`),
+      remaining: subtract(parseFloat(rawAmount), parseFloat(rawFilled)),
       timeInForce: TIME_IN_FORCE[o.force || o.timeInForce || o.tiF] || OrderTimeInForce.GoodTillCancel,
       info: o,
     };
@@ -1926,26 +2293,63 @@ export class BitgetExchange extends BaseExchange {
 
     let orders = [order];
     if (order.type === OrderType.Limit) {
-      if (o.presetStopLossPrice || o.stopLossTriggerPrice) {
+      if (o.presetStopLossPrice || o.stopLossTriggerPrice || o.stopLoss) {
         orders.push({
           ...order,
           id: `${order.id}__stop_loss`,
           side: order.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy,
           type: OrderType.StopLoss,
-          price: parseFloat(o.presetStopLossPrice || o.stopLossTriggerPrice),
+          price: parseFloat(o.presetStopLossPrice || o.stopLossTriggerPrice || o.stopLoss),
         });
       }
-      if (o.presetStopSurplusPrice || o.stopSurplusTriggerPrice || o.presetTakeProfitPrice) {
+      if (o.presetStopSurplusPrice || o.stopSurplusTriggerPrice || o.presetTakeProfitPrice || o.takeProfit) {
         orders.push({
           ...order,
           id: `${order.id}__take_profit`,
           side: order.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy,
           type: OrderType.TakeProfit,
-          price: parseFloat(o.presetStopSurplusPrice || o.stopSurplusTriggerPrice || o.presetTakeProfitPrice),
+          price: parseFloat(
+            o.presetStopSurplusPrice || o.stopSurplusTriggerPrice || o.presetTakeProfitPrice || o.takeProfit,
+          ),
         });
       }
     }
     return orders;
+  };
+
+  mapUtaPosition = (p: BITGET_UTA_POSITION): Position => {
+    const symbol = (p.symbol || '').replace(`_${this.apiProductType.toUpperCase()}`, '');
+    const positionMode = p.holdMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
+    const side = POSITION_SIDE[p.posSide || p.holdSide || 'long'] || PositionSide.Long;
+    const marginMode = p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
+    const contracts = this.toFiniteNumber(p.total, this.toFiniteNumber(p.size));
+    const markPrice = this.toFiniteNumber(p.markPrice);
+    const entryPrice = this.toFiniteNumber(p.avgPrice, this.toFiniteNumber(p.openPriceAvg));
+    const positionId = createPositionId(symbol, side, positionMode);
+    const marginSize = p.positionBalance != null ? this.toFiniteNumber(p.positionBalance) : this.toFiniteNumber(p.marginSize);
+
+    return {
+      id: positionId,
+      symbol,
+      side,
+      entryPrice,
+      notional: multiply(contracts, markPrice || entryPrice),
+      leverage: this.toFiniteNumber(p.leverage, 1),
+      unrealizedPnl: this.toFiniteNumber(p.unrealisedPnl, this.toFiniteNumber(p.unrealizedPL)),
+      realizedPnl:
+        this.toFiniteNumber(p.curRealisedPnl) +
+        this.toFiniteNumber(p.totalFunding) +
+        this.toFiniteNumber(p.openFeeTotal) +
+        this.toFiniteNumber(p.closeFeeTotal) -
+        this.toFiniteNumber(p.deductedFee),
+      contracts,
+      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice),
+      marginSize: marginSize > 0 ? marginSize : undefined,
+      positionMode,
+      marginType: marginMode,
+      info: p,
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+    };
   };
 
   mapPosition = (p: Record<string, any>): Position => {
@@ -2025,6 +2429,29 @@ export class BitgetExchange extends BaseExchange {
       }
     }
     return [side, tradeSide];
+  };
+
+  private getOrderSideUta = (
+    opts: PlaceOrderOpts,
+    positionMode: PositionMode,
+  ): { side: 'buy' | 'sell'; posSide?: 'long' | 'short' } => {
+    const side = opts.side === OrderSide.Buy ? 'buy' : 'sell';
+
+    if (positionMode !== PositionMode.Hedged) {
+      return { side };
+    }
+
+    if (opts.reduceOnly) {
+      return {
+        side,
+        posSide: opts.side === OrderSide.Buy ? 'short' : 'long',
+      };
+    }
+
+    return {
+      side,
+      posSide: opts.side === OrderSide.Buy ? 'long' : 'short',
+    };
   };
 
   private getAlgoOrderSide = (opts: PlaceOrderOpts, positionMode: PositionMode) => {

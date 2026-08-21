@@ -19,17 +19,27 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 ## UTA Support Status
 
 Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade
-endpoints. The adapter is **not fully UTA-compatible yet**: validation, balance,
-positions, orders, order placement/cancel/update, and private WS still use the
-Classic v2 contracts. The only v3 paths currently wired are the account-type
-probe (`ACCOUNT_SETTINGS_V3`) and UTA isolated hedge per-side leverage
-(`SET_LEVERAGE_V3`) after startup detection.
+endpoints. The adapter now has a first UTA slice for **livenet `bitget`
+USDT-futures only**:
+
+- Validation, balance, open positions, and open normal orders route through
+  `/api/v3/*` after the account-type probe marks `isUta = true`.
+- Normal market/limit place and cancel use v3 payloads (`category`, `qty`,
+  `posSide`, `clientOid`) and do not send v2 `productType`, `marginCoin`, or
+  `size` fields.
+- Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
+  `{ instType: "UTA", topic: "account" | "position" | "order" }`.
+
+Still out of scope for this slice: `bitgetusdc`, `bitgetinverse`, testnet UTA,
+trade/fill history, bills, standalone TP/SL, trailing stops, and attached TP/SL
+on normal UTA orders. Those paths must keep using Classic v2 behavior until
+their own slices land.
 
 When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
 Account API is not supported", surface the Tealstreet-owned UTA unsupported
-message from `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE`. Do not present it as a
-bad key, bad secret, or IP whitelist problem. Full UTA support requires a real
-v3 migration for REST payloads, pagination, and private WS topics.
+message from `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` for variants that do not
+route to UTA yet. Do not present it as a bad key, bad secret, or IP whitelist
+problem.
 
 ## File Structure
 
@@ -88,16 +98,20 @@ The `start()` method (`bitget.exchange.ts:144-191`) initializes in this **strict
 1. **`fetchMarkets()`** -- REST call to get available contracts; updates store with `markets`, sets `loaded.markets = true`
 2. **`publicWebsocket.connectAndSubscribe()`** -- starts primary public WS (ticker for 1/3 of markets) immediately after markets load
 3. **`fetchTickers()`** -- REST call to get initial ticker data (bid/ask/last/index/funding); updates store with `tickers`, sets `loaded.tickers = true`
-4. **Three WS connections started in parallel** (non-awaited):
+4. **Two secondary public WS connections started in parallel** (non-awaited):
    - `secondsTickersWebsocket.connectAndSubscribe()` -- secondary public WS for 2nd third of tickers
    - `thirdTickersWebsocket.connectAndSubscribe()` -- secondary public WS for 3rd third of tickers
-   - `privateWebsocket.connectAndSubscribe()` -- private WS (auth + subscribe to orders/positions/account)
-5. **`tick()`** -- first polling cycle: fetches positions (every tick), balance (every 2nd tick)
-6. **`fetchOrders()`** -- fetches all three order types sequentially:
+5. **`_detectAccountType()`** -- probes `ACCOUNT_SETTINGS_V3`; UTA routing is
+   enabled only for livenet `bitget` USDT-futures when this succeeds
+6. **`privateWebsocket.connectAndSubscribe()`** -- private WS chooses Classic v2
+   channels or UTA v3 topics from the completed account-type probe
+7. **`tick()`** -- first polling cycle: fetches positions (every tick), balance (every 2nd tick)
+8. **`fetchOrders()`** -- Classic fetches all three order types sequentially;
+   UTA fetches v3 unfilled normal orders only:
    - `fetchNormalOrders()` (limit/market orders, paginated)
    - `fetchAlgoOrders()` (TP/SL, paginated with `planType: 'profit_loss'`)
    - `fetchTrailingStopOrders()` (trailing stops, paginated with `planType: 'track_plan'`)
-7. Store updated with `orders`, sets `loaded.orders = true`
+9. Store updated with `orders`, sets `loaded.orders = true`
 
 Each step checks `this.isDisposed` to allow early exit if the exchange is disposed during initialization.
 
@@ -106,7 +120,8 @@ Each step checks `this.isDisposed` to allow early exit if the exchange is dispos
 ## REST API Endpoints
 
 Private trading/account endpoints are Classic v2 unless explicitly marked as v3
-below. Do not infer full UTA support from the v3 probe/leverage paths.
+below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
+!testnet`) and is currently true only for livenet `bitget`.
 
 ### Market Data
 
@@ -127,6 +142,8 @@ below. Do not infer full UTA support from the v3 probe/leverage paths.
 | `POSITIONS` / `POSITIONS_V2` | `/api/v2/mix/position/all-position`    | Fetch all open positions                             |
 | `POSITION_LEVERAGE`          | `/api/v2/mix/position/single-position` | Fetch single position details                        |
 | `FETCH_SINGLE_ACCOUNT`       | `/api/v2/mix/account/account`          | Fetch per-symbol account metadata                    |
+| `UTA_ACCOUNT_ASSETS`         | `/api/v3/account/assets`               | UTA balance/account assets                           |
+| `UTA_POSITIONS`              | `/api/v3/position/current-position`    | UTA current positions                                |
 
 ### Order Management
 
@@ -139,6 +156,10 @@ below. Do not infer full UTA support from the v3 probe/leverage paths.
 | `ORDER_HISTORY`     | `/api/v2/mix/order/orders-history`      | Fetch historical filled orders                     |
 | `CANCEL_ORDERS`     | `/api/v2/mix/order/batch-cancel-orders` | Batch cancel normal orders                         |
 | `CANCEL_ALL_ORDERS` | `/api/v2/mix/order/cancel-all-orders`   | Cancel all orders                                  |
+| `UTA_PLACE_ORDER`   | `/api/v3/trade/place-order`             | UTA normal market/limit order placement            |
+| `UTA_CANCEL_ORDER`  | `/api/v3/trade/cancel-order`            | UTA normal order cancellation                      |
+| `UTA_CANCEL_BATCH`  | `/api/v3/trade/cancel-batch`            | UTA batch cancellation constant, not preferred yet |
+| `UTA_MODIFY_ORDER`  | `/api/v3/trade/modify-order`            | UTA modify-order constant, not preferred yet       |
 
 ### Algo/Stop Orders
 
@@ -156,7 +177,8 @@ below. Do not infer full UTA support from the v3 probe/leverage paths.
 | --------------------- | --------------------------------------- | -------------------------------------------------- |
 | `SET_LEVERAGE`        | `/api/v2/mix/account/set-leverage`      | Set leverage for a symbol (Classic + UTA fallback) |
 | `SET_LEVERAGE_V3`     | `/api/v3/account/set-leverage`          | UTA per-side ISO leverage (`posSide` honored)      |
-| `ACCOUNT_SETTINGS_V3` | `/api/v3/account/settings`              | UTA-only probe used for account-type detection     |
+| `ACCOUNT_SETTINGS_V3` | `/api/v3/account/settings`              | UTA probe + hold/margin mode metadata              |
+| `UTA_SET_HOLD_MODE`   | `/api/v3/account/set-hold-mode`         | UTA one-way / hedge mode changes                   |
 | `SET_POSITION_MODE`   | `/api/v2/mix/account/set-position-mode` | Set hedge or one-way mode                          |
 | `SET_MARGIN_MODE`     | `/api/v2/mix/account/set-margin-mode`   | Set cross or isolated margin                       |
 
@@ -191,13 +213,18 @@ The implementation uses **four WebSocket connections** simultaneously:
 
 ### 4. Private WebSocket (`bitget.ws-private.ts`)
 
-- **URL**: `wss://ws.bitget.com/v2/ws/private` (or fallback: `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`)
+- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` (or fallback: `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`)
+- **UTA URL**: `wss://ws.bitget.com/v3/ws/private`
 - **Authentication**: Required before subscribing (login op)
 - **Channels subscribed**:
   - `account` with `coin: 'default'` - Balance/account updates
   - `positions` - Position changes (snapshot + incremental updates)
   - `orders` - Normal order updates (new, partial-fill, filled, cancel)
   - `orders-algo` - Algo/stop order updates (live, triggered, cancel)
+- **UTA topics subscribed**:
+  - `{ instType: "UTA", topic: "account" }`
+  - `{ instType: "UTA", topic: "position" }`
+  - `{ instType: "UTA", topic: "order" }`
 
 Normal-order fill handling recognizes the documented `partially_filled` status. Fill events use `baseVolume` (latest fill quantity), falling back to `accBaseVolume` when the latest-fill field is absent.
 
@@ -615,7 +642,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 20. **Trailing stop orders response format**: `fetchTrailingStopOrders()` handles both array and `{ entrustedList }` response formats (`bitget.exchange.ts:824-828`).
 
-21. **UTA vs Classic — per-side ISO leverage routing only, not full UTA support**: The v2 endpoint `set-leverage` silently couples long and short leverage on **all** accounts (Bitget removed per-side support from v2). Per-side ISO leverage in hedge mode only works through the v3 UTA endpoint (`SET_LEVERAGE_V3`) with `posSide`. UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during `start()` — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The probe runs in parallel with the first `tick()` so it adds zero serial startup latency. **Do NOT** auto-detect from `BALANCE` / `account/account` responses — `assetMode` and `unionAvailable` are populated on Classic too (verified against the `bg e2e` Classic account). Every future v3-routing method must read `this.isUta`; do not reintroduce trial-and-error fallbacks in setLeverage. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. Until the adapter is fully migrated to Bitget v3, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
+21. **UTA vs Classic routing is explicit and USDT-only for now**: UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during validation/startup — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The private startup path now awaits this probe before `privateWebsocket.connectAndSubscribe()` and before `tick()`, so v3-routed accounts do not race into v2 private endpoints. Every v3 path must read `usesUtaRouting`, not bare `isUta`; `supportsUtaRouting` stays false on `bitgetusdc` and `bitgetinverse` until their own UTA slices exist. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. For variants still on Classic routing, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
 
 22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 

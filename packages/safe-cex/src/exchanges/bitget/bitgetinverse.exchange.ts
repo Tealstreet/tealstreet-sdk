@@ -16,7 +16,7 @@ import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, Posit
 import { createPositionId } from '../../utils/createPositionId';
 import { adjust, multiply, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
-import { BitgetExchange } from './bitget.exchange';
+import { BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE, BitgetExchange } from './bitget.exchange';
 import {
   ENDPOINTS,
   FETCH_POSITIONS_V2_RESPONSE,
@@ -42,6 +42,8 @@ import {
  * API Documentation: https://www.bitget.com/api-doc/contract/intro
  */
 export class BitgetInverseExchange extends BitgetExchange {
+  protected supportsUtaRouting = false;
+
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
   }
@@ -127,11 +129,19 @@ export class BitgetInverseExchange extends BitgetExchange {
    */
   fetchBalance = async (): Promise<Balance> => {
     const {
-      data: { data },
+      data: response,
     } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.BALANCE, {
       params: { productType: this.apiProductType },
     });
 
+    if (parseInt(`${(response as any).code ?? 0}`, 10) !== 0) {
+      const message = `${(response as any).code ?? ''}` === '40085'
+        ? BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE
+        : (response as any).msg || 'Bitget inverse account balance request failed';
+      throw new Error(message);
+    }
+
+    const data = response.data;
     if (!data || data.length === 0) return this.store.balance;
 
     // For inverse, we may have multiple margin coins (BTC, ETH, etc.)

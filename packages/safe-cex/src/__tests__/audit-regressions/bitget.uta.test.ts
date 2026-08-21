@@ -1,0 +1,342 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE, BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BitgetInverseExchange } from '../../exchanges/bitget/bitgetinverse.exchange';
+import { BitgetUSDCExchange } from '../../exchanges/bitget/bitgetusdc.exchange';
+import { BASE_WS_PRIVATE_UTA_URL, ENDPOINTS } from '../../exchanges/bitget/bitget.types';
+import { DefaultStore } from '../../store/store.base';
+import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
+
+const market = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 125 } },
+};
+
+const createExchange = () => {
+  const store = new DefaultStore();
+  store.update({ markets: [market] as any });
+  const exchange = new BitgetExchange(
+    'bitget',
+    { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
+    store,
+  );
+  (exchange as any).isUta = true;
+  exchange.xhr = { get: vi.fn(), post: vi.fn() } as any;
+  exchange.unlimitedXHR = { get: vi.fn(), post: vi.fn() } as any;
+  return exchange;
+};
+
+const accountSettingsResponse = {
+  data: {
+    code: '00000',
+    msg: 'success',
+    data: {
+      holdMode: 'hedge_mode',
+      symbolConfigList: [
+        {
+          category: 'USDT-FUTURES',
+          symbol: 'BTCUSDT',
+          marginMode: 'crossed',
+          longLeverage: '10',
+          shortLeverage: '7',
+        },
+      ],
+    },
+  },
+};
+
+describe('audit regression: Bitget UTA routing', () => {
+  it('validates UTA accounts through v3 account assets after detection', async () => {
+    const exchange = createExchange();
+    (exchange.xhr.get as any)
+      .mockResolvedValueOnce(accountSettingsResponse)
+      .mockResolvedValueOnce({
+        data: {
+          code: '00000',
+          msg: 'success',
+          data: {
+            accountEquity: '105',
+            effEquity: '98',
+            unrealisedPnl: '5',
+            assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
+          },
+        },
+      });
+
+    await expect(exchange.validateAccount()).resolves.toEqual({
+      error: '',
+      balance: expect.objectContaining({ total: 100, free: 98, used: 7, upnl: 5 }),
+    });
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ACCOUNT_ASSETS);
+  });
+
+  it('maps UTA positions including hold mode, side, margin mode, and blank liquidation fallback', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Short, PositionMode.Hedged),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Short,
+          entryPrice: 50000,
+          notional: 50000,
+          leverage: 7,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 62000,
+          positionMode: PositionMode.Hedged,
+          marginType: MarginType.Cross,
+          info: {},
+        },
+      ] as any,
+    });
+    (exchange.xhr.get as any).mockResolvedValue({
+      data: {
+        code: '00000',
+        msg: 'success',
+        data: {
+          list: [
+            {
+              symbol: 'BTCUSDT',
+              holdMode: 'hedge_mode',
+              posSide: 'short',
+              marginMode: 'crossed',
+              total: '0.5',
+              avgPrice: '50000',
+              markPrice: '49900',
+              leverage: '7',
+              unrealisedPnl: '50',
+              liquidationPrice: '',
+            },
+          ],
+        },
+      },
+    });
+
+    const positions = await exchange.fetchOpenPositions();
+
+    expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.UTA_POSITIONS, {
+      params: { category: 'USDT-FUTURES' },
+    });
+    expect(positions[0]).toEqual(
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        side: PositionSide.Short,
+        positionMode: PositionMode.Hedged,
+        marginType: MarginType.Cross,
+        contracts: 0.5,
+        leverage: 7,
+        liquidationPrice: 62000,
+      }),
+    );
+  });
+
+  it('maps empty UTA position snapshots and paged open orders without v2 fields', async () => {
+    const exchange = createExchange();
+    (exchange.xhr.get as any)
+      .mockResolvedValueOnce({
+        data: { code: '00000', msg: 'success', data: { list: [] } },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          code: '00000',
+          msg: 'success',
+          data: {
+            cursor: 'next',
+            list: [
+              {
+                orderId: 'order-1',
+                category: 'USDT-FUTURES',
+                symbol: 'BTCUSDT',
+                orderStatus: 'new',
+                orderType: 'limit',
+                side: 'buy',
+                qty: '1',
+                cumExecQty: '0.25',
+                price: '50000',
+                timeInForce: 'gtc',
+              },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: { code: '00000', msg: 'success', data: { cursor: 'next', list: [] } },
+      });
+
+    await expect(exchange.fetchOpenPositions()).resolves.toEqual([]);
+    const orders = await exchange.fetchOrders();
+
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ORDERS, {
+      params: { category: 'USDT-FUTURES', limit: '100' },
+    });
+    expect(orders[0]).toEqual(
+      expect.objectContaining({
+        id: 'order-1',
+        status: OrderStatus.Open,
+        amount: 1,
+        filled: 0.25,
+        remaining: 0.75,
+      }),
+    );
+  });
+
+  it('places normal UTA limit orders with category, qty, posSide, and clientOid only', async () => {
+    const exchange = createExchange();
+    (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: null, clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.5,
+        price: 50000,
+      }),
+    ).resolves.toEqual(['client-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        qty: '0.5',
+        side: 'buy',
+        posSide: 'long',
+        marginMode: 'crossed',
+        clientOid: expect.any(String),
+      }),
+    );
+    const [, payload] = (exchange.unlimitedXHR.post as any).mock.calls[0];
+    expect(payload).not.toHaveProperty('productType');
+    expect(payload).not.toHaveProperty('marginCoin');
+    expect(payload).not.toHaveProperty('size');
+  });
+
+  it('subscribes and routes UTA private WS topics', async () => {
+    const exchange = createExchange();
+    const ws = exchange.privateWebsocket as any;
+    const sendWithLog = vi.fn();
+    ws.sendWithLog = sendWithLog;
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+    vi.spyOn(exchange, 'fetchBalance').mockResolvedValue({ total: 0, free: 0, used: 0, upnl: 0 });
+    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
+
+    ws.subscribe();
+    expect(sendWithLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        op: 'subscribe',
+        args: [
+          { instType: 'UTA', topic: 'account' },
+          { instType: 'UTA', topic: 'position' },
+          { instType: 'UTA', topic: 'order' },
+        ],
+      }),
+    );
+
+    const createWebsocket = vi.fn().mockReturnValue({ addEventListener: vi.fn() });
+    ws.createWebsocket = createWebsocket;
+    ws.connectAndSubscribe();
+    expect(createWebsocket).toHaveBeenCalledWith(BASE_WS_PRIVATE_UTA_URL);
+
+    ws.handleUtaPositionsTopic({
+      action: 'snapshot',
+      data: [{ symbol: 'BTCUSDT', holdMode: 'hedge_mode', posSide: 'long', total: '1', avgPrice: '50000' }],
+    });
+    expect(exchange.store.positions[0]).toEqual(expect.objectContaining({ symbol: 'BTCUSDT', contracts: 1 }));
+
+    ws.handleUtaOrderTopic({
+      data: [
+        {
+          orderId: 'uta-order',
+          symbol: 'BTCUSDT',
+          orderType: 'limit',
+          side: 'buy',
+          qty: '1',
+          cumExecQty: '0',
+          price: '50000',
+          orderStatus: 'new',
+        },
+      ],
+    });
+    expect(exchange.store.orders[0]).toEqual(expect.objectContaining({ id: 'uta-order', amount: 1 }));
+  });
+
+  it('keeps USDC and inverse variants on the UTA unsupported guard', async () => {
+    const usdc = new BitgetUSDCExchange(
+      'bitgetusdc',
+      { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
+      new DefaultStore(),
+    );
+    (usdc as any).isUta = true;
+    usdc.xhr = {
+      get: vi
+        .fn()
+        .mockResolvedValueOnce(accountSettingsResponse)
+        .mockResolvedValueOnce({
+          data: {
+            code: '40085',
+            msg: 'You are in Unified Account mode, and the Classic Account API is not supported at this time',
+            data: null,
+          },
+        }),
+    } as any;
+    vi.spyOn(usdc, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(usdc.validateAccount()).resolves.toEqual({ error: BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE });
+    expect(usdc.xhr.get).toHaveBeenLastCalledWith(ENDPOINTS.BALANCE, { params: { productType: 'usdc-futures' } });
+
+    const inverse = new BitgetInverseExchange(
+      'bitgetinverse',
+      { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
+      new DefaultStore(),
+    );
+    (inverse as any).isUta = true;
+    inverse.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          code: '40085',
+          msg: 'You are in Unified Account mode, and the Classic Account API is not supported at this time',
+          data: null,
+        },
+      }),
+    } as any;
+
+    await expect(inverse.fetchBalance()).rejects.toThrow(BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE);
+  });
+
+  it('awaits Bitget account-type detection before private WS and tick startup', async () => {
+    const exchange = createExchange();
+    const events: string[] = [];
+
+    (exchange as any).initExternalPublicData = vi.fn().mockResolvedValue(true);
+    (exchange as any)._detectAccountType = vi.fn().mockImplementation(async () => {
+      events.push('detect');
+    });
+    exchange.privateWebsocket.connectAndSubscribe = vi.fn().mockImplementation(() => {
+      events.push('ws');
+    });
+    exchange.tick = vi.fn().mockImplementation(async () => {
+      events.push('tick');
+    });
+    exchange.fetchOrders = vi.fn().mockImplementation(async () => {
+      events.push('orders');
+      return [];
+    });
+
+    await exchange.start();
+
+    expect(events).toEqual(['detect', 'ws', 'tick', 'orders']);
+  });
+});

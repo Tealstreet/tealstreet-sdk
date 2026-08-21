@@ -9,6 +9,8 @@ import { BitgetExchange } from './bitget.exchange';
  * Uses usdc-futures (or susdc-futures for testnet) as the product type.
  */
 export class BitgetUSDCExchange extends BitgetExchange {
+  protected supportsUtaRouting = false;
+
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
   }

@@ -28,7 +28,8 @@ describe('audit regression: Bitget account validation', () => {
       error: 'Bad API key, API secret or incorrect IP whitelist.',
     });
     expect(emitAndLogError).toHaveBeenCalledWith('Bad API key, API secret or incorrect IP whitelist.');
-    expect(get).toHaveBeenCalledWith(ENDPOINTS.BALANCE, { params: { productType: 'usdt-futures' } });
+    expect(get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(get).toHaveBeenNthCalledWith(2, ENDPOINTS.BALANCE, { params: { productType: 'usdt-futures' } });
   });
 
   it('returns an actionable UTA message when a v2 validation endpoint rejects unified accounts', async () => {
@@ -47,6 +48,7 @@ describe('audit regression: Bitget account validation', () => {
       error: BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE,
     });
     expect(emitAndLogError).toHaveBeenCalledWith(BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE);
-    expect(get).toHaveBeenCalledWith(ENDPOINTS.BALANCE, { params: { productType: 'usdt-futures' } });
+    expect(get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(get).toHaveBeenNthCalledWith(2, ENDPOINTS.BALANCE, { params: { productType: 'usdt-futures' } });
   });
 });

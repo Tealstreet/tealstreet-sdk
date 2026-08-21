@@ -7,6 +7,8 @@ export const BROKER_ID = 'Tealstreet';
 
 export const BASE_URL = 'https://api.bitget.com';
 export const BASE_WS_URL = 'wss://ws.bitget.com/v2/ws/public';
+export const BASE_WS_PRIVATE_URL = 'wss://ws.bitget.com/v2/ws/private';
+export const BASE_WS_PRIVATE_UTA_URL = 'wss://ws.bitget.com/v3/ws/private';
 
 // TODO: these endpoints all use -v2 syntax instead of api/v2/mix/...
 export const ENDPOINTS = {
@@ -34,6 +36,14 @@ export const ENDPOINTS = {
   SET_LEVERAGE: '/api/v2/mix/account/set-leverage',
   SET_LEVERAGE_V3: '/api/v3/account/set-leverage',
   ACCOUNT_SETTINGS_V3: '/api/v3/account/settings',
+  UTA_ACCOUNT_ASSETS: '/api/v3/account/assets',
+  UTA_POSITIONS: '/api/v3/position/current-position',
+  UTA_ORDERS: '/api/v3/trade/unfilled-orders',
+  UTA_PLACE_ORDER: '/api/v3/trade/place-order',
+  UTA_CANCEL_ORDER: '/api/v3/trade/cancel-order',
+  UTA_CANCEL_BATCH: '/api/v3/trade/cancel-batch',
+  UTA_MODIFY_ORDER: '/api/v3/trade/modify-order',
+  UTA_SET_HOLD_MODE: '/api/v3/account/set-hold-mode',
   POSITION_LEVERAGE: '/api/v2/mix/position/single-position',
   SET_POSITION_MODE: '/api/v2/mix/account/set-position-mode',
   SET_MARGIN_MODE: '/api/v2/mix/account/set-margin-mode',
@@ -55,7 +65,13 @@ export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.PLACE_ALGO_ORDER,
   ENDPOINTS.UPDATE_ORDER,
   ENDPOINTS.UPDATE_ALGO_ORDER,
+  ENDPOINTS.UTA_PLACE_ORDER,
+  ENDPOINTS.UTA_CANCEL_ORDER,
+  ENDPOINTS.UTA_CANCEL_BATCH,
+  ENDPOINTS.UTA_MODIFY_ORDER,
   ENDPOINTS.SET_LEVERAGE,
+  ENDPOINTS.SET_LEVERAGE_V3,
+  ENDPOINTS.UTA_SET_HOLD_MODE,
   ENDPOINTS.POSITION_LEVERAGE,
   ENDPOINTS.SET_POSITION_MODE,
   ENDPOINTS.SET_MARGIN_MODE,
@@ -66,6 +82,10 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.ACCOUNT,
   ENDPOINTS.ACCOUNT_SPOT,
   ENDPOINTS.BALANCE,
+  ENDPOINTS.ACCOUNT_SETTINGS_V3,
+  ENDPOINTS.UTA_ACCOUNT_ASSETS,
+  ENDPOINTS.UTA_POSITIONS,
+  ENDPOINTS.UTA_ORDERS,
   ENDPOINTS.POSITIONS,
   ENDPOINTS.POSITIONS_V2,
   ENDPOINTS.ORDERS,
@@ -202,6 +222,154 @@ export type FETCH_SINGLE_ACCOUNT_RESPONSE = {
   };
   msg: string;
   requestTime: string;
+};
+
+export type BITGET_UTA_CATEGORY = 'USDT-FUTURES' | 'USDC-FUTURES' | 'COIN-FUTURES';
+
+export type FETCH_UTA_ACCOUNT_ASSETS_RESPONSE = {
+  code: string;
+  msg: string;
+  requestTime: number;
+  data: {
+    accountEquity?: string;
+    usdtEquity?: string;
+    btcEquity?: string;
+    unrealisedPnl?: string;
+    usdtUnrealisedPnl?: string;
+    btcUnrealizedPnl?: string;
+    effEquity?: string;
+    mmr?: string;
+    imr?: string;
+    mgnRatio?: string;
+    positionMgnRatio?: string;
+    positionValue?: string;
+    leverage?: string;
+    assets?: Array<{
+      coin: string;
+      equity?: string;
+      usdValue?: string;
+      balance?: string;
+      available?: string;
+      debt?: string;
+      locked?: string;
+      bonus?: string;
+    }>;
+  } | null;
+};
+
+export type FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE = {
+  code: string;
+  msg: string;
+  requestTime: number;
+  data: {
+    accountMode?: string;
+    accountLevel?: string;
+    assetMode?: string;
+    holdMode?: string;
+    symbolConfigList?: Array<{
+      category?: string;
+      symbol?: string;
+      marginMode?: string;
+      leverage?: string;
+      longLeverage?: string;
+      shortLeverage?: string;
+    }>;
+  } | null;
+};
+
+export type BITGET_UTA_POSITION = {
+  category?: string;
+  symbol?: string;
+  marginCoin?: string;
+  holdMode?: string;
+  posSide?: string;
+  holdSide?: string;
+  marginMode?: string;
+  positionBalance?: string;
+  marginSize?: string;
+  available?: string;
+  frozen?: string;
+  total?: string;
+  size?: string;
+  leverage?: string;
+  curRealisedPnl?: string;
+  avgPrice?: string;
+  openPriceAvg?: string;
+  positionStatus?: string;
+  unrealisedPnl?: string;
+  unrealizedPL?: string;
+  liquidationPrice?: string;
+  liqPrice?: string;
+  mmr?: string;
+  profitRate?: string;
+  markPrice?: string;
+  breakEvenPrice?: string;
+  totalFunding?: string;
+  totalFee?: string;
+  openFeeTotal?: string;
+  closeFeeTotal?: string;
+  deductedFee?: string;
+  cashDividend?: string;
+  createdTime?: string;
+  updatedTime?: string;
+};
+
+export type FETCH_UTA_POSITIONS_RESPONSE = {
+  code: string;
+  msg: string;
+  requestTime: number;
+  data: {
+    list?: BITGET_UTA_POSITION[];
+  } | null;
+};
+
+export type BITGET_UTA_ORDER = {
+  category?: string;
+  symbol?: string;
+  orderId?: string;
+  clientOid?: string;
+  requestId?: string;
+  price?: string;
+  qty?: string;
+  amount?: string;
+  holdMode?: string;
+  holdSide?: string;
+  posSide?: string;
+  delegateType?: string;
+  tradeSide?: string;
+  orderType?: string;
+  timeInForce?: string;
+  side?: string;
+  marginMode?: string;
+  marginCoin?: string;
+  reduceOnly?: string;
+  cumExecQty?: string;
+  cumExecValue?: string;
+  avgPrice?: string;
+  orderStatus?: string;
+  cancelReason?: string;
+  leverage?: string;
+  feeDetail?: Array<{ feeCoin?: string; fee?: string }>;
+  createdTime?: string;
+  updatedTime?: string;
+  takeProfit?: string;
+  stopLoss?: string;
+  tpTriggerBy?: string;
+  slTriggerBy?: string;
+  tpOrderType?: string;
+  slOrderType?: string;
+  tpLimitPrice?: string;
+  slLimitPrice?: string;
+};
+
+export type FETCH_UTA_ORDERS_RESPONSE = {
+  code: string;
+  msg: string;
+  requestTime: number;
+  data: {
+    list?: BITGET_UTA_ORDER[];
+    cursor?: string;
+  } | null;
 };
 
 // {
