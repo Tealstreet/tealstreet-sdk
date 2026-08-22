@@ -134,20 +134,20 @@ All endpoints are prefixed with `/api/v1/`. Defined in `ENDPOINTS` object in `bl
 
 ### Private - Trading
 
-| Constant               | Path                                | Method | Description                                         |
-| ---------------------- | ----------------------------------- | ------ | --------------------------------------------------- |
-| `PLACE_ORDERS`         | `/api/v1/trade/order`               | POST   | Place single order                                  |
-| `PLACE_ORDERS_BATCH`   | `/api/v1/trade/batch-orders`        | POST   | Place batch orders (max 20)                         |
-| `PLACE_TPSL_ORDER`     | `/api/v1/trade/order-tpsl`          | POST   | Place TP/SL algo order                              |
-| `PLACE_TRIGGER_ORDER`  | `/api/v1/trade/order-algo`          | POST   | Place opening trigger/algo order                    |
-| `CANCEL_ORDERS`        | `/api/v1/trade/cancel-batch-orders` | POST   | Cancel batch orders (max 20)                        |
-| `CANCEL_ALGO_ORDER`    | `/api/v1/trade/cancel-tpsl`         | POST   | Cancel TP/SL orders (max 10)                        |
-| `CANCEL_TRIGGER_ORDER` | `/api/v1/trade/cancel-algo`         | POST   | Cancel one opening trigger/algo order               |
-| `UNFILLED_ORDERS`      | `/api/v1/trade/orders-pending`      | GET    | Get pending normal orders                           |
-| `UNFILLED_ALGO_ORDERS` | `/api/v1/trade/orders-tpsl-pending` | GET    | Get pending TP/SL orders                            |
-| `UNFILLED_TRIGGER_ORDERS` | `/api/v1/trade/orders-algo-pending` | GET | Read externally placed opening triggers             |
-| `FILLS`                | `/api/v1/trade/fills-history`       | GET    | User fill history (primary for `fetchHistoricalFills`)   |
-| `ORDERS_HISTORY`       | `/api/v1/trade/orders-history`      | GET    | Filled order history fallback for `fetchHistoricalFills` |
+| Constant                  | Path                                | Method | Description                                              |
+| ------------------------- | ----------------------------------- | ------ | -------------------------------------------------------- |
+| `PLACE_ORDERS`            | `/api/v1/trade/order`               | POST   | Place single order                                       |
+| `PLACE_ORDERS_BATCH`      | `/api/v1/trade/batch-orders`        | POST   | Place batch orders (max 20)                              |
+| `PLACE_TPSL_ORDER`        | `/api/v1/trade/order-tpsl`          | POST   | Place TP/SL algo order                                   |
+| `PLACE_TRIGGER_ORDER`     | `/api/v1/trade/order-algo`          | POST   | Place opening trigger/algo order                         |
+| `CANCEL_ORDERS`           | `/api/v1/trade/cancel-batch-orders` | POST   | Cancel batch orders (max 20)                             |
+| `CANCEL_ALGO_ORDER`       | `/api/v1/trade/cancel-tpsl`         | POST   | Cancel TP/SL orders (max 10)                             |
+| `CANCEL_TRIGGER_ORDER`    | `/api/v1/trade/cancel-algo`         | POST   | Cancel one opening trigger/algo order                    |
+| `UNFILLED_ORDERS`         | `/api/v1/trade/orders-pending`      | GET    | Get pending normal orders                                |
+| `UNFILLED_ALGO_ORDERS`    | `/api/v1/trade/orders-tpsl-pending` | GET    | Get pending TP/SL orders                                 |
+| `UNFILLED_TRIGGER_ORDERS` | `/api/v1/trade/orders-algo-pending` | GET    | Read externally placed opening triggers                  |
+| `FILLS`                   | `/api/v1/trade/fills-history`       | GET    | User fill history (primary for `fetchHistoricalFills`)   |
+| `ORDERS_HISTORY`          | `/api/v1/trade/orders-history`      | GET    | Filled order history fallback for `fetchHistoricalFills` |
 
 Execution-history behavior (`fetchHistoricalFills`):
 
@@ -168,8 +168,8 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ### Connection URLs
 
-| Type    | Livenet                               | Demo trading                                             |
-| ------- | ------------------------------------- | -------------------------------------------------------- |
+| Type    | Livenet                               | Demo trading                                       |
+| ------- | ------------------------------------- | -------------------------------------------------- |
 | Public  | `wss://openapi.blofin.com/ws/public`  | `wss://demo-trading-openapi.blofin.com/ws/public`  |
 | Private | `wss://openapi.blofin.com/ws/private` | `wss://demo-trading-openapi.blofin.com/ws/private` |
 
@@ -188,7 +188,8 @@ Reconnection is handled by `BaseWebSocket`:
 
 - Uses `ReconnectingWebSocket` when `ENABLE_RECONNECTING_WEBSOCKET` is enabled
 - On reconnect, public WS calls `emitWsReconnected()` to notify the system
-- On reconnect, private WS calls `parent.fetchAndSetPrivateSnapshot()` from `onOpen` to resync state
+- On reconnect, private WS waits for a successful login frame before calling
+  `parent.fetchAndSetPrivateSnapshot()`; rejected keys must not trigger private REST snapshots.
 - The `onClose` handler is inherited from `BaseWebSocket` and handles reconnect timing
 - The public socket arms a 20-second first-message watchdog on initial connect and after a close. If no frame arrives, it emits one forced warning explaining that REST history may still load while live charts/order books will not update. Reconnect churn does not repeat the warning; any inbound frame clears it and permits a future outage to warn once again.
 
@@ -220,12 +221,12 @@ snapshot arrives.
 
 ### Private Channels
 
-| Channel       | Description                                                    |
-| ------------- | -------------------------------------------------------------- |
-| `account`     | Account balance updates (`totalEquity`)                        |
-| `positions`   | Position changes (all instruments)                             |
-| `orders`      | Normal order status updates (live, filled, canceled)           |
-| `orders-algo` | TP/SL and opening-trigger updates from the documented channel  |
+| Channel       | Description                                                   |
+| ------------- | ------------------------------------------------------------- |
+| `account`     | Account balance updates (`totalEquity`)                       |
+| `positions`   | Position changes (all instruments)                            |
+| `orders`      | Normal order status updates (live, filled, canceled)          |
+| `orders-algo` | TP/SL and opening-trigger updates from the documented channel |
 
 Private channels subscribe without `instType` parameter (receives all instruments). Channels are subscribed individually (one `subscribe` message per channel) rather than batched (see `blofin.ws-private.ts subscribe`).
 
@@ -420,7 +421,7 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 - **Position updates**: WS position events apply via `addOrUpdatePositionsFull` so closed-symbol records (with their leverage / marginType / side / positionMode) are preserved while contracts / notional / upnl / liq are zeroed. The same call also recalculates `used` margin and `upnl` from the position data (see `blofin.ws-private.ts`).
 - **Account updates**: WS account events update `totalEquity` -> `free` and `total` balance fields.
 - **REST tick parity**: The 10s `tick` uses `addOrUpdatePositionsFull` (not a wholesale `store.update({ positions })`) so REST and WS share the same preserve-on-update semantics. Critical for keeping closed-symbol leverage available to the place-order % slider's no-position fallback. See the "Leverage" subsection under "Position & Margin Configuration" for the full rationale.
-- **Reconnection snapshot**: On private WS reconnect, `fetchAndSetPrivateSnapshot()` is called to resync all private data.
+- **Reconnection snapshot**: On private WS reconnect, `fetchAndSetPrivateSnapshot()` runs only after the private login success frame, so rejected keys do not trigger a retry-heavy private REST snapshot.
 - **Blank liquidation price**: `mapPositions` preserves the existing
   `liquidationPrice` for a matching open position when BloFin sends the field
   blank/missing. BloFin payload examples include `liquidationPrice: ""`, and
@@ -429,7 +430,7 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 
 ### Fake Positions
 
-`fetchPositions` with specific symbols: If a requested symbol has no open position, metadata (leverage, margin type, position mode) is fetched via `fetchPositionMetadata` and a "fake" position with `contracts=0` is created. Results are deduplicated with `uniqBy`.
+`fetchPositions` with specific symbols: If a requested symbol has no open position, metadata (leverage, margin type, position mode) is fetched via `fetchPositionMetadata` and a "fake" position with `contracts=0` is created. Results are deduplicated with `uniqBy`. While auth-failure backoff is latched, skip fake-position metadata entirely and return the existing store slice; rejected keys cannot produce useful leverage/mode readback.
 
 ### Position Conflict Detection
 
@@ -502,17 +503,21 @@ BloFin API success payloads are not perfectly uniform, but generally follow:
 Both of those are **configuration faults that retrying cannot fix**, so the
 response interceptor in `blofin.api.ts` feeds them to
 `BaseExchange.recordAuthFailure()` and the tick loop backs off exponentially
-(capped at 60s). Two details are load-bearing:
+(capped at 60s). Three details are load-bearing:
 
 - **The tick loop must schedule off `getTickInterval()`, not a hardcoded
   `10_000`.** It used to hardcode the interval, so the backoff had no effect and
   a dead key was polled at full rate forever — the e2e bad-key bound caught it
   as 132 HTTP requests against a limit of 100. The metadata `tickInterval` is
   also `10_000`, so reading it changes nothing in the healthy case.
-- **Only a *signed* success clears the streak.** Public endpoints return
+- **Only a _signed_ success clears the streak.** Public endpoints return
   `code: "0"` with no credentials involved, so counting them would immediately
   cancel the backoff for a rejected key. The interceptor gates on the
   `ACCESS-SIGN` header being present.
+- **Startup must not immediately enter another full tick after auth rejection.**
+  The initial private snapshot already proves the key is bad; schedule the next
+  attempt through the backed-off tick interval instead of doubling the startup
+  request burst.
 
 Unrelated non-zero codes (e.g. `400` from `set-position-mode`) must NOT record
 an auth failure — they are real rejections but not credential problems.

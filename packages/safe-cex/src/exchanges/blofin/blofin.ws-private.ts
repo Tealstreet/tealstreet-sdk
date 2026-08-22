@@ -54,9 +54,6 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
     if (!this.isDisposed) {
       this.auth();
       this.ping();
-      if (ENABLE_RECONNECTING_WEBSOCKET) {
-        this.parent.fetchAndSetPrivateSnapshot();
-      }
     }
   };
 
@@ -169,13 +166,13 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
 
       if (data === '{"event":"login","code":"0","msg":""}') {
         this.subscribe();
+        if (ENABLE_RECONNECTING_WEBSOCKET) {
+          this.parent.fetchAndSetPrivateSnapshot();
+        }
         return;
       }
 
-      if (
-        data.includes('"channel":"orders"') ||
-        data.includes('"channel":"orders-algo"')
-      ) {
+      if (data.includes('"channel":"orders"') || data.includes('"channel":"orders-algo"')) {
         const json = jsonParse(data);
         if (json) this.handleOrderTopic(json);
         return;

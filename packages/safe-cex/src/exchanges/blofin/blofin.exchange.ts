@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import {
   Balance,
   Candle,
@@ -48,16 +49,15 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
+import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
+import { oldestCursorId } from '../../utils/oldestCursorId';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { roundUSD } from '../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
-import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
-import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './blofin.api';
-import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from './blofin.income';
 import { mapBlofinHistoricalOrder } from './blofin.order-history';
 import {
@@ -204,6 +204,11 @@ export class BlofinExchange extends BaseExchange {
         });
       }),
     ]);
+
+    if (this.authFailureStreak > 0) {
+      loop(() => this.tick(), this.getTickInterval() ?? 10_000);
+      return;
+    }
 
     // Start the tick loop for periodic updates
     await this.tick();
@@ -361,6 +366,9 @@ export class BlofinExchange extends BaseExchange {
 
   fetchPositions = async (symbols?: string[]) => {
     const openPositions = await this.fetchPositionsHelper();
+    if (this.authFailureStreak > 0) {
+      return symbols ? this.store.positions.filter((p) => symbols.includes(p.symbol)) : openPositions;
+    }
     if (symbols) {
       const openPositionsForSymbols = openPositions.filter((p) => symbols.includes(p.symbol));
       const remainingSymbols = symbols.filter((s) => !openPositionsForSymbols.some((p) => p.symbol === s));
