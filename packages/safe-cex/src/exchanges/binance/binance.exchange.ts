@@ -72,9 +72,50 @@ import {
   POSITION_SIDE,
   TIME_IN_FORCE,
 } from './binance.types';
-import { buildUserTradesParams, mapBinanceUserTrade, USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
+import { USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
+
+type BinanceResponseRecord = Record<string, any>;
+
+const describeBinanceResponseShape = (payload: unknown): string => {
+  if (Array.isArray(payload)) return `array(${payload.length})`;
+  if (payload === null) return 'null';
+  if (typeof payload === 'object') {
+    const keys = Object.keys(payload as Record<string, unknown>).slice(0, 6);
+    return keys.length ? `object(${keys.join(',')})` : 'object';
+  }
+  return typeof payload;
+};
+
+const getBinanceResponseMessage = (payload: unknown): string => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+  const record = payload as Record<string, unknown>;
+  const message = record.msg || record.message || record.error;
+  const code = record.code;
+  const parts = [code !== undefined ? `code=${String(code)}` : '', message ? String(message) : ''].filter(Boolean);
+  return parts.join(' ');
+};
+
+const requireBinanceArrayResponse = <T>(endpoint: string, payload: unknown): T[] => {
+  if (Array.isArray(payload)) return payload as T[];
+
+  const shape = describeBinanceResponseShape(payload);
+  const message = getBinanceResponseMessage(payload);
+  throw new Error(
+    `Binance ${endpoint} response malformed: expected array, received ${shape}${message ? ` (${message})` : ''}`,
+  );
+};
+
+const emitBinanceExchangeError = (exchange: BaseExchange, err: any) => {
+  const message = err?.response?.data?.msg || err?.message;
+  if (err instanceof Error) {
+    exchange.emitAndLogError(err, message ? `Exchange Error: ${message}` : undefined);
+    return;
+  }
+
+  exchange.emitAndLogError(message);
+};
 
 const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
 const ACCOUNT_RECONCILIATION_INTERVAL_MS = 25_000;
@@ -390,12 +431,20 @@ export class BinanceExchange extends BaseExchange {
   fetchMarkets = async () => {
     try {
       const {
-        data: { symbols },
-      } = await this.publicXhr.get<{ symbols: Array<Record<string, any>> }>(ENDPOINTS.MARKETS);
+        data: marketData,
+      } = await this.publicXhr.get<{ symbols?: unknown }>(ENDPOINTS.MARKETS);
+      const symbols = requireBinanceArrayResponse<BinanceResponseRecord>(
+        `${ENDPOINTS.MARKETS}.symbols`,
+        marketData?.symbols,
+      );
 
-      const { data } = this.isPublicDataOnly
+      const { data: leverageBracketData } = this.isPublicDataOnly
         ? { data: [] }
-        : await this.xhr.get<Array<Record<string, any>>>(ENDPOINTS.LEVERAGE_BRACKET);
+        : await this.xhr.get<unknown>(ENDPOINTS.LEVERAGE_BRACKET);
+      const leverageBrackets = requireBinanceArrayResponse<BinanceResponseRecord>(
+        ENDPOINTS.LEVERAGE_BRACKET,
+        leverageBracketData,
+      );
 
       const markets: Market[] = symbols
         .filter(
@@ -404,12 +453,13 @@ export class BinanceExchange extends BaseExchange {
             ['USDT', 'USDC'].includes(v(m, 'marginAsset')),
         )
         .map((m) => {
-          const p = m.filters.find((f: any) => v(f, 'filterType') === 'PRICE_FILTER');
+          const filters = Array.isArray(m.filters) ? m.filters : [];
+          const p = filters.find((f: any) => v(f, 'filterType') === 'PRICE_FILTER');
 
-          const amt = m.filters.find((f: any) => v(f, 'filterType') === 'LOT_SIZE');
+          const amt = filters.find((f: any) => v(f, 'filterType') === 'LOT_SIZE');
 
-          const mAmt = m.filters.find((f: any) => v(f, 'filterType') === 'MARKET_LOT_SIZE');
-          const brackets = data.find((b) => b.symbol === m.symbol)?.brackets;
+          const mAmt = filters.find((f: any) => v(f, 'filterType') === 'MARKET_LOT_SIZE');
+          const brackets = leverageBrackets.find((b) => b.symbol === m.symbol)?.brackets;
           const baseAsset = v(m, 'baseAsset');
           const quoteAsset = v(m, 'quoteAsset');
           const marginAsset = v(m, 'marginAsset');
@@ -439,18 +489,21 @@ export class BinanceExchange extends BaseExchange {
 
       return markets;
     } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      emitBinanceExchangeError(this, err);
       return this.store.markets;
     }
   };
 
   fetchTickers = async () => {
     try {
-      const { data: dailys } = await this.publicXhr.get<Array<Record<string, any>>>(ENDPOINTS.TICKERS_24H);
+      const { data: dailyData } = await this.publicXhr.get<unknown>(ENDPOINTS.TICKERS_24H);
+      const dailys = requireBinanceArrayResponse<BinanceResponseRecord>(ENDPOINTS.TICKERS_24H, dailyData);
 
-      const { data: books } = await this.publicXhr.get<Array<Record<string, any>>>(ENDPOINTS.TICKERS_BOOK);
+      const { data: bookData } = await this.publicXhr.get<unknown>(ENDPOINTS.TICKERS_BOOK);
+      const books = requireBinanceArrayResponse<BinanceResponseRecord>(ENDPOINTS.TICKERS_BOOK, bookData);
 
-      const { data: prices } = await this.publicXhr.get<Array<Record<string, any>>>(ENDPOINTS.TICKERS_PRICE);
+      const { data: priceData } = await this.publicXhr.get<unknown>(ENDPOINTS.TICKERS_PRICE);
+      const prices = requireBinanceArrayResponse<BinanceResponseRecord>(ENDPOINTS.TICKERS_PRICE, priceData);
 
       // Use O(1) hashmap lookup instead of O(n) find
       const marketsBySymbol = this.store.marketsBySymbol;
@@ -481,7 +534,7 @@ export class BinanceExchange extends BaseExchange {
         return [...acc, ticker];
       }, []);
     } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      emitBinanceExchangeError(this, err);
       return this.store.tickers;
     }
   };

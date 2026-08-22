@@ -112,6 +112,13 @@ All three variants follow the same high-level pattern, with variant-specific dif
    leverage and margin type. V3 only returns symbols with a position or open
    order, so zero-position rows are synthesized for the rest of the market set.
 
+Futures REST snapshots that expect arrays must validate the response shape before
+calling `.find()` / `.map()` / `.reduce()`. Binance and proxy/tunnel paths can
+surface `{ code, msg }` error envelopes where an array is expected; those should
+emit a clear `Binance <endpoint> response malformed` exchange error and preserve
+the previous store snapshot, not leak minified `e.find is not a function` startup
+errors to users.
+
 ### Portfolio Margin Startup Differences
 
 - Uses `papiXhr` instead of `xhr` for authenticated endpoints.
