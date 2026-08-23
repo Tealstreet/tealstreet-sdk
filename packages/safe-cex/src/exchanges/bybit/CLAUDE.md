@@ -539,6 +539,15 @@ All Bybit variants use the UTA account-wide fields:
 - `free = totalAvailableBalance` (falls back to `totalMarginBalance`)
 - Per-coin balances reported with `equity` and `usdValue`
 
+Bybit Demo can return empty strings for the UTA aggregate margin fields
+(`totalAvailableBalance`, `totalMarginBalance`, `totalInitialMargin`,
+`totalMaintenanceMargin`) while still returning valid `totalEquity`,
+`totalWalletBalance`, and coin rows. Treat those blanks as missing values, not
+zero and not `NaN`. In that shape, derive available margin from coin-level
+wallet value minus `totalPositionIM`, `totalOrderIM`, `locked`, and `bonus`,
+then fall back to wallet/equity totals. The regression is
+`bybit.uta-default.test.ts`'s blank aggregate balance case.
+
 The retired Classic-account calculation was removed. In particular, do not
 restore a balance path based on per-coin `availableToWithdraw`; Bybit deprecated
 that field for UNIFIED accounts on 2025-01-09.

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
@@ -71,5 +72,42 @@ describe('Bybit UTA-first account behavior', () => {
       category: 'linear',
       request: [{ symbol: 'BTCUSDT', orderId: 'order-1' }],
     });
+  });
+
+  it('derives Bybit Demo available balance when UTA aggregate margin fields are blank', () => {
+    const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, new DefaultStore());
+    const blankAggregateBalance = {
+      accountType: 'UNIFIED',
+      totalAvailableBalance: '',
+      totalEquity: '195721.20725548',
+      totalInitialMargin: '',
+      totalMaintenanceMargin: '',
+      totalMarginBalance: '',
+      totalWalletBalance: '195721.20725548',
+      coin: [
+        {
+          coin: 'USDT',
+          equity: '195721.20725548',
+          usdValue: '195721.20725548',
+          walletBalance: '195721.20725548',
+          totalPositionIM: '6886.51',
+          totalOrderIM: '100',
+          locked: '5',
+          bonus: '0',
+        },
+      ],
+    };
+
+    const balance = exchange.formatBalance([blankAggregateBalance]);
+
+    expect(balance).toMatchObject({
+      total: 195721.20725548,
+      used: 6986.51,
+      free: 188729.69725548,
+      upnl: 0,
+    });
+    expect(Number.isFinite(balance.total)).toBe(true);
+    expect(Number.isFinite(balance.used)).toBe(true);
+    expect(Number.isFinite(balance.free)).toBe(true);
   });
 });

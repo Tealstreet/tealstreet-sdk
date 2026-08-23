@@ -132,6 +132,61 @@ const isBybitLeverageNotModified = (data: Record<string, any>) => {
   );
 };
 
+const parseBybitFiniteNumber = (value: unknown): number | undefined => {
+  const number = typeof value === 'number' ? value : parseFloat(`${value ?? ''}`);
+  return Number.isFinite(number) ? number : undefined;
+};
+
+const sumBybitCoinFields = (coins: Record<string, any>[], fields: string[]): number | undefined => {
+  let sawFiniteValue = false;
+  const sum = coins.reduce((acc, coin) => {
+    const coinSum = fields.reduce((fieldAcc, field) => {
+      const value = parseBybitFiniteNumber(coin[field]);
+      if (value === undefined) {
+        return fieldAcc;
+      }
+      sawFiniteValue = true;
+      return fieldAcc + value;
+    }, 0);
+    return acc + coinSum;
+  }, 0);
+
+  return sawFiniteValue ? sum : undefined;
+};
+
+const deriveBybitAvailableBalanceFromCoins = (coins: Record<string, any>[]): number | undefined => {
+  let sawFiniteValue = false;
+  const total = coins.reduce((acc, coin) => {
+    const walletValue =
+      parseBybitFiniteNumber(coin.usdValue) ??
+      parseBybitFiniteNumber(coin.walletBalance) ??
+      parseBybitFiniteNumber(coin.equity);
+    if (walletValue === undefined) {
+      return acc;
+    }
+
+    sawFiniteValue = true;
+    const used =
+      (parseBybitFiniteNumber(coin.totalPositionIM) ?? 0) +
+      (parseBybitFiniteNumber(coin.totalOrderIM) ?? 0) +
+      (parseBybitFiniteNumber(coin.locked) ?? 0) +
+      (parseBybitFiniteNumber(coin.bonus) ?? 0);
+
+    return acc + Math.max(walletValue - used, 0);
+  }, 0);
+
+  return sawFiniteValue ? total : undefined;
+};
+
+const firstFiniteNumber = (...values: Array<number | undefined>): number => {
+  for (const value of values) {
+    if (value !== undefined && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return 0;
+};
+
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
     if (opts.triggerType === OrderStopTriggerType.MarkPrice) return 'MarkPrice';
@@ -733,20 +788,46 @@ export class BybitExchange extends BaseExchange {
       return this.store.balance;
     }
     const [firstAccount] = rawBalance;
+    const coins = Array.isArray(firstAccount.coin) ? firstAccount.coin : [];
     const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
-    const total = subtract(parseFloat(firstAccount.totalEquity), upnl);
+    const totalEquity = parseBybitFiniteNumber(firstAccount.totalEquity);
+    const totalWalletBalance = parseBybitFiniteNumber(firstAccount.totalWalletBalance);
+    const totalMarginBalance = parseBybitFiniteNumber(firstAccount.totalMarginBalance);
+    const totalAvailableBalance = parseBybitFiniteNumber(firstAccount.totalAvailableBalance);
+    const totalInitialMargin = parseBybitFiniteNumber(firstAccount.totalInitialMargin);
+    const totalMaintenanceMargin = parseBybitFiniteNumber(firstAccount.totalMaintenanceMargin);
+    const usedFromTopLevel =
+      totalInitialMargin !== undefined || totalMaintenanceMargin !== undefined
+        ? (totalMaintenanceMargin ?? 0) + (totalInitialMargin ?? 0)
+        : undefined;
+    const usedFromCoins = sumBybitCoinFields(coins, ['totalPositionIM', 'totalOrderIM']);
+    const derivedTopAvailable =
+      totalMarginBalance !== undefined
+        ? totalInitialMargin !== undefined
+          ? Math.max(totalMarginBalance - totalInitialMargin, 0)
+          : totalMarginBalance
+        : undefined;
+    const derivedCoinAvailable = deriveBybitAvailableBalanceFromCoins(coins);
+    const total = subtract(firstFiniteNumber(totalEquity, totalWalletBalance), upnl);
 
     const balance: Balance = {
       total,
       upnl,
-      used: parseFloat(firstAccount.totalMaintenanceMargin) + parseFloat(firstAccount.totalInitialMargin),
-      free: parseFloat(firstAccount.totalAvailableBalance ?? firstAccount.totalMarginBalance),
-      coins: firstAccount.coin.reduce(
+      used: firstFiniteNumber(usedFromTopLevel, usedFromCoins),
+      free: firstFiniteNumber(
+        totalAvailableBalance,
+        derivedTopAvailable,
+        derivedCoinAvailable,
+        totalWalletBalance,
+        totalEquity,
+      ),
+      coins: coins.reduce(
         (prev: { [coin: string]: CoinBalance }, coin: any) => {
+          const amount = firstFiniteNumber(parseBybitFiniteNumber(coin.equity), parseBybitFiniteNumber(coin.walletBalance));
           prev[coin.coin] = {
             base: coin.coin,
-            amount: parseFloat(coin.equity),
-            notional: parseFloat(coin.usdValue),
+            amount,
+            notional: firstFiniteNumber(parseBybitFiniteNumber(coin.usdValue), amount),
           };
           return prev;
         },
