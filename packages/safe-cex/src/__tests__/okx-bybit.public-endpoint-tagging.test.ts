@@ -79,7 +79,7 @@ describe('okx public endpoint tagging', () => {
     async (url) => {
       const config = await capture(okx({ ...LOCAL_KEYS, testnet: true }), url);
 
-      expect(config.baseURL).toBe('https://www.okx.com');
+      expect(config.baseURL).toBe('https://openapi.okx.com');
       expect(config.headers['x-simulated-trading']).toBe('1');
     },
   );
