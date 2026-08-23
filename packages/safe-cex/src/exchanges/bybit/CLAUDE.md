@@ -113,6 +113,17 @@ Beta validation checklist:
 
 **HTTP-over-WebSocket tunnel** (`bybit.api.ts:87-90`): When `options.tealstreetTunnel` is set, the Axios adapter is replaced with `createAxiosHttpOverWebsocketAdapter` using the configured `proxyRegion`.
 
+**Create-order transport failures**: `placeOrder()` may split oversized orders
+into several `/v5/order/create` payloads and still return the ids for the
+payloads that succeeded. If every payload throws before Bybit returns a usable
+response (timeout, tunnel drop, signing/adapter failure), the method must
+rethrow the captured transport error instead of returning `[]`. The web/mobile
+order primitives treat `[]` as an ambiguous exchange response that may still
+have accepted an order server-side, so returning `[]` after a definite transport
+failure skips their normal error callbacks and leaves optimistic cleanup to time
+out. The regression lives in
+`src/__tests__/audit-regressions/bybit.market-slippage.test.ts`.
+
 ### WebSocket Authentication (`bybit.ws-private.ts`)
 
 1. Sync time with `virtualClock.syncBybitClientServerTime()`
