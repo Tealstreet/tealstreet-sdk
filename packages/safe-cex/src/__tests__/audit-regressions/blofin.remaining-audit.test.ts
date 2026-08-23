@@ -250,6 +250,7 @@ describe('BloFin remaining audit regressions', () => {
     expect(post).toHaveBeenCalledWith(ENDPOINTS.PLACE_TRIGGER_ORDER, {
       instId: MARKET.id,
       marginMode: 'cross',
+      positionSide: 'net',
       side: 'buy',
       size: '2',
       clientOrderId: expect.any(String),

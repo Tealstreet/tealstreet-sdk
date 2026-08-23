@@ -1987,10 +1987,7 @@ export class BlofinExchange extends BaseExchange {
     });
 
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit) {
-      if ((await this.getOrFetchPositionMode(market.symbol)) === PositionMode.OneWay) {
-        req.closeFraction = '1';
-        req.reduceOnly = true;
-      }
+      req.reduceOnly = 'true';
     }
 
     if (opts.stopLoss) {
@@ -2464,7 +2461,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   private getPositionSide = async (opts: Pick<PlaceOrderOpts, 'reduceOnly' | 'side' | 'type' | 'symbol'>) => {
-    if ((await this.getOrFetchPositionMode(opts.symbol)) === PositionMode.OneWay) return undefined;
+    if ((await this.getOrFetchPositionMode(opts.symbol)) === PositionMode.OneWay) return 'net';
 
     let side = opts.side === OrderSide.Buy ? 'long' : 'short';
 

@@ -349,9 +349,21 @@ Controlled by `USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY` flag (currently `false`, 
 
 `formatAlgoOrder`: When placing a TP or SL with amount=0 (full position), the code checks for existing opposite algo orders on the same symbol/side. If found, it cancels them and combines both TP and SL into a single API request by setting both `tpTriggerPrice`/`tpOrderPrice` and `slTriggerPrice`/`slOrderPrice` on one payload.
 
-### One-Way Mode TP/SL
+### Standalone TP/SL Targeting
 
-For TP/SL orders in one-way mode, `formatAlgoOrder` sets `closeFraction` to `'1'` and `reduceOnly` to `true`.
+Standalone TP/SL orders use `/api/v1/trade/order-tpsl` and must send an explicit
+`positionSide` target: `net` in one-way mode, or the existing `long` / `short`
+leg in hedge mode. Full-position TP/SL uses `size: "-1"` and
+`reduceOnly: "true"`; do not reintroduce the undocumented `closeFraction` field.
+
+BloFin's product UI now exposes a **Multi-Trade / Multi-Position** mode where
+same-direction positions can be managed separately. The public futures API docs
+still expose only `positionSide` on `/trade/order-tpsl`; Tealstreet's BloFin
+adapter keys live positions by `symbol + side + positionMode`, so it cannot
+represent or target multiple BloFin `positionId`s for the same symbol and side.
+If BloFin requires selecting a specific position for reduce-only orders in that
+mode, that is an unsupported account shape until the API exposes a target field
+and the app order flow carries it.
 
 ## Symbol Format
 

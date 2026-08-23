@@ -301,6 +301,82 @@ describe('Blofin contract scaling regression', () => {
     ]);
   });
 
+  it('targets the net position for one-way full-position stop losses', async () => {
+    const { exchange, store } = makeExchange();
+    const markets = await (async () => {
+      exchange.xhr = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            data: [RAW_BTC_INSTRUMENT],
+          },
+        }),
+      } as any;
+      return exchange.fetchMarkets();
+    })();
+
+    seedMarkets(store, markets as Market[]);
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+
+    const payload = await (exchange as any).formatAlgoOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      amount: 0,
+      price: 49_000,
+    });
+
+    expect(payload).toMatchObject({
+      instId: 'BTC-USDT',
+      marginMode: MarginType.Cross,
+      positionSide: 'net',
+      side: 'sell',
+      size: '-1',
+      slTriggerPrice: '49000',
+      slOrderPrice: '-1',
+      reduceOnly: 'true',
+    });
+    expect(payload).not.toHaveProperty('closeFraction');
+  });
+
+  it('targets the existing hedge leg for full-position stop losses', async () => {
+    const { exchange, store } = makeExchange();
+    const markets = await (async () => {
+      exchange.xhr = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            data: [RAW_BTC_INSTRUMENT],
+          },
+        }),
+      } as any;
+      return exchange.fetchMarkets();
+    })();
+
+    seedMarkets(store, markets as Market[]);
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.Hedged);
+
+    const payload = await (exchange as any).formatAlgoOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      amount: 0,
+      price: 49_000,
+    });
+
+    expect(payload).toMatchObject({
+      instId: 'BTC-USDT',
+      marginMode: MarginType.Cross,
+      positionSide: 'long',
+      side: 'sell',
+      size: '-1',
+      slTriggerPrice: '49000',
+      slOrderPrice: '-1',
+      reduceOnly: 'true',
+    });
+    expect(payload).not.toHaveProperty('closeFraction');
+  });
+
   it('maps positions from native contracts to base using contractSize', () => {
     const { exchange, store } = makeExchange();
     const btcMarket = {
