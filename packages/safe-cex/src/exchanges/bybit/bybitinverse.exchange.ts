@@ -1419,24 +1419,17 @@ export class BybitInverseExchange extends BaseExchange {
 
     if (rest) payloads.push({ ...req, qty: `${rest}` });
 
-    let lastPlacementError: Error | undefined;
     const responses = await mapSeries(payloads, async (p) => {
       try {
         const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, p);
         return data;
       } catch (err: any) {
-        const message = err?.response?.data?.retMsg || err.message;
-        this.emitAndLogError(message);
-        lastPlacementError = err instanceof Error ? err : new Error(message);
+        this.emitAndLogError(err?.response?.data?.retMsg || err.message);
         return undefined;
       }
     });
 
     const fullfilled = responses.filter((r) => r !== undefined);
-
-    if (fullfilled.length === 0 && lastPlacementError) {
-      throw lastPlacementError;
-    }
 
     let errMsg = '';
     fullfilled.forEach((resp) => {

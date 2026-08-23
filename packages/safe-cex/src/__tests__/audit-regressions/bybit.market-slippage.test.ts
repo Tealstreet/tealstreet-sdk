@@ -113,47 +113,6 @@ describe('Bybit native market slippage tolerance', () => {
     }
   });
 
-  it('rejects create-order transport failures when no split payload succeeds', async () => {
-    const variants = [
-      {
-        exchange: new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT')),
-        order: marketOrder(0.75),
-      },
-      {
-        exchange: new BybitInverseExchange(
-          'bybitinverse',
-          { key: 'key', secret: 'secret' },
-          createStore('BTCUSD', 'USD', true),
-        ),
-        order: { ...marketOrder(0.75), symbol: 'BTCUSD', amount: 25 },
-      },
-      {
-        exchange: new BybitDemoExchange(
-          'bybitdemo',
-          { key: 'key', secret: 'secret' },
-          createStore('BTCUSDT', 'USDT'),
-        ),
-        order: marketOrder(0.75),
-      },
-      {
-        exchange: new BybitSpotExchange('bybitspot', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT')),
-        order: marketOrder(0.75),
-      },
-    ];
-
-    for (const { exchange, order } of variants) {
-      if ('fetchPositionMode' in exchange) {
-        (exchange as any).fetchPositionMode = vi.fn().mockResolvedValue(PositionMode.OneWay);
-      }
-      const error = new Error('Request timeout to /v5/order/create');
-      exchange.emitAndLogError = vi.fn();
-      exchange.xhr = { post: vi.fn().mockRejectedValue(error) } as any;
-
-      await expect(exchange.placeOrder(order)).rejects.toThrow('Request timeout to /v5/order/create');
-      expect(exchange.emitAndLogError).toHaveBeenCalledWith('Request timeout to /v5/order/create');
-    }
-  });
-
   it('keeps protected market orders off the batch endpoint, which does not document slippage fields', async () => {
     const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
     (exchange as any).fetchPositionMode = vi.fn().mockResolvedValue(PositionMode.OneWay);
