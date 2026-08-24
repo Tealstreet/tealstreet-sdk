@@ -3,7 +3,7 @@
 ## Exchange Information
 
 - Exchange name: `mexc`
-- Product scope: USDT-margined perpetual futures only.
+- Product scope: USDT- and USDC-margined perpetual futures.
 - Venue symbols use underscores (`BTC_USDT`); Tealstreet symbols remain compact (`BTCUSDT`).
 - MEXC reports order and position sizes in native contract volume. Convert to base-asset size with `market.contractSize` before publishing to the store.
 - `PlaceOrderOpts.amount` arrives from the app order flow as native contract volume. Send it to MEXC as `vol` after snapping to `volUnit`; do not convert it with `contractSize` again.

@@ -72,6 +72,8 @@ export const nativeVolumeToAmount = (value: unknown, market?: Market): number =>
 
 export const amountToNativeVolume = (amount: number, market?: Market): number => amount / getContractSize(market);
 
+const SUPPORTED_MARGIN_COINS = new Set(['USDT', 'USDC']);
+
 export const normalizeMarket = (raw: Record<string, any>): Market => {
   const id = String(raw.symbol);
   const base = String(raw.baseCoin ?? id.split('_')[0] ?? '');
@@ -110,7 +112,7 @@ export const normalizeMarket = (raw: Record<string, any>): Market => {
 };
 
 export const isTradableMexcMarket = (raw: Record<string, any>): boolean =>
-  String(raw.quoteCoin ?? raw.settleCoin ?? '').toUpperCase() === 'USDT' &&
+  SUPPORTED_MARGIN_COINS.has(String(raw.settleCoin ?? raw.quoteCoin ?? '').toUpperCase()) &&
   raw.apiAllowed !== false &&
   raw.isHidden !== true &&
   (raw.state === undefined || toNumber(raw.state) === 0);
@@ -202,7 +204,17 @@ export const normalizeKlineResponse = (payload: any): Candle[] => {
 
 export const normalizeBalance = (rawRows: Record<string, any>[]): Balance => {
   const rows = Array.isArray(rawRows) ? rawRows : [];
-  const primary = rows.find((row) => String(row.currency ?? row.asset ?? '').toUpperCase() === 'USDT') || rows[0] || {};
+  const primary =
+    rows.find((row) => {
+      const currency = String(row.currency ?? row.asset ?? '').toUpperCase();
+      if (!SUPPORTED_MARGIN_COINS.has(currency)) return false;
+      const free = toNumber(row.availableBalance ?? row.available ?? row.free);
+      const total = toNumber(row.equity ?? row.cashBalance ?? row.balance ?? row.total, free);
+      return free !== 0 || total !== 0;
+    }) ||
+    rows.find((row) => SUPPORTED_MARGIN_COINS.has(String(row.currency ?? row.asset ?? '').toUpperCase())) ||
+    rows[0] ||
+    {};
   const free = toNumber(primary.availableBalance ?? primary.available ?? primary.free);
   const total = toNumber(primary.equity ?? primary.cashBalance ?? primary.balance ?? primary.total, free);
   const upnl = toNumber(primary.unrealized ?? primary.unrealizedPnl ?? primary.unRealizedProfit);

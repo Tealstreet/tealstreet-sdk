@@ -4,6 +4,7 @@ import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../../exc
 import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
 import { ENDPOINTS } from '../../exchanges/mexc/mexc.types';
 import {
+  isTradableMexcMarket,
   nativeVolumeToAmount,
   normalizeBalance,
   normalizeExecution,
@@ -72,6 +73,33 @@ describe('MEXC futures audit regressions', () => {
     });
     expect(toMexcSymbol('1000PEPEUSDT')).toBe('1000PEPE_USDT');
     expect(nativeVolumeToAmount(123, market)).toBeCloseTo(0.0123);
+  });
+
+  it('includes USDC-settled markets for ticker and margin support', () => {
+    const usdcMarket = normalizeMarket({
+      symbol: 'BTC_USDC',
+      baseCoin: 'BTC',
+      quoteCoin: 'USDC',
+      settleCoin: 'USDC',
+      state: 0,
+      apiAllowed: true,
+      contractSize: 0.0001,
+      priceScale: 1,
+      priceUnit: 0.1,
+      volUnit: 1,
+      minVol: 1,
+      maxVol: 400000,
+      minLeverage: 1,
+      maxLeverage: 500,
+    });
+
+    expect(isTradableMexcMarket(usdcMarket.info as Record<string, any>)).toBe(true);
+    expect(usdcMarket).toMatchObject({
+      id: 'BTC_USDC',
+      symbol: 'BTCUSDC',
+      quote: 'USDC',
+    });
+    expect(toMexcSymbol('BTCUSDC')).toBe('BTC_USDC');
   });
 
   it('normalizes tickers with venue volume converted from native contracts', () => {
@@ -181,6 +209,27 @@ describe('MEXC futures audit regressions', () => {
       upnl: -2.25,
     });
     expect(balance.currencies?.USDT).toMatchObject({ free: 100.5, used: 29.5, total: 130, upnl: -2.25 });
+  });
+
+  it('uses funded USDC as the primary balance when USDT is empty', () => {
+    const balance = normalizeBalance([
+      {
+        currency: 'USDT',
+        availableBalance: '0',
+        cashBalance: '0',
+        equity: '0',
+      },
+      {
+        currency: 'USDC',
+        availableBalance: '20',
+        cashBalance: '30',
+        equity: '32',
+        frozenBalance: '4',
+      },
+    ]);
+
+    expect(balance).toMatchObject({ free: 20, used: 12, total: 32 });
+    expect(balance.currencies?.USDC).toMatchObject({ free: 20, used: 12, total: 32 });
   });
 
   it('normalizes kline arrays and private fill payloads', () => {
