@@ -318,6 +318,22 @@ describe('Blofin contract scaling regression', () => {
           positionMode: PositionMode.OneWay,
         },
       },
+      positions: [
+        {
+          id: createPositionId('ARBUSDT', PositionSide.Long, PositionMode.OneWay),
+          symbol: 'ARBUSDT',
+          side: PositionSide.Long,
+          entryPrice: 0,
+          notional: 0,
+          leverage: 75,
+          liquidationPrice: 0,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+          unrealizedPnl: 0,
+          contracts: 0,
+          info: {},
+        },
+      ],
     });
     const post = vi.fn().mockResolvedValue({
       data: {
@@ -343,6 +359,13 @@ describe('Blofin contract scaling regression', () => {
       sellLeverage: 75,
       marginType: MarginType.Cross,
       positionMode: PositionMode.Hedged,
+    });
+    expect(store.positions[0]).toMatchObject({
+      id: createPositionId('ARBUSDT', PositionSide.Long, PositionMode.Hedged),
+      symbol: 'ARBUSDT',
+      side: PositionSide.Long,
+      positionMode: PositionMode.Hedged,
+      contracts: 0,
     });
   });
 

@@ -1871,14 +1871,31 @@ export class BlofinExchange extends BaseExchange {
     this._accountPositionMode = positionMode;
 
     const fetchedLeverageEntries = Object.entries(this.store.fetchedLeverage);
-    if (!fetchedLeverageEntries.length) {
+    const positions = this.store.positions;
+    if (!fetchedLeverageEntries.length && !positions.length) {
       return;
     }
 
     this.store.update({
-      fetchedLeverage: Object.fromEntries(
-        fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
-      ),
+      ...(fetchedLeverageEntries.length
+        ? {
+            fetchedLeverage: Object.fromEntries(
+              fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
+            ),
+          }
+        : {}),
+      ...(positions.length
+        ? {
+            positions: uniqBy(
+              positions.map((position) => ({
+                ...position,
+                id: createPositionId(position.symbol, position.side, positionMode),
+                positionMode,
+              })),
+              'id',
+            ),
+          }
+        : {}),
     });
   };
 
