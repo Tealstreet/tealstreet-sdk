@@ -1,17 +1,18 @@
 ---
-title: MEXC - Support Paused
-description: Integration of MEXC is Planned in the future.
-sidebar_position: 99
+title: MEXC
+description: Connect your MEXC account to Tealstreet.
+sidebar_position: 16
 hide_title: false
 draft: true
-hide_table_of_contents: true
+hide_table_of_contents: false
 ---
 
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
-import MexcAPI from '/img/connect/mexc/mexc-api.png';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 
 <ThemedImage
     alt="MEXC-Logo"
@@ -21,16 +22,72 @@ import MexcAPI from '/img/connect/mexc/mexc-api.png';
     }}
 />
 
-## MEXC
+## Connecting [MEXC](https://teal.link/mexc) to Tealstreet
 
-Integration Planned!
-
-Consider using Tealstreet's [MEXC Referral link](https://teal.link/mexc) to help support integration and development.
-
-<div class="text--center">
-    <img src={MexcAPI} alt="MEXC API" style={{ width: 1000 }} />
-</div>
+- First, make sure you are logged into your [MEXC](https://teal.link/mexc) account.
 
 :::note
-At this time MEXC does not have a public API that we can use for further integration as it is still in **maintenance mode**. Once they finish their maintenance and activate their API we will be able to resume integration with them.
+Consider supporting Tealstreet by using the [MEXC referral link](https://teal.link/mexc).
 :::
+
+<IntroTealstreet exchangeName="MEXC" />
+
+---
+
+### Creating the API key
+
+- Now you are ready to generate the API key within your MEXC account. Head back to the MEXC tab and open **API Management** from your account menu.
+- Start the API key creation flow.
+- Choose a label or note for the key. This only needs to help you recognize the key inside MEXC.
+
+:::tip
+Keep the MEXC tab and Tealstreet settings page open at the same time. You may need to copy Tealstreet's recommended IP addresses into the MEXC API form before the key is created.
+:::
+
+---
+
+### API permissions
+
+- Enable the permissions needed for futures trading:
+  - Read access for account, balance, orders, and positions.
+  - Trade access for placing, editing, and cancelling orders.
+- Do not enable withdrawal permissions. Tealstreet never needs withdrawal access.
+- If MEXC asks you to bind or whitelist IP addresses, copy the IP addresses shown in the Tealstreet API key form and paste them into the MEXC whitelist field.
+- Complete any email, SMS, or two-factor verification prompts MEXC requires.
+- After the key is created, keep the **API Key** and **API Secret** available. You will need both for Tealstreet.
+
+:::caution
+Never share your API keys with anyone. Tealstreet team members will never ask you what your API key or API secret is.
+:::
+
+---
+
+### Connecting the key to Tealstreet
+
+Now return to the Tealstreet API key form where you selected MEXC.
+
+- Give the key a name. This can be anything you want.
+- Choose the color you want this account to use in the terminal.
+- Paste the **API Key** MEXC showed you when the key was created.
+- Paste the **API Secret** MEXC showed you when the key was created.
+- Click **Done**.
+
+<OutroTealstreet exchangeName="MEXC" />
+
+---
+
+## Troubleshooting
+
+### MEXC rejects the API key
+
+Double check that the API key and API secret were copied into the correct Tealstreet fields. MEXC does not use an API passphrase for this connection.
+
+If you enabled IP restrictions on MEXC, make sure the whitelist exactly matches the IP addresses shown in the Tealstreet API key form. If you switch Tealstreet routing regions later, update the MEXC whitelist before trading.
+
+### I can see market data but cannot place orders
+
+Confirm the API key has futures trading permissions enabled. Read-only keys can load some account or market information, but they cannot place, edit, or cancel orders.
+
+### Does Tealstreet support MEXC spot trading?
+
+No. Tealstreet's MEXC integration is intended for perpetual futures trading.

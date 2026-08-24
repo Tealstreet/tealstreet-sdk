@@ -1,17 +1,16 @@
 ---
-title: MEXC - 支持计划
-description: Integration of MEXC is Planned in the future.
-sidebar_position: 12
+title: MEXC
+description: 将您的 MEXC 账户连接到 Tealstreet。
+sidebar_position: 16
 hide_title: false
-draft: false
-hide_table_of_contents: true
+draft: true
+hide_table_of_contents: false
 ---
 
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
-import MexcAPI from '/img/connect/mexc/mexc-api.png';
 
 <ThemedImage
     alt="MEXC-Logo"
@@ -21,16 +20,79 @@ import MexcAPI from '/img/connect/mexc/mexc-api.png';
     }}
 />
 
-## MEXC
+## 将 [MEXC](https://teal.link/mexc) 连接到 Tealstreet
 
-计划中的集成!
-
-考虑使用 Tealstreet 的 [MEXC 推荐链接](https://teal.link/mexc) 来支持集成和开发。
-
-<div class="text--center">
-    <img src={MexcAPI} alt="MEXC API" style={{ width: 1000 }} />
-</div>
+- 首先，请确保您已登录您的 [MEXC](https://teal.link/mexc) 账户。
 
 :::note
-目前，MEXC 没有公共 API 可供我们用于进一步集成，因为它仍处于维护模式。一旦他们完成维护并激活他们的 API，我们将能够恢复与他们的集成。
+考虑使用 [MEXC 推荐链接](https://teal.link/mexc) 支持 Tealstreet。
 :::
+
+- 登录您的 [Tealstreet](http://v3.tealstreet.io/trade) 账户。
+- 点击终端右上角附近的 **Settings** 按钮。
+- 在设置页面底部点击 **Add new key**。
+- 在交易所选择菜单中选择 **MEXC**。
+- 建议在整个设置过程中同时打开 **Tealstreet** 和 **MEXC** 标签页。
+
+---
+
+### 创建 API 密钥
+
+- 现在可以在 MEXC 账户中创建 API 密钥。回到 MEXC 标签页，并从账户菜单打开 **API Management**。
+- 开始创建 API 密钥。
+- 为密钥设置一个备注或标签。这个名称只用于帮助您在 MEXC 中识别密钥。
+
+:::tip
+保持 MEXC 和 Tealstreet 设置页面同时打开。创建密钥前，您可能需要把 Tealstreet 推荐的 IP 地址复制到 MEXC 的 API 表单中。
+:::
+
+---
+
+### API 权限
+
+- 启用期货交易所需的权限：
+  - 用于账户、余额、订单和仓位的读取权限。
+  - 用于下单、改单和撤单的交易权限。
+- 不要启用提现权限。Tealstreet 永远不需要提现权限。
+- 如果 MEXC 要求绑定或白名单 IP 地址，请复制 Tealstreet API 密钥表单中显示的 IP 地址，并粘贴到 MEXC 的白名单字段中。
+- 完成 MEXC 要求的邮箱、短信或双重验证。
+- 创建密钥后，请保管好 **API Key** 和 **API Secret**。连接 Tealstreet 时需要使用它们。
+
+:::caution
+请勿与任何人分享您的 API 密钥。Tealstreet 团队成员永远不会询问您的 API Key 或 API Secret。
+:::
+
+---
+
+### 连接到 Tealstreet
+
+现在返回您选择了 MEXC 的 Tealstreet API 密钥表单。
+
+- 为密钥设置一个名称。这个名称可以任意填写。
+- 选择该账户在终端中显示的颜色。
+- 粘贴 MEXC 创建密钥时显示的 **API Key**。
+- 粘贴 MEXC 创建密钥时显示的 **API Secret**。
+- 点击 **Done**。
+
+如果所有信息都正确，您将成功把 MEXC 账户连接到 Tealstreet。
+
+- 关闭设置页面并进入主交易页面。选择刚刚连接的 MEXC 账户来启用它。
+- 如果连接成功，您会在 Tealstreet 的保证金窗口中看到余额。
+
+---
+
+## 故障排除
+
+### MEXC 拒绝 API 密钥
+
+请确认 API Key 和 API Secret 已复制到 Tealstreet 的正确字段中。MEXC 连接不需要 API passphrase。
+
+如果您在 MEXC 启用了 IP 限制，请确保白名单与 Tealstreet API 密钥表单中显示的 IP 地址完全一致。如果之后切换 Tealstreet 路由区域，请在交易前更新 MEXC 白名单。
+
+### 可以看到市场数据，但无法下单
+
+请确认 API 密钥已启用期货交易权限。只读密钥可能可以加载部分账户或市场信息，但不能下单、改单或撤单。
+
+### Tealstreet 支持 MEXC 现货交易吗？
+
+不支持。Tealstreet 的 MEXC 集成用于永续期货交易。
