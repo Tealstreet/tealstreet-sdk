@@ -635,7 +635,7 @@ const MexcMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: false,
   enabledInDev: true,
-  enableInPreview: false,
+  enableInPreview: true,
   supportsTestnet: false,
   supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
