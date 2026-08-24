@@ -1,27 +1,95 @@
 ---
-title: Kucoin - Support Paused
-description: Kucoin API connection guide.
+title: KuCoin
+description: Connect your KuCoin account to Tealstreet.
 sidebar_position: 99
 hide_title: false
 draft: true
-hide_table_of_contents: true
+hide_table_of_contents: false
 ---
 
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 
 <ThemedImage
-    alt="kucoin-Logo"
+    alt="kucoin-logo"
     sources={{
         light: useBaseUrl('/img/exchange/kucoin-light.svg'),
         dark: useBaseUrl('/img/exchange/kucoin-dark.svg'),
     }}
 />
 
-## Kucoin
+## Connecting [KuCoin](https://teal.link/kucoin) to Tealstreet
 
-[Coming Soon!](/docs/connect/api-general)
+- First, make sure you are logged into your [KuCoin](https://teal.link/kucoin) account.
 
-Consider using Tealstreet's [Kucoin Referral link](https://teal.link/kucoin) to help support integration and development.
+:::note
+Consider supporting Tealstreet by using the [KuCoin referral link](https://teal.link/kucoin).
+:::
+
+<IntroTealstreet exchangeName="KuCoin" />
+
+---
+
+### Creating the API key
+
+- Now you are ready to generate the API key within your KuCoin account. Head back to the KuCoin tab and open **API Management** from your account menu.
+- Start the API key creation flow.
+- Choose a label or note for the key. This only needs to help you recognize the key inside KuCoin.
+- Create an **API Passphrase** for the key and store it somewhere safe. You will need to enter this passphrase in Tealstreet.
+
+:::tip
+Keep the KuCoin tab and Tealstreet settings page open at the same time. You may need to copy Tealstreet's recommended IP addresses into the KuCoin API form before the key is created.
+:::
+
+---
+
+### API permissions
+
+- Enable the permissions needed for trading:
+  - Read access for account, balance, orders, and positions.
+  - Trade access for placing, editing, and cancelling orders.
+- Do not enable withdrawal permissions. Tealstreet never needs withdrawal access.
+- If KuCoin asks you to bind or whitelist IP addresses, copy the IP addresses shown in the Tealstreet API key form and paste them into the KuCoin whitelist field.
+- Complete any email, SMS, or two-factor verification prompts KuCoin requires.
+- After the key is created, keep the **API Key**, **API Secret**, and **API Passphrase** available. You will need all three for Tealstreet.
+
+:::caution
+Never share your API keys with anyone. Tealstreet team members will never ask you what your API key, API secret, or API passphrase is.
+:::
+
+---
+
+### Connecting the key to Tealstreet
+
+Now return to the Tealstreet API key form where you selected KuCoin.
+
+- Give the key a name. This can be anything you want.
+- Choose the color you want this account to use in the terminal.
+- Paste the **API Key** KuCoin showed you when the key was created.
+- Paste the **API Secret** KuCoin showed you when the key was created.
+- Paste the **API Passphrase** you created for this KuCoin API key.
+- Click **Done**.
+
+<OutroTealstreet exchangeName="KuCoin" />
+
+---
+
+## Troubleshooting
+
+### KuCoin rejects the API key
+
+Double check that the API key, API secret, and API passphrase were copied into the correct Tealstreet fields. KuCoin requires the passphrase you created when making the API key.
+
+If you enabled IP restrictions on KuCoin, make sure the whitelist exactly matches the IP addresses shown in the Tealstreet API key form. If you switch Tealstreet routing regions later, update the KuCoin whitelist before trading.
+
+### I can see market data but cannot place orders
+
+Confirm the API key has trading permissions enabled. Read-only keys can load some account or market information, but they cannot place, edit, or cancel orders.
+
+### Which KuCoin account mode should I use?
+
+Use a KuCoin account mode supported by the Tealstreet connection flow shown in the app. If KuCoin blocks API trading for your account mode, create or switch to a supported KuCoin trading account before connecting the key.

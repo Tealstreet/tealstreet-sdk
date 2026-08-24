@@ -1,10 +1,10 @@
 ---
-title: Kucoin - 即将推出
-description: Kucoin API connection guide.
-sidebar_position: 12
+title: KuCoin
+description: 将您的 KuCoin 账户连接到 Tealstreet。
+sidebar_position: 99
 hide_title: false
-draft: false
-hide_table_of_contents: true
+draft: true
+hide_table_of_contents: false
 ---
 
 ---
@@ -13,15 +13,88 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
 
 <ThemedImage
-    alt="kucoin-Logo"
+    alt="kucoin-logo"
     sources={{
         light: useBaseUrl('/img/exchange/kucoin-light.svg'),
         dark: useBaseUrl('/img/exchange/kucoin-dark.svg'),
     }}
 />
 
-## Kucoin
+## 将 [KuCoin](https://teal.link/kucoin) 连接到 Tealstreet
 
-[即将推出！](/docs/connect/api-general)
+- 首先，请确保您已登录您的 [KuCoin](https://teal.link/kucoin) 账户。
 
-考虑使用Tealstreet的[Kucoin推荐链接](https://teal.link/kucoin)来支持集成和开发。
+:::note
+考虑使用 [KuCoin 推荐链接](https://teal.link/kucoin) 支持 Tealstreet。
+:::
+
+- 登录您的 [Tealstreet](http://v3.tealstreet.io/trade) 账户。
+- 点击终端右上角附近的 **Settings** 按钮。
+- 在设置页面底部点击 **Add new key**。
+- 在交易所选择菜单中选择 **KuCoin**。
+- 建议在整个设置过程中同时打开 **Tealstreet** 和 **KuCoin** 标签页。
+
+---
+
+### 创建 API 密钥
+
+- 现在可以在 KuCoin 账户中创建 API 密钥。回到 KuCoin 标签页，并从账户菜单打开 **API Management**。
+- 开始创建 API 密钥。
+- 为密钥设置一个备注或标签。这个名称只用于帮助您在 KuCoin 中识别密钥。
+- 为密钥创建一个 **API Passphrase** 并妥善保存。连接 Tealstreet 时需要填写这个 passphrase。
+
+:::tip
+保持 KuCoin 和 Tealstreet 设置页面同时打开。创建密钥前，您可能需要把 Tealstreet 推荐的 IP 地址复制到 KuCoin 的 API 表单中。
+:::
+
+---
+
+### API 权限
+
+- 启用交易所需的权限：
+  - 用于账户、余额、订单和仓位的读取权限。
+  - 用于下单、改单和撤单的交易权限。
+- 不要启用提现权限。Tealstreet 永远不需要提现权限。
+- 如果 KuCoin 要求绑定或白名单 IP 地址，请复制 Tealstreet API 密钥表单中显示的 IP 地址，并粘贴到 KuCoin 的白名单字段中。
+- 完成 KuCoin 要求的邮箱、短信或双重验证。
+- 创建密钥后，请保管好 **API Key**、**API Secret** 和 **API Passphrase**。连接 Tealstreet 时需要使用这三项信息。
+
+:::caution
+请勿与任何人分享您的 API 密钥。Tealstreet 团队成员永远不会询问您的 API Key、API Secret 或 API Passphrase。
+:::
+
+---
+
+### 连接到 Tealstreet
+
+现在返回您选择了 KuCoin 的 Tealstreet API 密钥表单。
+
+- 为密钥设置一个名称。这个名称可以任意填写。
+- 选择该账户在终端中显示的颜色。
+- 粘贴 KuCoin 创建密钥时显示的 **API Key**。
+- 粘贴 KuCoin 创建密钥时显示的 **API Secret**。
+- 粘贴您为该 KuCoin API 密钥创建的 **API Passphrase**。
+- 点击 **Done**。
+
+如果所有信息都正确，您将成功把 KuCoin 账户连接到 Tealstreet。
+
+- 关闭设置页面并进入主交易页面。选择刚刚连接的 KuCoin 账户来启用它。
+- 如果连接成功，您会在 Tealstreet 的保证金窗口中看到余额。
+
+---
+
+## 故障排除
+
+### KuCoin 拒绝 API 密钥
+
+请确认 API Key、API Secret 和 API Passphrase 已复制到 Tealstreet 的正确字段中。KuCoin 需要您创建 API 密钥时设置的 passphrase。
+
+如果您在 KuCoin 启用了 IP 限制，请确保白名单与 Tealstreet API 密钥表单中显示的 IP 地址完全一致。如果之后切换 Tealstreet 路由区域，请在交易前更新 KuCoin 白名单。
+
+### 可以看到市场数据，但无法下单
+
+请确认 API 密钥已启用交易权限。只读密钥可能可以加载部分账户或市场信息，但不能下单、改单或撤单。
+
+### 应该使用哪种 KuCoin 账户模式？
+
+请使用 Tealstreet 应用内连接流程支持的 KuCoin 账户模式。如果 KuCoin 阻止您的账户模式进行 API 交易，请先创建或切换到受支持的 KuCoin 交易账户，再连接 API 密钥。
