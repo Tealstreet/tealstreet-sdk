@@ -485,6 +485,40 @@ describe('Blofin contract scaling regression', () => {
     expect(payload).not.toHaveProperty('closeFraction');
   });
 
+  it('returns an actionable error for unsupported multi-trade TP/SL placement', async () => {
+    const { exchange } = makeExchange();
+    const post = vi
+      .fn()
+      .mockResolvedValue({
+        data: {
+          code: '102143',
+          msg: 'Please select a position when Reduce Only is enabled in Multi-Trade mode.',
+        },
+      });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
+    exchange.xhr = { post } as any;
+
+    await expect(
+      (exchange as any).placeAlgoOrderBatch([
+        {
+          instId: 'BTC-USDT',
+          marginMode: MarginType.Cross,
+          positionSide: 'long',
+          side: 'sell',
+          size: '-1',
+          slTriggerPrice: '49000',
+          slOrderPrice: '-1',
+          reduceOnly: 'true',
+        },
+      ]),
+    ).rejects.toThrow('BloFin Multi-Position mode is not supported in Tealstreet yet.');
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(emitAndLogError).toHaveBeenCalledWith(
+      'BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.',
+    );
+  });
+
   it('maps positions from native contracts to base using contractSize', () => {
     const { exchange, store } = makeExchange();
     const btcMarket = {

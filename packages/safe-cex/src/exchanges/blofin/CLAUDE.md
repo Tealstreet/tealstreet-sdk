@@ -361,9 +361,11 @@ same-direction positions can be managed separately. The public futures API docs
 still expose only `positionSide` on `/trade/order-tpsl`; Tealstreet's BloFin
 adapter keys live positions by `symbol + side + positionMode`, so it cannot
 represent or target multiple BloFin `positionId`s for the same symbol and side.
-If BloFin requires selecting a specific position for reduce-only orders in that
-mode, that is an unsupported account shape until the API exposes a target field
-and the app order flow carries it.
+A live experiment against `/trade/order-tpsl` still returned `102143` after
+including the visible position row's raw `positionId`, so do not retry with an
+undocumented `positionId` field. Treat `102143` as an unsupported account mode
+and tell the user to disable Multi-Position mode on BloFin before trading from
+Tealstreet.
 
 ## Symbol Format
 

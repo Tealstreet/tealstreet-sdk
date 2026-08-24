@@ -84,6 +84,9 @@ import { BlofinPublicWebsocket } from './blofin.ws-public';
 const BLOFIN_SUPPORTED_INST_TYPE = 'SWAP';
 const BLOFIN_SUPPORTED_CONTRACT_TYPE = 'linear';
 const BLOFIN_ACTIVE_ORDERS_PAGE_SIZE = 100;
+const BLOFIN_MULTI_TRADE_POSITION_SELECTION_CODE = '102143';
+const BLOFIN_MULTI_TRADE_UNSUPPORTED_MESSAGE =
+  'BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.';
 // Safety cap on order pagination. BloFin caps orders-pending / orders-tpsl-pending
 // at ~20 rows per page regardless of the requested `limit`, so we page via the
 // `after` cursor until an empty page. This bounds the loop if the cursor ever
@@ -2013,6 +2016,7 @@ export class BlofinExchange extends BaseExchange {
     const pPrice = market.precision.price;
     const price = opts.price ? adjust(opts.price, pPrice) : null;
 
+    const positionSide = await this.getPositionSide(opts);
     const req: Record<string, any> = omitUndefined({
       instId: market.id,
       marginMode: await this.getOrFetchMarginType(market.symbol),
@@ -2023,7 +2027,7 @@ export class BlofinExchange extends BaseExchange {
           }
         : {}),
       side: inverseObj(ORDER_SIDE)[opts.side],
-      positionSide: await this.getPositionSide(opts),
+      positionSide,
       size: `${amount === 0 ? -1 : amount}`,
     });
 
@@ -2248,8 +2252,12 @@ export class BlofinExchange extends BaseExchange {
       } = await this.xhr.post<{ code: string; msg: string; data: any }>(ENDPOINTS.PLACE_TPSL_ORDER, payload);
 
       if (code !== '0') {
-        this.emitAndLogError(data?.[0]?.msg || msg);
-        throw new Error(data?.[0]?.msg || msg);
+        const errorMessage =
+          code === BLOFIN_MULTI_TRADE_POSITION_SELECTION_CODE
+            ? BLOFIN_MULTI_TRADE_UNSUPPORTED_MESSAGE
+            : data?.[0]?.msg || msg;
+        this.emitAndLogError(errorMessage);
+        throw new Error(errorMessage);
       }
 
       responses.push(data?.tpslId);
