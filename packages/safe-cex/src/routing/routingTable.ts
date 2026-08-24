@@ -46,6 +46,7 @@ const REST_JP: ExchangeName[] = [
   'okxdemo',
   'okxeu',
   'okxeudemo',
+  'mexc',
   'bitget',
   'bitgetinverse',
   'bitgetusdc',

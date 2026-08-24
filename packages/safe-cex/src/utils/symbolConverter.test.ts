@@ -54,6 +54,7 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  'mexc',
   'okx',
   'okxdemo',
   'paradex',

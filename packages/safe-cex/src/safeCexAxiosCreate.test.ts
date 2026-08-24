@@ -297,6 +297,27 @@ describe('safeCexAxiosCreate', () => {
       expect(instance.interceptors.request.use).toHaveBeenCalledTimes(3);
     });
 
+    it('uses Tealstreet-Authorization for MEXC proxy auth to avoid venue Authorization conflicts', async () => {
+      const mexcExchange = {
+        ...mockExchange,
+        name: 'mexc',
+      } as unknown as BaseExchange;
+      const config = { baseURL: 'https://api.mexc.com' };
+      const options: ExchangeOptions = {
+        key: 'test-key',
+        secret: 'test-secret',
+        tealstreetProxy: true,
+      };
+
+      const instance = safeCexAxiosCreate(config, options, mexcExchange);
+      const proxyAuthInterceptor = vi.mocked(instance.interceptors.request.use).mock.calls[1][0];
+      expect(proxyAuthInterceptor).toBeDefined();
+      const requestConfig = await proxyAuthInterceptor!({ headers: {} } as any);
+
+      expect(requestConfig.headers['Tealstreet-Authorization']).toBe('Bearer mock-token');
+      expect(requestConfig.headers.Authorization).toBeUndefined();
+    });
+
     it('should add response interceptor', () => {
       const config = { baseURL: 'https://api.test.com' };
       const options: ExchangeOptions = { key: '', secret: '' };

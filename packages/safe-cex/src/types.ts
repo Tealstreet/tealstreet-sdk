@@ -36,6 +36,7 @@ export type ExchangeName =
   | 'hyperliquid'
   | 'hyperliquidspot'
   | 'lighter'
+  | 'mexc'
   | 'okx'
   | 'okxdemo'
   | 'okxeu'

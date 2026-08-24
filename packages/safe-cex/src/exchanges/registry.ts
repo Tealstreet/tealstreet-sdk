@@ -171,6 +171,9 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   lighter: () =>
     import(/* webpackChunkName: "exchange-lighter" */ './lighter/lighter.exchange').then((m) => m.LighterExchange),
 
+  // MEXC
+  mexc: () => import(/* webpackChunkName: "exchange-mexc" */ './mexc/mexc.exchange').then((m) => m.MexcExchange),
+
   // OKX
   okx: () => import(/* webpackChunkName: "exchange-okx" */ './okx/okx.exchange').then((m) => m.OKXExchange),
 

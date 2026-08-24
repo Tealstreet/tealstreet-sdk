@@ -347,6 +347,7 @@ describe('exchangeMetadata', () => {
         'kucoin',
         'kucoinspot',
         'lighter',
+        'mexc',
         'okx',
         'okxdemo',
         'paradex',

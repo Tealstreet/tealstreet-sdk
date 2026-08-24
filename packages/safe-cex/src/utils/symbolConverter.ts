@@ -187,6 +187,10 @@ export function toBinance(symbol: string, from: ExchangeName): string {
       return clean.replace(/_/g, '');
     }
 
+    // -- MEXC futures: BTC_USDT → BTCUSDT ----------------------------------
+    case 'mexc':
+      return symbol.replace(/_/g, '');
+
     // -- Crypto.com: BTCUSD-PERP → BTCUSD ----------------------------------
     case 'cryptocom': {
       return symbol.endsWith('-PERP') ? symbol.slice(0, -5) : symbol;
@@ -346,6 +350,12 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'backpack': {
       const { base, quote } = parseBinanceSymbol(symbol);
       return `${base}_${quote}_PERP`;
+    }
+
+    // -- MEXC futures: BTCUSDT → BTC_USDT ----------------------------------
+    case 'mexc': {
+      const { base, quote } = parseBinanceSymbol(symbol);
+      return `${base}_${quote}`;
     }
 
     // -- Crypto.com: BTCUSD → BTCUSD-PERP ----------------------------------

@@ -34,6 +34,7 @@ export const SYMBOL_SCOPED_FILLS: ReadonlySet<ExchangeName> = new Set([
   'bybitinverse',
   'hyperliquid',
   'lighter',
+  'mexc',
   'okx',
   'paradex',
   'phemex',

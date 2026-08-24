@@ -298,10 +298,11 @@ export const safeCexAxiosCreate = (
       // Get proxy token from SharedWorker (handles all fetching centrally)
       const token = await getProxyToken();
 
-      // For GRVT, use Tealstreet-Authorization header to avoid conflict with GRVT's
-      // session-based authentication (Cookie + X-Grvt-Account-Id headers)
+      // Use Tealstreet-Authorization when the venue has its own Authorization
+      // semantics. MEXC futures uses Authorization for WEB/APP sessions, while
+      // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
       // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
-      if (exchange.name === 'grvt') {
+      if (exchange.name === 'grvt' || exchange.name === 'mexc') {
         config.headers['Tealstreet-Authorization'] = `Bearer ${token}`;
       } else {
         config.headers.Authorization = `Bearer ${token}`;

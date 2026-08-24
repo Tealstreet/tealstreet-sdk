@@ -2102,6 +2102,30 @@
       "binance": "AZTECUSDC"
     }
   ],
+  "mexc": [
+    {
+      "symbol": "BTC_USDT",
+      "base": "BTC",
+      "quote": "USDT",
+      "id": "BTC_USDT",
+      "_source": "live-public-probe",
+      "binance": "BTCUSDT"
+    },
+    {
+      "symbol": "ETH_USDT",
+      "base": "ETH",
+      "quote": "USDT",
+      "id": "ETH_USDT",
+      "binance": "ETHUSDT"
+    },
+    {
+      "symbol": "1000PEPE_USDT",
+      "base": "1000PEPE",
+      "quote": "USDT",
+      "id": "1000PEPE_USDT",
+      "binance": "1000PEPEUSDT"
+    }
+  ],
   "okx": [
     {
       "symbol": "BTCUSD",
