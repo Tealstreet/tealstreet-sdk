@@ -312,24 +312,24 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
-  it('preserves selected leverage across flat-position metadata refreshes', async () => {
+  it('preserves side-specific leverage across flat-position metadata refreshes', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
     exchange.store.update({ markets: [market] });
-    exchange.xhr = { post } as any;
+    exchange.xhr = { post, get: vi.fn().mockRejectedValue(new Error('private leverage unavailable')) } as any;
 
     await exchange.setLeverage('BTCUSDT', 50, PositionSide.Long);
     await exchange.updateSymbolMetadata('BTCUSDT');
 
     await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
       buyLeverage: 50,
-      sellLeverage: 50,
+      sellLeverage: 20,
       marginType: MarginType.Cross,
       positionMode: PositionMode.Hedged,
     });
     expect(exchange.store.fetchedLeverage.BTCUSDT).toMatchObject({
       buyLeverage: 50,
-      sellLeverage: 50,
+      sellLeverage: 20,
     });
     expect(post).toHaveBeenCalledWith(ENDPOINTS.CHANGE_LEVERAGE, {
       symbol: 'BTC_USDT',
@@ -350,14 +350,14 @@ describe('MEXC futures audit regressions', () => {
             symbol: 'BTC_USDT',
             positionType: 1,
             openType: 2,
-            leverage: 20,
+            leverage: 50,
             maxLeverageView: 50,
           },
           {
             symbol: 'BTC_USDT',
             positionType: 2,
             openType: 2,
-            leverage: 20,
+            leverage: 32,
             maxLeverageView: 50,
           },
         ],
@@ -367,8 +367,8 @@ describe('MEXC futures audit regressions', () => {
     exchange.xhr = { get } as any;
 
     await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
-      buyLeverage: 20,
-      sellLeverage: 20,
+      buyLeverage: 50,
+      sellLeverage: 32,
       marginType: MarginType.Cross,
     });
     expect(exchange.store.marketsBySymbol.BTCUSDT.limits.leverage.max).toBe(50);
@@ -392,7 +392,7 @@ describe('MEXC futures audit regressions', () => {
 
     await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
       buyLeverage: 50,
-      sellLeverage: 50,
+      sellLeverage: 20,
       marginType: MarginType.Cross,
       positionMode: PositionMode.OneWay,
     });

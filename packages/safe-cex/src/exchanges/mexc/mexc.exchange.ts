@@ -87,7 +87,8 @@ const extractRows = <T = Record<string, any>>(payload: any, keys: string[] = [])
 
 type MexcSymbolConfig = {
   marginType: MarginType;
-  leverage: number;
+  buyLeverage: number;
+  sellLeverage: number;
   positionMode: PositionMode;
 };
 
@@ -294,7 +295,7 @@ export class MexcExchange extends BaseExchange {
           market,
           config?.positionMode || this.accountPositionMode,
           config?.marginType || MarginType.Cross,
-          config?.leverage || 20,
+          config ? Math.min(config.buyLeverage, config.sellLeverage) : 20,
         ).filter((position) => !openIds.has(position.id));
       });
 
@@ -445,7 +446,7 @@ export class MexcExchange extends BaseExchange {
     const nativeVolumeStep = toNumber(market.info?.volUnit, 1);
     const vol = Math.max(toNumber(adjust(opts.amount, nativeVolumeStep), nativeVolumeStep), nativeVolumeStep);
     const side = opts.reduceOnly ? REVERSE_ORDER_SIDE[opts.side].close : REVERSE_ORDER_SIDE[opts.side].open;
-    const leverage = this.symbolSettings.get(opts.symbol)?.leverage || this.findPositionLeverage(opts.symbol) || 20;
+    const leverage = this.getLeverageForOrder(opts);
     const payload = omitUndefined({
       symbol: market.id,
       price: opts.type === OrderType.Market ? undefined : `${adjust(opts.price || 0, market.precision.price)}`,
@@ -502,8 +503,8 @@ export class MexcExchange extends BaseExchange {
       throw new Error(message);
     }
 
+    const leverage = Math.min(Math.max(this.getLeverageForOrder(opts), market.limits.leverage.min), market.limits.leverage.max);
     const config = this.symbolSettings.get(opts.symbol) || this.deriveSymbolConfig(opts.symbol);
-    const leverage = Math.min(Math.max(config.leverage || 20, market.limits.leverage.min), market.limits.leverage.max);
     const payload = omitUndefined({
       symbol: market.id,
       vol,
@@ -622,8 +623,8 @@ export class MexcExchange extends BaseExchange {
         const rows = extractRows<Record<string, any>>(data);
         const longRow = rows.find((row) => toNumber(row.positionType, Number.NaN) === 1);
         const shortRow = rows.find((row) => toNumber(row.positionType, Number.NaN) === 2);
-        const buyLeverage = toNumber(longRow?.leverage, config.leverage);
-        const sellLeverage = toNumber(shortRow?.leverage, config.leverage);
+        const buyLeverage = toNumber(longRow?.leverage, config.buyLeverage);
+        const sellLeverage = toNumber(shortRow?.leverage, config.sellLeverage);
         const maxLeverageCandidates = rows
           .map((row) => toNumber(row.maxLeverageView ?? row.maxLeverage, Number.NaN))
           .filter(Number.isFinite);
@@ -631,7 +632,8 @@ export class MexcExchange extends BaseExchange {
         const marginType = normalizeMarginType(longRow?.openType ?? shortRow?.openType ?? REVERSE_MARGIN_TYPE[config.marginType]);
         const nextConfig = {
           ...config,
-          leverage: Math.min(buyLeverage, sellLeverage),
+          buyLeverage,
+          sellLeverage,
           marginType,
         };
 
@@ -670,8 +672,8 @@ export class MexcExchange extends BaseExchange {
     }
 
     const fetchedLeverage = {
-      buyLeverage: config.leverage,
-      sellLeverage: config.leverage,
+      buyLeverage: config.buyLeverage,
+      sellLeverage: config.sellLeverage,
       marginType: config.marginType,
       positionMode: config.positionMode,
     };
@@ -706,7 +708,8 @@ export class MexcExchange extends BaseExchange {
 
     const nextConfig = {
       ...currentConfig,
-      leverage: nextLeverage,
+      buyLeverage: side === PositionSide.Short ? currentConfig.buyLeverage : nextLeverage,
+      sellLeverage: side === PositionSide.Long ? currentConfig.sellLeverage : nextLeverage,
     };
     this.symbolSettings.set(symbol, nextConfig);
     this.updateFetchedLeverage(symbol, nextConfig);
@@ -735,12 +738,15 @@ export class MexcExchange extends BaseExchange {
 
     const marginType = isolated ? MarginType.Isolated : MarginType.Cross;
     const currentConfig = this.symbolSettings.get(symbol) || this.deriveSymbolConfig(symbol);
-    const leverage = Math.min(Math.max(currentConfig.leverage || 20, market.limits.leverage.min), market.limits.leverage.max);
-    for (const positionType of [1, 2]) {
+    const leverageByPositionType = {
+      1: Math.min(Math.max(currentConfig.buyLeverage || 20, market.limits.leverage.min), market.limits.leverage.max),
+      2: Math.min(Math.max(currentConfig.sellLeverage || 20, market.limits.leverage.min), market.limits.leverage.max),
+    };
+    for (const positionType of [1, 2] as const) {
       await this.xhr.post(ENDPOINTS.CHANGE_LEVERAGE, {
         symbol: market.id,
         positionType,
-        leverage,
+        leverage: leverageByPositionType[positionType],
         openType: REVERSE_MARGIN_TYPE[marginType],
       });
     }
@@ -757,8 +763,8 @@ export class MexcExchange extends BaseExchange {
       fetchedLeverage: {
         ...this.store.fetchedLeverage,
         [symbol]: {
-          buyLeverage: config.leverage,
-          sellLeverage: config.leverage,
+          buyLeverage: config.buyLeverage,
+          sellLeverage: config.sellLeverage,
           marginType: config.marginType,
           positionMode: config.positionMode,
         },
@@ -768,17 +774,32 @@ export class MexcExchange extends BaseExchange {
 
   private deriveSymbolConfig = (symbol: string): MexcSymbolConfig => {
     const existingConfig = this.symbolSettings.get(symbol);
-    const position = this.store.positions.find((item) => item.symbol === symbol && item.contracts);
+    const positions = this.store.positions.filter((item) => item.symbol === symbol && item.contracts);
+    const position = positions[0];
+    const positionMode = position?.positionMode || existingConfig?.positionMode || this.accountPositionMode;
+    const longPosition = positions.find((item) => item.side === PositionSide.Long);
+    const shortPosition = positions.find((item) => item.side === PositionSide.Short);
+    const oneWayPositionLeverage = positionMode === PositionMode.OneWay && position ? toNumber(position.leverage, 20) : undefined;
     return {
       marginType: normalizeMarginType(position?.info?.openType ?? position?.marginType ?? existingConfig?.marginType),
-      leverage: position ? toNumber(position.leverage, existingConfig?.leverage ?? 20) : (existingConfig?.leverage ?? 20),
-      positionMode: position?.positionMode || existingConfig?.positionMode || this.accountPositionMode,
+      buyLeverage:
+        longPosition !== undefined
+          ? toNumber(longPosition.leverage, existingConfig?.buyLeverage ?? 20)
+          : (oneWayPositionLeverage ?? existingConfig?.buyLeverage ?? existingConfig?.sellLeverage ?? 20),
+      sellLeverage:
+        shortPosition !== undefined
+          ? toNumber(shortPosition.leverage, existingConfig?.sellLeverage ?? 20)
+          : (oneWayPositionLeverage ?? existingConfig?.sellLeverage ?? existingConfig?.buyLeverage ?? 20),
+      positionMode,
     };
   };
 
-  private findPositionLeverage = (symbol: string): number => {
-    const position = this.store.positions.find((item) => item.symbol === symbol && item.contracts);
-    return toNumber(position?.leverage, 0);
+  private getLeverageForOrder = (opts: PlaceOrderOpts): number => {
+    const config = this.symbolSettings.get(opts.symbol) || this.deriveSymbolConfig(opts.symbol);
+    if (opts.reduceOnly) {
+      return opts.side === OrderSide.Sell ? config.buyLeverage : config.sellLeverage;
+    }
+    return opts.side === OrderSide.Buy ? config.buyLeverage : config.sellLeverage;
   };
 
   private orderListEndpoint = (venueSymbol?: string): string =>
