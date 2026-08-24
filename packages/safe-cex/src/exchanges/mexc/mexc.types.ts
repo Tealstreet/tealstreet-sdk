@@ -28,6 +28,7 @@ export const ENDPOINTS = {
 
   ASSETS: '/api/v1/private/account/assets',
   POSITION_MODE: '/api/v1/private/position/position_mode',
+  POSITION_LEVERAGE: '/api/v1/private/position/leverage',
   CHANGE_POSITION_MODE: '/api/v1/private/position/change_position_mode',
   CHANGE_LEVERAGE: '/api/v1/private/position/change_leverage',
   OPEN_POSITIONS: '/api/v1/private/position/open_positions',
@@ -56,6 +57,7 @@ export const GRAFANA_ENDPOINTS_EVERY = [
 export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.ASSETS,
   ENDPOINTS.POSITION_MODE,
+  ENDPOINTS.POSITION_LEVERAGE,
   ENDPOINTS.OPEN_POSITIONS,
   ENDPOINTS.OPEN_ORDERS,
 ];

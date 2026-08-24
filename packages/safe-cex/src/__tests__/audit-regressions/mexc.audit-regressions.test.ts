@@ -339,6 +339,44 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
+  it('uses private leverage max view to avoid overstating account-specific caps', async () => {
+    const exchange = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        code: 0,
+        data: [
+          {
+            symbol: 'BTC_USDT',
+            positionType: 1,
+            openType: 2,
+            leverage: 20,
+            maxLeverageView: 50,
+          },
+          {
+            symbol: 'BTC_USDT',
+            positionType: 2,
+            openType: 2,
+            leverage: 20,
+            maxLeverageView: 50,
+          },
+        ],
+      },
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
+      buyLeverage: 20,
+      sellLeverage: 20,
+      marginType: MarginType.Cross,
+    });
+    expect(exchange.store.marketsBySymbol.BTCUSDT.limits.leverage.max).toBe(50);
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.POSITION_LEVERAGE, {
+      params: { symbol: 'BTC_USDT' },
+    });
+  });
+
   it('keeps flat-position metadata in sync after position mode changes', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });

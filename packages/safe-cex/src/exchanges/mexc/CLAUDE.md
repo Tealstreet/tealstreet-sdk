@@ -64,6 +64,7 @@ Hosted mode must use the remote signer for this login signature. The secret is i
 - Cancel standalone TP/SL through `POST /api/v1/private/planorder/cancel`; regular order cancellation does not apply to these plan-order ids.
 - Margin mode changes use `POST /api/v1/private/position/change_leverage` with the current leverage plus `openType`; MEXC has no `change_margin_type` endpoint.
 - Position mode is account-level. After a successful mode change, update cached per-symbol metadata so flat fake positions do not revert the UI to the previous mode.
+- Contract detail can advertise a high top-level `maxLeverage` (for example BTC_USDT 500x) while the authenticated account/symbol cap is lower. Prefer `GET /api/v1/private/position/leverage` `maxLeverageView` for slider/display caps when credentials are available.
 - Trailing stops and opening trigger orders are intentionally not advertised or implemented in the MVP.
 
 ## Current Validation Status

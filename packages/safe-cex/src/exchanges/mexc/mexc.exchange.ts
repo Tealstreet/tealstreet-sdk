@@ -611,7 +611,64 @@ export class MexcExchange extends BaseExchange {
   };
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+    const market = this.store.marketsBySymbol[symbol];
     const config = this.symbolSettings.get(symbol) || this.deriveSymbolConfig(symbol);
+
+    try {
+      if (market && !this.isPublicDataOnly) {
+        const { data } = await this.xhr.get(ENDPOINTS.POSITION_LEVERAGE, {
+          params: { symbol: market.id },
+        });
+        const rows = extractRows<Record<string, any>>(data);
+        const longRow = rows.find((row) => toNumber(row.positionType, Number.NaN) === 1);
+        const shortRow = rows.find((row) => toNumber(row.positionType, Number.NaN) === 2);
+        const buyLeverage = toNumber(longRow?.leverage, config.leverage);
+        const sellLeverage = toNumber(shortRow?.leverage, config.leverage);
+        const maxLeverageCandidates = rows
+          .map((row) => toNumber(row.maxLeverageView ?? row.maxLeverage, Number.NaN))
+          .filter(Number.isFinite);
+        const maxLeverage = maxLeverageCandidates.length ? Math.min(...maxLeverageCandidates) : undefined;
+        const marginType = normalizeMarginType(longRow?.openType ?? shortRow?.openType ?? REVERSE_MARGIN_TYPE[config.marginType]);
+        const nextConfig = {
+          ...config,
+          leverage: Math.min(buyLeverage, sellLeverage),
+          marginType,
+        };
+
+        if (maxLeverage && maxLeverage > 0 && maxLeverage !== market.limits.leverage.max) {
+          this.store.updateMarket(
+            { id: market.id },
+            {
+              limits: {
+                ...market.limits,
+                leverage: {
+                  ...market.limits.leverage,
+                  max: maxLeverage,
+                },
+              },
+            },
+          );
+        }
+
+        this.symbolSettings.set(symbol, nextConfig);
+        const fetchedLeverage = {
+          buyLeverage,
+          sellLeverage,
+          marginType,
+          positionMode: config.positionMode,
+        };
+        this.store.update({
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: fetchedLeverage,
+          },
+        });
+        return fetchedLeverage;
+      }
+    } catch (err: any) {
+      this.log(`Failed to fetch MEXC leverage cap for ${symbol}: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+    }
+
     const fetchedLeverage = {
       buyLeverage: config.leverage,
       sellLeverage: config.leverage,
