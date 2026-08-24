@@ -1777,7 +1777,7 @@ export class BlofinExchange extends BaseExchange {
     }, []);
   };
 
-  changePositionMode = async (hedged: boolean, symbol?: string) => {
+  changePositionMode = async (hedged: boolean, _symbol?: string) => {
     const targetMode = hedged ? 'long_short_mode' : 'net_mode';
     this.log(`Attempting to change position mode to ${targetMode}`, LogSeverity.Info);
     this.log(
@@ -1805,16 +1805,9 @@ export class BlofinExchange extends BaseExchange {
       throw new Error(`${data.msg} (BloFin error code: ${data.code})`);
     }
 
-    this.log(`Position mode change successful, refetching data`, LogSeverity.Info);
-
-    await this.getOrFetchPositionMode(undefined, true);
-    const positions = await this.fetchPositions();
-    this.store.update({ positions });
-
-    if (symbol) {
-      const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
-    }
+    const confirmedMode = data.data?.positionMode === 'net_mode' ? PositionMode.OneWay : PositionMode.Hedged;
+    this.applyConfirmedPositionMode(confirmedMode);
+    this.log(`Position mode change successful: ${data.data?.positionMode ?? targetMode}`, LogSeverity.Info);
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
@@ -1859,10 +1852,34 @@ export class BlofinExchange extends BaseExchange {
     ...args: Parameters<this[M]>
   ) => {
     if (method === 'changePositionMode') {
-      this._accountPositionMode = args[0] ? PositionMode.Hedged : PositionMode.OneWay;
+      const confirmedMode =
+        typeof result === 'object' &&
+        result !== null &&
+        'positionMode' in result &&
+        (result as { positionMode?: PositionMode }).positionMode
+          ? (result as { positionMode: PositionMode }).positionMode
+          : args[0]
+            ? PositionMode.Hedged
+            : PositionMode.OneWay;
+      this.applyConfirmedPositionMode(confirmedMode);
     } else if (method === 'changeMarginType') {
       this._accountMarginType = args[0] ? MarginType.Isolated : MarginType.Cross;
     }
+  };
+
+  private applyConfirmedPositionMode = (positionMode: PositionMode) => {
+    this._accountPositionMode = positionMode;
+
+    const fetchedLeverageEntries = Object.entries(this.store.fetchedLeverage);
+    if (!fetchedLeverageEntries.length) {
+      return;
+    }
+
+    this.store.update({
+      fetchedLeverage: Object.fromEntries(
+        fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
+      ),
+    });
   };
 
   private parsePositivePrice = (value: unknown) => {

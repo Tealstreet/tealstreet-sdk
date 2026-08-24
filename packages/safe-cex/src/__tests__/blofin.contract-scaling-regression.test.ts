@@ -307,6 +307,45 @@ describe('Blofin contract scaling regression', () => {
     });
   });
 
+  it('commits successful position mode changes without waiting for slow refetches', async () => {
+    const { exchange, store } = makeExchange();
+    store.update({
+      fetchedLeverage: {
+        ARBUSDT: {
+          buyLeverage: 75,
+          sellLeverage: 75,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        },
+      },
+    });
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        code: '0',
+        msg: 'success',
+        data: { positionMode: 'long_short_mode' },
+      },
+    });
+    const fetchPositions = vi.spyOn(exchange, 'fetchPositions');
+    const getOrFetchPositionMode = vi.spyOn(exchange, 'getOrFetchPositionMode');
+    exchange.xhr = { post } as any;
+
+    await exchange.changePositionMode(true, 'ARBUSDT');
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.SET_POSITION_MODE, {
+      positionMode: 'long_short_mode',
+    });
+    expect(getOrFetchPositionMode).not.toHaveBeenCalled();
+    expect(fetchPositions).not.toHaveBeenCalled();
+    expect((exchange as any)._accountPositionMode).toBe(PositionMode.Hedged);
+    expect(store.fetchedLeverage.ARBUSDT).toMatchObject({
+      buyLeverage: 75,
+      sellLeverage: 75,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.Hedged,
+    });
+  });
+
   it('includes attachAlgoOrders compatibility payload when TP/SL are attached to normal orders', async () => {
     const { exchange, store } = makeExchange();
     const markets = await (async () => {

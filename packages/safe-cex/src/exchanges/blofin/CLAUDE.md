@@ -580,6 +580,11 @@ Blofin does **not** use the HTTP-over-WebSocket adapter for REST requests. In pr
 - **Hedged (long_short_mode)**: Separate long/short positions. API value: `long_short_mode` / positionSide: `long` or `short`
 - Position mode is **global** (applies to all symbols)
 - Changed via `POST /api/v1/account/set-position-mode`
+- Treat a successful `set-position-mode` response (`code: "0"`) as the commit
+  point. Do not await follow-up position/mode refetches inside
+  `changePositionMode`; the browser worker call has a 5s timeout, and BloFin can
+  confirm the mode change while the extra refetches still make the UI toast
+  "failed" and leave optimistic local mode state behind.
 
 ### Margin Type
 
