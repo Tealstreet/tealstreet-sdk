@@ -64,10 +64,6 @@ const config = {
             to: '/docs/2.0.0/connect/bybitv5',
           },
           {
-            from: '/docs/connect/mexc',
-            to: '/docs/2.0.0/connect/mexc',
-          },
-          {
             from: '/docs/connect/api-encryption',
             to: '/docs/2.0.0/connect/api-encryption',
           },
