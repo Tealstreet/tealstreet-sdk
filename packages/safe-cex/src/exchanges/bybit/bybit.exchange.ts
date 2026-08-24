@@ -66,6 +66,7 @@ import { mapBybitHistoricalOrder } from './bybit.order-history';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
+import { BYBIT_BRAZIL_SITE_ID } from './bybit.site';
 import {
   BASE_URL,
   BASE_WS_URL,
@@ -391,9 +392,33 @@ export class BybitExchange extends BaseExchange {
    */
   private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
 
+  private shouldUseLocalRestOrderLifecycleFallback = () => {
+    return this.isDemo || this.options.bybitSiteId === BYBIT_BRAZIL_SITE_ID;
+  };
+
   /** First sighting via private WS or an explicit cancel — stop protecting the id. */
   markOrderSeen = (orderId: string) => {
     this.recentlyPlacedOrders.delete(orderId);
+  };
+
+  private recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
+    const qty = parseFloat(payload.qty as string) || opts.amount || 0;
+    const price = parseFloat((payload.price ?? payload.triggerPrice) as string) || opts.price || opts.triggerPrice || 0;
+
+    this.recordRecentlyPlacedOrder({
+      id: orderId,
+      status: OrderStatus.Open,
+      symbol: opts.symbol,
+      type: opts.type,
+      side: opts.side,
+      price,
+      amount: qty,
+      filled: 0,
+      remaining: qty,
+      reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
+      timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+    });
   };
 
   private recordRecentlyPlacedOrder = (order: Order) => {
@@ -406,11 +431,10 @@ export class BybitExchange extends BaseExchange {
     }
 
     this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
-    // Demo's private WS drops order events, so without this the row may never
-    // reach the store at all: the UI shows nothing and the chaser supervisor
-    // idles next to an unmanaged resting order (a second click would then place
-    // a DUPLICATE). Live bybit keeps its WS-driven flow untouched.
-    if (this.isDemo) {
+    // Demo drops private order events. Bybit Brazil accounts can have the same
+    // effective symptom in browsers until a header-capable WS route is available:
+    // REST writes succeed, but direct browser WS cannot send x-site-id.
+    if (this.shouldUseLocalRestOrderLifecycleFallback()) {
       this.store.addOrUpdateOrders([order]);
     }
   };
@@ -449,9 +473,24 @@ export class BybitExchange extends BaseExchange {
       }
     }
 
-    if (this.isDemo) {
+    if (this.shouldUseLocalRestOrderLifecycleFallback()) {
       this.store.removeOrders(orders.map(({ id }) => ({ id })));
     }
+  };
+
+  private applyLocalOrderUpdateAfterRestWrite = (order: Order, update: Partial<Order>) => {
+    if (!this.shouldUseLocalRestOrderLifecycleFallback()) return;
+
+    const nextOrder: Order = {
+      ...order,
+      ...update,
+      ...(typeof update.amount === 'number'
+        ? { remaining: Math.max(0, update.amount - (order.filled || 0)) }
+        : {}),
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+    };
+
+    this.store.addOrUpdateOrders([nextOrder]);
   };
 
   /**
@@ -2240,25 +2279,10 @@ export class BybitExchange extends BaseExchange {
       throw new Error(errMsg);
     }
 
-    const placedAt = virtualClock.getCurrentTimeMs();
     return fullfilled.map((resp) => {
       const orderId = resp.data.result.orderId;
       if (orderId) {
-        const qty = parseFloat(resp.payload.qty as string) || 0;
-        this.recordRecentlyPlacedOrder({
-          id: orderId,
-          status: OrderStatus.Open,
-          symbol: opts.symbol,
-          type: opts.type,
-          side: opts.side,
-          price: price ?? triggerPrice ?? 0,
-          amount: qty,
-          filled: 0,
-          remaining: qty,
-          reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
-          timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
-          lastUpdate: placedAt,
-        });
+        this.recordRecentlyPlacedOrderFromOpts(orderId, opts, resp.payload);
       }
       return orderId;
     });
@@ -2457,10 +2481,17 @@ export class BybitExchange extends BaseExchange {
 
   private processBatch = async (category: string, orders: PlaceOrderOpts[]): Promise<string[]> => {
     // Convert orders to batch request format
-    const batchRequests = await Promise.all(orders.map(async (order) => await this.formatOrderForBatch(order)));
+    const batchRequests = await Promise.all(
+      orders.map(async (order) => ({
+        order,
+        request: await this.formatOrderForBatch(order),
+      })),
+    );
 
     // Filter out any null requests (orders that couldn't be formatted)
-    const validRequests = batchRequests.filter((req): req is Record<string, any> => req !== null);
+    const validRequests = batchRequests.filter(
+      (entry): entry is { order: PlaceOrderOpts; request: Record<string, any> } => entry.request !== null,
+    );
 
     if (validRequests.length === 0) {
       return [];
@@ -2469,7 +2500,7 @@ export class BybitExchange extends BaseExchange {
     const payload = {
       category,
       // Keep TP/SL on every request so scaled batches can attach one TP/SL pair per order.
-      request: validRequests,
+      request: validRequests.map(({ request }) => request),
     };
 
     const { data } = await this.xhr.post(ENDPOINTS.CREATE_BATCH_ORDER, payload);
@@ -2492,9 +2523,13 @@ export class BybitExchange extends BaseExchange {
     }
 
     if (data.result?.list) {
-      data.result.list.forEach((result: any) => {
+      data.result.list.forEach((result: any, index: number) => {
+        const request = validRequests[index];
         if (result.orderId) {
           orderIds.push(result.orderId);
+          if (request) {
+            this.recordRecentlyPlacedOrderFromOpts(result.orderId, request.order, request.request);
+          }
         }
       });
     }
@@ -2591,7 +2626,9 @@ export class BybitExchange extends BaseExchange {
 
     if (order.type === OrderType.TrailingStopLoss) {
       await this.cancelOrders([order]);
-      return this.placeTrailingStopLoss({ ...order, ...update });
+      const orderIds = await this.placeTrailingStopLoss({ ...order, ...update });
+      this.applyLocalOrderUpdateAfterRestWrite(order, update);
+      return orderIds;
     }
 
     // Cancel+replace for non-virtual, position-bound TP/SL (created via SET_TRADING_STOP).
@@ -2616,7 +2653,9 @@ export class BybitExchange extends BaseExchange {
               ? OrderType.TakeProfit
               : OrderType.StopLoss;
         await this.cancelOrders([order]);
-        return this.placeStopLossOrTakeProfit({ ...order, ...update, type: projectedType });
+        const orderIds = await this.placeStopLossOrTakeProfit({ ...order, ...update, type: projectedType });
+        this.applyLocalOrderUpdateAfterRestWrite(order, { ...update, type: projectedType });
+        return orderIds;
       }
     }
 
@@ -2648,6 +2687,7 @@ export class BybitExchange extends BaseExchange {
 
           if (data.retMsg === 'OK') {
             updatedOrderIds.push(data.result.orderId);
+            this.applyLocalOrderUpdateAfterRestWrite(order, update);
           } else if (data.retMsg === 'order not modified') {
             // do nothing, it's ok
           } else {
@@ -2692,6 +2732,7 @@ export class BybitExchange extends BaseExchange {
 
       if (data.retMsg === 'OK') {
         updatedOrderIds.push(data.result.orderId);
+        this.applyLocalOrderUpdateAfterRestWrite(order, update);
       } else if (data.retMsg === 'order not modified') {
         // do nothing, it's ok
       } else {
@@ -2737,6 +2778,8 @@ export class BybitExchange extends BaseExchange {
         // do nothing, it's ok
       } else if (data.retMsg !== 'OK') {
         this.emitAndLogError(data.retMsg);
+      } else {
+        this.applyLocalOrderUpdateAfterRestWrite(order, update);
       }
     }
 

@@ -40,9 +40,9 @@ const makeOrder = (id: string, overrides: Partial<Order> = {}): Order =>
     ...overrides,
   }) as Order;
 
-const makeExchange = (demo = false) => {
+const makeExchange = (demo = false, optionOverrides: Partial<ExchangeOptions> = {}) => {
   const store = new DefaultStore();
-  const options = { key: 'k', secret: 's' } as ExchangeOptions;
+  const options = { key: 'k', secret: 's', ...optionOverrides } as ExchangeOptions;
   const exchange = demo
     ? new BybitDemoExchange('bybitdemo' as any, options, store)
     : new BybitExchange('bybit' as any, options, store);
@@ -112,6 +112,56 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
   });
 
+  it('does not locally inject normal live Bybit orders while private WS owns the row', () => {
+    const { exchange, store } = makeExchange();
+
+    exchange.recordRecentlyPlacedOrder(makeOrder('live-1'));
+
+    expect(store.orders).toEqual([]);
+    expect(exchange.preserveRecentlyPlacedOrders([]).map((order: Order) => order.id)).toEqual(['live-1']);
+  });
+
+  it('locally injects Bybit Brazil resting orders while direct browser WS may be degraded', () => {
+    const { exchange, store } = makeExchange(false, { bybitSiteId: 'BRA_BTL' });
+
+    exchange.recordRecentlyPlacedOrder(makeOrder('brazil-1'));
+
+    expect(store.orders.map((order) => order.id)).toEqual(['brazil-1']);
+  });
+
+  it('records Bybit Brazil batch-created resting orders for local display', async () => {
+    const { exchange, store } = makeExchange(false, { bybitSiteId: 'BRA_BTL' });
+    exchange.formatOrderForBatch = async (order: Order) => ({
+      symbol: order.symbol,
+      qty: '2',
+      price: '100',
+    });
+    exchange.xhr = {
+      post: async () => ({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: { list: [{ orderId: 'batch-1' }] },
+          retExtInfo: { list: [] },
+        },
+      }),
+    };
+
+    await expect(
+      exchange.processBatch('linear', [
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 2,
+          price: 100,
+        },
+      ]),
+    ).resolves.toEqual(['batch-1']);
+
+    expect(store.orders).toMatchObject([{ id: 'batch-1', amount: 2, price: 100 }]);
+  });
+
   it('cancelOrders counts as a sighting so a cancelled order cannot resurrect', async () => {
     const { exchange } = makeExchange();
     const placed = makeOrder('new-1');
@@ -124,6 +174,32 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     await exchange.cancelOrders([placed]);
 
     expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
+  });
+
+  it('locally retires Bybit Brazil rows after a successful cancel', async () => {
+    const { exchange, store } = makeExchange(false, { bybitSiteId: 'BRA_BTL' });
+    const placed = makeOrder('brazil-1');
+    store.addOrUpdateOrders([placed]);
+    exchange.unlimitedXHR = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
+    };
+
+    await exchange.cancelOrders([placed]);
+
+    expect(store.orders).toEqual([]);
+  });
+
+  it('locally updates Bybit Brazil rows after a successful REST amend', async () => {
+    const { exchange, store } = makeExchange(false, { bybitSiteId: 'BRA_BTL' });
+    const placed = makeOrder('brazil-1', { price: 100 });
+    store.addOrUpdateOrders([placed]);
+    exchange.xhr = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'brazil-1' } } }),
+    };
+
+    await expect(exchange.updateOrder({ order: placed, update: { price: 101 } })).resolves.toEqual(['brazil-1']);
+
+    expect(store.orders).toMatchObject([{ id: 'brazil-1', price: 101 }]);
   });
 
   // The chaser cancels at the touch, so an order can fill during the cancel

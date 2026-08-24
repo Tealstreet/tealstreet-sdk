@@ -98,6 +98,7 @@ Rules:
 - Explicitly drop the field for `bybitdemo`; demo uses `api-demo.bybit.com` credentials and has no Brazil KYC/site concept.
 - REST requests include the header on signed and unsigned routes. Public KLINE strips auth but preserves `x-site-id`.
 - WS classes pass the header option to `createWebsocket()` and resolve the routing table before falling back to direct Bybit URLs. Browser-native direct WebSockets cannot set custom upgrade headers; if Bybit enforces the header there, a CTO-confirmed Tealstreet/tradetunnel WS route must be added to the routing table instead of inventing an unbacked host here.
+- Until that header-capable WS route exists, `bybitSiteId: 'BRA_BTL'` uses the same local REST order-lifecycle fallback as demo for resting orders: REST create/amend/cancel successes locally show, update, and retire chart rows while snapshots/WS catch up. Keep this scoped to Brazil/demo; normal live Bybit still lets private WS own order rows.
 
 Beta validation checklist:
 
