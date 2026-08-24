@@ -582,7 +582,14 @@ export class BlofinExchange extends BaseExchange {
         return null;
       }
 
-      const leverageObj: FetchedLeverage = { buyLeverage, sellLeverage };
+      const leverageObj: FetchedLeverage = {
+        buyLeverage,
+        sellLeverage,
+        marginType: (longRow.marginMode || shortRow.marginMode || netRow?.marginMode) === 'isolated'
+          ? MarginType.Isolated
+          : MarginType.Cross,
+        positionMode: netRow ? PositionMode.OneWay : PositionMode.Hedged,
+      };
 
       this.store.update({
         fetchedLeverage: {
@@ -1494,7 +1501,7 @@ export class BlofinExchange extends BaseExchange {
     this.store.update({
       fetchedLeverage: {
         ...this.store.fetchedLeverage,
-        [symbol]: { buyLeverage: leverage, sellLeverage: leverage },
+        [symbol]: { buyLeverage: leverage, sellLeverage: leverage, marginType, positionMode },
       },
     });
   };

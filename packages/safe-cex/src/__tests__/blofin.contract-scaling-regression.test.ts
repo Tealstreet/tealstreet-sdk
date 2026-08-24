@@ -261,6 +261,52 @@ describe('Blofin contract scaling regression', () => {
     expect(payloads[0].size).toBe('0.2');
   });
 
+  it('stores fetched position mode metadata for flat-symbol margin controls', async () => {
+    const { exchange, store } = makeExchange();
+    const btcMarket = {
+      id: 'BTC-USDT',
+      symbol: 'BTCUSDT',
+      base: 'BTC',
+      quote: 'USDT',
+      active: true,
+      precision: { amount: 0.1, price: 0.1 },
+      limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
+      contractSize: 0.001,
+      info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
+    } as Market;
+    seedMarkets(store, [btcMarket]);
+    vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          code: '0',
+          msg: 'success',
+          data: [
+            {
+              instId: 'BTC-USDT',
+              marginMode: 'cross',
+              positionSide: 'net',
+              leverage: '12',
+            },
+          ],
+        },
+      }),
+    } as any;
+
+    const leverage = await exchange.fetchLeverageForSymbol('BTCUSDT');
+
+    expect(leverage).toMatchObject({
+      buyLeverage: 12,
+      sellLeverage: 12,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.OneWay,
+    });
+    expect(store.fetchedLeverage.BTCUSDT).toMatchObject({
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.OneWay,
+    });
+  });
+
   it('includes attachAlgoOrders compatibility payload when TP/SL are attached to normal orders', async () => {
     const { exchange, store } = makeExchange();
     const markets = await (async () => {

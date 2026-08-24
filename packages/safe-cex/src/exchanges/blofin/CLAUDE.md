@@ -609,6 +609,10 @@ Response shape handling:
 - **Net mode**: response contains a single row with `positionSide: 'net'`. Both `buyLeverage` and `sellLeverage` are derived from that row.
 - **Hedged isolated**: response contains separate rows with `positionSide: 'long'` and `positionSide: 'short'`. Each side maps to the corresponding `buyLeverage` / `sellLeverage`.
 - Falls back to `net` row (or first row) if a side row is missing, to avoid leaving either side at `0`.
+- The returned `FetchedLeverage` also carries `marginType` and `positionMode`.
+  The margin panel uses that as the no-open-position fallback; without it,
+  flat BloFin symbols render a blank position-mode selector even though the
+  account-global mode was fetched during startup.
 - Returns `null` and surfaces the error message via `emitAndLogError` when `data.code !== '0'`.
 
 This is the React layer's no-position-on-symbol fallback — without it, `getCurrentPositionSizeAndLeverage` would land on `1x` and the place-order % slider would jitter when switching to a symbol the user doesn't currently hold.
