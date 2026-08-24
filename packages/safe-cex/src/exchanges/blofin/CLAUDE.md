@@ -356,16 +356,30 @@ Standalone TP/SL orders use `/api/v1/trade/order-tpsl` and must send an explicit
 leg in hedge mode. Full-position TP/SL uses `size: "-1"` and
 `reduceOnly: "true"`; do not reintroduce the undocumented `closeFraction` field.
 
-BloFin's product UI now exposes a **Multi-Trade / Multi-Position** mode where
-same-direction positions can be managed separately. The public futures API docs
-still expose only `positionSide` on `/trade/order-tpsl`; Tealstreet's BloFin
-adapter keys live positions by `symbol + side + positionMode`, so it cannot
-represent or target multiple BloFin `positionId`s for the same symbol and side.
-A live experiment against `/trade/order-tpsl` still returned `102143` after
-including the visible position row's raw `positionId`, so do not retry with an
-undocumented `positionId` field. Treat `102143` as an unsupported account mode
-and tell the user to disable Multi-Position mode on BloFin before trading from
-Tealstreet.
+BloFin's product UI now exposes a **Multi-Trade / Multi-Position** mode. Treat
+it as a hedged-mode-only extension: one-way/net mode is not the shape at issue;
+the risk appears when hedge mode can hold multiple same-direction positions for
+the same instrument. This is a third-rail account shape for Tealstreet today.
+The public futures API docs still expose only `positionSide` on
+`/trade/order-tpsl`; Tealstreet's BloFin adapter keys live positions by
+`symbol + side + positionMode`, so it cannot represent or target multiple
+BloFin `positionId`s for the same symbol and side.
+
+Live testing showed support is spotty enough to wall off:
+
+- `/trade/order-tpsl` returned `102143` even after including the visible
+  position row's raw `positionId`, so do not retry with an undocumented
+  `positionId` field.
+- Reduce-only market close can acknowledge the order while the Multi-Position
+  row remains open, so close-position flows are not reliable either.
+
+A future implementation could try to reverse-engineer BloFin's web client or
+private API shape, but that would be fragile and would still require a broader
+position-store/UI rework to preserve venue-native position identity, select
+between same-side rows, and thread that identity through TP/SL, reduce-only, and
+close flows. Current recommendation: keep Multi-Position mode walled off, treat
+`102143` as an unsupported account mode, and tell the user to disable
+Multi-Position mode on BloFin before trading from Tealstreet.
 
 ## Symbol Format
 
