@@ -5,6 +5,7 @@ import createHash from 'create-hash';
 import chunk from 'lodash/chunk';
 import uniqBy from 'lodash/uniqBy';
 
+import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
   Balance,
   Candle,
@@ -99,6 +100,8 @@ const MEXC_TRIGGER_LTE = 2;
 const MEXC_EXECUTE_CYCLE_SEVEN_DAYS = 2;
 const MEXC_TRIGGER_TREND_LATEST_PRICE = 1;
 const MEXC_PLAN_ORDER_LOOKBACK_MS = 89 * 24 * 60 * 60 * 1000;
+const MEXC_REGULAR_ORDER_SUBMIT_GAP_MS = 450;
+const MEXC_REGULAR_ORDER_THROTTLE_COOLDOWN_MS = 1_500;
 
 export class MexcExchange extends BaseExchange {
   xhr: Axios;
@@ -110,6 +113,9 @@ export class MexcExchange extends BaseExchange {
 
   private accountPositionMode: PositionMode = PositionMode.Hedged;
   private symbolSettings = new Map<string, MexcSymbolConfig>();
+  private regularOrderSubmitQueue: Promise<void> = Promise.resolve();
+  private lastRegularOrderSubmitAt = 0;
+  private regularOrderSubmitCooldownUntil = 0;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -311,27 +317,11 @@ export class MexcExchange extends BaseExchange {
   fetchOrders = async (symbols?: string[]): Promise<Order[]> => {
     if (this.isPublicDataOnly) return [];
 
+    const orders = await this.fetchRegularOrders(symbols);
     const requestedSymbols = symbols?.length ? symbols : [undefined];
-    const orders: Order[] = [];
 
     for (const symbol of requestedSymbols) {
       const venueSymbol = symbol ? toMexcSymbol(symbol) : undefined;
-
-      try {
-        const { data } = await this.xhr.get(this.orderListEndpoint(venueSymbol), {
-          params: {
-            page_num: 1,
-            page_size: 100,
-          },
-        });
-        orders.push(
-          ...extractRows<Record<string, any>>(data, ['orders', 'items'])
-            .map((row) => normalizeOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
-            .filter((order): order is Order => !!order),
-        );
-      } catch (err: any) {
-        this.log(`Failed to fetch MEXC open orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
-      }
 
       try {
         const now = virtualClock.getCurrentTimeMs();
@@ -377,6 +367,57 @@ export class MexcExchange extends BaseExchange {
     }
 
     return uniqBy(orders, 'id');
+  };
+
+  fetchRegularOrders = async (symbols?: string[]): Promise<Order[]> => {
+    if (this.isPublicDataOnly) return [];
+
+    const requestedSymbols = symbols?.length ? symbols : [undefined];
+    const orders: Order[] = [];
+
+    for (const symbol of requestedSymbols) {
+      const venueSymbol = symbol ? toMexcSymbol(symbol) : undefined;
+
+      try {
+        const { data } = await this.xhr.get(this.orderListEndpoint(venueSymbol), {
+          params: {
+            page_num: 1,
+            page_size: 100,
+          },
+        });
+        orders.push(
+          ...extractRows<Record<string, any>>(data, ['orders', 'items'])
+            .map((row) => normalizeOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
+            .filter((order): order is Order => !!order),
+        );
+      } catch (err: any) {
+        this.log(`Failed to fetch MEXC open orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+      }
+    }
+
+    return uniqBy(orders, 'id');
+  };
+
+  fetchAndSetRegularOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const regularOrders = await this.fetchRegularOrders(symbols);
+
+    if (symbols?.length) {
+      for (const symbol of symbols) {
+        const symbolRegularOrders = regularOrders.filter((order) => order.symbol === symbol);
+        const symbolStopLikeOrders = this.store.orders.filter(
+          (order) => order.symbol === symbol && this.isStopLikeOrder(order),
+        );
+        this.store.setOrdersForSymbol(symbol, uniqBy([...symbolStopLikeOrders, ...symbolRegularOrders], 'id'));
+      }
+    } else {
+      const stopLikeOrders = this.store.orders.filter((order) => this.isStopLikeOrder(order));
+      this.store.update({
+        orders: uniqBy([...stopLikeOrders, ...regularOrders], 'id'),
+        loaded: { ...this.store.loaded, orders: true },
+      });
+    }
+
+    return regularOrders;
   };
 
   fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
@@ -483,7 +524,8 @@ export class MexcExchange extends BaseExchange {
     });
 
     try {
-      const { data } = await this.xhr.post(ENDPOINTS.ORDER_SUBMIT, payload);
+      const { data } = await this.enqueueRegularOrderSubmit(() => this.xhr.post(ENDPOINTS.ORDER_SUBMIT, payload));
+      this.assertRegularOrderSubmitSucceeded(data);
       const orderId = toIntegerString(extractData(data)?.orderId ?? extractData(data));
       if (!orderId) throw new Error('MEXC order placement returned no order id');
       if (opts.timeInForce === OrderTimeInForce.PostOnly) {
@@ -494,6 +536,57 @@ export class MexcExchange extends BaseExchange {
       const message = err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC order placement failed';
       this.emitAndLogError(message);
       throw err;
+    }
+  };
+
+  private assertRegularOrderSubmitSucceeded = (payload: any): void => {
+    if (payload?.success !== false) return;
+
+    const error = new Error(payload.message || payload.msg || `MEXC order placement failed with code ${payload.code}`);
+    (error as any).response = { data: payload };
+    this.noteRegularOrderSubmitError(error);
+    throw error;
+  };
+
+  private enqueueRegularOrderSubmit = async <T>(task: () => Promise<T>): Promise<T> => {
+    const run = this.regularOrderSubmitQueue.catch(() => undefined).then(async () => {
+      await this.waitForRegularOrderSubmitSlot();
+      try {
+        return await task();
+      } catch (err: any) {
+        this.noteRegularOrderSubmitError(err);
+        throw err;
+      }
+    });
+
+    this.regularOrderSubmitQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
+  private waitForRegularOrderSubmitSlot = async (): Promise<void> => {
+    const now = virtualClock.getCurrentTimeMs();
+    const earliestSubmitAt = Math.max(
+      this.lastRegularOrderSubmitAt + MEXC_REGULAR_ORDER_SUBMIT_GAP_MS,
+      this.regularOrderSubmitCooldownUntil,
+    );
+    const delay = earliestSubmitAt - now;
+    if (delay > 0) {
+      await sleep(delay);
+    }
+    this.lastRegularOrderSubmitAt = virtualClock.getCurrentTimeMs();
+  };
+
+  private noteRegularOrderSubmitError = (err: any): void => {
+    const code = toNumber(err?.response?.data?.code ?? err?.code, Number.NaN);
+    const message = String(err?.response?.data?.message ?? err?.response?.data?.msg ?? err?.message ?? '');
+    if (code === 510 || message.toLowerCase().includes('requests are too frequent')) {
+      this.regularOrderSubmitCooldownUntil = Math.max(
+        this.regularOrderSubmitCooldownUntil,
+        virtualClock.getCurrentTimeMs() + MEXC_REGULAR_ORDER_THROTTLE_COOLDOWN_MS,
+      );
     }
   };
 

@@ -574,6 +574,92 @@ describe('MEXC futures audit regressions', () => {
     );
   });
 
+  it('paces sequential regular order placement to avoid venue spam throttles', async () => {
+    vi.useFakeTimers();
+    try {
+      const exchange = createExchange();
+      const post = vi
+        .fn()
+        .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-1' } })
+        .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-2' } });
+      exchange.store.update({ markets: [market] });
+      exchange.xhr = { post } as any;
+
+      const result = exchange.placeOrders([
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 10,
+          price: 50000,
+        },
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 10,
+          price: 49900,
+        },
+      ]);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(post).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(449);
+      expect(post).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toEqual(['order-1', 'order-2']);
+      expect(post).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes regular orders without fetching plan or stop orders after private WS updates', async () => {
+    const exchange = createExchange();
+    const planOrder = {
+      id: 'plan-1',
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      status: OrderStatus.Open,
+      amount: 0.001,
+      remaining: 0.001,
+      price: 49000,
+      info: { __mexcPlanOrder: true },
+    } as Order;
+    const get = vi.fn(async (url: string) => {
+      if (url !== ENDPOINTS.OPEN_ORDERS) {
+        throw new Error(`unexpected URL ${url}`);
+      }
+      return {
+        data: {
+          success: true,
+          code: 0,
+          data: [
+            {
+              orderId: 'regular-1',
+              symbol: 'BTC_USDT',
+              side: 1,
+              orderType: 1,
+              state: 2,
+              price: 50000,
+              vol: 10,
+              dealVol: 0,
+              createTime: 1787670700000,
+            },
+          ],
+        },
+      };
+    });
+    exchange.store.update({ markets: [market], orders: [planOrder] });
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.fetchAndSetRegularOrders()).resolves.toMatchObject([{ id: 'regular-1' }]);
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(exchange.store.orders.map((order) => order.id)).toEqual(['plan-1', 'regular-1']);
+  });
+
   it('reports already-placed IDs when sequential scaled placement halts mid-batch', async () => {
     const exchange = createExchange();
     const post = vi

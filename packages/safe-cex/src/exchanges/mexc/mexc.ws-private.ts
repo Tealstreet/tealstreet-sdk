@@ -261,8 +261,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     clearTimeout(this.refreshOrdersTimeout);
     this.refreshOrdersTimeout = setTimeout(async () => {
       try {
-        const orders = await this.parent.fetchOrders();
-        if (!this.isDisposed) this.store.update({ orders });
+        if (!this.isDisposed) await this.parent.fetchAndSetRegularOrders();
       } catch (_err) {}
     }, 1000);
   };
