@@ -22,6 +22,7 @@ import {
   OrderBook,
   OrderSide,
   OrderStatus,
+  OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
@@ -64,6 +65,7 @@ import {
   normalizePlanOrder,
   normalizePosition,
   normalizePositionMode,
+  normalizeStopOrder,
   normalizeTimestampToSeconds,
   normalizeTicker,
   toIntegerString,
@@ -351,6 +353,27 @@ export class MexcExchange extends BaseExchange {
       } catch (err: any) {
         this.log(`Failed to fetch MEXC plan orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
       }
+
+      try {
+        const now = virtualClock.getCurrentTimeMs();
+        const { data } = await this.xhr.get(ENDPOINTS.STOP_ORDER_LIST, {
+          params: omitUndefined({
+            symbol: venueSymbol,
+            is_finished: 0,
+            start_time: now - MEXC_PLAN_ORDER_LOOKBACK_MS,
+            end_time: now,
+            page_num: 1,
+            page_size: 100,
+          }),
+        });
+        orders.push(
+          ...extractRows<Record<string, any>>(data, ['orders', 'items'])
+            .map((row) => normalizeStopOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
+            .filter((order): order is Order => !!order),
+        );
+      } catch (err: any) {
+        this.log(`Failed to fetch MEXC position TP/SL orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+      }
     }
 
     return uniqBy(orders, 'id');
@@ -489,6 +512,10 @@ export class MexcExchange extends BaseExchange {
       throw new Error(message);
     }
 
+    if (opts.amount === 0) {
+      return await this.placePositionStopOrder(opts, market, triggerPrice);
+    }
+
     const nativeVolumeStep = toNumber(market.info?.volUnit, 1);
     const vol = toNumber(adjust(opts.amount, nativeVolumeStep), 0);
     if (!Number.isFinite(vol) || vol <= 0) {
@@ -515,7 +542,7 @@ export class MexcExchange extends BaseExchange {
       triggerType: this.planOrderTriggerType(opts),
       executeCycle: MEXC_EXECUTE_CYCLE_SEVEN_DAYS,
       orderType: REVERSE_ORDER_TYPE[OrderType.Market],
-      trend: MEXC_TRIGGER_TREND_LATEST_PRICE,
+      trend: this.stopOrderTrend(opts),
       positionMode: REVERSE_POSITION_MODE[config.positionMode],
       reduceOnly: true,
     });
@@ -532,12 +559,95 @@ export class MexcExchange extends BaseExchange {
     }
   };
 
+  private placePositionStopOrder = async (opts: PlaceOrderOpts, market: Market, triggerPrice: number): Promise<string> => {
+    const targetSide = opts.side === OrderSide.Sell ? PositionSide.Long : PositionSide.Short;
+    let position = this.findOpenPosition(opts.symbol, targetSide, this.store.positions);
+    if (!position || !this.nativePositionId(position)) {
+      position = this.findOpenPosition(opts.symbol, targetSide, await this.fetchPositions([opts.symbol]));
+    }
+
+    if (!position || position.contracts <= 0) {
+      const message = `MEXC full-position ${opts.type} requires an open ${targetSide} position on ${opts.symbol}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    const positionId = this.nativePositionId(position);
+    if (!positionId) {
+      const message = `MEXC full-position ${opts.type} requires a native position id for ${opts.symbol}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    const nativeVolumeStep = toNumber(market.info?.volUnit, 1);
+    const nativeAmount = toNumber(
+      position.extra?.contractsNative ??
+        position.info?.holdVol ??
+        position.info?.positionVol ??
+        position.info?.vol ??
+        position.info?.size,
+      0,
+    );
+    const vol = toNumber(adjust(nativeAmount, nativeVolumeStep), 0);
+    if (!Number.isFinite(vol) || vol <= 0) {
+      const message = `MEXC full-position ${opts.type} requires a positive native position volume`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    const trend = this.stopOrderTrend(opts);
+    const adjustedTriggerPrice = `${adjust(triggerPrice, market.precision.price)}`;
+    const payload = omitUndefined({
+      positionId,
+      vol,
+      lossTrend: opts.type === OrderType.StopLoss ? trend : MEXC_TRIGGER_TREND_LATEST_PRICE,
+      profitTrend: opts.type === OrderType.TakeProfit ? trend : MEXC_TRIGGER_TREND_LATEST_PRICE,
+      stopLossPrice: opts.type === OrderType.StopLoss ? adjustedTriggerPrice : undefined,
+      takeProfitPrice: opts.type === OrderType.TakeProfit ? adjustedTriggerPrice : undefined,
+      profitLossVolType: 'SAME',
+      volType: 2,
+      takeProfitType: opts.type === OrderType.TakeProfit ? 0 : undefined,
+      stopLossType: opts.type === OrderType.StopLoss ? 0 : undefined,
+    });
+
+    try {
+      const { data } = await this.xhr.post(ENDPOINTS.STOP_ORDER_PLACE, payload);
+      const responseData = extractData(data);
+      const responseRow = Array.isArray(responseData) ? responseData[0] : responseData;
+      const scalarId =
+        typeof responseData === 'string' || typeof responseData === 'number' ? responseData : undefined;
+      const orderId = toIntegerString(responseRow?.id ?? responseRow?.orderId ?? scalarId);
+      if (!orderId) throw new Error('MEXC position TP/SL placement returned no order id');
+      return orderId;
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC position TP/SL placement failed';
+      this.emitAndLogError(message);
+      throw err;
+    }
+  };
+
+  private findOpenPosition = (symbol: string, side: PositionSide, positions: Position[]): Position | undefined =>
+    positions.find((position) => position.symbol === symbol && position.side === side && position.contracts > 0);
+
+  private nativePositionId = (position: Position): string => {
+    const info = position.info as Record<string, any> | undefined;
+    return toIntegerString(info?.positionId ?? info?.id);
+  };
+
   private planOrderTriggerType = (opts: PlaceOrderOpts): number => {
     const closesLong = opts.side === OrderSide.Sell;
     if (opts.type === OrderType.TakeProfit) {
       return closesLong ? MEXC_TRIGGER_GTE : MEXC_TRIGGER_LTE;
     }
     return closesLong ? MEXC_TRIGGER_LTE : MEXC_TRIGGER_GTE;
+  };
+
+  private stopOrderTrend = (opts: PlaceOrderOpts): number => {
+    const triggerType = opts.type === OrderType.TakeProfit ? opts.tpTriggerType : opts.slTriggerType;
+    if (triggerType === OrderStopTriggerType.MarkPrice) return 2;
+    if (triggerType === OrderStopTriggerType.IndexPrice) return 3;
+    return MEXC_TRIGGER_TREND_LATEST_PRICE;
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
@@ -577,8 +687,16 @@ export class MexcExchange extends BaseExchange {
   cancelOrders = async (orders: Order[]): Promise<void> => {
     if (!orders.length) return;
 
+    const stopOrders = orders.filter((order) => this.isStopOrder(order));
     const planOrders = orders.filter((order) => this.isPlanOrder(order));
-    const regularOrders = orders.filter((order) => !this.isPlanOrder(order));
+    const regularOrders = orders.filter((order) => !this.isStopLikeOrder(order));
+
+    for (const lot of chunk(stopOrders, 50)) {
+      await this.xhr.post(
+        ENDPOINTS.STOP_ORDER_CANCEL,
+        lot.map((order) => ({ stopPlanOrderId: order.id.split('__')[0] })),
+      );
+    }
 
     for (const lot of chunk(planOrders, 50)) {
       await this.xhr.post(
@@ -600,10 +718,19 @@ export class MexcExchange extends BaseExchange {
     );
   };
 
-  private isPlanOrder = (order: Order): boolean =>
+  private isStopLikeOrder = (order: Order): boolean =>
     order.type === OrderType.StopLoss ||
     order.type === OrderType.TakeProfit ||
-    Boolean((order.info as Record<string, any> | undefined)?.__mexcPlanOrder);
+    Boolean((order.info as Record<string, any> | undefined)?.__mexcPlanOrder) ||
+    Boolean((order.info as Record<string, any> | undefined)?.__mexcStopOrder);
+
+  private isStopOrder = (order: Order): boolean =>
+    Boolean((order.info as Record<string, any> | undefined)?.__mexcStopOrder) ||
+    ((order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) &&
+      order.amount === 0 &&
+      order.remaining === 0);
+
+  private isPlanOrder = (order: Order): boolean => this.isStopLikeOrder(order) && !this.isStopOrder(order);
 
   cancelSymbolOrders = async (symbol: string): Promise<void> => {
     const market = this.store.marketsBySymbol[symbol];

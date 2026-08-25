@@ -42,6 +42,9 @@ export const ENDPOINTS = {
   PLAN_ORDER_LIST: '/api/v1/private/planorder/list/orders',
   PLAN_ORDER_PLACE: '/api/v1/private/planorder/place/v2',
   PLAN_ORDER_CANCEL: '/api/v1/private/planorder/cancel',
+  STOP_ORDER_LIST: '/api/v1/private/stoporder/list/orders',
+  STOP_ORDER_PLACE: '/api/v1/private/stoporder/place',
+  STOP_ORDER_CANCEL: '/api/v1/private/stoporder/cancel',
 };
 
 export const PUBLIC_ENDPOINTS = [ENDPOINTS.CONTRACT_DETAIL, ENDPOINTS.TICKER, ENDPOINTS.DEPTH, ENDPOINTS.KLINE];
@@ -50,6 +53,8 @@ export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.ORDER_SUBMIT,
   ENDPOINTS.PLAN_ORDER_PLACE,
   ENDPOINTS.PLAN_ORDER_CANCEL,
+  ENDPOINTS.STOP_ORDER_PLACE,
+  ENDPOINTS.STOP_ORDER_CANCEL,
   ENDPOINTS.ORDER_CANCEL,
   ENDPOINTS.ORDER_CANCEL_ALL,
   ENDPOINTS.CHANGE_POSITION_MODE,

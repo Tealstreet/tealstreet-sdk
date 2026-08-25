@@ -647,6 +647,7 @@ const MexcMetadata: ExchangeMetadata = {
   },
   supportsTrailingStopLoss: false,
   supportsPartialStops: true,
+  supportsInfinityStops: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
   defaultSLTriggerType: OrderStopTriggerType.MarkPrice,

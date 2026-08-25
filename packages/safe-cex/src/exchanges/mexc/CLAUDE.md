@@ -59,7 +59,8 @@ Hosted mode must use the remote signer for this login signature. The secret is i
 - Position mode enum: `1` hedge, `2` one-way.
 - Margin/open type enum: `1` isolated, `2` cross.
 - Regular order updates use cancel/replace. Native amend is not wired until verified.
-- Standalone TP/SL uses `POST /api/v1/private/planorder/place/v2` as a reduce-only market plan order with latest-price trigger (`trend: 1`), seven-day execution cycle (`executeCycle: 2`), and explicit quantity. Trigger direction is inferred from order type plus closing side.
+- Standalone sized TP/SL uses `POST /api/v1/private/planorder/place/v2` as a reduce-only market plan order, seven-day execution cycle (`executeCycle: 2`), and explicit quantity. Trigger direction is inferred from order type plus closing side.
+- Full-position / infinity TP/SL uses the separate position TP/SL API: `POST /api/v1/private/stoporder/place` with the native `positionId`, current native position `vol`, and `volType: 2`. These rows are listed with `GET /api/v1/private/stoporder/list/orders?is_finished=0` and canceled through `POST /api/v1/private/stoporder/cancel`; do not send them to the standalone `planorder` cancel route.
 - Open TP/SL orders do not appear in `/api/v1/private/order/list/open_orders`. Fetch untriggered plan orders with `GET /api/v1/private/planorder/list/orders?states=1` and normalize them into regular Tealstreet order state so REST reconciliation does not erase optimistic chart lines after placement.
 - Cancel standalone TP/SL through `POST /api/v1/private/planorder/cancel`; regular order cancellation does not apply to these plan-order ids.
 - Margin mode changes use `POST /api/v1/private/position/change_leverage` with the current leverage plus `openType`; MEXC has no `change_margin_type` endpoint.

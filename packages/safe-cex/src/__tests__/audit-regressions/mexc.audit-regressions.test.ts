@@ -17,7 +17,17 @@ import {
   toMexcSymbol,
 } from '../../exchanges/mexc/mexc.utils';
 import { DefaultStore } from '../../store/store.base';
-import { MarginType, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
+import {
+  MarginType,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderStopTriggerType,
+  OrderTimeInForce,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
 
 const createExchange = () => new MexcExchange('mexc', { key: 'key', secret: 'secret' }, new DefaultStore());
 
@@ -43,6 +53,10 @@ const market = normalizeMarket({
 describe('MEXC futures audit regressions', () => {
   it('advertises partial TP/SL support for explicit-volume plan orders', () => {
     expect(getExchangeMetadata('mexc').supportsPartialStops).toBe(true);
+  });
+
+  it('advertises infinity TP/SL support through position stop orders', () => {
+    expect(getExchangeMetadata('mexc').supportsInfinityStops).toBe(true);
   });
 
   it('signs GET query strings and POST raw JSON bodies exactly', () => {
@@ -526,6 +540,59 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
+  it('places full-position TP/SL through the MEXC position stop endpoint', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: 'position-stop-1' } });
+    exchange.store.update({
+      markets: [market],
+      positions: [
+        {
+          id: 'BTCUSDT:long',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 50000,
+          notional: 1,
+          leverage: 20,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.Hedged,
+          unrealizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 0,
+          info: {
+            positionId: 'native-position-1',
+            holdVol: 10000,
+          },
+          extra: {
+            contractsNative: 10000,
+          },
+        },
+      ],
+    });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0,
+        price: 49000,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    ).resolves.toEqual(['position-stop-1']);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.STOP_ORDER_PLACE, {
+      positionId: 'native-position-1',
+      vol: 10000,
+      lossTrend: 2,
+      profitTrend: 1,
+      stopLossPrice: '49000',
+      profitLossVolType: 'SAME',
+      volType: 2,
+      stopLossType: 0,
+    });
+  });
+
   it('keeps open plan orders visible after regular open orders are empty', async () => {
     const exchange = createExchange();
     const get = vi.fn(async (url: string) => {
@@ -562,6 +629,9 @@ describe('MEXC futures audit regressions', () => {
           },
         };
       }
+      if (url === ENDPOINTS.STOP_ORDER_LIST) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
       throw new Error(`unexpected URL ${url}`);
     });
     exchange.store.update({ markets: [market] });
@@ -590,6 +660,65 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
+  it('keeps full-position TP/SL stop orders visible as infinity stops', async () => {
+    const exchange = createExchange();
+    const get = vi.fn(async (url: string) => {
+      if (url === ENDPOINTS.OPEN_ORDERS || url === ENDPOINTS.PLAN_ORDER_LIST) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
+      if (url === ENDPOINTS.STOP_ORDER_LIST) {
+        return {
+          data: {
+            success: true,
+            code: 0,
+            data: {
+              orders: [
+                {
+                  id: 'stop-position-1',
+                  symbol: 'BTC_USDT',
+                  positionId: 'native-position-1',
+                  positionType: 1,
+                  stopLossPrice: 49000,
+                  takeProfitPrice: 0,
+                  triggerSide: 2,
+                  state: 1,
+                  vol: 10000,
+                  volType: 2,
+                  updateTime: 1700000000000,
+                },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.fetchOrders()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'stop-position-1',
+        status: OrderStatus.Open,
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 49000,
+        amount: 0,
+        remaining: 0,
+        reduceOnly: true,
+        extra: { remainingNative: 0 },
+      }),
+    ]);
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.STOP_ORDER_LIST, {
+      params: expect.objectContaining({
+        is_finished: 0,
+        page_num: 1,
+        page_size: 100,
+      }),
+    });
+  });
+
   it('cancels stop orders through the plan-order cancel endpoint even before REST marks them', async () => {
     const exchange = createExchange();
     const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));
@@ -611,6 +740,27 @@ describe('MEXC futures audit regressions', () => {
     expect(post).toHaveBeenCalledWith(ENDPOINTS.PLAN_ORDER_CANCEL, [
       { symbol: 'BTC_USDT', orderId: '846983655908788224' },
     ]);
+  });
+
+  it('cancels full-position TP/SL through the stop-order cancel endpoint', async () => {
+    const exchange = createExchange();
+    const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));
+    exchange.xhr = { post } as any;
+
+    await exchange.cancelOrders([
+      {
+        id: 'stop-position-1',
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        status: OrderStatus.Open,
+        amount: 0,
+        remaining: 0,
+        price: 49000,
+      } as Order,
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.STOP_ORDER_CANCEL, [{ stopPlanOrderId: 'stop-position-1' }]);
   });
 
   it('cancels regular orders with the documented orderIds payload', async () => {

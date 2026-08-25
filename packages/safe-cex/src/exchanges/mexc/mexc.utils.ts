@@ -382,6 +382,29 @@ const normalizePlanOrderType = (raw: Record<string, any>, side: OrderSide): Orde
   return triggerType === 2 ? OrderType.TakeProfit : OrderType.StopLoss;
 };
 
+const normalizeStopOrderStatus = (raw: Record<string, any>): OrderStatus => {
+  switch (toNumber(raw.state ?? raw.status, Number.NaN)) {
+    case 1:
+      return OrderStatus.Open;
+    case 3:
+      return OrderStatus.Closed;
+    case 2:
+    case 4:
+    case 5:
+      return OrderStatus.Canceled;
+    default:
+      return OrderStatus.Open;
+  }
+};
+
+const normalizeStopOrderType = (raw: Record<string, any>): OrderType => {
+  const triggerSide = toNumber(raw.triggerSide, 0);
+  if (triggerSide === 1) return OrderType.TakeProfit;
+  if (triggerSide === 2) return OrderType.StopLoss;
+
+  return toNumber(raw.takeProfitPrice, 0) > 0 ? OrderType.TakeProfit : OrderType.StopLoss;
+};
+
 export const normalizePlanOrder = (raw: Record<string, any>, market?: Market): Order | null => {
   const id = toIntegerString(raw.id ?? raw.orderId);
   const symbol = fromMexcSymbol(raw.symbol ?? raw.contract);
@@ -411,6 +434,44 @@ export const normalizePlanOrder = (raw: Record<string, any>, market?: Market): O
     },
     extra: {
       remainingNative: toNumber(raw.vol ?? raw.quantity ?? raw.origQty),
+    },
+  }) as Order;
+};
+
+export const normalizeStopOrder = (raw: Record<string, any>, market?: Market): Order | null => {
+  const id = toIntegerString(raw.id ?? raw.stopPlanOrderId);
+  const symbol = fromMexcSymbol(raw.symbol ?? raw.contract);
+  const positionSide = POSITION_SIDE[toNumber(raw.positionType ?? raw.positionSide, Number.NaN)];
+  if (!id || !symbol || !positionSide) return null;
+
+  const type = normalizeStopOrderType(raw);
+  const fullPositionStop = toNumber(raw.volType, 1) === 2;
+  const nativeAmount = toNumber(raw.vol ?? raw.quantity ?? raw.origQty);
+  const amount = fullPositionStop ? 0 : nativeVolumeToAmount(nativeAmount, market);
+  const triggerPrice =
+    type === OrderType.TakeProfit
+      ? toNumber(raw.takeProfitPrice ?? raw.triggerPrice ?? raw.price, 0)
+      : toNumber(raw.stopLossPrice ?? raw.triggerPrice ?? raw.price, 0);
+
+  return omitUndefined({
+    id,
+    status: normalizeStopOrderStatus(raw),
+    symbol,
+    type,
+    side: positionSide === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
+    price: triggerPrice,
+    amount,
+    filled: 0,
+    remaining: amount,
+    reduceOnly: true,
+    timeInForce: OrderTimeInForce.GoodTillCancel,
+    lastUpdate: normalizeTimestampToMs(raw.updateTime ?? raw.createTime),
+    info: {
+      ...raw,
+      __mexcStopOrder: true,
+    },
+    extra: {
+      remainingNative: fullPositionStop ? 0 : nativeAmount,
     },
   }) as Order;
 };
