@@ -1357,6 +1357,7 @@ export class BitgetExchange extends BaseExchange {
     const endTime = opts.from
       ? Math.min(end.valueOf(), startTime + Math.min(BITGET_CANDLE_MAX_WINDOW_MS, intervalMs * limit))
       : end.valueOf();
+    const shouldSendStartTime = Boolean(opts.from) && startTime < endTime;
 
     const {
       data: { data },
@@ -1365,7 +1366,7 @@ export class BitgetExchange extends BaseExchange {
         symbol: opts.symbol,
         granularity: interval,
         endTime,
-        ...(opts.from && { startTime }),
+        ...(shouldSendStartTime && { startTime }),
         productType: this.apiProductType,
         limit,
       },

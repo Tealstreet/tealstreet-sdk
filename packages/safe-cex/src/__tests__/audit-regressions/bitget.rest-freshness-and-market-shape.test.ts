@@ -118,6 +118,24 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     });
   });
 
+  it('omits startTime for a single-candle request with equal from/to bounds', async () => {
+    const exchange = createExchange();
+    const at = 1_787_677_200_000;
+    (exchange.xhr.get as any).mockResolvedValue({ data: { data: [] } });
+
+    await exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '1h', from: at, to: at, limit: 1 });
+
+    expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.KLINE, {
+      params: {
+        symbol: 'BTCUSDT',
+        granularity: '1H',
+        endTime: at,
+        productType: 'usdt-futures',
+        limit: 1,
+      },
+    });
+  });
+
   it('keeps fresher WS positions when REST reconciliation returns an older row', async () => {
     const exchange = createExchange();
     const wsPosition = exchange.mapPosition(rawPosition({ total: '2', openPriceAvg: '51000', uTime: '2000' }));
