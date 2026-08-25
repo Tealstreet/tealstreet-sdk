@@ -607,4 +607,70 @@ describe('MEXC futures audit regressions', () => {
       { symbol: 'BTC_USDT', orderId: '846983655908788224' },
     ]);
   });
+
+  it('cancels regular orders with the documented orderIds payload', async () => {
+    const exchange = createExchange();
+    const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));
+    exchange.xhr = { post } as any;
+
+    await exchange.cancelOrders([
+      {
+        id: 'regular-1',
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        status: OrderStatus.Open,
+        amount: 1,
+        remaining: 1,
+        price: 74000,
+      } as Order,
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER_CANCEL, {
+      orderIds: ['regular-1'],
+    });
+  });
+
+  it('replaces normalized MEXC orders with native contract volume on price moves', async () => {
+    const exchange = createExchange();
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { success: true, code: 0 } })
+      .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'replacement-1' } });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'regular-1',
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          status: OrderStatus.Open,
+          amount: 0.8004,
+          filled: 0,
+          remaining: 0.8004,
+          price: 80000,
+          reduceOnly: false,
+          lastUpdate: 0,
+          extra: { remainingNative: 8004 },
+        },
+        update: { price: 80500 },
+      }),
+    ).resolves.toEqual(['replacement-1']);
+
+    expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.ORDER_CANCEL, {
+      orderIds: ['regular-1'],
+    });
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      ENDPOINTS.ORDER_SUBMIT,
+      expect.objectContaining({
+        symbol: 'BTC_USDT',
+        price: '80500',
+        vol: 8004,
+      }),
+    );
+  });
 });

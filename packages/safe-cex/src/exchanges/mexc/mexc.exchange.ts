@@ -553,7 +553,7 @@ export class MexcExchange extends BaseExchange {
       symbol: order.symbol,
       type: order.type,
       side: order.side,
-      amount: 'amount' in update ? update.amount : order.amount,
+      amount: 'amount' in update ? update.amount : this.getReplacementOrderAmount(order),
       price: 'price' in update ? update.price : order.price,
       reduceOnly: order.reduceOnly,
       timeInForce: order.timeInForce,
@@ -561,6 +561,17 @@ export class MexcExchange extends BaseExchange {
 
     await this.cancelOrders([order]);
     return await this.placeOrder(nextOrder);
+  };
+
+  private getReplacementOrderAmount = (order: Order): number => {
+    const nativeAmount = toNumber(order.extra?.remainingNative, Number.NaN);
+    if (Number.isFinite(nativeAmount) && nativeAmount > 0) return nativeAmount;
+
+    const info = order.info as Record<string, any> | undefined;
+    const rawNativeAmount = toNumber(info?.vol ?? info?.quantity ?? info?.origQty, Number.NaN);
+    if (Number.isFinite(rawNativeAmount) && rawNativeAmount > 0) return rawNativeAmount;
+
+    return order.amount;
   };
 
   cancelOrders = async (orders: Order[]): Promise<void> => {
@@ -579,7 +590,7 @@ export class MexcExchange extends BaseExchange {
     for (const lot of chunk(regularOrders, 50)) {
       await this.xhr.post(
         ENDPOINTS.ORDER_CANCEL,
-        lot.map((order) => ({ orderId: order.id.split('__')[0] })),
+        { orderIds: lot.map((order) => order.id.split('__')[0]) },
       );
     }
 
