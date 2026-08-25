@@ -46,7 +46,9 @@ export type StoreWorkerIncomingOp =
   | '__worker_ping__'
   // Global worker config: host app pushes flag-derived knobs once, before any init.
   // Follows the __verbose/__perf convention (global op, handled before exchange routing).
-  | '__workerConfig';
+  | '__workerConfig'
+  // Dev-only: ask the worker to hand back its recorded perf fixture.
+  | '__perfFixtureDump';
 
 /** Ops the worker sends to the main thread */
 export type StoreWorkerOutgoingOp =
@@ -118,4 +120,31 @@ export interface WorkerConfig {
    * this may only ever reduce request pressure. See `utils/tickIntervalOverride`.
    */
   tickIntervalMultipliers?: Record<string, number>;
+  /**
+   * Dev-only benchmarking harness. Absent in production. See `perfFixture.ts`.
+   */
+  perfFixture?: PerfFixtureConfig;
+}
+
+/** One captured outbound worker message, stamped relative to recording start. */
+export interface PerfFixtureFrame {
+  atMs: number;
+  msg: any;
+}
+
+export interface PerfFixture {
+  version: 1;
+  recordedAtMs: number;
+  durationMs: number;
+  frames: PerfFixtureFrame[];
+}
+
+export interface PerfFixtureConfig {
+  mode: 'off' | 'record' | 'replay';
+  /** Required for `replay`. */
+  fixture?: PerfFixture;
+  /** Fixed gap between replayed frames. Defaults to 50ms (20 frames/sec). */
+  intervalMs?: number;
+  /** Restart from frame 0 at the end. Defaults to true. */
+  loop?: boolean;
 }

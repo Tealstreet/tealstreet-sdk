@@ -205,3 +205,35 @@ the resulting `worker_error_family=markets_not_loaded` tag.
   fires on payloads that explicitly stamp the id (e.g. signing
   requests). Don't add a "must have instanceId" assertion to
   store messages — that will silently drop every store update.
+
+## Benchmarking the trade page: use the perf fixture, not page instrumentation
+
+`perfFixture.ts` records this worker's OUTBOUND message stream and replays it
+at a fixed cadence with the venue disconnected. It is the only supported way to
+get comparable trade-page timings.
+
+Two findings forced it, both worth not rediscovering:
+
+- **Live data makes runs incomparable.** Idle blocking on one unchanged
+  production build measured 18.3% / 24.0% / 25.5% / 26.6% at 6x CPU throttle.
+  The spread was the venue's data rate, and it is larger than most
+  optimisations are worth — anything under ~8 points cannot be seen.
+- **Instrumenting from the page breaks the app.** Wrapping
+  `requestAnimationFrame` and `Worker` from the page to attribute cost blanked
+  the chart, orderbook, depth chart, place-order and screener modules while
+  still producing plausible numbers. Only passive `PerformanceObserver` is safe
+  there, and it misses frames under 50ms.
+
+Recording sits on `ctxWrapper` in `store.webworker.ts`, not on
+`_originalPostMessage` — `ExchangeWorker` posts through the former, so hooking
+the latter captures nothing on dedicated workers. A replay run never
+constructs an `ExchangeWorker` at all; a live venue alongside the fixture would
+put the variance straight back.
+
+Replay deliberately ignores each frame's captured timestamp and emits on a
+metronome. Reproducing the original burstiness would reproduce the problem.
+
+Driven from the page by `apps/web/src/utils/dev/perfFixture.ts`
+(`?perfFixture=record`, then `__tsPerfFixture.save()` / `.replay()` / `.off()`).
+Opt-in: with no URL param and no stored mode the worker stays in `off` and the
+cost is one boolean per outbound message.

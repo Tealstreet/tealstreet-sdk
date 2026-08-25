@@ -2,6 +2,13 @@ import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { ExchangeWorker } from './ExchangeWorker';
+import {
+  configurePerfFixture,
+  isReplayingPerfFixture,
+  recordOutboundFrame,
+  startReplay,
+  takePerfFixture,
+} from './perfFixture';
 import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
 import { TelegramWorker } from './TelgramWorker';
 
@@ -176,11 +183,34 @@ const start = (ctx: Worker, shared = false) => {
     _initPayload = payload;
     accountName = payload.data.accountName;
     exchangeName = payload.data.exchangeName;
+
+    // A replay run is driven entirely by the fixture. Opening the venue as well
+    // would feed live prices back into the page and reintroduce exactly the
+    // variance the fixture exists to remove.
+    if (isReplayingPerfFixture()) {
+      ctx.postMessage({ op: 'start-status', data: true });
+      startReplay(_originalPostMessage);
+      return;
+    }
     // Use prefixes to avoid collisions between account names and exchange names
     // e.g., account named "binance" vs anonymous binance connection
     portKey = accountName ? `account:${accountName}` : exchangeName ? `exchange:${exchangeName}` : '';
 
-    let ctxWrapper = ctx;
+    // Single choke point for everything this worker sends the main thread.
+    // `ExchangeWorker` posts through `ctxWrapper`, not `_originalPostMessage`,
+    // so recording has to sit here or it captures nothing on dedicated workers.
+    // `recordOutboundFrame` is a boolean check when the harness is off.
+    let ctxWrapper = new Proxy(ctx, {
+      get(target, prop, receiver) {
+        if (prop === 'postMessage') {
+          return function (msg: any) {
+            recordOutboundFrame(msg);
+            return (target as any).postMessage(msg);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
 
     if (shared) {
       if (!ports[portKey]) ports[portKey] = [];
@@ -203,6 +233,7 @@ const start = (ctx: Worker, shared = false) => {
         get(target, prop) {
           if (prop === 'postMessage') {
             return function (msg: any) {
+              recordOutboundFrame(msg);
               const subId = msg?.data?.subId;
               broadcastWithThrottle(portKey, msg, subId);
             };
@@ -280,6 +311,23 @@ const start = (ctx: Worker, shared = false) => {
     if (payload?.op === '__workerConfig') {
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
+      if ('perfFixture' in cfg) {
+        configurePerfFixture(cfg.perfFixture);
+        // Replay drives the main thread by itself — see `perfFixture.ts`. It is
+        // started here rather than on 'init' because a replay run never creates
+        // an ExchangeWorker, so 'init' short-circuits before reaching it.
+        if (isReplayingPerfFixture()) startReplay(_originalPostMessage);
+      }
+      return;
+    }
+
+    // Dev-only: hand the recorded fixture back so the page can save it.
+    if (payload?.op === '__perfFixtureDump') {
+      try {
+        _originalPostMessage({ op: '__perfFixtureDump', data: takePerfFixture() });
+      } catch (_e) {
+        // ignore — dead port
+      }
       return;
     }
 
