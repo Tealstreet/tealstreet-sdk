@@ -105,6 +105,16 @@ const MEXC_REGULAR_ORDER_SUBMIT_GAP_MS = 450;
 const MEXC_SCALED_ORDER_SUBMIT_GAP_MS = 1_500;
 const MEXC_REGULAR_ORDER_THROTTLE_COOLDOWN_MS = 1_500;
 const MEXC_RECENT_STOP_CANCEL_SHIELD_MS = 15_000;
+// Preservation window for open regular orders that the WS has already
+// written to the store but MEXC's `open_orders` REST endpoint has not yet
+// reflected. The 2s periodic `tick` wholesale-replaces `orders` with the
+// REST snapshot, so without this window a just-placed / just-moved order
+// briefly disappears from the UI until the next tick's REST catches up.
+// The bound is generous enough to cover normal REST propagation lag and
+// tight enough that a WS-missed external cancellation still clears
+// within one window; WS reconnect's `fetchAndSetPrivateSnapshot` remains
+// the wholesale reconciliation authority.
+const MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS = 15_000;
 
 export class MexcExchange extends BaseExchange {
   xhr: Axios;
@@ -433,13 +443,24 @@ export class MexcExchange extends BaseExchange {
     if (symbols?.length) {
       for (const symbol of symbols) {
         const symbolRegularOrders = regularOrders.filter((order) => order.symbol === symbol);
+        const fetchedIds = new Set(symbolRegularOrders.map((order) => order.id));
         const symbolStopLikeOrders = this.store.orders.filter((order) => this.shouldPreserveStopLikeOrder(order, symbol));
-        this.store.setOrdersForSymbol(symbol, uniqBy([...symbolStopLikeOrders, ...symbolRegularOrders], 'id'));
+        const preservedRegularOrders = this.store.orders.filter((order) =>
+          this.shouldPreserveRecentRegularOrder(order, fetchedIds, symbol),
+        );
+        this.store.setOrdersForSymbol(
+          symbol,
+          uniqBy([...symbolStopLikeOrders, ...preservedRegularOrders, ...symbolRegularOrders], 'id'),
+        );
       }
     } else {
+      const fetchedIds = new Set(regularOrders.map((order) => order.id));
       const stopLikeOrders = this.store.orders.filter((order) => this.shouldPreserveStopLikeOrder(order));
+      const preservedRegularOrders = this.store.orders.filter((order) =>
+        this.shouldPreserveRecentRegularOrder(order, fetchedIds),
+      );
       this.store.update({
-        orders: uniqBy([...stopLikeOrders, ...regularOrders], 'id'),
+        orders: uniqBy([...stopLikeOrders, ...preservedRegularOrders, ...regularOrders], 'id'),
         loaded: { ...this.store.loaded, orders: true },
       });
     }
@@ -530,6 +551,7 @@ export class MexcExchange extends BaseExchange {
       this.assertRegularOrderSubmitSucceeded(data);
       const orderId = toIntegerString(extractData(data)?.orderId ?? extractData(data));
       if (!orderId) throw new Error('MEXC order placement returned no order id');
+      this.addOptimisticRegularOrder(opts, orderId);
       if (opts.timeInForce === OrderTimeInForce.PostOnly) {
         this.store.updateOrder({ id: orderId }, { timeInForce: OrderTimeInForce.PostOnly });
       }
@@ -758,6 +780,50 @@ export class MexcExchange extends BaseExchange {
   private findOpenPosition = (symbol: string, side: PositionSide, positions: Position[]): Position | undefined =>
     positions.find((position) => position.symbol === symbol && position.side === side && position.contracts > 0);
 
+  // Seed a local Open row for a just-placed regular order so it survives
+  // a periodic-tick REST refresh that races the WS `push.personal.order`
+  // event. `handleOrder` will overwrite this row (same id) with the real
+  // WS payload as soon as it arrives. Market orders are skipped because
+  // they typically transition through Open -> Filled fast enough that an
+  // optimistic Open row would only flash. `fetchAndSetRegularOrders`
+  // preservation is bounded so a stale optimistic row still clears if the
+  // venue never confirms the order.
+  private addOptimisticRegularOrder = (opts: PlaceOrderOpts, orderId: string): void => {
+    if (opts.type === OrderType.Market) return;
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) return;
+
+    const nativeVolumeStep = toNumber(market.info?.volUnit, 1);
+    const nativeVol = Math.max(toNumber(adjust(opts.amount, nativeVolumeStep), nativeVolumeStep), nativeVolumeStep);
+    const amount = nativeVolumeToAmount(nativeVol, market);
+    const price = toNumber(adjust(opts.price || 0, market.precision.price));
+
+    this.store.addOrUpdateOrder({
+      id: orderId,
+      status: OrderStatus.Open,
+      symbol: opts.symbol,
+      type: opts.type,
+      side: opts.side,
+      price,
+      amount,
+      filled: 0,
+      remaining: amount,
+      reduceOnly: Boolean(opts.reduceOnly),
+      timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+      info: {
+        __mexcOptimisticRegular: true,
+        symbol: market.id,
+        vol: nativeVol,
+        price: `${price}`,
+      },
+      extra: {
+        remainingNative: nativeVol,
+      },
+    } as Order);
+  };
+
   private addOptimisticStopOrder = (
     opts: PlaceOrderOpts,
     market: Market,
@@ -882,7 +948,9 @@ export class MexcExchange extends BaseExchange {
 
       orders.forEach((order, index) => {
         const orderId = ids[index];
-        if (orderId && order.timeInForce === OrderTimeInForce.PostOnly) {
+        if (!orderId) return;
+        this.addOptimisticRegularOrder(order, orderId);
+        if (order.timeInForce === OrderTimeInForce.PostOnly) {
           this.store.updateOrder({ id: orderId }, { timeInForce: OrderTimeInForce.PostOnly });
         }
       });
@@ -1003,6 +1071,25 @@ export class MexcExchange extends BaseExchange {
     order.status === OrderStatus.Open &&
     (symbol === undefined || order.symbol === symbol) &&
     !this.isRecentlyCanceledStopLikeOrder(order);
+
+  // Preserve an in-store open regular order across a periodic tick's
+  // wholesale REST replace when MEXC's `open_orders` endpoint has not yet
+  // reflected a WS-delivered or just-placed order. Bounded by
+  // `MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS` so orders whose cancellation
+  // we missed still clear within one window.
+  private shouldPreserveRecentRegularOrder = (
+    order: Order,
+    fetchedIds: Set<string>,
+    symbol?: string,
+  ): boolean => {
+    if (fetchedIds.has(order.id)) return false;
+    if (order.status !== OrderStatus.Open) return false;
+    if (this.isStopLikeOrder(order)) return false;
+    if (symbol !== undefined && order.symbol !== symbol) return false;
+    const lastUpdate = toNumber(order.lastUpdate, 0);
+    if (!lastUpdate) return false;
+    return virtualClock.getCurrentTimeMs() - lastUpdate <= MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS;
+  };
 
   private isStopLikeOrder = (order: Order): boolean =>
     order.type === OrderType.StopLoss ||

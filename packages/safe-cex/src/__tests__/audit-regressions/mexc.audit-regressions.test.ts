@@ -4,6 +4,7 @@ import { getExchangeMetadata } from '../../exchangeMetadata';
 import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../../exchanges/mexc/mexc.api';
 import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
 import { ENDPOINTS } from '../../exchanges/mexc/mexc.types';
+import { virtualClock } from '../../utils/virtualClock';
 import {
   isTradableMexcMarket,
   nativeVolumeToAmount,
@@ -1483,5 +1484,244 @@ describe('MEXC futures audit regressions', () => {
         vol: 8004,
       }),
     );
+  });
+
+  it('preserves recently WS-written open regular orders across a tick REST refresh that lags the venue', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const get = vi.fn(async (url: string) => {
+      if (url === ENDPOINTS.OPEN_ORDERS) {
+        return {
+          data: {
+            success: true,
+            code: 0,
+            data: [
+              {
+                orderId: 'regular-old',
+                symbol: 'BTC_USDT',
+                side: 1,
+                type: 1,
+                state: 2,
+                price: 50000,
+                vol: 1,
+                dealVol: 0,
+                updateTime: now - 60_000,
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.xhr = { get } as any;
+
+    // In-store "fresh" regular order that the WS delivered but MEXC's
+    // open_orders REST snapshot has not reflected yet.
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'regular-fresh',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 55000,
+          amount: 0.0001,
+          filled: 0,
+          remaining: 0.0001,
+          reduceOnly: false,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          lastUpdate: now - 500,
+          info: {},
+        } as Order,
+      ],
+    });
+
+    await exchange.fetchAndSetRegularOrders();
+
+    expect(exchange.store.orders.map((order) => order.id).sort()).toEqual(['regular-fresh', 'regular-old']);
+  });
+
+  it('drops WS-written open regular orders whose age exceeds the preservation window', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const get = vi.fn(async () => ({
+      data: { success: true, code: 0, data: [] },
+    }));
+    exchange.xhr = { get } as any;
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'regular-stale',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 55000,
+          amount: 0.0001,
+          filled: 0,
+          remaining: 0.0001,
+          reduceOnly: false,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          // Older than the 15s preservation window; without an anchoring
+          // REST row, this is treated as a WS-missed cancellation.
+          lastUpdate: now - 30_000,
+          info: {},
+        } as Order,
+      ],
+    });
+
+    await exchange.fetchAndSetRegularOrders();
+
+    expect(exchange.store.orders).toEqual([]);
+  });
+
+  it('does not preserve non-Open regular rows past the tick', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const get = vi.fn(async () => ({
+      data: { success: true, code: 0, data: [] },
+    }));
+    exchange.xhr = { get } as any;
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'regular-canceled',
+          status: OrderStatus.Canceled,
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 55000,
+          amount: 0.0001,
+          filled: 0,
+          remaining: 0.0001,
+          reduceOnly: false,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          lastUpdate: now - 500,
+          info: {},
+        } as Order,
+      ],
+    });
+
+    await exchange.fetchAndSetRegularOrders();
+
+    expect(exchange.store.orders).toEqual([]);
+  });
+
+  it('seeds an optimistic open regular order after a successful REST placement', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const post = vi.fn(async () => ({
+      data: { success: true, code: 0, data: { orderId: 'regular-new' } },
+    }));
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 10,
+        price: 60000,
+        reduceOnly: false,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      }),
+    ).resolves.toEqual(['regular-new']);
+
+    expect(exchange.store.orders).toHaveLength(1);
+    expect(exchange.store.orders[0]).toMatchObject({
+      id: 'regular-new',
+      status: OrderStatus.Open,
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      price: 60000,
+      reduceOnly: false,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+      lastUpdate: now,
+    });
+    expect((exchange.store.orders[0].info as Record<string, any>).__mexcOptimisticRegular).toBe(true);
+    expect(exchange.store.orders[0].extra?.remainingNative).toBe(10);
+  });
+
+  it('does not seed an optimistic row for market orders', async () => {
+    const exchange = createExchange();
+    const post = vi.fn(async () => ({
+      data: { success: true, code: 0, data: { orderId: 'regular-market' } },
+    }));
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Market,
+      side: OrderSide.Buy,
+      amount: 10,
+      price: 0,
+      reduceOnly: false,
+    });
+
+    expect(exchange.store.orders).toEqual([]);
+  });
+
+  it('lets a real WS order payload overwrite the optimistic regular row without duplicating it', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const post = vi.fn(async () => ({
+      data: { success: true, code: 0, data: { orderId: 'regular-new' } },
+    }));
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 10,
+      price: 60000,
+      reduceOnly: false,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.order',
+        data: {
+          orderId: 'regular-new',
+          symbol: 'BTC_USDT',
+          side: 1,
+          type: 1,
+          state: 2,
+          price: 60000,
+          vol: 10,
+          dealVol: 1,
+          updateTime: now + 100,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders).toHaveLength(1);
+    expect(exchange.store.orders[0]).toMatchObject({
+      id: 'regular-new',
+      status: OrderStatus.Open,
+      symbol: 'BTCUSDT',
+      filled: 0.0001,
+    });
+    // Optimistic marker is replaced by the real payload.
+    expect((exchange.store.orders[0].info as Record<string, any>).__mexcOptimisticRegular).toBeUndefined();
   });
 });
