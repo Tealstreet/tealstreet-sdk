@@ -844,9 +844,15 @@ describe('MEXC futures audit regressions', () => {
     expect(post).toHaveBeenCalledWith(ENDPOINTS.STOP_ORDER_CANCEL, [{ stopPlanOrderId: 'stop-position-1' }]);
   });
 
-  it('cancels regular orders with the documented orderIds payload', async () => {
+  it('cancels regular orders with the raw order-id array required by the live API', async () => {
     const exchange = createExchange();
-    const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));
+    const post = vi.fn(async () => ({
+      data: {
+        success: true,
+        code: 0,
+        data: [{ orderId: 'regular-1', errorCode: 0, errorMsg: 'success' }],
+      },
+    }));
     exchange.xhr = { post } as any;
 
     await exchange.cancelOrders([
@@ -862,9 +868,34 @@ describe('MEXC futures audit regressions', () => {
       } as Order,
     ]);
 
-    expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER_CANCEL, {
-      orderIds: ['regular-1'],
-    });
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER_CANCEL, ['regular-1']);
+  });
+
+  it('rejects regular cancel rows that MEXC reports as per-order failures', async () => {
+    const exchange = createExchange();
+    const post = vi.fn(async () => ({
+      data: {
+        success: true,
+        code: 0,
+        data: [{ orderId: 'regular-1', errorCode: 2041, errorMsg: 'order state cannot be cancelled' }],
+      },
+    }));
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.cancelOrders([
+        {
+          id: 'regular-1',
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          status: OrderStatus.Open,
+          amount: 1,
+          remaining: 1,
+          price: 74000,
+        } as Order,
+      ]),
+    ).rejects.toThrow('MEXC order cancellation failed: regular-1: order state cannot be cancelled');
   });
 
   it('replaces normalized MEXC orders with native contract volume on price moves', async () => {
@@ -896,9 +927,7 @@ describe('MEXC futures audit regressions', () => {
       }),
     ).resolves.toEqual(['replacement-1']);
 
-    expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.ORDER_CANCEL, {
-      orderIds: ['regular-1'],
-    });
+    expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.ORDER_CANCEL, ['regular-1']);
     expect(post).toHaveBeenNthCalledWith(
       2,
       ENDPOINTS.ORDER_SUBMIT,

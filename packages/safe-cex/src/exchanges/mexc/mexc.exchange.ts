@@ -716,10 +716,11 @@ export class MexcExchange extends BaseExchange {
     }
 
     for (const lot of chunk(regularOrders, 50)) {
-      await this.xhr.post(
+      const { data } = await this.xhr.post(
         ENDPOINTS.ORDER_CANCEL,
-        { orderIds: lot.map((order) => order.id.split('__')[0]) },
+        lot.map((order) => order.id.split('__')[0]),
       );
+      this.assertRegularCancelSucceeded(data);
     }
 
     this.store.updateOrdersStatus(
@@ -741,6 +742,16 @@ export class MexcExchange extends BaseExchange {
       order.remaining === 0);
 
   private isPlanOrder = (order: Order): boolean => this.isStopLikeOrder(order) && !this.isStopOrder(order);
+
+  private assertRegularCancelSucceeded = (payload: any): void => {
+    const failedRows = extractRows<Record<string, any>>(payload).filter((row) => toNumber(row.errorCode, 0) !== 0);
+    if (!failedRows.length) return;
+
+    const message = failedRows
+      .map((row) => `${toIntegerString(row.orderId) || 'unknown'}: ${row.errorMsg || row.message || row.msg || row.errorCode}`)
+      .join(', ');
+    throw new Error(`MEXC order cancellation failed: ${message}`);
+  };
 
   cancelSymbolOrders = async (symbol: string): Promise<void> => {
     const market = this.store.marketsBySymbol[symbol];
