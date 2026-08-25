@@ -497,32 +497,7 @@ export class MexcExchange extends BaseExchange {
       return [await this.placePlanOrder(opts)];
     }
 
-    const market = this.store.marketsBySymbol[opts.symbol];
-    if (!market) {
-      const message = `Market ${opts.symbol} not found`;
-      this.emitAndLogError(message);
-      throw new Error(message);
-    }
-
-    const type =
-      opts.type === OrderType.Limit && opts.timeInForce
-        ? REVERSE_TIME_IN_FORCE[opts.timeInForce] || REVERSE_ORDER_TYPE[opts.type]
-        : REVERSE_ORDER_TYPE[opts.type];
-    const nativeVolumeStep = toNumber(market.info?.volUnit, 1);
-    const vol = Math.max(toNumber(adjust(opts.amount, nativeVolumeStep), nativeVolumeStep), nativeVolumeStep);
-    const side = opts.reduceOnly ? REVERSE_ORDER_SIDE[opts.side].close : REVERSE_ORDER_SIDE[opts.side].open;
-    const leverage = this.getLeverageForOrder(opts);
-    const payload = omitUndefined({
-      symbol: market.id,
-      price: opts.type === OrderType.Market ? undefined : `${adjust(opts.price || 0, market.precision.price)}`,
-      vol,
-      side,
-      type,
-      openType: REVERSE_MARGIN_TYPE[this.symbolSettings.get(opts.symbol)?.marginType || MarginType.Cross],
-      leverage: Math.min(Math.max(leverage, market.limits.leverage.min), market.limits.leverage.max),
-      externalOid: `ts_${uuid()}`,
-      reduceOnly: opts.reduceOnly || undefined,
-    });
+    const payload = this.formatRegularOrderPayload(opts);
 
     try {
       const { data } = await this.enqueueRegularOrderSubmit(() => this.xhr.post(ENDPOINTS.ORDER_SUBMIT, payload));
@@ -538,6 +513,35 @@ export class MexcExchange extends BaseExchange {
       this.emitAndLogError(message);
       throw err;
     }
+  };
+
+  private formatRegularOrderPayload = (opts: PlaceOrderOpts): Record<string, any> => {
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) {
+      const message = `Market ${opts.symbol} not found`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
+    const type =
+      opts.type === OrderType.Limit && opts.timeInForce
+        ? REVERSE_TIME_IN_FORCE[opts.timeInForce] || REVERSE_ORDER_TYPE[opts.type]
+        : REVERSE_ORDER_TYPE[opts.type];
+    const nativeVolumeStep = toNumber(market.info?.volUnit, 1);
+    const vol = Math.max(toNumber(adjust(opts.amount, nativeVolumeStep), nativeVolumeStep), nativeVolumeStep);
+    const side = opts.reduceOnly ? REVERSE_ORDER_SIDE[opts.side].close : REVERSE_ORDER_SIDE[opts.side].open;
+    const leverage = this.getLeverageForOrder(opts);
+    return omitUndefined({
+      symbol: market.id,
+      price: opts.type === OrderType.Market ? undefined : `${adjust(opts.price || 0, market.precision.price)}`,
+      vol,
+      side,
+      type,
+      openType: REVERSE_MARGIN_TYPE[this.symbolSettings.get(opts.symbol)?.marginType || MarginType.Cross],
+      leverage: Math.min(Math.max(leverage, market.limits.leverage.min), market.limits.leverage.max),
+      externalOid: `ts_${uuid()}`,
+      reduceOnly: opts.reduceOnly || undefined,
+    });
   };
 
   private assertRegularOrderSubmitSucceeded = (payload: any): void => {
@@ -791,6 +795,11 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    if (!orders.length) return [];
+    if (orders.every(this.isRegularPlaceOrder)) {
+      return await this.placeRegularOrdersBatch(orders);
+    }
+
     const ids: string[] = [];
     for (let index = 0; index < orders.length; index += 1) {
       try {
@@ -806,6 +815,66 @@ export class MexcExchange extends BaseExchange {
       }
     }
     return ids;
+  };
+
+  private isRegularPlaceOrder = (order: PlaceOrderOpts): boolean =>
+    order.type !== OrderType.StopLoss && order.type !== OrderType.TakeProfit && order.type !== OrderType.TrailingStopLoss;
+
+  private placeRegularOrdersBatch = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    const payload = orders.map((order) => ({
+      ...this.formatRegularOrderPayload(order),
+      stpMode: 0,
+    }));
+
+    try {
+      const { data } = await this.xhr.post(ENDPOINTS.ORDER_SUBMIT_BATCH, payload);
+      this.assertRegularOrderBatchSucceeded(data, orders.length);
+      const ids = extractRows<Record<string, any>>(data)
+        .map((row) => toIntegerString(row.orderId ?? row.id))
+        .filter(Boolean);
+      if (!ids.length) throw new Error('MEXC batch order placement returned no order ids');
+
+      orders.forEach((order, index) => {
+        const orderId = ids[index];
+        if (orderId && order.timeInForce === OrderTimeInForce.PostOnly) {
+          this.store.updateOrder({ id: orderId }, { timeInForce: OrderTimeInForce.PostOnly });
+        }
+      });
+      return ids;
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC batch order placement failed';
+      this.emitAndLogError(message);
+      throw err;
+    }
+  };
+
+  private assertRegularOrderBatchSucceeded = (payload: any, totalOrderCount: number): void => {
+    if (payload?.success === false) {
+      const error = new Error(payload.message || payload.msg || `MEXC batch order placement failed with code ${payload.code}`);
+      (error as any).response = { data: payload };
+      throw error;
+    }
+
+    const rows = extractRows<Record<string, any>>(payload);
+    const failedRows = rows.filter((row) => toNumber(row.errorCode, 0) !== 0);
+    if (!failedRows.length) return;
+
+    const partialOrderIds = rows
+      .filter((row) => toNumber(row.errorCode, 0) === 0)
+      .map((row) => toIntegerString(row.orderId ?? row.id))
+      .filter(Boolean);
+    const message = failedRows
+      .map((row, index) => `${index + 1}: ${row.errorMsg || row.message || row.msg || row.errorCode}`)
+      .join(', ');
+    const error = new Error(`MEXC batch order placement failed: ${message}`);
+    if (partialOrderIds.length) {
+      (error as any).partialOrderIds = partialOrderIds;
+      (error as any).partialOrderCount = partialOrderIds.length;
+      (error as any).totalOrderCount = totalOrderCount;
+      (error as any).failedOrderIndex = rows.findIndex((row) => toNumber(row.errorCode, 0) !== 0);
+    }
+    throw error;
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts): Promise<string[]> => {

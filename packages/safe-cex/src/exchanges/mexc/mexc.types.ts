@@ -37,6 +37,7 @@ export const ENDPOINTS = {
   OPEN_ORDERS: '/api/v1/private/order/list/open_orders',
   ORDER_DEALS: '/api/v1/private/order/list/order_deals',
   ORDER_SUBMIT: '/api/v1/private/order/submit',
+  ORDER_SUBMIT_BATCH: '/api/v1/private/order/submit_batch',
   ORDER_CANCEL: '/api/v1/private/order/cancel',
   ORDER_CANCEL_ALL: '/api/v1/private/order/cancel_all',
   PLAN_ORDER_LIST: '/api/v1/private/planorder/list/orders',
@@ -51,6 +52,7 @@ export const PUBLIC_ENDPOINTS = [ENDPOINTS.CONTRACT_DETAIL, ENDPOINTS.TICKER, EN
 
 export const GRAFANA_ENDPOINTS_EVERY = [
   ENDPOINTS.ORDER_SUBMIT,
+  ENDPOINTS.ORDER_SUBMIT_BATCH,
   ENDPOINTS.PLAN_ORDER_PLACE,
   ENDPOINTS.PLAN_ORDER_CANCEL,
   ENDPOINTS.STOP_ORDER_PLACE,

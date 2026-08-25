@@ -577,7 +577,7 @@ describe('MEXC futures audit regressions', () => {
     );
   });
 
-  it('paces sequential regular order placement to avoid venue spam throttles', async () => {
+  it('paces concurrent regular order placement to avoid venue spam throttles', async () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
@@ -588,22 +588,22 @@ describe('MEXC futures audit regressions', () => {
       exchange.store.update({ markets: [market] });
       exchange.xhr = { post } as any;
 
-      const result = exchange.placeOrders([
-        {
+      const result = Promise.all([
+        exchange.placeOrder({
           symbol: 'BTCUSDT',
           type: OrderType.Limit,
           side: OrderSide.Buy,
           amount: 10,
           price: 50000,
-        },
-        {
+        }),
+        exchange.placeOrder({
           symbol: 'BTCUSDT',
           type: OrderType.Limit,
           side: OrderSide.Buy,
           amount: 10,
           price: 49900,
-        },
-      ]);
+        }),
+      ]).then((ids) => ids.flat());
 
       await vi.advanceTimersByTimeAsync(0);
       expect(post).toHaveBeenCalledTimes(1);
@@ -615,6 +615,67 @@ describe('MEXC futures audit regressions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('places regular scaled orders through the native MEXC batch endpoint', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        code: 0,
+        data: [
+          { orderId: 'batch-1', errorCode: 0 },
+          { orderId: 'batch-2', errorCode: 0 },
+        ],
+      },
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrders([
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          amount: 10,
+          price: 51000,
+          timeInForce: OrderTimeInForce.PostOnly,
+        },
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          amount: 10,
+          price: 51100,
+          timeInForce: OrderTimeInForce.PostOnly,
+        },
+      ]),
+    ).resolves.toEqual(['batch-1', 'batch-2']);
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER_SUBMIT_BATCH, [
+      expect.objectContaining({
+        symbol: 'BTC_USDT',
+        price: '51000',
+        vol: 10,
+        side: 3,
+        type: 2,
+        openType: 2,
+        leverage: 20,
+        stpMode: 0,
+      }),
+      expect.objectContaining({
+        symbol: 'BTC_USDT',
+        price: '51100',
+        vol: 10,
+        side: 3,
+        type: 2,
+        openType: 2,
+        leverage: 20,
+        stpMode: 0,
+      }),
+    ]);
   });
 
   it('refreshes regular orders without fetching plan or stop orders after private WS updates', async () => {
@@ -663,13 +724,19 @@ describe('MEXC futures audit regressions', () => {
     expect(exchange.store.orders.map((order) => order.id)).toEqual(['plan-1', 'regular-1']);
   });
 
-  it('reports already-placed IDs when sequential scaled placement halts mid-batch', async () => {
+  it('reports already-placed IDs when native batch placement returns per-row failures', async () => {
     const exchange = createExchange();
-    const post = vi
-      .fn()
-      .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-1' } })
-      .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-2' } })
-      .mockRejectedValueOnce(new Error('Frequency limit reached'));
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        code: 0,
+        data: [
+          { orderId: 'order-1', errorCode: 0 },
+          { orderId: 'order-2', errorCode: 0 },
+          { orderId: null, errorCode: 510, errorMsg: 'Requests are too frequent, please try again later' },
+        ],
+      },
+    });
     exchange.store.update({ markets: [market] });
     exchange.xhr = { post } as any;
 
@@ -698,12 +765,48 @@ describe('MEXC futures audit regressions', () => {
         },
       ]),
     ).rejects.toMatchObject({
-      message: 'Frequency limit reached',
+      message: 'MEXC batch order placement failed: 1: Requests are too frequent, please try again later',
       partialOrderIds: ['order-1', 'order-2'],
       partialOrderCount: 2,
       totalOrderCount: 3,
       failedOrderIndex: 2,
     });
+  });
+
+  it('surfaces unsupported native batch failures without sequential fallback', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        success: false,
+        code: 600,
+        message: 'Batch order only supports market maker accounts',
+        data: null,
+      },
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrders([
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 10,
+          price: 50000,
+        },
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 10,
+          price: 49900,
+        },
+      ]),
+    ).rejects.toThrow('Batch order only supports market maker accounts');
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER_SUBMIT_BATCH, expect.any(Array));
   });
 
   it('places standalone reduce-only market TP/SL plan orders', async () => {
