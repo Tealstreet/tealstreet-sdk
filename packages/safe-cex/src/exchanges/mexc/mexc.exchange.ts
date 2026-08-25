@@ -102,6 +102,7 @@ const MEXC_EXECUTE_CYCLE_SEVEN_DAYS = 2;
 const MEXC_TRIGGER_TREND_LATEST_PRICE = 1;
 const MEXC_PLAN_ORDER_LOOKBACK_MS = 89 * 24 * 60 * 60 * 1000;
 const MEXC_REGULAR_ORDER_SUBMIT_GAP_MS = 450;
+const MEXC_SCALED_ORDER_SUBMIT_GAP_MS = 1_500;
 const MEXC_REGULAR_ORDER_THROTTLE_COOLDOWN_MS = 1_500;
 
 export class MexcExchange extends BaseExchange {
@@ -117,6 +118,7 @@ export class MexcExchange extends BaseExchange {
   private regularOrderSubmitQueue: Promise<void> = Promise.resolve();
   private lastRegularOrderSubmitAt = 0;
   private regularOrderSubmitCooldownUntil = 0;
+  private nativeBatchOrdersAvailable: boolean | undefined;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -797,13 +799,33 @@ export class MexcExchange extends BaseExchange {
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     if (!orders.length) return [];
     if (orders.every(this.isRegularPlaceOrder)) {
-      return await this.placeRegularOrdersBatch(orders);
+      if (this.nativeBatchOrdersAvailable !== false) {
+        try {
+          const orderIds = await this.placeRegularOrdersBatch(orders);
+          this.nativeBatchOrdersAvailable = true;
+          return orderIds;
+        } catch (err: any) {
+          if (!this.isNativeBatchAccessDeniedError(err)) {
+            throw err;
+          }
+          this.nativeBatchOrdersAvailable = false;
+          this.log('MEXC native batch order placement is unavailable for this account; falling back to paced sequential placement.');
+        }
+      }
+      return await this.placeOrdersSequentially(orders, MEXC_SCALED_ORDER_SUBMIT_GAP_MS);
     }
 
+    return await this.placeOrdersSequentially(orders);
+  };
+
+  private placeOrdersSequentially = async (orders: PlaceOrderOpts[], gapMs = 0): Promise<string[]> => {
     const ids: string[] = [];
     for (let index = 0; index < orders.length; index += 1) {
       try {
         ids.push(...(await this.placeOrder(orders[index])));
+        if (gapMs > 0 && index < orders.length - 1) {
+          await sleep(gapMs);
+        }
       } catch (err: any) {
         if (ids.length > 0 && err && typeof err === 'object') {
           err.partialOrderIds = [...ids];
@@ -842,11 +864,19 @@ export class MexcExchange extends BaseExchange {
       });
       return ids;
     } catch (err: any) {
-      const message =
-        err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC batch order placement failed';
-      this.emitAndLogError(message);
       throw err;
     }
+  };
+
+  private isNativeBatchAccessDeniedError = (err: any): boolean => {
+    const code = toNumber(err?.response?.data?.code ?? err?.code, Number.NaN);
+    const message = String(err?.response?.data?.message ?? err?.response?.data?.msg ?? err?.message ?? '').toLowerCase();
+    return (
+      code === 511 ||
+      message.includes('do not have access') ||
+      message.includes('access to the interface') ||
+      message.includes('market maker')
+    );
   };
 
   private assertRegularOrderBatchSucceeded = (payload: any, totalOrderCount: number): void => {

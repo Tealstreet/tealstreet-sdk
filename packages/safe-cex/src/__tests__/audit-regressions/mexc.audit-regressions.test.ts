@@ -773,21 +773,26 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
-  it('surfaces unsupported native batch failures without sequential fallback', async () => {
-    const exchange = createExchange();
-    const post = vi.fn().mockResolvedValue({
-      data: {
-        success: false,
-        code: 600,
-        message: 'Batch order only supports market maker accounts',
-        data: null,
-      },
-    });
-    exchange.store.update({ markets: [market] });
-    exchange.xhr = { post } as any;
+  it('falls back to paced sequential placement when native batch is unavailable', async () => {
+    vi.useFakeTimers();
+    try {
+      const exchange = createExchange();
+      const post = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            success: false,
+            code: 511,
+            message: 'You do not have access to the interface',
+          },
+        })
+        .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'fallback-1' } })
+        .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'fallback-2' } })
+        .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'fallback-3' } });
+      exchange.store.update({ markets: [market] });
+      exchange.xhr = { post } as any;
 
-    await expect(
-      exchange.placeOrders([
+      const firstResult = exchange.placeOrders([
         {
           symbol: 'BTCUSDT',
           type: OrderType.Limit,
@@ -802,11 +807,35 @@ describe('MEXC futures audit regressions', () => {
           amount: 10,
           price: 49900,
         },
-      ]),
-    ).rejects.toThrow('Batch order only supports market maker accounts');
+      ]);
 
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER_SUBMIT_BATCH, expect.any(Array));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.ORDER_SUBMIT_BATCH, expect.any(Array));
+      expect(post).toHaveBeenNthCalledWith(2, ENDPOINTS.ORDER_SUBMIT, expect.objectContaining({ price: '50000' }));
+      await vi.advanceTimersByTimeAsync(1499);
+      expect(post).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(firstResult).resolves.toEqual(['fallback-1', 'fallback-2']);
+      expect(post).toHaveBeenNthCalledWith(3, ENDPOINTS.ORDER_SUBMIT, expect.objectContaining({ price: '49900' }));
+
+      const secondResult = exchange.placeOrders([
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 10,
+          price: 49800,
+        },
+      ]);
+      await vi.advanceTimersByTimeAsync(450);
+      await expect(secondResult).resolves.toEqual(['fallback-3']);
+
+      expect(post).toHaveBeenCalledTimes(4);
+      expect(post).toHaveBeenNthCalledWith(4, ENDPOINTS.ORDER_SUBMIT, expect.objectContaining({ price: '49800' }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('places standalone reduce-only market TP/SL plan orders', async () => {
