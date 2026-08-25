@@ -250,7 +250,7 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   };
 
   private emitReceiveDiagnostics = (data: unknown, json: Record<string, any>) => {
-    if (json.channel === 'push.ticker') return;
+    if (json.channel === 'push.ticker' || json.channel === 'push.depth' || json.channel === 'push.depth.full') return;
     this.parent.emitter.emit('grafana-pws', `[mexc public] ${String(data)}`);
   };
 

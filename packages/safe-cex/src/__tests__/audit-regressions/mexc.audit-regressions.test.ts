@@ -96,7 +96,7 @@ describe('MEXC futures audit regressions', () => {
     dispose();
   });
 
-  it('emits public WebSocket receive diagnostics without flooding ticker pushes', () => {
+  it('emits public WebSocket receive diagnostics without flooding ticker or depth pushes', () => {
     const exchange = createExchange();
     const receiveLogs: string[] = [];
     exchange.on('grafana-pws', (message: string) => receiveLogs.push(message));
@@ -104,6 +104,9 @@ describe('MEXC futures audit regressions', () => {
     exchange.publicWebsocket.onMessage({ data: '{"channel":"rs.sub.kline","success":true}' } as MessageEvent);
     exchange.publicWebsocket.onMessage({
       data: '{"channel":"push.ticker","symbol":"BTC_USDT","data":{"lastPrice":"70000"}}',
+    } as MessageEvent);
+    exchange.publicWebsocket.onMessage({
+      data: '{"channel":"push.depth.full","symbol":"BTC_USDT","data":{"asks":[],"bids":[]}}',
     } as MessageEvent);
 
     expect(receiveLogs).toEqual(['[mexc public] {"channel":"rs.sub.kline","success":true}']);
