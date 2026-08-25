@@ -90,6 +90,14 @@ type CachedWooPositionMetadata = {
   updatedAt: number;
 };
 
+type WooAccountInfoEnvelope = {
+  success?: unknown;
+  data?: unknown;
+  message?: unknown;
+  msg?: unknown;
+  meta?: { message?: unknown };
+};
+
 const isPositiveFinitePrice = (price: number | undefined): price is number =>
   typeof price === 'number' && Number.isFinite(price) && price > 0;
 
@@ -303,6 +311,36 @@ export class WOOXExchange extends BaseExchange {
     return Number.isFinite(parsed) ? parsed : undefined;
   };
 
+  private getWooResponseMessage = (response: WooAccountInfoEnvelope, fallback: string) => {
+    const message = [response.message, response.msg, response.meta?.message].find(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    );
+    return message || fallback;
+  };
+
+  private fetchAccountInfo = async (): Promise<ACCOUNT_RESPONSE> => {
+    const { data: response } = await this.xhr.get<WooAccountInfoEnvelope>(ENDPOINTS.ACCOUNT);
+
+    if (!response || typeof response !== 'object') {
+      throw new Error('WOO X account info response has an invalid shape');
+    }
+
+    if (response.success !== true) {
+      throw new Error(this.getWooResponseMessage(response, 'WOO X account info request failed'));
+    }
+
+    if (!response.data || typeof response.data !== 'object') {
+      throw new Error(this.getWooResponseMessage(response, 'WOO X account info response is missing data'));
+    }
+
+    const accountInfo = response.data as ACCOUNT_RESPONSE;
+    if (accountInfo.positionMode !== 'ONE_WAY' && accountInfo.positionMode !== 'HEDGE_MODE') {
+      throw new Error('WOO X account info response has an invalid position mode');
+    }
+
+    return accountInfo;
+  };
+
   private refreshFundingRates = async () => {
     if (this.isDisposed || this._fundingRefreshInFlight) return;
 
@@ -356,9 +394,7 @@ export class WOOXExchange extends BaseExchange {
 
   async getPositionMode(): Promise<PositionMode> {
     if (!this._accountPositionMode) {
-      const {
-        data: { data },
-      } = await this.xhr.get<{ data: ACCOUNT_RESPONSE }>(ENDPOINTS.ACCOUNT);
+      const data = await this.fetchAccountInfo();
       this._accountPositionMode = data.positionMode === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
     }
     return this._accountPositionMode;
@@ -825,9 +861,7 @@ export class WOOXExchange extends BaseExchange {
   };
 
   getAccount = async () => {
-    const {
-      data: { data },
-    } = await this.xhr.get<{ data: ACCOUNT_RESPONSE }>(ENDPOINTS.ACCOUNT);
+    const data = await this.fetchAccountInfo();
 
     return {
       userId: data.applicationId,
@@ -947,9 +981,7 @@ export class WOOXExchange extends BaseExchange {
 
   fetchBalance = async () => {
     try {
-      const {
-        data: { data },
-      } = await this.xhr.get<{ data: ACCOUNT_RESPONSE }>(ENDPOINTS.ACCOUNT);
+      const data = await this.fetchAccountInfo();
 
       if (data.accountMode !== 'FUTURES') {
         throw new Error(`WOO X account is in ${data.accountMode} mode, only FUTURES mode is supported`);
