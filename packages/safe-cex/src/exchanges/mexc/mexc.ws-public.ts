@@ -4,7 +4,7 @@ import type { MexcExchange } from './mexc.exchange';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { LogSeverity } from '../../types';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, INTERVAL, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
+import { BASE_WS_URL, INTERVAL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import { fromMexcSymbol, normalizeCandle, normalizeOrderBook, normalizeTicker, toMexcSymbol } from './mexc.utils';
 
 type MessageHandler = (json: Record<string, any>) => void;
@@ -74,7 +74,9 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
 
     const channel = String(json.channel || '');
     if (!channel) return;
-    this.recordMessageHandlerStats(channel);
+    if (!isMexcControlChannel(channel)) {
+      this.recordMessageHandlerStats(channel);
+    }
 
     switch (channel) {
       case 'push.ticker':

@@ -226,12 +226,7 @@ export class MexcExchange extends BaseExchange {
     }
 
     try {
-      const orders = await this.fetchOrders();
-      if (this.isDisposed) return;
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      await this.fetchAndSetRegularOrders();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
     }
@@ -403,6 +398,7 @@ export class MexcExchange extends BaseExchange {
 
   fetchAndSetRegularOrders = async (symbols?: string[]): Promise<Order[]> => {
     const regularOrders = await this.fetchRegularOrders(symbols);
+    if (this.isDisposed) return regularOrders;
 
     if (symbols?.length) {
       for (const symbol of symbols) {

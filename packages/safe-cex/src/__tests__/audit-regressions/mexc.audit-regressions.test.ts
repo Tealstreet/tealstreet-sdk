@@ -98,6 +98,7 @@ describe('MEXC futures audit regressions', () => {
 
   it('emits public WebSocket receive diagnostics without flooding ticker or depth pushes', () => {
     const exchange = createExchange();
+    const recordStats = vi.spyOn(exchange.publicWebsocket as any, 'recordMessageHandlerStats');
     const receiveLogs: string[] = [];
     exchange.on('grafana-pws', (message: string) => receiveLogs.push(message));
 
@@ -110,6 +111,23 @@ describe('MEXC futures audit regressions', () => {
     } as MessageEvent);
 
     expect(receiveLogs).toEqual(['[mexc public] {"channel":"rs.sub.kline","success":true}']);
+    expect(recordStats).not.toHaveBeenCalledWith('rs.sub.kline');
+    expect(recordStats).toHaveBeenCalledWith('push.ticker');
+    expect(recordStats).toHaveBeenCalledWith('push.depth.full');
+  });
+
+  it('does not track one-shot WebSocket control responses as stale-topic liveness feeds', () => {
+    const exchange = createExchange();
+    const recordPublicStats = vi.spyOn(exchange.publicWebsocket as any, 'recordMessageHandlerStats');
+    const recordPrivateStats = vi.spyOn(exchange.privateWebsocket as any, 'recordMessageHandlerStats');
+
+    exchange.publicWebsocket.onMessage({ data: '{"channel":"rs.sub.ticker","success":true}' } as MessageEvent);
+    exchange.privateWebsocket.onMessage({ data: '{"channel":"rs.personal.filter","success":true}' } as MessageEvent);
+
+    expect(recordPublicStats).not.toHaveBeenCalled();
+    expect(recordPrivateStats).not.toHaveBeenCalled();
+    expect(exchange.publicWebsocket.messageHandlersStats['rs.sub.ticker']).toBeUndefined();
+    expect(exchange.privateWebsocket.messageHandlersStats['rs.personal.filter']).toBeUndefined();
   });
 
   it('redacts private WebSocket auth diagnostics before forwarding to the request drawer', async () => {
@@ -971,6 +989,63 @@ describe('MEXC futures audit regressions', () => {
       volType: 2,
       stopLossType: 0,
     });
+  });
+
+  it('keeps the periodic tick on regular open orders while preserving stop-like rows', async () => {
+    const exchange = createExchange();
+    const existingStopOrder = {
+      id: 'plan-1',
+      status: OrderStatus.Open,
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 49000,
+      amount: 1,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: true,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+      info: { __mexcPlanOrder: true },
+    } as Order;
+    const get = vi.fn(async (url: string) => {
+      if (url === ENDPOINTS.OPEN_ORDERS) {
+        return {
+          data: {
+            success: true,
+            code: 0,
+            data: [
+              {
+                orderId: 'regular-1',
+                symbol: 'BTC_USDT',
+                side: 1,
+                type: 1,
+                state: 2,
+                price: 50000,
+                vol: 10000,
+                dealVol: 0,
+                updateTime: 1700000000000,
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.store.update({ markets: [market], orders: [existingStopOrder] });
+    exchange.xhr = { get } as any;
+    vi.spyOn(exchange, 'fetchBalanceAndPositions').mockResolvedValue({ balance: normalizeBalance([]), positions: [] });
+    const fetchAndSetRegularOrders = exchange.fetchAndSetRegularOrders;
+    vi.spyOn(exchange, 'fetchAndSetRegularOrders').mockImplementation(async (symbols?: string[]) => {
+      const orders = await fetchAndSetRegularOrders(symbols);
+      exchange.isDisposed = true;
+      return orders;
+    });
+
+    await exchange.tick();
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.OPEN_ORDERS, { params: { page_num: 1, page_size: 100 } });
+    expect(exchange.store.orders.map((order) => order.id).sort()).toEqual(['plan-1', 'regular-1']);
   });
 
   it('keeps open plan orders visible after regular open orders are empty', async () => {

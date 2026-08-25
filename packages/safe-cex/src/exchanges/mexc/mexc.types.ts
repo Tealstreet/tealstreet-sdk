@@ -22,6 +22,8 @@ export const BASE_WS_URL = {
 
 export const MEXC_WS_HEARTBEAT_INTERVAL_MS = 8_000;
 
+export const isMexcControlChannel = (channel: string): boolean => channel.startsWith('rs.');
+
 export const ENDPOINTS = {
   CONTRACT_DETAIL: '/api/v1/contract/detail',
   TICKER: '/api/v1/contract/ticker',

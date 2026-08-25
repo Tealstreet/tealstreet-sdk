@@ -7,7 +7,7 @@ import { LogSeverity, Order, OrderStatus } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { signMexcWsLogin } from './mexc.api';
-import { BASE_WS_URL, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
+import { BASE_WS_URL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import { fromMexcSymbol, normalizeExecution, normalizeOrder, normalizePosition } from './mexc.utils';
 
 export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
@@ -75,7 +75,9 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
 
     const channel = String(json.channel || '');
     if (!channel) return;
-    this.recordMessageHandlerStats(channel);
+    if (!isMexcControlChannel(channel)) {
+      this.recordMessageHandlerStats(channel);
+    }
 
     switch (channel) {
       case 'push.personal.order':
