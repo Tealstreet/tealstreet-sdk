@@ -60,6 +60,7 @@ Hosted mode must use the remote signer for this login signature. The secret is i
 - Position mode enum: `1` hedge, `2` one-way.
 - Margin/open type enum: `1` isolated, `2` cross.
 - Regular order updates use cancel/replace. Native amend is not wired until verified.
+- Scaled/bulk order placement is sequential. If one leg fails after earlier legs returned order ids, `placeOrders` annotates the thrown error with `partialOrderIds`, `partialOrderCount`, `totalOrderCount`, and `failedOrderIndex` so the web order layer can tell the user that the batch halted partially.
 - Standalone sized TP/SL uses `POST /api/v1/private/planorder/place/v2` as a reduce-only market plan order, seven-day execution cycle (`executeCycle: 2`), and explicit quantity. Trigger direction is inferred from order type plus closing side.
 - Full-position / infinity TP/SL uses the separate position TP/SL API: `POST /api/v1/private/stoporder/place` with the native `positionId`, current native position `vol`, and `volType: 2`. These rows are listed with `GET /api/v1/private/stoporder/list/orders?is_finished=0` and canceled through `POST /api/v1/private/stoporder/cancel`; do not send them to the standalone `planorder` cancel route.
 - Open TP/SL orders do not appear in `/api/v1/private/order/list/open_orders`. Fetch untriggered plan orders with `GET /api/v1/private/planorder/list/orders?states=1` and normalize them into regular Tealstreet order state so REST reconciliation does not erase optimistic chart lines after placement.

@@ -652,8 +652,18 @@ export class MexcExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     const ids: string[] = [];
-    for (const order of orders) {
-      ids.push(...(await this.placeOrder(order)));
+    for (let index = 0; index < orders.length; index += 1) {
+      try {
+        ids.push(...(await this.placeOrder(orders[index])));
+      } catch (err: any) {
+        if (ids.length > 0 && err && typeof err === 'object') {
+          err.partialOrderIds = [...ids];
+          err.partialOrderCount = ids.length;
+          err.totalOrderCount = orders.length;
+          err.failedOrderIndex = index;
+        }
+        throw err;
+      }
     }
     return ids;
   };

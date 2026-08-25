@@ -482,6 +482,49 @@ describe('MEXC futures audit regressions', () => {
     );
   });
 
+  it('reports already-placed IDs when sequential scaled placement halts mid-batch', async () => {
+    const exchange = createExchange();
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-1' } })
+      .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-2' } })
+      .mockRejectedValueOnce(new Error('Frequency limit reached'));
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrders([
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          amount: 10,
+          price: 51000,
+        },
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          amount: 10,
+          price: 51100,
+        },
+        {
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          amount: 10,
+          price: 51200,
+        },
+      ]),
+    ).rejects.toMatchObject({
+      message: 'Frequency limit reached',
+      partialOrderIds: ['order-1', 'order-2'],
+      partialOrderCount: 2,
+      totalOrderCount: 3,
+      failedOrderIndex: 2,
+    });
+  });
+
   it('places standalone reduce-only market TP/SL plan orders', async () => {
     const exchange = createExchange();
     const post = vi
