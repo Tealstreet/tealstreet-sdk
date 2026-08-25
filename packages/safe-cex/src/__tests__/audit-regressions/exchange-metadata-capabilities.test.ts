@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.hoisted(() => {
+  // HyroTrader builds Bybit REST clients during construction, before the test ever starts I/O.
+  process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL ??= 'https://hyrotrader-simulator.test';
+});
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { BaseCapabilityMethod, BaseExchange, isBaseCapabilityFallback, isInertCapability } from '../../exchanges/base';
