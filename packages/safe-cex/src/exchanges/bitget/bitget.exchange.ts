@@ -1012,6 +1012,8 @@ export class BitgetExchange extends BaseExchange {
         // Calculate price precision based on pricePlace and priceEndStep
         const priceDecimals = 10 / 10 ** (parseFloat(m.pricePlace) + 1);
         const pricePrecision = priceDecimals * parseFloat(m.priceEndStep);
+        const maxOrderQty =
+          parseFloat(m.maxOrderQty) || parseFloat(m.maxMarketOrderQty) || parseFloat(m.maxTradeNum) || Infinity;
 
         return {
           id: m.symbol,
@@ -1026,7 +1028,7 @@ export class BitgetExchange extends BaseExchange {
           limits: {
             amount: {
               min: parseFloat(m.minTradeNum) || 0,
-              max: parseFloat(m.maxTradeNum) || Infinity,
+              max: maxOrderQty,
             },
             leverage: {
               min: parseFloat(m.minLever) || 1,
@@ -1346,8 +1348,7 @@ export class BitgetExchange extends BaseExchange {
     const [, amount, unit] = opts.interval.split(/(\d+)/);
 
     const end = opts.to ? dayjs(opts.to) : dayjs();
-    const start =
-      !opts.limit && opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
+    const start = opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
 
     const {
       data: { data },
@@ -1356,7 +1357,7 @@ export class BitgetExchange extends BaseExchange {
         symbol: opts.symbol,
         granularity: interval,
         endTime: end.valueOf(),
-        ...(end.valueOf() === start.valueOf() && { startTime: start.valueOf() }),
+        ...(opts.from && { startTime: start.valueOf() }),
         productType: this.apiProductType,
         limit,
       },

@@ -1,3 +1,4 @@
+import type { Position } from '../../types';
 import type { BitgetExchange } from './bitget.exchange';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 
@@ -40,6 +41,10 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private balanceFetchThrottleMs = 300;
   private balanceFetchScheduled = false;
   private hasPendingBalanceEvents = false;
+  private lastWsPositionSnapshotAt = 0;
+  private lastWsPositionSnapshotIds = new Set<string>();
+  private wsPositionUpdatedAtById = new Map<string, number>();
+  private readonly positionRestStaleGuardMs = 5_000;
 
   private toFiniteNumber = (value: unknown, fallback = 0): number => {
     if (typeof value === 'number') {
@@ -51,6 +56,74 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       return Number.isFinite(parsed) ? parsed : fallback;
     }
     return fallback;
+  };
+
+  private getPositionPayloadUpdateTime = (position: Position): number | undefined => {
+    const raw =
+      position.info?.uTime ??
+      position.info?.updatedTime ??
+      position.info?.utime ??
+      position.info?.cTime ??
+      position.info?.createdTime;
+    const parsed = this.toFiniteNumber(raw, NaN);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  private markWsPositions = (positions: Position[], action?: string) => {
+    const now = virtualClock.getCurrentTimeMs();
+    if (action === 'snapshot') {
+      this.lastWsPositionSnapshotAt = now;
+      this.lastWsPositionSnapshotIds = new Set(positions.map((position) => position.id));
+    }
+
+    for (const position of positions) {
+      this.wsPositionUpdatedAtById.set(position.id, now);
+    }
+  };
+
+  private mergeRestPositionsWithFreshWsState = (restPositions: Position[], requestStartedAt: number): Position[] => {
+    const currentById = new Map(this.store.positions.map((position) => [position.id, position]));
+    const merged: Position[] = [];
+    const usedIds = new Set<string>();
+    const snapshotIsFresh =
+      this.lastWsPositionSnapshotAt > 0 &&
+      requestStartedAt - this.lastWsPositionSnapshotAt <= this.positionRestStaleGuardMs;
+
+    for (const restPosition of restPositions) {
+      if (snapshotIsFresh && !this.lastWsPositionSnapshotIds.has(restPosition.id)) {
+        continue;
+      }
+
+      const currentPosition = currentById.get(restPosition.id);
+      const wsUpdatedAt = this.wsPositionUpdatedAtById.get(restPosition.id) ?? 0;
+      const wsIsFresh = wsUpdatedAt > 0 && requestStartedAt - wsUpdatedAt <= this.positionRestStaleGuardMs;
+
+      if (currentPosition && wsIsFresh) {
+        const currentUpdateTime = this.getPositionPayloadUpdateTime(currentPosition);
+        const restUpdateTime = this.getPositionPayloadUpdateTime(restPosition);
+
+        if (!restUpdateTime || (currentUpdateTime && currentUpdateTime > restUpdateTime)) {
+          merged.push(currentPosition);
+          usedIds.add(currentPosition.id);
+          continue;
+        }
+      }
+
+      merged.push(restPosition);
+      usedIds.add(restPosition.id);
+    }
+
+    for (const currentPosition of this.store.positions) {
+      if (usedIds.has(currentPosition.id)) continue;
+
+      const wsUpdatedAt = this.wsPositionUpdatedAtById.get(currentPosition.id) ?? 0;
+      if (wsUpdatedAt > 0 && requestStartedAt - wsUpdatedAt <= this.positionRestStaleGuardMs) {
+        merged.push(currentPosition);
+        usedIds.add(currentPosition.id);
+      }
+    }
+
+    return merged;
   };
 
   connectAndSubscribe = () => {
@@ -314,6 +387,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       // Bitget can send an empty snapshot when there are no open positions.
       // Apply immediately so UI does not wait on periodic tick reconciliation.
       if (action === 'snapshot') {
+        this.markWsPositions([], action);
         this.store.addOrUpdatePositionsFull([]);
       }
       this.hasPendingPositionEvents = true;
@@ -323,6 +397,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
 
     const positions = validItems.map((rawPosition) => this.parent.mapPosition(rawPosition));
+    this.markWsPositions(positions, action);
 
     // Snapshot should be treated as full state to clear stale positions that are omitted.
     if (action === 'snapshot') {
@@ -345,6 +420,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
     if (validItems.length === 0) {
       if (action === 'snapshot') {
+        this.markWsPositions([], action);
         this.store.addOrUpdatePositionsFull([]);
       }
       this.hasPendingPositionEvents = true;
@@ -354,6 +430,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
 
     const positions = validItems.map((rawPosition) => this.parent.mapUtaPosition(rawPosition));
+    this.markWsPositions(positions, action);
     if (action === 'snapshot') {
       this.store.addOrUpdatePositionsFull(positions);
     } else {
@@ -461,10 +538,11 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private executePositionFetch = async () => {
     try {
       this.lastPositionFetchTime = Date.now();
+      const requestStartedAt = virtualClock.getCurrentTimeMs();
       this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed) {
-        this.store.addOrUpdatePositionsFull(positions);
+        this.store.addOrUpdatePositionsFull(this.mergeRestPositionsWithFreshWsState(positions, requestStartedAt));
       }
     } catch {
       // Silent failure, will retry on next event
