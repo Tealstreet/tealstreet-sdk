@@ -396,6 +396,44 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
+  it('hydrates flat-symbol leverage during active-symbol metadata updates', async () => {
+    const exchange = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        code: 0,
+        data: [
+          {
+            symbol: 'BTC_USDT',
+            positionType: 1,
+            openType: 2,
+            leverage: 50,
+          },
+          {
+            symbol: 'BTC_USDT',
+            positionType: 2,
+            openType: 2,
+            leverage: 32,
+          },
+        ],
+      },
+    });
+    exchange.store.update({ markets: [market], positions: [] });
+    exchange.xhr = { get } as any;
+
+    await exchange.updateSymbolMetadata('BTCUSDT');
+
+    expect(exchange.store.fetchedLeverage.BTCUSDT).toMatchObject({
+      buyLeverage: 50,
+      sellLeverage: 32,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.Hedged,
+    });
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.POSITION_LEVERAGE, {
+      params: { symbol: 'BTC_USDT' },
+    });
+  });
+
   it('keeps flat-position metadata in sync after position mode changes', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });

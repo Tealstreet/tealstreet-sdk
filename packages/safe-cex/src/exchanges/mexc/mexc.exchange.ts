@@ -835,7 +835,7 @@ export class MexcExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
-    this.symbolSettings.set(symbol, this.deriveSymbolConfig(symbol));
+    await this.fetchLeverageForSymbol(symbol);
   };
 
   setLeverage = async (symbol: string, leverage: number, side?: PositionSide): Promise<void> => {
