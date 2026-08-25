@@ -1115,6 +1115,78 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
+  it('keeps existing regular close limits during symbol-scoped TP/SL refreshes', async () => {
+    const exchange = createExchange();
+    const regularCloseOrder = {
+      id: 'regular-tp-limit-1',
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Sell,
+      status: OrderStatus.Open,
+      price: 51000,
+      amount: 0.75,
+      filled: 0,
+      remaining: 0.75,
+      reduceOnly: true,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    } as Order;
+    const stalePlanOrder = {
+      id: 'stale-plan-sl',
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      status: OrderStatus.Open,
+      price: 48000,
+      amount: 0.75,
+      filled: 0,
+      remaining: 0.75,
+      reduceOnly: true,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+      info: { __mexcPlanOrder: true },
+    } as Order;
+    const get = vi.fn(async (url: string) => {
+      if (url === `${ENDPOINTS.OPEN_ORDERS}/BTC_USDT`) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
+      if (url === ENDPOINTS.PLAN_ORDER_LIST) {
+        return {
+          data: {
+            success: true,
+            code: 0,
+            data: [
+              {
+                id: 'plan-sl-1',
+                symbol: 'BTC_USDT',
+                side: 4,
+                triggerPrice: 49000,
+                vol: 7500,
+                openType: 2,
+                triggerType: 2,
+                state: 1,
+                executeCycle: 2,
+                trend: 1,
+                orderType: 5,
+                positionMode: 1,
+                reduceOnly: true,
+                updateTime: 1700000000000,
+              },
+            ],
+          },
+        };
+      }
+      if (url === ENDPOINTS.STOP_ORDER_LIST) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.store.update({ markets: [market], orders: [regularCloseOrder, stalePlanOrder] });
+    exchange.xhr = { get } as any;
+
+    await exchange.fetchAndSetOrders(['BTCUSDT']);
+
+    expect(exchange.store.orders.map((order) => order.id).sort()).toEqual(['plan-sl-1', 'regular-tp-limit-1']);
+  });
+
   it('keeps full-position TP/SL stop orders visible as infinity stops', async () => {
     const exchange = createExchange();
     const get = vi.fn(async (url: string) => {
@@ -1216,6 +1288,106 @@ describe('MEXC futures audit regressions', () => {
     ]);
 
     expect(post).toHaveBeenCalledWith(ENDPOINTS.STOP_ORDER_CANCEL, [{ stopPlanOrderId: 'stop-position-1' }]);
+  });
+
+  it('does not let lagging stop-order snapshots re-open a just-cancelled TP/SL row', async () => {
+    const exchange = createExchange();
+    const stopOrder = {
+      id: 'stop-position-1',
+      symbol: 'BTCUSDT',
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      status: OrderStatus.Open,
+      amount: 0,
+      remaining: 0,
+      price: 49000,
+      info: { __mexcStopOrder: true },
+    } as Order;
+    const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));
+    const get = vi.fn(async (url: string) => {
+      if (url === ENDPOINTS.OPEN_ORDERS || url === ENDPOINTS.PLAN_ORDER_LIST) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
+      if (url === ENDPOINTS.STOP_ORDER_LIST) {
+        return {
+          data: {
+            success: true,
+            code: 0,
+            data: [
+              {
+                stopPlanOrderId: 'stop-position-1',
+                symbol: 'BTC_USDT',
+                positionType: 1,
+                triggerSide: 2,
+                volType: 2,
+                stopLossPrice: 49000,
+                state: 1,
+                createTime: 1700000000000,
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { get, post } as any;
+
+    await exchange.cancelOrders([stopOrder]);
+
+    await expect(exchange.fetchOrders()).resolves.toEqual([]);
+  });
+
+  it('does not preserve already-cancelled stop-like rows during regular-order refreshes', async () => {
+    const exchange = createExchange();
+    const get = vi.fn(async (url: string) => {
+      if (url === ENDPOINTS.OPEN_ORDERS) {
+        return {
+          data: {
+            success: true,
+            code: 0,
+            data: [
+              {
+                orderId: 'regular-1',
+                symbol: 'BTC_USDT',
+                side: 1,
+                type: 1,
+                state: 2,
+                price: 50000,
+                vol: 10000,
+                dealVol: 0,
+                updateTime: 1700000000000,
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'plan-1',
+          status: OrderStatus.Canceled,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          info: { __mexcPlanOrder: true },
+        } as Order,
+      ],
+    });
+    exchange.xhr = { get } as any;
+
+    await exchange.fetchAndSetRegularOrders();
+
+    expect(exchange.store.orders.map((order) => order.id)).toEqual(['regular-1']);
   });
 
   it('cancels regular orders with the raw order-id array required by the live API', async () => {

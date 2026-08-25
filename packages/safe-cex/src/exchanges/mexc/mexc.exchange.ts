@@ -104,6 +104,7 @@ const MEXC_PLAN_ORDER_LOOKBACK_MS = 89 * 24 * 60 * 60 * 1000;
 const MEXC_REGULAR_ORDER_SUBMIT_GAP_MS = 450;
 const MEXC_SCALED_ORDER_SUBMIT_GAP_MS = 1_500;
 const MEXC_REGULAR_ORDER_THROTTLE_COOLDOWN_MS = 1_500;
+const MEXC_RECENT_STOP_CANCEL_SHIELD_MS = 15_000;
 
 export class MexcExchange extends BaseExchange {
   xhr: Axios;
@@ -119,6 +120,7 @@ export class MexcExchange extends BaseExchange {
   private lastRegularOrderSubmitAt = 0;
   private regularOrderSubmitCooldownUntil = 0;
   private nativeBatchOrdersAvailable: boolean | undefined;
+  private recentlyCanceledStopLikeOrderIds = new Map<string, number>();
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -364,7 +366,35 @@ export class MexcExchange extends BaseExchange {
       }
     }
 
-    return uniqBy(orders, 'id');
+    return this.filterRecentlyCanceledStopLikeOrders(uniqBy(orders, 'id'));
+  };
+
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders(symbols);
+    if (this.isDisposed) return orders;
+
+    if (symbols?.length) {
+      for (const symbol of symbols) {
+        const symbolOrders = orders.filter((order) => order.symbol === symbol);
+        const fetchedIds = new Set(symbolOrders.map((order) => order.id));
+        const existingOpenOrders = this.store.orders.filter(
+          (order) =>
+            order.symbol === symbol &&
+            order.status === OrderStatus.Open &&
+            !fetchedIds.has(order.id) &&
+            !this.isStopLikeOrder(order) &&
+            !this.isRecentlyCanceledStopLikeOrder(order),
+        );
+        this.store.setOrdersForSymbol(symbol, uniqBy([...symbolOrders, ...existingOpenOrders], 'id'));
+      }
+    } else {
+      this.store.update({
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      });
+    }
+
+    return orders;
   };
 
   fetchRegularOrders = async (symbols?: string[]): Promise<Order[]> => {
@@ -403,13 +433,11 @@ export class MexcExchange extends BaseExchange {
     if (symbols?.length) {
       for (const symbol of symbols) {
         const symbolRegularOrders = regularOrders.filter((order) => order.symbol === symbol);
-        const symbolStopLikeOrders = this.store.orders.filter(
-          (order) => order.symbol === symbol && this.isStopLikeOrder(order),
-        );
+        const symbolStopLikeOrders = this.store.orders.filter((order) => this.shouldPreserveStopLikeOrder(order, symbol));
         this.store.setOrdersForSymbol(symbol, uniqBy([...symbolStopLikeOrders, ...symbolRegularOrders], 'id'));
       }
     } else {
-      const stopLikeOrders = this.store.orders.filter((order) => this.isStopLikeOrder(order));
+      const stopLikeOrders = this.store.orders.filter((order) => this.shouldPreserveStopLikeOrder(order));
       this.store.update({
         orders: uniqBy([...stopLikeOrders, ...regularOrders], 'id'),
         loaded: { ...this.store.loaded, orders: true },
@@ -935,19 +963,24 @@ export class MexcExchange extends BaseExchange {
     const stopOrders = orders.filter((order) => this.isStopOrder(order));
     const planOrders = orders.filter((order) => this.isPlanOrder(order));
     const regularOrders = orders.filter((order) => !this.isStopLikeOrder(order));
+    const acceptedStopLikeCancels: Order[] = [];
 
     for (const lot of chunk(stopOrders, 50)) {
-      await this.xhr.post(
+      const { data } = await this.xhr.post(
         ENDPOINTS.STOP_ORDER_CANCEL,
         lot.map((order) => ({ stopPlanOrderId: order.id.split('__')[0] })),
       );
+      this.assertCommonCancelSucceeded(data, 'MEXC position TP/SL cancellation');
+      acceptedStopLikeCancels.push(...lot);
     }
 
     for (const lot of chunk(planOrders, 50)) {
-      await this.xhr.post(
+      const { data } = await this.xhr.post(
         ENDPOINTS.PLAN_ORDER_CANCEL,
         lot.map((order) => ({ symbol: toMexcSymbol(order.symbol), orderId: order.id.split('__')[0] })),
       );
+      this.assertCommonCancelSucceeded(data, 'MEXC plan order cancellation');
+      acceptedStopLikeCancels.push(...lot);
     }
 
     for (const lot of chunk(regularOrders, 50)) {
@@ -958,11 +991,18 @@ export class MexcExchange extends BaseExchange {
       this.assertRegularCancelSucceeded(data);
     }
 
+    this.noteRecentlyCanceledStopLikeOrders(acceptedStopLikeCancels);
     this.store.updateOrdersStatus(
       orders.map((order) => ({ id: order.id })),
       OrderStatus.Canceled,
     );
   };
+
+  private shouldPreserveStopLikeOrder = (order: Order, symbol?: string): boolean =>
+    this.isStopLikeOrder(order) &&
+    order.status === OrderStatus.Open &&
+    (symbol === undefined || order.symbol === symbol) &&
+    !this.isRecentlyCanceledStopLikeOrder(order);
 
   private isStopLikeOrder = (order: Order): boolean =>
     order.type === OrderType.StopLoss ||
@@ -978,7 +1018,37 @@ export class MexcExchange extends BaseExchange {
 
   private isPlanOrder = (order: Order): boolean => this.isStopLikeOrder(order) && !this.isStopOrder(order);
 
+  private noteRecentlyCanceledStopLikeOrders = (orders: Order[]): void => {
+    const now = virtualClock.getCurrentTimeMs();
+    for (const order of orders) {
+      this.recentlyCanceledStopLikeOrderIds.set(order.id.split('__')[0], now);
+    }
+  };
+
+  private isRecentlyCanceledStopLikeOrder = (order: Order): boolean => {
+    const id = order.id.split('__')[0];
+    const canceledAt = this.recentlyCanceledStopLikeOrderIds.get(id);
+    if (canceledAt === undefined) return false;
+
+    if (virtualClock.getCurrentTimeMs() - canceledAt > MEXC_RECENT_STOP_CANCEL_SHIELD_MS) {
+      this.recentlyCanceledStopLikeOrderIds.delete(id);
+      return false;
+    }
+    return true;
+  };
+
+  private filterRecentlyCanceledStopLikeOrders = (orders: Order[]): Order[] =>
+    orders.filter((order) => !this.isStopLikeOrder(order) || !this.isRecentlyCanceledStopLikeOrder(order));
+
+  private assertCommonCancelSucceeded = (payload: any, action: string): void => {
+    const code = payload?.code === undefined || payload?.code === null ? undefined : toNumber(payload.code, Number.NaN);
+    if (payload && payload.success !== false && code === 0) return;
+
+    throw new Error(`${action} failed: ${payload?.message || payload?.msg || payload?.code || 'unknown error'}`);
+  };
+
   private assertRegularCancelSucceeded = (payload: any): void => {
+    this.assertCommonCancelSucceeded(payload, 'MEXC order cancellation');
     const failedRows = extractRows<Record<string, any>>(payload).filter((row) => toNumber(row.errorCode, 0) !== 0);
     if (!failedRows.length) return;
 
