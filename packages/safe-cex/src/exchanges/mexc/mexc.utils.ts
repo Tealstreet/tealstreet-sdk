@@ -124,16 +124,18 @@ const normalizePercentage = (value: unknown): number => {
 
 export const normalizeTicker = (raw: Record<string, any>, market: Market): Ticker => {
   const last = toNumber(raw.lastPrice ?? raw.last, 0);
+  const mark = toNumber(raw.fairPrice ?? raw.markPrice, last);
+  const openInterestBase = nativeVolumeToAmount(raw.holdVol ?? raw.openInterest, market);
   return {
     id: market.id,
     symbol: market.symbol,
     bid: toNumber(raw.bid1 ?? raw.bidPrice, last),
     ask: toNumber(raw.ask1 ?? raw.askPrice, last),
     last,
-    mark: toNumber(raw.fairPrice ?? raw.markPrice, last),
+    mark,
     index: toNumber(raw.indexPrice, last),
     percentage: normalizePercentage(raw.riseFallRate ?? raw.priceChangePercent),
-    openInterest: nativeVolumeToAmount(raw.holdVol ?? raw.openInterest, market),
+    openInterest: openInterestBase * (mark || last),
     fundingRate: toNumber(raw.fundingRate),
     fundingTime: normalizeTimestampToMs(raw.fundingTime ?? raw.nextSettleTime),
     volume: nativeVolumeToAmount(raw.volume24 ?? raw.volume, market),

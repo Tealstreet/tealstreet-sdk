@@ -6,6 +6,7 @@
 - Product scope: USDT- and USDC-margined perpetual futures.
 - Venue symbols use underscores (`BTC_USDT`); Tealstreet symbols remain compact (`BTCUSDT`).
 - MEXC reports order and position sizes in native contract volume. Convert to base-asset size with `market.contractSize` before publishing to the store.
+- MEXC ticker `holdVol` is open interest in native contract volume. Convert it to base with `market.contractSize`, then publish `Ticker.openInterest` as quote notional using fair/mark price so ticker tables align with the venue's `Open Interest (USDT/USDC)` display.
 - `PlaceOrderOpts.amount` arrives from the app order flow as native contract volume. Send it to MEXC as `vol` after snapping to `volUnit`; do not convert it with `contractSize` again.
 
 ## Domains
