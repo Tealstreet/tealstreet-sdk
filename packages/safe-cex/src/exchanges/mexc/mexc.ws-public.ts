@@ -50,7 +50,7 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   ping = () => {
     if (!this.isDisposed) {
       this.pingAt = performance.now();
-      this.sendWithLog(JSON.stringify({ method: 'ping' }));
+      this.sendWithDiagnostics(JSON.stringify({ method: 'ping' }));
     }
   };
 
@@ -60,6 +60,7 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
 
     const json = bigIntAsStringJsonParse<Record<string, any>>(String(data));
     if (!json) return;
+    this.emitReceiveDiagnostics(data, json);
 
     if (json.channel === 'pong' || json.msg === 'pong' || json.method === 'pong') {
       this.handlePongEvent(15_000);
@@ -224,23 +225,33 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     const key = subscriptionKey(subscription);
     if (track) this.subscriptions.set(key, subscription);
     if (!this.isConnected) return;
-    this.sendWithLog(JSON.stringify(subscription));
+    this.sendWithDiagnostics(JSON.stringify(subscription));
   };
 
   private unsubscribe = (subscription: Subscription, track = true) => {
     const key = subscriptionKey(subscription);
     if (track) this.subscriptions.delete(key);
     if (!this.isConnected) return;
-    this.sendWithLog(JSON.stringify({ ...subscription, method: subscription.method.replace(/^sub\./, 'unsub.') }));
+    this.sendWithDiagnostics(JSON.stringify({ ...subscription, method: subscription.method.replace(/^sub\./, 'unsub.') }));
   };
 
   private resubscribe = () => {
     for (const subscription of this.subscriptions.values()) {
-      this.sendWithLog(JSON.stringify(subscription));
+      this.sendWithDiagnostics(JSON.stringify(subscription));
     }
     for (const subscription of this.tickerSubscriptions.values()) {
-      this.sendWithLog(JSON.stringify(subscription));
+      this.sendWithDiagnostics(JSON.stringify(subscription));
     }
+  };
+
+  private sendWithDiagnostics = (data: string) => {
+    this.send(data);
+    this.parent.emitter.emit('grafana-pws-sub', `[mexc public] ${data}`);
+  };
+
+  private emitReceiveDiagnostics = (data: unknown, json: Record<string, any>) => {
+    if (json.channel === 'push.ticker') return;
+    this.parent.emitter.emit('grafana-pws', `[mexc public] ${String(data)}`);
   };
 
   private addHandler = (key: string, handler: MessageHandler) => {

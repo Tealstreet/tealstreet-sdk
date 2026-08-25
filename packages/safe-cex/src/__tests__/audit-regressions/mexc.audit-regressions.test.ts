@@ -79,6 +79,60 @@ describe('MEXC futures audit regressions', () => {
     );
   });
 
+  it('emits public WebSocket diagnostics for request drawer subscriptions', () => {
+    const exchange = createExchange();
+    const send = vi.fn();
+    const sendLogs: string[] = [];
+    exchange.store.update({ markets: [market] });
+    exchange.publicWebsocket.ws = { readyState: 1, send } as any;
+    exchange.on('grafana-pws-sub', (message: string) => sendLogs.push(message));
+
+    const dispose = exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
+
+    expect(send).toHaveBeenCalledWith(JSON.stringify({ method: 'sub.kline', param: { symbol: 'BTC_USDT', interval: 'Min1' } }));
+    expect(sendLogs).toEqual([
+      '[mexc public] {"method":"sub.kline","param":{"symbol":"BTC_USDT","interval":"Min1"}}',
+    ]);
+    dispose();
+  });
+
+  it('emits public WebSocket receive diagnostics without flooding ticker pushes', () => {
+    const exchange = createExchange();
+    const receiveLogs: string[] = [];
+    exchange.on('grafana-pws', (message: string) => receiveLogs.push(message));
+
+    exchange.publicWebsocket.onMessage({ data: '{"channel":"rs.sub.kline","success":true}' } as MessageEvent);
+    exchange.publicWebsocket.onMessage({
+      data: '{"channel":"push.ticker","symbol":"BTC_USDT","data":{"lastPrice":"70000"}}',
+    } as MessageEvent);
+
+    expect(receiveLogs).toEqual(['[mexc public] {"channel":"rs.sub.kline","success":true}']);
+  });
+
+  it('redacts private WebSocket auth diagnostics before forwarding to the request drawer', async () => {
+    const exchange = createExchange();
+    const send = vi.fn();
+    const sendLogs: string[] = [];
+    exchange.privateWebsocket.ws = { readyState: 1, send } as any;
+    exchange.on('grafana-pws-sub', (message: string) => sendLogs.push(message));
+
+    await (exchange.privateWebsocket as any).sendLogin();
+
+    const sentLogin = JSON.parse(send.mock.calls[0][0]);
+    expect(sentLogin).toMatchObject({
+      method: 'login',
+      param: {
+        apiKey: 'key',
+        reqTime: expect.any(String),
+        signature: expect.any(String),
+      },
+    });
+    expect(sendLogs).toHaveLength(1);
+    expect(sendLogs[0]).toContain('"apiKey":"[redacted]"');
+    expect(sendLogs[0]).toContain('"signature":"[redacted]"');
+    expect(sendLogs[0]).not.toContain('"apiKey":"key"');
+  });
+
   it('normalizes market precision and contract-size sizing', () => {
     expect(market).toMatchObject({
       id: 'BTC_USDT',

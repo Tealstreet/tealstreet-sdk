@@ -53,6 +53,10 @@ Private WebSocket login sends:
 
 Hosted mode must use the remote signer for this login signature. The secret is intentionally empty on hosted exchange-server instances.
 
+## WebSocket Diagnostics
+
+MEXC public/private WebSockets emit `grafana-pws-sub` for outbound frames and `grafana-pws` for inbound frames so the web Requests drawer and Grafana diagnostics can show WS traffic even while the global `ENABLE_PWS_LOG` flag remains off. Keep private login frames redacted before emission. Public `push.ticker` frames are intentionally skipped because the active-symbol ticker fanout is high-volume; subscriptions, pongs, depth, klines, trades, and private account frames should still be visible.
+
 ## Order Semantics
 
 - Side enum: `1` open long, `2` close short, `3` open short, `4` close long.

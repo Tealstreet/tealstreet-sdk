@@ -40,7 +40,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   ping = () => {
     if (!this.isDisposed) {
       this.pingAt = performance.now();
-      this.sendWithLog(JSON.stringify({ method: 'ping' }));
+      this.sendWithDiagnostics(JSON.stringify({ method: 'ping' }));
     }
   };
 
@@ -50,6 +50,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
 
     const json = bigIntAsStringJsonParse<Record<string, any>>(String(data));
     if (!json) return;
+    this.emitReceiveDiagnostics(data);
 
     if (json.channel === 'pong' || json.msg === 'pong' || json.method === 'pong') {
       this.handlePongEvent(15_000);
@@ -126,7 +127,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     const signature = await this.createLoginSignature(apiKey, reqTime);
     if (!signature) return;
 
-    this.sendWithLog(
+    this.sendWithDiagnostics(
       JSON.stringify({
         method: 'login',
         param: {
@@ -135,6 +136,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
           signature,
         },
       }),
+      { redactAuth: true },
     );
   };
 
@@ -164,7 +166,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   };
 
   private subscribePrivateFeeds = () => {
-    this.sendWithLog(
+    this.sendWithDiagnostics(
       JSON.stringify({
         method: 'personal.filter',
         param: {
@@ -177,6 +179,31 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
         },
       }),
     );
+  };
+
+  private sendWithDiagnostics = (data: string, options?: { redactAuth?: boolean }) => {
+    this.send(data);
+    this.parent.emitter.emit('grafana-pws-sub', `[mexc private] ${options?.redactAuth ? this.redactAuthFrame(data) : data}`);
+  };
+
+  private emitReceiveDiagnostics = (data: unknown) => {
+    this.parent.emitter.emit('grafana-pws', `[mexc private] ${String(data)}`);
+  };
+
+  private redactAuthFrame = (data: string): string => {
+    try {
+      const payload = JSON.parse(data);
+      if (payload?.method === 'login' && payload.param) {
+        payload.param = {
+          ...payload.param,
+          apiKey: '[redacted]',
+          signature: '[redacted]',
+        };
+      }
+      return JSON.stringify(payload);
+    } catch {
+      return '[mexc private login redacted]';
+    }
   };
 
   private handleOrder = (json: Record<string, any>) => {
