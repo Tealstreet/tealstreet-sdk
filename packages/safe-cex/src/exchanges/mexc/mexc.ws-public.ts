@@ -4,7 +4,7 @@ import type { MexcExchange } from './mexc.exchange';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { LogSeverity } from '../../types';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, INTERVAL } from './mexc.types';
+import { BASE_WS_URL, INTERVAL, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import { fromMexcSymbol, normalizeCandle, normalizeOrderBook, normalizeTicker, toMexcSymbol } from './mexc.utils';
 
 type MessageHandler = (json: Record<string, any>) => void;
@@ -22,6 +22,7 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   private subscriptions = new Map<string, Subscription>();
   private tickerSubscriptions = new Map<string, Subscription>();
   private orderbooks: Record<string, OrderBook> = {};
+  private heartbeatInterval?: NodeJS.Timeout;
 
   constructor(parent: MexcExchange) {
     super(parent);
@@ -35,11 +36,12 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     this.ws = this.createWebsocket(BASE_WS_URL.public[key], undefined, { headers: { 'User-Agent': 'Tealstreet' } });
     this.ws.addEventListener('open', this.onOpen);
     this.ws.addEventListener('message', this.onMessage);
-    this.ws.addEventListener('close', this.onClose);
+    this.ws.addEventListener('close', this.handleClose);
   };
 
   onOpen = () => {
     if (this.isDisposed) return;
+    this.startHeartbeat();
     this.reconcileTickerSubscriptions();
     this.resubscribe();
     this.emitWsReconnected();
@@ -159,9 +161,30 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   };
 
   override dispose() {
+    this.stopHeartbeat();
     this.parent.off('activeTickerSymbols:changed', this.handleActiveTickerSymbolsChanged);
     super.dispose();
   }
+
+  private startHeartbeat = () => {
+    this.stopHeartbeat();
+    this.ping();
+    this.heartbeatInterval = setInterval(() => {
+      if (!this.isDisposed && this.isConnected) {
+        this.ping();
+      }
+    }, MEXC_WS_HEARTBEAT_INTERVAL_MS);
+  };
+
+  private stopHeartbeat = () => {
+    clearInterval(this.heartbeatInterval);
+    this.heartbeatInterval = undefined;
+  };
+
+  private handleClose = (event?: any) => {
+    this.stopHeartbeat();
+    this.onClose(event);
+  };
 
   private handleActiveTickerSymbolsChanged = () => {
     if (this.isDisposed) return;

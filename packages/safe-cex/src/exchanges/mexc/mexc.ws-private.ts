@@ -7,7 +7,7 @@ import { LogSeverity, Order, OrderStatus } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { signMexcWsLogin } from './mexc.api';
-import { BASE_WS_URL } from './mexc.types';
+import { BASE_WS_URL, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import { fromMexcSymbol, normalizeExecution, normalizeOrder, normalizePosition } from './mexc.utils';
 
 export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
@@ -16,6 +16,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   private refreshOrdersTimeout?: NodeJS.Timeout;
   private refreshPositionsTimeout?: NodeJS.Timeout;
   private refreshBalanceTimeout?: NodeJS.Timeout;
+  private heartbeatInterval?: NodeJS.Timeout;
 
   connectAndSubscribe = () => {
     if (this.isDisposed || this.parent.isPublicDataOnly) return;
@@ -25,11 +26,12 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     this.ws = this.createWebsocket(BASE_WS_URL.private[key], undefined, { headers: { 'User-Agent': 'Tealstreet' } });
     this.ws.addEventListener('open', this.onOpen);
     this.ws.addEventListener('message', this.onMessage);
-    this.ws.addEventListener('close', this.onClose);
+    this.ws.addEventListener('close', this.handleClose);
   };
 
   onOpen = () => {
     if (this.isDisposed) return;
+    this.startHeartbeat();
     this.sendLogin();
     this.parent.fetchAndSetPrivateSnapshot(10);
     this.emitWsReconnected();
@@ -91,10 +93,31 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   };
 
   dispose = () => {
+    this.stopHeartbeat();
     clearTimeout(this.refreshOrdersTimeout);
     clearTimeout(this.refreshPositionsTimeout);
     clearTimeout(this.refreshBalanceTimeout);
     super.dispose();
+  };
+
+  private startHeartbeat = () => {
+    this.stopHeartbeat();
+    this.ping();
+    this.heartbeatInterval = setInterval(() => {
+      if (!this.isDisposed && this.isConnected) {
+        this.ping();
+      }
+    }, MEXC_WS_HEARTBEAT_INTERVAL_MS);
+  };
+
+  private stopHeartbeat = () => {
+    clearInterval(this.heartbeatInterval);
+    this.heartbeatInterval = undefined;
+  };
+
+  private handleClose = (event?: any) => {
+    this.stopHeartbeat();
+    this.onClose(event);
   };
 
   private sendLogin = async () => {
