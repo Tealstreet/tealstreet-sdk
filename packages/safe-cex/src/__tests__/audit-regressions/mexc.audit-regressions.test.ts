@@ -121,7 +121,7 @@ describe('MEXC futures audit regressions', () => {
     expect(toMexcSymbol('BTCUSDC')).toBe('BTC_USDC');
   });
 
-  it('normalizes tickers with venue volume converted from native contracts', () => {
+  it('normalizes tickers with venue volume converted from native contracts and OI as quote notional', () => {
     const ticker = normalizeTicker(
       {
         symbol: 'BTC_USDT',
@@ -141,7 +141,7 @@ describe('MEXC futures audit regressions', () => {
 
     expect(ticker.symbol).toBe('BTCUSDT');
     expect(ticker.percentage).toBeCloseTo(0.24);
-    expect(ticker.openInterest).toBeCloseTo(65245.2606);
+    expect(ticker.openInterest).toBeCloseTo(65245.2606 * 77181.8);
     expect(ticker.volume).toBeCloseTo(61359.0677);
   });
 
