@@ -13,8 +13,6 @@ import { fromMexcSymbol, normalizeExecution, normalizeOrder, normalizePosition }
 export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   protected override treatAnyMessageAsPong = true;
 
-  private refreshOrdersTimeout?: NodeJS.Timeout;
-  private refreshPositionsTimeout?: NodeJS.Timeout;
   private refreshBalanceTimeout?: NodeJS.Timeout;
   private heartbeatInterval?: NodeJS.Timeout;
 
@@ -97,8 +95,6 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
 
   dispose = () => {
     this.stopHeartbeat();
-    clearTimeout(this.refreshOrdersTimeout);
-    clearTimeout(this.refreshPositionsTimeout);
     clearTimeout(this.refreshBalanceTimeout);
     super.dispose();
   };
@@ -223,7 +219,11 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
         }
       }
     }
-    this.throttledFetchOrders();
+    // Intentionally no REST reconciliation here. MEXC's `push.personal.order`
+    // payload is complete (vol/remainVol/state/price/leverage/timestamps/...),
+    // so trusting the WS write plus the periodic `tick` (~2s) and
+    // `scheduleUserActivityPositionRefetch` covers reconciliation without the
+    // duplicate `open_orders` roundtrip that used to fire on every WS event.
   };
 
   private handleFill = (json: Record<string, any>) => {
@@ -243,8 +243,9 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
         realizedPnl: fill.realizedPnl,
       });
     }
-    this.throttledFetchOrders();
-    this.throttledFetchPositions();
+    // MEXC emits a separate `push.personal.order` (order state) and
+    // `push.personal.position` (position delta) alongside every fill, so
+    // there is no need to fan out to REST from the deal handler.
   };
 
   private handlePosition = (json: Record<string, any>) => {
@@ -256,26 +257,10 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     if (positions.length) {
       this.store.addOrUpdatePositions(positions as any);
     }
-    this.throttledFetchPositions();
-  };
-
-  private throttledFetchOrders = () => {
-    clearTimeout(this.refreshOrdersTimeout);
-    this.refreshOrdersTimeout = setTimeout(async () => {
-      try {
-        if (!this.isDisposed) await this.parent.fetchAndSetRegularOrders();
-      } catch (_err) {}
-    }, 1000);
-  };
-
-  private throttledFetchPositions = () => {
-    clearTimeout(this.refreshPositionsTimeout);
-    this.refreshPositionsTimeout = setTimeout(async () => {
-      try {
-        const positions = await this.parent.fetchPositions();
-        if (!this.isDisposed) this.store.addOrUpdatePositionsFull(positions);
-      } catch (_err) {}
-    }, 1000);
+    // Intentionally no REST reconciliation here. `push.personal.position`
+    // is a full snapshot (holdVol/frozenVol/holdAvgPrice/leverage/liqPrice/
+    // marginRatio/pnl/...) so the WS write is enough; the 2s `tick` acts as
+    // the safety net.
   };
 
   private throttledFetchBalance = () => {
