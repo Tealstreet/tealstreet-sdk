@@ -88,6 +88,12 @@ If you enabled IP restrictions on MEXC, make sure the whitelist exactly matches 
 
 Confirm the API key has futures trading permissions enabled. Read-only keys can load some account or market information, but they cannot place, edit, or cancel orders.
 
+### Scaled orders submit slowly or batch orders are unavailable
+
+MEXC's futures batch order endpoint is only available to market maker accounts. If MEXC returns `You do not have access to the interface`, this usually means the API key or account UID is not entitled to that market maker-only interface. It is not, by itself, evidence that the REST source IP or proxy is missing a market maker allowlist.
+
+Tealstreet falls back to paced single-order submission when the batch endpoint is unavailable. If you need higher scaled-order throughput, ask MEXC whether your account UID and API key can be enabled for futures batch order placement, and separately confirm any per-UID and per-IP request limits that apply to your proxy or routing setup.
+
 ### MEXC shows lower maximum leverage than the risk table
 
 MEXC may lock its highest leverage tiers behind advanced KYC or other account-level eligibility checks. The public risk-limit table can show leverage tiers that are not available to every account. If MEXC or Tealstreet shows a lower cap for your account, complete any advanced KYC steps MEXC requires or contact MEXC support to confirm your account's leverage eligibility.
