@@ -731,6 +731,30 @@ describe('MEXC futures audit regressions', () => {
       }),
     ).resolves.toEqual(['plan-tp']);
 
+    expect(exchange.store.orders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'plan-sl',
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          status: OrderStatus.Open,
+          amount: 1,
+          remaining: 1,
+          price: 49000,
+          info: expect.objectContaining({ __mexcPlanOrder: true, vol: 10000 }),
+        }),
+        expect.objectContaining({
+          id: 'plan-tp',
+          symbol: 'BTCUSDT',
+          type: OrderType.TakeProfit,
+          status: OrderStatus.Open,
+          amount: 1,
+          remaining: 1,
+          price: 51000,
+          info: expect.objectContaining({ __mexcPlanOrder: true, vol: 10000 }),
+        }),
+      ]),
+    );
     expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.PLAN_ORDER_PLACE, {
       symbol: 'BTC_USDT',
       vol: 10000,

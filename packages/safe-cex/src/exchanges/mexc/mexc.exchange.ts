@@ -61,6 +61,7 @@ import {
   normalizeKlineResponse,
   normalizeMarginType,
   normalizeMarket,
+  nativeVolumeToAmount,
   normalizeOrder,
   normalizeOrderBook,
   normalizePlanOrder,
@@ -644,6 +645,8 @@ export class MexcExchange extends BaseExchange {
       const { data } = await this.xhr.post(ENDPOINTS.PLAN_ORDER_PLACE, payload);
       const orderId = toIntegerString(extractData(data)?.orderId ?? extractData(data));
       if (!orderId) throw new Error('MEXC plan order placement returned no order id');
+      this.addOptimisticStopOrder(opts, market, orderId, triggerPrice, '__mexcPlanOrder');
+      this.scheduleStopOrderSnapshotRefresh(opts.symbol);
       return orderId;
     } catch (err: any) {
       const message = err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC plan order placement failed';
@@ -711,6 +714,8 @@ export class MexcExchange extends BaseExchange {
         typeof responseData === 'string' || typeof responseData === 'number' ? responseData : undefined;
       const orderId = toIntegerString(responseRow?.id ?? responseRow?.orderId ?? scalarId);
       if (!orderId) throw new Error('MEXC position TP/SL placement returned no order id');
+      this.addOptimisticStopOrder(opts, market, orderId, triggerPrice, '__mexcStopOrder');
+      this.scheduleStopOrderSnapshotRefresh(opts.symbol);
       return orderId;
     } catch (err: any) {
       const message =
@@ -722,6 +727,48 @@ export class MexcExchange extends BaseExchange {
 
   private findOpenPosition = (symbol: string, side: PositionSide, positions: Position[]): Position | undefined =>
     positions.find((position) => position.symbol === symbol && position.side === side && position.contracts > 0);
+
+  private addOptimisticStopOrder = (
+    opts: PlaceOrderOpts,
+    market: Market,
+    orderId: string,
+    triggerPrice: number,
+    marker: '__mexcPlanOrder' | '__mexcStopOrder',
+  ): void => {
+    const nativeAmount = toNumber(opts.amount, 0);
+    const amount = nativeAmount === 0 ? 0 : nativeVolumeToAmount(nativeAmount, market);
+    this.store.addOrUpdateOrder({
+      id: orderId,
+      status: OrderStatus.Open,
+      symbol: opts.symbol,
+      type: opts.type,
+      side: opts.side,
+      price: toNumber(adjust(triggerPrice, market.precision.price)),
+      amount,
+      filled: 0,
+      remaining: amount,
+      reduceOnly: true,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+      info: {
+        [marker]: true,
+        symbol: market.id,
+        vol: nativeAmount,
+      },
+      extra: {
+        remainingNative: nativeAmount,
+      },
+    } as Order);
+  };
+
+  private scheduleStopOrderSnapshotRefresh = (symbol: string): void => {
+    const timeout = setTimeout(() => {
+      void this.fetchAndSetOrders([symbol]).catch((err: any) => {
+        this.log(`Failed to refresh MEXC TP/SL orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+      });
+    }, 1_500);
+    (timeout as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+  };
 
   private nativePositionId = (position: Position): string => {
     const info = position.info as Record<string, any> | undefined;
