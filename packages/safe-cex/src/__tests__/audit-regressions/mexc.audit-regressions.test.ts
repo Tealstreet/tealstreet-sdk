@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { getExchangeMetadata } from '../../exchangeMetadata';
 import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../../exchanges/mexc/mexc.api';
 import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
 import { ENDPOINTS } from '../../exchanges/mexc/mexc.types';
@@ -40,6 +41,10 @@ const market = normalizeMarket({
 });
 
 describe('MEXC futures audit regressions', () => {
+  it('advertises partial TP/SL support for explicit-volume plan orders', () => {
+    expect(getExchangeMetadata('mexc').supportsPartialStops).toBe(true);
+  });
+
   it('signs GET query strings and POST raw JSON bodies exactly', () => {
     expect(serializeMexcParams({ timestamp: 1700000000000, symbol: 'BTC_USDT' })).toBe(
       'symbol=BTC_USDT&timestamp=1700000000000',

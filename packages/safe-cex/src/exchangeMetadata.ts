@@ -646,6 +646,7 @@ const MexcMetadata: ExchangeMetadata = {
     JA: privateProxyIpsTokyo,
   },
   supportsTrailingStopLoss: false,
+  supportsPartialStops: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
   defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
