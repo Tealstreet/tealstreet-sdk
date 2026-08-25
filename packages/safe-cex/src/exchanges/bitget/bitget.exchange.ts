@@ -37,6 +37,7 @@ import {
   PositionMode,
   PositionSide,
   Ticker,
+  timeframeToSeconds,
   UpdateOrderOpts,
   Writable,
 } from '../../types';
@@ -91,6 +92,8 @@ const BITGET_FILLS_MAX_WINDOW_MS = 89 * 24 * 60 * 60 * 1000;
 /** Backstop only; the cursor is what actually terminates the walk. */
 const BITGET_FILLS_MAX_PAGES = 100;
 const BILL_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+/** Bitget rejects candle requests whose paired start/end range reaches the documented 90-day edge. */
+const BITGET_CANDLE_MAX_WINDOW_MS = 89 * 24 * 60 * 60 * 1000;
 
 export const BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE =
   'This Bitget API key belongs to a Unified Trading Account (UTA), but Tealstreet currently uses Bitget Classic API endpoints for this adapter. Please use a Classic-mode Bitget account/sub-account until the Bitget v3 migration is complete.';
@@ -1346,9 +1349,14 @@ export class BitgetExchange extends BaseExchange {
     const limit = Math.min(opts.limit || 500, 1000);
     const interval = INTERVAL[opts.interval];
     const [, amount, unit] = opts.interval.split(/(\d+)/);
+    const intervalMs = (timeframeToSeconds[opts.interval] || 0) * 1000;
 
     const end = opts.to ? dayjs(opts.to) : dayjs();
     const start = opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
+    const startTime = start.valueOf();
+    const endTime = opts.from
+      ? Math.min(end.valueOf(), startTime + Math.min(BITGET_CANDLE_MAX_WINDOW_MS, intervalMs * limit))
+      : end.valueOf();
 
     const {
       data: { data },
@@ -1356,8 +1364,8 @@ export class BitgetExchange extends BaseExchange {
       params: {
         symbol: opts.symbol,
         granularity: interval,
-        endTime: end.valueOf(),
-        ...(opts.from && { startTime: start.valueOf() }),
+        endTime,
+        ...(opts.from && { startTime }),
         productType: this.apiProductType,
         limit,
       },
