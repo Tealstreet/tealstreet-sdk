@@ -30,13 +30,6 @@ this store, see `../exchanges/CLAUDE.md` → "Public WebSocket
 Hot-Path Patterns". This doc covers the **store contracts** —
 what callers can rely on, and what's load-bearing.
 
-Worker-origin telemetry-only updates (`latency`, `messageHandlerStats`,
-`requestStats`, `socketHealth`) update the mirror store without calling
-`notify()`. UI consumers for those fields poll through `useSyncedSelector` /
-local intervals, and notifying on every worker bridge tick manufactures React
-work without changing order, position, ticker, balance, or layout-driving state.
-Any payload that also carries a render-driving field still notifies normally.
-
 ## Files
 
 - `store.interface.ts` — public surface every store implementation
@@ -154,15 +147,6 @@ The hot path inlines the empty-check and field-write in one
 `for...in` over `normalizedChanges`. Don't refactor the empty-check
 into its own pre-pass via `Object.keys(...).length === 0` — that
 allocates the keys array just to ask "is anything here?".
-
-### Packed ticker deltas apply through explicit mask branches
-
-`applyPackedTickerDeltasInPlace` is the main-thread mirror of the worker's
-live ticker bridge. Keep its field writes as explicit bit-mask branches rather
-than a `PACKED_TICKER_FIELDS` loop: live ticker deltas usually contain only a
-few fields, and looping over all 11 possible fields per delta shows up in the
-signed-in 6x CPU profile. The exported field list still owns the wire order
-for packing and tests; update both together if the packed format changes.
 
 ### `auditPositions()` is hoisted out of `addOrUpdatePositions`'s loop
 

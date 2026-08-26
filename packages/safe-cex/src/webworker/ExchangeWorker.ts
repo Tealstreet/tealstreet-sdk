@@ -10,8 +10,8 @@ import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { isNonPrivateDataAccount } from '../utils/isNonPrivateDataAccount';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
-import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
+import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { BaseHandler } from './handlers/BaseHandler';
 import { CallMethodHandler } from './handlers/CallMethodHandler';
 import { ChaserOrderHandler } from './handlers/ChaserOrderHandler';
@@ -23,22 +23,6 @@ import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
 import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
-
-const LIVE_TELEMETRY_FIELDS = new Set(['latency', 'messageHandlerStats', 'requestStats', 'socketHealth']);
-const LIVE_NON_LOAD_BEARING_FIELDS = new Set([...LIVE_TELEMETRY_FIELDS, 'updateIds']);
-const STABLE_LIVE_STORE_FIELDS = [
-  'activeChasers',
-  'activeTWAPs',
-  'balance',
-  'displayedMargin',
-  'displayedPositions',
-  'fetchedLeverage',
-  'loaded',
-  'options',
-  'ordersRisk',
-  'starkConfig',
-  'userData',
-] as const;
 
 export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
@@ -82,8 +66,6 @@ export class ExchangeWorker {
   private _lastSentOrdersUpdateId: number | null = null;
   private _lastSentPositionsUpdateId: number | null = null;
   private _lastPayloadHadActiveChasers = false;
-  private _lastSentLiveStoreFieldSignatures = new Map<string, string>();
-  private _lastSentLiveStoreFieldReferences = new Map<string, unknown>();
 
   constructor(
     ctx: Worker,
@@ -535,179 +517,12 @@ export class ExchangeWorker {
 
     if (!options?.forceFullStore && this._lastSentMarketsVersion === marketsVersion) {
       delete ensurePayloadCopy().markets;
-      return this._pruneRoutineLiveStorePayload(payload, options);
-    }
-
-    this._lastSentMarketsVersion = marketsVersion;
-    return this._pruneRoutineLiveStorePayload(payload, options);
-  };
-
-  private _pruneRoutineLiveStorePayload(
-    payload: StoreWorkerStorePayload,
-    options?: { forceFullStore?: boolean },
-  ): StoreWorkerStorePayload {
-    if (options?.forceFullStore) {
-      this._rememberLiveStoreFieldSignatures(payload);
       return payload;
     }
 
-    let prunedPayload: StoreWorkerStorePayload | undefined;
-    const ensurePayloadCopy = () => {
-      prunedPayload ??= { ...payload };
-      return prunedPayload;
-    };
-    const candidate = () => prunedPayload ?? payload;
-
-    for (const key of STABLE_LIVE_STORE_FIELDS) {
-      if (!(key in candidate())) continue;
-      const value = candidate()[key];
-      const signature = this._getStableLiveStoreFieldSignature(key, value);
-      if (signature === null) {
-        this._lastSentLiveStoreFieldSignatures.delete(key);
-        this._pruneReferenceStableLiveStoreField(key, value, ensurePayloadCopy);
-        continue;
-      }
-
-      this._lastSentLiveStoreFieldReferences.delete(key);
-      if (this._lastSentLiveStoreFieldSignatures.get(key) === signature) {
-        delete ensurePayloadCopy()[key];
-      } else {
-        this._lastSentLiveStoreFieldSignatures.set(key, signature);
-      }
-    }
-
-    let hasLoadBearingField = false;
-    for (const key in candidate()) {
-      if (!LIVE_NON_LOAD_BEARING_FIELDS.has(key)) {
-        hasLoadBearingField = true;
-        break;
-      }
-    }
-    if (hasLoadBearingField) {
-      const mutable = ensurePayloadCopy();
-      delete mutable.latency;
-      delete mutable.messageHandlerStats;
-      delete mutable.requestStats;
-      delete mutable.socketHealth;
-    }
-
-    return prunedPayload ?? payload;
-  }
-
-  private _pruneReferenceStableLiveStoreField(
-    key: string,
-    value: unknown,
-    ensurePayloadCopy: () => StoreWorkerStorePayload,
-  ): boolean {
-    if (key !== 'userData' && key !== 'starkConfig') return false;
-    if (!value || typeof value !== 'object') return false;
-
-    if (this._lastSentLiveStoreFieldReferences.get(key) === value) {
-      delete ensurePayloadCopy()[key];
-    } else {
-      this._lastSentLiveStoreFieldReferences.set(key, value);
-    }
-    return true;
-  }
-
-  private _rememberLiveStoreFieldSignatures(payload: StoreWorkerStorePayload): void {
-    for (const key of STABLE_LIVE_STORE_FIELDS) {
-      if (!(key in payload)) continue;
-      const value = payload[key];
-      if ((key === 'userData' || key === 'starkConfig') && value && typeof value === 'object') {
-        this._lastSentLiveStoreFieldReferences.set(key, value);
-      }
-      const signature = this._getStableLiveStoreFieldSignature(key, value);
-      if (signature !== null) {
-        this._lastSentLiveStoreFieldReferences.delete(key);
-        this._lastSentLiveStoreFieldSignatures.set(key, signature);
-      } else {
-        this._lastSentLiveStoreFieldSignatures.delete(key);
-      }
-    }
-  }
-
-  private _getStableLiveStoreFieldSignature(key: string, value: unknown): string | null {
-    if (Array.isArray(value)) {
-      return value.length === 0 ? '[]' : null;
-    }
-
-    if (!value || typeof value !== 'object') {
-      return `${typeof value}:${String(value)}`;
-    }
-
-    if (key === 'displayedMargin') {
-      const margin = value as { longExposure?: unknown; shortExposure?: unknown; totalNotional?: unknown };
-      return `${margin.longExposure ?? 0}:${margin.shortExposure ?? 0}:${margin.totalNotional ?? 0}`;
-    }
-
-    if (key === 'loaded') {
-      const loaded = value as {
-        balance?: unknown;
-        positions?: unknown;
-        orders?: unknown;
-        markets?: unknown;
-        tickers?: unknown;
-      };
-      return `${loaded.balance === true}:${loaded.positions === true}:${loaded.orders === true}:${loaded.markets === true}:${
-        loaded.tickers === true
-      }`;
-    }
-
-    if (key === 'balance' || key === 'options') {
-      return JSON.stringify(value);
-    }
-
-    if (key === 'ordersRisk') {
-      return this._getOrdersRiskSignature(value);
-    }
-
-    return Object.keys(value).length === 0 ? '{}' : null;
-  }
-
-  private _getOrdersRiskSignature(value: unknown): string | null {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-
-    const riskByOrder = value as Record<string, unknown>;
-    const orderIds = Object.keys(riskByOrder).sort();
-    if (orderIds.length === 0) {
-      return '{}';
-    }
-
-    let signature = '';
-    for (let orderIndex = 0; orderIndex < orderIds.length; orderIndex++) {
-      const orderId = orderIds[orderIndex];
-      const profiles = riskByOrder[orderId];
-      if (!Array.isArray(profiles)) {
-        return null;
-      }
-
-      signature += `${orderId}[`;
-      for (let profileIndex = 0; profileIndex < profiles.length; profileIndex++) {
-        const profile = profiles[profileIndex];
-        if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
-          return null;
-        }
-
-        const fields = Object.keys(profile).sort();
-        for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
-          const field = fields[fieldIndex];
-          const fieldValue = (profile as Record<string, unknown>)[field];
-          const valueType = typeof fieldValue;
-          if (fieldValue !== null && valueType === 'object') {
-            return null;
-          }
-          signature += `${field}:${valueType}:${String(fieldValue)};`;
-        }
-        signature += '|';
-      }
-      signature += ']';
-    }
-
-    return signature;
-  }
+    this._lastSentMarketsVersion = marketsVersion;
+    return payload;
+  };
 
   private _storeUpdate = (data: StoreData, options?: { forceFullStore?: boolean }) => {
     let processedData = data;

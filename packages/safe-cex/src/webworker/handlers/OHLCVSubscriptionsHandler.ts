@@ -11,22 +11,7 @@ interface SymbolIntervalSub {
   // separate counter desyncs on a duplicate subId and strands the subscription.
   subIds: Set<string>;
   lastCandleTimestamp: number;
-  lastSentCandle?: Candle;
 }
-
-const areCandlesEqual = (left: Candle | undefined, right: Candle | undefined): boolean => {
-  if (!left || !right) return false;
-
-  return (
-    left.timestamp === right.timestamp &&
-    left.open === right.open &&
-    left.high === right.high &&
-    left.low === right.low &&
-    left.close === right.close &&
-    left.volume === right.volume &&
-    left.lastSide === right.lastSide
-  );
-};
 
 export class OHLCVSubscriptionsHandler extends BaseHandler {
   // Deduplicated subscriptions keyed by symbol:interval.
@@ -82,7 +67,6 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
           throttleFn: f,
           subIds: new Set([subId]),
           lastCandleTimestamp: 0,
-          lastSentCandle: undefined,
         };
 
         const ohlcvSub = this._exchange.listenOHLCV(payload.data, (c) => {
@@ -94,10 +78,6 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
               // Ignored
             }
           }
-          if (areCandlesEqual(c, sub.lastSentCandle)) {
-            return;
-          }
-          sub.lastSentCandle = { ...c };
           f(c);
         });
         sub.unsub = ohlcvSub || (() => {});
