@@ -107,6 +107,10 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
     data.forEach((order: Record<string, any>) => {
       const orders = this.parent.mapOrder(order);
 
+      for (const mapped of orders) {
+        this.parent.markOrderSeen(mapped.id);
+      }
+
       const price = parseFloat(v(order, 'price'));
       const amount = parseFloat(v(order, 'qty'));
 

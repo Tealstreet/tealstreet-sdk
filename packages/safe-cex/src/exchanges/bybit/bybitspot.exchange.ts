@@ -4,7 +4,6 @@ import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
 import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
-import axios from 'axios';
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
@@ -19,13 +18,13 @@ import {
   Candle,
   CoinBalance,
   ExchangeOptions,
-  HistoricalTradeOptions,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
   OrderSide,
+  OrderStatus,
   OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
@@ -47,6 +46,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
 import { getBybitOrderExecutionParams } from './bybit.order-params';
+import { BYBIT_BRAZIL_SITE_ID } from './bybit.site';
 import {
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
@@ -64,6 +64,12 @@ import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
+const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
+
+const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
+  const normalized = `${message || ''}`.toLowerCase();
+  return normalized.includes('order not exists') || normalized.includes('too late to cancel');
+};
 
 export class BybitSpotExchange extends BaseExchange {
   xhr: Axios;
@@ -109,6 +115,98 @@ export class BybitSpotExchange extends BaseExchange {
     super.dispose();
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
+  };
+
+  private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
+
+  private shouldUseLocalRestOrderLifecycleFallback = () => {
+    return this.options.bybitSiteId === BYBIT_BRAZIL_SITE_ID;
+  };
+
+  /** First sighting via private WS or an explicit cancel — stop protecting the id. */
+  markOrderSeen = (orderId: string) => {
+    this.recentlyPlacedOrders.delete(orderId);
+  };
+
+  private recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
+    const qty = parseFloat(payload.qty as string) || opts.amount || 0;
+    const price = parseFloat((payload.price ?? payload.triggerPrice) as string) || opts.price || opts.triggerPrice || 0;
+
+    this.recordRecentlyPlacedOrder({
+      id: orderId,
+      status: OrderStatus.Open,
+      symbol: opts.symbol,
+      type: opts.type,
+      side: opts.side,
+      price,
+      amount: qty,
+      filled: 0,
+      remaining: qty,
+      reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
+      timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+    });
+  };
+
+  private recordRecentlyPlacedOrder = (order: Order) => {
+    if (order.type === OrderType.Market) {
+      return;
+    }
+
+    this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
+
+    if (this.shouldUseLocalRestOrderLifecycleFallback()) {
+      this.store.addOrUpdateOrders([order]);
+    }
+  };
+
+  private retireCancelledOrders = (orders: Array<Pick<Order, 'id' | 'symbol'>>) => {
+    if (orders.length === 0) return;
+
+    for (const order of orders) {
+      this.markOrderSeen(order.id);
+    }
+
+    if (this.shouldUseLocalRestOrderLifecycleFallback()) {
+      this.store.removeOrders(orders.map(({ id }) => ({ id })));
+    }
+  };
+
+  private applyLocalOrderUpdateAfterRestWrite = (order: Order, update: Partial<Order>) => {
+    if (!this.shouldUseLocalRestOrderLifecycleFallback()) return;
+
+    const nextOrder: Order = {
+      ...order,
+      ...update,
+      ...(typeof update.amount === 'number'
+        ? { remaining: Math.max(0, update.amount - (order.filled || 0)) }
+        : {}),
+      lastUpdate: virtualClock.getCurrentTimeMs(),
+    };
+
+    this.store.addOrUpdateOrders([nextOrder]);
+  };
+
+  private preserveRecentlyPlacedOrders = (fetched: Order[]): Order[] => {
+    if (this.recentlyPlacedOrders.size === 0) return fetched;
+
+    const now = virtualClock.getCurrentTimeMs();
+    const fetchedIds = new Set(fetched.map((o) => o.id));
+    const preserved: Order[] = [];
+
+    for (const [id, entry] of this.recentlyPlacedOrders) {
+      if (fetchedIds.has(id)) {
+        this.recentlyPlacedOrders.delete(id);
+        continue;
+      }
+      if (now - entry.placedAt > RECENTLY_PLACED_ORDER_GRACE_MS) {
+        this.recentlyPlacedOrders.delete(id);
+        continue;
+      }
+      preserved.push(this.store.orders.find((o) => o.id === id) ?? entry.order);
+    }
+
+    return preserved.length > 0 ? [...fetched, ...preserved] : fetched;
   };
 
   getAccount = async () => {
@@ -404,7 +502,7 @@ export class BybitSpotExchange extends BaseExchange {
     const bybitOrders = await recursiveFetch();
     const orders: Order[] = bybitOrders.flatMap(this.mapOrder.bind(this));
 
-    return orders;
+    return this.preserveRecentlyPlacedOrders(orders);
   };
 
   fetchPositions = async (_symbols?: string[]) => {
@@ -728,7 +826,14 @@ export class BybitSpotExchange extends BaseExchange {
       throw new Error(errMsg);
     }
 
-    return fullfilled.map((resp) => resp.result.orderId);
+    return fullfilled.map((resp, index) => {
+      const orderId = resp.result.orderId;
+      const payload = payloads[index];
+      if (orderId && payload) {
+        this.recordRecentlyPlacedOrderFromOpts(orderId, opts, payload);
+      }
+      return orderId;
+    });
   };
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
@@ -821,7 +926,9 @@ export class BybitSpotExchange extends BaseExchange {
 
     if (order.type === OrderType.TrailingStopLoss) {
       await this.cancelOrders([order]);
-      return this.placeTrailingStopLoss({ ...order, ...update });
+      const orderIds = await this.placeTrailingStopLoss({ ...order, ...update });
+      this.applyLocalOrderUpdateAfterRestWrite(order, update);
+      return orderIds;
     }
 
     // Only cancel+replace for *non-virtual* TP/SL. Virtual TP/SL (e.g. limit order with TP) are updated via REPLACE_ORDER on parent below.
@@ -843,7 +950,9 @@ export class BybitSpotExchange extends BaseExchange {
               ? OrderType.TakeProfit
               : OrderType.StopLoss;
         await this.cancelOrders([order]);
-        return this.placeStopLossOrTakeProfit({ ...order, ...update, type: projectedType });
+        const orderIds = await this.placeStopLossOrTakeProfit({ ...order, ...update, type: projectedType });
+        this.applyLocalOrderUpdateAfterRestWrite(order, { ...update, type: projectedType });
+        return orderIds;
       }
     }
 
@@ -875,6 +984,7 @@ export class BybitSpotExchange extends BaseExchange {
 
           if (data.retMsg === 'OK') {
             updatedOrderIds.push(data.result.orderId);
+            this.applyLocalOrderUpdateAfterRestWrite(order, update);
           } else if (data.retMsg === 'order not modified') {
             // do nothing, it's ok
           } else {
@@ -916,6 +1026,7 @@ export class BybitSpotExchange extends BaseExchange {
 
       if (data.retMsg === 'OK') {
         updatedOrderIds.push(data.result.orderId);
+        this.applyLocalOrderUpdateAfterRestWrite(order, update);
       } else if (data.retMsg === 'order not modified') {
         // do nothing, it's ok
       } else {
@@ -950,6 +1061,8 @@ export class BybitSpotExchange extends BaseExchange {
         // do nothing, it's ok
       } else if (data.retMsg !== 'OK') {
         this.emitAndLogError(data.retMsg);
+      } else {
+        this.applyLocalOrderUpdateAfterRestWrite(order, update);
       }
     }
 
@@ -964,6 +1077,8 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
+    for (const order of orders) this.markOrderSeen(order.id);
+
     // Drop virtual TP/SL display rows — see bybit.exchange.ts cancelOrders
     // for the full rationale. Synthetic IDs (`__stop_loss` / `__take_profit`)
     // are not real exchange orders; the parent's cancellation removes them.
@@ -999,14 +1114,22 @@ export class BybitSpotExchange extends BaseExchange {
         request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
       });
       if (data.retMsg !== 'OK') {
+        if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
+          this.retireCancelledOrders(orders);
+          return;
+        }
         this.emitAndLogError(data.retMsg);
         throw new Error(data.retMsg);
       }
-      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0);
+      const foundErr = data.retExtInfo?.list.find(
+        (l: any) => l.code !== 0 && !isBybitOrderAlreadyGoneCancelMessage(l.msg),
+      );
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);
       }
+
+      this.retireCancelledOrders(orders);
     });
   };
 
@@ -1014,6 +1137,10 @@ export class BybitSpotExchange extends BaseExchange {
     const tpOrSLOrders = cancelTpSl
       ? []
       : this.store.orders.filter((o) => o.symbol === symbol && o.type !== OrderType.Limit);
+
+    const cancelledRows = this.store.orders
+      .filter((o) => o.symbol === symbol)
+      .map(({ id, symbol: orderSymbol }) => ({ id, symbol: orderSymbol }));
 
     const { data } = await this.unlimitedXHR.post(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
       category: 'spot',
@@ -1033,7 +1160,10 @@ export class BybitSpotExchange extends BaseExchange {
 
     if (v(data, 'retMsg') !== 'OK') {
       this.emitAndLogError(v(data, 'retMsg'));
+      return;
     }
+
+    this.retireCancelledOrders(cancelledRows);
   };
 
   mapPosition(p: Record<string, any>) {

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
+import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Order, OrderSide, OrderStatus, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
@@ -48,6 +50,24 @@ const makeExchange = (demo = false, optionOverrides: Partial<ExchangeOptions> = 
     : new BybitExchange('bybit' as any, options, store);
   return { exchange: exchange as any, store };
 };
+
+const makeVariantExchange = (
+  variant: 'bybitinverse' | 'bybitspot',
+  optionOverrides: Partial<ExchangeOptions> = {},
+) => {
+  const store = new DefaultStore();
+  const options = { key: 'k', secret: 's', ...optionOverrides } as ExchangeOptions;
+  const exchange =
+    variant === 'bybitinverse'
+      ? new BybitInverseExchange('bybitinverse' as any, options, store)
+      : new BybitSpotExchange('bybitspot' as any, options, store);
+  return { exchange: exchange as any, store };
+};
+
+const variantCases = [
+  { variant: 'bybitinverse' as const, label: 'Bybit Inverse' },
+  { variant: 'bybitspot' as const, label: 'Bybit Spot' },
+];
 
 const seedRecentlyPlaced = (exchange: any, order: Order, ageMs = 0) => {
   exchange.recentlyPlacedOrders.set(order.id, {
@@ -445,5 +465,65 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
     expect(store.orders.map((order: Order) => order.id)).toEqual(['conditional-1']);
     expect(exchange.preserveRecentlyPlacedOrders([]).map((order: Order) => order.id)).toEqual(['conditional-1']);
+  });
+
+  variantCases.forEach(({ variant, label }) => {
+    describe(`${label} Brazil recently-placed lifecycle`, () => {
+      it('preserves an unsighted recently placed order across omitted REST snapshots', () => {
+        const { exchange } = makeVariantExchange(variant);
+        seedRecentlyPlaced(exchange, makeOrder('new-1'));
+
+        expect(exchange.preserveRecentlyPlacedOrders([]).map((order: Order) => order.id)).toEqual(['new-1']);
+
+        exchange.markOrderSeen('new-1');
+        expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
+      });
+
+      it('locally injects Brazil resting orders but leaves normal live accounts WS-owned', () => {
+        const brazil = makeVariantExchange(variant, { bybitSiteId: 'BRA_BTL' });
+        brazil.exchange.recordRecentlyPlacedOrder(makeOrder('brazil-1'));
+        expect(brazil.store.orders.map((order: Order) => order.id)).toEqual(['brazil-1']);
+
+        const live = makeVariantExchange(variant);
+        live.exchange.recordRecentlyPlacedOrder(makeOrder('live-1'));
+        expect(live.store.orders).toEqual([]);
+        expect(live.exchange.preserveRecentlyPlacedOrders([]).map((order: Order) => order.id)).toEqual(['live-1']);
+      });
+
+      it('locally updates Brazil rows after successful REST amend', async () => {
+        const { exchange, store } = makeVariantExchange(variant, { bybitSiteId: 'BRA_BTL' });
+        const placed = makeOrder('brazil-1', { price: 100 });
+        store.addOrUpdateOrders([placed]);
+        exchange.xhr = {
+          post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'brazil-1' } } }),
+        };
+
+        await expect(exchange.updateOrder({ order: placed, update: { price: 101 } })).resolves.toEqual(['brazil-1']);
+
+        expect(store.orders).toMatchObject([{ id: 'brazil-1', price: 101 }]);
+      });
+
+      it('locally retires Brazil rows after successful or already-gone REST cancel', async () => {
+        const { exchange, store } = makeVariantExchange(variant, { bybitSiteId: 'BRA_BTL' });
+        const placed = makeOrder('brazil-1');
+        store.addOrUpdateOrders([placed]);
+        seedRecentlyPlaced(exchange, placed);
+        exchange.unlimitedXHR = {
+          post: async () => ({
+            data: {
+              retCode: 0,
+              retMsg: 'OK',
+              result: {},
+              retExtInfo: { list: [{ code: 110001, msg: 'order not exists or too late to cancel' }] },
+            },
+          }),
+        };
+
+        await expect(exchange.cancelOrders([placed])).resolves.toBeUndefined();
+
+        expect(store.orders).toEqual([]);
+        expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
+      });
+    });
   });
 });

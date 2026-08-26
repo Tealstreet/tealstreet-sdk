@@ -476,7 +476,8 @@ The update path depends on the order type:
 - `cancelOrders` calls `markOrderSeen` for every id up front, so the
   recently-placed grace window can never resurrect an order we deliberately
   cancelled. On success it then calls `retireCancelledOrders`, which removes the
-  rows from the store **on demo only** — see "Demo has to retire its own rows".
+  rows from the store **only for Demo or Brazil account mode** — see "Demo has
+  to retire its own rows".
 - `"order not exists or too late to cancel"` is treated as success, both as a
   top-level `retMsg` and per-row in `retExtInfo.list`. The chaser cancels at the
   touch, so an order can fill inside the cancel round trip; throwing there made
@@ -886,12 +887,16 @@ cannot resurrect them from any cancel path), plus `store.removeOrders` when
 `isDemo`. It runs from `cancelOrdersHelper` after a successful lot **and** on the
 already-gone branch, and from `cancelSymbolOrders`.
 
-- **Keep the `isDemo` guard.** Live Bybit's WS-driven removal owns the row there;
-  removing locally would race it.
+- **Keep local retirement scoped to Demo or `bybitSiteId: 'BRA_BTL'`.** Normal
+  live Bybit/Inverse/Spot WS-driven removal owns the row; removing locally there
+  would race it.
 - **Do not "fix" this with a periodic order refetch instead.** Bybit ticks at
   500ms and `fetchOrders` is cursor-paginated per settle coin.
 - `cancelSymbolOrders` snapshots the symbol's ids *before* the cancel, because it
   re-places TP/SL afterwards and those new rows must survive.
+- The sibling `bybitinverse` and `bybitspot` adapters do not subclass
+  `BybitExchange`; keep their recently placed preservation, WS `markOrderSeen`,
+  and Brazil local REST lifecycle fallback in sync with regular Bybit.
 - A genuine cancel failure must leave the row in place — never hide real state.
 
 Still open by design: a manual (non-chaser) demo limit order that *fills* leaves
