@@ -314,7 +314,7 @@ export const fakePositionsForMarket = (
   market: Market,
   positionMode = PositionMode.Hedged,
   marginType = MarginType.Cross,
-  leverage = 20,
+  leverage: number | Partial<Record<PositionSide, number>> = 20,
 ): Position[] => {
   const sides = positionMode === PositionMode.OneWay ? [PositionSide.Long] : [PositionSide.Long, PositionSide.Short];
   return sides.map((side) => ({
@@ -323,7 +323,7 @@ export const fakePositionsForMarket = (
     side,
     entryPrice: 0,
     notional: 0,
-    leverage,
+    leverage: typeof leverage === 'number' ? leverage : (leverage[side] ?? 20),
     marginType,
     positionMode,
     unrealizedPnl: 0,

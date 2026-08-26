@@ -360,7 +360,12 @@ export class MexcExchange extends BaseExchange {
           market,
           config?.positionMode || this.accountPositionMode,
           config?.marginType || MarginType.Cross,
-          config ? Math.min(config.buyLeverage, config.sellLeverage) : 20,
+          config
+            ? {
+                [PositionSide.Long]: config.buyLeverage,
+                [PositionSide.Short]: config.sellLeverage,
+              }
+            : 20,
         ).filter((position) => !openIds.has(position.id));
       });
 
@@ -1173,7 +1178,7 @@ export class MexcExchange extends BaseExchange {
         ENDPOINTS.STOP_ORDER_CANCEL,
         lot.map((order) => ({ stopPlanOrderId: order.id.split('__')[0] })),
       );
-      this.assertCommonCancelSucceeded(data, 'MEXC position TP/SL cancellation');
+      this.assertCommonSuccess(data, 'MEXC position TP/SL cancellation');
       acceptedStopLikeCancels.push(...lot);
     }
 
@@ -1182,7 +1187,7 @@ export class MexcExchange extends BaseExchange {
         ENDPOINTS.PLAN_ORDER_CANCEL,
         lot.map((order) => ({ symbol: toMexcSymbol(order.symbol), orderId: order.id.split('__')[0] })),
       );
-      this.assertCommonCancelSucceeded(data, 'MEXC plan order cancellation');
+      this.assertCommonSuccess(data, 'MEXC plan order cancellation');
       acceptedStopLikeCancels.push(...lot);
     }
 
@@ -1312,7 +1317,7 @@ export class MexcExchange extends BaseExchange {
     return true;
   };
 
-  private assertCommonCancelSucceeded = (payload: any, action: string): void => {
+  private assertCommonSuccess = (payload: any, action: string): void => {
     const code = payload?.code === undefined || payload?.code === null ? undefined : toNumber(payload.code, Number.NaN);
     if (payload && payload.success !== false && code === 0) return;
 
@@ -1320,7 +1325,7 @@ export class MexcExchange extends BaseExchange {
   };
 
   private assertRegularCancelSucceeded = (payload: any): void => {
-    this.assertCommonCancelSucceeded(payload, 'MEXC order cancellation');
+    this.assertCommonSuccess(payload, 'MEXC order cancellation');
     const failedRows = extractRows<Record<string, any>>(payload).filter((row) => toNumber(row.errorCode, 0) !== 0);
     if (!failedRows.length) return;
 
@@ -1432,14 +1437,13 @@ export class MexcExchange extends BaseExchange {
 
     const nextLeverage = Math.min(Math.max(leverage, market.limits.leverage.min), market.limits.leverage.max);
     const currentConfig = this.symbolSettings.get(symbol) || this.deriveSymbolConfig(symbol);
-    const positionTypes = side === PositionSide.Short ? [2] : side === PositionSide.Long ? [1] : [1, 2];
+    const positionTypes: Array<1 | 2> = side === PositionSide.Short ? [2] : side === PositionSide.Long ? [1] : [1, 2];
     for (const positionType of positionTypes) {
-      await this.xhr.post(ENDPOINTS.CHANGE_LEVERAGE, {
-        symbol: market.id,
-        positionType,
-        leverage: nextLeverage,
-        openType: REVERSE_MARGIN_TYPE[currentConfig.marginType],
-      });
+      const { data } = await this.xhr.post(
+        ENDPOINTS.CHANGE_LEVERAGE,
+        this.formatChangeLeveragePayload(symbol, market, positionType, nextLeverage, currentConfig.marginType),
+      );
+      this.assertCommonSuccess(data, 'MEXC leverage change');
     }
 
     const nextConfig = {
@@ -1479,12 +1483,13 @@ export class MexcExchange extends BaseExchange {
       2: Math.min(Math.max(currentConfig.sellLeverage || 20, market.limits.leverage.min), market.limits.leverage.max),
     };
     for (const positionType of [1, 2] as const) {
-      await this.xhr.post(ENDPOINTS.CHANGE_LEVERAGE, {
-        symbol: market.id,
-        positionType,
-        leverage: leverageByPositionType[positionType],
-        openType: REVERSE_MARGIN_TYPE[marginType],
-      });
+      const { data } = await this.xhr.post(
+        ENDPOINTS.CHANGE_LEVERAGE,
+        this.formatChangeLeveragePayload(symbol, market, positionType, leverageByPositionType[positionType], marginType, {
+          includeOpenTypeWithPositionId: true,
+        }),
+      );
+      this.assertCommonSuccess(data, 'MEXC margin type change');
     }
     const nextConfig = {
       ...currentConfig,
@@ -1506,6 +1511,35 @@ export class MexcExchange extends BaseExchange {
         },
       },
     });
+  };
+
+  private formatChangeLeveragePayload = (
+    symbol: string,
+    market: Market,
+    positionType: 1 | 2,
+    leverage: number,
+    marginType: MarginType,
+    options: { includeOpenTypeWithPositionId?: boolean } = {},
+  ): Record<string, any> => {
+    const positionSide = positionType === 1 ? PositionSide.Long : PositionSide.Short;
+    const position = this.findOpenPosition(symbol, positionSide, this.store.positions);
+    const positionId = position ? this.nativePositionId(position) : '';
+    const openType = REVERSE_MARGIN_TYPE[marginType];
+
+    if (positionId) {
+      return omitUndefined({
+        positionId,
+        leverage,
+        openType: options.includeOpenTypeWithPositionId ? openType : undefined,
+      });
+    }
+
+    return {
+      symbol: market.id,
+      positionType,
+      leverage,
+      openType,
+    };
   };
 
   private deriveSymbolConfig = (symbol: string): MexcSymbolConfig => {

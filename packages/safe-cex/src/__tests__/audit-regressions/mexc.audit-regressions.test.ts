@@ -435,6 +435,62 @@ describe('MEXC futures audit regressions', () => {
     });
   });
 
+  it('keeps side-specific leverage on fake flat positions during tick refreshes', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
+    const get = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: [] } });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post, get } as any;
+
+    await exchange.setLeverage('BTCUSDT', 50, PositionSide.Long);
+    const positions = await exchange.fetchPositions(['BTCUSDT']);
+
+    expect(positions.find((position) => position.side === PositionSide.Long)?.leverage).toBe(50);
+    expect(positions.find((position) => position.side === PositionSide.Short)?.leverage).toBe(20);
+  });
+
+  it('uses positionId for open-position leverage changes', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
+    const openLong = normalizePosition(
+      {
+        positionId: 1394650,
+        symbol: 'BTC_USDT',
+        positionType: 1,
+        positionMode: 1,
+        openType: 2,
+        holdVol: 10000,
+        holdAvgPrice: 50000,
+        leverage: 20,
+      },
+      market,
+      PositionMode.Hedged,
+    );
+    exchange.store.update({ markets: [market], positions: openLong ? [openLong] : [] });
+    exchange.xhr = { post } as any;
+
+    await exchange.setLeverage('BTCUSDT', 50, PositionSide.Long);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.CHANGE_LEVERAGE, {
+      positionId: '1394650',
+      leverage: 50,
+    });
+  });
+
+  it('does not update leverage cache when MEXC rejects the mutation envelope', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({
+      data: { success: false, code: 2024, message: 'leverage over the maximum' },
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    await expect(exchange.setLeverage('BTCUSDT', 50, PositionSide.Long)).rejects.toThrow(
+      'MEXC leverage change failed: leverage over the maximum',
+    );
+    expect(exchange.store.fetchedLeverage.BTCUSDT).toBeUndefined();
+  });
+
   it('uses private leverage max view to avoid overstating account-specific caps', async () => {
     const exchange = createExchange();
     const get = vi.fn().mockResolvedValue({
@@ -563,6 +619,41 @@ describe('MEXC futures audit regressions', () => {
       marginType: MarginType.Isolated,
       buyLeverage: 50,
       sellLeverage: 50,
+    });
+  });
+
+  it('uses positionId when changing margin type for an open position', async () => {
+    const exchange = createExchange();
+    const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
+    const openLong = normalizePosition(
+      {
+        positionId: 1394650,
+        symbol: 'BTC_USDT',
+        positionType: 1,
+        positionMode: 1,
+        openType: 2,
+        holdVol: 10000,
+        holdAvgPrice: 50000,
+        leverage: 50,
+      },
+      market,
+      PositionMode.Hedged,
+    );
+    exchange.store.update({ markets: [market], positions: openLong ? [openLong] : [] });
+    exchange.xhr = { post } as any;
+
+    await exchange.changeMarginType(true, 'BTCUSDT');
+
+    expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.CHANGE_LEVERAGE, {
+      positionId: '1394650',
+      leverage: 50,
+      openType: 1,
+    });
+    expect(post).toHaveBeenNthCalledWith(2, ENDPOINTS.CHANGE_LEVERAGE, {
+      symbol: 'BTC_USDT',
+      positionType: 2,
+      leverage: 20,
+      openType: 1,
     });
   });
 
