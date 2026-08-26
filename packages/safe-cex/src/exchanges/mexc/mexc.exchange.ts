@@ -115,6 +115,27 @@ const MEXC_RECENT_STOP_CANCEL_SHIELD_MS = 15_000;
 // within one window; WS reconnect's `fetchAndSetPrivateSnapshot` remains
 // the wholesale reconciliation authority.
 const MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS = 15_000;
+// Shield window for orders MEXC just rejected server-side by delivering a
+// `state=4` (Canceled) frame with a non-zero `errorCode` and `dealVol=0`
+// right after acceptance. Common trigger: a reduce-only order whose total
+// open close size exceeds the open position — MEXC accepts each such
+// order briefly then cancels it. Because the HTTP `200` typically arrives
+// AFTER both WS frames, the placement site's optimistic-add path (and the
+// tick's preservation window) would otherwise resurrect the row as Open.
+// This shield lets subsequent code recognize the id and skip resurrection.
+const MEXC_RECENT_REJECTED_ORDER_SHIELD_MS = 30_000;
+
+// Best-effort translation of MEXC futures `errorCode` values seen on
+// `state=4` (Canceled) `push.personal.order` frames. MEXC does not publish
+// a canonical enum for this field, so any code not covered here falls
+// back to the numeric code in the user-facing message.
+const MEXC_ORDER_CANCEL_REASONS: Record<number, string> = {
+  6: 'total reduce-only close exceeds open short position',
+  7: 'total reduce-only close exceeds open long position',
+  8: 'order rejected by venue',
+  10: 'venue rejected the order (commonly: reduce-only would over-close, or post-only would cross the book)',
+  11: 'IOC / FOK order canceled by matching rule',
+};
 
 export class MexcExchange extends BaseExchange {
   xhr: Axios;
@@ -131,6 +152,7 @@ export class MexcExchange extends BaseExchange {
   private regularOrderSubmitCooldownUntil = 0;
   private nativeBatchOrdersAvailable: boolean | undefined;
   private recentlyCanceledStopLikeOrderIds = new Map<string, number>();
+  private recentlyRejectedRegularOrderIds = new Map<string, number>();
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -791,6 +813,17 @@ export class MexcExchange extends BaseExchange {
   private addOptimisticRegularOrder = (opts: PlaceOrderOpts, orderId: string): void => {
     if (opts.type === OrderType.Market) return;
 
+    // MEXC can deliver `state=2` (Open) then `state=4` (Canceled) WS frames
+    // BEFORE the placement HTTP 200 returns — see `handleOrder`'s rejection
+    // path. If the venue has already rejected the order, do not resurrect
+    // it as an optimistic Open row; that would flash a phantom line on the
+    // chart for the preservation window despite the venue having canceled.
+    if (this.isRecentlyRejectedRegularOrder(orderId)) return;
+    const existing = this.store.orders.find((order) => order.id === orderId);
+    if (existing && (existing.status === OrderStatus.Canceled || existing.status === OrderStatus.Closed)) {
+      return;
+    }
+
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) return;
 
@@ -1086,6 +1119,10 @@ export class MexcExchange extends BaseExchange {
     if (order.status !== OrderStatus.Open) return false;
     if (this.isStopLikeOrder(order)) return false;
     if (symbol !== undefined && order.symbol !== symbol) return false;
+    // Venue-rejected orders must not be preserved — the row exists locally
+    // only because a stale optimistic-add or WS state=2 frame beat the
+    // state=4 rejection. See `noteRejectedRegularOrder`.
+    if (this.isRecentlyRejectedRegularOrder(order.id)) return false;
     const lastUpdate = toNumber(order.lastUpdate, 0);
     if (!lastUpdate) return false;
     return virtualClock.getCurrentTimeMs() - lastUpdate <= MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS;
@@ -1126,6 +1163,39 @@ export class MexcExchange extends BaseExchange {
 
   private filterRecentlyCanceledStopLikeOrders = (orders: Order[]): Order[] =>
     orders.filter((order) => !this.isStopLikeOrder(order) || !this.isRecentlyCanceledStopLikeOrder(order));
+
+  // Called from `MexcPrivateWebsocket.handleOrder` when a `push.personal.order`
+  // frame reports the venue itself canceled a just-placed order that never
+  // filled (`state=4`, `errorCode>0`, `dealVol=0`). Registers the id in a
+  // short shield window so the optimistic-add and preservation paths don't
+  // resurrect the row, and surfaces a user-visible error explaining why
+  // the order didn't stick.
+  noteRejectedRegularOrder = (orderId: string, errorCode: number): void => {
+    if (!orderId) return;
+    const cleanId = orderId.split('__')[0];
+    this.recentlyRejectedRegularOrderIds.set(cleanId, virtualClock.getCurrentTimeMs());
+
+    const existing = this.store.orders.find((order) => order.id === cleanId);
+    if (existing && existing.status !== OrderStatus.Canceled) {
+      this.store.updateOrderStatus({ id: cleanId }, OrderStatus.Canceled);
+    }
+
+    const reason = MEXC_ORDER_CANCEL_REASONS[errorCode];
+    const detail = reason ? `${reason} (errorCode ${errorCode})` : `errorCode ${errorCode}`;
+    this.emitAndLogError(`MEXC canceled order ${cleanId}: ${detail}`);
+  };
+
+  private isRecentlyRejectedRegularOrder = (orderId: string): boolean => {
+    const cleanId = orderId.split('__')[0];
+    const rejectedAt = this.recentlyRejectedRegularOrderIds.get(cleanId);
+    if (rejectedAt === undefined) return false;
+
+    if (virtualClock.getCurrentTimeMs() - rejectedAt > MEXC_RECENT_REJECTED_ORDER_SHIELD_MS) {
+      this.recentlyRejectedRegularOrderIds.delete(cleanId);
+      return false;
+    }
+    return true;
+  };
 
   private assertCommonCancelSucceeded = (payload: any, action: string): void => {
     const code = payload?.code === undefined || payload?.code === null ? undefined : toNumber(payload.code, Number.NaN);

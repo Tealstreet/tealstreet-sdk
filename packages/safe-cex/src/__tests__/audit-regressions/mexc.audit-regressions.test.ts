@@ -1676,6 +1676,178 @@ describe('MEXC futures audit regressions', () => {
     expect(exchange.store.orders).toEqual([]);
   });
 
+  it('marks a MEXC state=4 errorCode=10 rejection as canceled and does not resurrect it via a lagging HTTP 200', async () => {
+    // Replays the sequence captured in a live ARB_USDC trace: WS state=2
+    // (Open) then WS state=4 with errorCode=10 (Canceled by venue) both
+    // arrive BEFORE the placement HTTP 200 returns. Without the shield,
+    // `addOptimisticRegularOrder` would flip the row back to Open.
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const errors: string[] = [];
+    exchange.on('error', (message: string) => errors.push(message));
+
+    const post = vi.fn(async () => ({
+      data: { success: true, code: 0, data: 'rejected-1' },
+    }));
+    const market = normalizeMarket({
+      symbol: 'ARB_USDC',
+      baseCoin: 'ARB',
+      quoteCoin: 'USDC',
+      settleCoin: 'USDC',
+      state: 0,
+      apiAllowed: true,
+      contractSize: 10,
+      priceScale: 5,
+      priceUnit: 0.00001,
+      volUnit: 1,
+      minVol: 1,
+      maxVol: 400000,
+      minLeverage: 1,
+      maxLeverage: 500,
+      makerFeeRate: 0,
+      takerFeeRate: 0.0002,
+    });
+    exchange.store.update({ markets: [market] });
+    exchange.xhr = { post } as any;
+
+    const acceptedFrame = {
+      channel: 'push.personal.order',
+      data: {
+        orderId: 'rejected-1',
+        symbol: 'ARB_USDC',
+        side: 4,
+        type: 2,
+        state: 2,
+        errorCode: 0,
+        price: 0.09794,
+        vol: 20,
+        remainVol: 20,
+        dealVol: 0,
+        updateTime: now,
+      },
+    };
+    const rejectedFrame = {
+      channel: 'push.personal.order',
+      data: {
+        orderId: 'rejected-1',
+        symbol: 'ARB_USDC',
+        side: 4,
+        type: 2,
+        state: 4,
+        errorCode: 10,
+        price: 0.09794,
+        vol: 20,
+        remainVol: 20,
+        dealVol: 0,
+        updateTime: now + 1,
+      },
+    };
+
+    exchange.privateWebsocket.onMessage({ data: JSON.stringify(acceptedFrame) } as MessageEvent);
+    exchange.privateWebsocket.onMessage({ data: JSON.stringify(rejectedFrame) } as MessageEvent);
+
+    await exchange.placeOrder({
+      symbol: 'ARBUSDC',
+      type: OrderType.Limit,
+      side: OrderSide.Sell,
+      amount: 20,
+      price: 0.09794,
+      reduceOnly: true,
+      timeInForce: OrderTimeInForce.PostOnly,
+    });
+
+    const row = exchange.store.orders.find((order) => order.id === 'rejected-1');
+    expect(row?.status).toBe(OrderStatus.Canceled);
+    expect((row?.info as Record<string, any>).__mexcOptimisticRegular).toBeUndefined();
+    expect(errors.some((message) => message.includes('rejected-1') && message.includes('errorCode 10'))).toBe(true);
+  });
+
+  it('does not preserve a MEXC-rejected regular row across the periodic tick REST replace', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    const get = vi.fn(async () => ({ data: { success: true, code: 0, data: [] } }));
+    exchange.xhr = { get } as any;
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'rejected-1',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          price: 60000,
+          amount: 0.0001,
+          filled: 0,
+          remaining: 0.0001,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.PostOnly,
+          lastUpdate: now - 500,
+          info: {},
+        } as Order,
+      ],
+    });
+
+    exchange.on('error', () => {}); // silence traced emitAndLogError
+
+    exchange.noteRejectedRegularOrder('rejected-1', 10);
+    // After noting, the local row must already be Canceled — the tick's
+    // wholesale REST replace then drops it entirely because no REST anchor
+    // exists and preservation skips non-Open rows.
+    expect(exchange.store.orders.find((order) => order.id === 'rejected-1')?.status).toBe(OrderStatus.Canceled);
+
+    await exchange.fetchAndSetRegularOrders();
+
+    const openIds = exchange.store.orders
+      .filter((order) => order.status === OrderStatus.Open)
+      .map((order) => order.id);
+    expect(openIds).not.toContain('rejected-1');
+  });
+
+  it('does not seed an optimistic regular row when the WS has already reported the id as canceled', async () => {
+    const exchange = createExchange();
+    const post = vi.fn(async () => ({
+      data: { success: true, code: 0, data: 'already-canceled-1' },
+    }));
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'already-canceled-1',
+          status: OrderStatus.Canceled,
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 60000,
+          amount: 0.0001,
+          filled: 0,
+          remaining: 0.0001,
+          reduceOnly: false,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          lastUpdate: 0,
+          info: {},
+        } as Order,
+      ],
+    });
+    exchange.xhr = { post } as any;
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 10,
+      price: 60000,
+      reduceOnly: false,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    expect(exchange.store.orders.find((order) => order.id === 'already-canceled-1')?.status).toBe(OrderStatus.Canceled);
+  });
+
   it('lets a real WS order payload overwrite the optimistic regular row without duplicating it', async () => {
     const exchange = createExchange();
     const now = 1_700_000_000_000;

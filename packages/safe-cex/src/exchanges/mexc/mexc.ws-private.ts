@@ -8,7 +8,14 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { signMexcWsLogin } from './mexc.api';
 import { BASE_WS_URL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
-import { fromMexcSymbol, normalizeExecution, normalizeOrder, normalizePosition } from './mexc.utils';
+import {
+  fromMexcSymbol,
+  normalizeExecution,
+  normalizeOrder,
+  normalizePosition,
+  toIntegerString,
+  toNumber,
+} from './mexc.utils';
 
 export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   protected override treatAnyMessageAsPong = true;
@@ -219,6 +226,27 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
         }
       }
     }
+
+    // Detect MEXC-side rejections. A `state=4` (Canceled) frame carrying a
+    // non-zero `errorCode` with `dealVol=0` means MEXC accepted the order
+    // and then immediately canceled it server-side. The most common trigger
+    // is a reduce-only order whose total open close size would exceed the
+    // position — MEXC emits `state=2` (Open) then `state=4` within ~1ms.
+    // The HTTP 200 from `POST /order/submit` typically arrives AFTER both
+    // WS frames, so the placement site's optimistic-add path and the tick
+    // preservation window would otherwise resurrect the row locally.
+    // Register the id in the parent's rejection shield and surface a
+    // user-visible error explaining why the order didn't stick.
+    for (const row of rows) {
+      const state = toNumber(row?.state ?? row?.status, Number.NaN);
+      const errorCode = toNumber(row?.errorCode, 0);
+      const dealVol = toNumber(row?.dealVol, 0);
+      if (state === 4 && errorCode > 0 && dealVol === 0) {
+        const orderId = toIntegerString(row?.orderId ?? row?.id);
+        if (orderId) this.parent.noteRejectedRegularOrder(orderId, errorCode);
+      }
+    }
+
     // Intentionally no REST reconciliation here. MEXC's `push.personal.order`
     // payload is complete (vol/remainVol/state/price/leverage/timestamps/...),
     // so trusting the WS write plus the periodic `tick` (~2s) and
