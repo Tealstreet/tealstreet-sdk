@@ -1305,7 +1305,7 @@ export class KucoinExchange extends BaseExchange {
       reduceOnly: o.reduceOnly === true,
       remaining: multiply(remainingNative, contractSize),
       timeInForce: TIME_IN_FORCE[o.timeInForce] || OrderTimeInForce.GoodTillCancel,
-      extra: { remainingNative },
+      extra: { remainingNative, filledInPlacementUnits: filledNative },
       info: o,
     };
 

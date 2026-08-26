@@ -250,6 +250,7 @@ describe('MEXC futures audit regressions', () => {
     expect(order?.filled).toBeCloseTo(0.0003);
     expect(order?.remaining).toBeCloseTo(0.0007);
     expect(order?.extra?.remainingNative).toBe(7);
+    expect(order?.extra?.filledInPlacementUnits).toBe(3);
   });
 
   it('preserves zero-valued position fields', () => {

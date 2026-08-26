@@ -1676,6 +1676,7 @@ export class BlofinExchange extends BaseExchange {
           remaining,
           extra: {
             remainingNative,
+            filledInPlacementUnits: filledNative,
           },
           reduceOnly: o.reduceOnly === 'true',
           lastUpdate: virtualClock.getCurrentTimeMs(),

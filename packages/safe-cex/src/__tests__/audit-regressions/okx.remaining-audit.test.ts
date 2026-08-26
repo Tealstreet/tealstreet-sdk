@@ -88,6 +88,31 @@ describe('OKX remaining July audit regressions', () => {
     );
   });
 
+  it('preserves regular order cumulative fill in placement units', () => {
+    const exchange = createExchange();
+
+    const [order] = exchange.mapOrders([
+      {
+        instId: market.id,
+        ordId: 'order-1',
+        state: 'partially_filled',
+        ordType: 'limit',
+        side: 'buy',
+        sz: '10',
+        accFillSz: '2',
+        px: '100',
+        avgPx: '100',
+        reduceOnly: 'false',
+      },
+    ]);
+
+    expect(order.amount).toBe(10);
+    expect(order.filled).toBe(0.02);
+    expect(order.remaining).toBe(0.08);
+    expect(order.extra?.remainingNative).toBe(8);
+    expect(order.extra?.filledInPlacementUnits).toBe(2);
+  });
+
   it('resubscribes for a fresh orderbook snapshot when sequence continuity breaks', () => {
     const exchange = createExchange();
     const websocket = exchange.publicWebsocket;

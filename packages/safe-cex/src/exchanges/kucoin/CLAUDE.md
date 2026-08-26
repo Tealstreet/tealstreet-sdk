@@ -607,7 +607,10 @@ must convert native→base via `contractSizeFor(internalSymbol)`:
 - `mapOrder`: `amount/filled = nativeSize * contractSize`; `remainSize` is the
   authoritative native remaining count when present (including `0`), otherwise
   remaining is derived as `size - filledSize`. Both base `remaining` and native
-  `extra.remainingNative` come from that value.
+  `extra.remainingNative` come from that value. `extra.filledInPlacementUnits`
+  keeps cumulative `filledSize` in native contracts for chaser replacement
+  arithmetic, because placement `opts.amount` is native while public
+  `Order.filled` is base.
 - private-WS `fill`: `amount = matchSize * contractSize`.
 
 Order **placement is the opposite direction**: `opts.amount` is NATIVE

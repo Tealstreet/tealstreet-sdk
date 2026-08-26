@@ -94,6 +94,7 @@ describe('KuCoin cancel-replace contract sizing', () => {
     expect(order.amount).toBe(19.982);
     expect(order.remaining).toBe(11.618);
     expect(order.extra?.remainingNative).toBe(11_618);
+    expect(order.extra?.filledInPlacementUnits).toBe(0);
 
     await exchange.updateOrder({ order, update: { price: 51_000 } });
 
@@ -219,6 +220,7 @@ describe('KuCoin cancel-replace contract sizing', () => {
       size: '20',
       filledSize: '9',
     });
+    expect(mappedOrder.extra?.filledInPlacementUnits).toBe(9);
     const order: Order = { ...mappedOrder, extra: undefined };
     store.update({ orders: [order] });
 

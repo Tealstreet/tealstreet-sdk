@@ -89,11 +89,20 @@ export class ChaserOrderInstance {
   }
 
   subtractFilledSize(order: Order) {
+    // Most adapters expose `Order.filled` in the same unit accepted by
+    // `PlaceOrderOpts.amount`. BloFin-style contract adapters keep the public
+    // value in base units, so they supply the equivalent placement-unit fill.
+    const placementFill = order.extra?.filledInPlacementUnits;
+    const filled =
+      typeof placementFill === 'number' && Number.isFinite(placementFill) && placementFill >= 0
+        ? placementFill
+        : order.filled;
+
     const prevFilled = this._filledByOrderId[order.id] || 0;
-    if (order.filled > prevFilled) {
+    if (filled > prevFilled) {
       this._lastPartialFillAt = Date.now();
     }
-    this._filledByOrderId[order.id] = order.filled;
+    this._filledByOrderId[order.id] = filled;
     this.recalculateRemainingSize();
     if (this._remainingSize <= 0) {
       this._state.isStopped = true;

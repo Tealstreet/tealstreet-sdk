@@ -638,6 +638,7 @@ describe('Blofin contract scaling regression', () => {
     expect(orders[0].amount).toBeCloseTo(0.2, 10);
     expect(orders[0].remaining).toBeCloseTo(0.15, 10);
     expect(orders[0].extra?.remainingNative).toBe(150);
+    expect(orders[0].extra?.filledInPlacementUnits).toBe(50);
   });
 
   it('ignores non-swap private order rows that collide with swap market ids', () => {

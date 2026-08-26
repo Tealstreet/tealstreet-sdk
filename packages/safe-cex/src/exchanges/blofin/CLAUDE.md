@@ -418,6 +418,8 @@ filled = parseFloat(o.filledSize) * contractValue
 
 Execution history follows the same conversion rule (`qty = nativeQty * contractSize`). Small native fills can produce tiny-but-valid base quantities (for example `0.2` contracts on `BTC-USDT` with `contractValue=0.001` -> `0.0002` BTC), so downstream UIs should avoid coarse fixed-decimal rounding that can display them as `0.0`.
 
+BloFin's public `Order.filled` remains base quantity. `Order.extra.filledInPlacementUnits` preserves the same cumulative native-contract value accepted by `PlaceOrderOpts.amount`, so chaser remainder arithmetic does not mix base quantity with placement units.
+
 ### Order Book Amount Conversion
 
 Order book amounts from WS are contract counts. Keep them in native contracts in `blofin.ws-public.ts`; web orderbook/DOM grouping utilities convert to base or quote exactly once using `contractSize`.

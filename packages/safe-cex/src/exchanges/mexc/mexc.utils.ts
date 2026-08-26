@@ -347,8 +347,10 @@ export const normalizeOrder = (raw: Record<string, any>, market?: Market): Order
   if (!id || !symbol || !sideInfo) return null;
 
   const typeCode = toNumber(raw.type ?? raw.orderType, 1);
-  const amount = nativeVolumeToAmount(raw.vol ?? raw.quantity ?? raw.origQty, market);
-  const filled = nativeVolumeToAmount(raw.dealVol ?? raw.filledQty ?? raw.executedQty, market);
+  const amountNative = toNumber(raw.vol ?? raw.quantity ?? raw.origQty);
+  const amount = nativeVolumeToAmount(amountNative, market);
+  const filledNative = toNumber(raw.dealVol ?? raw.filledQty ?? raw.executedQty);
+  const filled = nativeVolumeToAmount(filledNative, market);
   const status = ORDER_STATUS[toNumber(raw.state ?? raw.status, Number.NaN)] || OrderStatus.Open;
   const type = ORDER_TYPE[typeCode] || OrderType.Limit;
   const price = toNumber(raw.price ?? raw.orderPrice, 0);
@@ -369,7 +371,8 @@ export const normalizeOrder = (raw: Record<string, any>, market?: Market): Order
     lastUpdate: normalizeTimestampToMs(raw.updateTime ?? raw.modifyTime ?? raw.createTime),
     info: raw,
     extra: {
-      remainingNative: Math.max(toNumber(raw.vol) - toNumber(raw.dealVol), 0),
+      remainingNative: Math.max(amountNative - filledNative, 0),
+      filledInPlacementUnits: filledNative,
     },
   }) as Order;
 };

@@ -185,6 +185,14 @@ path), and `setFilledAmount` (Hyperliquid REST reconciliation) — any
 path that observes a fill increment. Don't bump it for cancels or
 status-only updates; those don't represent active fill flow.
 
+`subtractFilledSize` tracks fills in the same unit as
+`PlaceOrderOpts.amount`, because that is the unit used for replacement sizing.
+Most adapters already expose `Order.filled` in placement units. Contract-count
+adapters that publish `Order.filled` in base/display units (BloFin, KuCoin
+Futures, MEXC, OKX) must set `Order.extra.filledInPlacementUnits` to their
+cumulative native filled size, or a partially filled chaser can replace for the
+wrong remaining amount.
+
 This guard becomes relevant only because the per-exchange WS handlers
 now mirror cumulative fill onto the store row on `PARTIALLY_FILLED`
 (see `../../exchanges/binance/CLAUDE.md` → "Order Reconciliation").

@@ -1910,6 +1910,7 @@ export class OKXExchange extends BaseExchange {
         remaining,
         extra: {
           remainingNative,
+          filledInPlacementUnits: filled,
         },
         reduceOnly: o.reduceOnly === 'true',
         lastUpdate: virtualClock.getCurrentTimeMs(),

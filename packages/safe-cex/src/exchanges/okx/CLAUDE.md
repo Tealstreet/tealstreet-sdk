@@ -616,6 +616,7 @@ automatically split by `formatCreateOrder`:
 - **Contract size** (`contractSize`): `ctVal` from instrument data (e.g., `0.01` BTC per contract)
 - **Order amounts**: Specified in **contracts** (native units), not base currency
 - **Display conversion**: `contracts * contractSize` converts to base currency amount
+- **Order fills**: Public `Order.filled` is base-sized for display/position math, while `Order.extra.filledInPlacementUnits` keeps cumulative `accFillSz` in native contracts for chaser replacement arithmetic.
 - **Minimum amount**: `BigNumber(minSz).multipliedBy(ctVal)`
 - **Position notional**: Linear contracts use `contractsNative * markPrice * contractSize`; inverse contracts use their quote-denominated contract value
 
