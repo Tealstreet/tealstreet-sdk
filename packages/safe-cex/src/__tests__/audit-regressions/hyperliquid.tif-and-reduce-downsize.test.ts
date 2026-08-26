@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
 import { parseHyperliquidOrderTimeInForce } from '../../exchanges/hyperliquid/hyperliquid.order-inference';
 import { DefaultStore } from '../../store/store.base';
-import { OrderTimeInForce } from '../../types';
+import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
 
 const createExchange = () =>
   new HyperliquidExchange('hyperliquid' as any, { key: 'test', secret: 'test' } as any, new DefaultStore());
@@ -19,6 +19,172 @@ describe('hyperliquid reduce-only downsizing', () => {
   // Spot has no positions to reduce, so the flag would be meaningless there.
   it('leaves the spot venue on the default', () => {
     expect(exchangeMetadata.hyperliquidspot.autoDownSizeReduceOrders).toBe(false);
+  });
+});
+
+describe('hyperliquid core-perp trigger order safety', () => {
+  const createExchangeWithBtcMarket = () => {
+    const store = new DefaultStore();
+    const market = {
+      id: 'BTC',
+      symbol: 'BTC-PERP',
+      base: 'BTC',
+      quote: 'USDC',
+      active: true,
+      precision: { amount: 0.00001, price: 1 },
+      limits: { amount: { min: 0.00001, max: 1000 } },
+      contractSize: 1,
+      isSpot: false,
+      info: { hyperliquidId: 0 },
+    } as any;
+
+    store.update({
+      markets: [market],
+      tickers: [
+        {
+          id: 'BTC',
+          symbol: 'BTC-PERP',
+          bid: 78490,
+          ask: 78510,
+          last: 78500,
+          mark: 78500,
+          index: 78502,
+          percentage: 0,
+          openInterest: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+        } as any,
+      ],
+      positions: [
+        {
+          id: 'BTC-PERP:long',
+          symbol: 'BTC-PERP',
+          side: PositionSide.Long,
+          contracts: 0.00014,
+          entryPrice: 78500,
+          notional: 10.99,
+          leverage: 1,
+          unrealizedPnl: 0,
+          liquidationPrice: 0,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        } as any,
+      ],
+    });
+
+    const exchange = new HyperliquidExchange(
+      'hyperliquid' as any,
+      {
+        key: '0x0000000000000000000000000000000000000001',
+        secret: '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      } as any,
+      store,
+    );
+    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+    return { exchange, store };
+  };
+
+  it('routes explicit full-size reduce-only stops through positional TP/SL sizing', async () => {
+    const { exchange } = createExchangeWithBtcMarket();
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        status: 'ok',
+        response: {
+          type: 'order',
+          data: { statuses: [{ resting: { oid: 12345 } }] },
+        },
+      },
+    });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-PERP',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0.00014,
+        price: 77000,
+        reduceOnly: true,
+      }),
+    ).resolves.toEqual(['12345']);
+
+    const payload = post.mock.calls[0][1];
+    expect(payload.action.grouping).toBe('positionTpsl');
+    expect(payload.action.orders[0]).toMatchObject({
+      a: 0,
+      b: false,
+      s: '0',
+      r: true,
+      t: { trigger: { isMarket: true, tpsl: 'sl', triggerPx: '77000' } },
+    });
+  });
+
+  it('refreshes orders when positional TP/SL is accepted without an order id', async () => {
+    const { exchange } = createExchangeWithBtcMarket();
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        status: 'ok',
+        response: {
+          type: 'order',
+          data: { statuses: ['waitingForTrigger'] },
+        },
+      },
+    });
+    exchange.xhr = { post } as any;
+    exchange.scheduleOrderRefresh = vi.fn();
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-PERP',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0.00014,
+        price: 77000,
+        reduceOnly: true,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(exchange.scheduleOrderRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects trigger orders before POST when ticker price data is missing', async () => {
+    const { exchange, store } = createExchangeWithBtcMarket();
+    store.update({
+      tickers: [
+        {
+          id: 'BTC',
+          symbol: 'BTC-PERP',
+          bid: 0,
+          ask: 0,
+          last: 0,
+          mark: 0,
+          index: 0,
+          percentage: 0,
+          openInterest: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+        } as any,
+      ],
+    });
+    const post = vi.fn();
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-PERP',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0.00014,
+        price: 77000,
+        reduceOnly: true,
+      }),
+    ).rejects.toThrow('missing valid ticker price data');
+
+    expect(post).not.toHaveBeenCalled();
   });
 });
 
