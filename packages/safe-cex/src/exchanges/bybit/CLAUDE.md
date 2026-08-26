@@ -89,6 +89,11 @@ Bybit Brazil accounts use the normal global Bybit REST/WS hosts, but Bybit requi
 Current status for beta:
 
 - Functionally implemented in account shape, account creation/editing, sync/runtime fingerprints, REST headers, and Bybit WS connection options.
+- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/...`:
+  - private: `/bybitbra/v5/private`
+  - public linear: `/bybitbra/v5/public/linear`
+  - public inverse: `/bybitbra/v5/public/inverse`
+  - public spot: `/bybitbra/v5/public/spot`
 - Covered by focused safe-cex/web tests, package-local typechecks, and root lint during implementation.
 - Not venue-validated yet because we do not have a real Bybit Brazil account/API key. Treat the first Brazil-account rollout as beta validation rather than fully proven production behavior.
 
@@ -97,14 +102,14 @@ Rules:
 - Keep this as the specific `bybitSiteId` field. Do not replace it with a user-controlled generic header bag.
 - Explicitly drop the field for `bybitdemo`; demo uses `api-demo.bybit.com` credentials and has no Brazil KYC/site concept.
 - REST requests include the header on signed and unsigned routes. Public KLINE strips auth but preserves `x-site-id`.
-- WS classes pass the header option to `createWebsocket()` and resolve the routing table before falling back to direct Bybit URLs. Browser-native direct WebSockets cannot set custom upgrade headers; if Bybit enforces the header there, a CTO-confirmed Tealstreet/tradetunnel WS route must be added to the routing table instead of inventing an unbacked host here.
-- Until that header-capable WS route exists, `bybitSiteId: 'BRA_BTL'` uses the same local REST order-lifecycle fallback as demo for resting orders: REST create/amend/cancel successes locally show, update, and retire chart rows while snapshots/WS catch up. Keep this scoped to Brazil/demo; normal live Bybit still lets private WS own order rows.
+- WS classes resolve the routing table before falling back to direct Bybit URLs. For `bybitSiteId: 'BRA_BTL'`, the routing table must send browser WS through the dedicated Bybit Brazil proxy because browser-native direct WebSockets cannot set custom upgrade headers.
+- Keep the local REST order-lifecycle fallback for `bybitSiteId: 'BRA_BTL'` until Brazil-account WS behavior is venue-validated. REST create/amend/cancel successes locally show, update, and retire chart rows while snapshots/WS catch up. Keep this scoped to Brazil/demo; normal live Bybit still lets private WS own order rows.
 
 Beta validation checklist:
 
 - Add or edit a non-demo Bybit account, enable "Bybit Brazil account", and confirm validation succeeds.
 - Confirm REST activity works for the account mode the user actually trades: account info, balance, orders, positions, order history, executions, order placement/amend/cancel, and KLINE.
-- Confirm public and private WS behavior separately. If REST works but direct browser WS does not, collect the WS close/auth details and route it to proxy infra; do not remove the user-facing caveat until a header-capable tunnel route is confirmed.
+- Confirm public and private WS behavior separately, including that Brazil accounts connect through the `/bybitbra` proxy paths and receive order lifecycle updates without waiting for manual refresh.
 - Do not assume Brazil accounts are spot-only. Product availability is a venue/account-permission question; let Bybit errors prove unsupported derivatives before hiding perps/inverse in the UI.
 - Regression-check a normal non-Brazil Bybit account to ensure the unset `bybitSiteId` remains a no-op and does not cause reload/sync churn.
 

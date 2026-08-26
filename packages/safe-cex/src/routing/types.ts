@@ -40,6 +40,9 @@ export type WsStrategy =
   | { kind: 'proxyConditional'; host: WsHost }
   // tealstreetProxy ? (proxyRegion === 'JA' ? ja : other) : direct (bitmex).
   | { kind: 'regionConditional'; ja: WsHost; other: WsHost }
+  // bybitSiteId === 'BRA_BTL' ? host : direct. Browser WS cannot send the site
+  // header, so the dedicated proxy path injects it upstream.
+  | { kind: 'bybitBrazilConditional'; host: WsHost }
   // Direct primary; the class falls back to `fallback` after repeated reconnect
   // failures (bitget). The fallback HOST is owned here; the trigger state is not.
   | { kind: 'fallbackOnly'; fallback: WsHost }

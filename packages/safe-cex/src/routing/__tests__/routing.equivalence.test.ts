@@ -101,6 +101,7 @@ const legacyGetPrivateProxy = (url: string, requiresCors: boolean, forceJa: bool
 const proxy = { tealstreetProxy: true };
 const offProxy = { tealstreetProxy: false };
 const wsRoute = { tealstreetWsRoute: true };
+const bybitBrazil = { bybitSiteId: 'BRA_BTL' as const };
 
 describe('routing table / resolver (Epic 1 net)', () => {
   it('WS hosts reproduce the current hardcoded literals', () => {
@@ -152,6 +153,23 @@ describe('routing table / resolver (Epic 1 net)', () => {
       'wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true',
     );
     expect(resolveExchangeRouting('lighter', proxy).wsPrivate).toEqual({ tunnelled: false });
+
+    // bybitBrazilConditional: Bybit Brazil uses a dedicated proxy path that
+    // injects x-site-id upstream. It is keyed only by bybitSiteId, not proxy flags.
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPrivate.host).toBe(
+      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private',
+    );
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPublic.host).toBe(
+      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear',
+    );
+    expect(resolveExchangeRouting('bybitinverse', bybitBrazil).wsPublic.host).toBe(
+      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse',
+    );
+    expect(resolveExchangeRouting('bybitspot', bybitBrazil).wsPublic.host).toBe(
+      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot',
+    );
+    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('bybitdemo', bybitBrazil).wsPrivate).toEqual({ tunnelled: false });
   });
 
   it('REST pool host matches getPrivateProxy across every branch', () => {

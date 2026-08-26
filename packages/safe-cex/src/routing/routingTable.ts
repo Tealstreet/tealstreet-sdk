@@ -34,6 +34,10 @@ const WS = {
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
   lighterPublic: `${JP}/lighter/stream?readonly=true`,
   lighterPrivate: `${JP}/lighter/stream`,
+  bybitBraPrivate: `${ASIA}/bybitbra/v5/private`,
+  bybitBraPublicLinear: `${ASIA}/bybitbra/v5/public/linear`,
+  bybitBraPublicInverse: `${ASIA}/bybitbra/v5/public/inverse`,
+  bybitBraPublicSpot: `${ASIA}/bybitbra/v5/public/spot`,
 } as const;
 
 // Exchanges whose REST CORS pool is the Tokyo (jp) box — getPrivateProxy's
@@ -75,6 +79,7 @@ const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coin
 const bitmexWs: WsGroup = {
   private: { kind: 'regionConditional', ja: WS.bitmexJa, other: WS.bitmexOther },
 };
+const bybitBrazilPrivateWs = { kind: 'bybitBrazilConditional', host: WS.bybitBraPrivate } as const;
 
 // Per-exchange WS overrides (everything not listed defaults to all-direct).
 const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
@@ -95,6 +100,18 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
   lighter: {
     public: { kind: 'wsRouteCandidates', proxy: WS.lighterPublic },
     private: { kind: 'wsRouteCandidates', proxy: WS.lighterPrivate },
+  },
+  bybit: {
+    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicLinear },
+    private: bybitBrazilPrivateWs,
+  },
+  bybitinverse: {
+    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicInverse },
+    private: bybitBrazilPrivateWs,
+  },
+  bybitspot: {
+    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicSpot },
+    private: bybitBrazilPrivateWs,
   },
 };
 

@@ -12,6 +12,7 @@ import { routingTable } from './routingTable';
 export interface RoutingOptions {
   tealstreetProxy?: boolean;
   proxyRegion?: string;
+  bybitSiteId?: 'BRA_BTL';
   // lighter's WS proxy is gated by this separate flag, NOT tealstreetProxy.
   tealstreetWsRoute?: boolean;
 }
@@ -55,6 +56,8 @@ const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions): Resolve
       return o.tealstreetProxy
         ? { tunnelled: true, host: o.proxyRegion === 'JA' ? strategy.ja : strategy.other }
         : { tunnelled: false };
+    case 'bybitBrazilConditional':
+      return o.bybitSiteId === 'BRA_BTL' ? { tunnelled: true, host: strategy.host } : { tunnelled: false };
     case 'fallbackOnly':
       // Direct primary; the channel's runtime machine may switch to `fallback`.
       return { tunnelled: false, fallback: strategy.fallback };
