@@ -134,6 +134,9 @@ const parseHyperliquidOpenInterestNotional = (sourceTicker: AssetCtx, price: num
   return price > 0 ? openInterestBase * price : 0;
 };
 
+const isFinitePositiveNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
 export class HyperliquidExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
@@ -201,6 +204,34 @@ export class HyperliquidExchange extends BaseExchange {
         clearTimeout(timeoutId);
       }
     }
+  };
+
+  private getOrderBasePrice = (market: Market, purpose: string): number => {
+    const ticker = this.store.tickersBySymbol[market.symbol];
+    const candidates = market.isSpot
+      ? [ticker?.last, ticker?.midPrice, ticker?.mark, ticker?.index]
+      : [ticker?.mark, ticker?.last, ticker?.midPrice, ticker?.index];
+    const price = candidates.find(isFinitePositiveNumber);
+
+    if (!price) {
+      throw new Error(`Cannot place Hyperliquid ${purpose} for ${market.symbol}: missing valid ticker price data`);
+    }
+
+    return price;
+  };
+
+  private shouldUsePositionTpsl = (opts: PlaceOrderOpts, market: Market, orderSize: number): boolean => {
+    if (opts.amount === 0) return true;
+    if (!opts.reduceOnly || !isFinitePositiveNumber(orderSize)) return false;
+
+    const targetSide = opts.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
+    const position = this.store.positions.find(
+      (p) => p.symbol === market.symbol && p.side === targetSide && p.contracts > 0,
+    );
+    if (!position) return false;
+
+    const amountPrecision = isFinitePositiveNumber(market.precision.amount) ? market.precision.amount : 0;
+    return orderSize + amountPrecision >= position.contracts;
   };
 
   /**
@@ -2040,6 +2071,11 @@ export class HyperliquidExchange extends BaseExchange {
       .filter((oid: string | undefined): oid is string => oid !== undefined);
   }
 
+  private responseHasWaitingForTrigger(data: any): boolean {
+    const statuses = data?.response?.data?.statuses;
+    return Array.isArray(statuses) && statuses.includes('waitingForTrigger');
+  }
+
   private generateFakePositionsFromMarkets = (markets: Market[]) => {
     // Spot markets are deliberately excluded. Spot exposure is a coin balance
     // (`Balance.coins`), not a Position — synthesizing zero-size spot rows
@@ -3552,8 +3588,6 @@ export class HyperliquidExchange extends BaseExchange {
       // }
       const assetIndex = market?.info.hyperliquidId;
 
-      // Use O(1) hashmap lookup instead of O(n) find
-      const ticker = this.store.tickersBySymbol[market.symbol];
       const nAmount = market.precision.amount;
 
       // For market orders, use mark price (closer to oracle) to avoid "price too far from oracle" errors
@@ -3565,7 +3599,7 @@ export class HyperliquidExchange extends BaseExchange {
       // price — a spot market order on a pair that has moved more than 5%
       // would rest as a limit instead of crossing. Perps keep mark-first
       // (closer to oracle, avoids "price too far from oracle" rejections).
-      const basePrice = (market.isSpot ? ticker?.last || ticker?.mark : ticker?.mark || ticker?.last) || 0;
+      const basePrice = this.getOrderBasePrice(market, 'market order');
 
       const orderWire = orderRequestToOrderWire(
         {
@@ -3714,9 +3748,6 @@ export class HyperliquidExchange extends BaseExchange {
       // }
       const assetIndex = market?.info.hyperliquidId;
 
-      // Use O(1) hashmap lookup instead of O(n) find
-      const ticker = this.store.tickersBySymbol[market.symbol];
-
       // Use mark price for limit_px to avoid "price too far from oracle" errors
       // Spot prefers `last`: only `allMids` is guaranteed to carry spot coins
       // and it updates `last`/`midPrice` only, so a spot ticker's `mark` is
@@ -3725,22 +3756,28 @@ export class HyperliquidExchange extends BaseExchange {
       // price — a spot market order on a pair that has moved more than 5%
       // would rest as a limit instead of crossing. Perps keep mark-first
       // (closer to oracle, avoids "price too far from oracle" rejections).
-      const basePrice = (market.isSpot ? ticker?.last || ticker?.mark : ticker?.mark || ticker?.last) || 0;
+      const basePrice = this.getOrderBasePrice(market, `${opts.type} order`);
 
       // Adjust size to market precision (matches CCXT approach)
       const orderSize = opts.amount === 0 ? 0 : adjust(opts.amount, market.precision.amount);
+      const usePositionTpsl = this.shouldUsePositionTpsl(opts, market, orderSize);
+      const wireSize = usePositionTpsl ? 0 : orderSize;
+      const triggerPrice = Number(opts.price);
+      if (!isFinitePositiveNumber(triggerPrice)) {
+        throw new Error(`Cannot place Hyperliquid ${opts.type} for ${market.symbol}: invalid trigger price`);
+      }
 
       const orderWire = orderRequestToOrderWire(
         {
           coin: symbolToCoin(market.symbol),
           is_buy: opts.side === OrderSide.Buy,
-          sz: orderSize,
+          sz: wireSize,
           limit_px: +this.priceToPrecision(market.symbol, basePrice * (opts.side === OrderSide.Buy ? 1.05 : 0.95)),
           order_type: {
             trigger: {
               isMarket: true,
               tpsl: opts.type === OrderType.TakeProfit ? 'tp' : 'sl',
-              triggerPx: +this.priceToPrecision(market.symbol, opts.price || 0),
+              triggerPx: +this.priceToPrecision(market.symbol, triggerPrice),
             },
           },
           reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
@@ -3750,13 +3787,12 @@ export class HyperliquidExchange extends BaseExchange {
       // Get builder info if wallet is approved for builder fee
       const builderInfo = await this.getBuilderInfo();
 
-      // Use positionTpsl for full position close (amount = 0)
+      // Use positionTpsl for full position close (amount = 0 or explicit full-size reduce)
       // Use na grouping for standalone partial TP/SL orders with explicit size
       // Note: normalTpsl requires a main non-trigger order first, so we use na for standalone trigger orders
-      const action =
-        opts.amount > 0
-          ? orderWiresToOrderAction([orderWire], builderInfo)
-          : orderWiresToPositionalTPSLAction([orderWire], builderInfo);
+      const action = usePositionTpsl
+        ? orderWiresToPositionalTPSLAction([orderWire], builderInfo)
+        : orderWiresToOrderAction([orderWire], builderInfo);
 
       const nonce = this.generateNonce();
       const signature = await signL1Action(
@@ -3783,6 +3819,9 @@ export class HyperliquidExchange extends BaseExchange {
       });
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
+      if (orderIds.length === 0 && this.responseHasWaitingForTrigger(data)) {
+        this.scheduleOrderRefresh();
+      }
 
       // HIP-3 orders: Add optimistic order to store immediately
       // This prevents the 10-30 second delay waiting for Hyperliquid's REST API

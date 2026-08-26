@@ -437,6 +437,22 @@ Subscribed for the user (or vault address):
 
 Hyperliquid **rests a reduce-only order at whatever size it was sent** — it does not cap it to the open position server-side. A reduce-only sell of 336 against a 168-contract long stays open at 336. So the venue sets `autoDownSizeReduceOrders: true`, routing through the shared `downSizeReduceOrder` util in the web limit/market builders. Do not hand-roll a clamp in `placeOrder`/`createLimitOrderWires`; see `../CLAUDE.md` → "Reduce-only order downsizing". `hyperliquidspot` deliberately stays on the default `false`: spot has no positions, and `resolveReduceOnly` already forces `r:false` for `market.isSpot`.
 
+For standalone TP/SL orders, explicit full-size reduce-only requests must be
+routed as positional TP/SL (`grouping: "positionTpsl"`, `s: "0"`). This avoids
+Hyperliquid's `$10` minimum notional floor rejecting tiny-but-valid full-position
+stops. Partial TP/SL (`s > 0`) still uses standalone `na` grouping and can be
+rejected by the venue if the requested partial size is below the minimum.
+
+Market and trigger orders must not build the wire from a missing or zero ticker
+reference price. A zero `p` on Hyperliquid trigger-market orders can behave like
+a marketable close, so `placeOrder()` fails before POST when no finite positive
+mark/last/mid/index price is available.
+
+Position TP/SL placements can return `"waitingForTrigger"` without an `oid`.
+Treat that as accepted-but-not-yet-identified: schedule a REST order refresh and
+let the UI's optimistic order reconcile from WS/REST instead of surfacing an
+"unknown order status" error.
+
 ### TIF Mappings
 
 | Internal            | Hyperliquid Wire |
