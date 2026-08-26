@@ -372,9 +372,14 @@ export class ChaserOrderManager {
         for (const order of orders) {
           if (order.status === OrderStatus.Canceled && order.extra?.rejectReason === OrderRejectReason.PostOnly) {
             continue;
-          } else {
-            instance.subtractFilledSize(order);
           }
+
+          const placementFill = order.extra?.filledInPlacementUnits;
+          const resolvedFill =
+            typeof placementFill === 'number' && Number.isFinite(placementFill) && placementFill >= 0
+              ? placementFill
+              : order.filled;
+          instance.recordCumulativePlacementFill(order.id, resolvedFill);
         }
 
         // If all orders are closed = all of them are filled, also finishing chaser
@@ -502,7 +507,7 @@ export class ChaserOrderManager {
                 for (const [orderId, filledAmount] of fillsMap) {
                   // Only update if we got more filled than we knew about
                   this.log(`REST fills check: orderId=${orderId}, filledAmount=${filledAmount}`, instance);
-                  instance.setFilledAmount(orderId, filledAmount);
+                  instance.recordCumulativePlacementFill(orderId, filledAmount, 'Fully filled via REST check');
                 }
                 // Check if fully filled after REST update
                 if (instance.isStopped) {

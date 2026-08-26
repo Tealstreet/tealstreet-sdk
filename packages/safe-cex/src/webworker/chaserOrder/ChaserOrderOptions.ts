@@ -28,6 +28,7 @@ export type ChaserTerminate = {
 
 export type ChaserOrderOptions = {
   symbol: string;
+  /** Target amount in the exact unit this exchange accepts for `PlaceOrderOpts.amount`. */
   size: number;
   side: OrderSide;
   maxAttempts: number;

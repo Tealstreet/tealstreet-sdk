@@ -459,6 +459,9 @@ export type Order = {
   readonly extra?: {
     // actual remaining size in contracts considering contract size, inverse, quanto, etc
     readonly remainingNative?: number;
+    // Absolute cumulative fill in the exact unit accepted by this adapter's
+    // PlaceOrderOpts.amount. This is not universally base or native.
+    readonly filledInPlacementUnits?: number;
     readonly remainingNotional?: number;
     readonly conditionalOrderPrice?: number;
     readonly rejectReason?: OrderRejectReason;

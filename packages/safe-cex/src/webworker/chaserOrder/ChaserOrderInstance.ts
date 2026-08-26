@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { Exchange } from '../../exchanges/base';
-import { Order, OrderSide, PositionSide } from '../../types';
+import { OrderSide, PositionSide } from '../../types';
 import { clone } from '../../utils/clone';
 import { ChaserOrderOptions } from './ChaserOrderOptions';
 import { ChaserOrderState } from './ChaserOrderState';
@@ -88,16 +88,30 @@ export class ChaserOrderInstance {
     this._remainingSize = this.options.size - Object.values(this._filledByOrderId).reduce((a, b) => a + b, 0);
   }
 
-  subtractFilledSize(order: Order) {
-    const prevFilled = this._filledByOrderId[order.id] || 0;
-    if (order.filled > prevFilled) {
-      this._lastPartialFillAt = Date.now();
+  /**
+   * Record an absolute cumulative fill in the same placement unit as
+   * `ChaserOrderOptions.size`. Only strict increases are applied.
+   */
+  recordCumulativePlacementFill(
+    orderId: string,
+    cumulativeFilledInPlacementUnits: number,
+    stopReason = 'Fully filled already',
+  ) {
+    if (!Number.isFinite(cumulativeFilledInPlacementUnits) || cumulativeFilledInPlacementUnits < 0) {
+      return;
     }
-    this._filledByOrderId[order.id] = order.filled;
+
+    const currentFilled = this._filledByOrderId[orderId] || 0;
+    if (cumulativeFilledInPlacementUnits <= currentFilled) {
+      return;
+    }
+
+    this._lastPartialFillAt = Date.now();
+    this._filledByOrderId[orderId] = cumulativeFilledInPlacementUnits;
     this.recalculateRemainingSize();
     if (this._remainingSize <= 0) {
       this._state.isStopped = true;
-      this._state.stopReason = 'Fully filled already';
+      this._state.stopReason = stopReason;
     }
   }
 
@@ -122,26 +136,6 @@ export class ChaserOrderInstance {
     if (this._remainingSize <= 0) {
       this._state.isStopped = true;
       this._state.stopReason = 'Fully filled via fill events';
-    }
-  }
-
-  /**
-   * Set the total filled amount for an order (absolute value from REST API).
-   * Only updates if the new amount is greater than what we've tracked.
-   * @param orderId The order ID
-   * @param totalFilledAmount The total filled amount from REST API
-   */
-  setFilledAmount(orderId: string, totalFilledAmount: number) {
-    const currentFilled = this._filledByOrderId[orderId] || 0;
-    // Only update if REST shows more filled than we knew about
-    if (totalFilledAmount > currentFilled) {
-      this._lastPartialFillAt = Date.now();
-      this._filledByOrderId[orderId] = totalFilledAmount;
-      this.recalculateRemainingSize();
-      if (this._remainingSize <= 0) {
-        this._state.isStopped = true;
-        this._state.stopReason = 'Fully filled via REST check';
-      }
     }
   }
 

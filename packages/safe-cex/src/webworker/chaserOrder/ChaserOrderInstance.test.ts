@@ -229,9 +229,25 @@ describe('ChaserOrderInstance', () => {
       const instance = new ChaserOrderInstance(mockExchange, options);
 
       // Simulate partial fill
-      instance.subtractFilledSize({ id: 'order-1', filled: 0.3 } as any);
+      instance.recordCumulativePlacementFill('order-1', 0.3);
 
       expect(instance.remainingSize).toBeCloseTo(0.7, 10);
+    });
+
+    it('ignores stale cumulative fill snapshots that would increase remaining size', () => {
+      const instance = new ChaserOrderInstance(mockExchange, {
+        symbol: 'BTCUSDT',
+        size: 15,
+        side: OrderSide.Buy,
+        maxAttempts: 100,
+        reduceOnly: false,
+        delay: 1000,
+      });
+
+      instance.recordCumulativePlacementFill('order-1', 3);
+      instance.recordCumulativePlacementFill('order-1', 2.5);
+
+      expect(instance.remainingSize).toBe(12);
     });
 
     it('should stop when fully filled', () => {
@@ -246,7 +262,7 @@ describe('ChaserOrderInstance', () => {
 
       const instance = new ChaserOrderInstance(mockExchange, options);
 
-      instance.subtractFilledSize({ id: 'order-1', filled: 1.0 } as any);
+      instance.recordCumulativePlacementFill('order-1', 1.0);
 
       expect(instance.isStopped).toBe(true);
       expect(instance.state.stopReason).toBe('Fully filled already');
@@ -287,7 +303,7 @@ describe('ChaserOrderInstance', () => {
       instance.addFillAmount('order-1', 0.2);
 
       // Then REST shows more
-      instance.setFilledAmount('order-1', 0.5);
+      instance.recordCumulativePlacementFill('order-1', 0.5, 'Fully filled via REST check');
 
       expect(instance.remainingSize).toBeCloseTo(0.5, 10);
     });
@@ -305,11 +321,11 @@ describe('ChaserOrderInstance', () => {
       const instance = new ChaserOrderInstance(mockExchange, options);
 
       // Set via REST
-      instance.setFilledAmount('order-1', 0.5);
+      instance.recordCumulativePlacementFill('order-1', 0.5, 'Fully filled via REST check');
       expect(instance.remainingSize).toBeCloseTo(0.5, 10);
 
       // Try to set lower amount (should be ignored)
-      instance.setFilledAmount('order-1', 0.3);
+      instance.recordCumulativePlacementFill('order-1', 0.3, 'Fully filled via REST check');
       expect(instance.remainingSize).toBeCloseTo(0.5, 10);
     });
   });

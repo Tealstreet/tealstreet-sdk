@@ -179,10 +179,10 @@ exchange. The user ends up with `original + extra-fill` notional
 hold-steady window absorbs a normal multi-tranche fill burst; if no
 more fills arrive within 1 s, normal chasing resumes.
 
-`lastPartialFillAt` is bumped by `ChaserOrderInstance.subtractFilledSize`
-(WS order-status path), `addFillAmount` (Hyperliquid/GRVT fill-event
-path), and `setFilledAmount` (Hyperliquid REST reconciliation) — any
-path that observes a fill increment. Don't bump it for cancels or
+`lastPartialFillAt` is bumped by
+`ChaserOrderInstance.recordCumulativePlacementFill` (WS order-status and REST
+reconciliation paths) and `addFillAmount` (Hyperliquid/GRVT fill-event path) —
+any path that observes a fill increment. Don't bump it for cancels or
 status-only updates; those don't represent active fill flow.
 
 This guard becomes relevant only because the per-exchange WS handlers
@@ -193,6 +193,15 @@ Binance, so the chaser never saw a per-partial-fill order-update
 edge; it only re-evaluated on the ticker throttle. With the partial
 fills now visible, we *must* hold steady — otherwise the chaser
 re-evaluates and tries to cancel inside the fill window.
+
+## Fill accounting uses placement units
+
+`ChaserOrderOptions.size`, `remainingSize`, and replacement `PlaceOrderOpts.amount`
+stay in the adapter's placement unit. When an adapter's public `Order.filled`
+uses another unit, it publishes the absolute cumulative fill as
+`Order.extra.filledInPlacementUnits`; the manager prefers that field and keeps
+`Order.filled` as the legacy fallback for untouched adapters. Per-order
+cumulative snapshots are monotonic: equal or smaller stale values are ignored.
 
 ## Fill-based tracking (Hyperliquid and GRVT)
 

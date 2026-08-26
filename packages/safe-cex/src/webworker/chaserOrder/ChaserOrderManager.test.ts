@@ -215,6 +215,73 @@ describe('ChaserOrderManager', () => {
     expect(manager.instances).not.toContain(instance);
   });
 
+  it('tracks scaled partial fills in the same placement units used for replacement', async () => {
+    const { emit, exchange, order: initialOrder, store } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 15,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+      origin: 'cli',
+    });
+    const scaledOrder: Order = {
+      ...initialOrder,
+      amount: 15000,
+      filled: 2500,
+      remaining: 12500,
+      extra: {
+        filledInPlacementUnits: 2.5,
+      },
+    };
+    store.orders.splice(0, store.orders.length, scaledOrder);
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    await emit('update', store);
+
+    expect(instance.isStopped).toBe(false);
+    expect(instance.remainingSize).toBe(12.5);
+    expect(manager.instances).toContain(instance);
+
+    await vi.advanceTimersByTimeAsync(1500);
+    Object.assign(store.tickersBySymbol.BTCUSDT, { bid: 101, ask: 102 });
+    const repriceUpdate = emit('update', store);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1000);
+    await repriceUpdate;
+
+    expect(exchange.cancelOrders).toHaveBeenCalledWith([scaledOrder]);
+    expect(exchange.placeOrder).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        amount: 12.5,
+      }),
+    );
+  });
+
+  it('falls back to public filled quantity for adapters without placement-unit metadata', async () => {
+    const { emit, exchange, order, store } = createMockExchange();
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+    const legacyOrder: Order = { ...order, filled: 0.3, remaining: 0.7 };
+    store.orders.splice(0, store.orders.length, legacyOrder);
+
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    await emit('update', store);
+
+    expect(instance.remainingSize).toBeCloseTo(0.7, 10);
+  });
+
   it('does not miss an order fill that arrives while a reprice is pending', async () => {
     const { emit, exchange, order, store } = createMockExchange();
     const manager = new ChaserOrderManager();
