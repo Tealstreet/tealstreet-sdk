@@ -230,8 +230,7 @@ export class HyperliquidExchange extends BaseExchange {
     );
     if (!position) return false;
 
-    const amountPrecision = isFinitePositiveNumber(market.precision.amount) ? market.precision.amount : 0;
-    return orderSize + amountPrecision >= position.contracts;
+    return orderSize >= position.contracts;
   };
 
   /**

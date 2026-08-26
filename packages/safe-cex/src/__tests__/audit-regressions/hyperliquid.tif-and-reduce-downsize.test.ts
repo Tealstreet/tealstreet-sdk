@@ -121,6 +121,41 @@ describe('hyperliquid core-perp trigger order safety', () => {
     });
   });
 
+  it('keeps one-lot-smaller reduce-only stops as partial standalone trigger orders', async () => {
+    const { exchange } = createExchangeWithBtcMarket();
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        status: 'ok',
+        response: {
+          type: 'order',
+          data: { statuses: [{ resting: { oid: 12345 } }] },
+        },
+      },
+    });
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-PERP',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0.00013,
+        price: 77000,
+        reduceOnly: true,
+      }),
+    ).resolves.toEqual(['12345']);
+
+    const payload = post.mock.calls[0][1];
+    expect(payload.action.grouping).toBe('na');
+    expect(payload.action.orders[0]).toMatchObject({
+      a: 0,
+      b: false,
+      s: '0.00013',
+      r: true,
+      t: { trigger: { isMarket: true, tpsl: 'sl', triggerPx: '77000' } },
+    });
+  });
+
   it('refreshes orders when positional TP/SL is accepted without an order id', async () => {
     const { exchange } = createExchangeWithBtcMarket();
     const post = vi.fn().mockResolvedValue({
