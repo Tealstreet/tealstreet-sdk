@@ -384,7 +384,22 @@ const normalizePlanOrderType = (raw: Record<string, any>, side: OrderSide): Orde
   return triggerType === 2 ? OrderType.TakeProfit : OrderType.StopLoss;
 };
 
-const normalizeStopOrderStatus = (raw: Record<string, any>): OrderStatus => {
+// Plan orders and position stop orders share MEXC's *trigger*-order state
+// space, which is deliberately DIFFERENT from the regular contract-order
+// state space encoded by `ORDER_STATUS`:
+//
+//   Regular order state: 1 Uninformed, 2 Uncompleted (Open), 3 Completed,
+//     4 Cancelled, 5 Invalid
+//   Trigger order state: 1 Untriggered (Open), 2 Cancelled, 3 Executed,
+//     4 Invalid, 5 Failed
+//
+// A `push.personal.plan.order` / `push.personal.stop.order` cancel notification
+// therefore arrives with `state:2`, which the regular-order map would
+// misinterpret as Open — the exact bug that resurrected canceled TP/SL rows
+// during rapid cancel bursts (see mexc/CLAUDE.md "Trigger-order state
+// semantics"). Route BOTH normalizers through this helper so the two surfaces
+// stay in lockstep.
+const normalizeTriggerOrderStatus = (raw: Record<string, any>): OrderStatus => {
   switch (toNumber(raw.state ?? raw.status, Number.NaN)) {
     case 1:
       return OrderStatus.Open;
@@ -414,7 +429,11 @@ export const normalizePlanOrder = (raw: Record<string, any>, market?: Market): O
   if (!id || !symbol || !sideInfo) return null;
 
   const amount = nativeVolumeToAmount(raw.vol ?? raw.quantity ?? raw.origQty, market);
-  const status = ORDER_STATUS[toNumber(raw.state ?? raw.status, Number.NaN)] || OrderStatus.Open;
+  // Plan orders use the trigger-order state space (1 Open, 2 Cancelled,
+  // 3 Executed, 4 Invalid, 5 Failed). The regular `ORDER_STATUS` map was
+  // silently miscoding state=2 as Open, so every WS cancel frame flipped a
+  // just-canceled TP/SL back to Open until the next REST tick shook it out.
+  const status = normalizeTriggerOrderStatus(raw);
   const triggerPrice = toNumber(raw.triggerPrice ?? raw.stopPrice ?? raw.price, 0);
 
   return omitUndefined({
@@ -457,7 +476,7 @@ export const normalizeStopOrder = (raw: Record<string, any>, market?: Market): O
 
   return omitUndefined({
     id,
-    status: normalizeStopOrderStatus(raw),
+    status: normalizeTriggerOrderStatus(raw),
     symbol,
     type,
     side: positionSide === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,

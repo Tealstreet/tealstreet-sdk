@@ -1910,6 +1910,142 @@ describe('MEXC futures audit regressions', () => {
     expect((exchange as any).recentlyPlacedStopLikeOrderIds.has('plan-ws-1')).toBe(false);
   });
 
+  // Regression: `normalizePlanOrder` used to route status through the regular
+  // `ORDER_STATUS` map, in which `state:2` means Uncompleted (Open). Trigger
+  // orders (plan + position stop) use a DIFFERENT state space where `state:2`
+  // means Cancelled. The old wiring resurrected every canceled TP/SL row via
+  // the WS `push.personal.plan.order` cancel notification — a live trace
+  // showed dozens of successful cancel POSTs, dozens of matching `state:2`
+  // WS frames, and the chart lighting up with all "canceled" rows still open.
+  // See mexc/CLAUDE.md "Regular vs trigger order state semantics".
+  it('marks a locally-Open plan-order row Canceled when push.personal.plan.order arrives with state=2', () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'plan-cancel-1',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          info: { __mexcPlanOrder: true },
+        } as Order,
+      ],
+    });
+
+    // Live MEXC cancel notification: `push.personal.plan.order` with
+    // `state:2`. Must be normalized to Canceled, not Open.
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.plan.order',
+        data: {
+          id: 'plan-cancel-1',
+          symbol: 'BTC_USDT',
+          side: 4,
+          triggerPrice: 49000,
+          price: 0,
+          vol: 10000,
+          state: 2,
+          triggerType: 2,
+          orderType: 5,
+          reduceOnly: false,
+          updateTime: 1_700_000_000_000,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders.find((order) => order.id === 'plan-cancel-1')?.status).toBe(
+      OrderStatus.Canceled,
+    );
+  });
+
+  // The reported symptom, distilled: a plan.order state=2 frame that lands
+  // BEFORE the cancel HTTP response used to be misinterpreted as Open. Even
+  // the cancel-shield guard could not save it because the shield entry is
+  // only written *after* the HTTP response, which arrives after the frame in
+  // the observed race. Correct state normalization eliminates the race
+  // entirely — the frame carries the Canceled state directly.
+  it('lets a plan-order state=2 WS frame land the Canceled state even without a cancel-shield entry', () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'plan-race-1',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          info: { __mexcPlanOrder: true },
+        } as Order,
+      ],
+    });
+
+    // No `noteRecentlyCanceledStopLikeOrders` call yet — mirrors the "WS
+    // frame beats HTTP response" race captured in the live trace.
+    expect((exchange as any).isRecentlyCanceledStopLikeOrderId('plan-race-1')).toBe(false);
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.plan.order',
+        data: {
+          id: 'plan-race-1',
+          symbol: 'BTC_USDT',
+          side: 4,
+          triggerPrice: 49000,
+          vol: 10000,
+          state: 2,
+          triggerType: 2,
+          orderType: 5,
+          reduceOnly: false,
+          updateTime: 1_700_000_000_000,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders.find((order) => order.id === 'plan-race-1')?.status).toBe(
+      OrderStatus.Canceled,
+    );
+  });
+
+  // Unit-level guard: pin the trigger-order state -> status mapping so a
+  // future refactor cannot silently regress `normalizePlanOrder` back to the
+  // regular-order `ORDER_STATUS` map (state=2 Open).
+  it('normalizePlanOrder maps the MEXC trigger-order state enum to Open/Closed/Canceled correctly', async () => {
+    const { normalizePlanOrder } = await import('../../exchanges/mexc/mexc.utils');
+    const base = {
+      id: 'plan-state-1',
+      symbol: 'BTC_USDT',
+      side: 4,
+      triggerPrice: 49000,
+      vol: 1,
+      triggerType: 2,
+      orderType: 5,
+      updateTime: 1_700_000_000_000,
+    };
+
+    // state=1 (Untriggered) is Open, state=3 (Executed) is Closed, and
+    // state=2/4/5 (Cancelled / Invalid / Failed) all collapse to Canceled.
+    expect(normalizePlanOrder({ ...base, state: 1 }, market)?.status).toBe(OrderStatus.Open);
+    expect(normalizePlanOrder({ ...base, state: 2 }, market)?.status).toBe(OrderStatus.Canceled);
+    expect(normalizePlanOrder({ ...base, state: 3 }, market)?.status).toBe(OrderStatus.Closed);
+    expect(normalizePlanOrder({ ...base, state: 4 }, market)?.status).toBe(OrderStatus.Canceled);
+    expect(normalizePlanOrder({ ...base, state: 5 }, market)?.status).toBe(OrderStatus.Canceled);
+  });
+
   it('upserts a stop-order row from push.personal.stop.order and marks canceled state', () => {
     const exchange = createExchange();
     exchange.store.update({ markets: [market] });
