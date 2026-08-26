@@ -18,8 +18,23 @@ export const PACKED_TICKER_FIELDS = [
   'volume',
   'quoteVolume',
 ] as const;
+const WORKER_TELEMETRY_ONLY_FIELDS = new Set<keyof StoreUpdate>([
+  'latency',
+  'messageHandlerStats',
+  'requestStats',
+  'socketHealth',
+]);
 
-type PackedTickerField = (typeof PACKED_TICKER_FIELDS)[number];
+const isWorkerTelemetryOnlyUpdate = (changes: Partial<StoreUpdate>) => {
+  let hasField = false;
+  for (const key in changes) {
+    hasField = true;
+    if (!WORKER_TELEMETRY_ONLY_FIELDS.has(key as keyof StoreUpdate)) {
+      return false;
+    }
+  }
+  return hasField;
+};
 
 export const defaultStore: StoreData = {
   latency: 0,
@@ -597,7 +612,9 @@ export class DefaultStore implements Store {
         this.marketsBySymbolMap[market.symbol] = market;
       });
     }
-    this.notify(fromWorker);
+    if (!(fromWorker && isWorkerTelemetryOnlyUpdate(normalizedChanges))) {
+      this.notify(fromWorker);
+    }
   };
 
   reset = () => {
@@ -934,13 +951,18 @@ export class DefaultStore implements Store {
       const ticker = this.state.tickers[idx];
       let valueCursor = 2;
 
-      for (let fieldIndex = 0; fieldIndex < PACKED_TICKER_FIELDS.length; fieldIndex++) {
-        if (mask & (1 << fieldIndex)) {
-          const field = PACKED_TICKER_FIELDS[fieldIndex] as PackedTickerField;
-          (ticker as any)[field] = delta[valueCursor++];
-          didMutate = true;
-        }
-      }
+      if (mask & 1) ticker.bid = delta[valueCursor++];
+      if (mask & 2) ticker.ask = delta[valueCursor++];
+      if (mask & 4) ticker.last = delta[valueCursor++];
+      if (mask & 8) ticker.mark = delta[valueCursor++];
+      if (mask & 16) ticker.index = delta[valueCursor++];
+      if (mask & 32) ticker.percentage = delta[valueCursor++];
+      if (mask & 64) ticker.openInterest = delta[valueCursor++];
+      if (mask & 128) ticker.fundingRate = delta[valueCursor++];
+      if (mask & 256) ticker.fundingTime = delta[valueCursor++];
+      if (mask & 512) ticker.volume = delta[valueCursor++];
+      if (mask & 1024) ticker.quoteVolume = delta[valueCursor++];
+      didMutate = true;
     }
 
     return didMutate;

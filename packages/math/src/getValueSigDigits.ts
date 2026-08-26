@@ -1,5 +1,5 @@
 export const getValueSigDigits = (v: string | number) => {
-  const absVal = Math.abs(parseFloat(String(v)));
+  const absVal = Math.abs(typeof v === 'number' ? v : parseFloat(v));
   if (absVal === 0) {
     return 1;
   } else if (absVal >= 1000) {

@@ -123,6 +123,47 @@ describe('DefaultStore', () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
+    it('updates worker telemetry-only fields without notifying listeners', () => {
+      const listener = vi.fn();
+      store.subscribe(listener);
+
+      store.update(
+        {
+          latency: 100,
+          messageHandlerStats: { public: { ticker: { lastMessageTimestamp: 123 } } },
+          requestStats: { ok: 1, rateLimit: 0, auth: 0, network: 0, other: 0 },
+          socketHealth: {
+            publicHealthy: true,
+            privateHealthy: true,
+            publicInitialized: true,
+            privateInitialized: true,
+          },
+        },
+        true,
+      );
+
+      expect(store.latency).toBe(100);
+      expect(store.messageHandlerStats?.public?.ticker.lastMessageTimestamp).toBe(123);
+      expect(store.requestStats?.ok).toBe(1);
+      expect(store.socketHealth?.publicHealthy).toBe(true);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('notifies listeners for worker telemetry when render-driving fields are present', () => {
+      const listener = vi.fn();
+      store.subscribe(listener);
+
+      store.update(
+        {
+          latency: 100,
+          displayedPositions: [createPosition({ id: 'displayed-position' }) as any],
+        },
+        true,
+      );
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
     it('adopts worker updateIds without bumping repeated private snapshots', () => {
       store.update(
         {
@@ -213,7 +254,7 @@ describe('DefaultStore', () => {
     it('should pass fromWorker flag to listeners', () => {
       const listener = vi.fn();
       store.subscribe(listener);
-      store.update({ latency: 100 }, true);
+      store.update({ balance: { used: 100, free: 900, total: 1000, upnl: 0 } }, true);
       expect(listener).toHaveBeenCalledWith(expect.anything(), true);
     });
   });
@@ -550,6 +591,16 @@ describe('DefaultStore', () => {
       expect(store.tickers[0].last).toBe(53100);
       expect(listener).toHaveBeenCalledTimes(1);
       expect(listener).toHaveBeenCalledWith(expect.anything(), true);
+    });
+
+    it('does not notify for zero-mask packed ticker deltas', () => {
+      store.update({ tickers: [createTicker()] });
+      const listener = vi.fn();
+      store.subscribe(listener);
+
+      store.applyPackedTickerDeltas([[0, 0]], true);
+
+      expect(listener).not.toHaveBeenCalled();
     });
 
     it('applies packed ticker deltas inside worker store updates without replacing tickers', () => {

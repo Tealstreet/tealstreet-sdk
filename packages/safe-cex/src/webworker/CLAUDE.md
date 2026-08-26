@@ -112,6 +112,18 @@ _contents_ between prepare and clone are fine (we want the latest
 content). It is only the omit-decision fields where the race
 matters.
 
+Routine live store payloads structurally sign `ordersRisk` before omitting it.
+That field is recomputed as a fresh object on every postprocessor pass, so
+reference equality is useless; omission is allowed only when every order's risk
+profiles contain the same primitive fields and values as the last sent payload.
+If the shape stops being primitive, the worker sends it rather than guessing.
+Stable-field pruning keeps two mutually exclusive memories: structural
+signatures for cheap exact states (`[]`, `{}`, primitive/known scalar shapes)
+and object references only for `userData`/`starkConfig`. Whenever a field moves
+between those modes, clear the other memory. Otherwise a field that started
+empty, became non-empty, then returned to empty can be pruned against a stale
+signature, leaving the main thread stuck on the non-empty value.
+
 This bug was BitMEX-visible because cancel is terminal: BitMEX
 sends exactly one WS frame with `ordStatus: 'Canceled'` and no
 follow-up. Drop that frame at the bridge and the order is frozen
@@ -169,6 +181,15 @@ pending op counts, market loaded/count state, public-data/testnet flags, and
 socket-health scalars. Do not add raw account names, symbols, topics, payload
 objects, or request bodies here; the web Sentry sanitizer is allowed to index
 the resulting `worker_error_family=markets_not_loaded` tag.
+
+## OHLCV bridge: exact duplicate candles stop in the worker
+
+`handlers/OHLCVSubscriptionsHandler.ts` suppresses only exact duplicate candle
+objects before `postMessage` (`timestamp`, OHLCV, `volume`, and `lastSide` all
+unchanged). Same-timestamp candles with a changed price/volume still cross the
+bridge. Keep this distinction: it removes main-thread work for no-op realtime
+bar repeats without throttling, sampling, or coalescing real market-data
+updates.
 
 ## Other notes
 

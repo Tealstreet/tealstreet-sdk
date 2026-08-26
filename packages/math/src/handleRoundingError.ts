@@ -4,5 +4,6 @@ export const handleRoundingError = (v: unknown): number => {
   if (isNotNumber(v)) {
     return 0;
   }
-  return parseFloat(parseFloat(String(v)).toFixed(10));
+  const numV = typeof v === 'number' ? v : Number(v);
+  return parseFloat(numV.toFixed(10));
 };
