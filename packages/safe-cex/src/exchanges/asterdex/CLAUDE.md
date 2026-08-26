@@ -503,6 +503,11 @@ the dedicated Aster clock uses the same REST constant.
   and normal signing generates a fresh nonce for cancellation. Never route an
   order through `guardedCancelOrder`/`guardedBatchOrders` without durable,
   per-order placement-nonce provenance.
+- **Unknown-order cancel is idempotent**: Aster returns `-2011 Unknown order sent`
+  when canceling an order that has already disappeared. Treat this as a
+  completed cancel and suppress the user-facing API error, especially for the
+  open-position close path where successful market close is followed by stale
+  TP/SL cleanup.
 - **Builder reads are not account execution history**:
   `builder/userTrades` returns every approved user's activity under the
   authenticated builder identity, while `builder/approvedUserList` is builder

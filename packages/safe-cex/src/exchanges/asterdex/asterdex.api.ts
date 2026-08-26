@@ -115,6 +115,15 @@ const isPublicEndpoint = (url?: string): boolean => {
   return PUBLIC_FAPI_PREFIXES.some((prefix) => url.startsWith(prefix) || url.includes(prefix));
 };
 
+const shouldSuppressUnknownOrderError = (config: any, code: unknown, message?: string): boolean =>
+  Boolean(
+    config?.__suppressAsterUnknownOrderError &&
+      String(code) === '-2011' &&
+      String(message || '')
+        .toLowerCase()
+        .includes('unknown order'),
+  );
+
 export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
   const baseURL = exchange?.options?.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
 
@@ -288,7 +297,7 @@ export const createAPI = (
       if (response.data?.code && response.data.code < 0) {
         const errorMessage = `AsterDEX API Error: ${response.data.msg || 'Unknown error'} (code: ${response.data.code})`;
 
-        if (exchange) {
+        if (!shouldSuppressUnknownOrderError(response.config, response.data.code, response.data.msg) && exchange) {
           exchange.emitAndLogError(errorMessage);
         }
 
@@ -351,8 +360,10 @@ export const createAPI = (
           errorMessage += ` (code: ${data.code})`;
         }
 
+        const shouldSuppressEmission = shouldSuppressUnknownOrderError(error.config, data?.code, data?.msg || data?.error);
+
         // Log and emit error (similar to Hyperliquid pattern)
-        if (exchange) {
+        if (!shouldSuppressEmission && exchange) {
           exchange.emitAndLogError(errorMessage);
 
           // Handle specific error codes

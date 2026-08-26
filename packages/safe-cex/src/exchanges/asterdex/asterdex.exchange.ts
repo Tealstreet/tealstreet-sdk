@@ -6,8 +6,6 @@ import type {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
-  HistoricalTrade,
-  HistoricalTradeOptions,
   Market,
   OHLCVOptions,
   Order,
@@ -78,6 +76,11 @@ const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
 const BALANCE_RECONCILIATION_INTERVAL_MS = 25_000;
 const POSITION_SAFETY_RECONCILIATION_INTERVAL_MS = 25_000;
 const ORDER_SAFETY_RECONCILIATION_INTERVAL_MS = 75_000;
+
+const isAsterDEXUnknownOrderError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('code: -2011') && message.toLowerCase().includes('unknown order');
+};
 
 export class AsterDEXExchange extends BaseExchange {
   private static readonly OPEN_INTEREST_POLL_INTERVAL_MS = 15000;
@@ -1021,13 +1024,20 @@ export class AsterDEXExchange extends BaseExchange {
     for (const order of orders) {
       try {
         await this.secondaryAPI.delete(this.getFapiPath('order'), {
+          __suppressAsterUnknownOrderError: true,
           params: {
             symbol: order.symbol,
             orderId: order.id,
           },
-        });
+        } as any);
         cancelledIds.push(order.id);
       } catch (error: any) {
+        if (isAsterDEXUnknownOrderError(error)) {
+          this.log(`Order ${order.id} was already gone on AsterDEX; treating cancel as complete`, LogSeverity.Info);
+          cancelledIds.push(order.id);
+          continue;
+        }
+
         errMsg = error.message || String(error);
         this.log(`Failed to cancel order ${order.id}: ${errMsg}`, LogSeverity.Error);
         // Continue cancelling remaining orders even if one fails

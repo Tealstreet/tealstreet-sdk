@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AsterDEXExchange } from '../exchanges/asterdex/asterdex.exchange';
-import { OrderSide, OrderType, PositionMode, PositionSide } from '../types';
+import { OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../types';
 
 const createAPIInstancesMock = vi.fn();
 
@@ -266,6 +266,49 @@ describe('AsterDEX leverage brackets', () => {
     await expect(exchange.fetchPositionMode()).resolves.toBe(true);
 
     expect(primaryGet).toHaveBeenCalledWith('/fapi/v1/positionSide/dual');
+  });
+
+  it('treats unknown-order cancels as already complete', async () => {
+    const secondaryDelete = vi.fn().mockRejectedValue(new Error('AsterDEX API Error: Unknown order sent. (code: -2011)'));
+
+    createAPIInstancesMock.mockReturnValue({
+      primary: {},
+      secondary: { delete: secondaryDelete },
+      unlimited: {},
+      public: {},
+    });
+
+    const exchange = new AsterDEXExchange('asterdex' as any, { key: 'k', secret: 's' } as any, createMockStore());
+    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+
+    await expect(
+      exchange.cancelOrders([
+        {
+          id: '12345',
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 50000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          status: OrderStatus.Open,
+          reduceOnly: true,
+          lastUpdate: 0,
+        },
+      ]),
+    ).resolves.toBeUndefined();
+
+    expect(secondaryDelete).toHaveBeenCalledWith(
+      '/fapi/v1/order',
+      expect.objectContaining({
+        __suppressAsterUnknownOrderError: true,
+        params: {
+          symbol: 'BTCUSDT',
+          orderId: '12345',
+        },
+      }),
+    );
   });
 
   it('uses the fetched account mode for fake zero-size positions', async () => {
