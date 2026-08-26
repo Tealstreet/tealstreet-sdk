@@ -184,7 +184,19 @@ describe('TwapInstance — twap chase timeout/fail policy', () => {
       const chaser = lastChaser()!;
       // Simulate the chaser fully filling
       chaser.markComplete('Fully filled');
-      chaser.recordCumulativePlacementFill('x', 0.2);
+      chaser.subtractFilledSize({
+        id: 'x',
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        status: 'closed',
+        price: 50000,
+        amount: 0.2,
+        filled: 0.2,
+        remaining: 0,
+        reduceOnly: false,
+        lastUpdate: 0,
+      } as never);
 
       vi.advanceTimersByTime(60_000);
       expect(marketCalls(exchange)).toHaveLength(0);
