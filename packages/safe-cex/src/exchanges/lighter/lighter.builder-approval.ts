@@ -86,13 +86,6 @@ const getBaseUrl = (testnet: boolean, overrideBaseUrl?: string): string => {
   return testnet ? getLighterBaseUrl('testnet') : getLighterBaseUrl('livenet');
 };
 
-const shouldAttachLighterAuthHeaders = (url: string): boolean => {
-  if (!url) {
-    return true;
-  }
-  return !(url.includes('/public/') || url.includes('/markets') || url.includes('/tickers'));
-};
-
 const toBigInt = (value: unknown): bigint | undefined => {
   if (value === null || value === undefined) {
     return undefined;
@@ -151,33 +144,14 @@ const getDefaultIntegratorAccountIndex = (testnet: boolean): bigint => {
   return BigInt(parsed);
 };
 
-const createApprovalClient = (opts: {
-  accountIndexHeader: string;
-  baseUrl?: string;
-  testnet: boolean;
-}): LighterApiClient => {
-  const client = new LighterApiClient({
+const createApprovalClient = (opts: { baseUrl?: string; testnet: boolean }): LighterApiClient =>
+  new LighterApiClient({
     baseUrl: getBaseUrl(opts.testnet, opts.baseUrl),
     timeout: RECV_WINDOW,
     headers: {
       'Content-Type': 'application/json',
     },
   });
-
-  client.addRequestInterceptor((requestConfig) => {
-    const url = String(requestConfig.url ?? '');
-    if (shouldAttachLighterAuthHeaders(url)) {
-      requestConfig.headers = {
-        ...requestConfig.headers,
-        'X-Timestamp': Date.now().toString(),
-        'X-Account-Index': opts.accountIndexHeader,
-      };
-    }
-    return requestConfig;
-  });
-
-  return client;
-};
 
 const resolveAccountIndex = async (params: {
   accountIdentifier: string;
@@ -230,7 +204,6 @@ const fetchAccountSnapshot = async (params: {
   testnet: boolean;
 }): Promise<LighterAccountSnapshot> => {
   const client = createApprovalClient({
-    accountIndexHeader: params.accountIndex.toString(),
     baseUrl: params.baseUrl,
     testnet: params.testnet,
   });
@@ -274,7 +247,6 @@ const getNextNonce = async (params: {
   testnet: boolean;
 }): Promise<bigint> => {
   const client = createApprovalClient({
-    accountIndexHeader: params.accountIndex.toString(),
     baseUrl: params.baseUrl,
     testnet: params.testnet,
   });
@@ -556,7 +528,6 @@ export const submitLighterBuilderApprovalWithL1Signature = async (params: {
 }): Promise<LighterBuilderApprovalResult> => {
   const testnet = Boolean(params.testnet);
   const apiClient = createApprovalClient({
-    accountIndexHeader: params.accountIndex.toString(),
     baseUrl: params.baseUrl,
     testnet,
   });

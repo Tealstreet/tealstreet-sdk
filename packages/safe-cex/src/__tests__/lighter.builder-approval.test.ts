@@ -4,16 +4,24 @@ import {
   buildLighterApproveIntegratorL1Message,
   checkLighterBuilderApproved,
   createLighterL1SignatureHelperUrl,
+  prepareLighterBuilderApprovalContext,
 } from '../exchanges/lighter/lighter.builder-approval';
 
-const { lighterApiGetMock } = vi.hoisted(() => ({
+const { lighterApiGetMock, lighterApiGetNextNonceMock, lighterApiInstances } = vi.hoisted(() => ({
   lighterApiGetMock: vi.fn(),
+  lighterApiGetNextNonceMock: vi.fn(),
+  lighterApiInstances: [] as Array<{ addRequestInterceptor: ReturnType<typeof vi.fn> }>,
 }));
 
 vi.mock('@tealstreet/lighter-sdk', () => ({
   LighterApiClient: class {
     addRequestInterceptor = vi.fn();
     get = lighterApiGetMock;
+    getNextNonce = lighterApiGetNextNonceMock;
+
+    constructor() {
+      lighterApiInstances.push(this);
+    }
   },
   TransactionClient: class {},
 }));
@@ -27,6 +35,7 @@ vi.mock('@tealstreet/poseidon-crypto', () => ({
 describe('lighter.builder-approval utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lighterApiInstances.length = 0;
   });
 
   it('builds the expected L1 message template', () => {
@@ -77,6 +86,30 @@ describe('lighter.builder-approval utilities', () => {
     expect(url).toContain('integratorAccountIndex=158385');
     expect(url).toContain('approvalExpiry=1777588355553');
     expect(url).toContain('chainId=304');
+  });
+
+  it('prepares approval context without unsupported Lighter REST auth headers', async () => {
+    lighterApiGetNextNonceMock.mockResolvedValueOnce(919n);
+    lighterApiGetMock.mockResolvedValueOnce({
+      accounts: [
+        {
+          l1_address: '0x22b270B95599989A3D2A54BdcCbb75e21e772630',
+          approved_integrators: [],
+        },
+      ],
+    });
+
+    const context = await prepareLighterBuilderApprovalContext({
+      accountIdentifier: '718895',
+      apiKeyIndex: 2,
+    });
+
+    expect(context.nonce).toBe(919n);
+    expect(lighterApiGetNextNonceMock).toHaveBeenCalledWith(718895n, 2);
+    expect(lighterApiInstances).toHaveLength(2);
+    for (const instance of lighterApiInstances) {
+      expect(instance.addRequestInterceptor).not.toHaveBeenCalled();
+    }
   });
 
   it('treats an unexpired approval below the default taker fee cap as not approved', async () => {
