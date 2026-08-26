@@ -458,20 +458,29 @@ forever in this case — we never get a real id to `confirm()` the reconciler
 against. Two things bridge that:
 
 1. `apps/web/src/utils/order/getOpenOrders.ts` — `mergeOrdersWithInProgress`
-   fuzzy-matches `Creating` trigger-like ghosts to same-slot Open orders in
-   `store.orders` (same account/symbol/side/type/reduceOnly) and hides the
-   ghost the moment the real WS-delivered order lands. Protective stops sit
-   one-per-slot on every venue we support, so any Open match is the placement.
+   fuzzy-matches `Creating` AND `Updating` trigger-like ghosts to same-slot
+   Open orders in `store.orders` (same account/symbol/side/type/reduceOnly)
+   and hides the ghost the moment the real WS-delivered order lands.
+   Protective stops sit one-per-slot on every venue we support, so any Open
+   match is the placement.
 2. `apps/web/src/order/createStopLossOrder.ts` — on `waitingForTrigger` we call
    `optimistic.reject(new OptimisticOrderPlacementError(...))` so a click on the
    ghost's cancel-X in the sub-second gap before WS arrives fails fast instead
    of hanging on the reconciler's 15s timeout. The user can cancel via the real
    order's own row.
+3. `apps/web/src/order/updateOrder.ts` — a chart drag of a positional TP/SL is
+   a cancel+replace, and the placement half also comes back as
+   `"waitingForTrigger"` with no oid. On that empty result we do NOT flip the
+   optimistic ghost to `Open` (that would strand a phantom row on the just-
+   cancelled oid at the new price, right next to the real replacement). We
+   leave the ghost as `Updating` so the same fuzzy matcher can reconcile it,
+   and we bump `removeUpdateDelay` to 15s so the ghost survives long enough
+   for WS/REST to deliver the replacement.
 
-Do not remove either half without the other, and do not extend the ghost's
-`removeUpdateDelay` beyond 15s — the fuzzy-match makes the shorter delay a
-non-issue in the common case, and the 15s floor is the safety net if WS/REST
-never delivers.
+Do not remove any of the three without the others, and do not extend the
+ghost's `removeUpdateDelay` beyond 15s — the fuzzy-match makes the shorter
+delay a non-issue in the common case, and the 15s floor is the safety net if
+WS/REST never delivers.
 
 ### TIF Mappings
 
