@@ -2105,6 +2105,103 @@ describe('MEXC futures audit regressions', () => {
     }
   });
 
+  it('drops a stale push.personal.plan.order Open frame for a locally-canceled id (no re-open flicker)', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'plan-flicker-1',
+          status: OrderStatus.Canceled,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          info: { __mexcPlanOrder: true },
+        } as Order,
+      ],
+    });
+    // Simulate the cancel path having just noted the id (post-cancel-HTTP,
+    // status already Canceled locally).
+    (exchange as any).noteRecentlyCanceledStopLikeOrders([exchange.store.orders[0]]);
+
+    // Stale Open frame flushed by MEXC after our cancel HTTP already returned.
+    // Without the guard this would flip the row back to Open, then the next
+    // Canceled frame (or REST tick) would flip it Canceled again — the
+    // Canceled → Open → Canceled ping-pong the user is seeing as flicker.
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.plan.order',
+        data: {
+          id: 'plan-flicker-1',
+          symbol: 'BTC_USDT',
+          side: 4,
+          triggerPrice: 49000,
+          vol: 10000,
+          state: 1,
+          triggerType: 2,
+          orderType: 5,
+          reduceOnly: true,
+          updateTime: 1_700_000_000_050,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders.find((order) => order.id === 'plan-flicker-1')?.status).toBe(OrderStatus.Canceled);
+  });
+
+  it('honors a real Canceled push.personal.stop.order frame even when the id is in the cancel shield', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'stop-flicker-1',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 0,
+          filled: 0,
+          remaining: 0,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          info: { __mexcStopOrder: true },
+        } as Order,
+      ],
+    });
+    (exchange as any).noteRecentlyCanceledStopLikeOrders([exchange.store.orders[0]]);
+
+    // The authoritative Canceled frame from MEXC. The cancel-shield lookup
+    // must NOT drop this — only Open frames are treated as stale for shielded
+    // ids. This is what actually lands the row in its final Canceled state
+    // when the shield check would otherwise be over-eager.
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.stop.order',
+        data: {
+          id: 'stop-flicker-1',
+          symbol: 'BTC_USDT',
+          positionType: 1,
+          triggerSide: 2,
+          stopLossPrice: 49000,
+          state: 2, // canceled
+          vol: 10000,
+          volType: 2,
+          updateTime: 1_700_000_000_100,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders.find((order) => order.id === 'stop-flicker-1')?.status).toBe(OrderStatus.Canceled);
+  });
+
   it('clears the placement shield after cancelling the stop-like order', async () => {
     const exchange = createExchange();
     const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));

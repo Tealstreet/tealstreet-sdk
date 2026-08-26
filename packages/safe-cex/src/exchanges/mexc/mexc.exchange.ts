@@ -1256,8 +1256,16 @@ export class MexcExchange extends BaseExchange {
     }
   };
 
-  private isRecentlyCanceledStopLikeOrder = (order: Order): boolean => {
-    const id = order.id.split('__')[0];
+  private isRecentlyCanceledStopLikeOrder = (order: Order): boolean =>
+    this.isRecentlyCanceledStopLikeOrderId(order.id);
+
+  // Public shield-check for the private WS handlers. WS frames don't carry a
+  // full `Order`, so `handlePlanOrder` / `handleStopOrder` need an id-based
+  // variant to decide whether a lagging Open frame is stale (already locally
+  // canceled) and should be dropped instead of resurrecting the row.
+  isRecentlyCanceledStopLikeOrderId = (orderId: string): boolean => {
+    if (!orderId) return false;
+    const id = orderId.split('__')[0];
     const canceledAt = this.recentlyCanceledStopLikeOrderIds.get(id);
     if (canceledAt === undefined) return false;
 

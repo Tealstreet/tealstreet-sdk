@@ -326,28 +326,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   // WS is marked seen so the recently-placed-stop shield stops protecting it;
   // from that point on, normal WS/REST reconciliation owns the row.
   private handlePlanOrder = (json: Record<string, any>) => {
-    const data = json.data || json;
-    const rows = Array.isArray(data) ? data : [data];
-    const orders = rows
-      .map((row) => normalizePlanOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
-      .filter((order): order is Order => !!order);
-
-    for (const row of rows) {
-      const id = toIntegerString(row?.id ?? row?.orderId ?? row?.stopPlanOrderId);
-      if (id) this.parent.markStopLikeOrderSeen(id);
-    }
-
-    if (orders.length) {
-      this.store.addOrUpdateOrders(orders as any);
-      for (const order of orders) {
-        if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
-          this.store.updateOrderStatus({ id: order.id }, order.status);
-        }
-      }
-    }
-    // Intentionally no REST fan-out. The plan-order frame is a full-row
-    // snapshot; the 1.5s coalesced `scheduleStopOrderSnapshotRefresh` fires
-    // after user actions and covers cases where a frame is missed or dropped.
+    this.applyStopLikeFrame(json, 'plan');
   };
 
   // MEXC position TP/SL (`stoporder/place` / `stoporder/change_price`) and
@@ -358,25 +337,50 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   // `positionType`, `stopLossPrice`/`takeProfitPrice`, `state`, `volType`,
   // `triggerSide` — which `normalizeStopOrder` already accepts.
   private handleStopOrder = (json: Record<string, any>) => {
+    this.applyStopLikeFrame(json, 'stop');
+  };
+
+  private applyStopLikeFrame = (json: Record<string, any>, kind: 'plan' | 'stop') => {
     const data = json.data || json;
     const rows = Array.isArray(data) ? data : [data];
-    const orders = rows
-      .map((row) => normalizeStopOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
+    const normalize = kind === 'plan' ? normalizePlanOrder : normalizeStopOrder;
+    const parsed = rows
+      .map((row) => normalize(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
       .filter((order): order is Order => !!order);
 
+    // Mark every id we observed on the wire as "seen" so the placement
+    // shield stops protecting it. This runs even for stale frames — the
+    // placement shield only cares whether the venue knows the id exists.
     for (const row of rows) {
       const id = toIntegerString(row?.id ?? row?.stopPlanOrderId ?? row?.orderId);
       if (id) this.parent.markStopLikeOrderSeen(id);
     }
 
-    if (orders.length) {
-      this.store.addOrUpdateOrders(orders as any);
-      for (const order of orders) {
-        if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
-          this.store.updateOrderStatus({ id: order.id }, order.status);
-        }
-      }
-    }
+    // The venue occasionally flushes a queued `state=1` (Open) snapshot for
+    // an order the user just canceled locally, arriving *after* our HTTP
+    // cancel completed. `addOrUpdateOrders` overwrites the whole row, so
+    // without this guard the locally-canceled row flips back to Open and
+    // the chart line reappears until either the real `state=2` frame or
+    // the next REST tick shakes it out again — visible as flicker /
+    // "sticky" TP/SL / reappearing lines during rapid cancel bursts.
+    // Canceled and Closed frames are always honored (they're authoritative
+    // regardless of what our local shield thinks).
+    const orders = parsed.filter((order) => {
+      if (order.status !== OrderStatus.Open) return true;
+      if (this.parent.isRecentlyCanceledStopLikeOrderId(order.id)) return false;
+      return true;
+    });
+
+    if (!orders.length) return;
+
+    // `addOrUpdateOrders` writes the full normalized row (including the
+    // Canceled / Closed status carried by the frame), so a separate
+    // `updateOrderStatus` call would just re-emit the store notification
+    // for the same terminal transition — skip it.
+    this.store.addOrUpdateOrders(orders as any);
+    // Intentionally no REST fan-out. The plan/stop frame is a full-row
+    // snapshot; the 1.5s coalesced `scheduleStopOrderSnapshotRefresh` fires
+    // after user actions and covers cases where a frame is missed or dropped.
   };
 
   private throttledFetchBalance = () => {
