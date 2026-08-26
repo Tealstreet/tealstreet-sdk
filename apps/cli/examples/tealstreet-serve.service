@@ -31,8 +31,8 @@ StartLimitIntervalSec=600
 StartLimitBurst=10
 
 # Environment (uncomment and modify if needed)
-# Environment=TEALSTREET_EXCHANGE_RELAY_URL=https://exchange.tealstreet.io
-# Environment=TEALSTREET_EXCHANGE_RELAY_WS=wss://exchange.tealstreet.io/account
+# Environment=TEALSTREET_EXCHANGE_RELAY_URL=https://connect.tealstreet.io
+# Environment=TEALSTREET_EXCHANGE_RELAY_WS=wss://connect.tealstreet.io/account
 # Environment=TEALSTREET_WEB_URL=https://trade.tealstreet.io
 
 # Logging

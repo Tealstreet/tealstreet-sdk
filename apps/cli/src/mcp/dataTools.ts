@@ -231,7 +231,7 @@ export const createCliDataTools = ({
   },
   {
     name: 'get_exchange_proxy_candles',
-    description: 'Read public historical candles through the exchange.tealstreet.io candle service.',
+    description: 'Read public historical candles through the data.tealstreet.io candle service.',
     scope: 'market:read',
     shape: {
       exchange: z.string().describe('safe-cex exchange id, for example binance, bybit, okx.'),
@@ -271,7 +271,7 @@ export const createCliDataTools = ({
   },
   {
     name: 'get_safe_cex_markets',
-    description: 'Read bounded safe-cex public market metadata through the exchange.tealstreet.io candle service.',
+    description: 'Read bounded safe-cex public market metadata through the data.tealstreet.io candle service.',
     scope: 'market:read',
     shape: {
       exchange: z.string().describe('safe-cex exchange id, for example bybit, binance, okx.'),
@@ -289,7 +289,7 @@ export const createCliDataTools = ({
   },
   {
     name: 'get_safe_cex_market',
-    description: 'Look up one safe-cex public market metadata row through the exchange.tealstreet.io candle service.',
+    description: 'Look up one safe-cex public market metadata row through the data.tealstreet.io candle service.',
     scope: 'market:read',
     shape: {
       exchange: z.string().describe('safe-cex exchange id, for example bybit, binance, okx.'),

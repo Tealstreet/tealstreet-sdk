@@ -1,6 +1,6 @@
 type JsonRecord = Record<string, unknown>;
 
-const DEFAULT_EXCHANGE_PROXY_ORIGIN = 'https://exchange.tealstreet.io/candles';
+const DEFAULT_EXCHANGE_PROXY_ORIGIN = 'https://data.tealstreet.io/candles';
 const EXCHANGE_PROXY_FETCH_TIMEOUT_MS = 5_000;
 
 const exchangeProxyOrigin = (): string =>

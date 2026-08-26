@@ -58,8 +58,8 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   # Production URLs - bundled into the release
   # These can be overridden at runtime via env vars for local development
   PROD_WEB_URL="https://preview.tealstreet.io"
-  PROD_RELAY_URL="https://exchange.tealstreet.io"
-  PROD_RELAY_WS="wss://exchange.tealstreet.io/account"
+  PROD_RELAY_URL="https://connect.tealstreet.io"
+  PROD_RELAY_WS="wss://connect.tealstreet.io/account"
 
   "$BUN" build src/index.ts \
     --compile \

@@ -60,9 +60,9 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>TEALSTREET_EXCHANGE_RELAY_URL</key>
-        <string>https://exchange.tealstreet.io</string>
+        <string>https://connect.tealstreet.io</string>
         <key>TEALSTREET_EXCHANGE_RELAY_WS</key>
-        <string>wss://exchange.tealstreet.io/account</string>
+        <string>wss://connect.tealstreet.io/account</string>
         <key>TEALSTREET_WEB_URL</key>
         <string>https://trade.tealstreet.io</string>
     </dict>
