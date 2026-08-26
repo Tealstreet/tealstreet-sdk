@@ -255,7 +255,7 @@ CLI calls that Worker origin with `TEALSTREET_POLYMARKET_ORIGIN_HEADER`
 directly to public Gamma/CLOB upstreams. These tools are public-only and must
 not expose Polymarket account, key, or order data.
 `get_exchange_proxy_candles` is the CLI parity surface for the exchange-services
-candle route. It defaults to `https://exchange.tealstreet.io/candles` and may be
+candle route. It defaults to `https://data.tealstreet.io/candles` and may be
 overridden with `TEALSTREET_EXCHANGE_PROXY_ORIGIN`,
 `TEALSTREET_CANDLE_SERVER_URL`, or `NEXT_PUBLIC_CANDLE_SERVER_URL`. Keep it as a
 strict adapter for `/api/market-data/candles`; do not add a user-supplied path or

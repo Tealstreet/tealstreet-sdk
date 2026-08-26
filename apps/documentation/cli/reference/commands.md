@@ -752,9 +752,9 @@ reports the server as failed, check your login first — tokens expire.
 | `list_market_data_sources`                                                                                  | Public Tealstreet data sources and publicdata exchange health                          |
 | `get_public_tickers` / `get_public_ticker`                                                                  | Public ticker snapshots from Tealstreet publicdata                                     |
 | `get_top_movers` / `get_top_volume` / `get_top_funding`                                                     | Public market top lists from Tealstreet publicdata                                     |
-| `get_exchange_proxy_candles`                                                                                | Historical candles through exchange.tealstreet.io's public candle service              |
+| `get_exchange_proxy_candles`                                                                                | Historical candles through data.tealstreet.io's public candle service                  |
 | `get_recent_news`                                                                                           | Public normalized TealNews items through news.tealstreet.io's recent-news endpoint     |
-| `get_safe_cex_markets` / `get_safe_cex_market`                                                              | Safe-cex market metadata through exchange.tealstreet.io's public candle service        |
+| `get_safe_cex_markets` / `get_safe_cex_market`                                                              | Safe-cex market metadata through data.tealstreet.io's public candle service            |
 | `get_mcp_context_dsl_reference`                                                                             | Self-contained `mcp-context/v1` DSL, scope, refresh, callback and dashboard reference  |
 | `list_mcp_context_planes` / `plan_mcp_context_query`                                                        | Plan composable `mcp-context/v1` dashboard queries into bounded MCP tool steps         |
 | `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
