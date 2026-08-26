@@ -115,6 +115,17 @@ const MEXC_RECENT_STOP_CANCEL_SHIELD_MS = 15_000;
 // within one window; WS reconnect's `fetchAndSetPrivateSnapshot` remains
 // the wholesale reconciliation authority.
 const MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS = 15_000;
+// Same idea as `MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS`, but for plan and
+// stop orders. These have their own REST endpoints (`planorder/list` and
+// `stoporder/list`) that are noticeably laggier than `open_orders`, so the
+// window is a bit longer to keep the chart line stable during rapid TP/SL
+// drag/place bursts. Entries are cleared eagerly on the first WS/REST
+// sighting or on explicit cancel to keep the shield small.
+const MEXC_RECENT_STOP_LIKE_PLACE_SHIELD_MS = 20_000;
+// Trailing-debounce for `fetchAndSetOrders` after placing / moving TP/SL.
+// The window fires once per burst per symbol so rapid drags emit one REST
+// reconcile instead of one per drag frame.
+const MEXC_STOP_SNAPSHOT_REFRESH_DELAY_MS = 1_500;
 // Shield window for orders MEXC just rejected server-side by delivering a
 // `state=4` (Canceled) frame with a non-zero `errorCode` and `dealVol=0`
 // right after acceptance. Common trigger: a reduce-only order whose total
@@ -153,6 +164,20 @@ export class MexcExchange extends BaseExchange {
   private nativeBatchOrdersAvailable: boolean | undefined;
   private recentlyCanceledStopLikeOrderIds = new Map<string, number>();
   private recentlyRejectedRegularOrderIds = new Map<string, number>();
+  // Shield map for plan and stop orders whose HTTP `POST /placeOrder` just
+  // succeeded but whose corresponding WS frame / REST snapshot has not yet
+  // caught up. Entries are keyed by order id (with the optional `__side`
+  // suffix stripped) and hold the placement timestamp. Reads via
+  // `isRecentlyPlacedStopLikeOrder` self-expire past
+  // `MEXC_RECENT_STOP_LIKE_PLACE_SHIELD_MS`. Populated by
+  // `addOptimisticStopOrder`, cleared eagerly by `markStopLikeOrderSeen`
+  // (WS + REST reconcile paths) and by `noteRecentlyCanceledStopLikeOrders`.
+  private recentlyPlacedStopLikeOrderIds = new Map<string, number>();
+  // Per-symbol trailing-debounce handles for `scheduleStopOrderSnapshotRefresh`.
+  // Keyed by internal (non-venue) symbol; cleared on fire, on `dispose`, and
+  // whenever a superseding call for the same symbol arrives during the
+  // trailing window.
+  private pendingStopSnapshotRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -405,6 +430,12 @@ export class MexcExchange extends BaseExchange {
     const orders = await this.fetchOrders(symbols);
     if (this.isDisposed) return orders;
 
+    // Any id we see in this snapshot is now venue-authoritative — release the
+    // placement shield entry so subsequent snapshots aren't second-guessed.
+    for (const order of orders) {
+      this.markStopLikeOrderSeen(order.id);
+    }
+
     if (symbols?.length) {
       for (const symbol of symbols) {
         const symbolOrders = orders.filter((order) => order.symbol === symbol);
@@ -417,11 +448,43 @@ export class MexcExchange extends BaseExchange {
             !this.isStopLikeOrder(order) &&
             !this.isRecentlyCanceledStopLikeOrder(order),
         );
-        this.store.setOrdersForSymbol(symbol, uniqBy([...symbolOrders, ...existingOpenOrders], 'id'));
+        // MEXC's `planorder/list` and `stoporder/list` snapshots are visibly
+        // laggier than `open_orders`. During rapid TP/SL bursts, a snapshot
+        // may not include a row that HTTP has already returned an id for
+        // (and the private WS frame may still be inflight). Preserve any
+        // shielded, still-open, non-canceled stop-like row from being
+        // dropped by the wholesale replace below. See Bybit's
+        // `preserveRecentlyPlacedOrders` for the analogous pattern.
+        const shieldedStopLikeOrders = this.store.orders.filter(
+          (order) =>
+            order.symbol === symbol &&
+            order.status === OrderStatus.Open &&
+            !fetchedIds.has(order.id) &&
+            this.isStopLikeOrder(order) &&
+            !this.isRecentlyCanceledStopLikeOrder(order) &&
+            this.isRecentlyPlacedStopLikeOrder(order),
+        );
+        this.store.setOrdersForSymbol(
+          symbol,
+          uniqBy([...symbolOrders, ...existingOpenOrders, ...shieldedStopLikeOrders], 'id'),
+        );
       }
     } else {
+      // Full-scope refreshes are authoritative for the whole account, so
+      // shielded rows only survive if the venue *and* the shield agree.
+      // Merge shielded stop-like rows that the venue did NOT return so the
+      // chart stays stable during a full snapshot immediately after a burst.
+      const fetchedIds = new Set(orders.map((order) => order.id));
+      const shieldedStopLikeOrders = this.store.orders.filter(
+        (order) =>
+          order.status === OrderStatus.Open &&
+          !fetchedIds.has(order.id) &&
+          this.isStopLikeOrder(order) &&
+          !this.isRecentlyCanceledStopLikeOrder(order) &&
+          this.isRecentlyPlacedStopLikeOrder(order),
+      );
       this.store.update({
-        orders,
+        orders: uniqBy([...orders, ...shieldedStopLikeOrders], 'id'),
         loaded: { ...this.store.loaded, orders: true },
       });
     }
@@ -888,15 +951,54 @@ export class MexcExchange extends BaseExchange {
         remainingNative: nativeAmount,
       },
     } as Order);
+    // Shield the id so a rapid subsequent `fetchAndSetOrders([symbol])` won't
+    // wholesale-drop the optimistic row while `planorder/list` or
+    // `stoporder/list` still lag the placement HTTP `200`.
+    this.notePlacedStopLikeOrder(orderId);
   };
 
+  // Called by the WS `handlePlanOrder` / `handleStopOrder` paths (and by the
+  // cancel path) once we see any authoritative signal for the id — venue-owned
+  // row now exists (or is gone), so the placement shield is done for that id.
+  markStopLikeOrderSeen = (orderId: string): void => {
+    if (!orderId) return;
+    this.recentlyPlacedStopLikeOrderIds.delete(orderId.split('__')[0]);
+  };
+
+  private notePlacedStopLikeOrder = (orderId: string): void => {
+    if (!orderId) return;
+    this.recentlyPlacedStopLikeOrderIds.set(orderId.split('__')[0], virtualClock.getCurrentTimeMs());
+  };
+
+  private isRecentlyPlacedStopLikeOrder = (order: Order): boolean => {
+    const id = order.id.split('__')[0];
+    const placedAt = this.recentlyPlacedStopLikeOrderIds.get(id);
+    if (placedAt === undefined) return false;
+
+    if (virtualClock.getCurrentTimeMs() - placedAt > MEXC_RECENT_STOP_LIKE_PLACE_SHIELD_MS) {
+      this.recentlyPlacedStopLikeOrderIds.delete(id);
+      return false;
+    }
+    return true;
+  };
+
+  // Trailing-debounced per-symbol refresh. Rapid TP/SL place/move bursts on
+  // MEXC (which has no matched-scope REST endpoint for plan/stop orders)
+  // used to fan out one `planorder/list` + one `stoporder/list` per action;
+  // this collapses them to one pair of requests per burst, per symbol.
   private scheduleStopOrderSnapshotRefresh = (symbol: string): void => {
+    const existing = this.pendingStopSnapshotRefreshTimers.get(symbol);
+    if (existing) clearTimeout(existing);
+
     const timeout = setTimeout(() => {
+      this.pendingStopSnapshotRefreshTimers.delete(symbol);
+      if (this.isDisposed) return;
       void this.fetchAndSetOrders([symbol]).catch((err: any) => {
         this.log(`Failed to refresh MEXC TP/SL orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
       });
-    }, 1_500);
+    }, MEXC_STOP_SNAPSHOT_REFRESH_DELAY_MS);
     (timeout as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+    this.pendingStopSnapshotRefreshTimers.set(symbol, timeout);
   };
 
   private nativePositionId = (position: Position): string => {
@@ -1145,7 +1247,12 @@ export class MexcExchange extends BaseExchange {
   private noteRecentlyCanceledStopLikeOrders = (orders: Order[]): void => {
     const now = virtualClock.getCurrentTimeMs();
     for (const order of orders) {
-      this.recentlyCanceledStopLikeOrderIds.set(order.id.split('__')[0], now);
+      const cleanId = order.id.split('__')[0];
+      this.recentlyCanceledStopLikeOrderIds.set(cleanId, now);
+      // Whether the venue already surfaced the row or not, a cancel is a
+      // stronger signal than "we just placed it" — drop the placement shield
+      // entry so the row is not resurrected by a mid-flight snapshot.
+      this.recentlyPlacedStopLikeOrderIds.delete(cleanId);
     }
   };
 
@@ -1425,4 +1532,15 @@ export class MexcExchange extends BaseExchange {
 
   private orderListEndpoint = (venueSymbol?: string): string =>
     venueSymbol ? `${ENDPOINTS.OPEN_ORDERS}/${venueSymbol}` : ENDPOINTS.OPEN_ORDERS;
+
+  override dispose(): void {
+    // Cancel any in-flight coalesced TP/SL refresh timers so a delayed
+    // `fetchAndSetOrders` doesn't fire after the sockets have been torn down
+    // and leak an XHR against a disposed exchange.
+    for (const timer of this.pendingStopSnapshotRefreshTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingStopSnapshotRefreshTimers.clear();
+    super.dispose();
+  }
 }

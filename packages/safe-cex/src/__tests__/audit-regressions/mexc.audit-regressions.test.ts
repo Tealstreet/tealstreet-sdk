@@ -1848,6 +1848,287 @@ describe('MEXC futures audit regressions', () => {
     expect(exchange.store.orders.find((order) => order.id === 'already-canceled-1')?.status).toBe(OrderStatus.Canceled);
   });
 
+  it('subscribes to plan / stop / stop-plan private WS filters so TP/SL frames arrive', () => {
+    const exchange = createExchange();
+    const send = vi.fn();
+    exchange.privateWebsocket.ws = { readyState: 1, send } as any;
+
+    // `personal.filter` is MEXC's *narrowing* subscription — omitting any of
+    // these keys silently drops the corresponding TP/SL pushes and
+    // regresses plan/stop sync back to REST-poll-only.
+    (exchange.privateWebsocket as any).subscribePrivateFeeds();
+
+    const payload = JSON.parse(send.mock.calls[0][0]);
+    expect(payload.method).toBe('personal.filter');
+    const filters = (payload.param.filters as Array<{ filter: string }>).map((row) => row.filter);
+    expect(filters).toEqual(
+      expect.arrayContaining(['order', 'order.deal', 'position', 'asset', 'plan.order', 'stop.order', 'stop.planorder']),
+    );
+  });
+
+  it('upserts a plan-order row from push.personal.plan.order and releases its placement shield', () => {
+    const exchange = createExchange();
+    exchange.store.update({ markets: [market] });
+
+    // Seed a placement-shield entry the way `addOptimisticStopOrder` would
+    // right after the placement HTTP 200.
+    (exchange as any).notePlacedStopLikeOrder('plan-ws-1');
+    expect((exchange as any).recentlyPlacedStopLikeOrderIds.has('plan-ws-1')).toBe(true);
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.plan.order',
+        data: {
+          id: 'plan-ws-1',
+          symbol: 'BTC_USDT',
+          side: 4,
+          triggerPrice: 49000,
+          price: 0,
+          vol: 10000,
+          state: 1,
+          triggerType: 2,
+          executeCycle: 2,
+          trend: 1,
+          orderType: 5,
+          reduceOnly: true,
+          updateTime: 1_700_000_000_000,
+        },
+      }),
+    } as MessageEvent);
+
+    const row = exchange.store.orders.find((order) => order.id === 'plan-ws-1');
+    expect(row).toMatchObject({
+      id: 'plan-ws-1',
+      symbol: 'BTCUSDT',
+      status: OrderStatus.Open,
+      type: OrderType.StopLoss,
+      side: OrderSide.Sell,
+      price: 49000,
+    });
+    expect((row?.info as Record<string, any>).__mexcPlanOrder).toBe(true);
+    // WS sighting releases the placement shield so future REST snapshots are authoritative.
+    expect((exchange as any).recentlyPlacedStopLikeOrderIds.has('plan-ws-1')).toBe(false);
+  });
+
+  it('upserts a stop-order row from push.personal.stop.order and marks canceled state', () => {
+    const exchange = createExchange();
+    exchange.store.update({ markets: [market] });
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.stop.order',
+        data: {
+          id: 'stop-ws-1',
+          symbol: 'BTC_USDT',
+          positionId: 'native-position-1',
+          positionType: 1,
+          stopLossPrice: 49000,
+          takeProfitPrice: 0,
+          triggerSide: 2,
+          state: 1,
+          vol: 10000,
+          volType: 2,
+          updateTime: 1_700_000_000_000,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders.find((order) => order.id === 'stop-ws-1')).toMatchObject({
+      id: 'stop-ws-1',
+      status: OrderStatus.Open,
+      type: OrderType.StopLoss,
+    });
+
+    exchange.privateWebsocket.onMessage({
+      data: JSON.stringify({
+        channel: 'push.personal.stop.order',
+        data: {
+          id: 'stop-ws-1',
+          symbol: 'BTC_USDT',
+          positionId: 'native-position-1',
+          positionType: 1,
+          stopLossPrice: 49000,
+          takeProfitPrice: 0,
+          triggerSide: 2,
+          state: 2, // cancelled
+          vol: 10000,
+          volType: 2,
+          updateTime: 1_700_000_000_001,
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders.find((order) => order.id === 'stop-ws-1')?.status).toBe(OrderStatus.Canceled);
+  });
+
+  it('preserves a recently-placed stop-like row across a lagging symbol-scoped REST replace', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    // In-store optimistic plan order added by placeOrder right before the
+    // shielded snapshot fires.
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'shielded-plan-1',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          lastUpdate: now,
+          info: { __mexcPlanOrder: true },
+        } as Order,
+      ],
+    });
+    (exchange as any).notePlacedStopLikeOrder('shielded-plan-1');
+
+    const get = vi.fn(async (url: string) => {
+      // MEXC's `planorder/list` snapshot lags — none of the three list
+      // endpoints know about `shielded-plan-1` yet.
+      if (
+        url === `${ENDPOINTS.OPEN_ORDERS}/BTC_USDT` ||
+        url === ENDPOINTS.PLAN_ORDER_LIST ||
+        url === ENDPOINTS.STOP_ORDER_LIST
+      ) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.xhr = { get } as any;
+
+    await exchange.fetchAndSetOrders(['BTCUSDT']);
+
+    // Without the shield the wholesale replace would have dropped the row.
+    expect(exchange.store.orders.map((order) => order.id)).toEqual(['shielded-plan-1']);
+  });
+
+  it('drops a stop-like row from the wholesale replace once the placement shield expires', async () => {
+    const exchange = createExchange();
+    const now = 1_700_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+
+    exchange.store.update({
+      markets: [market],
+      orders: [
+        {
+          id: 'stale-plan-1',
+          status: OrderStatus.Open,
+          symbol: 'BTCUSDT',
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          lastUpdate: now - 60_000,
+          info: { __mexcPlanOrder: true },
+        } as Order,
+      ],
+    });
+    // Placement was long enough ago that the shield entry has expired — no
+    // shield lookup should preserve the row anymore.
+    (exchange as any).recentlyPlacedStopLikeOrderIds.set('stale-plan-1', now - 60_000);
+
+    const get = vi.fn(async (url: string) => {
+      if (
+        url === `${ENDPOINTS.OPEN_ORDERS}/BTC_USDT` ||
+        url === ENDPOINTS.PLAN_ORDER_LIST ||
+        url === ENDPOINTS.STOP_ORDER_LIST
+      ) {
+        return { data: { success: true, code: 0, data: [] } };
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    exchange.xhr = { get } as any;
+
+    await exchange.fetchAndSetOrders(['BTCUSDT']);
+
+    expect(exchange.store.orders).toEqual([]);
+  });
+
+  it('coalesces rapid scheduleStopOrderSnapshotRefresh bursts into one delayed refresh per symbol', async () => {
+    vi.useFakeTimers();
+    try {
+      const exchange = createExchange();
+      exchange.store.update({ markets: [market] });
+      const fetchAndSetOrders = vi
+        .spyOn(exchange, 'fetchAndSetOrders')
+        .mockResolvedValue([]);
+
+      // Simulate a chart-drag burst placing five TP/SL rows on the same
+      // symbol in ~50 ms. Without coalescing, each placement would fan out
+      // to `GET /planorder/list` + `GET /stoporder/list` after 1.5 s, five
+      // rows deep — the exact pattern seen in the user's HAR dump.
+      for (let i = 0; i < 5; i++) {
+        (exchange as any).scheduleStopOrderSnapshotRefresh('BTCUSDT');
+      }
+
+      expect(fetchAndSetOrders).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(fetchAndSetOrders).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchAndSetOrders).toHaveBeenCalledTimes(1);
+      expect(fetchAndSetOrders).toHaveBeenCalledWith(['BTCUSDT']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels pending stop-order snapshot refreshes on dispose', async () => {
+    vi.useFakeTimers();
+    try {
+      const exchange = createExchange();
+      exchange.store.update({ markets: [market] });
+      const fetchAndSetOrders = vi
+        .spyOn(exchange, 'fetchAndSetOrders')
+        .mockResolvedValue([]);
+
+      (exchange as any).scheduleStopOrderSnapshotRefresh('BTCUSDT');
+      exchange.dispose();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchAndSetOrders).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the placement shield after cancelling the stop-like order', async () => {
+    const exchange = createExchange();
+    const post = vi.fn(async () => ({ data: { success: true, code: 0 } }));
+    exchange.xhr = { post } as any;
+    (exchange as any).notePlacedStopLikeOrder('stop-cancel-1');
+    expect((exchange as any).recentlyPlacedStopLikeOrderIds.has('stop-cancel-1')).toBe(true);
+
+    await exchange.cancelOrders([
+      {
+        id: 'stop-cancel-1',
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        status: OrderStatus.Open,
+        amount: 0,
+        remaining: 0,
+        price: 49000,
+        info: { __mexcStopOrder: true },
+      } as Order,
+    ]);
+
+    expect((exchange as any).recentlyPlacedStopLikeOrderIds.has('stop-cancel-1')).toBe(false);
+  });
+
   it('lets a real WS order payload overwrite the optimistic regular row without duplicating it', async () => {
     const exchange = createExchange();
     const now = 1_700_000_000_000;

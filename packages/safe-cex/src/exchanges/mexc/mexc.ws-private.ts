@@ -12,7 +12,9 @@ import {
   fromMexcSymbol,
   normalizeExecution,
   normalizeOrder,
+  normalizePlanOrder,
   normalizePosition,
+  normalizeStopOrder,
   toIntegerString,
   toNumber,
 } from './mexc.utils';
@@ -97,6 +99,22 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
       case 'push.personal.asset':
         this.throttledFetchBalance();
         break;
+      // MEXC futures also emit plan and stop order lifecycle frames on the
+      // same private WS. Without subscribing to and handling them here, the
+      // TP/SL half of the order surface would be REST-poll only and users
+      // would see chart lines flicker during rapid drag/place bursts while
+      // `planorder/list` / `stoporder/list` catch up. See MEXC docs:
+      // "All private data will be pushed after login: order, order.deal,
+      // position, plan.order, stop.order, stop.planorder, ..." — the
+      // matching push channels follow the `push.personal.<filter>` pattern.
+      case 'push.personal.plan.order':
+      case 'push.personal.trigger.order':
+        this.handlePlanOrder(json);
+        break;
+      case 'push.personal.stop.order':
+      case 'push.personal.stop.planorder':
+        this.handleStopOrder(json);
+        break;
     }
   };
 
@@ -171,6 +189,11 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   };
 
   private subscribePrivateFeeds = () => {
+    // MEXC's `personal.filter` is a *narrowing* filter, not a subscription:
+    // by default the login pushes every private topic, and sending an
+    // explicit filter list excludes anything not named here. If plan/stop
+    // filters are omitted, the venue silently drops those pushes and
+    // TP/SL sync degrades to REST-polling only. See mexc.exchange CLAUDE.md.
     this.sendWithDiagnostics(
       JSON.stringify({
         method: 'personal.filter',
@@ -180,6 +203,9 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
             { filter: 'order.deal' },
             { filter: 'position' },
             { filter: 'asset' },
+            { filter: 'plan.order' },
+            { filter: 'stop.order' },
+            { filter: 'stop.planorder' },
           ],
         },
       }),
@@ -289,6 +315,68 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     // is a full snapshot (holdVol/frozenVol/holdAvgPrice/leverage/liqPrice/
     // marginRatio/pnl/...) so the WS write is enough; the 2s `tick` acts as
     // the safety net.
+  };
+
+  // MEXC standalone plan orders (untriggered TP/SL and other trigger orders
+  // placed via `POST /planorder/place/v2`). These arrive on
+  // `push.personal.plan.order` (and, per CCXT, `push.personal.trigger.order`).
+  // The frame carries the same core fields as the REST `planorder/list`
+  // response — `id`/`symbol`/`side`/`triggerPrice`/`vol`/`state`/`triggerType`
+  // — so `normalizePlanOrder` can consume it directly. Any id observed on the
+  // WS is marked seen so the recently-placed-stop shield stops protecting it;
+  // from that point on, normal WS/REST reconciliation owns the row.
+  private handlePlanOrder = (json: Record<string, any>) => {
+    const data = json.data || json;
+    const rows = Array.isArray(data) ? data : [data];
+    const orders = rows
+      .map((row) => normalizePlanOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
+      .filter((order): order is Order => !!order);
+
+    for (const row of rows) {
+      const id = toIntegerString(row?.id ?? row?.orderId ?? row?.stopPlanOrderId);
+      if (id) this.parent.markStopLikeOrderSeen(id);
+    }
+
+    if (orders.length) {
+      this.store.addOrUpdateOrders(orders as any);
+      for (const order of orders) {
+        if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
+          this.store.updateOrderStatus({ id: order.id }, order.status);
+        }
+      }
+    }
+    // Intentionally no REST fan-out. The plan-order frame is a full-row
+    // snapshot; the 1.5s coalesced `scheduleStopOrderSnapshotRefresh` fires
+    // after user actions and covers cases where a frame is missed or dropped.
+  };
+
+  // MEXC position TP/SL (`stoporder/place` / `stoporder/change_price`) and
+  // stop-limit plan trigger orders (`stoporder/change_plan_price`). Both come
+  // through the `stop.order` / `stop.planorder` filters and land on
+  // `push.personal.stop.order` / `push.personal.stop.planorder`. Frame shape
+  // follows the REST `stoporder/list` response — `id` (or `stopPlanOrderId`),
+  // `positionType`, `stopLossPrice`/`takeProfitPrice`, `state`, `volType`,
+  // `triggerSide` — which `normalizeStopOrder` already accepts.
+  private handleStopOrder = (json: Record<string, any>) => {
+    const data = json.data || json;
+    const rows = Array.isArray(data) ? data : [data];
+    const orders = rows
+      .map((row) => normalizeStopOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
+      .filter((order): order is Order => !!order);
+
+    for (const row of rows) {
+      const id = toIntegerString(row?.id ?? row?.stopPlanOrderId ?? row?.orderId);
+      if (id) this.parent.markStopLikeOrderSeen(id);
+    }
+
+    if (orders.length) {
+      this.store.addOrUpdateOrders(orders as any);
+      for (const order of orders) {
+        if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
+          this.store.updateOrderStatus({ id: order.id }, order.status);
+        }
+      }
+    }
   };
 
   private throttledFetchBalance = () => {
