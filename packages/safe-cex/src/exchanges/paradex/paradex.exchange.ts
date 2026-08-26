@@ -63,6 +63,24 @@ import {
 import { ParadexPrivateWebSocket } from './paradex.ws-private';
 import { ParadexPublicWebSocket } from './paradex.ws-public';
 
+const PRIVATE_HISTORY_AUTH_RETRY_DELAYS_MS = [500, 1500] as const;
+
+class ParadexPrivateHistoryAuthNotReadyError extends Error {
+  readonly originalError?: unknown;
+
+  constructor(operation: string, originalError?: unknown) {
+    const detail = originalError instanceof Error && originalError.message ? `: ${originalError.message}` : '';
+    super(`Paradex private auth not ready for ${operation}${detail}`);
+    this.name = 'ParadexPrivateHistoryAuthNotReadyError';
+    this.originalError = originalError;
+  }
+}
+
+const isParadexPrivateHistoryAuthNotReadyError = (err: unknown): err is ParadexPrivateHistoryAuthNotReadyError =>
+  err instanceof ParadexPrivateHistoryAuthNotReadyError;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class ParadexExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
@@ -157,6 +175,52 @@ export class ParadexExchange extends BaseExchange {
       // Re-throw the error so it's visible and stops exchange initialization
       throw error;
     }
+  }
+
+  private resetSDKStateAfterInitFailure() {
+    this.sdkInitPromise = null;
+    this.sdkAccount = null;
+    this.requestSigner = null;
+    this.jwtManager = null;
+  }
+
+  private async ensurePrivateHistoryAuth(operation: string) {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= PRIVATE_HISTORY_AUTH_RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        if (this.jwtManager) {
+          return;
+        }
+
+        if (!this.sdkInitPromise && this.options.paradexAddress) {
+          this.log(`Retrying Paradex SDK initialization for ${operation}`, LogSeverity.Debug);
+          this.sdkInitPromise = this.initializeSDK();
+          void this.sdkInitPromise.catch(() => {});
+        }
+
+        if (this.sdkInitPromise) {
+          await this.sdkInitPromise;
+        }
+
+        if (this.jwtManager) {
+          return;
+        }
+
+        lastError = new Error('JWT manager not initialized');
+        this.resetSDKStateAfterInitFailure();
+      } catch (err) {
+        lastError = err;
+        this.resetSDKStateAfterInitFailure();
+      }
+
+      const delay = PRIVATE_HISTORY_AUTH_RETRY_DELAYS_MS[attempt];
+      if (delay !== undefined) {
+        await wait(delay);
+      }
+    }
+
+    throw new ParadexPrivateHistoryAuthNotReadyError(operation, lastError);
   }
 
   dispose = () => {
@@ -883,6 +947,8 @@ export class ParadexExchange extends BaseExchange {
     const PAGE_SIZE = 100;
 
     try {
+      await this.ensurePrivateHistoryAuth('fetchHistoricalOrders');
+
       const orders: HistoricalOrder[] = [];
       const seen = new Set<string>();
       let cursor: string | undefined;
@@ -923,6 +989,10 @@ export class ParadexExchange extends BaseExchange {
       const sorted = orders.sort((a, b) => b.createdTime - a.createdTime);
       return opts?.limit && opts.limit > 0 ? sorted.slice(0, opts.limit) : sorted;
     } catch (err: any) {
+      if (isParadexPrivateHistoryAuthNotReadyError(err)) {
+        this.log(err.message, LogSeverity.Warning);
+        throw err;
+      }
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return [];
     }
@@ -940,14 +1010,6 @@ export class ParadexExchange extends BaseExchange {
 
     const market = this.store.marketsBySymbol[symbol];
     if (!market) {
-      return [];
-    }
-
-    if (this.sdkInitPromise) {
-      await this.sdkInitPromise;
-    }
-    if (!this.jwtManager) {
-      this.log('Skipping fetchHistoricalFills: JWT manager not initialized', LogSeverity.Warning);
       return [];
     }
 
@@ -1079,6 +1141,8 @@ export class ParadexExchange extends BaseExchange {
     };
 
     try {
+      await this.ensurePrivateHistoryAuth('fetchHistoricalFills');
+
       const primaryRows = await fetchFillRows();
       const fallbackRows = primaryRows.length > 0 ? [] : await fetchOrderFallbackRows();
       const deduped = new Map<string, Execution>();
@@ -1096,6 +1160,10 @@ export class ParadexExchange extends BaseExchange {
 
       return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxLimit);
     } catch (err: any) {
+      if (isParadexPrivateHistoryAuthNotReadyError(err)) {
+        this.log(err.message, LogSeverity.Warning);
+        throw err;
+      }
       this.log(`Error fetching executions: ${err?.message || err}`, LogSeverity.Error);
       return [];
     }

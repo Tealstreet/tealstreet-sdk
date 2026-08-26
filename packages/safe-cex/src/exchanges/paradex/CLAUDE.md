@@ -215,6 +215,10 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Uses authenticated `/fills` with cursor pagination for primary execution history
 - Falls back to `/orders-history` rows where filled size is positive (`size - remaining_size > 0`)
 - Normalizes symbol/side/timestamp and returns Unix-second execution timestamps
+- Private history auth is retryable: `fetchHistoricalOrders` and `fetchHistoricalFills`
+  retry SDK/JWT readiness briefly, then throw `ParadexPrivateHistoryAuthNotReadyError`.
+  Do not convert auth-not-ready into `[]`, because ingestion would complete the
+  coverage window as genuinely empty and never revisit it.
 
 ## WebSocket Implementation
 
