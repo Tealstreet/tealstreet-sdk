@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
 import { ENDPOINTS } from '../../exchanges/bitunix/bitunix.types';
 import { DefaultStore } from '../../store/store.base';
-import { PositionMode } from '../../types';
+import { MarginType, PositionMode, PositionSide } from '../../types';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -70,6 +70,105 @@ describe('Bitunix account validation regression', () => {
     });
     expect(get).toHaveBeenCalledTimes(2);
     expect(exchange.accountPositionMode).toBe(PositionMode.OneWay);
+  });
+
+  it('reads position mode from the documented account-array response', async () => {
+    const exchange = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        code: 0,
+        data: [
+          { marginCoin: 'BTC', positionMode: 'HEDGE' },
+          { marginCoin: 'USDT', positionMode: 'ONE_WAY' },
+        ],
+        msg: 'Success',
+      },
+    });
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.fetchPositionMode()).resolves.toBe(false);
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT, { params: { marginCoin: 'USDT' } });
+  });
+
+  it('keeps malformed account numeric fields finite instead of publishing NaN', async () => {
+    const exchange = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        code: 0,
+        data: [
+          {
+            marginCoin: 'USDT',
+            availableBalance: 0,
+            frozen: 'not-a-number',
+            margin: '',
+            crossUnrealizedPNL: 'not-a-number',
+            positionMode: 'HEDGE',
+          },
+        ],
+        msg: 'Success',
+      },
+    });
+    exchange.xhr = { get } as any;
+
+    const result = await exchange.fetchBalance();
+
+    expect(result).toEqual({
+      balance: { total: 0, free: 0, used: 0, upnl: 0 },
+      positions: [],
+    });
+    expect(Object.values(result.balance).every(Number.isFinite)).toBe(true);
+    expect(exchange.accountPositionMode).toBe(PositionMode.Hedged);
+  });
+
+  it('parses nested position wrappers and alias fields without known markets', async () => {
+    const exchange = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        code: 0,
+        data: {
+          result: {
+            positionList: [
+              {
+                positionId: 'position-1',
+                instId: 'DOGEUSDT',
+                positionAmt: '1234.5',
+                positionSide: 'SHORT',
+                posMode: 'ONE_WAY',
+                marginType: 'ISOLATED',
+                avgPrice: '0.1725',
+                positionValue: '212.953125',
+                lever: '5',
+                unRealizedProfit: '6.25',
+                realizedPnl: '1.5',
+                liqPx: '0.08',
+              },
+            ],
+          },
+        },
+        msg: 'Success',
+      },
+    });
+    exchange.xhr = { get } as any;
+
+    const positions = await exchange.fetchPositions();
+
+    expect(positions).toEqual([
+      expect.objectContaining({
+        symbol: 'DOGEUSDT',
+        side: PositionSide.Short,
+        positionMode: PositionMode.OneWay,
+        marginType: MarginType.Isolated,
+        contracts: 1234.5,
+        entryPrice: 0.1725,
+        notional: 212.953125,
+        leverage: 5,
+        unrealizedPnl: 6.25,
+        realizedPnl: 1.5,
+        liquidationPrice: 0.08,
+        info: expect.objectContaining({ positionId: 'position-1' }),
+      }),
+    ]);
+    expect(exchange.positionIdCache.size).toBe(0);
   });
 
   it('preserves thrown transport-error handling', async () => {
