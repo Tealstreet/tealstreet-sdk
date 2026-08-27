@@ -1451,9 +1451,6 @@ export class BybitExchange extends BaseExchange {
       limit,
     };
 
-    console.warn(
-      `[BYBIT-KLINE] adapter=${typeof this.xhr.defaults.adapter} remoteSigner=${!!this.options.remoteSigner} url=${ENDPOINTS.KLINE}`,
-    );
     const response = await this.xhr.get(ENDPOINTS.KLINE, { params });
     const { data } = response;
 
