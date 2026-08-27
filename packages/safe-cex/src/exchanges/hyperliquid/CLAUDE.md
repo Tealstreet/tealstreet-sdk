@@ -419,6 +419,14 @@ Subscribed for the user (or vault address):
 
 **Ping**: Every 15 seconds.
 
+## WebSocket Diagnostics
+
+Hyperliquid public/private WebSockets emit `grafana-pws-sub` for selected outbound frames and `grafana-pws` for selected inbound frames so the web Requests drawer and Grafana diagnostics can show useful WS control/order traffic without enabling the global `ENABLE_PWS_LOG` firehose. Keep wallet/user addresses redacted before emission.
+
+Public diagnostics should include outbound subscribe/unsubscribe control frames and inbound subscription/error control frames. Do not log high-volume public market-data inbound frames (`allMids`, `fastAssetCtxs`, `l2Book`, `bbo`, `candle`) on the receive side.
+
+Private diagnostics should include outbound user/order subscription frames and inbound order/user lifecycle frames (`orderUpdates`, `userEvents`, `userFills`, funding/non-funding updates, notifications, subscription responses, errors). Do not log high-volume private `activeAssetData` subscribe bursts or inbound account/market-state floods such as `activeAssetData`, `clearinghouseState`, `spotState`, `spotClearinghouseState`, `allMids`, or heartbeat pongs.
+
 ## Order Types and Mappings
 
 ### Supported Order Types

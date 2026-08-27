@@ -19,6 +19,11 @@ import { hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import { HyperliquidExchange } from './hyperliquid.exchange';
 import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from './hyperliquid.order-inference';
 import { UserFills, UserFundingEntry, UserNonFundingLedgerEntry, WSS_URLS } from './hyperliquid.types';
+import {
+  formatHyperliquidWsDiagnostic,
+  shouldEmitHyperliquidWsReceiveDiagnostic,
+  shouldEmitHyperliquidWsSendDiagnostic,
+} from './hyperliquid.ws-diagnostics';
 
 // Per-channel timestamp tracking for deduplication
 interface PerChannelTimestampState {
@@ -115,7 +120,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
   ping = () => {
     if (!this.isDisposed) {
       this.pingAt = performance.now();
-      this.send(JSON.stringify({ method: 'ping' }));
+      this.sendWithDiagnostics(JSON.stringify({ method: 'ping' }));
     }
   };
 
@@ -123,7 +128,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     const user = this.parent.options.vault || this.parent.options.applicationId;
 
     for (const type of systemSubscriptionTypes) {
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -137,7 +142,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     // Opt-in standard accounts need this too — they use spot state for the
     // holdings display, not as collateral.
     if (this.parent.shouldTrackSpotHoldings()) {
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -150,7 +155,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     }
 
     // Core-perp clearinghouseState subscription for real-time position updates.
-    this.send(
+    this.sendWithDiagnostics(
       JSON.stringify({
         method: 'subscribe',
         subscription: {
@@ -165,7 +170,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     // See: https://hyperliquid.gitbook.io/hyperliquid-docs
     for (const dexName of this.parent.hip3DexNames) {
       // allMids with dex is the reliable HIP-3 last-price stream.
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -176,7 +181,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       );
       // clearinghouseState with dex for faster real-time position updates
       // This is the authoritative position snapshot for the DEX.
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -187,7 +192,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         }),
       );
       // userFills with dex for instant HIP-3 fill notifications
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -198,7 +203,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         }),
       );
       // orderUpdates with dex for incremental order status changes
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -209,7 +214,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         }),
       );
       // userEvents with dex for comprehensive order lifecycle events
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -242,7 +247,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       if (market.isSpot) continue;
       // Skip HIP-3 markets (contain ':') to avoid exceeding 1000 channel limit
       if (coin.includes(':')) continue;
-      this.send(
+      this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
@@ -385,6 +390,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
       try {
         const json = jsonParse(data);
+        this.emitReceiveDiagnostics(data, json);
 
         // Handle pong separately (no deduplication needed)
         if (json?.channel === 'pong') {
@@ -414,6 +420,19 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         }
         this.processMessage(json);
       } catch (_e) {}
+    }
+  };
+
+  private sendWithDiagnostics = (data: string) => {
+    this.send(data);
+    if (shouldEmitHyperliquidWsSendDiagnostic(data)) {
+      this.parent.emitter.emit('grafana-pws-sub', formatHyperliquidWsDiagnostic('private', data));
+    }
+  };
+
+  private emitReceiveDiagnostics = (data: unknown, json: unknown) => {
+    if (shouldEmitHyperliquidWsReceiveDiagnostic('private', json)) {
+      this.parent.emitter.emit('grafana-pws', formatHyperliquidWsDiagnostic('private', data));
     }
   };
 

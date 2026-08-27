@@ -8,6 +8,11 @@ import { BaseWebSocket } from '../base.ws';
 import { HyperliquidExchange } from './hyperliquid.exchange';
 import { decodeHyperliquidFastAssetCtxs } from './hyperliquid.fast-asset-ctxs';
 import { AllMids, HyperliquidCandle, WsBbo, WsBook, WSS_URLS } from './hyperliquid.types';
+import {
+  formatHyperliquidWsDiagnostic,
+  shouldEmitHyperliquidWsReceiveDiagnostic,
+  shouldEmitHyperliquidWsSendDiagnostic,
+} from './hyperliquid.ws-diagnostics';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -84,7 +89,7 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
   subscribePublicTopics = () => {
     // Keep allMids as the stable full-snapshot fallback, and overlay the
     // compressed snapshot+diff fastAssetCtxs stream for fresh mark/mid prices.
-    this.send(
+    this.sendWithDiagnostics(
       JSON.stringify({
         method: 'subscribe',
         subscription: {
@@ -92,7 +97,7 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         },
       }),
     );
-    this.send(
+    this.sendWithDiagnostics(
       JSON.stringify({
         method: 'subscribe',
         subscription: {
@@ -115,13 +120,13 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       return false;
     }
     this.activeSubscriptions.add(key);
-    this.send(JSON.stringify({ method: 'subscribe', subscription }));
+    this.sendWithDiagnostics(JSON.stringify({ method: 'subscribe', subscription }));
     return true;
   };
 
   private sendUnsubscription = (subscription: Record<string, unknown>): void => {
     this.activeSubscriptions.delete(JSON.stringify(subscription));
-    this.send(JSON.stringify({ method: 'unsubscribe', subscription }));
+    this.sendWithDiagnostics(JSON.stringify({ method: 'unsubscribe', subscription }));
   };
 
   subscribeUserTopics = () => {
@@ -151,7 +156,7 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
   ping = () => {
     if (!this.isDisposed) {
       this.pingAt = performance.now();
-      this.send(JSON.stringify({ method: 'ping' }));
+      this.sendWithDiagnostics(JSON.stringify({ method: 'ping' }));
     }
   };
 
@@ -161,6 +166,7 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
 
       try {
         const json = jsonParse(data);
+        this.emitReceiveDiagnostics(data, json);
         // Debug: log subscription responses
         if (json?.channel === 'subscriptionResponse' || json?.channel === 'SubscriptionResponse') {
           this.parent.log(`Subscription response: ${JSON.stringify(json)}`, LogSeverity.Debug);
@@ -268,6 +274,19 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
           }
         }
       } catch (_e) {}
+    }
+  };
+
+  private sendWithDiagnostics = (data: string) => {
+    this.send(data);
+    if (shouldEmitHyperliquidWsSendDiagnostic(data)) {
+      this.parent.emitter.emit('grafana-pws-sub', formatHyperliquidWsDiagnostic('public', data));
+    }
+  };
+
+  private emitReceiveDiagnostics = (data: unknown, json: unknown) => {
+    if (shouldEmitHyperliquidWsReceiveDiagnostic('public', json)) {
+      this.parent.emitter.emit('grafana-pws', formatHyperliquidWsDiagnostic('public', data));
     }
   };
 
