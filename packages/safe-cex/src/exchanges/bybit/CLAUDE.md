@@ -965,6 +965,10 @@ When a full-sized position exists on the opposite side, `StopLoss` and `TakeProf
 - Forces an order-inclusive REST snapshot after success so `/v5/order/realtime`
   can surface the real TP/SL row IDs even when private WS is degraded or
   geo-flaky. Do not gate this refresh solely on WebSocket health.
+- The web `createStopLossOrder` wrapper treats this empty result as accepted for
+  Bybit-family stop-like orders only. Keep that carveout paired with this
+  adapter behavior; reverting it makes successful `trading-stop` calls look like
+  failed placements while the real stop appears moments later in open orders.
 
 ### Trailing Stop Loss
 
