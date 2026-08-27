@@ -80,6 +80,7 @@ import { collapseHyperliquidOrderHistory, mapHyperliquidHistoricalOrder } from '
 import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from './hyperliquid.order-inference';
 import {
   hyperliquidOrderResponseHasWaitingForTrigger,
+  HyperliquidUnreadableOrderResponseError,
   parseHyperliquidOrderResponse,
 } from './hyperliquid.order-response';
 import {
@@ -2057,7 +2058,18 @@ export class HyperliquidExchange extends BaseExchange {
    * @throws Error if response is invalid or contains errors
    */
   private validateResponseAndExtractOrderIds(data: any): string[] {
-    return parseHyperliquidOrderResponse(data).orderIds;
+    try {
+      return parseHyperliquidOrderResponse(data).orderIds;
+    } catch (error) {
+      // The POST went out and came back unreadable, so the placement is
+      // UNKNOWN, not failed — the order may be resting on the venue right now.
+      // Pull orders from REST so one that did land shows up in the table
+      // instead of the user seeing only a "failed to place" toast and placing
+      // it a second time. The throw still stands: an unreadable body is a
+      // transport/venue failure, never an accepted empty-id result.
+      if (error instanceof HyperliquidUnreadableOrderResponseError) this.scheduleOrderRefresh();
+      throw error;
+    }
   }
 
   private responseHasWaitingForTrigger(data: any): boolean {

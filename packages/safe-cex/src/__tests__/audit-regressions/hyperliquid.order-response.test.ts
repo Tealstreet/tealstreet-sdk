@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
+  HyperliquidUnreadableOrderResponseError,
+  describeHyperliquidHttpFailure,
   extractHyperliquidResponseError,
   hyperliquidOrderResponseHasWaitingForTrigger,
   parseHyperliquidOrderResponse,
@@ -79,5 +81,50 @@ describe('Hyperliquid order response contract', () => {
         },
       }),
     ).toThrow('Hyperliquid order response contained unsupported status: "newStatusFromVenue"');
+  });
+});
+
+describe('Hyperliquid transport failure reporting', () => {
+  // The HOW tunnel adapter resolves non-2xx without axios' settle(), so these
+  // arrive as successes. Before this, an unreadable error page reached the user
+  // as "Invalid response from Hyperliquid API: null" — 122 Sentry events across
+  // 25 users, none of which named the status that caused them.
+  it('names the status and reason on a tunnel-delivered non-2xx', () => {
+    expect(describeHyperliquidHttpFailure({ status: 429, statusText: 'Too Many Requests', data: null })).toBe(
+      'Hyperliquid API error (HTTP 429 Too Many Requests)',
+    );
+  });
+
+  it("reads the tunnel frame's snake_case status_text", () => {
+    expect(
+      describeHyperliquidHttpFailure({ status: 422, status_text: 'Unprocessable Entity', data: undefined } as never),
+    ).toBe('Hyperliquid API error (HTTP 422 Unprocessable Entity)');
+  });
+
+  it('carries the venue body through when there is one', () => {
+    expect(
+      describeHyperliquidHttpFailure({
+        status: 422,
+        data: { raw_response: 'Failed to deserialize the JSON body into the target type' },
+      }),
+    ).toBe(
+      'Hyperliquid API error (HTTP 422): {"raw_response":"Failed to deserialize the JSON body into the target type"}',
+    );
+  });
+
+  it('marks unreadable bodies as unreadable so the caller can reconcile from REST', () => {
+    expect(() => parseHyperliquidOrderResponse(null)).toThrow(HyperliquidUnreadableOrderResponseError);
+    expect(() => parseHyperliquidOrderResponse({ status: 'ok', response: { type: 'order', data: {} } })).toThrow(
+      HyperliquidUnreadableOrderResponseError,
+    );
+  });
+
+  it('leaves a venue rejection as a plain error, not an unreadable response', () => {
+    expect(() =>
+      parseHyperliquidOrderResponse({
+        status: 'ok',
+        response: { type: 'order', data: { statuses: [{ error: 'Order price cannot be more than 80% away' }] } },
+      }),
+    ).not.toThrow(HyperliquidUnreadableOrderResponseError);
   });
 });

@@ -162,20 +162,6 @@ export const isNodeOrBunRuntime = (): boolean =>
 
 export const LAST_LOG_PERIODICY = 30 * 1_000;
 
-const stringifyResponseBody = (body: unknown): string =>
-  typeof body === 'string' ? body : JSON.stringify(body) ?? String(body);
-
-const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
-  const message =
-    typeof body === 'string'
-      ? body
-      : body && typeof body === 'object' && 'message' in body && typeof body.message === 'string'
-        ? body.message
-        : '';
-
-  return message === 'Authorization header is missing' || message === 'Invalid JWT';
-};
-
 /**
  * Classify a REST outcome from the HTTP status alone, then record it on the
  * exchange's store.
@@ -448,12 +434,9 @@ export const safeCexAxiosCreate = (
       // them cascade into cryptic downstream errors or silent broken state.
       if (isPrivateProxyEnabled && status) {
         const body = error?.response?.data;
-        const bodyStr = stringifyResponseBody(body);
+        const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
         if (status === 403 || status === 401) {
-          const authFailureSource = isTealstreetProxyAuthFailureBody(body)
-            ? 'Tealstreet proxy auth failed'
-            : 'Upstream exchange auth failed via proxy';
-          const msg = `[${exchange.name}] ${authFailureSource} (${status}): ${bodyStr}`;
+          const msg = `[${exchange.name}] Proxy auth failed (${status}): ${bodyStr}`;
           console.error(msg);
           exchange.emitter.emit('error', msg);
         } else if (status >= 500) {

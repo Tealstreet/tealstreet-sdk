@@ -6,9 +6,10 @@ import qs from 'qs';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
-import { BaseExchange } from '../base';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
+import { BaseExchange } from '../base';
 import {
+  describeHyperliquidHttpFailure,
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
   extractHyperliquidResponseError,
 } from './hyperliquid.order-response';
@@ -24,9 +25,24 @@ const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exch
       throw new Error(responseError);
     }
 
+    // The HOW tunnel adapter resolves without axios' settle(), so a non-2xx
+    // from Hyperliquid or the egress proxy reaches this success handler with
+    // its status intact but never inspected. Callers then report the body
+    // SHAPE instead of the failure — an unreadable error page surfaced as
+    // "Invalid response from Hyperliquid API: null", which names nothing you
+    // can act on. Read the status here so the venue's own failure wins.
+    // Only the tunnel path gets here: a direct axios request already rejects
+    // non-2xx in validateStatus before any interceptor runs.
+    if (typeof response.status === 'number' && response.status >= 400) {
+      const msg = describeHyperliquidHttpFailure(response);
+      exchange.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
     if (response.config?.url === ENDPOINTS.EXCHANGE && response.data == null) {
-      exchange.emitAndLogError(EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE);
-      throw new Error(EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE);
+      const msg = `${EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE} (HTTP ${response.status})`;
+      exchange.emitAndLogError(msg);
+      throw new Error(msg);
     }
 
     return response;

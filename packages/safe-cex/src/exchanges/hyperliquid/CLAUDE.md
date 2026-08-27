@@ -462,6 +462,28 @@ return a single top-level `{ status: "err", response: "..." }` message. A `null`
 or empty `/exchange` response body is not one of those accepted shapes and must
 remain a clear transport/venue failure, not an accepted empty-id result.
 
+**A non-2xx reaching that validator at all is the bug behind
+`Invalid response from Hyperliquid API: null`.** The HOW tunnel adapter
+resolves without axios' `settle()`, so a 4xx/5xx from Hyperliquid or from the
+egress proxy arrives at the response interceptor as a *success* with its status
+intact but never read — and the caller then reports the body SHAPE instead of
+the failure. Hyperliquid's own error bodies are not JSON objects (`422` returns
+the bare text `Failed to deserialize the JSON body into the target type`), so
+what the user saw was a body-shape complaint naming nothing actionable: 122
+Sentry events across 25 users, every one of them ending in `: null`. The
+interceptor now reads `response.status` first, so the venue's failure wins.
+Note the tunnel frame spells it `status_text`, not axios' `statusText` —
+`describeHyperliquidHttpFailure` reads both. Only tunnelled requests reach this
+branch; a direct axios request already rejects non-2xx in `validateStatus`.
+
+An unreadable `/exchange` body means the placement is **unknown, not failed** —
+the POST went out and the order may be resting right now. That is why
+`parseHyperliquidOrderResponse` throws the typed
+`HyperliquidUnreadableOrderResponseError` (venue rejections stay plain
+`Error`s): `validateResponseAndExtractOrderIds` catches only that type,
+schedules a REST order refresh, and rethrows. Without it the user gets a
+"failed to place" toast for a stop that landed and places it a second time.
+
 The optimistic ghost row in `inProgressOrdersAtom` will keep its `optim_*` id
 forever in this case — we never get a real id to `confirm()` the reconciler
 against. Two things bridge that:

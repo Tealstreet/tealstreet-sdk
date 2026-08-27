@@ -1,5 +1,4 @@
-export const EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE =
-  'Hyperliquid API returned an empty order response body';
+export const EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE = 'Hyperliquid API returned an empty order response body';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -7,6 +6,19 @@ export type ParsedHyperliquidOrderResponse = {
   orderIds: string[];
   waitingForTrigger: boolean;
 };
+
+/**
+ * Thrown when an `/exchange` response cannot be read as any documented order
+ * result — an empty body, a missing `statuses` vector, or a status entry we do
+ * not recognise. Distinct from a venue rejection: the order may still have
+ * landed, so callers should reconcile from REST rather than assume it did not.
+ */
+export class HyperliquidUnreadableOrderResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HyperliquidUnreadableOrderResponseError';
+  }
+}
 
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -84,7 +96,7 @@ export const extractHyperliquidResponseError = (data: unknown): string | undefin
 
 export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidOrderResponse => {
   if (data === undefined || data === null) {
-    throw new Error(EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE);
+    throw new HyperliquidUnreadableOrderResponseError(EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE);
   }
 
   const error = extractHyperliquidResponseError(data);
@@ -94,7 +106,9 @@ export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidO
 
   const statuses = getStatuses(data);
   if (!statuses || statuses.length === 0) {
-    throw new Error(`Hyperliquid order response missing statuses: ${describeResponse(data)}`);
+    throw new HyperliquidUnreadableOrderResponseError(
+      `Hyperliquid order response missing statuses: ${describeResponse(data)}`,
+    );
   }
 
   const orderIds: string[] = [];
@@ -108,12 +122,16 @@ export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidO
 
     const statusRecord = getRecord(status);
     if (!statusRecord) {
-      throw new Error(`Hyperliquid order response contained unsupported status: ${describeResponse(status)}`);
+      throw new HyperliquidUnreadableOrderResponseError(
+        `Hyperliquid order response contained unsupported status: ${describeResponse(status)}`,
+      );
     }
 
     const oid = getOid(statusRecord.resting) ?? getOid(statusRecord.filled);
     if (!oid) {
-      throw new Error(`Hyperliquid order response contained unrecognized status: ${describeResponse(status)}`);
+      throw new HyperliquidUnreadableOrderResponseError(
+        `Hyperliquid order response contained unrecognized status: ${describeResponse(status)}`,
+      );
     }
 
     orderIds.push(oid);
@@ -124,3 +142,21 @@ export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidO
 
 export const hyperliquidOrderResponseHasWaitingForTrigger = (data: unknown): boolean =>
   getStatuses(data)?.includes('waitingForTrigger') ?? false;
+
+/**
+ * Describe a non-2xx `/exchange` or `/info` response.
+ *
+ * The tunnel frame carries `status_text`, not axios' `statusText`, so read both
+ * before falling back to the numeric status alone.
+ */
+export const describeHyperliquidHttpFailure = (response: {
+  status?: number;
+  statusText?: string;
+  data?: unknown;
+}): string => {
+  const statusText = response.statusText || (response as UnknownRecord).status_text;
+  const reason = typeof statusText === 'string' && statusText ? ` ${statusText}` : '';
+  const body = describeResponse(response.data);
+  const detail = body && body !== 'null' && body !== 'undefined' ? `: ${body.slice(0, 300)}` : '';
+  return `Hyperliquid API error (HTTP ${response.status}${reason})${detail}`;
+};
