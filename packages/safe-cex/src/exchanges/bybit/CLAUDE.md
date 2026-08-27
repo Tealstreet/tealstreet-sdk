@@ -969,6 +969,10 @@ When a full-sized position exists on the opposite side, `StopLoss` and `TakeProf
   Bybit-family stop-like orders only. Keep that carveout paired with this
   adapter behavior; reverting it makes successful `trading-stop` calls look like
   failed placements while the real stop appears moments later in open orders.
+- Repeating the same position TP/SL can return `"not modified"` from
+  `SET_TRADING_STOP`. Treat that as a successful no-op rather than an exchange
+  error and keep the linear/demo snapshot refresh; the BE button can
+  legitimately submit the same entry-price stop twice.
 
 ### Trailing Stop Loss
 
@@ -1195,7 +1199,10 @@ Two rules for calling them:
 
 ### Error-as-Success Patterns
 
-- **"order not modified"**: Returned when `REPLACE_ORDER` is called but nothing actually changed. Treated as success in all three contexts (virtual SL/TP update, limit order update, position-bound TP/SL update).
+- **"order not modified"**: Returned when `REPLACE_ORDER` or `SET_TRADING_STOP`
+  is called but nothing actually changed. Treat as success for virtual SL/TP
+  update, limit order update, position-bound TP/SL update, and repeated
+  position TP/SL placement.
 - **"leverage not modified" / `110043`**: Returned when `SET_LEVERAGE` is called
   with the already-active leverage. Treat as a successful no-op and refresh the
   symbol's positions instead of surfacing an error toast. This applies to demo

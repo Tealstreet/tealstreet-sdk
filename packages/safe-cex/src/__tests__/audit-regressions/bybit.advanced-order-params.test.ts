@@ -347,6 +347,77 @@ describe('Bybit adapter-only advanced order parameters', () => {
     expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
   });
 
+  it('treats Bybit Demo trading-stop not-modified responses as successful no-ops', async () => {
+    vi.useFakeTimers();
+    const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
+    mockPositionMode(exchange);
+    const post = vi.fn().mockResolvedValue({ data: { retMsg: 'not modified', result: {} } });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    const fetchAndSetPrivateSnapshotHelper = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshotHelper').mockResolvedValue(
+      undefined,
+    );
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeStopLossOrTakeProfit({
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 65_000,
+        amount: 0,
+        reduceOnly: true,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.SET_TRADING_STOP,
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        tpslMode: 'Full',
+        stopLoss: '65000',
+      }),
+    );
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(fetchAndSetPrivateSnapshotHelper).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(251);
+
+    expect(fetchAndSetPrivateSnapshotHelper).toHaveBeenCalledOnce();
+  });
+
+  it('treats Bybit inverse trading-stop not-modified responses as successful no-ops', async () => {
+    const exchange = new BybitInverseExchange(
+      'bybitinverse',
+      { key: 'key', secret: 'secret' },
+      createStore('BTCUSD', 'USD', true),
+    );
+    mockPositionMode(exchange);
+    const post = vi.fn().mockResolvedValue({ data: { retMsg: 'not modified', result: {} } });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeStopLossOrTakeProfit({
+        symbol: 'BTCUSD',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 65_000,
+        amount: 0,
+        reduceOnly: true,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.SET_TRADING_STOP,
+      expect.objectContaining({
+        symbol: 'BTCUSD',
+        tpslMode: 'Full',
+        stopLoss: '65000',
+      }),
+    );
+    expect(emitAndLogError).not.toHaveBeenCalled();
+  });
+
   it('does not force an order snapshot after generic cancellation', async () => {
     const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
     const post = vi.fn().mockResolvedValue({

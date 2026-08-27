@@ -91,6 +91,8 @@ const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
   return normalized.includes('order not exists') || normalized.includes('too late to cancel');
 };
 
+const isBybitOrderNotModifiedMessage = (message: unknown) => `${message || ''}`.toLowerCase().includes('not modified');
+
 const getBybitTriggerBy = (opts: PlaceOrderOpts) => {
   if (opts.type === OrderType.Conditional) {
     if (opts.triggerType === OrderStopTriggerType.MarkPrice) return 'MarkPrice';
@@ -1592,6 +1594,10 @@ export class BybitInverseExchange extends BaseExchange {
 
     const { data } = await this.xhr.post(ENDPOINTS.SET_TRADING_STOP, payload);
 
+    if (isBybitOrderNotModifiedMessage(data.retMsg)) {
+      return [];
+    }
+
     if (data.retMsg !== 'OK') {
       this.emitAndLogError(data.retMsg);
       throw new Error(data.retMsg);
@@ -1623,6 +1629,10 @@ export class BybitInverseExchange extends BaseExchange {
     };
 
     const { data } = await this.xhr.post(ENDPOINTS.SET_TRADING_STOP, payload);
+
+    if (isBybitOrderNotModifiedMessage(data.retMsg)) {
+      return [];
+    }
 
     if (data.retMsg !== 'OK') {
       this.emitAndLogError(data.retMsg);
