@@ -1,3 +1,5 @@
+import { describeHttpFailure } from '../../utils/httpFailure';
+
 export const EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE = 'Hyperliquid API returned an empty order response body';
 
 type UnknownRecord = Record<string, unknown>;
@@ -144,20 +146,10 @@ export const hyperliquidOrderResponseHasWaitingForTrigger = (data: unknown): boo
   getStatuses(data)?.includes('waitingForTrigger') ?? false;
 
 /**
- * Describe a non-2xx `/exchange` or `/info` response.
+ * Describe a non-2xx `/exchange` response.
  *
- * The tunnel frame carries `status_text`, not axios' `statusText`, so read both
- * before falling back to the numeric status alone.
+ * Delegates to the shared reader so this stays one format across venues — see
+ * `utils/httpFailure.ts` for why the status has to be read at all.
  */
-export const describeHyperliquidHttpFailure = (response: {
-  status?: number;
-  statusText?: string;
-  data?: unknown;
-}): string => {
-  const statusText = response.statusText || (response as UnknownRecord).status_text;
-  const reason = typeof statusText === 'string' && statusText ? ` ${statusText}` : '';
-  const status = typeof response.status === 'number' ? String(response.status) : 'unknown';
-  const body = describeResponse(response.data);
-  const detail = body && body !== 'null' && body !== 'undefined' ? `: ${body.slice(0, 300)}` : '';
-  return `Hyperliquid API error (HTTP ${status}${reason})${detail}`;
-};
+export const describeHyperliquidHttpFailure = (response: unknown): string =>
+  describeHttpFailure('Hyperliquid', response);

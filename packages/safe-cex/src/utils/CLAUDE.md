@@ -210,6 +210,16 @@ drift measurement.
 
 ## Files
 
+- `httpFailure.ts` — `getHttpFailure` / `appendHttpFailure` / `describeHttpFailure`.
+  The HOW adapter resolves non-2xx tunnel frames without axios' `settle()`, so a
+  venue interceptor's SUCCESS handler receives the failure with its status
+  intact but never inspected, and every venue then builds its message out of a
+  body it cannot parse. These helpers only READ — nothing here throws. Making
+  the adapter settle instead would change control flow at 24 call sites at once,
+  and doing it on one venue alone cost four regressions. Note the tunnel spells
+  the reason `status_text` (snake_case, no serde `rename_all`) and fills it from
+  `canonical_reason().unwrap_or("")`, so `statusText` is `undefined` on every
+  tunnelled response and `status_text` may be present-but-empty.
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals
