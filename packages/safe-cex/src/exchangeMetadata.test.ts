@@ -5,6 +5,7 @@ import {
   exchangePrettyNames,
   getExchangeMetadata,
   getUniqueLatencyDomains,
+  isExchangeSupportedOnMobile,
   latencyDomainToExchanges,
 } from './exchangeMetadata';
 import { ExchangeName, MarginType, PositionMode } from './types';
@@ -359,6 +360,31 @@ describe('exchangeMetadata', () => {
       expectedTrue.forEach((name) => {
         expect(exchangeMetadata[name].supportsPublicOnly, `${name}: expected supportsPublicOnly to be true`).toBe(true);
       });
+    });
+
+    it('supports exactly the mobile-enabled exchange allow-list', () => {
+      const mobileSupported = exchanges.filter((name) => exchangeMetadata[name].supportedOnMobile).sort();
+
+      expect(mobileSupported).toEqual(['bybit', 'hyperliquid', 'kraken', 'lighter', 'okx']);
+
+      mobileSupported.forEach((name) => {
+        expect(isExchangeSupportedOnMobile(name), `${name}: helper should match metadata`).toBe(true);
+      });
+
+      [
+        'bybitdemo',
+        'bybitinverse',
+        'bybitspot',
+        'hyperliquidspot',
+        'krakenspot',
+        'okxdemo',
+        'okxeu',
+        'okxeudemo',
+      ].forEach((name) => {
+        expect(isExchangeSupportedOnMobile(name), `${name}: variant should not be mobile-enabled`).toBe(false);
+      });
+
+      expect(isExchangeSupportedOnMobile('unknown-exchange')).toBe(false);
     });
 
     it('exchanges not verified for public-only should have supportsPublicOnly: false', () => {

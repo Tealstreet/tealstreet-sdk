@@ -265,6 +265,7 @@ follow-up, not an oversight.
 | Flag                         | Default | Purpose                                                               |
 | ---------------------------- | ------- | --------------------------------------------------------------------- |
 | `hiddenFromNewAccountPicker` | `false` | Hide from the add-API-key picker while keeping saved accounts running |
+| `supportedOnMobile`          | `false` | Allow this exchange to run in the React Native mobile app             |
 | `supportsSpotToggle`         | `false` | Venue serves spot + derivatives from one connection; offer the opt-in |
 
 `hiddenFromNewAccountPicker` is deliberately **not** `enabled: false`:
@@ -272,6 +273,12 @@ availability gates also decide whether a _saved_ account may register at
 startup, so disabling a superseded venue stops every existing user account on
 it from loading. Set on `hyperliquidspot`, now served by `hyperliquid`'s spot
 toggle.
+
+`supportedOnMobile` is the separate mobile allow-list. It must stay
+default-off because mobile account sync/import paths can receive any web account;
+the app should keep unsupported venues saved but inactive instead of constructing
+their exchange workers. Use `isExchangeSupportedOnMobile()` rather than direct
+truthiness checks so unknown legacy exchange names fail closed.
 
 `supportsSpotToggle` drives `ExchangeAccountConfig.enableSpotMarkets` →
 `ExchangeOptions.enableSpotMarkets` (forwarded in `createExchangeFromAccount`

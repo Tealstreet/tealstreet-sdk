@@ -60,6 +60,14 @@ export type ExchangeMetadata = {
    */
   hiddenFromNewAccountPicker?: boolean;
   /**
+   * Whether this exchange is allowed to run in the React Native mobile app.
+   *
+   * Default-off. Mobile uses this as a saved-account availability gate, so
+   * exchanges can remain enabled on web while imported/synced mobile accounts
+   * for unsupported venues are kept inactive.
+   */
+  supportedOnMobile: boolean;
+  /**
    * Whether this exchange serves spot markets alongside derivatives from one
    * connection, and therefore should offer a per-account "also trade spot"
    * toggle in the add-account form (`ExchangeAccountConfig.enableSpotMarkets`).
@@ -261,6 +269,7 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   enabled: false,
   enabledInDev: true,
   enableInPreview: true,
+  supportedOnMobile: false,
   supportsTestnet: false,
   supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
@@ -338,6 +347,7 @@ const BybitMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
@@ -381,6 +391,7 @@ const BybitDemoMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitdemo' as ExchangeName,
   prettyName: 'Bybit Demo',
+  supportedOnMobile: false,
   supportsTestnet: false,
   forbidCors: true,
   enforceWsTunnel: true,
@@ -412,6 +423,7 @@ const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitspot' as ExchangeName,
   prettyName: 'Bybit Spot',
+  supportedOnMobile: false,
   supportsTestnet: false,
   supportsExecutionsHistory: false,
   // Inherits `true` from BybitMetadata via the spread above. Spot has no position-based
@@ -439,6 +451,7 @@ const BybitInverseMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitinverse' as ExchangeName,
   prettyName: 'Bybit Inverse',
+  supportedOnMobile: false,
   logo: '/static/exchanges/logos/BYBITINVERSE/logo.svg',
   lightLogo: '/static/exchanges/logos/BYBITINVERSE/light.png',
   darkLogo: '/static/exchanges/logos/BYBITINVERSE/dark.png',
@@ -1130,6 +1143,7 @@ const OkxMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 250,
@@ -1159,6 +1173,7 @@ const OkxEUMetadata: ExchangeMetadata = {
   ...OkxMetadata,
   exchangeName: 'okxeu' as ExchangeName,
   prettyName: 'OKX EU',
+  supportedOnMobile: false,
   requiresCors: true,
   latencyDomain: 'eea.okx.com',
 };
@@ -1167,6 +1182,7 @@ const OkxDemoMetadata: ExchangeMetadata = {
   ...OkxMetadata,
   exchangeName: 'okxdemo' as ExchangeName,
   prettyName: 'OKX Demo',
+  supportedOnMobile: false,
   supportsTestnet: false,
   // OKX Demo REST keys are third-party linked through Tealstreet routing; keep
   // REST on the existing OKX proxy path while leaving demo WebSockets direct.
@@ -1182,6 +1198,7 @@ const OkxEUDemoMetadata: ExchangeMetadata = {
   ...OkxEUMetadata,
   exchangeName: 'okxeudemo' as ExchangeName,
   prettyName: 'OKX EU Demo',
+  supportedOnMobile: false,
   supportsTestnet: false,
   // EEA demo REST uses the live EEA host with `x-simulated-trading: 1`, and
   // browser REST still needs the existing OKX EU proxy path.
@@ -1497,6 +1514,7 @@ const HyperliquidMetadata: ExchangeMetadata = {
   enabled: true,
   defaultSymbol: 'BTC-PERP',
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: true,
   supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
@@ -1951,6 +1969,7 @@ const KrakenMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   enableInPreview: true,
+  supportedOnMobile: true,
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'Kraken Futures',
@@ -2234,6 +2253,7 @@ const LighterMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   enableInPreview: true,
+  supportedOnMobile: true,
   supportsTestnet: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 100,
@@ -2342,6 +2362,10 @@ export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string,
     throw new Error(`Unknown exchange metadata: ${exchange}`);
   }
   return metadata;
+};
+
+export const isExchangeSupportedOnMobile = (exchange: string): boolean => {
+  return exchangeMetadata[exchange as ExchangeName]?.supportedOnMobile === true;
 };
 
 export const exchangePrettyNames: { [key in ExchangeName]: string } = Object.keys(exchangeMetadata).reduce(

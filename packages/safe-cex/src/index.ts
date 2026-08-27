@@ -16,6 +16,13 @@ import { DefaultStore } from './store/store.base';
 import { PRIVATE_PROXY_JP } from './utils/transportResolution';
 import { virtualClock } from './utils/virtualClock';
 
+export {
+  exchangeMetadata,
+  exchangePrettyNames,
+  getExchangeMetadata,
+  isExchangeSupportedOnMobile,
+} from './exchangeMetadata';
+
 // Cache for loaded exchange classes
 const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
 
