@@ -112,6 +112,12 @@ All three variants follow the same high-level pattern, with variant-specific dif
    leverage and margin type. V3 only returns symbols with a position or open
    order, so zero-position rows are synthesized for the rest of the market set.
 
+`changePositionMode()` runs in the worker for the web app. Keep the main-thread
+copy in sync through `afterMethodCalledInWorker`; update both `isHedged` and the
+symbol's `fetchedLeverage.positionMode`. Treat Binance code `-4059` (`No need to
+change position side`) as idempotent success for the requested mode, and keep it
+in the REST client's silent error-code list so duplicate clicks don't emit a UI error.
+
 Futures REST snapshots that expect arrays must validate the response shape before
 calling `.find()` / `.map()` / `.reduce()`. Binance and proxy/tunnel paths can
 surface `{ code, msg }` error envelopes where an array is expected; those should

@@ -55,7 +55,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { splitTimeRange } from '../../utils/splitTimeRange';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
-import { BaseExchange } from '../base';
+import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI, createPublicAPI } from './binance.api';
 import { deriveBinanceClosedPositions } from './binance.closed-pnl';
@@ -118,6 +118,11 @@ const emitBinanceExchangeError = (exchange: BaseExchange, err: any) => {
 };
 
 const PRIVATE_STATE_HEALTH_CHECK_INTERVAL_MS = 3_000;
+const isBinancePositionModeAlreadySetError = (err: any) => {
+  const code = err?.response?.data?.code;
+  return code === -4059 || code === '-4059';
+};
+
 const ACCOUNT_RECONCILIATION_INTERVAL_MS = 25_000;
 const DEGRADED_ACCOUNT_RECONCILIATION_INTERVAL_MS = 3_000;
 const POSITION_RISK_RECONCILIATION_INTERVAL_MS = 75_000;
@@ -430,9 +435,7 @@ export class BinanceExchange extends BaseExchange {
 
   fetchMarkets = async () => {
     try {
-      const {
-        data: marketData,
-      } = await this.publicXhr.get<{ symbols?: unknown }>(ENDPOINTS.MARKETS);
+      const { data: marketData } = await this.publicXhr.get<{ symbols?: unknown }>(ENDPOINTS.MARKETS);
       const symbols = requireBinanceArrayResponse<BinanceResponseRecord>(
         `${ENDPOINTS.MARKETS}.symbols`,
         marketData?.symbols,
@@ -1287,7 +1290,7 @@ export class BinanceExchange extends BaseExchange {
     return data.dualSidePosition === true;
   };
 
-  changePositionMode = async (hedged: boolean) => {
+  changePositionMode = async (hedged: boolean, symbol?: string) => {
     if (this.store.positions.filter((p) => p.contracts > 0).length > 0) {
       this.emitAndLogError('Please close all positions before switching position mode');
       return;
@@ -1297,10 +1300,49 @@ export class BinanceExchange extends BaseExchange {
       await this.xhr.post(ENDPOINTS.HEDGE_MODE, {
         dualSidePosition: hedged ? 'true' : 'false',
       });
-      this.store.setSetting('isHedged', hedged);
+      this.applyConfirmedPositionMode(hedged, symbol);
     } catch (err: any) {
+      if (isBinancePositionModeAlreadySetError(err)) {
+        this.applyConfirmedPositionMode(hedged, symbol);
+        return;
+      }
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
     }
+  };
+
+  afterMethodCalledInWorker = <M extends CallableMethodsInWorker>(
+    _result: ReturnType<this[M]>,
+    method: M,
+    ...args: Parameters<this[M]>
+  ) => {
+    if (method !== 'changePositionMode') return;
+
+    this.applyConfirmedPositionMode(Boolean(args[0]), typeof args[1] === 'string' ? args[1] : undefined);
+  };
+
+  private applyConfirmedPositionMode = (hedged: boolean, symbol?: string) => {
+    const positionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
+    const symbols = symbol ? [symbol] : this.store.markets.map((market) => market.symbol);
+    const symbolSet = new Set(symbols);
+    const fetchedLeverage = { ...this.store.fetchedLeverage };
+
+    for (const symbol of symbols) {
+      const previousMetadata = fetchedLeverage[symbol];
+      fetchedLeverage[symbol] = { buyLeverage: 0, sellLeverage: 0, ...previousMetadata, positionMode };
+    }
+
+    const positions = this.store.positions.map((position) => {
+      if (!symbolSet.has(position.symbol) || Number(position.contracts) !== 0) return position;
+
+      return {
+        ...position,
+        id: createPositionId(position.symbol, position.side, positionMode),
+        positionMode,
+      };
+    });
+
+    this.store.setSetting('isHedged', hedged);
+    this.store.update({ fetchedLeverage, positions });
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
