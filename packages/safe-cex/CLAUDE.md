@@ -87,6 +87,22 @@ When an exchange emits a known bad-key, expired-key, signature, or IP-allowlist
 message, keep the health patterns aligned so it enters that terminal family.
 Do not classify transient network, 5xx, timeout, or rate-limit messages as auth.
 
+**And do not let an appended HTTP status do it for you.** `processMessage`
+matches over the WHOLE message, so `appendHttpFailure` (`utils/httpFailure.ts`)
+appends the status NUMBER and never the canonical reason phrase. Enumerating
+which phrases are safe was tried and abandoned: three review rounds over one
+small change found three separate collisions — `'unauthorized'` / `'forbidden'`
+/ `'not allowed'` (401/403/405) push a working key into the terminal auth
+family, `'server error'` (500) and `'timeout'` (408/504) demote a red toast to a
+deduped log, and `/market.*not found/i` (404) is FIRST in the list under
+`suppressed`, so it would drop the error with no toast at all. That last one is
+a REGEX bridging the original message and the suffix, which substring reasoning
+misses entirely. The list also grows whenever someone adds a pattern here, with
+nothing to warn them the append exists. The bare number costs nothing: `'429'`,
+`'502'` and `'503'` are already patterns, and their categories are the right
+answers for a transport failure, so the number classifies exactly what is worth
+classifying and is inert everywhere else.
+
 ## Metadata capability non-fallback baseline
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,

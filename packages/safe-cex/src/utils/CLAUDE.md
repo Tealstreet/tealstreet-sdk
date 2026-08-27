@@ -220,6 +220,13 @@ drift measurement.
   the reason `status_text` (snake_case, no serde `rename_all`) and fills it from
   `canonical_reason().unwrap_or("")`, so `statusText` is `undefined` on every
   tunnelled response and `status_text` may be present-but-empty.
+  `appendHttpFailure` is wrapped around venue messages in the five `.api.ts`
+  response interceptors that have both the response and the message in scope
+  (backpack, apexomni, asterdex, bitget, bitunix); it returns the message
+  untouched on a 2xx, so wrapping is unconditional and control flow is
+  unchanged. It appends the status NUMBER only, never the canonical reason —
+  see the health-classification note in `packages/safe-cex/CLAUDE.md` for the
+  three separate collisions that rule replaced.
 - `httpFailureContext.ts` — correlates a swallowed non-2xx to an error emitted
   just after it, for Sentry TAGS only. Needed because `axiosErrorEnhancer`'s
   causal `statusCode` only exists on the REJECTED path, and six venues

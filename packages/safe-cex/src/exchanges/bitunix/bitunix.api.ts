@@ -8,6 +8,7 @@ import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { v } from '../../utils/get-key';
+import { appendHttpFailure } from '../../utils/httpFailure';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL } from './bitunix.types';
@@ -110,7 +111,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       if (message) {
         const isRateLimitMessage = `${message}`.toLowerCase().includes('request too frequently');
         if (!(suppressExchangeRateLimitError && isRateLimitMessage)) {
-          exchange.emitAndLogError(message);
+          exchange.emitAndLogError(appendHttpFailure(`${message}`, response));
         }
       }
     }

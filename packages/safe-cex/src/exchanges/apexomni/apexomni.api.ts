@@ -6,6 +6,7 @@ import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { appendHttpFailure } from '../../utils/httpFailure';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './apexomni.types';
@@ -159,7 +160,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         });
       }
 
-      const msg = `[${response.data.code}] ${response.data.msg}`;
+      const msg = appendHttpFailure(`[${response.data.code}] ${response.data.msg}`, response);
       exchange.emitAndLogError(msg);
       throw new Error(msg);
     }

@@ -6,6 +6,7 @@ import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { appendHttpFailure } from '../../utils/httpFailure';
 import { BaseExchange } from '../base';
 import { generateAuthHeaders } from './backpack.signing';
 import { BASE_URLS, INSTRUCTIONS } from './backpack.types';
@@ -79,13 +80,16 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     async (response) => {
       // Check for error in response data
       if (response.data?.error) {
-        const msg = `Backpack API Error: ${response.data.error.msg || response.data.error}`;
+        const msg = appendHttpFailure(
+          `Backpack API Error: ${response.data.error.msg || response.data.error}`,
+          response,
+        );
         exchange.emitAndLogError(msg);
         throw new Error(msg);
       }
 
       if (response.data?.code && response.data?.msg) {
-        const msg = `Backpack API Error ${response.data.code}: ${response.data.msg}`;
+        const msg = appendHttpFailure(`Backpack API Error ${response.data.code}: ${response.data.msg}`, response);
         exchange.emitAndLogError(msg);
         throw new Error(msg);
       }

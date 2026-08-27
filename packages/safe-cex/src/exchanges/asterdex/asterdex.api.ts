@@ -12,6 +12,7 @@ import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { ExchangeOptions, LogSeverity } from '../../types';
+import { appendHttpFailure } from '../../utils/httpFailure';
 import {
   ASTERDEX_ENDPOINTS,
   isAsterDEXV3PrivateKey,
@@ -295,7 +296,10 @@ export const createAPI = (
     async (response) => {
       // Check if response contains an error (Binance-style API returns errors with 200 status)
       if (response.data?.code && response.data.code < 0) {
-        const errorMessage = `AsterDEX API Error: ${response.data.msg || 'Unknown error'} (code: ${response.data.code})`;
+        const errorMessage = appendHttpFailure(
+          `AsterDEX API Error: ${response.data.msg || 'Unknown error'} (code: ${response.data.code})`,
+          response,
+        );
 
         if (!shouldSuppressUnknownOrderError(response.config, response.data.code, response.data.msg) && exchange) {
           exchange.emitAndLogError(errorMessage);

@@ -55,20 +55,41 @@ export const getHttpFailure = (response: unknown): HttpFailure | undefined => {
 };
 
 /**
- * Append ` (HTTP 429 Too Many Requests)` to a message the caller was already
- * going to emit.
+ * Append ` (HTTP 429)` to a message the caller was already going to emit.
  *
  * Returns the message untouched when the response did not fail, so it is safe
  * to wrap an existing `emitAndLogError` argument unconditionally. Idempotent:
  * a message that already names this status is returned as-is, so a venue that
  * formats its own status does not get it twice.
+ *
+ * **The number goes on, the canonical reason never does.**
+ * `ExchangeHealthMonitor.processMessage` classifies by matching patterns over
+ * the WHOLE message, so an appended reason phrase changes how the error is
+ * treated — and enumerating which phrases are safe does not work. Three review
+ * rounds over one small change turned up three separate collisions:
+ * `'unauthorized'`/`'forbidden'`/`'not allowed'` (401/403/405) push a working
+ * key into the terminal auth family; `'server error'` (500) and `'timeout'`
+ * (408/504) demote a red toast to a deduped log; and `/market.*not found/i`
+ * (404) is FIRST in the list under `suppressed`, so it would drop the error
+ * entirely — a regex bridges the original message and the suffix, which the
+ * substring reasoning misses. The list also grows whenever someone adds a
+ * pattern, with nothing to tell them this append exists.
+ *
+ * The bare number costs nothing: `'429'`, `'502'` and `'503'` are already
+ * patterns in that file, and their categories (`rate_limit`, `exchange_down`)
+ * are the right answers for a transport failure — so the number classifies
+ * exactly the cases worth classifying and is inert everywhere else. The reason
+ * text still reaches Sentry through `httpFailureContext`'s tags.
  */
-export const appendHttpFailure = (message: string, response: unknown): string => {
+export const appendHttpFailure = (message: unknown, response: unknown): string => {
+  // Coerced: bitget and bitunix pass `v(response.data, 'msg')`, which is `any`
+  // and can be a number, and a telemetry helper must not throw into a request.
+  const text = typeof message === 'string' ? message : String(message ?? '');
   const failure = getHttpFailure(response);
-  if (!failure) return message;
-  if (message.includes(`HTTP ${failure.status}`)) return message;
-  const reason = failure.statusText ? ` ${failure.statusText}` : '';
-  return `${message} (HTTP ${failure.status}${reason})`;
+  if (!failure) return text;
+  if (text.includes(`HTTP ${failure.status}`)) return text;
+  // The NUMBER only, never the canonical reason. See the note above.
+  return `${text} (HTTP ${failure.status})`;
 };
 
 const describeBody = (value: unknown): string => {

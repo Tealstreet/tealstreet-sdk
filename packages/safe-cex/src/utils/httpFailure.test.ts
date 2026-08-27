@@ -55,13 +55,18 @@ describe('appendHttpFailure', () => {
     expect(appendHttpFailure('Order rejected', undefined)).toBe('Order rejected');
   });
 
-  it('appends the status and reason to a message the caller was already emitting', () => {
+  it('appends the status to a message the caller was already emitting', () => {
     expect(appendHttpFailure('Order rejected', { status: 429, status_text: 'Too Many Requests' })).toBe(
-      'Order rejected (HTTP 429 Too Many Requests)',
+      'Order rejected (HTTP 429)',
     );
   });
 
-  it('omits the reason when the venue sent a non-standard code', () => {
+  it('never appends the canonical reason, which would reclassify the error', () => {
+    // See appendHttpFailure's own note: ExchangeHealthMonitor matches over the
+    // whole message, so a reason phrase changes how the error is treated.
+    expect(appendHttpFailure('Order rejected', { status: 401, status_text: 'Unauthorized' })).not.toContain(
+      'Unauthorized',
+    );
     expect(appendHttpFailure('Order rejected', { status: 599, status_text: '' })).toBe('Order rejected (HTTP 599)');
   });
 

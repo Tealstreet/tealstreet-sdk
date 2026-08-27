@@ -8,6 +8,7 @@ import qs from 'qs';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { v } from '../../utils/get-key';
+import { appendHttpFailure } from '../../utils/httpFailure';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
@@ -92,7 +93,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     if (response.data && !v(response.data, 'data') && v(response.data, 'code') !== '00000') {
       const code = String(v(response.data, 'code') ?? '');
       if (v(response.data, 'msg') && !SILENT_ERROR_CODES.has(code)) {
-        exchange.emitAndLogError(v(response.data, 'msg'));
+        exchange.emitAndLogError(appendHttpFailure(String(v(response.data, 'msg')), response));
       }
     }
     return response;
