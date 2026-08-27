@@ -633,7 +633,7 @@ const MexcMetadata: ExchangeMetadata = {
   refImage: '',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
