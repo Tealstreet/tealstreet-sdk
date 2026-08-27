@@ -453,6 +453,15 @@ Treat that as accepted-but-not-yet-identified: schedule a REST order refresh and
 let the UI's optimistic order reconcile from WS/REST instead of surfacing an
 "unknown order status" error.
 
+Order response validation lives in `hyperliquid.order-response.ts`. Keep it
+aligned with the official `/exchange` docs and CCXT: successful creates return a
+`statuses` vector containing `{ resting: { oid } }`, `{ filled: { oid, ... } }`,
+or `"waitingForTrigger"` for accepted TP/SL triggers; per-order rejections return
+`{ error }` entries in that vector; whole-payload pre-validation can instead
+return a single top-level `{ status: "err", response: "..." }` message. A `null`
+or empty `/exchange` response body is not one of those accepted shapes and must
+remain a clear transport/venue failure, not an accepted empty-id result.
+
 The optimistic ghost row in `inProgressOrdersAtom` will keep its `optim_*` id
 forever in this case — we never get a real id to `confirm()` the reconciler
 against. Two things bridge that:

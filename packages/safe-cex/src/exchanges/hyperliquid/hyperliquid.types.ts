@@ -183,17 +183,22 @@ export interface UserFills {
 }
 [];
 
+export type OrderResponseStatus =
+  | { resting: { oid: number | string } }
+  | { filled: { oid: number | string; totalSz?: string; avgPx?: string } }
+  | { error: string }
+  | 'waitingForTrigger';
+
 export interface OrderResponse {
   status: string;
-  response: {
-    type: string;
-    data: {
-      statuses: Array<{
-        resting?: { oid: number };
-        filled?: { oid: number };
-      }>;
-    };
-  };
+  response:
+    | string
+    | {
+        type: string;
+        data: {
+          statuses: OrderResponseStatus[];
+        };
+      };
 }
 
 export interface WsTrade {

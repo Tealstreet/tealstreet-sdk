@@ -79,6 +79,10 @@ import {
 import { collapseHyperliquidOrderHistory, mapHyperliquidHistoricalOrder } from './hyperliquid.order-history';
 import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from './hyperliquid.order-inference';
 import {
+  hyperliquidOrderResponseHasWaitingForTrigger,
+  parseHyperliquidOrderResponse,
+} from './hyperliquid.order-response';
+import {
   orderRequestToOrderWire,
   orderWiresToNormalTPSLAction,
   orderWiresToOrderAction,
@@ -2053,26 +2057,11 @@ export class HyperliquidExchange extends BaseExchange {
    * @throws Error if response is invalid or contains errors
    */
   private validateResponseAndExtractOrderIds(data: any): string[] {
-    if (!data?.response?.data?.statuses) {
-      throw new Error(`Invalid response from Hyperliquid API: ${JSON.stringify(data)}`);
-    }
-
-    const errors = data.response.data.statuses.filter((status: any) => status?.error);
-    if (errors.length > 0) {
-      throw new Error(`Hyperliquid order error: ${errors.map((e: any) => e.error).join(', ')}`);
-    }
-
-    return data.response.data.statuses
-      .map((status: any) => {
-        const oid = status?.resting?.oid || status?.filled?.oid;
-        return oid !== undefined ? String(oid) : undefined;
-      })
-      .filter((oid: string | undefined): oid is string => oid !== undefined);
+    return parseHyperliquidOrderResponse(data).orderIds;
   }
 
   private responseHasWaitingForTrigger(data: any): boolean {
-    const statuses = data?.response?.data?.statuses;
-    return Array.isArray(statuses) && statuses.includes('waitingForTrigger');
+    return hyperliquidOrderResponseHasWaitingForTrigger(data);
   }
 
   private generateFakePositionsFromMarkets = (markets: Market[]) => {

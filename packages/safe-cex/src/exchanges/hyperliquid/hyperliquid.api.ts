@@ -8,40 +8,25 @@ import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
+import {
+  EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
+  extractHyperliquidResponseError,
+} from './hyperliquid.order-response';
 import { signL1Action } from './hyperliquid.signing';
 import { BASE_URLS, ENDPOINTS } from './hyperliquid.types';
 
 // Common response interceptor for Hyperliquid API responses
 const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exchange: BaseExchange) => {
   xhr.interceptors.response.use(async (response) => {
-    if (response.data?.status === 'err') {
-      const msg = `${response.data?.response}`;
-      exchange.emitAndLogError(msg);
-      throw new Error(msg);
+    const responseError = extractHyperliquidResponseError(response.data);
+    if (responseError) {
+      exchange.emitAndLogError(responseError);
+      throw new Error(responseError);
     }
-    if (response.data?.response?.data?.status === 'err') {
-      const msg = `${response.data?.response?.data?.response}`;
-      exchange.emitAndLogError(msg);
-      throw new Error(msg);
-    }
-    if (response.data?.statuses && response.data?.statuses.some((status: any) => Boolean(status.error))) {
-      const errors = response.data?.statuses
-        .filter((status: any) => Boolean(status.error))
-        .map((status: any) => status.error)
-        .join(', ');
-      exchange.emitAndLogError(errors);
-      throw new Error(errors);
-    }
-    if (
-      response.data?.response?.data?.statuses &&
-      response.data?.response?.data?.statuses.some((status: any) => Boolean(status.error))
-    ) {
-      const errors = response.data?.response?.data?.statuses
-        .filter((status: any) => Boolean(status.error))
-        .map((status: any) => status.error)
-        .join(', ');
-      exchange.emitAndLogError(errors);
-      throw new Error(errors);
+
+    if (response.config?.url === ENDPOINTS.EXCHANGE && response.data == null) {
+      exchange.emitAndLogError(EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE);
+      throw new Error(EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE);
     }
 
     return response;
