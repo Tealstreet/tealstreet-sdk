@@ -120,6 +120,27 @@ describe('bybit response interceptor auth handling', () => {
     expect(res.data.retMsg).toMatch(/forbidden/i);
   });
 
+  it('leaves a non-auth status bare, because the reason phrase would reclassify it', async () => {
+    // `response.statusText` is undefined on every tunnelled response (the frame
+    // spells it `status_text`), so this degrades to a bare `HTTP 500`. That
+    // looks like a bug and is not one: `errorPatterns.ts` matches 'server
+    // error', so `HTTP 500 Internal Server Error` would classify exchange_down
+    // and demote the red toast to a deduped log. Do NOT "fix" this by reading
+    // status_text — see packages/safe-cex/CLAUDE.md.
+    const { handler } = makeApi();
+
+    // Shaped like a real tunnel frame: statusText absent, status_text present.
+    const res = await handler({
+      status: 500,
+      status_text: 'Internal Server Error',
+      data: { raw_response: '' },
+      config: signed,
+    });
+
+    expect(res.data.retMsg).toBe('HTTP 500');
+    expect(res.data.retMsg).not.toMatch(/server error/i);
+  });
+
   it('counts enveloped credential failures that arrive on HTTP 200', async () => {
     const { exchange, handler } = makeApi();
 

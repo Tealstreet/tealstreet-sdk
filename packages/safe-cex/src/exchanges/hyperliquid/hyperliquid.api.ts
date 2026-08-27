@@ -7,10 +7,10 @@ import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttp
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
+import { describeHttpFailure } from '../../utils/httpFailure';
 import { isSigningCaptureRequest } from '../../utils/signingCapture';
 import { BaseExchange } from '../base';
 import {
-  describeHyperliquidHttpFailure,
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
   extractHyperliquidResponseError,
 } from './hyperliquid.order-response';
@@ -49,7 +49,7 @@ const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exch
     }
 
     if (httpFailed) {
-      const msg = describeHyperliquidHttpFailure(response);
+      const msg = describeHttpFailure('Hyperliquid', response);
       exchange.emitAndLogError(msg);
       throw new Error(msg);
     }

@@ -108,13 +108,16 @@ const describeBody = (value: unknown): string => {
  * `label` names the venue so the message survives being read out of context in
  * Sentry. The body is included when there is one worth reading — the common
  * case is an edge error page or plain text that the venue's own parser could
- * make nothing of.
+ * make nothing of. Like `appendHttpFailure`, it emits the status NUMBER only.
  */
 export const describeHttpFailure = (label: string, response: unknown): string => {
   const failure = getHttpFailure(response);
   const status = failure ? String(failure.status) : 'unknown';
-  const reason = failure?.statusText ? ` ${failure.statusText}` : '';
   const body = describeBody((response as { data?: unknown } | null)?.data);
   const detail = body && body !== 'null' && body !== 'undefined' ? `: ${body.slice(0, 300)}` : '';
-  return `${label} API error (HTTP ${status}${reason})${detail}`;
+  // No canonical reason here either — this string goes to `emitAndLogError` on
+  // the same path, so it faces exactly the classification collisions described
+  // on `appendHttpFailure`. The body is included instead, which is the part
+  // worth reading anyway.
+  return `${label} API error (HTTP ${status})${detail}`;
 };

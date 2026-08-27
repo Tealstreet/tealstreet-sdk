@@ -1147,6 +1147,33 @@ a bare `HTTP 401`: **the tunnel frame carries no `statusText`**, and both
 `health/errorPatterns.ts`'s `auth_invalid` set and the e2e toast assertion match
 on words like "unauthorized" / "api key", never on the numeric status.
 
+**That spelling is for 401/403 ONLY, and every other status must stay a bare
+`HTTP <n>`.** The `else` arm reads `response.statusText`, which is `undefined`
+on every tunnelled response because the frame spells it `status_text` — so a
+500 renders as `HTTP 500`. That looks like a bug and is not one. Routing it
+through the shared `getHttpFailure` would produce `HTTP 500 Internal Server
+Error`, and `errorPatterns.ts` matches `'server error'` → `exchange_down`,
+which demotes the red toast to a deduped log; `'timeout'` does the same to
+408/504. This is the general rule in `packages/safe-cex/CLAUDE.md`: the number
+goes on, the canonical reason never does. 401/403 are the deliberate exception
+because there the auth wording IS the intended classification. Pinned by
+`bybit.auth-failure-backoff.test.ts`.
+
+The 401/403 strings are load-bearing beyond this file:
+`apps/web/src/utils/sentry/sentryFingerprint.ts` matches
+`/HTTP 403 Forbidden[\s\S]*API key rejected/i`. Changing the wording silently
+breaks that grouping.
+
+**Known limitation, deliberately not "fixed":** a bodyless 403 from the egress
+proxy is indistinguishable here from a venue credential rejection, so it is
+blamed on the user's key and counts toward the auth backoff. Bybit's real
+credential failures arrive ENVELOPED (`10003`/`10005`/`10010`/`33004`) on HTTP
+200 and are counted separately, which argues the bodyless case is transport —
+but a bad key was also observed producing bodyless 4xx in the e2e run above, so
+the two cannot be told apart from the status alone. Removing the attribution
+would leave a genuinely dead key polling at 500ms forever, which is the worse
+failure, so the current behaviour stands until something can distinguish them.
+
 Nothing backed off either — the tick loop re-armed unconditionally at the 500ms
 metadata interval, so the error count was purely a function of how long you
 watched (120 errors vs a bound of 100). `BaseExchange.recordAuthFailure()` /

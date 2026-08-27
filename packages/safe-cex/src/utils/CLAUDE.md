@@ -224,9 +224,11 @@ drift measurement.
   response interceptors that have both the response and the message in scope
   (backpack, apexomni, asterdex, bitget, bitunix); it returns the message
   untouched on a 2xx, so wrapping is unconditional and control flow is
-  unchanged. It appends the status NUMBER only, never the canonical reason —
-  see the health-classification note in `packages/safe-cex/CLAUDE.md` for the
-  three separate collisions that rule replaced.
+  unchanged. Both it and `describeHttpFailure` emit the status NUMBER only and
+  never the canonical reason — see the health-classification note in
+  `packages/safe-cex/CLAUDE.md` for the three separate collisions that rule
+  replaced. `describeHttpFailure` is the standalone form, used where there is no
+  venue error text to attach to; hyperliquid consumes it directly.
 - `httpFailureContext.ts` — correlates a swallowed non-2xx to an error emitted
   just after it, for Sentry TAGS only. Needed because `axiosErrorEnhancer`'s
   causal `statusCode` only exists on the REJECTED path, and six venues

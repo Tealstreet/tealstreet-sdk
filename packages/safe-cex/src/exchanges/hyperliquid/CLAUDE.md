@@ -472,11 +472,13 @@ the bare text `Failed to deserialize the JSON body into the target type`), so
 what the user saw was a body-shape complaint naming nothing actionable: 122
 Sentry events across 25 users, every one of them ending in `: null`. The
 interceptor now reads `response.status`, and appends it to the venue's own error
-text rather than choosing between them. Note the tunnel frame spells it
-`status_text`, not axios' `statusText` — `describeHyperliquidHttpFailure` reads
-both, and `statusText` is `undefined` on every tunnelled response. Only
-tunnelled requests reach this branch; a direct axios request already rejects
-non-2xx in `validateStatus`.
+text rather than choosing between them, via the shared
+`describeHttpFailure('Hyperliquid', response)` in `utils/httpFailure.ts` — there
+is no hyperliquid-specific formatter any more. It emits the status NUMBER and
+never the canonical reason phrase; see `packages/safe-cex/CLAUDE.md` for the
+health-classification collisions that rule exists to avoid. Only tunnelled
+requests reach this branch; a direct axios request already rejects non-2xx in
+`validateStatus`.
 
 **That status branch is scoped to `/exchange` on purpose — do not widen it to
 the shared interceptor.** `/info` answers 422 for probe types we ask about

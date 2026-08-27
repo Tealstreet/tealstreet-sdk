@@ -77,9 +77,14 @@ describe('appendHttpFailure', () => {
 });
 
 describe('describeHttpFailure', () => {
-  it('names the venue, the status and the reason', () => {
+  it('names the venue and the status, never the reason', () => {
+    // Same rule as appendHttpFailure: this string reaches emitAndLogError, so a
+    // canonical reason phrase would reclassify the error.
     expect(describeHttpFailure('Hyperliquid', { status: 429, statusText: 'Too Many Requests', data: null })).toBe(
-      'Hyperliquid API error (HTTP 429 Too Many Requests)',
+      'Hyperliquid API error (HTTP 429)',
+    );
+    expect(describeHttpFailure('Hyperliquid', { status: 401, statusText: 'Unauthorized', data: null })).not.toContain(
+      'Unauthorized',
     );
   });
 

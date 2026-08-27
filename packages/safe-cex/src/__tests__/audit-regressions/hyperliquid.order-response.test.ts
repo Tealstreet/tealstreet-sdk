@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
-  HyperliquidUnreadableOrderResponseError,
-  describeHyperliquidHttpFailure,
   extractHyperliquidResponseError,
   hyperliquidOrderResponseHasWaitingForTrigger,
+  HyperliquidUnreadableOrderResponseError,
   parseHyperliquidOrderResponse,
 } from '../../exchanges/hyperliquid/hyperliquid.order-response';
+import { describeHttpFailure } from '../../utils/httpFailure';
 
 describe('Hyperliquid order response contract', () => {
   it('extracts documented resting and filled order ids', () => {
@@ -89,25 +89,34 @@ describe('Hyperliquid transport failure reporting', () => {
   // arrive as successes. Before this, an unreadable error page reached the user
   // as "Invalid response from Hyperliquid API: null" — 122 Sentry events across
   // 25 users, none of which named the status that caused them.
-  it('names the status and reason on a tunnel-delivered non-2xx', () => {
-    expect(describeHyperliquidHttpFailure({ status: 429, statusText: 'Too Many Requests', data: null })).toBe(
-      'Hyperliquid API error (HTTP 429 Too Many Requests)',
+  it('names the status, and never the canonical reason, on a tunnel-delivered non-2xx', () => {
+    expect(describeHttpFailure('Hyperliquid', { status: 429, statusText: 'Too Many Requests', data: null })).toBe(
+      'Hyperliquid API error (HTTP 429)',
     );
   });
 
   it('degrades to `HTTP unknown` rather than `HTTP undefined` without a status', () => {
-    expect(describeHyperliquidHttpFailure({ data: null })).toBe('Hyperliquid API error (HTTP unknown)');
+    expect(describeHttpFailure('Hyperliquid', { data: null })).toBe('Hyperliquid API error (HTTP unknown)');
   });
 
-  it("reads the tunnel frame's snake_case status_text", () => {
-    expect(
-      describeHyperliquidHttpFailure({ status: 422, status_text: 'Unprocessable Entity', data: undefined } as never),
-    ).toBe('Hyperliquid API error (HTTP 422 Unprocessable Entity)');
+  it('never leaks the tunnel frame\'s status_text into the message', () => {
+    // A real tunnel frame always carries status_text (the Rust side fills it
+    // from canonical_reason()), so this is the shape that would regress if the
+    // reason were ever put back. `getHttpFailure` still READS it — that is
+    // covered in httpFailure.test.ts — it just must not reach the message.
+    const message = describeHttpFailure('Hyperliquid', {
+      status: 422,
+      status_text: 'Unprocessable Entity',
+      data: undefined,
+    } as never);
+
+    expect(message).toBe('Hyperliquid API error (HTTP 422)');
+    expect(message).not.toContain('Unprocessable Entity');
   });
 
   it('carries the venue body through when there is one', () => {
     expect(
-      describeHyperliquidHttpFailure({
+      describeHttpFailure('Hyperliquid', {
         status: 422,
         data: { raw_response: 'Failed to deserialize the JSON body into the target type' },
       }),

@@ -1,5 +1,3 @@
-import { describeHttpFailure } from '../../utils/httpFailure';
-
 export const EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE = 'Hyperliquid API returned an empty order response body';
 
 type UnknownRecord = Record<string, unknown>;
@@ -144,12 +142,3 @@ export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidO
 
 export const hyperliquidOrderResponseHasWaitingForTrigger = (data: unknown): boolean =>
   getStatuses(data)?.includes('waitingForTrigger') ?? false;
-
-/**
- * Describe a non-2xx `/exchange` response.
- *
- * Delegates to the shared reader so this stays one format across venues — see
- * `utils/httpFailure.ts` for why the status has to be read at all.
- */
-export const describeHyperliquidHttpFailure = (response: unknown): string =>
-  describeHttpFailure('Hyperliquid', response);
