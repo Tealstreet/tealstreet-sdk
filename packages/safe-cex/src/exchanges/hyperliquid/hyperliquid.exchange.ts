@@ -79,7 +79,7 @@ import {
 import { collapseHyperliquidOrderHistory, mapHyperliquidHistoricalOrder } from './hyperliquid.order-history';
 import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from './hyperliquid.order-inference';
 import {
-  hyperliquidOrderResponseHasWaitingForTrigger,
+  hyperliquidOrderResponseHasDeferredOrderStatus,
   HyperliquidUnreadableOrderResponseError,
   parseHyperliquidOrderResponse,
 } from './hyperliquid.order-response';
@@ -2094,8 +2094,8 @@ export class HyperliquidExchange extends BaseExchange {
     }
   }
 
-  private responseHasWaitingForTrigger(data: any): boolean {
-    return hyperliquidOrderResponseHasWaitingForTrigger(data);
+  private responseHasDeferredOrderStatus(data: any): boolean {
+    return hyperliquidOrderResponseHasDeferredOrderStatus(data);
   }
 
   private generateFakePositionsFromMarkets = (markets: Market[]) => {
@@ -3835,7 +3835,7 @@ export class HyperliquidExchange extends BaseExchange {
       const data = await this.postOrderAction(payload);
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
-      if (orderIds.length === 0 && this.responseHasWaitingForTrigger(data)) {
+      if (orderIds.length === 0 && this.responseHasDeferredOrderStatus(data)) {
         this.scheduleOrderRefresh();
       }
 

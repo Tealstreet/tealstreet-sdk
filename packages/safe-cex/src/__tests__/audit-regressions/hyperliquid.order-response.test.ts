@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
   extractHyperliquidResponseError,
+  hyperliquidOrderResponseHasDeferredOrderStatus,
   hyperliquidOrderResponseHasWaitingForTrigger,
   HyperliquidUnreadableOrderResponseError,
   parseHyperliquidOrderResponse,
@@ -37,6 +38,35 @@ describe('Hyperliquid order response contract', () => {
 
     expect(parseHyperliquidOrderResponse(response)).toEqual({ orderIds: [], waitingForTrigger: true });
     expect(hyperliquidOrderResponseHasWaitingForTrigger(response)).toBe(true);
+    expect(hyperliquidOrderResponseHasDeferredOrderStatus(response)).toBe(true);
+  });
+
+  it('accepts waitingForFill trigger children without an oid', () => {
+    const response = {
+      status: 'ok',
+      response: {
+        type: 'order',
+        data: {
+          statuses: [{ resting: { oid: 77738308 } }, 'waitingForFill'],
+        },
+      },
+    };
+
+    expect(parseHyperliquidOrderResponse(response)).toEqual({ orderIds: ['77738308'], waitingForTrigger: false });
+    expect(hyperliquidOrderResponseHasDeferredOrderStatus(response)).toBe(true);
+
+    const fullyDeferredResponse = {
+      status: 'ok',
+      response: {
+        type: 'order',
+        data: {
+          statuses: ['waitingForFill'],
+        },
+      },
+    };
+
+    expect(parseHyperliquidOrderResponse(fullyDeferredResponse)).toEqual({ orderIds: [], waitingForTrigger: false });
+    expect(hyperliquidOrderResponseHasDeferredOrderStatus(fullyDeferredResponse)).toBe(true);
   });
 
   it('surfaces documented per-order errors from the statuses vector', () => {

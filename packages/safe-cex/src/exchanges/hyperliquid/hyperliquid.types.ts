@@ -187,6 +187,7 @@ export type OrderResponseStatus =
   | { resting: { oid: number | string } }
   | { filled: { oid: number | string; totalSz?: string; avgPx?: string } }
   | { error: string }
+  | 'waitingForFill'
   | 'waitingForTrigger';
 
 export interface OrderResponse {

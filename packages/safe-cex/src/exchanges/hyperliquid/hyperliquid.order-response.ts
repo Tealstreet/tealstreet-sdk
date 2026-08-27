@@ -2,6 +2,8 @@ export const EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE = 'Hyperliquid API returne
 
 type UnknownRecord = Record<string, unknown>;
 
+const HYPERLIQUID_DEFERRED_ORDER_STATUSES = new Set(['waitingForFill', 'waitingForTrigger']);
+
 export type ParsedHyperliquidOrderResponse = {
   orderIds: string[];
   waitingForTrigger: boolean;
@@ -61,6 +63,9 @@ const getOid = (value: unknown): string | undefined => {
   return oid === undefined || oid === null ? undefined : String(oid);
 };
 
+const isHyperliquidDeferredOrderStatus = (value: unknown): value is 'waitingForFill' | 'waitingForTrigger' =>
+  typeof value === 'string' && HYPERLIQUID_DEFERRED_ORDER_STATUSES.has(value);
+
 export const extractHyperliquidResponseError = (data: unknown): string | undefined => {
   const root = getRecord(data);
   if (!root) return undefined;
@@ -115,8 +120,10 @@ export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidO
   let waitingForTrigger = false;
 
   for (const status of statuses) {
-    if (status === 'waitingForTrigger') {
-      waitingForTrigger = true;
+    if (isHyperliquidDeferredOrderStatus(status)) {
+      if (status === 'waitingForTrigger') {
+        waitingForTrigger = true;
+      }
       continue;
     }
 
@@ -142,3 +149,6 @@ export const parseHyperliquidOrderResponse = (data: unknown): ParsedHyperliquidO
 
 export const hyperliquidOrderResponseHasWaitingForTrigger = (data: unknown): boolean =>
   getStatuses(data)?.includes('waitingForTrigger') ?? false;
+
+export const hyperliquidOrderResponseHasDeferredOrderStatus = (data: unknown): boolean =>
+  getStatuses(data)?.some(isHyperliquidDeferredOrderStatus) ?? false;
