@@ -16,8 +16,6 @@ import {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
-  HistoricalTrade,
-  HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,
   LogSeverity,

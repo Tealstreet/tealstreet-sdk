@@ -1,6 +1,5 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
-import type { ExchangeLike } from '../../types';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 import { adjust, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 

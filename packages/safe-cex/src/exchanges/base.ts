@@ -27,7 +27,6 @@ import {
   ExecutionsOptions,
   FetchedLeverage,
   HistoricalOrder,
-  HistoricalTrade,
   HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,

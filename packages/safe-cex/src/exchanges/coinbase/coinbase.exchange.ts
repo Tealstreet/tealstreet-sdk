@@ -13,7 +13,6 @@ import {
   Candle,
   ExchangeName,
   ExchangeOptions,
-  HistoricalTradeOptions,
   MarginType,
   Market,
   OHLCVOptions,

@@ -18,7 +18,6 @@ import {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
-  HistoricalTradeOptions,
   MarginType,
   Market,
   OHLCVOptions,
