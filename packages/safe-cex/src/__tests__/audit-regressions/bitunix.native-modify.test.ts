@@ -123,6 +123,77 @@ describe('Bitunix native modify-order safety boundary', () => {
     expect(placeOrder).not.toHaveBeenCalled();
   });
 
+  it('amends a sanitized main-thread LIMIT order when raw info was stripped by the worker bridge', async () => {
+    const { exchange, post } = createExchange();
+    const order = createParentOrder({ info: undefined });
+
+    await expect(exchange.updateOrder({ order, update: { price: 50_100.04 } })).resolves.toEqual(['bitunix-order-1']);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.MODIFY_ORDER, {
+      orderId: 'bitunix-order-1',
+      symbol: MARKET.symbol,
+      qty: '1.25',
+      price: '50100',
+    });
+  });
+
+  it('maps documented pending-order aliases before native modify preflight runs', async () => {
+    const { exchange } = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        code: 0,
+        data: {
+          orderList: [
+            {
+              orderId: 'bitunix-order-1',
+              symbol: MARKET.symbol,
+              qty: '1.25',
+              tradeQty: '0.25',
+              price: '50000',
+              side: 'sell',
+              type: 'LIMIT',
+              effect: 'GTC',
+              reduceOnly: false,
+              clientId: 'stable-client-id',
+              tpPrice: '51000',
+              tpStopType: 'LAST',
+              slPrice: '49000',
+              slStopType: 'MARK',
+              mtime: 1_784_505_600_000,
+            },
+          ],
+        },
+      },
+    });
+    exchange.xhr = { get } as unknown as Axios;
+
+    const [parent, takeProfit, stopLoss] = await exchange.fetchRegularOrders();
+
+    expect(parent).toEqual(
+      expect.objectContaining({
+        id: 'bitunix-order-1',
+        type: OrderType.Limit,
+        side: OrderSide.Sell,
+        tpTriggerType: OrderStopTriggerType.LastPrice,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    );
+    expect(takeProfit).toEqual(
+      expect.objectContaining({
+        id: 'bitunix-order-1__tp',
+        type: OrderType.TakeProfit,
+        tpTriggerType: OrderStopTriggerType.LastPrice,
+      }),
+    );
+    expect(stopLoss).toEqual(
+      expect.objectContaining({
+        id: 'bitunix-order-1__sl',
+        type: OrderType.StopLoss,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    );
+  });
+
   it('sends the requested total base quantity after a partial fill and preserves reduce-only state in place', async () => {
     const { exchange, post } = createExchange();
     const order = createParentOrder({

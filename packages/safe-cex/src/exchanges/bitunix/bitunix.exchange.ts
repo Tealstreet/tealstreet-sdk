@@ -6,7 +6,6 @@ import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
 import groupBy from 'lodash/groupBy';
-import isNull from 'lodash/isNull';
 import omit from 'lodash/omit';
 import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
@@ -781,6 +780,7 @@ export class BitunixExchange extends BaseExchange {
         const cachedTif = this.orderTifCache.get(o.clientId);
         const restTif = TIME_IN_FORCE[o.effect?.toUpperCase()] || OrderTimeInForce.GoodTillCancel;
         const timeInForce = cachedTif || restTif;
+        const rawOrderType = String(this.getFirstValue(o, ['orderType', 'type']) || '').toUpperCase();
         const reduceOnly = this.getBitunixReduceOnly(o.reduceOnly, o.clientId);
         const orderInfo = { ...o, reduceOnly };
 
@@ -788,8 +788,8 @@ export class BitunixExchange extends BaseExchange {
           id: v(o, 'orderId'),
           status: OrderStatus.Open,
           symbol: o.symbol,
-          type: ORDER_TYPE[o.orderType?.toUpperCase()],
-          side: ORDER_SIDE[o.side],
+          type: ORDER_TYPE[rawOrderType],
+          side: ORDER_SIDE[String(o.side || '').toUpperCase()],
           price: parseFloat(o.price), // || parseFloat(v(o, 'stopPrice')),
           amount: parseFloat(v(o, 'qty')),
           reduceOnly,
@@ -808,7 +808,7 @@ export class BitunixExchange extends BaseExchange {
         const subList = [baseOrder];
 
         // Create virtual TP/SL orders if they exist on the limit order
-        if (!isNull(o.tpPrice)) {
+        if (this.hasFiniteTriggerPrice(o.tpPrice)) {
           subList.push({
             id: `${v(o, 'orderId')}__tp`,
             status: OrderStatus.Open,
@@ -830,7 +830,7 @@ export class BitunixExchange extends BaseExchange {
           });
         }
 
-        if (!isNull(o.slPrice)) {
+        if (this.hasFiniteTriggerPrice(o.slPrice)) {
           subList.push({
             id: `${v(o, 'orderId')}__sl`,
             status: OrderStatus.Open,
@@ -1819,15 +1819,20 @@ export class BitunixExchange extends BaseExchange {
     }
 
     const info = targetOrder.info;
-    const reconciledOrderId = info?.orderId === undefined || info?.orderId === null ? '' : String(info.orderId);
-    const reconciledOrderType = String(info?.orderType || info?.type || '').toUpperCase();
-    if (reconciledOrderId !== targetOrder.id || reconciledOrderType !== 'LIMIT') {
+    const hasRawInfo = this.isRecord(info);
+    const rawOrderId = hasRawInfo ? info.orderId : undefined;
+    const rawOrderType = hasRawInfo ? String(info.orderType || info.type || '').toUpperCase() : '';
+    const hasReconciledOrderId = hasRawInfo
+      ? rawOrderId !== undefined && rawOrderId !== null && rawOrderId !== '' && String(rawOrderId) === targetOrder.id
+      : targetOrder.id !== '';
+    const hasReconciledOrderType = hasRawInfo ? rawOrderType === 'LIMIT' : targetOrder.type === OrderType.Limit;
+    if (!hasReconciledOrderId || !hasReconciledOrderType) {
       return rejectPreflight(
         `Bitunix cannot safely amend ${targetOrder.id}: exact pending LIMIT order identity is not reconciled`,
       );
     }
 
-    if (typeof info?.reduceOnly !== 'boolean' || info.reduceOnly !== targetOrder.reduceOnly) {
+    if (hasRawInfo && (typeof info.reduceOnly !== 'boolean' || info.reduceOnly !== targetOrder.reduceOnly)) {
       return rejectPreflight(`Bitunix cannot safely amend ${targetOrder.id}: reduce-only state is not reconciled`);
     }
 

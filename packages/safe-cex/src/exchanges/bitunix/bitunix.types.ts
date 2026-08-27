@@ -104,7 +104,9 @@ export const TIME_IN_FORCE: Record<string, OrderTimeInForce> = {
 };
 
 export const ORDER_TRIGGER_TYPE: Record<string, OrderStopTriggerType> = {
+  MARK: OrderStopTriggerType.MarkPrice,
   MARK_PRICE: OrderStopTriggerType.MarkPrice,
+  LAST: OrderStopTriggerType.LastPrice,
   LAST_PRICE: OrderStopTriggerType.LastPrice,
   // WS uses short names while REST uses UPPER_SNAKE
   Mark: OrderStopTriggerType.MarkPrice,

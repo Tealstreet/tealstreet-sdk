@@ -267,7 +267,9 @@ Each uses `clearTimeout` + `setTimeout(fn, 1000)` pattern to debounce rapid succ
 
 | Bitunix Value | Internal Type                    | Context   |
 | ------------- | -------------------------------- | --------- |
+| `MARK`        | `OrderStopTriggerType.MarkPrice` | REST docs example |
 | `MARK_PRICE`  | `OrderStopTriggerType.MarkPrice` | REST API  |
+| `LAST`        | `OrderStopTriggerType.LastPrice` | REST alias |
 | `LAST_PRICE`  | `OrderStopTriggerType.LastPrice` | REST API  |
 | `Mark`        | `OrderStopTriggerType.MarkPrice` | WebSocket |
 | `Last`        | `OrderStopTriggerType.LastPrice` | WebSocket |
@@ -337,6 +339,12 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   upstream `LIMIT` type, and a raw boolean `reduceOnly` value matching the
   normalized order. The endpoint does not accept side, trade side, TIF, or
   reduce-only fields, so those attributes remain attached to the same order.
+- In the web app's main thread, worker store snapshots deliberately strip raw
+  `order.info` before `updateOrderById` reads the row. When raw `info` is absent
+  altogether, Bitunix native amend falls back to the normalized `order.id`,
+  `order.type`, and `order.reduceOnly` that came from the worker snapshot. If raw
+  `info` is present but contradicts those fields, the stricter reconciliation
+  guard still rejects before any exchange write.
 - Bitunix's private order channel omits `reduceOnly` and can omit other
   immutable/protection fields on `UPDATE`. Tealstreet caches submitted
   reduce-only state by `clientId`, and WS updates merge onto the existing raw
