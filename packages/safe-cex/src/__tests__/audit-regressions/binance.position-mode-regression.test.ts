@@ -46,7 +46,7 @@ describe('Binance position mode synchronization', () => {
       ],
     });
 
-    exchange.afterMethodCalledInWorker(undefined, 'changePositionMode', false, 'DOGEUSDT');
+    exchange.afterMethodCalledInWorker(Promise.resolve(), 'changePositionMode', false, 'DOGEUSDT');
 
     expect(store.options.isHedged).toBe(false);
     expect(store.fetchedLeverage.DOGEUSDT).toEqual({

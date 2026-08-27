@@ -1328,7 +1328,12 @@ export class BinanceExchange extends BaseExchange {
 
     for (const symbol of symbols) {
       const previousMetadata = fetchedLeverage[symbol];
-      fetchedLeverage[symbol] = { buyLeverage: 0, sellLeverage: 0, ...previousMetadata, positionMode };
+      fetchedLeverage[symbol] = {
+        ...previousMetadata,
+        buyLeverage: previousMetadata?.buyLeverage ?? 0,
+        sellLeverage: previousMetadata?.sellLeverage ?? 0,
+        positionMode,
+      };
     }
 
     const positions = this.store.positions.map((position) => {
