@@ -52,6 +52,8 @@ import {
   ValidateAccountResult,
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
+import type { HttpFailureRecord } from '../utils/httpFailureContext';
+import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
 import { tryParseJson } from '../utils/tryParseJson';
 import { BaseWebSocket } from './base.ws';
 import { ExternalPublicDataProvider } from './external-public-data';
@@ -387,6 +389,7 @@ export class BaseExchange implements Exchange {
   private readonly WATCHDOG_INTERVAL_MS = 10_000; // Check every 10 seconds
   private readonly WATCHDOG_STALE_THRESHOLD_MS = 30_000; // Consider stale after 30s without messages
   private readonly WATCHDOG_CONNECTION_TIMEOUT_MS = 60_000; // Max time to wait for first message after init
+  private _lastHttpFailure?: HttpFailureRecord;
   private remoteSignerAvailabilityCleanups = new Set<() => void>();
   private readonly unsubscribeFromStore: () => void;
 
@@ -1443,6 +1446,22 @@ export class BaseExchange implements Exchange {
     this.getAllSockets().forEach((socket) => socket?.reconnect());
   };
 
+  /**
+   * Note the most recent non-2xx that axios resolved instead of rejecting.
+   *
+   * Called from the REST response interceptors for every client. A successful
+   * response clears the slot: a stale failure is worse than none, because it
+   * reads as current. Never throws — telemetry must not be able to break a
+   * request.
+   */
+  public noteHttpResponse(response: unknown, url?: string) {
+    try {
+      this._lastHttpFailure = recordHttpFailure(response, Date.now(), url);
+    } catch {
+      /* recording must never break a request */
+    }
+  }
+
   emitAndLogError(err: string | Error | undefined | null, msg?: string, extraData?: Record<string, any>) {
     if (this.isDisposed) {
       console.warn('exchange error (disposed, suppressing)', err);
@@ -1504,6 +1523,23 @@ export class BaseExchange implements Exchange {
       }
     }
 
+    // A swallowed non-2xx, tagged as the CORRELATION it is.
+    //
+    // Skipped when the error is an enhanced axios error: those rejected
+    // normally, so `formatErrorForSentry` already put a causal `statusCode` on
+    // them and a nearby-but-unrelated status beside it would actively mislead.
+    // Tags only — `sanitizeWorkerSentryData` caps worker `extra` at 12 keys in
+    // insertion order, so anything appended there is silently dropped.
+    // Consumed once, so one failure cannot decorate every error behind it.
+    const enhancedForCorrelation = err as EnhancedAxiosError | null;
+    let correlationTags: Record<string, unknown> = {};
+    if (!enhancedForCorrelation?.context) {
+      correlationTags = readHttpFailureContext(this._lastHttpFailure, Date.now()) ?? {};
+      // Cleared either way: consumed when it correlated, dropped when it had
+      // already expired, so a stale record cannot sit in the slot forever.
+      this._lastHttpFailure = undefined;
+    }
+
     // Detect if we're in a web worker
     const isWebWorker = typeof self !== 'undefined' && typeof window === 'undefined';
 
@@ -1519,6 +1555,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...correlationTags,
           },
           extra: {
             originalMessage: formattedMsg,
@@ -1541,6 +1578,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...correlationTags,
           },
           extra: {
             originalMessage: formattedMsg,

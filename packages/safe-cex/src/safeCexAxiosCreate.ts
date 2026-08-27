@@ -230,6 +230,14 @@ export const safeCexAxiosCreateNoProxy = (
   axiosInstance.interceptors.response.use(
     (response) => {
       recordRequestOutcome(exchange, response.status, true, response.config);
+      // Mirrors the signing-capture guard in recordRequestOutcome: the capture
+      // adapter's synthetic 200 is not a failure so it would clear rather than
+      // record, which is correct — but keep the guard explicit so the two stay
+      // in step if either changes.
+      // Optional-called: `exchange` is duck-typed in several call paths and in
+      // tests, and an interceptor that throws on a missing method would fail the
+      // REQUEST. Telemetry must never be able to do that.
+      if (!isSigningCaptureRequest(response.config)) exchange.noteHttpResponse?.(response, response.config?.url);
       return response;
     },
     (error) => {
@@ -378,6 +386,14 @@ export const safeCexAxiosCreate = (
   axiosInstance.interceptors.response.use(
     async (response) => {
       recordRequestOutcome(exchange, response.status, true, response.config);
+      // Mirrors the signing-capture guard in recordRequestOutcome: the capture
+      // adapter's synthetic 200 is not a failure so it would clear rather than
+      // record, which is correct — but keep the guard explicit so the two stay
+      // in step if either changes.
+      // Optional-called: `exchange` is duck-typed in several call paths and in
+      // tests, and an interceptor that throws on a missing method would fail the
+      // REQUEST. Telemetry must never be able to do that.
+      if (!isSigningCaptureRequest(response.config)) exchange.noteHttpResponse?.(response, response.config?.url);
       let shouldLog = isDevelopment;
       /* Logging */
       if (!shouldLog) {

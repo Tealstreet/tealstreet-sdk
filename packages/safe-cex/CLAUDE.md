@@ -385,6 +385,16 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
 response interceptors in `safeCexAxiosCreate.ts` — **both** factories
 (`safeCexAxiosCreate` and `safeCexAxiosCreateNoProxy`), success and error.
 
+The same two success interceptors also call `exchange.noteHttpResponse?.()`,
+which records the most recent non-2xx that axios **resolved instead of
+rejecting** — the HOW tunnel adapter never calls `settle()`, so on that path no
+axios error is ever built and the status is lost before any error is emitted.
+It is read once in `emitAndLogError` and merged into Sentry tags only; it never
+touches the store, the message text, or `errorPatterns` classification. See
+`utils/httpFailureContext.ts`. **Call it optionally (`?.`)** — `exchange` is
+duck-typed in several paths and in tests, and an interceptor that throws on a
+missing method fails the REQUEST; an unguarded call broke 51 tests.
+
 Three constraints, each load-bearing:
 
 - **The store is the only channel out.** This package ships in the OSS mirror,

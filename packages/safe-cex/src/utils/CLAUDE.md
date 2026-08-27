@@ -220,6 +220,18 @@ drift measurement.
   the reason `status_text` (snake_case, no serde `rename_all`) and fills it from
   `canonical_reason().unwrap_or("")`, so `statusText` is `undefined` on every
   tunnelled response and `status_text` may be present-but-empty.
+- `httpFailureContext.ts` — correlates a swallowed non-2xx to an error emitted
+  just after it, for Sentry TAGS only. Needed because `axiosErrorEnhancer`'s
+  causal `statusCode` only exists on the REJECTED path, and six venues
+  (bitmex, phemex, woo, coinbase, kucoin, bingx) have no response interceptor
+  at all — so there is no point where the failing response and the eventual
+  message are both in scope. Three rules are load-bearing: the tags are named
+  `recentHttp*` and carry their own age because they are circumstantial, not
+  causal; they go in `tags` and never `extra`, since `sanitizeWorkerSentryData`
+  caps worker `extra` at 12 keys in insertion order; and the URL has its query
+  stripped before being indexed, because `kraken.api.ts` rewrites `config.url`
+  to `path?postData`. Expect a low hit rate — the tick loop runs parallel
+  requests, so a concurrent success can clear the slot first.
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals
