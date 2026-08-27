@@ -1108,6 +1108,57 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
               this.parent.scheduleOrderRefresh();
             }
           }
+        } else if (
+          !isHip3 &&
+          Boolean(orderData.reduceOnly) &&
+          (!orderData.origSz || Number(orderData.origSz) === 0) &&
+          !orderData.orderType &&
+          !orderData.triggerPx &&
+          !orderData.isTrigger
+        ) {
+          // Core-perp positional TP/SL (cancel+replace): Hyperliquid's first
+          // WS `orderUpdates` message for a freshly-placed positional TP/SL
+          // arrives with `orderType`, `triggerPx`, and `isTrigger` all
+          // `undefined` — only `limitPx` and `reduceOnly` are populated. The
+          // trigger fields only materialize on the REST `frontendOpenOrders`
+          // snapshot (~500–700 ms later) or on subsequent WS frames.
+          //
+          // Feeding that first WS frame through inferHyperliquidOrderTypeAndPrice()
+          // misclassifies it as `type: Limit` at `limitPx`, which:
+          //   (1) pollutes the store with the wrong price,
+          //   (2) can be amplified by formatOrderPricesInBounds snapping the
+          //       "limit" up to bestBid / down to bestAsk, and
+          //   (3) prevents the chart's pending-no-id trigger claim from
+          //       firing (that path requires isProtectiveStopOrder), so the
+          //       chart spawns a phantom line alongside the parked ghost
+          //       line, then does a DESTRUCTIVE move when REST finally
+          //       corrects the type — producing the "SL teleports between
+          //       3–4 positions" flicker.
+          //
+          // Preserve type/price if we already have this oid in the store
+          // (subsequent WS frame after REST has arrived); otherwise defer:
+          // skip the insert and schedule an accelerated REST refresh. The
+          // chart-side Updating ghost keeps the parked line at the correct
+          // price meanwhile, and when REST arrives with the real
+          // `Stop Market` / `Take Profit Market` fields the pending-no-id
+          // trigger claim fires as a RENAME (no phantom, no destructive move).
+          const existingOrder = existingOrdersById[orderId];
+          if (existingOrder) {
+            inferredType = existingOrder.type;
+            inferredPrice = existingOrder.price;
+            inferenceSource =
+              existingOrder.status === OrderStatus.Creating || existingOrder.status === OrderStatus.Updating
+                ? 'optimistic-preserved'
+                : 'store-preserved';
+          } else {
+            this.parent.log(
+              `[orderUpdates] Deferring positional TP/SL insert (core-perp WS lacks orderType/triggerPx/isTrigger): ` +
+                `oid=${orderId} coin=${orderData.coin} limitPx=${orderData.limitPx}. Scheduling REST refresh.`,
+              LogSeverity.Debug,
+            );
+            this.parent.scheduleOrderRefresh();
+            continue;
+          }
         } else {
           const inferred = inferHyperliquidOrderTypeAndPrice(orderData);
           inferredType = inferred.type;

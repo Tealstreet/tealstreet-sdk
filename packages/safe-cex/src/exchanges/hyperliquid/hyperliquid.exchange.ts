@@ -2458,13 +2458,19 @@ export class HyperliquidExchange extends BaseExchange {
       // replaced the orders array via addOrUpdateOrdersFull. If we captured currentOrders
       // before the REST calls, we'd hold a reference to the OLD array and the removal step
       // would incorrectly remove orders that WS handlers had already added to the NEW array.
-      const fetchedOrderIds = new Set(orders.map((o) => o.id));
+      // A degraded/retry-heavy refresh can see the same oid more than once
+      // across core and dex `frontendOpenOrders` reads. Reconcile one row per
+      // oid; the loop below snapshots `currentOrdersById` before applying
+      // changes, so duplicate incoming rows would otherwise both look "new"
+      // and could be appended twice.
+      const uniqueOrders = uniqBy(orders, (order) => order.id);
+      const fetchedOrderIds = new Set(uniqueOrders.map((o) => o.id));
       const currentOrders = [...this.store.orders]; // Snapshot the CURRENT array (after WS updates)
       const currentOrdersById = new Map(currentOrders.map((o) => [o.id, o]));
       const now = Date.now();
 
       // 1. Add new orders and update changed orders (one at a time, no array replacement)
-      for (const newOrder of orders) {
+      for (const newOrder of uniqueOrders) {
         // Reconcile with cancellation suppression:
         // If REST returns an order we thought was cancelled, decide whether to trust REST or the cancel
         const cancelTime = this._cancelledOrders.get(newOrder.id);
@@ -2527,7 +2533,7 @@ export class HyperliquidExchange extends BaseExchange {
         }
       }
 
-      return orders;
+      return uniqueOrders;
     } catch (error) {
       this.log(`Failed to fetch orders: ${error}`, LogSeverity.Error);
       return [];

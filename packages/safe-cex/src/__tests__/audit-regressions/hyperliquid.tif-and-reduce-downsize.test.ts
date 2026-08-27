@@ -121,6 +121,66 @@ describe('hyperliquid core-perp trigger order safety', () => {
     });
   });
 
+  it('dedupes duplicate frontendOpenOrders rows before mutating the store', async () => {
+    const store = new DefaultStore();
+    const market = {
+      id: 'ARB',
+      symbol: 'ARB-PERP',
+      base: 'ARB',
+      quote: 'USDC',
+      active: true,
+      precision: { amount: 0.1, price: 0.00001 },
+      limits: { amount: { min: 0.1, max: 1000000 } },
+      contractSize: 1,
+      isSpot: false,
+      info: { hyperliquidId: 11 },
+    } as any;
+
+    store.update({ markets: [market] });
+
+    const exchange = new HyperliquidExchange(
+      'hyperliquid' as any,
+      {
+        key: '0x0000000000000000000000000000000000000001',
+        secret: '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        applicationId: '0x0000000000000000000000000000000000000001',
+      } as any,
+      store,
+    );
+    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+    (exchange as any).hip3DexNames = ['mkts'];
+
+    const openOrder = {
+      coin: 'ARB',
+      side: 'A',
+      limitPx: '0.08762',
+      sz: '0.0',
+      oid: 528182185290,
+      timestamp: 1787819295129,
+      triggerCondition: 'Price below 0.08717',
+      isTrigger: true,
+      triggerPx: '0.08717',
+      children: [],
+      isPositionTpsl: true,
+      reduceOnly: true,
+      orderType: 'Stop Market',
+      origSz: '0.0',
+      tif: null,
+      cloid: null,
+    };
+    const post = vi.fn().mockResolvedValueOnce({ data: [openOrder] }).mockResolvedValueOnce({ data: [openOrder] });
+    exchange.xhr = { post } as any;
+
+    await expect(exchange.fetchOrders()).resolves.toHaveLength(1);
+    expect(store.orders).toHaveLength(1);
+    expect(store.orders[0]).toMatchObject({
+      id: '528182185290',
+      symbol: 'ARB-PERP',
+      type: OrderType.StopLoss,
+      price: 0.08717,
+    });
+  });
+
   it('keeps one-lot-smaller reduce-only stops as partial standalone trigger orders', async () => {
     const { exchange } = createExchangeWithBtcMarket();
     const post = vi.fn().mockResolvedValue({

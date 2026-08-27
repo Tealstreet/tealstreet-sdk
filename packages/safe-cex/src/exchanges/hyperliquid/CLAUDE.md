@@ -516,12 +516,15 @@ on the next occurrence, which should name it.
 
 The optimistic ghost row in `inProgressOrdersAtom` will keep its `optim_*` id
 forever in this case — we never get a real id to `confirm()` the reconciler
-against. Two things bridge that:
+against. Four things bridge that:
 
 1. `apps/web/src/utils/order/getOpenOrders.ts` — `mergeOrdersWithInProgress`
    fuzzy-matches `Creating` AND `Updating` trigger-like ghosts to same-slot
    Open orders in `store.orders` (same account/symbol/side/type/reduceOnly)
    and hides the ghost the moment the real WS-delivered order lands.
+   It also collapses older same-slot Creating/Updating ghosts against the
+   newest `lastUpdate`, because degraded WS can leave multiple no-id stop
+   attempts alive inside the 15s safety window.
    Protective stops sit one-per-slot on every venue we support, so any Open
    match is the placement.
 2. `apps/web/src/order/createStopLossOrder.ts` — on `waitingForTrigger` we call
@@ -537,11 +540,23 @@ against. Two things bridge that:
    leave the ghost as `Updating` so the same fuzzy matcher can reconcile it,
    and we bump `removeUpdateDelay` to 15s so the ghost survives long enough
    for WS/REST to deliver the replacement.
+4. `apps/web/src/components/chart/broker/lineManagers/OrderLineManager.ts` —
+   the chart has its own adapter identity. When the order list hides a
+   Creating/Updating same-slot ghost or a no-id drag gets its real replacement,
+   re-key the existing line adapter to the newer same-slot id/real oid instead of remove/create.
+   Without that handoff the list is deduped, but the chart still flickers or
+   warps as stale and real snapshots race.
 
-Do not remove any of the three without the others, and do not extend the
+Do not remove any of the four without the others, and do not extend the
 ghost's `removeUpdateDelay` beyond 15s — the fuzzy-match makes the shorter
 delay a non-issue in the common case, and the 15s floor is the safety net if
 WS/REST never delivers.
+
+`fetchOrdersInternal` must dedupe parsed `frontendOpenOrders` rows by oid before
+mutating `store.orders`. In degraded/retry-heavy sessions the same stop can be
+observed more than once across core/dex REST reads, and the reconciliation loop
+uses a pre-mutation `currentOrdersById` snapshot; without input dedupe,
+duplicate same-oid rows can both look new and be appended to the store.
 
 ### TIF Mappings
 
@@ -916,6 +931,12 @@ Entries expire after 60 seconds.
    dual-instance trap — a fix that works in worker mode can be a complete no-op
    in hosted mode, which is exactly how the first version of this fix shipped and
    moved hyperliquid 4/11 → 5/11 without touching the TIF assertion at all.
+
+   **Positional TP/SL cancel+replace also carries this omission on core perps.** When a positional TP/SL is placed via cancel+replace (Hyperliquid does not support amend for stops), the very first `orderUpdates` frame for the new oid arrives with `orderType`, `triggerPx`, `isTrigger`, and `tpsl` **all `undefined`** — only `limitPx`, `reduceOnly`, and `origSz: "0.0"` are populated. The correct fields only materialize on the REST `frontendOpenOrders` snapshot ~500–700 ms later. This was previously believed to be HIP-3-only; a Aug 2026 debug dump confirmed it happens on plain core perps too.
+   
+   Feeding that first WS frame through `inferHyperliquidOrderTypeAndPrice()` mis-classifies it as `type: Limit` at `limitPx`. Downstream, three amplifiers turn that into a visible SL-drag flicker: (1) the store row carries the wrong price and status; (2) the frontend's `formatOrderPricesInBounds` snaps the "limit" toward bestBid/bestAsk (a full spread away from the intended stop); (3) `OrderLineManager._claimPendingNoIdTriggerMove` gates on `isProtectiveStopOrder(candidate)` and skips the claim for `type: Limit`, so the chart spawns a phantom line beside the parked ghost line, then executes a DESTRUCTIVE `_moveOrderLineMeta` once REST arrives with the correct type — producing the "SL teleports between 3–4 positions" flicker in ~1 second.
+   
+   The `handleOrderUpdates` fix is a defer branch scoped to `reduceOnly && (!origSz || Number(origSz) === 0) && !orderType && !triggerPx && !isTrigger` on **non-HIP-3** markets. If the oid is already in the store (later WS frame after REST populated it), preserve type/price. Otherwise skip the insert entirely and call `scheduleOrderRefresh()`; the frontend-side `Updating` ghost keeps the parked line at the drag price until REST provides the authoritative first snapshot, and the pending-no-id trigger claim then fires as a RENAME (no phantom, no destructive move). `formatOrderPricesInBounds` in `apps/web/src/utils/order/getOpenOrders.ts` also skips the snap for `amount === 0 && remaining === 0` orders as a defensive belt-and-braces layer.
 
 2. **Aggregate feeds are not drop-in reconciliation replacements**: `webData2` is rejected and current `webData3` contains frontend user/DEX status but no positions, orders, or ticker contexts. Current `allDexs*` live frames also differ from their published record-shaped contract and do not remove the metadata dependency. Do not adopt them without a concrete consumer, stable mapping, and refreshed upstream evidence.
 3. **Balance scoping depends on account abstraction mode**: `clearinghouseState` with `dex` returns dex-specific margin only. In `unifiedAccount`/`portfolioMargin`, all collateral and holds are in spot state: use the current `spotState` WS channel, not the rejected `spotClearinghouseState` WS channel. Token 0 `tokenToAvailableAfterMaintenance` is authoritative free USDC; only responses without it fall back to core margin plus spot-hold reconstruction. Keep `currencies.USDC` as the aggregate margin slice for sizing; raw spot slices belong under `balance.info.spotCollateralCurrencies`.
