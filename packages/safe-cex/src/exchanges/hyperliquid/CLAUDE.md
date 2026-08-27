@@ -471,18 +471,46 @@ the failure. Hyperliquid's own error bodies are not JSON objects (`422` returns
 the bare text `Failed to deserialize the JSON body into the target type`), so
 what the user saw was a body-shape complaint naming nothing actionable: 122
 Sentry events across 25 users, every one of them ending in `: null`. The
-interceptor now reads `response.status` first, so the venue's failure wins.
-Note the tunnel frame spells it `status_text`, not axios' `statusText` —
-`describeHyperliquidHttpFailure` reads both. Only tunnelled requests reach this
-branch; a direct axios request already rejects non-2xx in `validateStatus`.
+interceptor now reads `response.status`, and appends it to the venue's own error
+text rather than choosing between them. Note the tunnel frame spells it
+`status_text`, not axios' `statusText` — `describeHyperliquidHttpFailure` reads
+both, and `statusText` is `undefined` on every tunnelled response. Only
+tunnelled requests reach this branch; a direct axios request already rejects
+non-2xx in `validateStatus`.
 
-An unreadable `/exchange` body means the placement is **unknown, not failed** —
-the POST went out and the order may be resting right now. That is why
-`parseHyperliquidOrderResponse` throws the typed
-`HyperliquidUnreadableOrderResponseError` (venue rejections stay plain
-`Error`s): `validateResponseAndExtractOrderIds` catches only that type,
-schedules a REST order refresh, and rethrows. Without it the user gets a
-"failed to place" toast for a stop that landed and places it a second time.
+**That status branch is scoped to `/exchange` on purpose — do not widen it to
+the shared interceptor.** `/info` answers 422 for probe types we ask about
+optionally (`perpDexs`, `userRole`, `userAbstraction`) and 429 under load. Every
+one of those is already swallowed by its caller, so throwing turns a silent
+fallback into a full error toast per attempt, multiplied by the startup retries
+and the 120s HIP-3 sweep — and `errorPatterns.ts` has no arm for
+`Unprocessable Entity`, so it classifies `unknown` and toasts at error level. A
+401/403 from the *egress proxy* would classify as `auth_invalid` and tell the
+user their API key is bad for what is a transport failure. Worse, `/info`
+failures reach paged collectors: `fetchHistoricalFills` wraps its whole window
+loop in one try/catch returning `[]`, and `collectAccountAxis` reads a resolved
+`[]` as a successfully-empty window — so one 429 mid-walk would close the
+`historical_coverage` row over a gap that is then never re-asked.
+
+An `/exchange` POST that fails **after** leaving the browser means the placement
+is **unknown, not failed** — the order may be resting right now. `postOrderAction`
+therefore schedules a REST order refresh on ANY rejection and rethrows: a tunnel
+timeout, an egress 502 and an unreadable body all reject *before* the response
+parser runs, so hanging the refresh off the parse would miss every one of them.
+`parseHyperliquidOrderResponse` additionally throws the typed
+`HyperliquidUnreadableOrderResponseError` (venue rejections stay plain `Error`s)
+so the 2xx-with-unreadable-body case reconciles too. Without this the user gets
+a "failed to place" toast for a stop that landed and places it a second time.
+
+One more trap in that empty-body branch: `BaseExchange.signHttpRequest` captures
+a signed config by dispatching through a per-request adapter that resolves
+`{data: null, status: 200}` without sending anything, and interceptors still
+run. It is guarded with `isSigningCaptureRequest`, or every hosted-mode
+signature of an `/exchange` action rejects inside the signer.
+
+Still unexplained: **nothing in the tunnel path can produce `data === null`**, so
+the original `: null` reports are not yet root-caused. The status now rides along
+on the next occurrence, which should name it.
 
 The optimistic ghost row in `inProgressOrdersAtom` will keep its `optim_*` id
 forever in this case — we never get a real id to `confirm()` the reconciler

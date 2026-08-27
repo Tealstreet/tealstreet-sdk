@@ -95,6 +95,10 @@ describe('Hyperliquid transport failure reporting', () => {
     );
   });
 
+  it('degrades to `HTTP unknown` rather than `HTTP undefined` without a status', () => {
+    expect(describeHyperliquidHttpFailure({ data: null })).toBe('Hyperliquid API error (HTTP unknown)');
+  });
+
   it("reads the tunnel frame's snake_case status_text", () => {
     expect(
       describeHyperliquidHttpFailure({ status: 422, status_text: 'Unprocessable Entity', data: undefined } as never),

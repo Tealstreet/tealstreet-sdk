@@ -2057,16 +2057,38 @@ export class HyperliquidExchange extends BaseExchange {
    * Validates Hyperliquid API response and extracts order IDs
    * @throws Error if response is invalid or contains errors
    */
+  /**
+   * POST an order action to `/exchange`, reconciling from REST on any failure.
+   *
+   * Once the POST is on the wire the placement is UNKNOWN, not failed — the
+   * order may be resting on the venue right now. A tunnel timeout, an egress
+   * 502 and an unreadable body are indistinguishable from here, and all three
+   * reject before the response parser ever runs, so the refresh has to hang off
+   * the request rather than off the parse. Without it the user gets a "failed
+   * to place" toast for a stop that landed and places it a second time.
+   */
+  private async postOrderAction(payload: unknown): Promise<any> {
+    try {
+      const { data } = await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      return data;
+    } catch (error) {
+      this.scheduleOrderRefresh();
+      throw error;
+    }
+  }
+
   private validateResponseAndExtractOrderIds(data: any): string[] {
     try {
       return parseHyperliquidOrderResponse(data).orderIds;
     } catch (error) {
-      // The POST went out and came back unreadable, so the placement is
-      // UNKNOWN, not failed — the order may be resting on the venue right now.
-      // Pull orders from REST so one that did land shows up in the table
-      // instead of the user seeing only a "failed to place" toast and placing
-      // it a second time. The throw still stands: an unreadable body is a
-      // transport/venue failure, never an accepted empty-id result.
+      // Same reasoning as postOrderAction: an unreadable body is a failure we
+      // cannot attribute, so reconcile rather than assume nothing landed. The
+      // throw still stands — never an accepted empty-id result. A venue
+      // rejection is a plain Error and stays out of this branch.
       if (error instanceof HyperliquidUnreadableOrderResponseError) this.scheduleOrderRefresh();
       throw error;
     }
@@ -3470,11 +3492,7 @@ export class HyperliquidExchange extends BaseExchange {
       this.addToPrePlacementCache(coin, opts.side, OrderType.Limit, opts.price || 0, opts.amount);
     }
 
-    const { data } = await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const data = await this.postOrderAction(payload);
 
     const orderIds = this.validateResponseAndExtractOrderIds(data);
 
@@ -3632,11 +3650,7 @@ export class HyperliquidExchange extends BaseExchange {
       );
 
       const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
-      const { data } = await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const data = await this.postOrderAction(payload);
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
 
@@ -3812,11 +3826,7 @@ export class HyperliquidExchange extends BaseExchange {
         this.addToPrePlacementCache(coin, opts.side, opts.type, opts.price || 0, opts.amount);
       }
 
-      const { data } = await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const data = await this.postOrderAction(payload);
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
       if (orderIds.length === 0 && this.responseHasWaitingForTrigger(data)) {

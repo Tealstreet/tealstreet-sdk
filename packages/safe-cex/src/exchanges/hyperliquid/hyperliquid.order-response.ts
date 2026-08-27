@@ -156,7 +156,8 @@ export const describeHyperliquidHttpFailure = (response: {
 }): string => {
   const statusText = response.statusText || (response as UnknownRecord).status_text;
   const reason = typeof statusText === 'string' && statusText ? ` ${statusText}` : '';
+  const status = typeof response.status === 'number' ? String(response.status) : 'unknown';
   const body = describeResponse(response.data);
   const detail = body && body !== 'null' && body !== 'undefined' ? `: ${body.slice(0, 300)}` : '';
-  return `Hyperliquid API error (HTTP ${response.status}${reason})${detail}`;
+  return `Hyperliquid API error (HTTP ${status}${reason})${detail}`;
 };

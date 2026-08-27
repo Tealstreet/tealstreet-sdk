@@ -7,6 +7,7 @@ import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttp
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
+import { isSigningCaptureRequest } from '../../utils/signingCapture';
 import { BaseExchange } from '../base';
 import {
   describeHyperliquidHttpFailure,
@@ -19,27 +20,45 @@ import { BASE_URLS, ENDPOINTS } from './hyperliquid.types';
 // Common response interceptor for Hyperliquid API responses
 const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exchange: BaseExchange) => {
   xhr.interceptors.response.use(async (response) => {
+    // The HOW tunnel adapter resolves without axios' settle(), so a non-2xx
+    // reaches this SUCCESS handler with its status intact but never inspected,
+    // and callers report the body SHAPE instead of the failure. Read it here so
+    // the status rides along — but only for `/exchange`. A blanket throw would
+    // also hit `/info`, where Hyperliquid answers 422 for probe types we ask
+    // about optionally (`perpDexs`, `userRole`, `userAbstraction`) and 429 under
+    // load; every one of those is already swallowed by its caller, and turning
+    // them into throws costs a full error toast per attempt across the startup
+    // retries and the 120s HIP-3 sweep. `/info` failures also reach paged
+    // collectors like `fetchHistoricalFills`, whose try/catch wraps the whole
+    // window loop — a throw there discards windows already collected and the
+    // ingestion coverage row closes over the gap for good.
+    //
+    // Only tunnelled requests get here: a direct axios request already rejects
+    // non-2xx in validateStatus before any interceptor runs.
+    const isExchangeAction = response.config?.url === ENDPOINTS.EXCHANGE;
+    const httpFailed = isExchangeAction && typeof response.status === 'number' && response.status >= 400;
+
+    // Append the status rather than choosing between it and the venue's text:
+    // Hyperliquid can answer a 4xx with a perfectly good `{"status":"err"}`
+    // body, and picking one drops half the diagnosis.
     const responseError = extractHyperliquidResponseError(response.data);
     if (responseError) {
-      exchange.emitAndLogError(responseError);
-      throw new Error(responseError);
+      const msg = httpFailed ? `${responseError} (HTTP ${response.status})` : responseError;
+      exchange.emitAndLogError(msg);
+      throw new Error(msg);
     }
 
-    // The HOW tunnel adapter resolves without axios' settle(), so a non-2xx
-    // from Hyperliquid or the egress proxy reaches this success handler with
-    // its status intact but never inspected. Callers then report the body
-    // SHAPE instead of the failure — an unreadable error page surfaced as
-    // "Invalid response from Hyperliquid API: null", which names nothing you
-    // can act on. Read the status here so the venue's own failure wins.
-    // Only the tunnel path gets here: a direct axios request already rejects
-    // non-2xx in validateStatus before any interceptor runs.
-    if (typeof response.status === 'number' && response.status >= 400) {
+    if (httpFailed) {
       const msg = describeHyperliquidHttpFailure(response);
       exchange.emitAndLogError(msg);
       throw new Error(msg);
     }
 
-    if (response.config?.url === ENDPOINTS.EXCHANGE && response.data == null) {
+    // `signHttpRequest` captures a signed config by dispatching through a
+    // per-request adapter that resolves `{data: null, status: 200}` without
+    // sending anything. Interceptors still run, so without this guard every
+    // hosted-mode signature of an `/exchange` action rejects inside the signer.
+    if (isExchangeAction && response.data == null && !isSigningCaptureRequest(response.config)) {
       const msg = `${EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE} (HTTP ${response.status})`;
       exchange.emitAndLogError(msg);
       throw new Error(msg);
