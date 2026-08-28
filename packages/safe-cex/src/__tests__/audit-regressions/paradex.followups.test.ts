@@ -59,14 +59,14 @@ describe('audit regression: Paradex current REST and lifecycle contracts', () =>
     );
   });
 
-  it('posts account max slippage to the documented profile endpoint', async () => {
+  it('posts account max slippage to the documented per-market profile endpoint', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ status: 200, data: {} });
     exchange.xhr = { post } as any;
 
-    await exchange.setMaxSlippage('0.1');
+    await exchange.setMaxSlippage('0.1', 'BTC-USD-PERP');
 
-    expect(post).toHaveBeenCalledWith('/account/profile/max_slippage', { max_slippage: '0.1' });
+    expect(post).toHaveBeenCalledWith('/account/profile/market_max_slippage/BTC-USD-PERP', { max_slippage: '0.1' });
   });
 
   it('uses order history, not open orders, when fills are unavailable', async () => {

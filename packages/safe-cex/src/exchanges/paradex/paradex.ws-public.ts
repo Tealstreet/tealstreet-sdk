@@ -538,7 +538,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
 
       // Asynchronously set max slippage to 20% when listening to orderbook
       if (!this.parent.isPublicDataOnly && this.parent.jwtManager) {
-        this.parent.setMaxSlippage('0.2').catch((err) => {
+        this.parent.setMaxSlippage('0.2', symbol).catch((err) => {
           this.parent.log(`Failed to set max slippage for ${symbol}: ${err}`, LogSeverity.Warning);
         });
       }
@@ -589,7 +589,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
 
     // Asynchronously set max slippage to 20% when listening to OHLCV
     if (!this.parent.isPublicDataOnly && this.parent.jwtManager) {
-      this.parent.setMaxSlippage('0.2').catch((err) => {
+      this.parent.setMaxSlippage('0.2', opts.symbol).catch((err) => {
         this.parent.log(`Failed to set max slippage for ${opts.symbol}: ${err}`, LogSeverity.Warning);
       });
     }

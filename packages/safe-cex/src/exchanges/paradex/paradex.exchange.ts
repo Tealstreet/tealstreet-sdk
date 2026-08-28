@@ -24,6 +24,7 @@ import {
   OrderHistoryOptions,
   OrderSide,
   OrderStatus,
+  OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
   Position,
@@ -80,6 +81,23 @@ const isParadexPrivateHistoryAuthNotReadyError = (err: unknown): err is ParadexP
   err instanceof ParadexPrivateHistoryAuthNotReadyError;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isPositiveFinitePrice = (price: number | undefined): price is number =>
+  typeof price === 'number' && Number.isFinite(price) && price > 0;
+
+const normalizePositiveFraction = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed > 1 ? parsed / 100 : parsed;
+};
+
+const roundPriceToStep = (price: number, priceStep: number, direction: 'up' | 'down') => {
+  const step = Number.isFinite(priceStep) && priceStep > 0 ? priceStep : 0.000001;
+  const ratio = price / step;
+  const roundedRatio =
+    direction === 'up' ? Math.ceil(ratio - Number.EPSILON) : Math.floor(ratio + Number.EPSILON);
+  return adjust(roundedRatio * step, step);
+};
 
 export class ParadexExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
@@ -355,17 +373,6 @@ export class ParadexExchange extends BaseExchange {
       this.log('Fetching initial leverage settings...', LogSeverity.Debug);
       await this.fetchLeverageSettings();
       if (this.isDisposed) return;
-
-      // Set max slippage tolerance to avoid market order rejections
-      // Default: 0.1 = 10% slippage tolerance
-      if (this.jwtManager) {
-        try {
-          this.log('Setting max slippage tolerance to 0.1 (10%)...', LogSeverity.Debug);
-          await this.setMaxSlippage('0.1');
-        } catch (_err) {
-          this.log('Failed to set max slippage, continuing with defaults', LogSeverity.Warning);
-        }
-      }
 
       this.log('Running initial tick (fetching positions and balance)...', LogSeverity.Debug);
       await this.tick();
@@ -1413,6 +1420,63 @@ export class ParadexExchange extends BaseExchange {
     return clientId;
   };
 
+  private resolveMarketIocExecutionPrice = async (opts: PlaceOrderOpts): Promise<number | undefined> => {
+    if (opts.type !== OrderType.Market || typeof opts.maxSlippagePct !== 'number' || !Number.isFinite(opts.maxSlippagePct)) {
+      return undefined;
+    }
+    if (opts.timeInForce !== undefined && opts.timeInForce !== 'ImmediateOrCancel' && opts.timeInForce !== 'IOC') {
+      throw new Error('Paradex maxSlippagePct market orders require IOC time-in-force');
+    }
+
+    const orderBook = await this.fetchOrderBook(opts.symbol, 5);
+    const touchPrice = opts.side === OrderSide.Buy ? orderBook.asks[0]?.price : orderBook.bids[0]?.price;
+    if (!Number.isFinite(touchPrice) || !touchPrice || touchPrice <= 0) {
+      throw new Error(`Paradex ${opts.side} market IOC order requires a live ${opts.side === OrderSide.Buy ? 'ask' : 'bid'}`);
+    }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+    const ticker = this.store.tickers.find((t) => t.symbol === opts.symbol || t.id === opts.symbol);
+    const bidAskMidpoint =
+      isPositiveFinitePrice(ticker?.bid) && isPositiveFinitePrice(ticker?.ask) ? (ticker.bid + ticker.ask) / 2 : undefined;
+    const fairPrice = [ticker?.mark, ticker?.index, ticker?.midPrice, ticker?.last, bidAskMidpoint, touchPrice].find(
+      isPositiveFinitePrice,
+    );
+    const priceBandWidth =
+      normalizePositiveFraction(market?.info?.price_bands_width) ?? normalizePositiveFraction(market?.info?.max_slippage);
+    const slippageFactor = Math.max(0, opts.maxSlippagePct) / 100;
+    const priceStep = Number(market?.precision?.price || 0.000001);
+    const bandLimit =
+      fairPrice !== undefined && priceBandWidth !== undefined
+        ? fairPrice * (opts.side === OrderSide.Buy ? 1 + priceBandWidth : 1 - priceBandWidth)
+        : undefined;
+    let rawPrice = (fairPrice ?? touchPrice) * (opts.side === OrderSide.Buy ? 1 + slippageFactor : 1 - slippageFactor);
+
+    if (bandLimit !== undefined) {
+      rawPrice = opts.side === OrderSide.Buy ? Math.min(rawPrice, bandLimit) : Math.max(rawPrice, bandLimit);
+    }
+
+    const touchInsideBand =
+      bandLimit === undefined || (opts.side === OrderSide.Buy ? touchPrice <= bandLimit : touchPrice >= bandLimit);
+    if (touchInsideBand) {
+      const missesTouch = opts.side === OrderSide.Buy ? rawPrice < touchPrice : rawPrice > touchPrice;
+      if (missesTouch) rawPrice = touchPrice;
+    }
+
+    let price = roundPriceToStep(rawPrice, priceStep, opts.side === OrderSide.Buy ? 'up' : 'down');
+    if (bandLimit !== undefined) {
+      if (opts.side === OrderSide.Buy && price > bandLimit) {
+        price = roundPriceToStep(bandLimit, priceStep, 'down');
+      }
+      if (opts.side === OrderSide.Sell && price < bandLimit) {
+        price = roundPriceToStep(bandLimit, priceStep, 'up');
+      }
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`Paradex ${opts.side} market IOC order produced invalid execution price ${price}`);
+    }
+    return price;
+  };
+
   private buildMainOrderPayload = async (opts: PlaceOrderOpts, clientId?: string) => {
     const rejectPreflight = (message: string): never => {
       this.emitAndLogError(message);
@@ -1440,10 +1504,18 @@ export class ParadexExchange extends BaseExchange {
       }
     }
     const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-    const type = this.mapOrderType(opts.type);
+    let type = this.mapOrderType(opts.type);
+    let executionPrice = opts.price;
+    let timeInForce = opts.timeInForce;
+    const marketIocExecutionPrice = await this.resolveMarketIocExecutionPrice(opts);
+    if (marketIocExecutionPrice !== undefined) {
+      type = 'LIMIT';
+      executionPrice = marketIocExecutionPrice;
+      timeInForce = OrderTimeInForce.ImmediateOrCancel;
+    }
     const isStopOrder = isParadexTriggerOrderType(type);
     const hasLimitExecutionPrice = type === 'LIMIT' || type === 'STOP_LIMIT' || type.endsWith('_LIMIT');
-    const triggerPrice = isOpeningTrigger ? opts.triggerPrice : isStopOrder ? opts.price : opts.triggerPrice;
+    const triggerPrice = isOpeningTrigger ? opts.triggerPrice : isStopOrder ? executionPrice : opts.triggerPrice;
     const signOrderParams: {
       market: string;
       side: 'BUY' | 'SELL';
@@ -1456,11 +1528,11 @@ export class ParadexExchange extends BaseExchange {
       type,
       size: opts.amount.toString(),
     };
-    if (hasLimitExecutionPrice && opts.price) {
-      signOrderParams.price = opts.price.toString();
+    if (hasLimitExecutionPrice && executionPrice) {
+      signOrderParams.price = executionPrice.toString();
     }
     const { signature, signature_timestamp } = await this.requestSigner.signOrder(signOrderParams);
-    const instruction = this.mapTimeInForce(opts.timeInForce);
+    const instruction = this.mapTimeInForce(timeInForce);
     const shouldBeReduceOnly = opts.reduceOnly || (isStopOrder && !isOpeningTrigger);
 
     return omitUndefined({
@@ -1468,7 +1540,7 @@ export class ParadexExchange extends BaseExchange {
       side,
       type,
       size: opts.amount.toString(),
-      price: hasLimitExecutionPrice && opts.price ? opts.price.toString() : undefined,
+      price: hasLimitExecutionPrice && executionPrice ? executionPrice.toString() : undefined,
       trigger_price: triggerPrice?.toString(),
       instruction,
       flags: shouldBeReduceOnly ? ['REDUCE_ONLY'] : undefined,
@@ -2242,13 +2314,15 @@ export class ParadexExchange extends BaseExchange {
     }
   };
 
-  setMaxSlippage = async (maxSlippage: string): Promise<void> => {
+  setMaxSlippage = async (maxSlippage: string, market: string): Promise<void> => {
     try {
-      this.log(`Setting account max slippage to ${maxSlippage}`, LogSeverity.Info);
+      if (!market) {
+        throw new Error('Paradex max slippage requires a market symbol');
+      }
 
-      // Paradex API: POST /account/profile/max_slippage
-      // Body requires: max_slippage (string, decimal representation)
-      const endpoint = ENDPOINTS.MAX_SLIPPAGE;
+      this.log(`Setting account max slippage for ${market} to ${maxSlippage}`, LogSeverity.Info);
+
+      const endpoint = ENDPOINTS.MAX_SLIPPAGE.replace('{market}', market);
       const payload = {
         max_slippage: maxSlippage,
       };
@@ -2258,7 +2332,7 @@ export class ParadexExchange extends BaseExchange {
       const response = await this.xhr.post(endpoint, payload);
 
       this.log(`Response status: ${response.status}, data: ${JSON.stringify(response.data)}`, LogSeverity.Debug);
-      this.log(`Successfully set account max slippage to ${maxSlippage}`, LogSeverity.Info);
+      this.log(`Successfully set account max slippage for ${market} to ${maxSlippage}`, LogSeverity.Info);
     } catch (err: any) {
       const errorMsg = err?.message || 'Unknown error';
       this.log(`Error setting max slippage: ${errorMsg}`, LogSeverity.Error);

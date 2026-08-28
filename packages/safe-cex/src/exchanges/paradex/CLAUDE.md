@@ -149,10 +149,9 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 4. **Connect public WebSocket**: Subscribe to `bbo.{symbol}` + `trades.{symbol}` for filtered perps and `markets_summary`; orderbook stays on-demand
 5. **Connect private WebSocket** (if `jwtManager` available): Auth + subscribe to orders/positions/balance
 6. **Fetch leverage settings**: `GET /account/margin` → populate `leverageSettings` map
-7. **Set max slippage**: `POST /account/profile/max_slippage` to `0.1` (10%)
-8. **Initial tick**: Fetch positions → fetch balance → calculate uPnL from positions → store
-9. **Fetch orders**: `GET /orders` → filter open statuses → store
-10. **Start tick loop**: `tick()` → positions + balance + orders + leverage refresh → `loop(tick, 10_000)`
+7. **Initial tick**: Fetch positions → fetch balance → calculate uPnL from positions → store
+8. **Fetch orders**: `GET /orders` → filter open statuses → store
+9. **Start tick loop**: `tick()` → positions + balance + orders + leverage refresh → `loop(tick, 10_000)`
 
 **Notes**:
 
@@ -177,7 +176,7 @@ The `start()` method (`paradex.exchange.ts:189-282`) proceeds as follows:
 | `/onboarding`                   | POST   | Account onboarding                                                     |
 | `/account/margin`               | GET    | Get all margin/leverage configs                                        |
 | `/account/margin/{market}`      | POST   | Set leverage for a market                                              |
-| `/account/profile/max_slippage` | POST   | Set account max slippage tolerance                                     |
+| `/account/profile/market_max_slippage/{market}` | POST   | Set market-scoped max slippage tolerance                               |
 
 ### Markets
 
@@ -301,7 +300,7 @@ Execution-history behavior (`fetchHistoricalFills`):
 - `pollKey` format: `"{symbol}:{interval}"` used to track active subscriptions
 - Cleanup function stops polling, clears callbacks, clears cache
 
-**Max slippage auto-set**: When `listenOrderBook()` or `listenOHLCV()` is first called, automatically sets max slippage to 20% (`paradex.ws-public.ts:474-478`, `paradex.ws-public.ts:522-525`).
+**Max slippage auto-set**: When `listenOrderBook()` or `listenOHLCV()` is first called, automatically sets that market's max slippage to 20% via `/account/profile/market_max_slippage/{market}`.
 
 ### Private WebSocket (`paradex.ws-private.ts`)
 
@@ -702,7 +701,7 @@ windowed request with their full history and no error.
 
 4. **FOK mapped to IOC**: Paradex does not support Fill-or-Kill; it is mapped to IOC as the closest match (`paradex.exchange.ts:1407`).
 
-5. **Max slippage auto-set**: Exchange automatically sets max slippage to 10% on startup (`paradex.exchange.ts:253`) and to 20% when orderbook or OHLCV listening starts (`paradex.ws-public.ts:474-478`).
+5. **Max slippage auto-set**: Orderbook/OHLCV listeners set per-market max slippage to 20% before market-order emulation.
 
 6. **OHLCV not on WebSocket**: Paradex does not support OHLCV/kline streaming via WebSocket. Implementation uses REST polling every 3 seconds combined with trade-based candle construction (`paradex.ws-public.ts:494`).
 

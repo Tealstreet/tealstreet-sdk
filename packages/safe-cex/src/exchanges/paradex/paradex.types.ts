@@ -58,7 +58,7 @@ export const ENDPOINTS = {
   SET_MARGIN: '/account/margin/{market}',
 
   // Max slippage settings
-  MAX_SLIPPAGE: '/account/profile/max_slippage',
+  MAX_SLIPPAGE: '/account/profile/market_max_slippage/{market}',
 };
 
 export const ORDER_TYPE: Record<string, OrderType> = {
