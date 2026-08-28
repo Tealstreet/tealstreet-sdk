@@ -1424,7 +1424,8 @@ export class ParadexExchange extends BaseExchange {
     if (opts.type !== OrderType.Market || typeof opts.maxSlippagePct !== 'number' || !Number.isFinite(opts.maxSlippagePct)) {
       return undefined;
     }
-    if (opts.timeInForce !== undefined && opts.timeInForce !== 'ImmediateOrCancel' && opts.timeInForce !== 'IOC') {
+    const timeInForce = opts.timeInForce as string | undefined;
+    if (timeInForce !== undefined && timeInForce !== OrderTimeInForce.ImmediateOrCancel && timeInForce !== 'IOC') {
       throw new Error('Paradex maxSlippagePct market orders require IOC time-in-force');
     }
 
