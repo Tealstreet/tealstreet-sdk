@@ -174,6 +174,14 @@ export const ORDER_TYPE: Record<string, OrderType> = {
   TrailingStop: OrderType.TrailingStopLoss,
 };
 
+export const POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE: Record<string, 'TakeProfit' | 'StopLoss' | 'TrailingStop'> = {
+  CreateByTakeProfit: 'TakeProfit',
+  CreateByPartialTakeProfit: 'TakeProfit',
+  CreateByStopLoss: 'StopLoss',
+  CreateByPartialStopLoss: 'StopLoss',
+  CreateByTrailingStop: 'TrailingStop',
+};
+
 export const ORDER_SIDE: Record<string, OrderSide> = {
   Buy: OrderSide.Buy,
   Sell: OrderSide.Sell,

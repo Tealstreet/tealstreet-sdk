@@ -433,6 +433,15 @@ These virtual orders:
 - Have `filled: 0` and `remaining` equal to the parent order's amount
 - Carry trigger type information from `slTriggerBy` / `tpTriggerBy`
 
+For position-bound TP/SL rows, `mapOrder` must also treat Bybit V5
+`createType` as a fallback classifier when `stopOrderType` is temporarily
+`UNKNOWN` during reconciliation. `CreateByTakeProfit` /
+`CreateByPartialTakeProfit` stay `OrderType.TakeProfit`, and
+`CreateByStopLoss` / `CreateByPartialStopLoss` stay `OrderType.StopLoss`.
+Without that fallback, the interim row can be mapped as a plain `Limit`, get
+snapped to near-touch price by chart/open-order formatting, and appear as a
+phantom order until the next snapshot corrects it.
+
 **Cancel path implication**: `cancelOrders` filters out virtual TP/SL IDs at
 its entry point in all three variants (`bybit`, `bybitspot`, `bybitinverse`).
 Synthetic IDs are not known to Bybit's cancel endpoint, and on UNIFIED

@@ -59,6 +59,7 @@ import {
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
   POSITION_SIDE,
+  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
 } from './bybit.types';
 import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
@@ -1223,10 +1224,17 @@ export class BybitSpotExchange extends BaseExchange {
   }
 
   mapOrder(o: Record<string, any>) {
-    const isStop = o.stopOrderType !== 'UNKNOWN' && o.stopOrderType !== '';
+    const stopOrderType = v(o, 'stopOrderType');
+    const tpslMode = v(o, 'tpslMode');
+    const isPositionTpslMode = tpslMode === 'Full' || tpslMode === 'Partial';
+    const createTypeOrderType = isPositionTpslMode
+      ? POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE[v(o, 'createType')]
+      : undefined;
+    const isStop = Boolean((stopOrderType && stopOrderType !== 'UNKNOWN') || createTypeOrderType);
 
-    const oPrice = isStop ? v(o, 'triggerPrice') : o.price;
-    const oType = isStop ? v(o, 'stopOrderType') : v(o, 'orderType');
+    const triggerPrice = v(o, 'triggerPrice');
+    const oPrice = isStop ? triggerPrice || o.price : o.price;
+    const oType = createTypeOrderType || (isStop ? stopOrderType : v(o, 'orderType'));
 
     const type = ORDER_TYPE[oType];
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
@@ -1251,7 +1259,7 @@ export class BybitSpotExchange extends BaseExchange {
           remainingNative,
         },
         price,
-        amount: (oType === 'StopLoss' || oType === 'TakeProfit') && o.tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
+        amount: (oType === 'StopLoss' || oType === 'TakeProfit') && tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
         filled: parseFloat(v(o, 'cumExecQty') ?? 0),
         reduceOnly: v(o, 'reduceOnly') || false,
         info: o,

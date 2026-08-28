@@ -339,4 +339,26 @@ describe('audit regression: Bybit inverse opening conditional orders', () => {
     expect(closeOnlyStop.type).toBe(OrderType.StopLoss);
     expect(positionTakeProfit.type).toBe(OrderType.TakeProfit);
   });
+
+  it('uses createType to keep transient position TP/SL rows protective', () => {
+    const { exchange } = createExchange();
+
+    const [positionTakeProfit] = exchange.mapOrder(
+      rawOrder({
+        orderId: 'tp-reconciling',
+        side: 'Sell',
+        orderType: 'Limit',
+        stopOrderType: 'UNKNOWN',
+        createType: 'CreateByPartialTakeProfit',
+        tpslMode: 'Partial',
+        reduceOnly: true,
+        closeOnTrigger: true,
+        triggerPrice: '32000',
+        price: '30000',
+      }),
+    );
+
+    expect(positionTakeProfit.type).toBe(OrderType.TakeProfit);
+    expect(positionTakeProfit.price).toBe(32000);
+  });
 });

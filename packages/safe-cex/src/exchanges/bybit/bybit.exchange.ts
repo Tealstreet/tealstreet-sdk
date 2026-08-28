@@ -86,6 +86,7 @@ import {
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
   POSITION_SIDE,
+  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
 } from './bybit.types';
 import { BybitPrivateWebsocket } from './bybit.ws-private';
 import { BybitPublicWebsocket } from './bybit.ws-public';
@@ -3044,16 +3045,18 @@ export class BybitExchange extends BaseExchange {
 
   mapOrder(o: Record<string, any>) {
     const stopOrderType = v(o, 'stopOrderType');
-    const isStop = Boolean(stopOrderType && stopOrderType !== 'UNKNOWN');
-
-    const triggerPrice = v(o, 'triggerPrice');
-    const oPrice = isStop ? triggerPrice || o.price : o.price;
-    const oType = isStop ? stopOrderType : v(o, 'orderType');
-
     const reduceOnly = v(o, 'reduceOnly') === true || v(o, 'reduceOnly') === 'true';
     const closeOnTrigger = v(o, 'closeOnTrigger') === true || v(o, 'closeOnTrigger') === 'true';
     const tpslMode = v(o, 'tpslMode');
     const isPositionTpslMode = isBybitPositionTpslMode(tpslMode);
+    const createTypeOrderType = isPositionTpslMode
+      ? POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE[v(o, 'createType')]
+      : undefined;
+    const isStop = Boolean((stopOrderType && stopOrderType !== 'UNKNOWN') || createTypeOrderType);
+
+    const triggerPrice = v(o, 'triggerPrice');
+    const oPrice = isStop ? triggerPrice || o.price : o.price;
+    const oType = createTypeOrderType || (isStop ? stopOrderType : v(o, 'orderType'));
     const isOpeningTriggerOrder =
       isStop &&
       !reduceOnly &&

@@ -397,6 +397,45 @@ describe('Bybit conditional orders', () => {
     expect(positionTakeProfit.type).toBe(OrderType.TakeProfit);
   });
 
+  it('uses createType to keep transient position TP/SL rows protective', () => {
+    const { exchange } = createExchange();
+
+    const [positionTakeProfit] = exchange.mapOrder(
+      rawOrder({
+        orderId: 'tp-reconciling',
+        side: 'Sell',
+        orderType: 'Limit',
+        stopOrderType: 'UNKNOWN',
+        createType: 'CreateByTakeProfit',
+        tpslMode: 'Full',
+        reduceOnly: true,
+        closeOnTrigger: true,
+        triggerPrice: '32000',
+        price: '30000',
+      }),
+    );
+    const [positionStopLoss] = exchange.mapOrder(
+      rawOrder({
+        orderId: 'sl-reconciling',
+        side: 'Sell',
+        orderType: 'Limit',
+        stopOrderType: 'UNKNOWN',
+        createType: 'CreateByPartialStopLoss',
+        tpslMode: 'Partial',
+        reduceOnly: true,
+        closeOnTrigger: true,
+        triggerPrice: '29000',
+        price: '30000',
+      }),
+    );
+
+    expect(positionTakeProfit.type).toBe(OrderType.TakeProfit);
+    expect(positionTakeProfit.price).toBe(32000);
+    expect(positionTakeProfit.amount).toBe(0);
+    expect(positionStopLoss.type).toBe(OrderType.StopLoss);
+    expect(positionStopLoss.price).toBe(29000);
+  });
+
   it('keeps Bybit websocket position TP/SL partials protective', () => {
     const { exchange } = createExchange();
 
