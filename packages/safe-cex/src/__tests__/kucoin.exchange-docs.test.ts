@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAPI } from '../exchanges/kucoin/kucoin.api';
 import { KucoinExchange } from '../exchanges/kucoin/kucoin.exchange';
-import { ENDPOINTS } from '../exchanges/kucoin/kucoin.types';
+import { BROKER_ID, ENDPOINTS } from '../exchanges/kucoin/kucoin.types';
+import { createKucoinSpotAPI } from '../exchanges/kucoin/kucoinspot.api';
+import { KUCOIN_SPOT_ENDPOINTS } from '../exchanges/kucoin/kucoinspot.types';
 import { KucoinPublicWebsocket } from '../exchanges/kucoin/kucoin.ws-public';
 import { DefaultStore } from '../store/store.base';
 import {
@@ -44,6 +46,16 @@ const makeExchange = () => {
   return { exchange, store };
 };
 
+const getHeader = (headers: any, name: string) => headers?.get?.(name) ?? headers?.[name];
+
+const kucoinBrokerExtra = {
+  kucoinBroker: {
+    partner: 'goodbroker',
+    brokerKey: 'broker-secret',
+    brokerName: 'goodbrokerND',
+  },
+};
+
 describe('KucoinExchange current futures docs compatibility', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -64,11 +76,11 @@ describe('KucoinExchange current futures docs compatibility', () => {
     await api.get(ENDPOINTS.MARKETS, { params: { symbol: 'XBTUSDTM' } });
 
     const headers = adapter.mock.calls[0][0].headers;
-    expect(headers?.['KC-API-KEY']).toBeUndefined();
-    expect(headers?.['KC-API-SIGN']).toBeUndefined();
-    expect(headers?.['KC-API-TIMESTAMP']).toBeUndefined();
-    expect(headers?.['KC-API-PASSPHRASE']).toBeUndefined();
-    expect(headers?.['KC-API-KEY-VERSION']).toBeUndefined();
+    expect(getHeader(headers, 'KC-API-KEY')).toBeUndefined();
+    expect(getHeader(headers, 'KC-API-SIGN')).toBeUndefined();
+    expect(getHeader(headers, 'KC-API-TIMESTAMP')).toBeUndefined();
+    expect(getHeader(headers, 'KC-API-PASSPHRASE')).toBeUndefined();
+    expect(getHeader(headers, 'KC-API-KEY-VERSION')).toBeUndefined();
   });
 
   it('signs private futures REST requests with the unencoded query string', async () => {
@@ -95,7 +107,139 @@ describe('KucoinExchange current futures docs compatibility', () => {
       .update(`${timestamp}DELETE/api/v1/sub/api-key?apiKey=67b3&subName=test&passphrase=abc!@#11`)
       .digest('base64');
 
-    expect(adapter.mock.calls[0][0].headers?.['KC-API-SIGN']).toBe(expectedSignature);
+    expect(getHeader(adapter.mock.calls[0][0].headers, 'KC-API-SIGN')).toBe(expectedSignature);
+  });
+
+  it('adds official signed broker headers to futures private REST requests when configured', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+
+    const { exchange } = makeExchange();
+    const adapter = vi.fn().mockResolvedValue({
+      data: { code: '200000', data: {} },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    });
+    const api = createAPI(
+      { key: 'k', secret: 's', passphrase: 'p', extra: kucoinBrokerExtra } as ExchangeOptions,
+      exchange,
+    );
+    api.defaults.adapter = adapter;
+
+    await api.post(ENDPOINTS.PLACE_ORDER, { symbol: 'XBTUSDTM', side: 'buy', type: 'limit', size: '1' });
+
+    const timestamp = `${Date.parse('2026-05-02T12:00:00Z')}`;
+    const expectedPartnerSign = createHmac('sha256', 'broker-secret')
+      .update(`${timestamp}goodbrokerk`)
+      .digest('base64');
+    const headers = adapter.mock.calls[0][0].headers;
+
+    expect(getHeader(headers, 'X-CHANNEL-API-CODE')).toBe(BROKER_ID);
+    expect(getHeader(headers, 'KC-API-PARTNER')).toBe('goodbroker');
+    expect(getHeader(headers, 'KC-API-PARTNER-SIGN')).toBe(expectedPartnerSign);
+    expect(getHeader(headers, 'KC-BROKER-NAME')).toBe('goodbrokerND');
+    expect(getHeader(headers, 'KC-API-PARTNER-VERIFY')).toBe('true');
+  });
+
+  it('reuses an existing KuCoin timestamp so remote broker and user signatures match', async () => {
+    const { exchange } = makeExchange();
+    const adapter = vi.fn().mockResolvedValue({
+      data: { code: '200000', data: {} },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    });
+    const api = createAPI(
+      { key: 'k', secret: 's', passphrase: 'p', extra: kucoinBrokerExtra } as ExchangeOptions,
+      exchange,
+    );
+    api.defaults.adapter = adapter;
+
+    await api.post(
+      ENDPOINTS.PLACE_ORDER,
+      { symbol: 'XBTUSDTM', side: 'buy', type: 'limit', size: '1' },
+      { headers: { 'KC-API-TIMESTAMP': '123456789' } },
+    );
+
+    const headers = adapter.mock.calls[0][0].headers;
+    const expectedApiSign = createHmac('sha256', 's')
+      .update('123456789POST/api/v1/orders{"symbol":"XBTUSDTM","side":"buy","type":"limit","size":"1"}')
+      .digest('base64');
+    const expectedPartnerSign = createHmac('sha256', 'broker-secret')
+      .update('123456789goodbrokerk')
+      .digest('base64');
+
+    expect(getHeader(headers, 'KC-API-TIMESTAMP')).toBe('123456789');
+    expect(getHeader(headers, 'KC-API-SIGN')).toBe(expectedApiSign);
+    expect(getHeader(headers, 'KC-API-PARTNER-SIGN')).toBe(expectedPartnerSign);
+  });
+
+  it('includes signed broker headers in the futures remote-signer request envelope', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+
+    const { exchange } = makeExchange();
+    const sign = vi.fn().mockRejectedValue(new Error('stop after capture'));
+    const api = createAPI(
+      {
+        key: 'k',
+        secret: '',
+        passphrase: 'p',
+        remoteSigner: {
+          sign,
+          isAvailable: () => true,
+          onAvailabilityChange: () => () => undefined,
+          accountName: 'account-1',
+        },
+        extra: kucoinBrokerExtra,
+      } as ExchangeOptions,
+      exchange,
+    );
+
+    await expect(api.post(ENDPOINTS.PLACE_ORDER, { symbol: 'XBTUSDTM' })).rejects.toThrow('stop after capture');
+
+    const timestamp = `${Date.parse('2026-05-02T12:00:00Z')}`;
+    const headers = sign.mock.calls[0][0].config.headers;
+
+    expect(headers['KC-API-TIMESTAMP']).toBe(timestamp);
+    expect(headers['KC-API-PARTNER']).toBe('goodbroker');
+    expect(headers['KC-BROKER-NAME']).toBe('goodbrokerND');
+    expect(headers['KC-API-PARTNER-VERIFY']).toBe('true');
+  });
+
+  it('adds official signed broker headers to spot private REST requests when configured', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+
+    const { exchange } = makeExchange();
+    const adapter = vi.fn().mockResolvedValue({
+      data: { code: '200000', data: {} },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {},
+    });
+    const api = createKucoinSpotAPI(
+      { key: 'k', secret: 's', passphrase: 'p', extra: kucoinBrokerExtra } as ExchangeOptions,
+      exchange,
+    );
+    api.defaults.adapter = adapter;
+
+    await api.post(KUCOIN_SPOT_ENDPOINTS.PLACE_ORDER, { symbol: 'BTC-USDT', side: 'buy', type: 'limit', size: '1' });
+
+    const timestamp = `${Date.parse('2026-05-02T12:00:00Z')}`;
+    const expectedPartnerSign = createHmac('sha256', 'broker-secret')
+      .update(`${timestamp}goodbrokerk`)
+      .digest('base64');
+    const headers = adapter.mock.calls[0][0].headers;
+
+    expect(getHeader(headers, 'KC-API-PARTNER')).toBe('goodbroker');
+    expect(getHeader(headers, 'KC-API-PARTNER-SIGN')).toBe(expectedPartnerSign);
+    expect(getHeader(headers, 'KC-BROKER-NAME')).toBe('goodbrokerND');
+    expect(getHeader(headers, 'KC-API-PARTNER-VERIFY')).toBe('true');
   });
 
   it('maps active perpetual USDT contracts from current /contracts/active fields', async () => {

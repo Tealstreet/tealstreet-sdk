@@ -9,6 +9,7 @@ import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttp
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { addKucoinBrokerHeaders, getKucoinRequestTimestamp } from './kucoin.broker';
 import {
   KUCOIN_SPOT_BASE_URL,
   KUCOIN_SPOT_BROKER_ID,
@@ -55,11 +56,13 @@ export const createKucoinSpotAPI = (options: ExchangeOptions, exchange: BaseExch
       return nextConfig;
     }
 
+    const timestamp = getKucoinRequestTimestamp(nextConfig.headers) ?? `${virtualClock.getCurrentTimeMs()}`;
+    const headersWithBroker = addKucoinBrokerHeaders(new AxiosHeaders(nextConfig.headers), options, timestamp);
+
     if (options.remoteSigner) {
-      return nextConfig;
+      return { ...nextConfig, headers: headersWithBroker };
     }
 
-    const timestamp = virtualClock.getCurrentTimeMs();
     const method = config.method?.toUpperCase() ?? 'GET';
 
     let url = config.url;
@@ -73,14 +76,12 @@ export const createKucoinSpotAPI = (options: ExchangeOptions, exchange: BaseExch
       .update([timestamp, method, url, stringifiedBody].join(''))
       .digest('base64');
 
-    const headers = new AxiosHeaders({
-      ...nextConfig.headers,
-      'KC-API-KEY': options.key,
-      'KC-API-SIGN': signature,
-      'KC-API-TIMESTAMP': timestamp,
-      'KC-API-PASSPHRASE': encryptedPassphrase,
-      'KC-API-KEY-VERSION': '2',
-    });
+    const headers = addKucoinBrokerHeaders(headersWithBroker, options, timestamp);
+    headers.set('KC-API-KEY', options.key);
+    headers.set('KC-API-SIGN', signature);
+    headers.set('KC-API-TIMESTAMP', timestamp);
+    headers.set('KC-API-PASSPHRASE', encryptedPassphrase);
+    headers.set('KC-API-KEY-VERSION', '2');
 
     return { ...nextConfig, headers };
   });

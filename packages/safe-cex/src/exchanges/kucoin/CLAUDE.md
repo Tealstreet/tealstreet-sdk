@@ -196,7 +196,32 @@ KuCoin uses HMAC-SHA256 with an encrypted passphrase (`kucoin.api.ts:12-73`):
    | `X-CHANNEL-API-CODE` | Broker ID (`'3zexp'`)                      |
    | `Content-Type`       | `'application/json'`                       |
 
-4. **HTTP-over-WebSocket**: Authenticated/private REST uses `axiosHttpOverWebsocketAdapter` for REST API tunneling through WebSocket connections (`kucoin.api.ts:43`). Public-data-only REST does not install the tunnel adapter.
+4. **Broker attribution headers**: KuCoin's current Broker REST docs say
+   `X-CHANNEL-API-CODE` alone is not the complete attribution path. When a
+   trusted runtime supplies `options.extra.kucoinBroker`, both Futures and Spot
+   add the official signed headers to private REST requests:
+
+   | Header                  | Value                                                                 |
+   | ----------------------- | --------------------------------------------------------------------- |
+   | `KC-API-PARTNER`        | `options.extra.kucoinBroker.partner`                                  |
+   | `KC-API-PARTNER-SIGN`   | `base64(HMAC-SHA256(timestamp + partner + apiKey, brokerKey))`        |
+   | `KC-BROKER-NAME`        | `options.extra.kucoinBroker.brokerName`                               |
+   | `KC-API-PARTNER-VERIFY` | `'true'` by default, so a bad broker signature fails rather than drops |
+
+   `brokerKey` is a KuCoin-issued broker secret. **Never hardcode it in
+   browser-bundled code or pass it through saved account config.** The helper
+   also reuses an existing `KC-API-TIMESTAMP` header: hosted/server code can add
+   broker headers before the remote-signer round trip, and the browser signer
+   will sign the user request with the same timestamp.
+
+5. **HTTP-over-WebSocket**: Authenticated/private REST uses `axiosHttpOverWebsocketAdapter` for REST API tunneling through WebSocket connections (`kucoin.api.ts:43`). Public-data-only REST does not install the tunnel adapter.
+
+Broker attribution is guaranteed only on code paths where the signed broker
+headers are present. The main-thread browser exchange is the executor of user
+order writes; do not put the broker key there. If KuCoin requires signed broker
+headers for order-write rebate credit, the browser write transport needs a
+trusted header-injection/signing path, or those writes fall back to the legacy
+`X-CHANNEL-API-CODE` header only.
 
 ### Private WebSocket Authentication
 
@@ -733,7 +758,13 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
 18. **No Bitget product artifacts**: KuCoin code uses KuCoin response shapes and contract ids only; the old `00000`, `_UMCBL`, `umcbl`/`sumcbl`, and commented leverage-port remnants were removed.
 19. **Order fetch is two books with preserve-on-failure**: `fetchOrders` = `/api/v1/orders` (normal) + `/api/v1/stopOrders` (TP/SL + trailing). A failed book preserves the existing store orders of that category so the tick's full-replace can't wipe TP/SL lines — see "Order Fetch — two books, partial-failure preservation". (The old duplicate `fetchTrailingStopOrders`, which re-hit `/api/v1/stopOrders`, was removed.)
 20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book.
-21. **Broker ID**: `X-CHANNEL-API-CODE: '3zexp'` sent as a default REST header.
+21. **Broker attribution**: `X-CHANNEL-API-CODE: '3zexp'` is still sent as a
+    default REST header for legacy attribution. The current official KuCoin
+    Broker docs additionally require signed partner headers
+    (`KC-API-PARTNER`, `KC-API-PARTNER-SIGN`, `KC-BROKER-NAME`, and recommended
+    `KC-API-PARTNER-VERIFY:true`) for reliable rebate attribution. Both
+    `kucoin.api.ts` and `kucoinspot.api.ts` add those headers when
+    `options.extra.kucoinBroker` is supplied by a trusted runtime.
 22. **`isQuanto` is a false friend — `fetchMarkets` forces it to `false`.** KuCoin
     marks multiplier-based LINEAR contracts (XBTUSDTM + ~11 others) as
     `isQuanto: true`, but that is NOT the BitMEX-style quanto the web app means

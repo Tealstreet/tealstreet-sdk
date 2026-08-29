@@ -125,6 +125,19 @@ export type ExchangeOptions = {
     lighterIntegratorAccountIndex?: string;
     // Lighter TP/SL allowed execution slippage, as a percentage from trigger price.
     lighterStopSlippagePct?: number;
+    /**
+     * KuCoin broker attribution config for trusted runtimes.
+     *
+     * `brokerKey` is a KuCoin-issued broker secret used to sign
+     * KC-API-PARTNER-SIGN. Do not pass it through browser-exposed account
+     * config or NEXT_PUBLIC env.
+     */
+    kucoinBroker?: {
+      readonly partner: string;
+      readonly brokerKey: string;
+      readonly brokerName: string;
+      readonly verify?: boolean;
+    };
   };
 
   /** Delegates request signing to a signer outside this exchange runtime. */

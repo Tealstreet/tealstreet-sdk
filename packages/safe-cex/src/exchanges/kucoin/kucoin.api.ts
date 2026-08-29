@@ -9,6 +9,7 @@ import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttp
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { addKucoinBrokerHeaders, getKucoinRequestTimestamp } from './kucoin.broker';
 import { BASE_URL, BROKER_ID, RECV_WINDOW } from './kucoin.types';
 
 const stringifyQuery = (params: Record<string, any>, encode: boolean) => qs.stringify(params, { encode });
@@ -56,11 +57,17 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };
 
-    if (!shouldAuthenticate || options.remoteSigner) {
+    if (!shouldAuthenticate) {
       return nextConfig;
     }
 
-    const timestamp = virtualClock.getCurrentTimeMs();
+    const timestamp = getKucoinRequestTimestamp(nextConfig.headers) ?? `${virtualClock.getCurrentTimeMs()}`;
+    const headersWithBroker = addKucoinBrokerHeaders(new AxiosHeaders(nextConfig.headers), options, timestamp);
+
+    if (options.remoteSigner) {
+      return { ...nextConfig, headers: headersWithBroker };
+    }
+
     const method = config.method?.toUpperCase() ?? 'GET';
 
     let url = config.url;
@@ -74,12 +81,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     const signature = createHmac('sha256', secret).update(toSign).digest('base64');
 
-    const headers = new AxiosHeaders({
-      ...nextConfig.headers,
-      'KC-API-SIGN': signature,
-      'KC-API-TIMESTAMP': timestamp,
-      'KC-API-KEY-VERSION': '2',
-    });
+    const headers = addKucoinBrokerHeaders(headersWithBroker, options, timestamp);
+    headers.set('KC-API-SIGN', signature);
+    headers.set('KC-API-TIMESTAMP', timestamp);
+    headers.set('KC-API-KEY-VERSION', '2');
 
     return { ...nextConfig, headers };
   });
