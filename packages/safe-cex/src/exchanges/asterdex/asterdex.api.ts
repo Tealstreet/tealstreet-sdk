@@ -51,6 +51,11 @@ const PUBLIC_FAPI_PREFIXES = [
 ] as const;
 
 const lastV3NonceBySigner = new Map<string, bigint>();
+const ASTERDEX_CODE_CHAIN_ID = {
+  production: 1666,
+  testnet: 714,
+} as const;
+const ASTERDEX_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const buildV3Nonce = (nonceScopeKey: string): string => {
   const microsecondsNow = BigInt(asterDEXVirtualClock.getCurrentTimeMs()) * 1000n;
@@ -58,6 +63,39 @@ const buildV3Nonce = (nonceScopeKey: string): string => {
   const nextNonce = microsecondsNow > prevNonce ? microsecondsNow : prevNonce + 1n;
   lastV3NonceBySigner.set(nonceScopeKey, nextNonce);
   return nextNonce.toString();
+};
+
+export const buildAsterDEXV3Nonce = (nonceScopeKey: string): string => buildV3Nonce(nonceScopeKey);
+
+export const getAsterDEXCodeChainId = (testnet?: boolean): number =>
+  testnet ? ASTERDEX_CODE_CHAIN_ID.testnet : ASTERDEX_CODE_CHAIN_ID.production;
+
+export const getAsterDEXAsterChain = (testnet?: boolean): 'Mainnet' | 'Testnet' => (testnet ? 'Testnet' : 'Mainnet');
+
+export const buildAsterDEXCodeQueryString = (params: Record<string, any>): string =>
+  Object.entries(params)
+    .filter(([_, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join('&');
+
+export const generateAsterDEXCodeMessageSignature = (
+  queryString: string,
+  signerPrivateKey: string,
+  testnet?: boolean,
+): string => {
+  const normalizedPrivateKey = signerPrivateKey.startsWith('0x') ? signerPrivateKey : `0x${signerPrivateKey}`;
+  const domain = {
+    name: 'AsterSignTransaction',
+    version: '1',
+    chainId: getAsterDEXCodeChainId(testnet),
+    verifyingContract: ASTERDEX_ZERO_ADDRESS,
+  };
+  const types = {
+    Message: [{ name: 'msg', type: 'string' }],
+  };
+  const digest = ethers.TypedDataEncoder.hash(domain, types, { msg: queryString });
+  const signerKey = new ethers.SigningKey(normalizedPrivateKey);
+  return ethers.Signature.from(signerKey.sign(digest)).serialized;
 };
 
 const generateV1Signature = (queryString: string, secret: string): string => {
@@ -111,18 +149,31 @@ const generateV3Signature = (
   return ethers.Signature.from(signature).serialized;
 };
 
+const stripQueryString = (url: string): string => url.split('?')[0];
+
 const isPublicEndpoint = (url?: string): boolean => {
   if (!url) return false;
-  return PUBLIC_FAPI_PREFIXES.some((prefix) => url.startsWith(prefix) || url.includes(prefix));
+  const path = stripQueryString(url);
+  return PUBLIC_FAPI_PREFIXES.some((prefix) => path.startsWith(prefix) || path.includes(prefix));
+};
+
+const isAsterDEXCodeSignedEndpoint = (url?: string, method?: string): boolean => {
+  if (!url) return false;
+  const path = stripQueryString(url);
+  const normalizedMethod = String(method || 'get').toLowerCase();
+  return (
+    (normalizedMethod === 'post' && path.endsWith('/fapi/v3/order')) ||
+    (normalizedMethod === 'get' && (path.endsWith('/fapi/v3/builder') || path.endsWith('/fapi/v3/agent')))
+  );
 };
 
 const shouldSuppressUnknownOrderError = (config: any, code: unknown, message?: string): boolean =>
   Boolean(
     config?.__suppressAsterUnknownOrderError &&
-      String(code) === '-2011' &&
-      String(message || '')
-        .toLowerCase()
-        .includes('unknown order'),
+    String(code) === '-2011' &&
+    String(message || '')
+      .toLowerCase()
+      .includes('unknown order'),
   );
 
 export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
@@ -205,13 +256,15 @@ export const createAPI = (
   // Add authentication interceptor
   api.interceptors.request.use(
     async (config) => {
-      const isPublic = isPublicEndpoint(config.url);
+      const urlPath = stripQueryString(config.url || '');
+      const isPublic = isPublicEndpoint(urlPath);
 
       if (exchange.options.remoteSigner && !isPublic) {
         return config;
       }
 
       if (!isPublic && options.apiKey) {
+        const mutableConfig = config as typeof config & { __asterUnsignedParams?: Record<string, any> };
         // Check if time sync is needed
         if (asterDEXVirtualClock.needsSync()) {
           if (exchange) {
@@ -231,7 +284,8 @@ export const createAPI = (
 
         // Prepare parameters for signature
         // Binance-style APIs send all parameters as query params, even for POST/PUT
-        const data = config.data || config.params || {};
+        const data = mutableConfig.__asterUnsignedParams || config.data || config.params || {};
+        mutableConfig.__asterUnsignedParams = { ...data };
 
         // Add timestamp and recvWindow at the end (order matters)
         const params: Record<string, any> = {
@@ -259,10 +313,28 @@ export const createAPI = (
           const nonceScopeKey = `${userAddress}:${signerAddress}`;
           const nonce = buildV3Nonce(nonceScopeKey);
 
-          signature = generateV3Signature(params, userAddress, signerAddress, v3SignerPrivateKey, nonce);
-          params.user = userAddress;
-          params.signer = signerAddress;
-          params.nonce = nonce;
+          if (isAsterDEXCodeSignedEndpoint(urlPath, config.method)) {
+            const codeParams = {
+              ...data,
+              asterChain: getAsterDEXAsterChain(options.testnet),
+              user: userAddress,
+              signer: signerAddress,
+              nonce,
+            };
+            const queryString = buildAsterDEXCodeQueryString(codeParams);
+            signature = generateAsterDEXCodeMessageSignature(queryString, v3SignerPrivateKey, options.testnet);
+            config.url = `${urlPath}?${queryString}&signature=${signature}`;
+            delete config.params;
+            if (config.data) {
+              delete config.data;
+            }
+            return config;
+          } else {
+            signature = generateV3Signature(params, userAddress, signerAddress, v3SignerPrivateKey, nonce);
+            params.user = userAddress;
+            params.signer = signerAddress;
+            params.nonce = nonce;
+          }
         } else {
           if (!options.apiSecret) {
             throw new Error('AsterDEX v1 signing requires API secret');
@@ -364,7 +436,11 @@ export const createAPI = (
           errorMessage += ` (code: ${data.code})`;
         }
 
-        const shouldSuppressEmission = shouldSuppressUnknownOrderError(error.config, data?.code, data?.msg || data?.error);
+        const shouldSuppressEmission = shouldSuppressUnknownOrderError(
+          error.config,
+          data?.code,
+          data?.msg || data?.error,
+        );
 
         // Log and emit error (similar to Hyperliquid pattern)
         if (!shouldSuppressEmission && exchange) {

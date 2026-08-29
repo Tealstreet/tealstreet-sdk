@@ -229,6 +229,34 @@ export type {
 } from './exchanges/hyperliquid/hyperliquid.types';
 
 /**
+ * Aster builder attribution and approval utilities
+ */
+export {
+  approveAsterBuilderFeeWithBrowserWallet,
+  buildAsterApproveBuilderTypedData,
+  checkAsterBuilderApproved,
+  getAsterBuilderApprovalConfig,
+} from './exchanges/asterdex/asterdex.builder-approval';
+export {
+  ASTER_BUILDER_FEE_RATE_CAP,
+  DEFAULT_ASTER_BUILDER_FEE_RATE_MAKER,
+  DEFAULT_ASTER_BUILDER_FEE_RATE_TAKER,
+  getAsterBuilderApprovalFeeRate,
+  getAsterBuilderFeeRateForOrder,
+  resolveAsterBuilderFeeConfig,
+  TEALSTREET_ASTER_BUILDER_ADDRESS_MAINNET,
+  TEALSTREET_ASTER_BUILDER_ADDRESS_TESTNET,
+} from './exchanges/asterdex/asterdex.builder-fee';
+
+export type {
+  AsterBuilderApprovalCheckResult,
+  AsterBuilderApprovalResult,
+  AsterBuilderApprovalStatus,
+} from './exchanges/asterdex/asterdex.builder-approval';
+
+export type { AsterBuilderFeeConfig } from './exchanges/asterdex/asterdex.builder-fee';
+
+/**
  * Hyperliquid agent (API) wallet utilities
  * Used for in-app API wallet creation
  */

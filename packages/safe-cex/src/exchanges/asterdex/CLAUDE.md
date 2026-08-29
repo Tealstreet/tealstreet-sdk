@@ -24,6 +24,8 @@ The uplift is intentionally backward-compatible: existing V1 accounts continue t
 
 - `asterdex.exchange.ts`: main exchange class; resolves API version and routes fapi calls via `getFapiPath()`
 - `asterdex.api.ts`: REST client with V1+V3 signing logic, timestamp retry, and multiple rate-limited clients
+- `asterdex.builder-fee.ts`: Aster Code builder-address/rate resolver and maker/taker placement policy
+- `asterdex.builder-approval.ts`: Aster Code builder approval check and main-wallet approval helpers
 - `asterdex.types.ts`: exchange types plus version/auth helpers (`resolveAsterDEXApiVersion`, `hasAsterDEXV3AuthContext`, `getAsterDEXFapiPath`)
 - `asterdex.virtualClock.ts`: Aster-specific time sync with V1/V3 time endpoint fallback and proxy fallback
 - `asterdex.ws-public.ts`: public WebSocket (tickers, depth, trades, mark prices, klines)
@@ -53,7 +55,7 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
 ### V3 (Wallet / Agent Model)
 
 - Header: `X-MBX-APIKEY`
-- Params include `recvWindow`, `timestamp`, plus:
+- Standard signed params include `recvWindow`, `timestamp`, plus:
   - `user`
   - `signer`
   - `nonce` (microseconds, monotonic)
@@ -63,6 +65,17 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
   3. keccak hash encoded payload
   4. apply Ethereum signed-message hash
   5. sign via secp256k1 ECDSA
+- Aster Code query/trading endpoints (`POST /fapi/v3/order`, `GET /fapi/v3/builder`,
+  `GET /fapi/v3/agent`) use the newer EIP-712 `Message.msg` signer instead:
+  1. Build the exact final query string in insertion order, without URL encoding
+  2. Append `asterChain`, `user`, `signer`, and monotonic `nonce`
+  3. Sign `types: { Message: [{ name: 'msg', type: 'string' }] }` under domain
+     `AsterSignTransaction` v1, zero verifying contract, chainId `1666` mainnet or `714` testnet
+  4. Send that exact query string plus `signature`
+
+The signed `msg` must equal the sent query string byte-for-byte excluding the trailing
+`signature`. Do not reorder params, pass decimals as JS numbers, or rely on Axios
+default serialization for Aster Code requests. V1 HMAC signing is unchanged.
 
 ### Common Request Behavior
 
@@ -164,10 +177,10 @@ Most endpoints use `/fapi/{apiVersion}/...` where `apiVersion` is `v1` or `v3`.
 
 ### Network Configuration
 
-| Component | Production | Testnet |
-| --------- | ---------- | ------- |
-| Public WS | `wss://fstream.asterdex.com/stream?requestId=<nanoid>` | `wss://fstream5.asterdex-testnet.com/stream?requestId=<nanoid>` |
-| Private WS | `wss://fstream.asterdex.com/ws/<listenKey>` | `wss://fstream5.asterdex-testnet.com/ws/<listenKey>` |
+| Component  | Production                                             | Testnet                                                         |
+| ---------- | ------------------------------------------------------ | --------------------------------------------------------------- |
+| Public WS  | `wss://fstream.asterdex.com/stream?requestId=<nanoid>` | `wss://fstream5.asterdex-testnet.com/stream?requestId=<nanoid>` |
+| Private WS | `wss://fstream.asterdex.com/ws/<listenKey>`            | `wss://fstream5.asterdex-testnet.com/ws/<listenKey>`            |
 
 Each environment uses one host for public and private streams, with `/stream`
 for public multiplexed traffic and `/ws/<listenKey>` for private user data.
@@ -360,6 +373,55 @@ When `takeProfit` or `stopLoss` is provided with a limit/market order (`AsterDEX
 - All three paths reject before request I/O on V1, and malformed runtime
   values or unknown read responses fail closed.
 
+### Builder Attribution (Aster Code)
+
+- Aster futures builder attribution is per-exchange only. It does not stack with
+  Hyperliquid or any other venue's builder fee.
+- Order placement uses one decimal-string `feeRate` per order plus `builder`; Aster
+  does not expose separate venue-side maker/taker rates. Tealstreet resolves a client-side
+  maker/taker policy at placement time:
+  - post-only `LIMIT` (`GTX`) uses `feeRateMaker`
+  - every other order path uses `feeRateTaker`
+- Built-in maker/taker policy rates default to `0.0001` (1 bps). A real
+  builder wallet address is still required; placeholder builder constants keep
+  attribution disabled.
+- Futures fee cap is `0.001` (10 bps). Reject invalid, negative, scientific-notation,
+  NaN, or over-cap rates. Do not clamp them.
+- Resolver skips attribution entirely when unconfigured, when both configured rates are
+  `0`, or when the selected maker/taker rate for this order is `0`. Never send
+  `builder` without `feeRate`, never send `feeRate` without `builder`, and never send
+  `feeRate='0'`.
+- Split oversized children, bracket TP/SL siblings, `placeOrders()` loops, and
+  `closePosition='true'` TP/SL close orders all carry attribution when configured.
+- ADL and liquidation orders are excluded from builder fees by Aster itself; do not
+  attempt to work around that.
+- Approval requires the user's main wallet EIP-712 signature (`ApproveBuilder`). An
+  agent-only imported account cannot approve in-app; surface actionable guidance to
+  re-add with the main wallet or approve out-of-band on Aster.
+- `ApproveBuilder` is a main-wallet action and must follow Aster's demo shape
+  exactly:
+  - switch/request the browser wallet on BNB Smart Chain (`chainId` `0x38`)
+    before `eth_signTypedData_v4`
+  - EIP-712 domain `chainId` is `56` for EVM wallets, and submitted
+    `signatureChainId` is also `56`; `asterChain` remains `Mainnet`/`Testnet`
+  - include the explicit `EIP712Domain` type in the typed data plus
+    `ApproveBuilder` fields in this order: `Builder`, `MaxFeeRate`,
+    `BuilderName`, `AsterChain`, `User`, `Nonce`
+  - submit `POST /fapi/v3/approveBuilder` as
+    `application/x-www-form-urlencoded` body fields in demo order:
+    `builder`, `maxFeeRate`, `builderName`, `asterChain`, `user`, `nonce`,
+    `signature`, `signatureChainId`
+  - do not reuse the Aster Code query/order signer chain ids (`1666`/`714`)
+    for approval signatures; using them opens or signs in some wallets but
+    Aster rejects the submit with signature verification failure
+- Browser account-form approval checks/submits use the Tealstreet JP proxy when
+  a proxy token is available. A direct local browser request can fail with
+  `Ip not in whitelist` even when the saved account would work through the
+  normal exchange tunnel/proxy path.
+- Read-side approval checks use signed `GET /fapi/v3/builder`. Treat parse/network
+  failures as `unverified`, not as a denial, so already-approved users are not locked
+  out by a transient read failure.
+
 ## Symbol Format
 
 - **Format**: Concatenated base + quote: `BTCUSDT`, `ETHUSDT`
@@ -464,11 +526,11 @@ Four API instances with different rate limits (`createAPIInstances`):
 
 ## Testnet/Demo
 
-| Component  | Production                          | Testnet                                            |
-| ---------- | ----------------------------------- | -------------------------------------------------- |
-| REST API   | `https://fapi.asterdex.com`         | `https://fapi.asterdex-testnet.com`                |
-| Public WS  | `wss://fstream.asterdex.com/stream` | `wss://fstream5.asterdex-testnet.com/stream`       |
-| Private WS | `wss://fstream.asterdex.com/ws/...` | `wss://fstream5.asterdex-testnet.com/ws/...`       |
+| Component  | Production                          | Testnet                                      |
+| ---------- | ----------------------------------- | -------------------------------------------- |
+| REST API   | `https://fapi.asterdex.com`         | `https://fapi.asterdex-testnet.com`          |
+| Public WS  | `wss://fstream.asterdex.com/stream` | `wss://fstream5.asterdex-testnet.com/stream` |
+| Private WS | `wss://fstream.asterdex.com/ws/...` | `wss://fstream5.asterdex-testnet.com/ws/...` |
 
 `ASTERDEX_ENDPOINTS` is the single source for REST and WS environment hosts;
 the dedicated Aster clock uses the same REST constant.
@@ -528,7 +590,7 @@ the dedicated Aster clock uses the same REST constant.
 - **Orders placed individually**: no batch endpoint usage in `placeOrders`/`cancelOrders`; failures are tolerated per-item.
 - **Trigger defaults**: TP defaults to `CONTRACT_PRICE` and SL defaults to `MARK_PRICE` (Binance-like behavior).
 - **All signed params in query**: POST/PUT/DELETE signed requests use query parameters and clear request body.
-- **Dual signing**: V1 routes use HMAC-SHA256; V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`.
+- **Dual signing**: V1 routes use HMAC-SHA256; standard V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`; Aster Code routes use EIP-712 `Message.msg` query-string signing with `asterChain`.
 - **Binance-style 200-with-error handling**: interceptor treats negative `code` values as API errors.
 - **Ticker bid/ask source**: bid/ask are derived only from validated partial orderbook snapshots, not 24h ticker REST payload or diff frames.
 - **Private WS repair is split by purpose**: `ACCOUNT_UPDATE` schedules
@@ -550,7 +612,7 @@ the dedicated Aster clock uses the same REST constant.
 - Error code `-1021` with "Timestamp" in message triggers automatic resync
 - Resyncs time via `asterDEXVirtualClock.syncClientServerTime()`
 - Retries the original request once (uses `__isRetryRequest` flag to prevent infinite loop)
-- Strips stale signature params before retry (`timestamp`, `signature`, `recvWindow`, plus `user`/`signer`/`nonce` when present)
+- Strips stale signature params before retry (`timestamp`, `signature`, `recvWindow`, plus `user`/`signer`/`nonce` when present); pre-built Aster Code URLs are rebuilt from the stored unsigned params.
 
 ### HTTP Status Code Handling (`createAPI` response interceptor)
 
@@ -603,6 +665,11 @@ authoritative reconciliation.
 `src/__tests__/audit-regressions/asterdex.v3-stp.test.ts` locks V3-only STP
 account reads/writes, per-order override serialization, V1 rejection before
 I/O, and malformed mode rejection.
+
+`src/__tests__/audit-regressions/asterdex.builder-attribution.test.ts` locks the
+Aster builder-fee resolver, V1 no-op behavior, V3 maker/taker attribution,
+split/bracket/close-position propagation, Aster Code signed-query byte parity,
+nonce monotonicity, and approval-status parsing.
 
 ## CCXT Reference
 

@@ -119,6 +119,11 @@ export type ExchangeOptions = {
     recvWindow?: number;
     // Optional AsterDEX REST API version override.
     asterdexApiVersion?: 'v1' | 'v3';
+    // Optional Aster Code builder attribution overrides.
+    // Aster accepts one feeRate per order; maker/taker fields are Tealstreet placement policy.
+    asterBuilderAddress?: string;
+    asterBuilderFeeRateMaker?: string;
+    asterBuilderFeeRateTaker?: string;
     // Lighter builder/integrator fee mode.
     lighterBuilderFeeMode?: 'dynamic' | 'static';
     // Optional override for Lighter integrator account index.

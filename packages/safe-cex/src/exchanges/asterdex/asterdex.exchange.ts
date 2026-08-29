@@ -55,6 +55,7 @@ import { loop } from '../../utils/loop';
 import { adjust } from '../../utils/safe-math';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPIInstances } from './asterdex.api';
+import { getAsterBuilderFeeRateForOrder, resolveAsterBuilderFeeConfig } from './asterdex.builder-fee';
 import {
   asterdexOrderSideMap,
   asterdexOrderTypeMap,
@@ -873,6 +874,24 @@ export class AsterDEXExchange extends BaseExchange {
       if (opts.stpMode !== undefined) {
         orderParams.stpMode = opts.stpMode;
       }
+      if (this.apiVersion === 'v3') {
+        const builderFeeConfig = resolveAsterBuilderFeeConfig(this.options);
+        if (builderFeeConfig) {
+          const feeRate = getAsterBuilderFeeRateForOrder(
+            {
+              type: opts.type,
+              timeInForce: opts.timeInForce,
+              postOnly: (opts as { readonly postOnly?: boolean }).postOnly,
+            },
+            orderType,
+            builderFeeConfig,
+          );
+          if (feeRate) {
+            orderParams.builder = builderFeeConfig.builderAddress;
+            orderParams.feeRate = feeRate;
+          }
+        }
+      }
       const positionSide = this.getOrderPositionSide(opts);
       if (positionSide !== 'BOTH') {
         orderParams.positionSide = positionSide;
@@ -932,9 +951,14 @@ export class AsterDEXExchange extends BaseExchange {
       // Client order ID is not supported in PlaceOrderOpts
 
       const response = await this.secondaryAPI.post<AsterDEXOrderResponse>(this.getFapiPath('order'), orderParams);
+      const rawResponse = response.data as { orderId?: string | number; data?: { orderId?: string | number } };
+      const orderId: string | number | undefined = rawResponse.orderId ?? rawResponse.data?.orderId;
+      if (orderId === undefined || orderId === null || orderId === '') {
+        throw new Error('AsterDEX order response did not include orderId');
+      }
 
-      this.log(`Order placed: ${response.data.orderId}`, LogSeverity.Info);
-      return [response.data.orderId.toString()];
+      this.log(`Order placed: ${orderId}`, LogSeverity.Info);
+      return [orderId.toString()];
     } catch (error: any) {
       this.log(`Failed to place order: ${error.message}`, LogSeverity.Error);
       throw error;
