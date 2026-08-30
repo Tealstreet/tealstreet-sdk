@@ -1,6 +1,6 @@
 import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
 
@@ -118,6 +118,32 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         enforceWsTunnel: true,
         privateProxyRegions: { SG: ['1.2.3.4'] },
       },
+      kucoin: {
+        exchangeName: 'kucoin',
+        requiresCors: false,
+        requiresPassphrase: true,
+        requiresApplicationId: false,
+        requiresApiKeyIndex: false,
+        supportsVault: false,
+        requiresOmniKeySeed: false,
+        requiresParadexAddress: false,
+        supportsSubaccount: false,
+        enforceWsTunnel: true,
+        privateProxyRegions: { SG: ['1.2.3.4'] },
+      },
+      kucoinspot: {
+        exchangeName: 'kucoinspot',
+        requiresCors: false,
+        requiresPassphrase: true,
+        requiresApplicationId: false,
+        requiresApiKeyIndex: false,
+        supportsVault: false,
+        requiresOmniKeySeed: false,
+        requiresParadexAddress: false,
+        supportsSubaccount: false,
+        enforceWsTunnel: true,
+        privateProxyRegions: { SG: ['1.2.3.4'] },
+      },
     };
     return metadataMap[exchange] || metadataMap.bybit;
   }),
@@ -129,6 +155,10 @@ vi.mock('./index', () => ({
 }));
 
 describe('accountToExchangeOptions', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe('basic credentials mapping', () => {
     it('should map apiKey and apiSecret to key and secret', () => {
       const account: ExchangeAccountConfig = {
@@ -515,6 +545,89 @@ describe('accountToExchangeOptions', () => {
       const options = accountToExchangeOptions(account);
 
       expect(options.orderlyExchangeId).toBe('orderly-123');
+    });
+
+    it('should include public KuCoin broker attribution env for futures and spot', () => {
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_PARTNER', ' 3zexp ');
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_KEY', ' browser-broker-key ');
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_NAME', ' tealstreet ');
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_VERIFY', '0');
+
+      for (const exchange of ['kucoin', 'kucoinspot'] as const) {
+        const options = accountToExchangeOptions({
+          exchange,
+          name: `test-${exchange}`,
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+          passphrase: 'test-passphrase',
+        });
+
+        expect(options.extra?.kucoinBroker).toEqual({
+          partner: '3zexp',
+          brokerKey: 'browser-broker-key',
+          brokerName: 'tealstreet',
+          verify: false,
+        });
+      }
+    });
+
+    it('should skip public KuCoin broker attribution env when incomplete or on other exchanges', () => {
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_PARTNER', '3zexp');
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_KEY', 'browser-broker-key');
+
+      expect(
+        accountToExchangeOptions({
+          exchange: 'kucoin',
+          name: 'test-kucoin',
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+          passphrase: 'test-passphrase',
+        }).extra?.kucoinBroker,
+      ).toBeUndefined();
+
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_NAME', 'tealstreet');
+
+      expect(
+        accountToExchangeOptions({
+          exchange: 'bybit',
+          name: 'test-bybit',
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+        }).extra?.kucoinBroker,
+      ).toBeUndefined();
+    });
+
+    it('should let explicit KuCoin broker overrides win over public env defaults', () => {
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_PARTNER', '3zexp');
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_KEY', 'browser-broker-key');
+      vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_NAME', 'tealstreet');
+
+      const options = accountToExchangeOptions(
+        {
+          exchange: 'kucoin',
+          name: 'test-kucoin',
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+          passphrase: 'test-passphrase',
+        },
+        {
+          extra: {
+            kucoinBroker: {
+              partner: 'override-partner',
+              brokerKey: 'override-key',
+              brokerName: 'override-name',
+              verify: true,
+            },
+          },
+        },
+      );
+
+      expect(options.extra?.kucoinBroker).toEqual({
+        partner: 'override-partner',
+        brokerKey: 'override-key',
+        brokerName: 'override-name',
+        verify: true,
+      });
     });
   });
 

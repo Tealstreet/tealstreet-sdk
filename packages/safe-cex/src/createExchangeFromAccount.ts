@@ -5,6 +5,57 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { createExchange } from './index';
 import { getPublicCorsProxy, resolveAccountTransport } from './utils/transportResolution';
 
+type KucoinBrokerConfig = NonNullable<NonNullable<ExchangeOptions['extra']>['kucoinBroker']>;
+
+const getPublicEnv = (name: string): string | undefined => {
+  const value = typeof process === 'undefined' ? undefined : process.env?.[name];
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+};
+
+const parseKucoinBrokerVerify = (value: string | undefined): boolean | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+
+  return undefined;
+};
+
+const resolvePublicKucoinBrokerConfig = (
+  exchange: ExchangeAccountConfig['exchange'],
+): KucoinBrokerConfig | undefined => {
+  if (exchange !== 'kucoin' && exchange !== 'kucoinspot') {
+    return undefined;
+  }
+
+  const partner = getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_PARTNER');
+  const brokerKey = getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_KEY');
+  const brokerName = getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_NAME');
+  if (!partner || !brokerKey || !brokerName) {
+    return undefined;
+  }
+
+  const verify = parseKucoinBrokerVerify(getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_VERIFY'));
+
+  return {
+    partner,
+    brokerKey,
+    brokerName,
+    ...(verify !== undefined ? { verify } : {}),
+  };
+};
+
 /**
  * Convert an ExchangeAccountConfig to ExchangeOptions.
  * This is a pure function that maps account fields to the options format
@@ -15,10 +66,17 @@ export function accountToExchangeOptions(
   account: ExchangeAccountConfig,
   overrides?: Partial<ExchangeOptions>,
 ): ExchangeOptions {
+  const { extra: overrideExtra, ...optionOverrides } = overrides ?? {};
   const metadata = getExchangeMetadata(account.exchange);
   const shouldForwardApplicationId =
     metadata.requiresApplicationId || account.exchange === 'lighter' || account.exchange === 'asterdex';
   const shouldForwardApiKeyIndex = metadata.requiresApiKeyIndex || account.exchange === 'lighter';
+  const publicKucoinBrokerConfig = resolvePublicKucoinBrokerConfig(account.exchange);
+  const extra = {
+    ...(publicKucoinBrokerConfig ? { kucoinBroker: publicKucoinBrokerConfig } : {}),
+    ...overrideExtra,
+  };
+  const hasExtra = Object.keys(extra).length > 0;
 
   // Runtime sanity checks for impossible metadata configurations
   if (metadata.requiresCors && metadata.forbidCors) {
@@ -95,9 +153,10 @@ export function accountToExchangeOptions(
 
     // Orderly exchange ID
     ...(account.orderlyExchangeId ? { orderlyExchangeId: account.orderlyExchangeId } : {}),
+    ...(hasExtra ? { extra } : {}),
 
     // Apply any overrides
-    ...overrides,
+    ...optionOverrides,
   };
 
   return options;

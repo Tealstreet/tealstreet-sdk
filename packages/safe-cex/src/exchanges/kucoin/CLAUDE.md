@@ -197,9 +197,9 @@ KuCoin uses HMAC-SHA256 with an encrypted passphrase (`kucoin.api.ts:12-73`):
    | `Content-Type`       | `'application/json'`                       |
 
 4. **Broker attribution headers**: KuCoin's current Broker REST docs say
-   `X-CHANNEL-API-CODE` alone is not the complete attribution path. When a
-   trusted runtime supplies `options.extra.kucoinBroker`, both Futures and Spot
-   add the official signed headers to private REST requests:
+   `X-CHANNEL-API-CODE` alone is not the complete attribution path. When
+   `options.extra.kucoinBroker` is supplied, both Futures and Spot add the
+   official signed headers to private REST requests:
 
    | Header                  | Value                                                                 |
    | ----------------------- | --------------------------------------------------------------------- |
@@ -208,11 +208,13 @@ KuCoin uses HMAC-SHA256 with an encrypted passphrase (`kucoin.api.ts:12-73`):
    | `KC-BROKER-NAME`        | `options.extra.kucoinBroker.brokerName`                               |
    | `KC-API-PARTNER-VERIFY` | `'true'` by default, so a bad broker signature fails rather than drops |
 
-   `brokerKey` is a KuCoin-issued broker secret. **Never hardcode it in
-   browser-bundled code or pass it through saved account config.** The helper
-   also reuses an existing `KC-API-TIMESTAMP` header: hosted/server code can add
-   broker headers before the remote-signer round trip, and the browser signer
-   will sign the user request with the same timestamp.
+   Product policy currently permits sending this attribution from the browser
+   runtime. `accountToExchangeOptions` fills `options.extra.kucoinBroker` for
+   `kucoin` and `kucoinspot` from `NEXT_PUBLIC_KUCOIN_BROKER_PARTNER`,
+   `NEXT_PUBLIC_KUCOIN_BROKER_KEY`, `NEXT_PUBLIC_KUCOIN_BROKER_NAME`, and
+   optional `NEXT_PUBLIC_KUCOIN_BROKER_VERIFY` when all required values are
+   present. The helper also reuses an existing `KC-API-TIMESTAMP` header so a
+   remote signer and the local broker-header signer use the same timestamp.
 
 5. **HTTP-over-WebSocket**: Authenticated/private REST uses `axiosHttpOverWebsocketAdapter` for REST API tunneling through WebSocket connections (`kucoin.api.ts:43`). Public-data-only REST does not install the tunnel adapter.
 
@@ -764,7 +766,9 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
     (`KC-API-PARTNER`, `KC-API-PARTNER-SIGN`, `KC-BROKER-NAME`, and recommended
     `KC-API-PARTNER-VERIFY:true`) for reliable rebate attribution. Both
     `kucoin.api.ts` and `kucoinspot.api.ts` add those headers when
-    `options.extra.kucoinBroker` is supplied by a trusted runtime.
+    `options.extra.kucoinBroker` is supplied. Browser account construction
+    populates it from `NEXT_PUBLIC_KUCOIN_BROKER_*` env vars for `kucoin` and
+    `kucoinspot`.
 22. **`isQuanto` is a false friend — `fetchMarkets` forces it to `false`.** KuCoin
     marks multiplier-based LINEAR contracts (XBTUSDTM + ~11 others) as
     `isQuanto: true`, but that is NOT the BitMEX-style quanto the web app means
