@@ -360,17 +360,19 @@ export class AsterDEXExchange extends BaseExchange {
         const keyLooksLikeWalletAddress = isAsterDEXAddress(this.options.key);
         const secretLooksLikePrivateKey = isAsterDEXV3PrivateKey(this.options.secret);
         if (this.apiVersion === 'v1' && keyLooksLikeWalletAddress && secretLooksLikePrivateKey && !auth.userAddress) {
-          throw new Error('AsterDEX v3 keys require Main Wallet Address (applicationId / auth.userAddress)');
+          throw new Error(
+            'Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with the login wallet, keep API Wallet Address as the API/vault wallet, and use the Generated Private Key for that API wallet.',
+          );
         }
 
         if (this.apiVersion === 'v3') {
           if (!auth.userAddress || !auth.signerAddress || !auth.signerPrivateKey) {
             throw new Error(
-              'Missing required AsterDEX v3 auth fields: auth.userAddress, auth.signerAddress, and signer private key (auth.privateKey or secret)',
+              'Missing required Aster v3 auth fields: Main Wallet Address, API Wallet Address, and Generated Private Key',
             );
           }
           if (!isAsterDEXV3PrivateKey(auth.signerPrivateKey)) {
-            throw new Error('Invalid AsterDEX v3 signer private key format (expected 64-byte hex)');
+            throw new Error('Invalid Aster API Wallet private key format (expected 64-byte hex)');
           }
         } else if (!this.options.secret) {
           throw new Error('Missing required credentials: API secret');

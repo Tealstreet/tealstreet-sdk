@@ -59,6 +59,11 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
   - `user`
   - `signer`
   - `nonce` (microseconds, monotonic)
+- Saved account mapping: `applicationId` is the `user` / login-main wallet,
+  `apiKey` is the API Wallet / agent / vault address (`signer`), and
+  `apiSecret` is the private key for that API wallet. Users must not replace
+  the main wallet with the API/vault wallet; both identities are required for
+  V3 trading/query endpoints.
 - Signature flow:
   1. Convert business params to string values and sort keys
   2. ABI encode `[string payloadJson, address user, address signer, uint256 nonce]`
