@@ -212,19 +212,16 @@ KuCoin uses HMAC-SHA256 with an encrypted passphrase (`kucoin.api.ts:12-73`):
    browser-bundled code or pass it through saved account config.** The helper
    also reuses an existing `KC-API-TIMESTAMP` header: hosted/server code can add
    broker headers before the remote-signer round trip, and the browser signer
-   will sign the user request with the same timestamp. The TradeTunnel REST
-   executor can also inject these headers from its own `KUCOIN_BROKER_*`
-   environment variables for browser-originated HoW requests.
+   will sign the user request with the same timestamp.
 
 5. **HTTP-over-WebSocket**: Authenticated/private REST uses `axiosHttpOverWebsocketAdapter` for REST API tunneling through WebSocket connections (`kucoin.api.ts:43`). Public-data-only REST does not install the tunnel adapter.
 
 Broker attribution is guaranteed only on code paths where the signed broker
 headers are present. The main-thread browser exchange is the executor of user
-order writes; do not put the broker key there. Browser order writes that go
-through HoW/TradeTunnel can receive server-side injection there when its
-`KUCOIN_BROKER_*` env vars are configured. Direct legacy REST-proxy paths can
-pass the headers via CORS, but do not generate the partner signature unless a
-separate trusted secret-bearing proxy hook is added.
+order writes; do not put the broker key there. If KuCoin requires signed broker
+headers for order-write rebate credit, the browser write transport needs a
+trusted header-injection/signing path, or those writes fall back to the legacy
+`X-CHANNEL-API-CODE` header only.
 
 ### Private WebSocket Authentication
 
@@ -767,9 +764,7 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
     (`KC-API-PARTNER`, `KC-API-PARTNER-SIGN`, `KC-BROKER-NAME`, and recommended
     `KC-API-PARTNER-VERIFY:true`) for reliable rebate attribution. Both
     `kucoin.api.ts` and `kucoinspot.api.ts` add those headers when
-    `options.extra.kucoinBroker` is supplied by a trusted runtime. TradeTunnel
-    can inject the same signed header set from server-only `KUCOIN_BROKER_*`
-    env vars for tunneled browser REST requests.
+    `options.extra.kucoinBroker` is supplied by a trusted runtime.
 22. **`isQuanto` is a false friend — `fetchMarkets` forces it to `false`.** KuCoin
     marks multiplier-based LINEAR contracts (XBTUSDTM + ~11 others) as
     `isQuanto: true`, but that is NOT the BitMEX-style quanto the web app means
