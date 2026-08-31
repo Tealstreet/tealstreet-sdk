@@ -20,6 +20,7 @@ Official docs used for `kucoinspot`:
 - Spot klines: https://www.kucoin.com/docs-new/rest/spot-trading/market-data/get-klines
 - Spot HF orders: https://www.kucoin.com/docs-new/rest/spot-trading/orders/add-order
 - Spot HF open orders by page: https://www.kucoin.com/docs-new/rest/spot-trading/orders/get-open-orders-by-page
+- Spot HF fills: https://www.kucoin.com/docs-new/rest/spot-trading/orders/get-trade-history
 
 **`get-open-orders-by-page` caps `pageSize` at 50** (`"pageSize must be less or
 equals than 50"`). `KUCOIN_SPOT_OPEN_ORDERS_PAGE_SIZE` was 100, so `fetchOrders`
@@ -78,6 +79,14 @@ call `fetchOrders()` with no args). `fetchActiveOrderSymbols`
 (`/api/v1/hf/orders/active/symbols`) discovers which symbols have open orders,
 then it fetches each. Combined with the cancel mislabel above, a cancelled spot
 order otherwise stuck forever as the wrong status.
+
+**`fetchHistoricalFills()` is symbol-required too.** KuCoin's HF fills endpoint
+(`/api/v1/hf/fills`) rejects an account-wide request with "Symbol code can't be
+empty". The adapter returns `[]` without a venue call when no symbol is supplied,
+and `kucoinspot` is listed in `SYMBOL_SCOPED_FILLS`. Because Spot has no income
+ledger / traded-symbol enumerator today, background ingestion treats its fills
+axis as `unsupported` instead of repeatedly calling the venue or completing a
+false empty coverage window.
 
 **Spot pre-flight throws emit first.** `placeOrder`'s unsupported-type and
 attached-TP/SL rejections call `emitAndLogError` before throwing (per the

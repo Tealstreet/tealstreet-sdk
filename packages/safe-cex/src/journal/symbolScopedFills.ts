@@ -21,7 +21,7 @@ import type { ExchangeName } from '../types';
  * guard and fails if the registry disagrees. A hand list would drift the first
  * time someone added or removed the early return, and the drift would present as
  * silent under-collection rather than as a broken build — which is how the
- * `positions` axis ended up declaring only three of these thirteen.
+ * `positions` axis ended up declaring only three of these symbol-scoped venues.
  */
 export const SYMBOL_SCOPED_FILLS: ReadonlySet<ExchangeName> = new Set([
   'apexomni',
@@ -33,6 +33,7 @@ export const SYMBOL_SCOPED_FILLS: ReadonlySet<ExchangeName> = new Set([
   'bybit',
   'bybitinverse',
   'hyperliquid',
+  'kucoinspot',
   'lighter',
   'mexc',
   'okx',
@@ -48,9 +49,9 @@ export const isSymbolScopedFills = (exchange: ExchangeName): boolean => SYMBOL_S
  * A symbol-scoped venue with no income ledger cannot be collected account-wide
  * NOR symbol by symbol, because there is nothing to enumerate from. The correct
  * report for those is `unsupported` — "we have no way to ask" — and never an
- * empty result. Six venues sit here today (apexomni, asterdex, bingx,
- * bybitinverse, lighter, phemex); each needs either an income route or a
- * venue-specific symbol source before its fills can be held.
+ * empty result. Seven venues sit here today (apexomni, asterdex, bingx,
+ * bybitinverse, kucoinspot, lighter, phemex); each needs either an income route
+ * or a venue-specific symbol source before its fills can be held.
  */
 export const canEnumerateFillSymbols = (exchange: { fetchIncomeHistoryRange?: unknown }): boolean =>
   typeof exchange.fetchIncomeHistoryRange === 'function';

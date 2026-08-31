@@ -528,6 +528,13 @@ describe('KucoinSpotExchange', () => {
     ]);
   });
 
+  it('does not call the symbol-required HF fills endpoint without a symbol', async () => {
+    exchange.xhr = { get: vi.fn() } as any;
+
+    await expect(exchange.fetchHistoricalFills({ from: 1_700_000_000_000 })).resolves.toEqual([]);
+    expect(exchange.xhr.get).not.toHaveBeenCalled();
+  });
+
   it('generates zero-size one-way positions for active spot markets', async () => {
     store.update({
       markets: [
