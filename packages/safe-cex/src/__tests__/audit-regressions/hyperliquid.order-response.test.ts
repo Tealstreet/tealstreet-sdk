@@ -181,6 +181,9 @@ describe('Hyperliquid transport failure reporting', () => {
 
     expect(isOnlyHyperliquidTerminalCancelError('Order was never placed, already canceled, or filled.')).toBe(true);
 
+    expect(isOnlyHyperliquidTerminalCancelError('')).toBe(false);
+    expect(isOnlyHyperliquidTerminalCancelError(' , . ')).toBe(false);
+
     expect(
       isOnlyHyperliquidTerminalCancelError(
         'Order was never placed, already canceled, or filled. asset=0, Insufficient margin to place order.',

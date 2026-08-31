@@ -48,6 +48,9 @@ const describeResponse = (value: unknown): string => {
 export const isOnlyHyperliquidTerminalCancelError = (message: unknown): boolean => {
   if (typeof message !== 'string') return false;
 
+  const terminalCancelErrors = message.match(HYPERLIQUID_TERMINAL_CANCEL_ERROR_PATTERN);
+  if (!terminalCancelErrors?.length) return false;
+
   const withoutTerminalCancelErrors = message
     .replace(HYPERLIQUID_TERMINAL_CANCEL_ERROR_PATTERN, '')
     .replace(/[,\s.]+/g, '');

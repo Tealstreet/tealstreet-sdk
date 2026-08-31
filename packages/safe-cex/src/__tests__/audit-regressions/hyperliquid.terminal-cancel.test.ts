@@ -178,6 +178,15 @@ describe('Hyperliquid terminal cancel misses after flatten', () => {
     expect(exchange.store.orders).toEqual([]);
   });
 
+  it('does not treat a blank cancel failure as an already-gone order', async () => {
+    const exchange = createExchange();
+    exchange.store.update({ orders: closeOrders });
+    exchange.xhr = { post: vi.fn().mockRejectedValue(new Error('')) } as any;
+
+    await expect(exchange.cancelOrders(closeOrders)).rejects.toMatchObject({ message: '' });
+    expect(exchange.store.orders).toEqual(closeOrders);
+  });
+
   it('does not let a stale frontendOpenOrders response re-add a WS-cancelled positional stop', async () => {
     const exchange = createExchange();
     const order = closeOrders[0];
