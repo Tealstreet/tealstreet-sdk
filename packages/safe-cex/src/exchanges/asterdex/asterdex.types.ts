@@ -53,6 +53,29 @@ export const isAsterDEXAddress = (value?: string): boolean => {
   return Boolean(value && ASTERDEX_ADDRESS_REGEX.test(value));
 };
 
+// Canonical marker sentence that MUST appear in any error the app throws when
+// AsterDEX V3-shape credentials are submitted without the Main Wallet Address.
+// `isAsterDEXMainWalletError` uses this marker so error routing stays coupled
+// to the message the exchange class actually throws.
+export const ASTERDEX_MAIN_WALLET_REQUIRED_HINT =
+  'Aster API Wallet/vault keys require the Main Wallet Address';
+
+export const ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE =
+  `${ASTERDEX_MAIN_WALLET_REQUIRED_HINT}. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.`;
+
+// Legacy substrings from earlier error-message revisions. Kept so a saved error
+// or an out-of-date build's message still routes to `applicationId` instead of
+// being misrouted to `apiSecret`. Add new phrasings to `ASTERDEX_MAIN_WALLET_REQUIRED_HINT`
+// (the composed message includes it by construction), not here.
+const ASTERDEX_MAIN_WALLET_LEGACY_HINTS = ['auth.useraddress', 'v3 keys require'] as const;
+
+export const isAsterDEXMainWalletError = (message: unknown): boolean => {
+  if (typeof message !== 'string' || message.length === 0) return false;
+  const lower = message.toLowerCase();
+  if (lower.includes(ASTERDEX_MAIN_WALLET_REQUIRED_HINT.toLowerCase())) return true;
+  return ASTERDEX_MAIN_WALLET_LEGACY_HINTS.some((hint) => lower.includes(hint));
+};
+
 export const resolveAsterDEXV3AuthContext = (options: ExchangeOptions): AsterDEXV3AuthContext => {
   return {
     // Keep auth.* as highest priority but allow account-model fallback fields.

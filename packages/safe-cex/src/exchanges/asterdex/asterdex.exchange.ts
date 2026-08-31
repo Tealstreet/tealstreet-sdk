@@ -57,6 +57,7 @@ import { BaseExchange, CallableMethodsInWorker } from '../base';
 import { createAPIInstances } from './asterdex.api';
 import { getAsterBuilderFeeRateForOrder, resolveAsterBuilderFeeConfig } from './asterdex.builder-fee';
 import {
+  ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
   asterdexOrderSideMap,
   asterdexOrderTypeMap,
   asterdexTimeInForceMap,
@@ -360,9 +361,7 @@ export class AsterDEXExchange extends BaseExchange {
         const keyLooksLikeWalletAddress = isAsterDEXAddress(this.options.key);
         const secretLooksLikePrivateKey = isAsterDEXV3PrivateKey(this.options.secret);
         if (this.apiVersion === 'v1' && keyLooksLikeWalletAddress && secretLooksLikePrivateKey && !auth.userAddress) {
-          throw new Error(
-            'Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with the login wallet, keep API Wallet Address as the API/vault wallet, and use the Generated Private Key for that API wallet.',
-          );
+          throw new Error(ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE);
         }
 
         if (this.apiVersion === 'v3') {
