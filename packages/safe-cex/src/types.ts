@@ -133,9 +133,9 @@ export type ExchangeOptions = {
     /**
      * KuCoin broker attribution config.
      *
-     * Browser builds may supply this from NEXT_PUBLIC_KUCOIN_BROKER_* env vars
-     * when product policy permits sending signed broker attribution from the
-     * client runtime.
+     * Browser builds may supply this from NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_*
+     * or NEXT_PUBLIC_KUCOIN_SPOT_BROKER_* env vars when product policy permits
+     * sending signed broker attribution from the client runtime.
      */
     kucoinBroker?: {
       readonly partner: string;

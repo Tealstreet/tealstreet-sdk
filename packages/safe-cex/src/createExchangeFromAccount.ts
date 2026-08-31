@@ -7,6 +7,11 @@ import { getPublicCorsProxy, resolveAccountTransport } from './utils/transportRe
 
 type KucoinBrokerConfig = NonNullable<NonNullable<ExchangeOptions['extra']>['kucoinBroker']>;
 
+const KUCOIN_BROKER_ENV_PREFIX_BY_EXCHANGE = {
+  kucoin: 'NEXT_PUBLIC_KUCOIN_FUTURES_BROKER',
+  kucoinspot: 'NEXT_PUBLIC_KUCOIN_SPOT_BROKER',
+} as const;
+
 const getPublicEnv = (name: string): string | undefined => {
   const value = typeof process === 'undefined' ? undefined : process.env?.[name];
   if (typeof value !== 'string') {
@@ -32,6 +37,9 @@ const parseKucoinBrokerVerify = (value: string | undefined): boolean | undefined
   return undefined;
 };
 
+const getKucoinBrokerEnv = (prefix: string, suffix: 'PARTNER' | 'KEY' | 'NAME' | 'VERIFY'): string | undefined =>
+  getPublicEnv(`${prefix}_${suffix}`) ?? getPublicEnv(`NEXT_PUBLIC_KUCOIN_BROKER_${suffix}`);
+
 const resolvePublicKucoinBrokerConfig = (
   exchange: ExchangeAccountConfig['exchange'],
 ): KucoinBrokerConfig | undefined => {
@@ -39,14 +47,15 @@ const resolvePublicKucoinBrokerConfig = (
     return undefined;
   }
 
-  const partner = getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_PARTNER');
-  const brokerKey = getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_KEY');
-  const brokerName = getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_NAME');
+  const prefix = KUCOIN_BROKER_ENV_PREFIX_BY_EXCHANGE[exchange];
+  const partner = getKucoinBrokerEnv(prefix, 'PARTNER');
+  const brokerKey = getKucoinBrokerEnv(prefix, 'KEY');
+  const brokerName = getKucoinBrokerEnv(prefix, 'NAME');
   if (!partner || !brokerKey || !brokerName) {
     return undefined;
   }
 
-  const verify = parseKucoinBrokerVerify(getPublicEnv('NEXT_PUBLIC_KUCOIN_BROKER_VERIFY'));
+  const verify = parseKucoinBrokerVerify(getKucoinBrokerEnv(prefix, 'VERIFY'));
 
   return {
     partner,
