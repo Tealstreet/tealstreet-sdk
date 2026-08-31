@@ -181,11 +181,12 @@ export async function checkBuilderFeeApproved(
 
     // Convert from tenths of basis points to percentage string
     // e.g., 10 tenths of bps = 1 bps = 0.01%
-    const feePercentage = (feeValueTenthsBps / 10 / 100).toFixed(2) + '%';
+    const feePercentage = `${feeValueTenthsBps / 10 / 100}%`;
 
     return {
-      approved: feeValueTenthsBps > 0,
+      approved: feeValueTenthsBps >= TEALSTREET_BUILDER_FEE,
       maxFeeRate: feePercentage,
+      maxFeeRateTenthsBps: feeValueTenthsBps,
     };
   } catch (error) {
     console.error('Failed to check builder fee approval:', error);

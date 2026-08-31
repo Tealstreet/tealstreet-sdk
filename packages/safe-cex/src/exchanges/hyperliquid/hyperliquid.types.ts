@@ -684,6 +684,7 @@ export interface BuilderFeeApprovalResult {
 export interface BuilderFeeCheckResult {
   approved: boolean;
   maxFeeRate?: string;
+  maxFeeRateTenthsBps?: number;
   /**
    * Set when the check could not be completed (network failure, non-2xx, or an
    * unparseable body). `approved: false` alone does NOT mean the user was

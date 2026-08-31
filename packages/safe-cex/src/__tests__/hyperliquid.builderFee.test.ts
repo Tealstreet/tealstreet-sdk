@@ -17,7 +17,16 @@ describe('checkBuilderFeeApproved', () => {
 
     const result = await checkBuilderFeeApproved('0xabc');
 
-    expect(result).toEqual({ approved: true, maxFeeRate: '0.01%' });
+    expect(result).toEqual({ approved: true, maxFeeRate: '0.01%', maxFeeRateTenthsBps: 10 });
+    expect(result.error).toBeUndefined();
+  });
+
+  it('rejects positive builder fees below the Tealstreet order fee', async () => {
+    mockFetch(async () => ({ ok: true, status: 200, text: async () => '5' }));
+
+    const result = await checkBuilderFeeApproved('0xabc');
+
+    expect(result).toEqual({ approved: false, maxFeeRate: '0.005%', maxFeeRateTenthsBps: 5 });
     expect(result.error).toBeUndefined();
   });
 
