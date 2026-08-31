@@ -547,65 +547,28 @@ describe('accountToExchangeOptions', () => {
       expect(options.orderlyExchangeId).toBe('orderly-123');
     });
 
-    it('should include separate public KuCoin broker attribution env for futures and spot', () => {
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_PARTNER', ' futures-partner ');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_KEY', ' futures-broker-key ');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_NAME', ' futures-broker ');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_VERIFY', '0');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_SPOT_BROKER_PARTNER', ' spot-partner ');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_SPOT_BROKER_KEY', ' spot-broker-key ');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_SPOT_BROKER_NAME', ' spot-broker ');
-      vi.stubEnv('NEXT_PUBLIC_KUCOIN_SPOT_BROKER_VERIFY', '1');
-
-      const futuresOptions = accountToExchangeOptions({
-        exchange: 'kucoin',
-        name: 'test-kucoin',
-        apiKey: 'test-key',
-        apiSecret: 'test-secret',
-        passphrase: 'test-passphrase',
-      });
-      const spotOptions = accountToExchangeOptions({
-        exchange: 'kucoinspot',
-        name: 'test-kucoinspot',
-        apiKey: 'test-key',
-        apiSecret: 'test-secret',
-        passphrase: 'test-passphrase',
-      });
-
-      expect(futuresOptions.extra?.kucoinBroker).toEqual({
-        partner: 'futures-partner',
-        brokerKey: 'futures-broker-key',
-        brokerName: 'futures-broker',
-        verify: false,
-      });
-      expect(spotOptions.extra?.kucoinBroker).toEqual({
-        partner: 'spot-partner',
-        brokerKey: 'spot-broker-key',
-        brokerName: 'spot-broker',
-        verify: true,
-      });
-    });
-
-    it('should use generic public KuCoin broker attribution env as a fallback', () => {
+    it('should include public KuCoin broker attribution env for futures and spot', () => {
       vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_PARTNER', ' 3zexp ');
       vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_KEY', ' browser-broker-key ');
       vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_NAME', ' tealstreet ');
       vi.stubEnv('NEXT_PUBLIC_KUCOIN_BROKER_VERIFY', '0');
 
-      const options = accountToExchangeOptions({
-        exchange: 'kucoinspot',
-        name: 'test-kucoinspot',
-        apiKey: 'test-key',
-        apiSecret: 'test-secret',
-        passphrase: 'test-passphrase',
-      });
+      for (const exchange of ['kucoin', 'kucoinspot'] as const) {
+        const options = accountToExchangeOptions({
+          exchange,
+          name: `test-${exchange}`,
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+          passphrase: 'test-passphrase',
+        });
 
-      expect(options.extra?.kucoinBroker).toEqual({
-        partner: '3zexp',
-        brokerKey: 'browser-broker-key',
-        brokerName: 'tealstreet',
-        verify: false,
-      });
+        expect(options.extra?.kucoinBroker).toEqual({
+          partner: '3zexp',
+          brokerKey: 'browser-broker-key',
+          brokerName: 'tealstreet',
+          verify: false,
+        });
+      }
     });
 
     it('should skip public KuCoin broker attribution env when incomplete or on other exchanges', () => {
