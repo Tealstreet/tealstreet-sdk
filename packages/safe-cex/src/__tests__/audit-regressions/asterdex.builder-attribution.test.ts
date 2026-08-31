@@ -430,6 +430,55 @@ describe('audit regression: Aster builder attribution', () => {
     expect(BigInt(nonces[1]!)).toBeGreaterThan(BigInt(nonces[0]!));
   });
 
+  it('surfaces Aster missing-builder-config errors with actionable API-key guidance', async () => {
+    const emitAndLogError = vi.fn();
+    const api = createAPI(
+      { options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any,
+      {},
+      { key: '', secret: '' } as any,
+    );
+    api.defaults.adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
+      config,
+      data: { code: -5025, msg: 'Cannot found builder config.' },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+
+    await expect(api.get('/fapi/v3/ping')).rejects.toThrow(
+      'Aster builder attribution is not synced for this API key',
+    );
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('Open your Aster API key settings'));
+  });
+
+  it('surfaces HTTP Aster missing-builder-config errors with actionable API-key guidance', async () => {
+    const emitAndLogError = vi.fn();
+    const api = createAPI(
+      { options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any,
+      {},
+      { key: '', secret: '' } as any,
+    );
+    api.defaults.adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) =>
+      Promise.reject(
+        Object.assign(new Error('Request failed'), {
+          config,
+          response: {
+            config,
+            data: { code: -5025, msg: 'Cannot found builder config.' },
+            headers: {},
+            status: 400,
+            statusText: 'Bad Request',
+          },
+        }),
+      ),
+    );
+
+    await expect(api.get('/fapi/v3/ping')).rejects.toThrow(
+      'Aster builder attribution is not synced for this API key',
+    );
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('reconnect the account and try again'));
+  });
+
   it('distinguishes approved, missing, insufficient cap, and unverified builder status', async () => {
     vi.spyOn(asterDEXVirtualClock, 'getCurrentTimeMs').mockReturnValue(1_700_000_000_000);
     const fetchMock = vi

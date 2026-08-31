@@ -176,6 +176,19 @@ const shouldSuppressUnknownOrderError = (config: any, code: unknown, message?: s
       .includes('unknown order'),
   );
 
+const getAsterDEXErrorDetail = (message: unknown, code: unknown): string => {
+  const rawMessage = typeof message === 'string' ? message : String(message || 'Unknown error');
+  const normalizedMessage = rawMessage.toLowerCase();
+  if (String(code) === '-5025' || normalizedMessage.includes('cannot found builder config')) {
+    return [
+      'Aster builder attribution is not synced for this API key.',
+      'Open your Aster API key settings, sync or enable the Tealstreet builder authorization,',
+      'then reconnect the account and try again.',
+    ].join(' ');
+  }
+  return rawMessage;
+};
+
 export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
   const baseURL = exchange?.options?.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
 
@@ -368,8 +381,9 @@ export const createAPI = (
     async (response) => {
       // Check if response contains an error (Binance-style API returns errors with 200 status)
       if (response.data?.code && response.data.code < 0) {
+        const detail = getAsterDEXErrorDetail(response.data.msg, response.data.code);
         const errorMessage = appendHttpFailure(
-          `AsterDEX API Error: ${response.data.msg || 'Unknown error'} (code: ${response.data.code})`,
+          `AsterDEX API Error: ${detail} (code: ${response.data.code})`,
           response,
         );
 
@@ -426,9 +440,9 @@ export const createAPI = (
 
         // Add error details from response
         if (data?.msg) {
-          errorMessage += ` - ${data.msg}`;
+          errorMessage += ` - ${getAsterDEXErrorDetail(data.msg, data?.code)}`;
         } else if (data?.error) {
-          errorMessage += ` - ${data.error}`;
+          errorMessage += ` - ${getAsterDEXErrorDetail(data.error, data?.code)}`;
         }
 
         // Include error code if available
