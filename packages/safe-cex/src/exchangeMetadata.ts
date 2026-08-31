@@ -2010,7 +2010,7 @@ const KrakenSpotMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/kraken/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
