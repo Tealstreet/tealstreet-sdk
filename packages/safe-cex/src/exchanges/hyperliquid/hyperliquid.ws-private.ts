@@ -1047,6 +1047,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         status === 'reduceOnlyCanceled' ||
         status === 'reduceOnlyRejected'
       ) {
+        this.parent.suppressCancelledOrder(orderId);
         this.parent.store.removeOrder({ id: orderId });
         this.parent.forgetLimitOrderTimeInForce(orderId);
         continue;

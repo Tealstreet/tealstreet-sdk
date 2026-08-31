@@ -381,10 +381,10 @@ export class HyperliquidExchange extends BaseExchange {
   }
 
   /**
-   * Mark an order as recently cancelled. Stale WS messages will be suppressed
-   * until REST backfill confirms the cancellation or the suppression expires.
+   * Mark an order as recently cancelled. Stale WS/REST open snapshots will be
+   * suppressed until REST backfill confirms the cancellation or the suppression expires.
    */
-  private suppressCancelledOrder(orderId: string): void {
+  public suppressCancelledOrder(orderId: string): void {
     this._cancelledOrders.set(orderId, Date.now());
   }
 
@@ -2411,6 +2411,17 @@ export class HyperliquidExchange extends BaseExchange {
   private fetchOrdersInternal = async (): Promise<Order[]> => {
     const user = this.options.vault || this.options.applicationId;
     const orders: Order[] = [];
+    const observedOpenOrderIds = new Set<string>();
+    const recordObservedOpenOrderIds = (openOrders: unknown): void => {
+      if (!Array.isArray(openOrders)) return;
+      for (const openOrder of openOrders) {
+        if (!openOrder || typeof openOrder !== 'object') continue;
+        const oid = (openOrder as { oid?: unknown }).oid;
+        if (oid !== undefined && oid !== null) {
+          observedOpenOrderIds.add(`${oid}`);
+        }
+      }
+    };
 
     try {
       // Fetch core perp orders (without dex param)
@@ -2421,6 +2432,7 @@ export class HyperliquidExchange extends BaseExchange {
       );
 
       if (Array.isArray(coreOrders)) {
+        recordObservedOpenOrderIds(coreOrders);
         orders.push(...this.parseOpenOrders(coreOrders));
       }
 
@@ -2441,6 +2453,9 @@ export class HyperliquidExchange extends BaseExchange {
           );
 
           fetchedDexes.add(dexName.toLowerCase());
+          if (Array.isArray(dexOrders)) {
+            recordObservedOpenOrderIds(dexOrders);
+          }
           if (Array.isArray(dexOrders) && dexOrders.length > 0) {
             const parsedOrders = this.parseOpenOrders(dexOrders);
             this.log(`Successfully parsed ${parsedOrders.length} orders from HIP-3 dex: ${dexName}`, LogSeverity.Info);
@@ -2529,7 +2544,7 @@ export class HyperliquidExchange extends BaseExchange {
 
       // 3. Clean up confirmed cancellations — orders not in REST are truly gone
       for (const [cancelledId] of this._cancelledOrders) {
-        if (!fetchedOrderIds.has(cancelledId)) {
+        if (!observedOpenOrderIds.has(cancelledId)) {
           this._cancelledOrders.delete(cancelledId);
         }
       }

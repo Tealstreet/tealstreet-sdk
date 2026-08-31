@@ -573,6 +573,16 @@ observed more than once across core/dex REST reads, and the reconciliation loop
 uses a pre-mutation `currentOrdersById` snapshot; without input dedupe,
 duplicate same-oid rows can both look new and be appended to the store.
 
+WS terminal `orderUpdates` frames (`canceled`, `reduceOnlyCanceled`, etc.) must
+also seed the cancel-suppression map before removing the local row. Hyperliquid
+`frontendOpenOrders` snapshots can overlap the cancel and return a just-dead
+positional TP/SL as still open; without the same suppression used by local
+`cancelOrders()`, that stale REST response re-adds the row and the user waits
+for a later reconcile to clear it again. Track raw observed REST oids separately
+from parsed orders here: `parseOpenOrders()` filters suppressed orders out, and
+using only parsed ids would clear the suppression after the first stale response
+instead of waiting until REST actually stops returning the order.
+
 ### TIF Mappings
 
 | Internal            | Hyperliquid Wire |

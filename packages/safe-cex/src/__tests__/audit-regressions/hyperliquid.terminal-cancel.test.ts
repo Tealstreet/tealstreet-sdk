@@ -178,6 +178,59 @@ describe('Hyperliquid terminal cancel misses after flatten', () => {
     expect(exchange.store.orders).toEqual([]);
   });
 
+  it('does not let a stale frontendOpenOrders response re-add a WS-cancelled positional stop', async () => {
+    const exchange = createExchange();
+    const order = closeOrders[0];
+    exchange.store.update({ orders: [order] });
+    exchange.xhr = {
+      post: vi.fn().mockResolvedValue({
+        data: [
+          {
+            coin: 'BTC',
+            side: 'A',
+            limitPx: '66500',
+            sz: '0.0',
+            oid: Number(order.id),
+            timestamp: 1788209282578,
+            triggerCondition: 'Price below 70000',
+            isTrigger: true,
+            triggerPx: '70000',
+            children: [],
+            isPositionTpsl: true,
+            reduceOnly: true,
+            orderType: 'Stop Market',
+            origSz: '0.0',
+            tif: null,
+            cloid: null,
+          },
+        ],
+      }),
+    } as any;
+
+    exchange.privateWebsocket.handleOrderUpdates([
+      {
+        order: {
+          coin: 'BTC',
+          side: 'A',
+          limitPx: '66500',
+          sz: '0.0',
+          oid: Number(order.id),
+          timestamp: 1788209282578,
+          origSz: '0.0',
+          reduceOnly: true,
+        },
+        status: 'canceled',
+        statusTimestamp: 1788209287188,
+      },
+    ]);
+
+    expect(exchange.store.orders).toEqual([]);
+
+    await expect(exchange.fetchOrders()).resolves.toEqual([]);
+    await expect(exchange.fetchOrders()).resolves.toEqual([]);
+    expect(exchange.store.orders).toEqual([]);
+  });
+
   it('still fails cancel when Hyperliquid reports a real error', async () => {
     const exchange = createExchange();
     exchange.xhr = { post: vi.fn().mockRejectedValue(new Error('Cannot cancel. asset=0')) } as any;
