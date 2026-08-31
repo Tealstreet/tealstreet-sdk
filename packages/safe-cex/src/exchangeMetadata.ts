@@ -700,7 +700,7 @@ const BinanceSpotMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/reflinks/binance/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
   supportsTestnet: true,
   // No fetchHistoricalFills/fetchHistoricalTrades implementation in the Spot adapter.
