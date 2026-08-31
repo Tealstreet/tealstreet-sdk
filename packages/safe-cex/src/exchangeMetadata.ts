@@ -433,7 +433,7 @@ const BybitSpotMetadata: ExchangeMetadata = {
   supportsClosedPnLEndpoint: false,
   supportsOpeningTriggerOrders: false,
   forbidCors: true,
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
   marginTypes: [MarginType.Isolated],
   positionModes: [PositionMode.OneWay],
