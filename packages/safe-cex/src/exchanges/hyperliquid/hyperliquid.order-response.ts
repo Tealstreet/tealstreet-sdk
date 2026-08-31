@@ -3,6 +3,8 @@ export const EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE = 'Hyperliquid API returne
 type UnknownRecord = Record<string, unknown>;
 
 const HYPERLIQUID_DEFERRED_ORDER_STATUSES = new Set(['waitingForFill', 'waitingForTrigger']);
+const HYPERLIQUID_TERMINAL_CANCEL_ERROR_PATTERN =
+  /Order was never placed, already canceled, or filled\.?(?:\s*asset=\d+)?/gi;
 
 export type ParsedHyperliquidOrderResponse = {
   orderIds: string[];
@@ -41,6 +43,16 @@ const describeResponse = (value: unknown): string => {
   } catch {
     return String(value);
   }
+};
+
+export const isOnlyHyperliquidTerminalCancelError = (message: unknown): boolean => {
+  if (typeof message !== 'string') return false;
+
+  const withoutTerminalCancelErrors = message
+    .replace(HYPERLIQUID_TERMINAL_CANCEL_ERROR_PATTERN, '')
+    .replace(/[,\s.]+/g, '');
+
+  return withoutTerminalCancelErrors.length === 0;
 };
 
 const getResponseData = (data: unknown): UnknownRecord | undefined => {
@@ -91,7 +103,7 @@ export const extractHyperliquidResponseError = (data: unknown): string | undefin
     const errors: string[] = [];
     for (const status of statuses) {
       const error = getNonEmptyString(getRecord(status)?.error);
-      if (error) errors.push(error);
+      if (error && !errors.includes(error)) errors.push(error);
     }
     if (errors.length > 0) return errors.join(', ');
   }

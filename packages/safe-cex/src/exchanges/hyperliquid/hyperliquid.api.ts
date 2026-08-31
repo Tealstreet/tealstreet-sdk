@@ -13,9 +13,29 @@ import { BaseExchange } from '../base';
 import {
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
   extractHyperliquidResponseError,
+  isOnlyHyperliquidTerminalCancelError,
 } from './hyperliquid.order-response';
 import { signL1Action } from './hyperliquid.signing';
 import { BASE_URLS, ENDPOINTS } from './hyperliquid.types';
+
+const getRequestActionType = (requestData: unknown): string | undefined => {
+  const data =
+    typeof requestData === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(requestData);
+          } catch {
+            return undefined;
+          }
+        })()
+      : requestData;
+
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined;
+  const action = (data as { action?: unknown }).action;
+  if (typeof action !== 'object' || action === null || Array.isArray(action)) return undefined;
+  const type = (action as { type?: unknown }).type;
+  return typeof type === 'string' ? type : undefined;
+};
 
 // Common response interceptor for Hyperliquid API responses
 const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exchange: BaseExchange) => {
@@ -44,7 +64,19 @@ const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exch
     const responseError = extractHyperliquidResponseError(response.data);
     if (responseError) {
       const msg = httpFailed ? `${responseError} (HTTP ${response.status})` : responseError;
-      exchange.emitAndLogError(msg);
+      // Close-all / flatten then tries to cancel leftover TP/SL. Hyperliquid
+      // already dropped those orders with the fill, so cancel comes back as
+      // "never placed, already canceled, or filled" once per oid. That is the
+      // desired end state — do not toast it. Still throw so callers can tell
+      // a miss from a 2xx, and keep mixed batches (any other error) loud.
+      const actionType = getRequestActionType(response.config?.data);
+      const isTerminalCancelMiss =
+        isExchangeAction &&
+        (actionType === 'cancel' || actionType === 'cancelByCloid') &&
+        isOnlyHyperliquidTerminalCancelError(responseError);
+      if (!isTerminalCancelMiss) {
+        exchange.emitAndLogError(msg);
+      }
       throw new Error(msg);
     }
 

@@ -6,6 +6,7 @@ import {
   hyperliquidOrderResponseHasDeferredOrderStatus,
   hyperliquidOrderResponseHasWaitingForTrigger,
   HyperliquidUnreadableOrderResponseError,
+  isOnlyHyperliquidTerminalCancelError,
   parseHyperliquidOrderResponse,
 } from '../../exchanges/hyperliquid/hyperliquid.order-response';
 import { describeHttpFailure } from '../../utils/httpFailure';
@@ -169,5 +170,39 @@ describe('Hyperliquid transport failure reporting', () => {
         response: { type: 'order', data: { statuses: [{ error: 'Order price cannot be more than 80% away' }] } },
       }),
     ).not.toThrow(HyperliquidUnreadableOrderResponseError);
+  });
+
+  it('recognizes repeated terminal cancel misses without swallowing mixed failures', () => {
+    expect(
+      isOnlyHyperliquidTerminalCancelError(
+        'Order was never placed, already canceled, or filled. asset=0, Order was never placed, already canceled, or filled. asset=0, Order was never placed, already canceled, or filled. asset=0',
+      ),
+    ).toBe(true);
+
+    expect(isOnlyHyperliquidTerminalCancelError('Order was never placed, already canceled, or filled.')).toBe(true);
+
+    expect(
+      isOnlyHyperliquidTerminalCancelError(
+        'Order was never placed, already canceled, or filled. asset=0, Insufficient margin to place order.',
+      ),
+    ).toBe(false);
+  });
+
+  it('unique-dedupes identical per-order status errors', () => {
+    expect(
+      extractHyperliquidResponseError({
+        status: 'ok',
+        response: {
+          type: 'cancel',
+          data: {
+            statuses: [
+              { error: 'Order was never placed, already canceled, or filled. asset=0' },
+              { error: 'Order was never placed, already canceled, or filled. asset=0' },
+              { error: 'Order was never placed, already canceled, or filled. asset=0' },
+            ],
+          },
+        },
+      }),
+    ).toBe('Order was never placed, already canceled, or filled. asset=0');
   });
 });

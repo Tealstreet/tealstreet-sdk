@@ -81,6 +81,7 @@ import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } f
 import {
   hyperliquidOrderResponseHasDeferredOrderStatus,
   HyperliquidUnreadableOrderResponseError,
+  isOnlyHyperliquidTerminalCancelError,
   parseHyperliquidOrderResponse,
 } from './hyperliquid.order-response';
 import {
@@ -3940,11 +3941,20 @@ export class HyperliquidExchange extends BaseExchange {
     );
 
     const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
-    await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    try {
+      await this.xhr.post(ENDPOINTS.EXCHANGE, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (error) {
+      // Venue already canceled/filled these oids (typical after a market flatten
+      // auto-cancels positional TP/SL). Local cleanup below still applies.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!isOnlyHyperliquidTerminalCancelError(message)) {
+        throw error;
+      }
+    }
 
     // Optimistic removal: suppress cancelled orders from being re-added by stale WS snapshots.
     // REST backfill will be the source of truth — if the cancel somehow failed, fetchOrders()

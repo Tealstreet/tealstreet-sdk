@@ -502,6 +502,13 @@ loop in one try/catch returning `[]`, and `collectAccountAxis` reads a resolved
 `[]` as a successfully-empty window — so one 429 mid-walk would close the
 `historical_coverage` row over a gap that is then never re-asked.
 
+**Cancel of already-gone TP/SL after flatten is not a placement failure.** Close
+All / chart flatten places a reduce-only market, then `createMarketOrder`
+cancels leftover close-side TP/SL. Hyperliquid often already dropped those
+orders with the fill, so `/exchange` cancel returns
+`Order was never placed, already canceled, or filled. asset=N` (BTC is `0`)
+once per oid. Dedupe + squelch that miss only — see Error-as-Success below.
+
 An `/exchange` POST that fails **after** leaving the browser means the placement
 is **unknown, not failed** — the order may be resting right now. `postOrderAction`
 therefore schedules a REST order refresh on ANY rejection and rethrows: a tunnel
@@ -1171,6 +1178,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 
 - Cancel response with `status: "err"` is treated as a real error (interceptor throws)
 - Order placement response with any `status.error` in the statuses array causes full rejection of the batch
+- **Terminal cancel misses are not user errors.** After a full reduce-only market close, Hyperliquid auto-drops positional TP/SL. The follow-up `cancel` then returns `Order was never placed, already canceled, or filled. asset=N` once per oid (BTC is `asset=0`). `extractHyperliquidResponseError` unique-dedupes identical status strings; `isOnlyHyperliquidTerminalCancelError` matches a cancel/`cancelByCloid` batch that is *only* that miss. The interceptor still throws so callers can distinguish it from a 2xx, but it does **not** `emitAndLogError` (no toast). `cancelOrders` treats it as success and still suppresses/removes the local rows. Any other error in the same batch still toasts and throws.
 
 ## Testing / Validation
 
