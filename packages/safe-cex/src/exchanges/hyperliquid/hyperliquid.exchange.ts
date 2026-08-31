@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { Store } from '../../store/store.interface';
-import type { BuilderInfo } from './hyperliquid.types';
+import type { BuilderFeeCheckResult, BuilderInfo } from './hyperliquid.types';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs, { ManipulateType } from 'dayjs';
@@ -117,6 +117,22 @@ export { hasSeenFill, markFillSeen };
 const parseFiniteNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const maskHyperliquidAddress = (address: unknown): string | undefined => {
+  if (typeof address !== 'string' || !address) return undefined;
+  return address.length > 14 ? `${address.slice(0, 8)}...${address.slice(-6)}` : address;
+};
+
+const parseHyperliquidExchangePayload = (requestData: unknown): any | undefined => {
+  if (typeof requestData === 'string') {
+    try {
+      return JSON.parse(requestData);
+    } catch {
+      return undefined;
+    }
+  }
+  return requestData && typeof requestData === 'object' && !Array.isArray(requestData) ? requestData : undefined;
 };
 
 const calculatePriceChangePercentage = (price: number, prevDayPx: number): number => {
@@ -353,6 +369,7 @@ export class HyperliquidExchange extends BaseExchange {
 
   // Builder fee approval status: null = unknown, true = approved, false = not approved
   private _builderFeeApproved: boolean | null = null;
+  private _builderFeeLastCheck: BuilderFeeCheckResult | null = null;
 
   // ============================================================================
   // CANCELLATION SUPPRESSION
@@ -795,6 +812,7 @@ export class HyperliquidExchange extends BaseExchange {
     // Only check for wallet-based connections that have applicationId
     if (!this.options.applicationId) {
       this._builderFeeApproved = false;
+      this._builderFeeLastCheck = { approved: false, error: 'missing applicationId' };
       return;
     }
 
@@ -810,6 +828,7 @@ export class HyperliquidExchange extends BaseExchange {
         { approved: false },
       );
       this._builderFeeApproved = result.approved;
+      this._builderFeeLastCheck = result;
       this.log(
         `Builder fee approval status: ${result.approved ? 'approved' : 'not approved'}`,
         result.approved ? LogSeverity.Info : LogSeverity.Debug,
@@ -817,6 +836,10 @@ export class HyperliquidExchange extends BaseExchange {
     } catch (err) {
       this.log(`Failed to check builder fee approval: ${err}`, LogSeverity.Warning);
       this._builderFeeApproved = null; // Keep as unknown on error
+      this._builderFeeLastCheck = {
+        approved: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   };
 
@@ -1013,6 +1036,52 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     return undefined;
+  };
+
+  public getOrderErrorTelemetry = (requestData: unknown, message: string): Record<string, unknown> | undefined => {
+    if (!message.toLowerCase().includes('builder fee')) return undefined;
+
+    const payload = parseHyperliquidExchangePayload(requestData);
+    const action = payload?.action && typeof payload.action === 'object' ? payload.action : undefined;
+    const builder = action?.builder && typeof action.builder === 'object' ? (action.builder as Partial<BuilderInfo>) : undefined;
+    const lastCheck = this._builderFeeLastCheck;
+    const maxFeeTenths = lastCheck?.maxFeeRateTenthsBps;
+    const feeSufficient =
+      typeof maxFeeTenths === 'number' ? (maxFeeTenths >= TEALSTREET_BUILDER_FEE ? 'yes' : 'no') : 'unknown';
+    const builderCheckStatus =
+      this._builderFeeApproved === true ? 'approved' : this._builderFeeApproved === false ? 'not_approved' : 'unknown';
+
+    return {
+      sentryTags: {
+        hyperliquid_error_family: 'builder_fee',
+        hyperliquid_builder_attached: builder ? 'yes' : 'no',
+        hyperliquid_builder_check: builderCheckStatus,
+        hyperliquid_builder_fee_sufficient: feeSufficient,
+        hyperliquid_has_application_id: this.options.applicationId ? 'yes' : 'no',
+        hyperliquid_has_vault: this.options.vault ? 'yes' : 'no',
+        hyperliquid_network: this.options.testnet ? 'testnet' : 'mainnet',
+      },
+      sentryExtra: {
+        hyperliquidBuilderFee: {
+          actionType: typeof action?.type === 'string' ? action.type : undefined,
+          grouping: typeof action?.grouping === 'string' ? action.grouping : undefined,
+          orderCount: Array.isArray(action?.orders) ? action.orders.length : undefined,
+          builderPayloadPresent: Boolean(builder),
+          attachedBuilderAddress: maskHyperliquidAddress(builder?.b),
+          attachedBuilderFeeTenthsBps: builder?.f,
+          expectedBuilderAddress: maskHyperliquidAddress(getBuilderAddress(this.options.testnet ?? false)),
+          requiredBuilderFeeTenthsBps: TEALSTREET_BUILDER_FEE,
+          checkedMainWallet: maskHyperliquidAddress(this.options.applicationId),
+          signerWallet: maskHyperliquidAddress(this.options.key),
+          vaultAddress: maskHyperliquidAddress(this.options.vault),
+          lastCheckApproved: lastCheck?.approved,
+          lastCheckMaxFeeRate: lastCheck?.maxFeeRate,
+          lastCheckMaxFeeTenthsBps: maxFeeTenths,
+          lastCheckError: lastCheck?.error,
+          publicDataOnly: this.options.publicDataOnly,
+        },
+      },
+    };
   };
 
   /**

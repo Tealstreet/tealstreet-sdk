@@ -37,6 +37,19 @@ const getRequestActionType = (requestData: unknown): string | undefined => {
   return typeof type === 'string' ? type : undefined;
 };
 
+type HyperliquidOrderErrorTelemetryProvider = {
+  getOrderErrorTelemetry?: (requestData: unknown, message: string) => Record<string, unknown> | undefined;
+};
+
+const getOrderErrorTelemetry = (
+  exchange: BaseExchange,
+  requestData: unknown,
+  message: string,
+): Record<string, unknown> | undefined => {
+  const provider = exchange as BaseExchange & HyperliquidOrderErrorTelemetryProvider;
+  return provider.getOrderErrorTelemetry?.(requestData, message);
+};
+
 // Common response interceptor for Hyperliquid API responses
 const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exchange: BaseExchange) => {
   xhr.interceptors.response.use(async (response) => {
@@ -75,7 +88,7 @@ const addResponseInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>, exch
         (actionType === 'cancel' || actionType === 'cancelByCloid') &&
         isOnlyHyperliquidTerminalCancelError(responseError);
       if (!isTerminalCancelMiss) {
-        exchange.emitAndLogError(msg);
+        exchange.emitAndLogError(msg, undefined, getOrderErrorTelemetry(exchange, response.config?.data, msg));
       }
       throw new Error(msg);
     }

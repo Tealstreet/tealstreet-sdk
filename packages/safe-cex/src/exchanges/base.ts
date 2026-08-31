@@ -1473,6 +1473,19 @@ export class BaseExchange implements Exchange {
     let formattedMsg;
     let errorObject: Error | undefined;
     let sentryContext: any = {};
+    const structuredExtraData =
+      extraData && typeof extraData === 'object' && !Array.isArray(extraData) ? extraData : {};
+    const sentryTags =
+      structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
+        ? structuredExtraData.sentryTags
+        : {};
+    const sentryExtra =
+      structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'
+        ? structuredExtraData.sentryExtra
+        : {};
+    const legacyExtraData = Object.fromEntries(
+      Object.entries(structuredExtraData).filter(([key]) => key !== 'sentryTags' && key !== 'sentryExtra'),
+    );
 
     // Handle undefined, null, or other falsy values
     if (!err) {
@@ -1498,7 +1511,7 @@ export class BaseExchange implements Exchange {
         sentryContext = {
           ...errorForSentry.tags,
           ...errorForSentry.extra,
-          ...extraData,
+          ...legacyExtraData,
         };
       } else {
         if (msg) {
@@ -1516,11 +1529,15 @@ export class BaseExchange implements Exchange {
             method: tunnelError.method,
             originalError: tunnelError.originalError,
             errorType: tunnelError.name || 'TradeTunnelError',
-            ...extraData,
+            ...legacyExtraData,
           };
         }
       }
     }
+    sentryContext = {
+      ...sentryContext,
+      ...legacyExtraData,
+    };
 
     // A swallowed non-2xx, tagged as the CORRELATION it is.
     //
@@ -1554,6 +1571,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...sentryTags,
             ...correlationTags,
           },
           extra: {
@@ -1563,6 +1581,7 @@ export class BaseExchange implements Exchange {
               publicDataOnly: this.options.publicDataOnly,
             },
             ...sentryContext,
+            ...sentryExtra,
           },
         },
         // Pass enhanced error context for better toast messages
@@ -1577,6 +1596,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...sentryTags,
             ...correlationTags,
           },
           extra: {
@@ -1586,6 +1606,7 @@ export class BaseExchange implements Exchange {
               publicDataOnly: this.options.publicDataOnly,
             },
             ...sentryContext,
+            ...sentryExtra,
           },
         });
       }

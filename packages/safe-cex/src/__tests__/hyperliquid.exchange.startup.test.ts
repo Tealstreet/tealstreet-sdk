@@ -74,6 +74,55 @@ const coreState = (accountValue = 0, totalMarginUsed = 0) => ({
 });
 
 describe('HyperliquidExchange startup sequencing', () => {
+  it('adds redacted builder-fee context for rejected order telemetry', () => {
+    const exchange = createExchange();
+    const mainWallet = '0x1111111111111111111111111111111111111111';
+    const signerWallet = '0x2222222222222222222222222222222222222222';
+    const vaultAddress = '0x3333333333333333333333333333333333333333';
+    (exchange.options as any).applicationId = mainWallet;
+    (exchange.options as any).key = signerWallet;
+    (exchange.options as any).vault = vaultAddress;
+    (exchange as any)._builderFeeApproved = true;
+    (exchange as any)._builderFeeLastCheck = {
+      approved: true,
+      maxFeeRate: '0.01%',
+      maxFeeRateTenthsBps: 10,
+    };
+
+    const telemetry = exchange.getOrderErrorTelemetry(
+      {
+        action: {
+          type: 'order',
+          grouping: 'na',
+          orders: [{ a: 0 }],
+          builder: { b: '0xea629e1e8534B82f704A818643F2DAF38cB7Fd4d', f: 10 },
+        },
+      },
+      'Builder fee has not been approved.',
+    );
+
+    expect(telemetry?.sentryTags).toMatchObject({
+      hyperliquid_error_family: 'builder_fee',
+      hyperliquid_builder_attached: 'yes',
+      hyperliquid_builder_check: 'approved',
+      hyperliquid_builder_fee_sufficient: 'yes',
+      hyperliquid_has_vault: 'yes',
+      hyperliquid_network: 'testnet',
+    });
+    expect(telemetry?.sentryExtra).toMatchObject({
+      hyperliquidBuilderFee: expect.objectContaining({
+        builderPayloadPresent: true,
+        attachedBuilderFeeTenthsBps: 10,
+        checkedMainWallet: '0x111111...111111',
+        signerWallet: '0x222222...222222',
+        vaultAddress: '0x333333...333333',
+      }),
+    });
+    expect(JSON.stringify(telemetry)).not.toContain(mainWallet);
+    expect(JSON.stringify(telemetry)).not.toContain(signerWallet);
+    expect(JSON.stringify(telemetry)).not.toContain(vaultAddress);
+  });
+
   it('does not block startup on private REST bootstrap calls', async () => {
     const exchange = createExchange();
 
