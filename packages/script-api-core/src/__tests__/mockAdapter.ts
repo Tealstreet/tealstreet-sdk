@@ -19,7 +19,6 @@ import type {
   PositionMode,
   Ticker,
   Timeframe,
-  UpdateOrderOpts,
 } from '@tealstreet/safe-cex/src/types';
 
 import type { CoreAdapter } from '../adapter/AdapterContext';
@@ -32,6 +31,7 @@ import type {
   PlaceOrderOptions,
   PrintKind,
   RunCommandResult,
+  UpdateOrderPatch,
 } from '../api/CoreApi.types';
 
 export interface MockSeed {
@@ -106,7 +106,7 @@ export type MockWriteCall =
   | {
       kind: 'updateOrder';
       orderId: string;
-      patch: UpdateOrderOpts;
+      patch: UpdateOrderPatch;
       account: string;
     }
   | {

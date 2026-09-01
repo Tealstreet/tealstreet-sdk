@@ -1,7 +1,9 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderType, OrderTimeInForce, type PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 import { adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
+import { amountPrecisionOf } from '../../utils/marketPrecision';
 
 /**
  * `swarm <side> <size> into <count> [reduce] [irregular]` — fire N
@@ -130,9 +132,10 @@ export class SwarmCommand extends TradingBaseCommand {
       return this.error(`Market not found for ${symbol}`);
     }
 
-    const slices = this.distribute(totalContracts, count, irregular, market.precision.amount);
+    const lotStep = amountPrecisionOf(market);
+    const slices = this.distribute(totalContracts, count, irregular, lotStep);
     if (slices.some((s) => s <= 0)) {
-      return this.error(`swarm: total size too small to split into ${count} (precision ${market.precision.amount})`);
+      return this.error(`swarm: total size too small to split into ${count} (precision ${lotStep})`);
     }
 
     const orders: PlaceOrderOpts[] = [];
@@ -165,7 +168,14 @@ export class SwarmCommand extends TradingBaseCommand {
 
     // Fire all simultaneously. Errors on individual orders are gathered
     // so a single bad slice doesn't stop the rest.
-    const results = await Promise.allSettled(orders.map((o) => exchange.placeOrder!(o)));
+    // `async` on the map body is load-bearing: `prepareCliOrder` throws
+    // synchronously when a slice fails the order policy, and a synchronous
+    // throw inside `.map` would reject the whole batch. Inside an async
+    // callback it becomes one rejected promise, which is what the comment
+    // above asks for — a single bad slice does not stop the rest.
+    const results = await Promise.allSettled(
+      orders.map(async (o) => exchange.placeOrder!(prepareCliOrder(exchange, o))),
+    );
     const ok = results.filter((r) => r.status === 'fulfilled').length;
     const fail = results.length - ok;
     // Charge the budget for exactly the slices that placed — sum their

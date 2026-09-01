@@ -3,6 +3,8 @@ import type { CommandContext } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
+import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
+import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 
 /**
@@ -124,7 +126,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
         if (!position) {
           throw new Error(`No ${side ?? ''} position found for symbol ${symbol}`.replace(/\s+/g, ' ').trim());
         }
-        return adjust((Math.abs(position.contracts) * pct) / 100, market.precision.amount);
+        // NATIVE contracts. `position.contracts` is base and differs by
+        // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
+        // multiple of the position rather than half of it.
+        return adjust((nativePositionSize(position, market) * pct) / 100, amountPrecisionOf(market));
       }
 
       // balance scope
@@ -143,14 +148,14 @@ export abstract class TradingBaseCommand extends BaseCommand {
       // explanation in `notionalToSize`.
       if (market.isInverse) {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-        return adjust(notional / contractSize, market.precision.amount);
+        return adjust(notional / contractSize, amountPrecisionOf(market));
       }
       const ticker = exchange.store?.tickers?.find((t) => t.symbol === symbol);
       if (!ticker?.last) {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / ticker.last), market.precision.amount);
+      return adjust(baseToNativeContracts(market, notional / ticker.last), amountPrecisionOf(market));
     }
 
     if (this.looksLikeSize(trimmed)) {
@@ -188,7 +193,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    */
   protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
-    const amountPrecision = market?.precision.amount || 0.00000001;
+    const amountPrecision = amountPrecisionOf(market);
 
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;

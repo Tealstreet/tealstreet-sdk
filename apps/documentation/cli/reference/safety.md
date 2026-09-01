@@ -160,6 +160,32 @@ falls back to the focused symbol by design. Source: `BaseBuySellCommand.ts`.
 
 ---
 
+## Venue rules the CLI refuses to break
+
+Beyond the guards you configure, some orders are refused because the venue
+cannot accept them. These fire before anything reaches the exchange, so you
+get a named error rather than a venue rejection:
+
+```text
+buy 0.0004 BTCUSDT     # error: order size 0.0004 rounds to 0 for 'BTCUSDT' — below the venue lot step
+stop 58000             # on Paradex: 'paradex' does not support Full (Infinity) TP/SL orders
+```
+
+A bare `stop <price>` with no size means "cover the whole position", which is
+sent as a zero-size stop. Most venues read that as a Full stop; twelve do not
+— Weex, Backpack, Crypto.com, Bitrue, GRVT, Apex Omni, Coinbase, Kraken,
+Kraken Spot, Paradex, Polymarket and Lighter. Give the stop an explicit size
+there.
+
+An order for a symbol whose market has not loaded yet is also refused rather
+than sent unrounded. On a global `close`, that refusal is per position — one
+symbol that is not ready does not stop the rest of the sweep.
+
+See [Sizing and prices](./sizing-and-prices.md#every-price-and-size-is-rounded-to-the-venue-before-it-is-sent)
+for the rounding itself.
+
+---
+
 ## Degraded-connection lock
 
 When an account's **private data stream goes stale** (the connection was

@@ -11,17 +11,23 @@ function createMockExchange(
   overrides: Partial<ExchangeLike> = {},
 ): ExchangeLike {
   return {
-    name: 'test-exchange',
+    // A REAL venue id, not 'test': every write now goes through the shared
+    // order policy, which asks `exchangeMetadata` about round-down, infinity
+    // stops and the reduce-only clamp. A made-up name answers "unknown venue"
+    // and no longer exercises the branches these tests are about.
+    name: 'binance',
     store: {
       markets: [
         { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', precision: { amount: 0.001, price: 0.01 } },
         { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT', precision: { amount: 0.01, price: 0.01 } },
         { symbol: 'WIFUSDT', base: 'WIF', quote: 'USDT', precision: { amount: 1, price: 0.0001 } },
+        { symbol: 'SOLUSDT', base: 'SOL', quote: 'USDT', precision: { amount: 0.1, price: 0.001 } },
       ],
       tickers: [
         { symbol: 'BTCUSDT', last: 50000 },
         { symbol: 'ETHUSDT', last: 3000 },
         { symbol: 'WIFUSDT', last: 2.5 },
+        { symbol: 'SOLUSDT', last: 150 },
       ],
       orders: [],
       positions,
@@ -456,6 +462,21 @@ describe('CloseCommand', () => {
       expect(ctx.adapter.printInfo).toHaveBeenCalledWith(
         '(no shorts positions to close)',
       );
+    });
+
+    it('one symbol with no loaded market does not abort the sweep', async () => {
+      // `nativeCloseSize` REFUSES a missing market rather than falling back to
+      // base units. That refusal has to land inside the per-position catch —
+      // it used to sit outside it, so one unloaded symbol would have thrown
+      // past the catch and killed every close after it.
+      const exchange = createMockExchange(multiPositions());
+      exchange.store!.markets = exchange.store!.markets!.filter((m) => m.symbol !== 'ETHUSDT');
+
+      const r = await command.execute(createMockContext(['close', 'allpos'], exchange, 'BTCUSDT'));
+
+      expect(r.success).toBe(true);
+      const calls = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(calls.map((o) => o.symbol).sort()).toEqual(['BTCUSDT', 'SOLUSDT', 'WIFUSDT']);
     });
 
     it('skips zero-contract positions even with `allpos`', async () => {

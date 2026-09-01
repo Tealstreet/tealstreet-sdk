@@ -92,7 +92,7 @@ function crossTradeCliPlaceOrder(getExchange: (account: string) => ExchangeLike 
       if (!referencePrice) return;
       const maxSlipPrice =
         side === OrderSide.Buy ? referencePrice * (1 + SLIPPAGE_LIMIT) : referencePrice * (1 - SLIPPAGE_LIMIT);
-      const adjustedPrice = adjust(maxSlipPrice, market.precision.price ?? DEFAULT_PRICE_PRECISION);
+      const adjustedPrice = adjust(maxSlipPrice, market.precision.price || DEFAULT_PRICE_PRECISION);
       const order: PlaceOrderOpts = {
         symbol,
         side,

@@ -1,5 +1,6 @@
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 import { OrderStatus, OrderType } from '@tealstreet/safe-cex/src/types';
 import { formatPriceCompact } from '@tealstreet/utils/src/formatting';
 
@@ -110,7 +111,7 @@ export class MoveCommand extends BaseCommand {
     try {
       await ctx.exchange.updateOrder({
         order,
-        update: { price: newPrice },
+        update: { price: prepareCliAmendPrice(ctx.exchange, order.symbol, newPrice) },
       });
       this.printSuccess(ctx, `Order moved to ${newPriceStr}`);
       return this.success();

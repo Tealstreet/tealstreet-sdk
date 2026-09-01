@@ -14,5 +14,19 @@
  *         `packages/script-authoring`; bumped because `check:api-versions`
  *         watches the file, and a patch bump is cheaper than teaching the
  *         gate to distinguish comments from surface.
+ * 1.2.0 — Three ADDITIVE order-flow extensions, all needed so the OEMS slice
+ *         could be expressed on this surface rather than beside it:
+ *         `CancelFilter.ids` cancels exactly the enumerated orders (the other
+ *         fields are ignored when it is present); `setLeverage` takes an
+ *         optional `side` for one leg of a hedge-mode position; and
+ *         `UpdateOrderPatch` replaces `UpdateOrderOpts` in `updateOrder`,
+ *         making `order` optional because every host discards it and
+ *         re-resolves by id. Existing callers keep typechecking.
+ * 1.3.0 — `PlaceOrderOptions` gains `triggerPrice` and `triggerType`, so a
+ *         standalone stop-like order can be expressed here at all. safe-cex's
+ *         `PlaceOrderOpts` has always carried both; omitting them meant every
+ *         caller placing a bare stop had to go around this surface, which is
+ *         how the CLI's `stop` command ended up sending an unrounded trigger.
+ *         `triggerPrice` is rounded to the venue tick like `price`.
  */
-export const CORE_API_VERSION = '1.1.1';
+export const CORE_API_VERSION = '1.3.0';

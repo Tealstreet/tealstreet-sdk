@@ -1,5 +1,6 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 import { OrderStatus, OrderType, OrderSide } from '@tealstreet/safe-cex/src/types';
 import { formatPriceCompact } from '@tealstreet/utils/src/formatting';
 
@@ -156,7 +157,10 @@ export class BumpCommand extends TradingBaseCommand {
         continue;
       }
       try {
-        await exchange.updateOrder({ order, update: { price: newPrice } });
+        await exchange.updateOrder({
+          order,
+          update: { price: prepareCliAmendPrice(exchange, order.symbol, newPrice) },
+        });
         successCount++;
       } catch (e) {
         this.printError(ctx, `Failed to update order ${order.id}: ${(e as Error).message}`);

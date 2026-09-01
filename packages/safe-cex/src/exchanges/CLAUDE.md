@@ -308,7 +308,7 @@ loop firing 11×.
 When a reduce-only order is placed larger than the open position, it must
 be capped to the position size. **The canonical mechanism is the
 `autoDownSizeReduceOrders` metadata flag**, which runs the shared
-`apps/web/src/utils/order/downSizeReduceOrder.ts` util inside the web order
+`packages/script-api-core/src/order/downSizeReduceOrder.ts` util inside the web order
 builders (`apps/web/src/order/createLimitOrder.ts` /
 `apps/web/src/order/createMarketOrder.ts`) _before_ the amount reaches
 `placeOrder`. The util also handles **hedge-mode side matching** and

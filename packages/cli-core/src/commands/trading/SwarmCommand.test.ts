@@ -40,7 +40,11 @@ function bal(p: Partial<Balance> = {}): Balance {
 
 function makeExchange(opts: { positions?: Position[]; balance?: Balance } = {}): ExchangeLike {
   return {
-    name: 'test',
+    // A REAL venue id, not 'test': every write now goes through the shared
+    // order policy, which asks `exchangeMetadata` about round-down, infinity
+    // stops and the reduce-only clamp. A made-up name answers "unknown venue"
+    // and no longer exercises the branches these tests are about.
+    name: 'binance',
     store: {
       markets: [
         { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', precision: { amount: 0.001, price: 0.01 } },

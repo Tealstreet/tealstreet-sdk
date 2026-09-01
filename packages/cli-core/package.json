@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tealstreet/safe-cex": "*",
+    "@tealstreet/script-api-core": "*",
     "@tealstreet/utils": "*"
   },
   "devDependencies": {

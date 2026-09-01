@@ -225,7 +225,9 @@ const buildExchange = (
     setLeverage: async (symbol, leverage, opts) => {
       validateWriteCapability('setLeverage', capabilities);
       const account = gateAccount(resolve(opts));
-      return proxy.callWrite('setLeverage', [symbol, leverage, { account }]);
+      // `side` rides the same opts bag it arrived in, so a hedge-mode leg is
+      // not silently dropped between the public API and the adapter.
+      return proxy.callWrite('setLeverage', [symbol, leverage, { account, side: opts?.side }]);
     },
     setPositionMode: async (mode, opts) => {
       validateWriteCapability('setPositionMode', capabilities);

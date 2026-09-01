@@ -113,6 +113,38 @@ describe('roundToNearestMultiple', () => {
 });
 
 describe('roundToNearestMultipleDown', () => {
+  describe('a value that is ALREADY an exact multiple stays put', () => {
+    // `Math.floor(0.3 / 0.1)` is 2, not 3, because `0.3 / 0.1` is
+    // 2.9999999999999996. That returned 0.2 — a third of the order dropped on
+    // a value a user would plainly type. This is the round-DOWN branch
+    // Hyperliquid SPOT placement uses, so under-sizing by a lot step is the
+    // opposite of the safe failure it exists to produce.
+    it.each([
+      [0.3, 0.1, 0.3],
+      [0.7, 0.1, 0.7],
+      [2.9, 0.1, 2.9],
+      [8.2, 0.1, 8.2],
+      [0.29, 0.01, 0.29],
+      [1.1, 0.1, 1.1],
+      [0.07, 0.01, 0.07],
+    ])('%f at step %f stays %f', (value, step, expected) => {
+      expect(roundToNearestMultipleDown(value, step)).toBeCloseTo(expected, 10);
+    });
+  });
+
+  describe('a genuine round-down still rounds down', () => {
+    it.each([
+      [0.35, 0.1, 0.3],
+      [0.39, 0.1, 0.3],
+      [2.5, 1, 2],
+      [0.299, 0.01, 0.29],
+      [1.999, 0.5, 1.5],
+    ])('%f at step %f becomes %f', (value, step, expected) => {
+      expect(roundToNearestMultipleDown(value, step)).toBeCloseTo(expected, 10);
+    });
+  });
+
+
   it('should always round down to the nearest multiple', () => {
     expect(roundToNearestMultipleDown(10, 3)).toBe(9);
     expect(roundToNearestMultipleDown(11, 3)).toBe(9);

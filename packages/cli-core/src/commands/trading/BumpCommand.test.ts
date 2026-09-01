@@ -22,7 +22,11 @@ function order(o: Partial<Order> & { id: string; price: number; side: OrderSide;
 
 function makeExchange(orders: Order[] = []): ExchangeLike {
   return {
-    name: 'test',
+    // A REAL venue id, not 'test': every write now goes through the shared
+    // order policy, which asks `exchangeMetadata` about round-down, infinity
+    // stops and the reduce-only clamp. A made-up name answers "unknown venue"
+    // and no longer exercises the branches these tests are about.
+    name: 'binance',
     store: {
       markets: [
         { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', precision: { amount: 0.001, price: 0.01 } },

@@ -1,5 +1,6 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 
 /**
@@ -98,7 +99,7 @@ export class StopCommand extends TradingBaseCommand {
         const isLong = side === PositionSide.Long;
         // TP vs SL is decided by trigger vs mark — that's when the
         // order fires, regardless of what limit price it routes to.
-        await exchange.placeOrder({
+        const stopOrder = {
           symbol: targetSymbol,
           side: isLong ? OrderSide.Sell : OrderSide.Buy,
           type: isLong
@@ -116,7 +117,8 @@ export class StopCommand extends TradingBaseCommand {
             sizePosition !== -1 && sizePosition < args.length
               ? this.parseSizeAndConvertIfUsd(exchange, targetSymbol, args[sizePosition])
               : 0,
-        });
+        };
+        await exchange.placeOrder(prepareCliOrder(exchange, stopOrder));
       }
 
       this.printSuccess(ctx, triggerIdx !== -1 ? 'Placing a limit stop order' : 'Placing a stop order');

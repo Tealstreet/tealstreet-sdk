@@ -1,5 +1,6 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { nativeCloseSize, prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
 
 /**
@@ -137,11 +138,13 @@ export class CloseCommand extends TradingBaseCommand {
           } catch (e) {
             return this.error((e as Error).message);
           }
-          // Cap at the position size — `close 200%` should not flip the position.
-          const capped = Math.min(Math.abs(amount), Math.abs(position.contracts));
+          // Cap at the position size — `close 200%` should not flip the
+          // position. Both sides must be NATIVE for the comparison to mean
+          // anything; `position.contracts` is base.
+          const capped = Math.min(Math.abs(amount), nativeCloseSize(exchange, position));
           amount = capped;
         } else {
-          amount = Math.abs(position.contracts);
+          amount = nativeCloseSize(exchange, position);
         }
 
         const order: PlaceOrderOpts = {
@@ -152,7 +155,7 @@ export class CloseCommand extends TradingBaseCommand {
           reduceOnly: true,
         };
 
-        await exchange.placeOrder(order);
+        await exchange.placeOrder(prepareCliOrder(exchange, order));
       }
     }
 
@@ -228,35 +231,37 @@ export class CloseCommand extends TradingBaseCommand {
 
     let placed = 0;
     for (const position of targets) {
-      let amount: number;
-      if (sizeArg) {
-        try {
-          amount = this.parseSizeAndConvertIfUsd(
-            exchange,
-            position.symbol,
-            sizeArg,
-            true,
-            position.side,
-            'position',
-          );
-        } catch (e) {
-          this.printError(ctx, `${position.symbol}: ${(e as Error).message}`);
-          continue;
-        }
-        amount = Math.min(Math.abs(amount), Math.abs(position.contracts));
-      } else {
-        amount = Math.abs(position.contracts);
-      }
+      // Per-position: a global close walks every open position, and one symbol
+      // whose market has not loaded must not abort the rest of the sweep.
+      //
+      // SIZING is inside the try, not just the placement. `nativeCloseSize`
+      // refuses a missing market, and it used to sit outside this block — so
+      // one unloaded symbol would have thrown past the catch and killed the
+      // sweep, which is the regression this comment was written about.
+      try {
+        const full = nativeCloseSize(exchange, position);
+        const amount = sizeArg
+          ? Math.min(
+              Math.abs(
+                this.parseSizeAndConvertIfUsd(exchange, position.symbol, sizeArg, true, position.side, 'position'),
+              ),
+              full,
+            )
+          : full;
 
-      const order: PlaceOrderOpts = {
-        symbol: position.symbol,
-        side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
-        type: OrderType.Market,
-        amount,
-        reduceOnly: true,
-      };
-      await placeOrder(order);
-      placed++;
+        const order: PlaceOrderOpts = {
+          symbol: position.symbol,
+          side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
+          type: OrderType.Market,
+          amount,
+          reduceOnly: true,
+        };
+
+        await placeOrder(prepareCliOrder(exchange, order));
+        placed++;
+      } catch (e) {
+        this.printError(ctx, `${position.symbol}: ${(e as Error).message}`);
+      }
     }
 
     const label =

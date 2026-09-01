@@ -34,8 +34,33 @@ resolves against the **open position** (e.g. `sell 50% reduce` closes
 half your position), not free balance. Use `%bal` or `%pos` explicitly
 when you want to override the default.
 
-A size that rounds to **0** at the market's amount precision is rejected
-rather than sent as an empty order.
+### Every price and size is rounded to the venue before it is sent
+
+Whatever you type is snapped to the market's real tick size and lot step
+before it leaves your machine:
+
+| You type            | What is sent                                                                    |
+| ------------------- | ------------------------------------------------------------------------------- |
+| a limit price       | rounded to the market's tick size                                                |
+| a stop `trigger`    | rounded to the market's tick size                                                |
+| a size              | rounded to the market's lot step                                                 |
+| a size below one lot | **rejected** — `order size 0.0004 rounds to 0 for 'BTCUSDT'`                    |
+
+A `reduce`-only market close is the one exception to the last row: a residual
+position smaller than one lot step keeps its raw size, so dust can still be
+closed rather than becoming uncloseable.
+
+Two rules follow from the venue rather than from your input:
+
+- **Hyperliquid spot sizes round DOWN**, not to nearest, so a buy can never ask
+  for more base than the wallet holds. Perps on the same connection still round
+  to nearest.
+- **On Hyperliquid and WOO a `reduce`-only order is shrunk** against the
+  reduce-only orders already resting ahead of it, which those venues would
+  otherwise reject.
+
+This is the same rounding the web app and the mobile app apply — one
+implementation, so the three cannot disagree about a number.
 
 ### Bare numbers are rejected
 

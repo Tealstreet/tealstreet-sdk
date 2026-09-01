@@ -30,9 +30,9 @@ import type {
   OrderBook,
   Position,
   PositionMode,
+  PositionSide,
   Ticker,
   Timeframe,
-  UpdateOrderOpts,
 } from '@tealstreet/safe-cex/src/types';
 
 import type {
@@ -44,6 +44,7 @@ import type {
   PlaceOrderOptions,
   PrintKind,
   RunCommandResult,
+  UpdateOrderPatch,
 } from '../api/CoreApi.types';
 
 export type MaybePromise<T> = T | Promise<T>;
@@ -95,12 +96,15 @@ export interface CoreAdapter {
   ): MaybePromise<{ orderIds: readonly string[] }>;
   cancelOrder(orderId: string, opts: { account: string; symbol?: string }): MaybePromise<void>;
   cancelOrders(filter: CancelFilter, account: string): MaybePromise<{ canceled: number }>;
-  updateOrder(orderId: string, patch: UpdateOrderOpts, account: string): MaybePromise<void>;
+  updateOrder(orderId: string, patch: UpdateOrderPatch, account: string): MaybePromise<void>;
   closePosition(
     opts: Omit<ClosePositionOpts, 'account'>,
     account: string,
   ): MaybePromise<{ orderIds: readonly string[] }>;
-  setLeverage(symbol: string, leverage: number, account: string): MaybePromise<void>;
+  /** `side` names one leg of a hedge-mode position. Hosts whose venue has no
+   *  per-side leverage ignore it; dropping it from the contract instead would
+   *  silently set the wrong leg on the venues that do. */
+  setLeverage(symbol: string, leverage: number, account: string, side?: PositionSide): MaybePromise<void>;
   setPositionMode(mode: PositionMode, account: string): MaybePromise<void>;
   setMarginType(symbol: string, marginType: MarginType, account: string): MaybePromise<void>;
 

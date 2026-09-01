@@ -10,7 +10,7 @@
 - `PlaceOrderOpts.amount` arrives from the app order flow as native contract volume. Send it to MEXC as `vol` after snapping to `volUnit`; do not convert it with `contractSize` again.
 - Public `Order.filled` is base-sized (`dealVol * contractSize`), but chaser replacement arithmetic tracks fills against native `PlaceOrderOpts.amount`. Keep cumulative native fill volume in `Order.extra.filledInPlacementUnits`.
 - Web close-size helpers must use native volume for MEXC reduce-only closes. A displayed `0.006 BTC` BTC_USDT position is `60` native contracts when `contractSize` is `0.0001`; sending `amount: 0.006` rounds to `vol: 1` and closes only `0.0001 BTC`.
-- The shared reduce-only clamp (`apps/web/src/utils/order/downSizeReduceOrder.ts`) runs before `placeOrder` and historically compared the incoming native amount with `position.contracts` (base) and stored `order.amount` (base) directly. For MEXC-style fractional-lot linear futures (`contractSize < 1`) it now converts the incoming native amount to base for the clamp and converts the result back to native before returning, so full and partial closes preserve the intended `vol` instead of collapsing to `vol: 1`.
+- The shared reduce-only clamp (`packages/script-api-core/src/order/downSizeReduceOrder.ts`) runs before `placeOrder` and historically compared the incoming native amount with `position.contracts` (base) and stored `order.amount` (base) directly. For MEXC-style fractional-lot linear futures (`contractSize < 1`) it now converts the incoming native amount to base for the clamp and converts the result back to native before returning, so full and partial closes preserve the intended `vol` instead of collapsing to `vol: 1`.
 
 ## Domains
 

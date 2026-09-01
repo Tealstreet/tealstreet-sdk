@@ -1,5 +1,6 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
 
 /**
@@ -353,7 +354,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     // TP). Bybit's position-level TP/SL endpoint returns []. The
     // helper surfaces whatever the exchange returned; the runner
     // decides what to do with an empty array.
-    const ids = (await exchange.placeOrder!(order)) ?? [];
+    const ids = (await exchange.placeOrder!(prepareCliOrder(exchange, order))) ?? [];
     // Charge the budget only AFTER the order placed (a throw above skips this).
     if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
     return ids;
@@ -389,7 +390,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       timeInForce: postOnly ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
       ...(stopLoss !== undefined ? { stopLoss } : {}),
     };
-    const ids = (await exchange.placeOrder!(order)) ?? [];
+    const ids = (await exchange.placeOrder!(prepareCliOrder(exchange, order))) ?? [];
     if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
     return ids;
   }

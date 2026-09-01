@@ -12,6 +12,7 @@ import type {
   Candle,
   OHLCVOptions,
   OrderBook,
+  PositionSide,
 } from '@tealstreet/safe-cex/src/types';
 
 // Re-export types from safe-cex
@@ -80,7 +81,9 @@ export interface ExchangeLike {
   nukePositions?: (retries?: number) => Promise<void>;
   nukeOrders?: () => Promise<void>;
   // Leverage
-  setLeverage?: (symbol: string, leverage: number) => Promise<void>;
+  /** Third argument names one leg of a hedge-mode position; safe-cex accepts
+   *  it and ignores it where the venue has no per-side leverage. */
+  setLeverage?: (symbol: string, leverage: number, side?: PositionSide) => Promise<void>;
   setAllLeverage?: (leverage: number) => Promise<void>;
   // OHLCV data
   fetchOHLCV?: (opts: OHLCVOptions) => Promise<Candle[]>;

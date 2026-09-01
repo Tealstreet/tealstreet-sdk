@@ -42,6 +42,7 @@ export type {
   Ticker,
   Timeframe,
   UpdateOrderOpts,
+  UpdateOrderPatch,
 } from './api/CoreApi.types';
 
 export {
@@ -111,17 +112,41 @@ export {
   CORE_WRITE_API_PATHS,
   CLI_READ_API_PATHS,
   MOBILE_READ_API_PATHS,
+  OEMS_API_PATHS,
+  OEMS_READ_API_PATHS,
+  OEMS_WRITE_API_PATHS,
   PORTABLE_READ_ONLY_API_PATHS,
   RUNNABLE_TARGETS,
   RUNTIME_SURFACES,
   getAllowedApiPathsForTargets,
   getApiPathAvailability,
   isKnownApiPath,
+  narrowToRunnableTargets,
   type ApiPath,
   type ApiPathAvailability,
   type RunnableTargetName,
   type RuntimeSurfaceDescriptor,
 } from './runtime/runtimeSurface';
+/** The portable `CoreAdapter` body and the host seam it is written against.
+ *  A runtime supplies `HostBindings`; it does not implement `CoreAdapter`. */
+export { createCoreAdapter } from './adapter/createCoreAdapter';
+export { bySymbol } from './adapter/HostBindings';
+export type { HostAccount, HostBindings, HostExchange, HostWriteEvent } from './adapter/HostBindings';
+export { ScriptValidationError } from './order/ScriptValidationError';
+export {
+  isStopLikeOrderType,
+  roundMarketCloseSize,
+  roundMarketOrderSize,
+  roundOrderPrice,
+  roundOrderSize,
+  roundOrderSizeToNearest,
+  venueAutoDownsizesReduceOrders,
+  venueSupportsInfinityStops,
+} from './order/orderPricing';
+export { notionalToNativeSize } from './order/notionalSizing';
+export { clampReduceOnlyOrder, prepareOrder } from './order/prepareOrder';
+export type { OrderPolicyContext, ReduceOnlyClampContext } from './order/prepareOrder';
+
 /** @internal Host-side — account resolution (SPEC §2.6). */
 export { resolveAccount } from './runtime/accountResolver';
 

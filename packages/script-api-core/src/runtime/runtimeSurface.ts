@@ -51,6 +51,55 @@ export const CORE_WRITE_API_PATHS = Object.freeze([
   writePath('runCommand'),
 ] as const);
 
+/**
+ * The OEMS slice — the order-flow subset an agent-driven caller may use when
+ * it is ACTING on the user's behalf rather than rendering a panel.
+ *
+ * This is a slice of the surface above, not a fourth API. It is deliberately
+ * NOT an entry in `RUNTIME_SURFACES`: that record is keyed by `TargetName`,
+ * whose members feed exhaustive `Record<TargetName, …>` tables in
+ * `targetCheck.ts` and the `RunnableTargetName` exclusion. OEMS is a
+ * CAPABILITY narrowing, not a place code runs, and conflating the two would
+ * make every target-shaped table grow a member that can never be a target.
+ *
+ * Three writes are excluded and the exclusions are the point:
+ * `setPositionMode` and `setMarginType` reconfigure an ACCOUNT rather than
+ * work an order, and `runCommand` is the REPL escape hatch — a planner that
+ * can reach it can reach every verb this slice was drawn to exclude.
+ */
+export const OEMS_WRITE_API_PATHS = Object.freeze([
+  writePath('placeOrder'),
+  writePath('placeOrders'),
+  writePath('cancelOrder'),
+  writePath('cancelOrders'),
+  writePath('updateOrder'),
+  writePath('closePosition'),
+  writePath('setLeverage'),
+] as const satisfies readonly ApiPath[]);
+
+/**
+ * What an OEMS caller may read. Candles, orderbooks and historical positions
+ * are absent: they are analysis inputs, and a planner that has to SPEND
+ * CONTEXT describing its own surface pays for every path it never uses.
+ */
+export const OEMS_READ_API_PATHS = Object.freeze([
+  readPath('getActiveAccount'),
+  readPath('getActiveAccounts'),
+  readPath('getActiveSymbol'),
+  readPath('getAccounts'),
+  readPath('getMarkets'),
+  readPath('getMarket'),
+  readPath('getTicker'),
+  readPath('getPositions'),
+  readPath('getOrders'),
+  readPath('getBalance'),
+] as const satisfies readonly ApiPath[]);
+
+export const OEMS_API_PATHS = Object.freeze([
+  ...OEMS_READ_API_PATHS,
+  ...OEMS_WRITE_API_PATHS,
+] as const satisfies readonly ApiPath[]);
+
 const PORTABLE_UTILITY_API_PATHS = Object.freeze([
   'api.io',
   'api.io.print',
@@ -214,13 +263,24 @@ const KNOWN_API_PATHS = new Set<ApiPath>([
   ...(Object.keys(ALTERNATIVES) as ApiPath[]),
 ]);
 
-const asRunnableTargets = (targets: readonly TargetName[]): readonly RunnableTargetName[] => {
+/**
+ * Narrow a target list to the ones a thing can actually RUN on, treating an
+ * empty result as "all of them" rather than "none".
+ *
+ * Exported because `@tealstreet/module-api-runtime` needs the identical rule
+ * for the module vocabulary and had a byte-identical copy of it. The two
+ * vocabularies describe different api objects — `api.exchange.placeOrder` is
+ * not `api.orders.placeMarketOrder` — so their PATH SETS stay separate, but
+ * "which targets does this list mean" is one question with one answer, and two
+ * copies of it can only drift apart.
+ */
+export const narrowToRunnableTargets = (targets: readonly TargetName[]): readonly RunnableTargetName[] => {
   const runnable = targets.filter((target): target is RunnableTargetName => RUNTIME_TARGET_SET.has(target));
   return runnable.length > 0 ? runnable : RUNNABLE_TARGETS;
 };
 
 export const getAllowedApiPathsForTargets = (targets: readonly TargetName[]): ReadonlySet<ApiPath> => {
-  const runnable = asRunnableTargets(targets);
+  const runnable = narrowToRunnableTargets(targets);
   const [first, ...rest] = runnable;
   let allowed = new Set<ApiPath>(RUNTIME_SURFACES[first].apiPaths);
   for (const target of rest) {
@@ -233,7 +293,7 @@ export const getAllowedApiPathsForTargets = (targets: readonly TargetName[]): Re
 export const isKnownApiPath = (path: string): path is ApiPath => KNOWN_API_PATHS.has(path as ApiPath);
 
 export const getApiPathAvailability = (path: ApiPath, targets: readonly TargetName[]): ApiPathAvailability => {
-  const runnable = asRunnableTargets(targets);
+  const runnable = narrowToRunnableTargets(targets);
   const excludedBy = runnable.filter((target) => !RUNTIME_SURFACES[target].apiPaths.includes(path));
   return {
     path,

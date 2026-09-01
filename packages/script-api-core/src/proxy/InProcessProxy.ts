@@ -158,7 +158,12 @@ export class InProcessProxy implements ApiProxy {
       }
       case 'setLeverage': {
         const [symbol, leverage, opts] = args as WriteMethodArgs<'setLeverage'>;
-        return (await this.adapter.setLeverage(symbol, leverage, this.requireAccount(opts))) as WriteMethodResult<M>;
+        return (await this.adapter.setLeverage(
+          symbol,
+          leverage,
+          this.requireAccount(opts),
+          opts?.side,
+        )) as WriteMethodResult<M>;
       }
       case 'setPositionMode': {
         const [mode, opts] = args as WriteMethodArgs<'setPositionMode'>;

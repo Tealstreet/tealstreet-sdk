@@ -490,12 +490,15 @@ name}` footer segment auto-runs the named script ~1×/sec
   **append-only** — never rotate/rewrite it from the CLI; `readAuditTail`
   reads the whole file (fine for now; bounded read + rotation deferred).
   **Script-driven writes are also captured** (slice 2): `script:<name>`
-  steps bypass `processSingleCommand`, so the script-adapter's write
-  methods (`placeOrder`/`placeOrders`/`cancel*`/`updateOrder`/
-  `closePosition`/`setLeverage`) call `recordScriptWrite` for each
-  internal write op (success AND failure — wrapped in try/catch so a
-  failed scripted write is still audited; `closePosition` records partial
-  fills on a mid-loop throw), and `runScriptStep` records the named
+  steps bypass `processSingleCommand`, so every write op is audited via
+  the `onWrite` binding the CLI hands
+  `@tealstreet/script-api-core`'s `createCoreAdapter`. That covers all
+  nine writes — `placeOrder`/`placeOrders`/`cancelOrder`/`cancelOrders`/
+  `updateOrder`/`closePosition`/`setLeverage`/`setPositionMode`/
+  `setMarginType`; the last two were NOT audited while the adapter was
+  hand-rolled. The observer fires from inside the shared body's own catch
+  (success AND failure), which is what lets `closePosition` still report
+  the ids that went live when a later leg throws. `runScriptStep` records the named
   invocation (against the override-resolved account) — all tagged
   `[script]`. **Command lineage (slice 3):** every entry carries a
   `runId` shared by all writes from one top-level invocation.

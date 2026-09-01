@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CLIPlatformAdapter, CLISession } from '@tealstreet/cli-core';
+import type { CoreAdapter } from '@tealstreet/script-api-core';
 import type { OrderBook } from '@tealstreet/safe-cex/src/types';
+
+import { OEMS_READ_METHODS, OEMS_WRITE_METHODS } from '@tealstreet/oems-core';
 
 import type { ExchangeManager } from './exchange-manager';
 import { createStandaloneCoreAdapter } from './script-adapter';
@@ -29,6 +32,47 @@ const buildPlatformAdapter = (): CLIPlatformAdapter =>
     printWarning: () => {},
     printInfo: () => {},
   }) as CLIPlatformAdapter;
+
+describe('the OEMS slice is servable here', () => {
+  // The web half of this lives in
+  // `apps/web/src/components/aiOrders/oemsSurface.test.ts`. This is the CLI
+  // half, and it exists because the slice is only meaningful while every host
+  // in the venn diagram actually serves it — see the venn table in
+  // `packages/script-api-core/CLAUDE.md`. Mobile is the third host and cannot
+  // be asserted from this repo; `MobileCoreAdapter` throws on every write by
+  // design, which is documented there rather than pinned here.
+  it('every OEMS method is a key of the CoreAdapter type', () => {
+    // The runtime assertions below are nearly vacuous on their own — the
+    // factory returns an object literal annotated `CoreAdapter`, so tsc
+    // already guarantees the keys exist. THIS is the assertion that bites: it
+    // fails to COMPILE if the slice names a method the contract dropped.
+    const writes: readonly (keyof CoreAdapter)[] = OEMS_WRITE_METHODS;
+    const reads: readonly (keyof CoreAdapter)[] = OEMS_READ_METHODS;
+    expect(writes.length + reads.length).toBe(OEMS_WRITE_METHODS.length + OEMS_READ_METHODS.length);
+  });
+
+  it('every OEMS write method is a callable member of the CLI adapter', () => {
+    const adapter = createStandaloneCoreAdapter(
+      { getExchange: () => null } as unknown as ExchangeManager,
+      { currentExchange: null, currentAccountName: 'acct', currentSymbol: 'BTCUSDT' },
+      buildPlatformAdapter(),
+    );
+    for (const method of OEMS_WRITE_METHODS) {
+      expect(typeof adapter[method]).toBe('function');
+    }
+  });
+
+  it('every OEMS read method is a callable member of the CLI adapter', () => {
+    const adapter = createStandaloneCoreAdapter(
+      { getExchange: () => null } as unknown as ExchangeManager,
+      { currentExchange: null, currentAccountName: 'acct', currentSymbol: 'BTCUSDT' },
+      buildPlatformAdapter(),
+    );
+    for (const method of OEMS_READ_METHODS) {
+      expect(typeof adapter[method]).toBe('function');
+    }
+  });
+});
 
 describe('createStandaloneCoreAdapter', () => {
   it('fails script runCommand calls that cli-core does not handle', async () => {

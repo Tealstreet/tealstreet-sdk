@@ -29,7 +29,6 @@ import type {
   PositionSide,
   Ticker,
   Timeframe,
-  UpdateOrderOpts,
 } from '@tealstreet/safe-cex/src/types';
 
 import type { Capabilities, TargetName } from './capabilities.types';
@@ -167,6 +166,19 @@ export interface PlaceOrderOptions {
   readonly slTriggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   /**
+   * Trigger for a stop-like order (`StopLoss` / `TakeProfit` /
+   * `TrailingStopLoss`) placed as an order in its own right, rather than as
+   * the `stopLoss` / `takeProfit` leg attached to an entry.
+   *
+   * Absent until 1.3.0, and its absence was not a design decision — safe-cex's
+   * `PlaceOrderOpts` has carried both fields all along, so a caller that
+   * needed a standalone stop had to bypass this surface entirely. The CLI's
+   * `stop` command did exactly that, which is why it also applied no rounding.
+   * `triggerPrice` is rounded to the venue tick like `price`.
+   */
+  readonly triggerPrice?: number;
+  readonly triggerType?: OrderStopTriggerType;
+  /**
    * Bybit V5 book-priced limit order. Valid only for plain Bybit linear or
    * inverse limit orders without an explicit price, trigger, or attached TP/SL.
    */
@@ -183,6 +195,28 @@ export interface CancelFilter {
   readonly symbol?: string;
   readonly side?: OrderSide;
   readonly reduceOnly?: boolean;
+  /**
+   * Cancel exactly these order ids and nothing else. When present the other
+   * fields are ignored, because a caller that already enumerated the orders
+   * has answered the question the filter exists to ask.
+   *
+   * Without it a caller that means "these 25 of the 40 resting" can only
+   * describe them by symbol and side, and cancels all 40 — which is how a
+   * preview stops matching what executes. Ids come from `getOrders`.
+   */
+  readonly ids?: readonly string[];
+}
+
+/**
+ * An amend. `order` is accepted for callers that already hold the row, and
+ * IGNORED — every adapter re-resolves the live order by id before amending,
+ * because the caller's copy is a snapshot and the venue's is not. It is
+ * optional so a caller holding only an id need not fabricate an `Order` whose
+ * every field is discarded.
+ */
+export interface UpdateOrderPatch {
+  readonly order?: Order;
+  readonly update: { readonly amount: number } | { readonly price: number };
 }
 
 export interface ClosePositionOpts {
@@ -296,9 +330,11 @@ export interface CoreExchange {
   placeOrders(opts: readonly PlaceOrderOptions[]): Promise<{ orderIds: readonly string[] }>;
   cancelOrder(orderId: string, opts?: { account?: string; symbol?: string }): Promise<void>;
   cancelOrders(filter: CancelFilter, opts?: { account?: string }): Promise<{ canceled: number }>;
-  updateOrder(orderId: string, patch: UpdateOrderOpts, opts?: { account?: string }): Promise<void>;
+  updateOrder(orderId: string, patch: UpdateOrderPatch, opts?: { account?: string }): Promise<void>;
   closePosition(opts: ClosePositionOpts): Promise<{ orderIds: readonly string[] }>;
-  setLeverage(symbol: string, leverage: number, opts?: { account?: string }): Promise<void>;
+  /** `side` targets one leg of a hedge-mode position; omitted means the
+   *  venue's default, which on one-way accounts is the only leg there is. */
+  setLeverage(symbol: string, leverage: number, opts?: { account?: string; side?: PositionSide }): Promise<void>;
   setPositionMode(mode: PositionMode, opts?: { account?: string }): Promise<void>;
   setMarginType(symbol: string, marginType: MarginType, opts?: { account?: string }): Promise<void>;
   /** Escape hatch — runs any allowlisted REPL verb. See SPEC §4.2. */

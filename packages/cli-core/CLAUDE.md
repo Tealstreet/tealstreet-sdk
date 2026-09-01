@@ -209,6 +209,44 @@ reference at `apps/documentation/cli/reference/commands.md` in the same commit.
   bodies splice back into the chain" describe blocks in
   `preprocessIntegration.test.ts`.
 
+## Every order goes through `src/order/prepareCliOrder.ts`
+
+Placement and amend calls in `src/commands/trading/` used to hand
+`exchange.placeOrder` whatever the command had computed. So `buy ... at` never
+rounded its price to the tick, `stop` sent an unrounded trigger AND an
+`amount: 0` infinity stop to the twelve venues that do not read one, `close`
+sent a raw `Math.abs(position.contracts)`, and nothing anywhere applied the
+reduce-only clamp. Web, mobile and custom scripts had all of it, through
+`createCoreAdapter`.
+
+`prepareCliOrder` calls the SAME body that adapter calls —
+`@tealstreet/script-api-core`'s `prepareOrder`. It could not simply take a
+`CoreAdapter`, because an adapter resolves everything through an account name
+and these commands run from three hosts, two of which build a `CommandContext`
+with a bare exchange handle and `accountName: undefined`. The policy was
+lifted out of that closure instead; see `packages/script-api-core/CLAUDE.md`.
+
+`cliOrdersGoThroughPolicy.test.ts` enforces it **per call, not per file** — a
+per-file version passed while `CloseCommand` had one wrapped write and one raw
+one, which is exactly how a file with two writes loses one of them.
+`NukeCommand`, `TwapCommand` and `ChaseCommand` are allowlisted because they
+hand the whole operation to a lower-level manager; their entry sizes still come
+from `TradingBaseCommand`.
+
+Three consequences worth knowing before debugging one:
+
+- **A command now refuses rather than sending an unrounded number.** "Market
+  not loaded" is precisely the state that used to produce bad numbers, so it is
+  the state that has to fail. On a global `close` the refusal is caught per
+  position — one symbol that is not ready must not abort the sweep.
+- **Test fixtures need a REAL venue id.** `name: 'test'` answers "unknown
+  venue" to every metadata question, so round-down, infinity stops and the
+  clamp all go untested. The trading fixtures use `binance`.
+- **`swarm` maps with an `async` callback on purpose.** `prepareCliOrder`
+  throws synchronously, and a synchronous throw inside `.map` would reject the
+  whole batch — the opposite of the "a single bad slice doesn't stop the rest"
+  behaviour the comment above it promises.
+
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
 `TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide
@@ -407,3 +445,12 @@ interface TableColumn {
    - Instead of `'⏸️ Paused'` use `cell('Paused', 'yellow')`
 3. **Web mode uses non-breaking spaces** - This prevents HTML whitespace collapse
 4. **Column widths are hints** - Web mode may auto-adjust based on content
+
+## An amend re-checks the price AFTER rounding
+
+`bump` and `move` validate the shifted price before handing it to
+`prepareCliAmendPrice`, which is not enough: rounding itself can produce zero.
+An order at `0.001` on a `0.001` tick bumped by `-0.0008` is a valid `0.0002`,
+and `roundOrderPrice(0.0002, 0.001)` is `0` — so the amend reached the venue as
+`price: 0`. `prepareOrder` and `createCoreAdapter.updateOrder` both re-check;
+this was the one copy that did not.

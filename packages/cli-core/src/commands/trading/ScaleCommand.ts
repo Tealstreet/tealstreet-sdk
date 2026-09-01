@@ -1,7 +1,8 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
+import { prepareCliOrders } from '../../order/prepareCliOrder';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
-import { adjust, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
+import { subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 
 /**
  * Modifiers the scale allocator genuinely implements: `reduce`
@@ -166,8 +167,6 @@ export class ScaleCommand extends TradingBaseCommand {
     const priceIncrement = subtract(priceUpper, priceLower) / subtract(ordersCount, 1);
     const orderSize = totalSize / ordersCount;
 
-    const market = exchange.store?.markets?.find((market) => market.symbol === targetSymbol);
-
     const orders = [];
     for (let i = 0; i < ordersCount; i++) {
       const price = priceLower + i * priceIncrement;
@@ -200,15 +199,18 @@ export class ScaleCommand extends TradingBaseCommand {
 
     const orderIds =
       (await exchange.placeOrders(
-        orders.map((order) => ({
-          side: order.side,
-          symbol: targetSymbol,
-          price: adjust(parseFloat(order.price), market?.precision.price || 0),
-          type: OrderType.Limit,
-          amount: adjust(order.size, market?.precision.amount || 0),
-          ...(!allowTaker ? { timeInForce: OrderTimeInForce.PostOnly } : {}),
-          reduceOnly: order.reduceOnly,
-        })),
+        prepareCliOrders(
+          exchange,
+          orders.map((order) => ({
+            side: order.side,
+            symbol: targetSymbol,
+            price: parseFloat(order.price),
+            type: OrderType.Limit,
+            amount: order.size,
+            ...(!allowTaker ? { timeInForce: OrderTimeInForce.PostOnly } : {}),
+            reduceOnly: order.reduceOnly,
+          })),
+        ),
       )) ?? [];
 
     if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
