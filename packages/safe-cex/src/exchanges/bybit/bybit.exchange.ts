@@ -493,6 +493,11 @@ export class BybitExchange extends BaseExchange {
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 
+    const recentlyPlaced = this.recentlyPlacedOrders.get(order.id);
+    if (recentlyPlaced) {
+      this.recentlyPlacedOrders.set(order.id, { ...recentlyPlaced, order: nextOrder });
+    }
+
     this.store.addOrUpdateOrders([nextOrder]);
   };
 

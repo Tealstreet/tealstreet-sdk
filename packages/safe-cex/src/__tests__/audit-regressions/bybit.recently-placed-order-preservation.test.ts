@@ -222,6 +222,27 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     expect(store.orders).toMatchObject([{ id: 'brazil-1', price: 101 }]);
   });
 
+  it('keeps the demo recently-placed shield row current after a successful REST amend', async () => {
+    const { exchange, store } = makeExchange(true);
+    const placed = makeOrder('demo-1', { price: 100, amount: 1, remaining: 1 });
+    exchange.recordRecentlyPlacedOrder(placed);
+    exchange.xhr = {
+      post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'demo-1' } } }),
+    };
+
+    await expect(exchange.updateOrder({ order: placed, update: { price: 101, amount: 2 } })).resolves.toEqual([
+      'demo-1',
+    ]);
+
+    expect(store.orders).toMatchObject([{ id: 'demo-1', price: 101, amount: 2, remaining: 2 }]);
+    expect(exchange.recentlyPlacedOrders.get('demo-1')?.order).toMatchObject({
+      id: 'demo-1',
+      price: 101,
+      amount: 2,
+      remaining: 2,
+    });
+  });
+
   // The chaser cancels at the touch, so an order can fill during the cancel
   // round trip. Throwing here made the chaser stop and abandon the chase.
   it('treats already-gone cancel rows as success', async () => {
