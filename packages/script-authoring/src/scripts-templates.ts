@@ -15,18 +15,17 @@
  * edits to either survive across launches.
  */
 
-import { CLI_TYPES_DTS, CORE_TYPES_DTS, WEB_TYPES_DTS } from './script-types-bundle';
+import { CORE_TYPES_DTS, WEB_TYPES_DTS } from './script-types-bundle';
 
 const TYPES_HEADER = `// AUTO-GENERATED on every CLI launch — do not edit. Edits will be
 // overwritten the next time the CLI starts. See SPEC §5.1.
 //
-// This file declares three modules:
+// This file declares two modules:
 //   - '@tealstreet/script-api-core'  (target-agnostic surface — most scripts)
-//   - '@tealstreet/script-api-cli'   (CLI-specific extensions; scaffold today)
 //   - '@tealstreet/script-api-web'   (web-app extensions; scaffold today)
 //
-// Mobile currently has no extension package. It runs a read-only CoreApi
-// subset, enforced by meta.targets and the shared target-surface validator.
+// CLI and mobile have no extension package. Both run a CoreApi subset,
+// enforced by meta.targets and the shared target-surface validator.
 //
 // Each is bundled from the source package at CLI build time and
 // stays in lockstep with the running binary's runtime surface (drift
@@ -49,7 +48,7 @@ const TYPES_HEADER = `// AUTO-GENERATED on every CLI launch — do not edit. Edi
  * it separately they could silently diverge, and an agent would write against
  * a surface the user's editor doesn't have.
  */
-export const SCRIPT_TYPES_BUNDLE = [CORE_TYPES_DTS, CLI_TYPES_DTS, WEB_TYPES_DTS].join('\n');
+export const SCRIPT_TYPES_BUNDLE = [CORE_TYPES_DTS, WEB_TYPES_DTS].join('\n');
 
 export const TYPES_TEMPLATE = [TYPES_HEADER, SCRIPT_TYPES_BUNDLE].join('\n');
 

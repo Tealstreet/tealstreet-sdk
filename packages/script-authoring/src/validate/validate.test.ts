@@ -6,12 +6,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 // The REAL generated bundle, not a fixture: validating against a
 // hand-written surface would prove nothing about the shipped contract.
-import { CLI_TYPES_DTS, CORE_TYPES_DTS, WEB_TYPES_DTS } from '../script-types-bundle';
+import { CORE_TYPES_DTS, WEB_TYPES_DTS } from '../script-types-bundle';
 import { checkRuntimeImports } from './checkRuntimeImports';
 import { validate } from './validate';
 import { __clearValidatorCache, validateScript } from './validateScript';
 
-const typesBundle = [CORE_TYPES_DTS, CLI_TYPES_DTS, WEB_TYPES_DTS].join('\n');
+const typesBundle = [CORE_TYPES_DTS, WEB_TYPES_DTS].join('\n');
 const options = { typesBundle };
 
 // Mirrors HELLO_TEMPLATE's shape: api/args are PARAMETERS, not ambient globals.

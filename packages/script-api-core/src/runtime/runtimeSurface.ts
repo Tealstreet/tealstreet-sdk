@@ -202,6 +202,31 @@ const WEB_EXTENSION_API_PATHS = Object.freeze([
   'api.domHotkey.register',
 ] as const satisfies readonly ApiPath[]);
 
+/**
+ * The version of the `cli` SURFACE, which is what `validateTargets` compares a
+ * script's `cliApiVersion` stamp against.
+ *
+ * It lived in `@tealstreet/script-api-cli` until that package was deleted. The
+ * package was scaffolding and stayed scaffolding: three of its four files were
+ * `export {}` placeholders for a phase that never landed, and this constant —
+ * still `0.0.0` — was the only thing it exported. `api.io.print` / `api.io.return`,
+ * the one surface the SPEC earmarked for it, were moved into core early on
+ * because web inline invocation needs them too, and nothing CLI-specific ever
+ * replaced them.
+ *
+ * The TARGET is not going anywhere: `RUNTIME_SURFACES.cli` below is real,
+ * `apps/cli` mounts it, and a script may declare `targets: ['cli']`. Only its
+ * empty package is gone, which leaves `cli` shaped exactly like `mobile` —
+ * a target described entirely from core.
+ *
+ * **`validateTargets` REQUIRES a non-empty string here** for any target it
+ * checks, so deleting this rather than moving it would make every
+ * `targets: ['cli']` script fail to load with "runtime provides no 'cli' API
+ * version". Bump it when a genuinely CLI-only script API lands; at that point
+ * it also needs a `check:api-versions` entry naming its new surface files.
+ */
+export const CLI_API_VERSION = '0.0.0';
+
 export const RUNTIME_SURFACES = Object.freeze({
   core: Object.freeze({
     target: 'core',

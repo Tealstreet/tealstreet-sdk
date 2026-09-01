@@ -107,6 +107,7 @@ export { InProcessProxy } from './proxy/InProcessProxy';
 export { validateTargets, type ScriptDescriptor, type RuntimeDescriptor } from './runtime/targetCheck';
 /** @internal Host-side — target API surface descriptors. */
 export {
+  CLI_API_VERSION,
   CORE_READ_API_PATHS,
   CORE_SHARED_API_PATHS,
   CORE_WRITE_API_PATHS,

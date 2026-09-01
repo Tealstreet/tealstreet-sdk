@@ -20,8 +20,8 @@
  * zero cli-core dep). The shim is the host's gluing point.
  */
 import type { PreprocessStore } from '@tealstreet/cli-core';
-import { CLI_API_VERSION } from '@tealstreet/script-api-cli';
 import {
+  CLI_API_VERSION,
   CORE_API_VERSION,
   assertIdempotentForRetry,
   normalizeReturnForCapture,

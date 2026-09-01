@@ -6,7 +6,7 @@ import { checkTopLevelEffects, readScriptMeta, validate, type ValidationIssue } 
 
 import { recordMcpScriptAction } from '../audit-log';
 import { isLoggedIn } from '../auth';
-import { CLI_TYPES_DTS, CORE_TYPES_DTS, WEB_TYPES_DTS } from '@tealstreet/script-authoring/src/script-types-bundle';
+import { CORE_TYPES_DTS, WEB_TYPES_DTS } from '@tealstreet/script-authoring/src/script-types-bundle';
 import { SCRIPT_TYPES_BUNDLE } from '@tealstreet/script-authoring/src/scripts-templates';
 import { RUNTIME_SURFACES, getAllowedApiPathsForTargets, type TargetName } from '@tealstreet/script-api-core';
 import {
@@ -207,8 +207,7 @@ defineTool(
       case 'cli':
         return text(
           [
-            CLI_TYPES_DTS,
-            '',
+            'The CLI has no extension package; it runs the CoreApi subset below.',
             'CLI runtime API paths:',
             formatApiPaths(RUNTIME_SURFACES.cli.apiPaths),
           ].join('\n'),

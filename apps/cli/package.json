@@ -48,7 +48,6 @@
     "@tealstreet/cli-core": "*",
     "@tealstreet/mcp-data": "*",
     "@tealstreet/safe-cex": "*",
-    "@tealstreet/script-api-cli": "*",
     "@tealstreet/oems-core": "*",
     "@tealstreet/script-api-core": "*",
     "@tealstreet/script-api-web": "*",
