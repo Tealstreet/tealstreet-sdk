@@ -53,7 +53,7 @@
     "@tealstreet/script-api-web": "*",
     "@tealstreet/script-authoring": "*",
     "@tealstreet/utils": "*",
-    "chalk": "^5.3.0",
+    "chalk": "^6.0.0",
     "commander": "^15.0.0",
     "fast-json-patch": "^3.1.1",
     "open": "^11.0.1",
