@@ -1,6 +1,6 @@
 import type { ExchangeOptions } from '../../types';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
@@ -477,6 +477,36 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
     expect(store.orders).toEqual([]);
     expect(exchange.preserveRecentlyPlacedOrders([])).toEqual([]);
+  });
+
+  it('retires filled demo reduce-only limit closes instead of leaving the local placeholder open', async () => {
+    vi.useFakeTimers();
+    try {
+      const { exchange, store } = makeExchange(true);
+      const placed = makeOrder('close-1', { side: OrderSide.Sell, reduceOnly: true });
+      exchange.xhr = {
+        get: async (_endpoint: string, config: any) => ({
+          data: {
+            retCode: 0,
+            retMsg: 'OK',
+            result: {
+              list: [{ orderId: config.params.orderId, execQty: '1' }],
+              nextPageCursor: '',
+            },
+          },
+        }),
+      };
+
+      exchange.recordRecentlyPlacedOrder(placed);
+      expect(store.orders.map((order: Order) => order.id)).toEqual(['close-1']);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(store.orders).toEqual([]);
+      expect(exchange.recentlyPlacedOrders.has('close-1')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('still injects conditional market triggers because they are resting orders', () => {

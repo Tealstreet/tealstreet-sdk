@@ -105,6 +105,7 @@ const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
 // order-indexing lag with margin; short enough that a phantom row for an order
 // that filled before its first sighting cannot linger.
 const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
+const REDUCE_ONLY_LIMIT_RECONCILE_DELAYS_MS = [1_000, 3_000, RECENTLY_PLACED_ORDER_GRACE_MS + 250];
 const RETIRED_ORDER_SYMBOL_TTL_MS = 60_000;
 const FILL_RECONCILIATION_MAX_PAGES = 20;
 
@@ -368,6 +369,9 @@ export class BybitExchange extends BaseExchange {
 
   dispose = () => {
     this.debouncedPrivateSnapshotRefresh.cancel();
+    for (const orderId of this.recentlyPlacedOrderReconciliationTimers.keys()) {
+      this.clearRecentlyPlacedOrderReconciliationTimers(orderId);
+    }
     super.dispose();
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
@@ -394,6 +398,7 @@ export class BybitExchange extends BaseExchange {
    * would re-place on top of a fill and overfill the user's target.
    */
   private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
+  private recentlyPlacedOrderReconciliationTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
 
   private shouldUseLocalRestOrderLifecycleFallback = () => {
     return this.isDemo || this.options.bybitSiteId === BYBIT_BRAZIL_SITE_ID;
@@ -402,6 +407,72 @@ export class BybitExchange extends BaseExchange {
   /** First sighting via private WS or an explicit cancel — stop protecting the id. */
   markOrderSeen = (orderId: string) => {
     this.recentlyPlacedOrders.delete(orderId);
+    this.clearRecentlyPlacedOrderReconciliationTimers(orderId);
+  };
+
+  private clearRecentlyPlacedOrderReconciliationTimers = (orderId: string) => {
+    const timers = this.recentlyPlacedOrderReconciliationTimers.get(orderId);
+    if (!timers) return;
+
+    timers.forEach((timer) => clearTimeout(timer));
+    this.recentlyPlacedOrderReconciliationTimers.delete(orderId);
+  };
+
+  private shouldReconcileLocalReduceOnlyLimitOrder = (order: Order) => {
+    return this.shouldUseLocalRestOrderLifecycleFallback() && order.type === OrderType.Limit && order.reduceOnly === true;
+  };
+
+  private scheduleLocalReduceOnlyLimitOrderReconciliation = (order: Order) => {
+    if (!this.shouldReconcileLocalReduceOnlyLimitOrder(order)) return;
+
+    this.clearRecentlyPlacedOrderReconciliationTimers(order.id);
+    const timers = REDUCE_ONLY_LIMIT_RECONCILE_DELAYS_MS.map((delayMs) =>
+      setTimeout(() => {
+        void this.reconcileLocalReduceOnlyLimitOrder(order.id);
+      }, delayMs),
+    );
+    this.recentlyPlacedOrderReconciliationTimers.set(order.id, timers);
+  };
+
+  private getFilledOrderReconciliationTarget = (order: Order) => {
+    const amounts = [order.amount, order.remaining + (order.filled || 0)].filter(Number.isFinite);
+    return amounts.length > 0 ? Math.max(...amounts) : 0;
+  };
+
+  private reconcileLocalReduceOnlyLimitOrder = async (orderId: string) => {
+    const entry = this.recentlyPlacedOrders.get(orderId);
+    if (!entry || this.isDisposed) return;
+
+    const order = this.store.orders.find((o) => o.id === orderId) ?? entry.order;
+    if (!this.shouldReconcileLocalReduceOnlyLimitOrder(order)) return;
+
+    try {
+      const fillsByOrderId = await this.fetchFillsForOrderIds([orderId]);
+      if (this.isDisposed) return;
+
+      const filled = fillsByOrderId.get(orderId) ?? 0;
+      const targetAmount = this.getFilledOrderReconciliationTarget(order);
+      const fullFillTolerance = Math.max(targetAmount * 1e-8, 1e-12);
+      if (targetAmount > 0 && filled >= targetAmount - fullFillTolerance) {
+        this.markOrderSeen(orderId);
+        this.store.removeOrders([{ id: orderId }]);
+        return;
+      }
+
+      const now = virtualClock.getCurrentTimeMs();
+      if (now - entry.placedAt < RECENTLY_PLACED_ORDER_GRACE_MS) {
+        return;
+      }
+
+      const orders = await this.fetchOrders();
+      if (this.isDisposed) return;
+      this.store.update({
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      });
+    } catch (error: any) {
+      this.log(`Failed to reconcile local Bybit reduce-only limit order ${orderId}: ${error?.message || error}`, LogSeverity.Warning);
+    }
   };
 
   private recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
@@ -439,6 +510,7 @@ export class BybitExchange extends BaseExchange {
     // REST writes succeed, but direct browser WS cannot send x-site-id.
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
       this.store.addOrUpdateOrders([order]);
+      this.scheduleLocalReduceOnlyLimitOrderReconciliation(order);
     }
   };
 
@@ -541,11 +613,11 @@ export class BybitExchange extends BaseExchange {
     for (const [id, entry] of this.recentlyPlacedOrders) {
       if (fetchedIds.has(id)) {
         // REST has indexed it — normal reconciliation owns it from here on.
-        this.recentlyPlacedOrders.delete(id);
+        this.markOrderSeen(id);
         continue;
       }
       if (now - entry.placedAt > RECENTLY_PLACED_ORDER_GRACE_MS) {
-        this.recentlyPlacedOrders.delete(id);
+        this.markOrderSeen(id);
         continue;
       }
       preserved.push(this.store.orders.find((o) => o.id === id) ?? entry.order);
