@@ -60,7 +60,7 @@
     "nanoid": "~6.0.1",
     "p-iteration": "^1.1.8",
     "pako": "^3.0.1",
-    "qs": "^6.15.3",
+    "qs": "^6.16.0",
     "tiny-emitter": "^2.1.0",
     "ws": "^8.21.0",
     "zklink-web-sdk-alpha": "1.0.2"
