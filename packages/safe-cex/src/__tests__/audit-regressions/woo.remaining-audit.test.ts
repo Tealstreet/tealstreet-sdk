@@ -258,6 +258,7 @@ describe('WooX remaining July audit regressions', () => {
       if (endpoint === ENDPOINTS.ACCOUNT) {
         return {
           data: {
+            success: true,
             data: {
               positionMode: 'ONE_WAY',
               accountMode: 'FUTURES',
