@@ -180,4 +180,39 @@ describe('Binance Spot REST contract', () => {
       }),
     ).toThrow(/trailingDelta/);
   });
+
+  it('rejects failed order placement instead of resolving with no order IDs', async () => {
+    const store = new DefaultStore();
+    store.update({
+      markets: [
+        {
+          id: 'BTC/USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          isSpot: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+        },
+      ],
+    });
+    const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+    vi.spyOn(exchange.unlimitedXHR, 'post').mockRejectedValue({
+      response: { data: { msg: 'Account has insufficient balance for requested action.' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        amount: 0.1,
+        price: 40_000,
+      }),
+    ).rejects.toMatchObject({
+      response: { data: { msg: 'Account has insufficient balance for requested action.' } },
+    });
+  });
 });

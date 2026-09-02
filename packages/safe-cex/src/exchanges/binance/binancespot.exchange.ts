@@ -570,6 +570,7 @@ export class BinanceSpotExchange extends BaseExchange {
           orderIds.push(lot[i].newClientOrderId);
         } catch (err: any) {
           this.emitAndLogError(err?.response?.data?.msg || err?.message);
+          throw err;
         }
       }
     }
