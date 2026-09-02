@@ -352,7 +352,10 @@ Spot order requests never send futures-only `positionSide`, `closePosition`, or
 `reduceOnly`. Regular post-only limits use `LIMIT_MAKER`; stop-loss and
 take-profit use the spot market-trigger types. The shared trailing-stop option
 is rejected because it supplies a futures callback-rate shape, while Binance
-Spot requires `trailingDelta` on a stop order.
+Spot requires `trailingDelta` on a stop order. Spot also requires an explicit
+positive `quantity` for the supported order shapes here, so `binancespot`
+advertises `supportsInfinityStops: false` and `formatCreateOrder` rejects
+`amount <= 0` before `/api/v3/order`.
 
 WebSocket API events arrive as `{ subscriptionId, event }`; the inner Spot event
 has top-level `executionReport` fields, and `outboundAccountPosition.B` carries
@@ -856,7 +859,11 @@ Calling `changeMarginType()` on PM always throws an error with "Portfolio margin
 - Uses `/api/v3/account`; spot balances map into `balance.currencies`/`coins`
   and spot returns no derivative positions.
 - Account event handler (`outboundAccountPosition`) treats all positions as Long side (`binancespot.ws-private.ts:104`)
-- No batch order support -- places orders one at a time in a loop (`binancespot.exchange.ts:604-613`)
+- No full-position/infinity stops; spot stop-loss and take-profit orders must
+  carry a positive explicit quantity.
+- No batch order support -- places orders one at a time in a loop. Spot may
+  split orders above `LOT_SIZE.maxQty`, but only when `maxQty > 0`; a malformed
+  zero max must fall back to one order, not an infinite/empty split.
 - No `bigIntAsStringJsonParse` in API layer
 
 ### Spot Precision Calculation

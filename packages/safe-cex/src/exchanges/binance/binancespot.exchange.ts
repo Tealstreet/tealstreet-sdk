@@ -482,6 +482,12 @@ export class BinanceSpotExchange extends BaseExchange {
     const pAmount = market.precision.amount;
     const amount = adjust(opts.amount, pAmount);
 
+    if (!Number.isFinite(amount) || amount <= 0) {
+      const message = `Binance Spot orders require an explicit quantity greater than zero for ${opts.symbol}`;
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     // We use price only for limit orders
     // Market order should not define price
     const price = opts.price && opts.type !== OrderType.Market ? adjust(opts.price, pPrice) : undefined;
@@ -517,8 +523,9 @@ export class BinanceSpotExchange extends BaseExchange {
         opts.type === OrderType.Limit && opts.timeInForce !== OrderTimeInForce.PostOnly ? timeInForce : undefined,
     });
 
-    const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
-    const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
+    const shouldSplitLots = maxSize > 0 && amount > maxSize;
+    const lots = shouldSplitLots ? Math.ceil(amount / maxSize) : 1;
+    const rest = shouldSplitLots ? adjust(amount % maxSize, pAmount) : 0;
 
     const lotSize = adjust((amount - rest) / lots, pAmount);
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binancespot.types';
 import { DefaultStore } from '../../store/store.base';
@@ -25,6 +26,10 @@ describe('Binance Spot REST contract', () => {
   it('uses the current account and current-open-orders endpoints', () => {
     expect(ENDPOINTS.ACCOUNT).toBe('/api/v3/account');
     expect(ENDPOINTS.OPEN_ORDERS).toBe('/api/v3/openOrders');
+  });
+
+  it('does not advertise full-position stop orders', () => {
+    expect(exchangeMetadata.binancespot.supportsInfinityStops).toBe(false);
   });
 
   it('maps spot balances without expecting futures positions or totals', async () => {
@@ -139,6 +144,69 @@ describe('Binance Spot REST contract', () => {
       expect(order).not.toHaveProperty('closePosition');
       expect(order).not.toHaveProperty('reduceOnly');
     }
+  });
+
+  it('rejects zero-quantity spot orders before posting to Binance', () => {
+    const store = new DefaultStore();
+    store.update({
+      markets: [
+        {
+          id: 'BTC/USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          isSpot: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+        },
+      ],
+    });
+    const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    expect(() =>
+      (exchange as any).formatCreateOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Sell,
+        type: OrderType.StopLoss,
+        amount: 0,
+        price: 39_000,
+      }),
+    ).toThrow('Binance Spot orders require an explicit quantity greater than zero for BTCUSDT');
+    expect(emitAndLogError).toHaveBeenCalledWith(
+      'Binance Spot orders require an explicit quantity greater than zero for BTCUSDT',
+    );
+  });
+
+  it('does not treat a zero maxQty as an infinite split count', () => {
+    const store = new DefaultStore();
+    store.update({
+      markets: [
+        {
+          id: 'BTC/USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          isSpot: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 0 }, leverage: { min: 1, max: 1 } },
+        },
+      ],
+    });
+    const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
+
+    const payload = (exchange as any).formatCreateOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Limit,
+      amount: 0.123,
+      price: 40_000,
+    });
+
+    expect(payload).toHaveLength(1);
+    expect(payload[0]).toMatchObject({ quantity: '0.123', price: '40000' });
   });
 
   it('maps post-only to LIMIT_MAKER and rejects unsupported trailing-stop inputs', () => {

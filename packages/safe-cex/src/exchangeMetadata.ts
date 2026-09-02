@@ -708,6 +708,7 @@ const BinanceSpotMetadata: ExchangeMetadata = {
   privateProxyIps: privateProxyIpsTokyo,
   supportsChaser: true,
   supportsPositionMargin: false,
+  supportsInfinityStops: false,
   prettyName: 'Binance Spot',
   doesNotSupportOpenInterest: true,
   latencyDomain: 'api.binance.com',
