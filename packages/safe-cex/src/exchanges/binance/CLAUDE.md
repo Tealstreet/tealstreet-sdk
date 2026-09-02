@@ -219,7 +219,7 @@ As of **2026-04-23**, Binance retired the legacy `wss://fstream.binance.com/ws` 
 | **PM** livenet      | `wss://fstream.binance.com/public/ws`      | `wss://fstream.binance.com/market/ws`      | `wss://fstream.binance.com/pm/ws/{listenKey}`           |
 | **PM** testnet      | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/pm/ws/{listenKey}`      |
 | **Spot** livenet    | `wss://stream.binance.com:9443/ws`         | (same as public — unaffected by split)     | `wss://ws-api.binance.com:443/ws-api/v3`                |
-| **Spot** testnet    | `wss://testnet.binance.vision/ws`          | (same as public — unaffected by split)     | `wss://ws-api.testnet.binance.vision/ws-api/v3`         |
+| **Spot** testnet    | `wss://stream.testnet.binance.vision/ws`   | (same as public — unaffected by split)     | `wss://ws-api.testnet.binance.vision/ws-api/v3`         |
 
 **Stream → endpoint routing (futures + PM):**
 
@@ -764,7 +764,7 @@ orderbookTickDelay: 60
 | Variant      | Livenet WS (public + market)                                                  | Testnet WS (public + market)                                                            |
 | ------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Futures      | `wss://fstream.binance.com/public/ws` + `wss://fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/public/ws` + `wss://demo-fstream.binance.com/market/ws` |
-| Spot public  | `wss://stream.binance.com:9443/ws`                                            | `wss://testnet.binance.vision/ws`                                                       |
+| Spot public  | `wss://stream.binance.com:9443/ws`                                            | `wss://stream.testnet.binance.vision/ws`                                                |
 | Spot private | `wss://ws-api.binance.com:443/ws-api/v3`                                      | `wss://ws-api.testnet.binance.vision/ws-api/v3`                                         |
 
 ### Behavioral Differences

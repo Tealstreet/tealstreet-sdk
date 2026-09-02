@@ -34,9 +34,15 @@ afterEach(() => {
 
 describe('Binance Spot WebSocket API user-data subscription', () => {
   it('uses Binance WebSocket API endpoints and has no retired listen-key endpoint', async () => {
-    expect(BASE_WS_URL.private).toEqual({
-      livenet: 'wss://ws-api.binance.com:443/ws-api/v3',
-      testnet: 'wss://ws-api.testnet.binance.vision/ws-api/v3',
+    expect(BASE_WS_URL).toEqual({
+      public: {
+        livenet: 'wss://stream.binance.com:9443/ws',
+        testnet: 'wss://stream.testnet.binance.vision/ws',
+      },
+      private: {
+        livenet: 'wss://ws-api.binance.com:443/ws-api/v3',
+        testnet: 'wss://ws-api.testnet.binance.vision/ws-api/v3',
+      },
     });
     expect(ENDPOINTS).not.toHaveProperty('LISTEN_KEY');
 

@@ -9,7 +9,7 @@ export const BASE_URL = {
 export const BASE_WS_URL = {
   public: {
     livenet: 'wss://stream.binance.com:9443/ws',
-    testnet: 'wss://testnet.binance.vision/ws',
+    testnet: 'wss://stream.testnet.binance.vision/ws',
   },
   private: {
     livenet: 'wss://ws-api.binance.com:443/ws-api/v3',
