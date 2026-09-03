@@ -115,7 +115,7 @@ Beta validation checklist:
 
 **Retry logic** (`bybit.api.ts:49-52`): Retries up to 3 times on network errors or `"error sign!"` responses, except `MARKETS` (`/v5/market/instruments-info`) network errors, which are not retried inside worker startup. The `shouldRetryBybitRequest()` function checks both `ret_msg` and `retMsg` response fields for signature drift.
 
-**Time sync** (`bybit.api.ts:92-105`): On `recv_window` errors (response `retMsg` containing `'recv'`), automatically calls `virtualClock.syncBybitClientServerTime()`. Also logs server unavailability when the raw response includes "too much traffic or a configuration error".
+**Time sync** (`bybit.api.ts:92-105`): On `recv_window` errors (response `retMsg` containing `'recv'`), automatically calls `virtualClock.syncBybitClientServerTime()` and retries the signed request once. If the retry also fails, the error is logged and returned to the caller. Also logs server unavailability when the raw response includes "too much traffic or a configuration error".
 
 **HTTP-over-WebSocket tunnel** (`bybit.api.ts:87-90`): When `options.tealstreetTunnel` is set, the Axios adapter is replaced with `createAxiosHttpOverWebsocketAdapter` using the configured `proxyRegion`.
 
@@ -1041,7 +1041,7 @@ A 1-second delay (`INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY`) is applied when
 ### Time Synchronization
 
 - REST: `virtualClock.getCurrentTimeMs()` for timestamps
-- If recv_window errors occur, auto-syncs via `virtualClock.syncBybitClientServerTime()`
+- If recv_window errors occur, auto-syncs via `virtualClock.syncBybitClientServerTime()` and retries once
 - WebSocket: Syncs time before auth on every connection/reconnection
 
 ### Spot-Specific: PnL Calculation on Ticker Update
@@ -1128,7 +1128,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | Error Message / Code                          | Handling                                                                               | Location                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
 | `"error sign!"`                               | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:17-22`               |
-| `"timestamp and recv_window param"`           | Auto time sync via `virtualClock.syncBybitClientServerTime()`                          | `bybit.api.ts:92-96`               |
+| `"timestamp and recv_window param"`           | Auto time sync via `virtualClock.syncBybitClientServerTime()`, then one retry          | `bybit.api.ts:92-96`               |
 | `"accountType only support UNIFIED."`         | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
 | Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
 | `"order not modified"`                        | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
@@ -1253,7 +1253,7 @@ yarn test-ci
 ## Common Issues and Solutions
 
 1. **"error sign!" on requests**: Signature mismatch. Check time sync, recv_window. The API retries 3x automatically.
-2. **"timestamp and recv_window param"**: Local clock is out of sync. Auto-resolved by `virtualClock.syncBybitClientServerTime()`.
+2. **"timestamp and recv_window param"**: Local clock is out of sync. Auto-resolved by `virtualClock.syncBybitClientServerTime()` plus one signed-request retry.
 3. **"accountType only support UNIFIED."**: Defensive fallback for an unexpected stale account status; normal requests are UNIFIED-first.
 4. **Margin-mode switch rejected**: Surface Bybit's returned reason; the integration uses the UTA account-level margin-mode endpoint.
 5. **Batch order failures**: Falls back to individual order placement per order in the failed batch.

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
 import { createAPI } from '../../exchanges/bybit/bybit.api';
+import { virtualClock } from '../../utils/virtualClock';
 
 /**
  * A known-bad bybit key was polled at the 500ms metadata tick interval forever:
@@ -97,6 +98,11 @@ describe('bybit response interceptor auth handling', () => {
   };
 
   const signed = { headers: { 'X-BAPI-SIGN': 'abc' } };
+  const clockReject = {
+    retCode: 10002,
+    retMsg:
+      'invalid request, please check your server timestamp or recv_window param: req_timestamp[1000],server_timestamp[2000],recv_window[20000]',
+  };
 
   it('turns a tunnelled 401 into a message the auth patterns match', async () => {
     const { exchange, handler } = makeApi();
@@ -166,5 +172,66 @@ describe('bybit response interceptor auth handling', () => {
 
     await handler({ status: 200, data: { retCode: 0, retMsg: 'OK' }, config: signed });
     expect(exchange.recordAuthSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('silently resyncs and retries a Bybit clock rejection once', async () => {
+    const exchange = {
+      name: 'bybit',
+      recordAuthFailure: vi.fn(),
+      recordAuthSuccess: vi.fn(),
+      emitAndLogError: vi.fn(),
+    } as unknown as BaseExchange;
+    const syncSpy = vi.spyOn(virtualClock, 'syncBybitClientServerTime').mockResolvedValue();
+    const timeSpy = vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValueOnce(1000).mockReturnValueOnce(2000);
+    const responses = [clockReject, { retCode: 0, retMsg: 'OK' }];
+    const adapter = vi.fn(async (config) => ({
+      config,
+      data: responses.shift(),
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+    const xhr = createAPI({ key: 'k', secret: 's' } as any, exchange);
+
+    const response = await xhr.get('/v5/order/realtime', { adapter });
+
+    expect(response.data.retMsg).toBe('OK');
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(exchange.emitAndLogError).not.toHaveBeenCalled();
+    expect(exchange.recordAuthSuccess).toHaveBeenCalledTimes(1);
+    expect(adapter.mock.calls[0][0].headers['X-BAPI-TIMESTAMP']).toBe('1000');
+    expect(adapter.mock.calls[1][0].headers['X-BAPI-TIMESTAMP']).toBe('2000');
+    timeSpy.mockRestore();
+    syncSpy.mockRestore();
+  });
+
+  it('surfaces the clock rejection when the retry also fails', async () => {
+    const exchange = {
+      name: 'bybit',
+      recordAuthFailure: vi.fn(),
+      recordAuthSuccess: vi.fn(),
+      emitAndLogError: vi.fn(),
+    } as unknown as BaseExchange;
+    const syncSpy = vi.spyOn(virtualClock, 'syncBybitClientServerTime').mockResolvedValue();
+    const timeSpy = vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValueOnce(1000).mockReturnValueOnce(2000);
+    const adapter = vi.fn(async (config) => ({
+      config,
+      data: clockReject,
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+    const xhr = createAPI({ key: 'k', secret: 's' } as any, exchange);
+
+    const response = await xhr.get('/v5/order/realtime', { adapter });
+
+    expect(response.data.retMsg).toBe(clockReject.retMsg);
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(exchange.emitAndLogError).toHaveBeenCalledWith('Local time is out of sync after retry');
+    expect(exchange.recordAuthSuccess).not.toHaveBeenCalled();
+    timeSpy.mockRestore();
+    syncSpy.mockRestore();
   });
 });

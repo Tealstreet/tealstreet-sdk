@@ -26,6 +26,8 @@ const BYBIT_AUTH_RET_CODES = new Set([
   33004, // api key has expired
 ]);
 
+const CLOCK_SYNC_RETRY_CONFIG_KEY = 'safeCexBybitClockSyncRetry';
+
 // KLINE is fetched unsigned (headers are stripped below) and shares this
 // client, so header presence is what distinguishes a credential-proving call.
 const isSignedRequest = (config: { headers?: any } | undefined) => Boolean(config?.headers?.['X-BAPI-SIGN']);
@@ -35,6 +37,11 @@ const isSignedRequest = (config: { headers?: any } | undefined) => Boolean(confi
 const isPublicEndpoint = (url?: string) => Boolean(url?.includes('/v5/market/'));
 
 const isInstrumentsInfoRequest = (error: any) => error?.config?.url === ENDPOINTS.MARKETS;
+
+const isBybitClockSyncRetMsg = (retMsg: string) => retMsg.toLowerCase().includes('recv');
+
+const hasRetriedClockSync = (config: unknown) =>
+  Boolean((config as Record<string, unknown> | undefined)?.[CLOCK_SYNC_RETRY_CONFIG_KEY]);
 
 export const shouldRetryBybitRequest = (error: any) => {
   const isNetwork = isNetworkError(error);
@@ -178,9 +185,15 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     if (response.data && responseMeta.hasExplicitStatus && !responseMeta.isSuccess) {
       const retMsg = responseMeta.retMsg || '';
-      if (retMsg.includes('recv')) {
-        exchange.emitAndLogError('Local time is out of sync, updating...');
-        await virtualClock.syncBybitClientServerTime(); // This method name stays the same as it's a common sync
+      if (isBybitClockSyncRetMsg(retMsg)) {
+        if (!hasRetriedClockSync(response.config)) {
+          await virtualClock.syncBybitClientServerTime(); // This method name stays the same as it's a common sync
+          return xhr.request({
+            ...response.config,
+            [CLOCK_SYNC_RETRY_CONFIG_KEY]: true,
+          } as typeof response.config);
+        }
+        exchange.emitAndLogError('Local time is out of sync after retry');
       } else if (responseMeta.retCode !== undefined ? responseMeta.retCode !== 0 : true) {
         if (response.data?.raw_response?.includes?.('There might be too much traffic or a configuration error')) {
           exchange.emitAndLogError('Server was unavailable for a request, retrying...');
