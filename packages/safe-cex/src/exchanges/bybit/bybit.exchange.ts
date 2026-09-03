@@ -109,9 +109,33 @@ const REDUCE_ONLY_LIMIT_RECONCILE_DELAYS_MS = [1_000, 3_000, RECENTLY_PLACED_ORD
 const RETIRED_ORDER_SYMBOL_TTL_MS = 60_000;
 const FILL_RECONCILIATION_MAX_PAGES = 20;
 
+/**
+ * Only the message survives structured-clone out of the exchange worker, so the
+ * reason has to ride in it or Sentry sees nothing but a constant string. Kept to
+ * a fixed vocabulary: the raw retMsg carries proxy IPs and ban timestamps, which
+ * would split one issue into thousands.
+ */
+export const describeBybitMarketsFailure = (cause: unknown): string => {
+  const err = cause as
+    | { response?: { status?: number; data?: { retMsg?: unknown } }; code?: unknown; message?: unknown }
+    | null
+    | undefined;
+
+  const retMsg = String(err?.response?.data?.retMsg ?? '').toLowerCase();
+  const message = String(err?.message ?? '').toLowerCase();
+  const status = err?.response?.status;
+
+  if (retMsg.includes('too many') || retMsg.includes('rate limit') || status === 429) return 'rate-limited';
+  if (retMsg.includes('banned') || status === 403) return 'blocked';
+  if (message.includes('timeout') || message.includes('timed out') || err?.code === 'ECONNABORTED') return 'timeout';
+  if (typeof status === 'number') return `HTTP ${status}`;
+  if (message.includes('network')) return 'network';
+  return 'unknown';
+};
+
 class BybitTradingMarketsRequestError extends Error {
   constructor(readonly cause: unknown) {
-    super('Failed to fetch Bybit Trading markets');
+    super(`Failed to fetch Bybit Trading markets (${describeBybitMarketsFailure(cause)})`);
     this.name = 'BybitTradingMarketsRequestError';
   }
 }
