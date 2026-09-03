@@ -10,6 +10,16 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
   private orderBookHandlers: { [symbol: string]: Array<(o: OrderBook) => void> } = {};
   private orderBookCache: { [symbol: string]: { bids: Map<number, number>; asks: Map<number, number> } } = {};
 
+  private getTickerProductIds = () => {
+    const productIds = this.parent.store.markets.map((m) => m.symbol);
+    const activeSymbols = this.parent.getActiveTickerSymbols();
+    if (activeSymbols.length === 0) return productIds;
+
+    const activeSet = new Set(activeSymbols);
+    const filtered = productIds.filter((symbol) => activeSet.has(symbol));
+    return filtered.length > 0 ? filtered : productIds;
+  };
+
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';
@@ -36,8 +46,8 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
   onOpen = () => {
     if (!this.isDisposed) {
-      // Subscribe to ticker for all visible markets
-      const product_ids = this.parent.store.markets.map((m) => m.symbol);
+      // Subscribe to ticker for the active products when the host supplies them.
+      const product_ids = this.getTickerProductIds();
       // Kraken expects batches; keep payload size modest
       for (let i = 0; i < product_ids.length; i += 50) {
         const batch = product_ids.slice(i, i + 50);
@@ -236,6 +246,8 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
     if (handlers.length === 0) {
       return;
     }
+
+    this.recordMessageHandlerStats('book');
 
     // Log the raw data to debug quantity parsing
     const rawBids = v(msg, 'bids') || [];

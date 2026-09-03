@@ -102,7 +102,7 @@ Uses `virtualClock.getCurrentTimeMs()` for nonce generation. No explicit server 
 4. `fetchTickers()` -- GET `/v3/tickers`, map to existing markets
 5. Store update: set `tickers` and `loaded.tickers = true`
 6. Dispose check
-7. Create and connect `KrakenPublicWebsocket` -- subscribes to ticker feed for all markets
+7. Create and connect `KrakenPublicWebsocket` -- subscribes to the active ticker products when supplied, otherwise all markets
 8. **Conditionally** create `KrakenPrivateWebsocket` -- only if `!publicDataOnly && key && secret` (`kraken.exchange.ts`)
 9. Call `this.tick(0)` -- triggers immediate first tick
 
@@ -319,7 +319,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 
 **On Open** (`kraken.ws-public.ts`):
 
-1. Subscribe to `ticker` feed for all markets, batched in groups of 50 (`product_ids` array)
+1. Subscribe to `ticker` feed for active products when supplied, otherwise all markets, batched in groups of 50 (`product_ids` array)
 2. Re-subscribe to any active orderbook handlers
 3. OHLCV re-subscription is a no-op (Kraken Futures does not support WebSocket OHLCV)
 
@@ -327,7 +327,7 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 
 - `event` field present: subscription confirmations or errors (logged, not processed further)
 - `feed: 'ticker'` -> `handleTicker()`: updates bid, ask, last, mark, index, fundingRate, fundingTime, percentage
-- `feed: 'book_snapshot'` -> `handleBookSnapshot()`: full orderbook replacement
+- `feed: 'book_snapshot'` -> `handleBookSnapshot()`: full orderbook replacement and book liveness stats
 - `feed: 'book'` -> `handleBookDelta()`: incremental update (single price level)
 - `feed: 'ohlc'` -> no-op handler (not supported by Kraken Futures)
 
