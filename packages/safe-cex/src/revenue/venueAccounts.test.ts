@@ -39,14 +39,32 @@ describe('resolveVenueAccount', () => {
     });
   });
 
-  it('yields nothing before start() resolves the address, rather than claiming the key', () => {
-    // `options.key` may be an AGENT wallet, which never appears in the builder
-    // feed. Linking a user to it would look successful and attribute nothing.
-    expect(resolveVenueAccount('hyperliquid', options({}))).toBeUndefined();
+  it('falls back to the key when start() never resolved an address', () => {
+    // `applicationId` comes from an info call that can time out, and when it
+    // does the account has no id at all — "not yet" becomes silently "never",
+    // client-side, where nothing can see it. The key may be an AGENT wallet
+    // that never appears in the feed; an inert row costs nothing and a missing
+    // one costs the affiliate everything.
+    expect(resolveVenueAccount('hyperliquid', options({ key: MASTER }))).toEqual({
+      venue: 'hyperliquid',
+      venueAccountId: MASTER,
+    });
+  });
+
+  it('still refuses a key that is not an address', () => {
+    // The format check is what makes the fallback safe.
+    expect(resolveVenueAccount('hyperliquid', options({ key: 'not-an-address' }))).toBeUndefined();
+  });
+
+  it('prefers the resolved address over the key', () => {
+    expect(resolveVenueAccount('hyperliquid', options({ key: VAULT, applicationId: MASTER }))).toEqual({
+      venue: 'hyperliquid',
+      venueAccountId: MASTER,
+    });
   });
 
   it('treats a blank resolved value as unresolved', () => {
-    expect(resolveVenueAccount('hyperliquid', options({ applicationId: '   ' }))).toBeUndefined();
+    expect(resolveVenueAccount('hyperliquid', options({ key: '', applicationId: '   ' }))).toBeUndefined();
   });
 
   it('yields nothing for an exchange with no revenue venue', () => {
