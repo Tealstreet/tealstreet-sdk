@@ -659,6 +659,18 @@ export type Execution = {
    */
   readonly realizedPnl?: number;
   readonly maker?: boolean;
+  /**
+   * What the VENUE says the integrator (us) earned on this fill — distinct from
+   * `commission`, which is what the USER paid the exchange.
+   *
+   * Almost always absent: of the twelve venues we attach broker attribution to,
+   * only hyperliquid reports it (`builderFee` on `userFills`). Everywhere else
+   * our cut is COMPUTED from the fill — see `src/revenue/` — and this field
+   * stays undefined. It is not a fallback for that computation; it is the only
+   * thing the computation can be checked against, on the one venue that offers it.
+   */
+  readonly venueReportedRevenue?: number;
+  readonly venueReportedRevenueAsset?: string;
 };
 
 export type PlaceOrderOpts = {

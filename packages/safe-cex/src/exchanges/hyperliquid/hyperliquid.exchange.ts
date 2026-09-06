@@ -1043,7 +1043,8 @@ export class HyperliquidExchange extends BaseExchange {
 
     const payload = parseHyperliquidExchangePayload(requestData);
     const action = payload?.action && typeof payload.action === 'object' ? payload.action : undefined;
-    const builder = action?.builder && typeof action.builder === 'object' ? (action.builder as Partial<BuilderInfo>) : undefined;
+    const builder =
+      action?.builder && typeof action.builder === 'object' ? (action.builder as Partial<BuilderInfo>) : undefined;
     const lastCheck = this._builderFeeLastCheck;
     const maxFeeTenths = lastCheck?.maxFeeRateTenthsBps;
     const feeSufficient =
@@ -3157,6 +3158,9 @@ export class HyperliquidExchange extends BaseExchange {
           }
 
           const feeRaw = Number.parseFloat(String(fill?.fee || 0));
+          // `userFills`/`userFillsByTime` carry `builderFee` per fill. Absent on
+          // fills placed without a builder code, which is why it is not defaulted.
+          const builderFeeRaw = Number.parseFloat(String((fill as { builderFee?: string })?.builderFee ?? ''));
           const closedPnlRaw = Number.parseFloat(String(fill?.closedPnl ?? ''));
           const execution: Execution = {
             id: fill?.tid !== undefined && fill?.tid !== null ? `${fill.tid}` : undefined,
@@ -3176,6 +3180,12 @@ export class HyperliquidExchange extends BaseExchange {
             realizedPnl: Number.isFinite(closedPnlRaw) ? closedPnlRaw : undefined,
             // `crossed` means the fill crossed the spread, i.e. took liquidity.
             maker: typeof fill?.crossed === 'boolean' ? !fill.crossed : undefined,
+            // What the venue says WE earned, as opposed to `commission` above,
+            // which is what the user paid. Hyperliquid is the only venue in the
+            // integration that reports this, and it is what lets the computed
+            // builder cut be checked per fill rather than per day.
+            venueReportedRevenue: Number.isFinite(builderFeeRaw) ? Math.abs(builderFeeRaw) : undefined,
+            venueReportedRevenueAsset: Number.isFinite(builderFeeRaw) ? fill?.feeToken || 'USDC' : undefined,
           };
 
           const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
