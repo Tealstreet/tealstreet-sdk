@@ -25,6 +25,38 @@ export const getBuilderAddress = (testnet: boolean): string =>
 export const TEALSTREET_BUILDER_FEE = 10;
 
 /**
+ * The whole ladder, keyed by the `f` we send: 10/30/50 tenths of a bp.
+ *
+ * **`venue_builder_tiers` on the server is the authority; this is the browser's
+ * copy, and it exists for exactly one job** — the standalone approval page runs
+ * with no session and no atoms, so it takes its builder from the URL, and an
+ * unvalidated address there would let anyone send a link asking a user to sign
+ * away 5bp to a wallet of their choosing. A closed allowlist makes that a
+ * broken link instead of a phishing page.
+ *
+ * Mainnet only, like the ladder itself. These are on-chain addresses we already
+ * disclose to every user at approval time, so nothing here is private.
+ */
+export const HYPERLIQUID_BUILDER_TIERS: Readonly<Record<number, string>> = {
+  10: TEALSTREET_BUILDER_ADDRESS_MAINNET,
+  30: '0x95d699952Fd9B110ef1218369def8538CCbB094B',
+  50: '0xbB7b32512e1aDadE56f2B7f092ED0A232BE80D66',
+};
+
+/**
+ * Is this (builder, rate) pair one of ours? Case-insensitive, because an
+ * address survives a round trip through a URL, a database and a signature in
+ * whatever case each of them prefers.
+ */
+export const isKnownHyperliquidBuilder = (address: string, feeTenthsBps: number): boolean =>
+  // `hasOwn` rather than a bare index, because the caller's rate comes off a
+  // URL. A number can never spell `__proto__`, but a lookup that consults the
+  // prototype chain at all is not the thing to leave load-bearing on a page
+  // whose only job is collecting a signature.
+  Object.hasOwn(HYPERLIQUID_BUILDER_TIERS, feeTenthsBps) &&
+  HYPERLIQUID_BUILDER_TIERS[feeTenthsBps]?.toLowerCase() === address.trim().toLowerCase();
+
+/**
  * Which builder wallet an account routes through, and at what rate.
  *
  * The two are ONE fact. A user's approval on Hyperliquid is per (builder, max
