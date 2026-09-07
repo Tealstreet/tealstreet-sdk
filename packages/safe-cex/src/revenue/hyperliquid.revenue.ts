@@ -2,22 +2,15 @@ import type { RevenueResult, VenueRevenueFn } from './types';
 
 import { TEALSTREET_BUILDER_FEE } from '../exchanges/hyperliquid/hyperliquid.constants';
 
-/** Tenths of a basis point to a fraction of notional: 10 is 1bp is 0.0001. */
-export const builderRateFromTenthsBps = (feeTenthsBps: number): number => feeTenthsBps / 100_000;
-
-/**
- * The DEFAULT tier's rate. Kept as a named constant because it is the rate every
- * fill before 2026-09 was charged at, and the one an unconfigured caller gets —
- * but it is no longer THE rate. Read the fill's own tier instead.
- */
-export const HYPERLIQUID_BUILDER_RATE = builderRateFromTenthsBps(TEALSTREET_BUILDER_FEE);
+/** `TEALSTREET_BUILDER_FEE` is tenths of a basis point, so 10 is 1bp is 0.0001. */
+export const HYPERLIQUID_BUILDER_RATE = TEALSTREET_BUILDER_FEE / 100_000;
 
 /**
  * The reference implementation, and the only venue where the answer is this short.
  *
- * We are the builder and we set the rate — but the rate is now a TIER an affiliate
- * chose, so it arrives in `inputs` rather than being read from a constant here.
- * Two fills on this venue one second apart can be worth 1bp and 5bp.
+ * We are the builder, we set the rate, and it does not vary by tier or by whether
+ * the user came through a referral — so the whole function is notional times 1bp,
+ * with one real branch.
  *
  * **SPOT PAYS NOTHING**, and that is measured rather than assumed: across all 233
  * published days the venue charged no builder fee on any spot fill (`@260` on
@@ -26,7 +19,7 @@ export const HYPERLIQUID_BUILDER_RATE = builderRateFromTenthsBps(TEALSTREET_BUIL
  * was never received, and the daily reconciliation would then fail against the
  * venue's own numbers.
  */
-export const hyperliquidRevenue: VenueRevenueFn<'hyperliquid'> = ({ fill, market, inputs }): RevenueResult => {
+export const hyperliquidRevenue: VenueRevenueFn<'hyperliquid'> = ({ fill, market }): RevenueResult => {
   if (market.isSpot) {
     return { kind: 'none', reason: 'venue-pays-nothing' };
   }
@@ -36,17 +29,9 @@ export const hyperliquidRevenue: VenueRevenueFn<'hyperliquid'> = ({ fill, market
     return { kind: 'unknown', reason: 'fill carries no usable notional' };
   }
 
-  // A tier we cannot read is UNKNOWN, never the default. Falling back to 1bp
-  // here would quietly value a 5bp fill at a fifth of what the venue paid us,
-  // and the daily reconciliation is the only thing that would ever notice.
-  const { builderFeeTenthsBps } = inputs;
-  if (!Number.isFinite(builderFeeTenthsBps) || builderFeeTenthsBps <= 0) {
-    return { kind: 'unknown', reason: 'fill carries no usable builder fee rate' };
-  }
-
   return {
     kind: 'earned',
-    amount: notional * builderRateFromTenthsBps(builderFeeTenthsBps),
+    amount: notional * HYPERLIQUID_BUILDER_RATE,
     // Builder fees settle in the quote asset the fee was charged in.
     asset: fill.commissionAsset ?? 'USDC',
     basis: 'computed_from_notional',

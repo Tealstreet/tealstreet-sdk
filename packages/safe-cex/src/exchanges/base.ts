@@ -1,10 +1,8 @@
 import type { Axios, AxiosInstance } from 'axios';
-import type { Store } from '../store/store.interface';
-import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';import { buildFoldedPositionRecords } from '../journal/buildRecords';
-import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
-import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import type { PositionRecord } from '../journal/position.types';
-
+import type { Store } from '../store/store.interface';
+import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
+import type { HttpFailureRecord } from '../utils/httpFailureContext';
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
@@ -17,6 +15,7 @@ import { TinyEmitter } from 'tiny-emitter';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
+import { buildFoldedPositionRecords } from '../journal/buildRecords';
 import {
   Candle,
   ClosedPnlEntry,
@@ -51,8 +50,9 @@ import {
   ValidateAccountResult,
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
-import type { HttpFailureRecord } from '../utils/httpFailureContext';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
+import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
+import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import { tryParseJson } from '../utils/tryParseJson';
 import { BaseWebSocket } from './base.ws';
 import { ExternalPublicDataProvider } from './external-public-data';
@@ -910,7 +910,6 @@ export class BaseExchange implements Exchange {
 
     return records;
   };
-
 
   // Branded so support can be detected. `typeof exchange.fetchIncomeHistory` is TRUE
   // on every venue because this field always exists — any consumer duck-typing on that
@@ -1771,19 +1770,22 @@ export class BaseExchange implements Exchange {
    * and the pause flag is true if ANY socket has given up — that is the state
    * worth surfacing, since it means nothing is retrying.
    *
-   * Not covered: `ExternalPublicDataProvider` is not a `BaseWebSocket` and is
-   * absent from `getPublicSockets()`, so gateway-mode accounts report no close
-   * code even though the gateway drives `publicHealthy`.
+   * Not covered: neither public-data provider is a `BaseWebSocket`, and both are
+   * absent from `getPublicSockets()`, so provider-fed accounts report no close
+   * code even though the provider drives `publicHealthy`.
+   *
+   * Both provider kinds count. An account fed in-process by a shared exchange
+   * (the hosted exchange-server arrangement) has no public socket of its own, so
+   * excluding it left `publicInitialized` false forever and the connection
+   * popover stuck on "Waiting" while data flowed. It also pinned `publicHealthy`
+   * true via the no-source branch below, so stale public data could not go red.
    */
   private syncSocketHealthToStoreInternal = () => {
     const publicSockets = this.getPublicSockets();
     const privateSockets = this.getPrivateSockets();
 
     const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
-    const gatewayProvider =
-      this.externalPublicDataProvider instanceof ExternalPublicDataProvider
-        ? this.externalPublicDataProvider
-        : undefined;
+    const gatewayProvider = this.externalPublicDataProvider;
     const initializedGatewayProvider = gatewayProvider?.isInitialized ? gatewayProvider : undefined;
     const hasInitializedPublicSource = initializedPublicSockets.length > 0 || !!initializedGatewayProvider;
     const publicHealthy =

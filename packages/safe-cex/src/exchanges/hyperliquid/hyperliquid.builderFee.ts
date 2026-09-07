@@ -11,9 +11,7 @@
 import { ethers } from 'ethers';
 
 import {
-  builderFeeRateFromTenthsBps,
   getBuilderAddress,
-  resolveHyperliquidBuilder,
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
   TEALSTREET_BUILDER_FEE,
@@ -21,25 +19,13 @@ import {
 import { BASE_URLS, BuilderFeeApprovalResult, BuilderFeeCheckResult, Signature } from './hyperliquid.types';
 
 // Re-export for public API
-export {
-  builderFeeRateFromTenthsBps,
-  getBuilderAddress,
-  resolveHyperliquidBuilder,
-  TEALSTREET_BUILDER_ADDRESS_MAINNET,
-  TEALSTREET_BUILDER_ADDRESS_TESTNET,
-};
-export type { HyperliquidBuilderConfig } from './hyperliquid.constants';
+export { getBuilderAddress, TEALSTREET_BUILDER_ADDRESS_MAINNET, TEALSTREET_BUILDER_ADDRESS_TESTNET };
 
 // Window.ethereum is declared globally in src/env.d.ts (EthereumProvider)
 
 // Default fee rate: 1 basis point (0.01%)
-//
-// DERIVED, not written out. It was the literal `'0.01%'` until the builder rate
-// became configurable, and an independently-written percentage is exactly how
-// the signed rate and the checked rate drift apart — a user signing one number
-// while the check demands another can never clear the approval.
+export const DEFAULT_BUILDER_FEE_RATE = '0.01%';
 export const DEFAULT_BUILDER_FEE_TENTHS_BPS = TEALSTREET_BUILDER_FEE;
-export const DEFAULT_BUILDER_FEE_RATE = builderFeeRateFromTenthsBps(DEFAULT_BUILDER_FEE_TENTHS_BPS);
 
 // EIP-712 domain for Hyperliquid signing (mainnet)
 export const HYPERLIQUID_BUILDER_DOMAIN = {
@@ -158,16 +144,12 @@ export const APPROVE_BUILDER_FEE_TYPES = {
  * @param userAddress - The user's main wallet address
  * @param builderAddress - The builder address to check (defaults to Tealstreet based on network)
  * @param testnet - Whether to use testnet API
- * @param requiredFeeTenthsBps - The rate this account is meant to pay; the approval must
- *   cover at least this much. Defaults to the historical 1bp, so a caller that has not
- *   been taught about tiers keeps today's behaviour exactly.
  * @returns Whether the builder fee is approved and the max fee rate
  */
 export async function checkBuilderFeeApproved(
   userAddress: string,
   builderAddress?: string,
   testnet: boolean = false,
-  requiredFeeTenthsBps: number = TEALSTREET_BUILDER_FEE,
 ): Promise<BuilderFeeCheckResult> {
   const baseUrl = testnet ? BASE_URLS.TESTNET : BASE_URLS.PRODUCTION;
   const builder = builderAddress ?? getBuilderAddress(testnet);
@@ -199,13 +181,10 @@ export async function checkBuilderFeeApproved(
 
     // Convert from tenths of basis points to percentage string
     // e.g., 10 tenths of bps = 1 bps = 0.01%
-    const feePercentage = builderFeeRateFromTenthsBps(feeValueTenthsBps);
+    const feePercentage = `${feeValueTenthsBps / 10 / 100}%`;
 
     return {
-      // `>=`, not `===`: a user who once approved a HIGHER cap on this builder is
-      // still covered for a lower rate, and re-prompting them would be asking for
-      // permission they have already given.
-      approved: feeValueTenthsBps >= requiredFeeTenthsBps,
+      approved: feeValueTenthsBps >= TEALSTREET_BUILDER_FEE,
       maxFeeRate: feePercentage,
       maxFeeRateTenthsBps: feeValueTenthsBps,
     };

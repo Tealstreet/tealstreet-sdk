@@ -91,20 +91,8 @@ export type RevenueResult =
  * `VenueRevenueRegistry` — so wiring a venue up is not something you can forget.
  */
 export interface VenueRevenueInputs {
-  /**
-   * The rate the FILL was charged at, in tenths of a basis point.
-   *
-   * This was `Record<string, never>` with the note "we set the rate, and it does
-   * not vary". It varies now: an affiliate chooses which of our builder wallets
-   * their referred users route through, so two fills on the same venue in the
-   * same second can be worth 1bp and 5bp. Reading a module constant here would
-   * value every fill at whichever tier happened to be written down.
-   *
-   * It is an INPUT rather than something derived from the fill because the fill
-   * does not name the builder — that pairing lives in our own records, which is
-   * exactly the kind of commercial fact this half of the signature is for.
-   */
-  hyperliquid: { readonly builderFeeTenthsBps: number };
+  /** Needs nothing beyond the fill: we set the rate, and it does not vary. */
+  hyperliquid: Record<string, never>;
 }
 
 export type RevenueVenue = keyof VenueRevenueInputs;

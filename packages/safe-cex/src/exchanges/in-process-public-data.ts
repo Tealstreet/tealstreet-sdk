@@ -2,6 +2,7 @@ import type { Candle, OHLCVOptions, OrderBook, PublicDataSource, StoreData } fro
 import type { BaseExchange } from './base';
 
 import { LogSeverity } from '../types';
+import { EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS } from './external-public-data';
 
 /**
  * In-process public data provider that forwards data from a running
@@ -21,6 +22,8 @@ export class InProcessPublicDataProvider {
   private source: PublicDataSource;
   private unsubscribeStore?: () => void;
   private isDisposed = false;
+  private initialized = false;
+  private lastReceived = 0;
 
   constructor(parent: BaseExchange, source: PublicDataSource) {
     this.parent = parent;
@@ -40,6 +43,7 @@ export class InProcessPublicDataProvider {
     const { tickers, markets, loaded } = this.source.store;
 
     if (loaded.tickers && tickers.length > 0) {
+      this.noteDataObserved();
       this.parent.store.update({
         tickers,
         loaded: { ...this.parent.store.loaded, tickers: true },
@@ -47,6 +51,7 @@ export class InProcessPublicDataProvider {
     }
 
     if (loaded.markets && markets.length > 0) {
+      this.noteDataObserved();
       this.parent.store.update({
         markets,
         loaded: { ...this.parent.store.loaded, markets: true },
@@ -77,6 +82,13 @@ export class InProcessPublicDataProvider {
       const hasTickers = !!sourceTickers && sourceTickers.length > 0;
       const hasMarkets = !!sourceMarkets && sourceMarkets.length > 0;
       if (!hasTickers && !hasMarkets) return;
+
+      // Stamp liveness BEFORE the change filter below. The source mutates
+      // ticker fields in place and only trips that filter when the array
+      // reference or length changes, so a filtered notify is still proof the
+      // source is delivering — stamping after it would report a live feed as
+      // stale within seconds.
+      this.noteDataObserved();
 
       const tickersChanged =
         hasTickers && (sourceTickers !== lastTickers || sourceTickers.length !== lastTickers?.length);
@@ -124,6 +136,32 @@ export class InProcessPublicDataProvider {
   get isConnected(): boolean {
     return !this.isDisposed && !!this.unsubscribeStore;
   }
+
+  /**
+   * These three mirror `ExternalPublicDataProvider` so the store's socket-health
+   * bridge can treat both providers alike. Without them a hosted account
+   * reported `publicInitialized: false` forever and the connection popover sat
+   * on "Waiting" while public data was arriving normally, because the account
+   * has no public socket of its own — the shared exchange in the same process
+   * feeds it through here.
+   */
+  get isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  get isHealthy(): boolean {
+    if (!this.isConnected || this.lastReceived === 0) return false;
+    return Date.now() - this.lastReceived < EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS;
+  }
+
+  get lastMessageTimestamp(): number | undefined {
+    return this.lastReceived > 0 ? this.lastReceived : undefined;
+  }
+
+  private noteDataObserved = () => {
+    this.initialized = true;
+    this.lastReceived = Date.now();
+  };
 
   /**
    * Dispose the provider and clean up all subscriptions.
