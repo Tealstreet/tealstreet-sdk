@@ -44,9 +44,32 @@ export const HYPERLIQUID_BUILDER_TIERS: Readonly<Record<number, string>> = {
 };
 
 /**
- * Is this (builder, rate) pair one of ours? Case-insensitive, because an
+ * The rate a given builder wallet charges, or `null` if it is not one of ours.
+ *
+ * The ingest path needs this direction: it holds an address from the feed and
+ * has to know what rate that day MUST reconcile at. `null` is not a zero — an
+ * unrecognised builder is one we must refuse to ingest, because every row of
+ * `hyperliquid_builder_fills` becomes payable affiliate commission with no
+ * builder filter anywhere downstream.
+ */
+export const hyperliquidBuilderFeeTenthsBps = (address: string): number | null => {
+  const wanted = address.trim().toLowerCase();
+
+  for (const [feeTenthsBps, builder] of Object.entries(HYPERLIQUID_BUILDER_TIERS)) {
+    if (builder.toLowerCase() === wanted) return Number(feeTenthsBps);
+  }
+
+  return null;
+};
+
+/**
+ * Is this (builder, rate) PAIR one of ours? Case-insensitive, because an
  * address survives a round trip through a URL, a database and a signature in
  * whatever case each of them prefers.
+ *
+ * The pair, not either half: an approval on Hyperliquid is per (builder, max
+ * rate), so one of our wallets named with another tier's rate is not a
+ * combination we ever issue.
  */
 export const isKnownHyperliquidBuilder = (address: string, feeTenthsBps: number): boolean =>
   // `hasOwn` rather than a bare index, because the caller's rate comes off a
