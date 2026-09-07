@@ -90,6 +90,23 @@ export type ExchangeOptions = {
   readonly vault?: string;
   readonly applicationId?: string;
   readonly apiKeyIndex?: string;
+  /**
+   * Which Hyperliquid builder wallet this account routes through, and the rate
+   * it charges — `feeTenthsBps` is tenths of a basis point, so 10 is 1bp.
+   *
+   * Absent means the historical default (`getBuilderAddress` +
+   * `TEALSTREET_BUILDER_FEE`), which is what every caller took before this
+   * existed. Resolve it through `resolveHyperliquidBuilder` rather than reading
+   * the field, so the fallback is defined in exactly one place.
+   *
+   * **The address and the rate travel together and must never be mixed.** A
+   * user approves a specific (builder, max rate) pair, so sending one builder's
+   * address with another's rate is an order Hyperliquid rejects.
+   */
+  readonly hyperliquidBuilder?: {
+    readonly address: string;
+    readonly feeTenthsBps: number;
+  };
   readonly testnet?: boolean;
   /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
   readonly enableSpotMarkets?: boolean;

@@ -59,11 +59,10 @@ import { BaseExchange } from '../base';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
 import { checkBuilderFeeApproved } from './hyperliquid.builderFee';
 import {
-  getBuilderAddress,
   PERP_MAX_PRICE_DECIMALS,
   SPOT_ASSET_INDEX_OFFSET,
   SPOT_MAX_PRICE_DECIMALS,
-  TEALSTREET_BUILDER_FEE,
+  resolveHyperliquidBuilder,
 } from './hyperliquid.constants';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
@@ -817,11 +816,13 @@ export class HyperliquidExchange extends BaseExchange {
     }
 
     try {
+      const builder = resolveHyperliquidBuilder(this.options);
       const result = await this.withStartupTimeout(
         checkBuilderFeeApproved(
           this.options.applicationId,
-          getBuilderAddress(this.options.testnet ?? false),
+          builder.address,
           this.options.testnet ?? false,
+          builder.feeTenthsBps,
         ),
         HyperliquidExchange.BUILDER_FEE_APPROVAL_TIMEOUT_MS,
         'Builder fee approval check',
@@ -1027,11 +1028,14 @@ export class HyperliquidExchange extends BaseExchange {
       await this.fetchBuilderFeeApproval();
     }
 
-    // Return builder info only if approved
+    // Return builder info only if approved. Address and rate come from ONE
+    // resolve — pairing an address with another tier's rate is an order the
+    // venue rejects, because the user's approval is per (builder, max rate).
     if (this._builderFeeApproved) {
+      const builder = resolveHyperliquidBuilder(this.options);
       return {
-        b: getBuilderAddress(this.options.testnet ?? false).toLowerCase(),
-        f: TEALSTREET_BUILDER_FEE,
+        b: builder.address.toLowerCase(),
+        f: builder.feeTenthsBps,
       };
     }
 
@@ -1047,8 +1051,9 @@ export class HyperliquidExchange extends BaseExchange {
       action?.builder && typeof action.builder === 'object' ? (action.builder as Partial<BuilderInfo>) : undefined;
     const lastCheck = this._builderFeeLastCheck;
     const maxFeeTenths = lastCheck?.maxFeeRateTenthsBps;
+    const configuredBuilder = resolveHyperliquidBuilder(this.options);
     const feeSufficient =
-      typeof maxFeeTenths === 'number' ? (maxFeeTenths >= TEALSTREET_BUILDER_FEE ? 'yes' : 'no') : 'unknown';
+      typeof maxFeeTenths === 'number' ? (maxFeeTenths >= configuredBuilder.feeTenthsBps ? 'yes' : 'no') : 'unknown';
     const builderCheckStatus =
       this._builderFeeApproved === true ? 'approved' : this._builderFeeApproved === false ? 'not_approved' : 'unknown';
 
@@ -1070,8 +1075,8 @@ export class HyperliquidExchange extends BaseExchange {
           builderPayloadPresent: Boolean(builder),
           attachedBuilderAddress: maskHyperliquidAddress(builder?.b),
           attachedBuilderFeeTenthsBps: builder?.f,
-          expectedBuilderAddress: maskHyperliquidAddress(getBuilderAddress(this.options.testnet ?? false)),
-          requiredBuilderFeeTenthsBps: TEALSTREET_BUILDER_FEE,
+          expectedBuilderAddress: maskHyperliquidAddress(configuredBuilder.address),
+          requiredBuilderFeeTenthsBps: configuredBuilder.feeTenthsBps,
           checkedMainWallet: maskHyperliquidAddress(this.options.applicationId),
           signerWallet: maskHyperliquidAddress(this.options.key),
           vaultAddress: maskHyperliquidAddress(this.options.vault),
