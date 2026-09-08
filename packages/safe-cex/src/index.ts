@@ -212,10 +212,12 @@ export type {
 export {
   approveBuilderFeeWithBrowserWallet,
   checkBuilderFeeApproved,
+  builderFeeRateFromTenthsBps,
   createBuilderInfo,
   DEFAULT_BUILDER_FEE_RATE,
   DEFAULT_BUILDER_FEE_TENTHS_BPS,
   getBuilderAddress,
+  resolveHyperliquidBuilder,
   signBuilderFeeApproval,
   submitBuilderFeeApproval,
   TEALSTREET_BUILDER_ADDRESS_MAINNET,

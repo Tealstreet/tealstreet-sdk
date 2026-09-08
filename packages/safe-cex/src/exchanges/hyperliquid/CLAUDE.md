@@ -28,7 +28,7 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.exchange.ts`    | Main exchange class extending `BaseExchange`. Orchestrates startup, order/position management, HIP-3 lifecycle, builder fee, cancel suppression, and tick loop.                                                                                                                                               |
 | `hyperliquid.api.ts`         | Axios client factory. Creates two clients: `createExchangeAPI` (for `/exchange` endpoint) and `createInfoAPI` (for `/info` endpoint).                                                                                                                                                                         |
 | `hyperliquid.types.ts`       | All TypeScript interfaces: REST responses, WS payloads, order wires, HIP-3 types (`PerpDex`, `PerpDexs`), builder fee types, candle types, etc. Also defines `BASE_URLS`, `WSS_URLS`, `ENDPOINTS`, `INFO_TYPES`, `EXCHANGE_TYPES`, `WEBSOCKET` constants.                                                     |
-| `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), builder fee amount (10 tenths bps = 1bp = 0.01%).                                                                                                                 |
+| `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), the DEFAULT builder fee (10 tenths bps = 1bp), and `HYPERLIQUID_BUILDER_TIERS` — the whole 10/30/50 ladder, which the standalone approval page validates a URL against.                                                                                                                 |
 | `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`). |
 | `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                |
 | `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                               |
@@ -167,7 +167,16 @@ Agent name format: `"Tealstreet XXXX"` (15 chars, max 16 chars, random alphanume
 
 ### Builder Fees
 
-Builder fees (builder codes) allow Tealstreet to receive a portion of trading fees. Fee = 10 tenths of bps = 1bp = 0.01%. Builder info is attached to order actions as `{ b: builderAddress, f: 10 }`.
+Builder fees (builder codes) allow Tealstreet to receive a portion of trading
+fees. Builder info is attached to order actions as `{ b: builderAddress, f }`.
+
+**The rate is NOT a constant any more.** An affiliate chooses which of three
+builder wallets their referred users route through — 1bp, 3bp or 5bp — so `f` is
+whatever `resolveHyperliquidBuilder` returns for that account. 10 tenths of a bp
+is only the DEFAULT, taken when nothing configures one. `HYPERLIQUID_BUILDER_TIERS`
+holds all three; `venue_builder_tiers` in Postgres is the authority and this is
+the browser's copy, kept so the standalone approval page can validate a builder
+that arrived in a URL.
 
 **Flow**: On startup, check if user has approved builder fee via `maxBuilderFee` info type (`fetchBuilderFeeApproval`). If approved, include `builder` field in all order actions. Approval requires EIP-712 signing from the main wallet via `approveBuilderFeeWithBrowserWallet()`.
 
@@ -175,6 +184,35 @@ Builder fees (builder codes) allow Tealstreet to receive a portion of trading fe
 
 - Mainnet: `0xea629e1e8534B82f704A818643F2DAF38cB7Fd4d`
 - Testnet: `0x76676949EA8f83A3a461AdfefD9a8C35d8e41fba`
+
+**The address and rate are now a PARAMETER, not a constant.**
+`ExchangeOptions.hyperliquidBuilder` names both, and every read goes through
+`resolveHyperliquidBuilder(options)`, which falls back to the pair above at 1bp.
+That fallback is centralized so a call site cannot re-derive it and drift.
+
+`checkBuilderFeeApproved`'s `requiredFeeTenthsBps` parameter is a deliberate
+SECOND copy of the default, so that a caller passing nothing behaves exactly as
+it did before tiers existed. **Every web call site now passes the account's own
+builder and rate**, which is what closes the gap this paragraph used to describe:
+a caller taking the default checks 1bp for a 3bp user and waves through an
+approval that does not cover them. If you add a call site, pass the pair.
+
+Tealstreet runs three builder wallets so an affiliate can choose what their
+referred users pay; see
+[`docs/plans/AFFILIATE_FEE_TIERS_v1.md`](../../../../../docs/plans/AFFILIATE_FEE_TIERS_v1.md).
+
+**Address and rate travel together and must never be mixed.** Approval on
+Hyperliquid is per (builder, max rate), so sending one wallet's address with
+another's rate is an order the venue rejects — which surfaces as "orders stopped
+working", not as a fee problem.
+
+**The SIGNED rate and the CHECKED rate must come from one value.**
+`builderFeeRateFromTenthsBps` is that value: it produces the `maxFeeRate` string
+the user signs AND formats the approval check's reading. `DEFAULT_BUILDER_FEE_RATE`
+used to be the independent literal `'0.01%'`; had it stayed one while only the
+check became configurable, a 3bp user would sign `0.01%`, the venue would record
+10, the check would demand 30, and the approval prompt would reappear forever
+with no way out.
 
 **Approval status** is cached in `_builderFeeApproved` (null = unknown, true = approved, false = not approved). If unknown when placing an order, `getBuilderInfo()` re-fetches the status. On successful browser-wallet approval, a fire-and-forget POST to `/api/logger/builder-fee` logs the event.
 

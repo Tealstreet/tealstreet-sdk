@@ -20,15 +20,34 @@ const fill = (over: Partial<Execution> = {}): Execution =>
 
 const market = (over: Partial<Market> = {}): Market => ({ isSpot: false, ...over }) as Market;
 
-const evaluate = (over: Partial<Execution> = {}, m: Partial<Market> = {}) =>
-  hyperliquidRevenue({ fill: fill(over), market: market(m), at: Date.now(), inputs: {} });
+const evaluate = (over: Partial<Execution> = {}, m: Partial<Market> = {}, builderFeeTenthsBps = 10) =>
+  hyperliquidRevenue({ fill: fill(over), market: market(m), at: Date.now(), inputs: { builderFeeTenthsBps } });
 
 describe('hyperliquidRevenue', () => {
-  it('is notional times 1bp', () => {
+  it('is notional times the DEFAULT tier when that is what the fill was charged', () => {
     const result = evaluate({ price: 100_000, qty: 1 });
 
     expect(result).toEqual({ kind: 'earned', amount: 10, asset: 'USDC', basis: 'computed_from_notional' });
     expect(HYPERLIQUID_BUILDER_RATE).toBe(0.0001);
+  });
+
+  // The ladder an affiliate picks from. Same fill, same venue, same second —
+  // three different answers, which is the whole reason the rate is an input
+  // rather than a constant.
+  it.each([
+    [10, 100],
+    [30, 300],
+    [50, 500],
+  ])('values a $1M fill at %i tenths of a bp as $%i', (tenths, expected) => {
+    expect(evaluate({ price: 100_000, qty: 10 }, {}, tenths)).toMatchObject({ kind: 'earned', amount: expected });
+  });
+
+  it('says UNKNOWN rather than falling back to 1bp when the tier is unusable', () => {
+    // The dangerous direction: defaulting here values a 5bp fill at a fifth of
+    // what the venue actually paid us, and nothing but the daily reconciliation
+    // would ever notice.
+    expect(evaluate({ price: 100_000, qty: 1 }, {}, 0)).toMatchObject({ kind: 'unknown' });
+    expect(evaluate({ price: 100_000, qty: 1 }, {}, NaN)).toMatchObject({ kind: 'unknown' });
   });
 
   it('earns nothing on spot, because the venue charges nothing there', () => {
@@ -78,7 +97,7 @@ describe('verifyAgainstVenue', () => {
 
 describe('the registry', () => {
   it('resolves an implemented venue', () => {
-    expect(resolveVenueRevenue('hyperliquid', { fill: fill(), market: market(), at: 0, inputs: {} })).toMatchObject({
+    expect(resolveVenueRevenue('hyperliquid', { fill: fill(), market: market(), at: 0, inputs: { builderFeeTenthsBps: 10 } })).toMatchObject({
       kind: 'earned',
     });
   });
