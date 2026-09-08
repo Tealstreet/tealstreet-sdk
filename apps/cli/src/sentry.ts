@@ -1,18 +1,16 @@
 import * as Sentry from '@sentry/bun';
 
+// One scrubber for every Tealstreet service that reports to Sentry. It used to
+// live here; two Bun services then needed the same one, and a second copy of a
+// redaction rule is worse than none because it still looks like protection.
+import { scrub, scrubString } from '@tealstreet/service-telemetry/src/scrub';
+
 const DSN = 'https://dc80fdcd175badb5f3da861273c46f93@o815347.ingest.us.sentry.io/4511874153709568';
 
 const THROTTLE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_EVENTS_PER_KEY_PER_WINDOW = 2;
 
 const seen = new Map<string, { count: number; firstSeen: number }>();
-
-/** Key-shaped values that must never leave the user's machine. */
-const SENSITIVE_KEY_PATTERN =
-  /(authorization|cookie|secret|passphrase|password|privatekey|private_key|api[-_]?key|apisecret|proxykey|proxytoken|token|mnemonic|seed)/i;
-
-// 32+ chars of unbroken base64/hex is an API key or JWT segment, not prose.
-const KEY_SHAPED_VALUE = /\b[A-Za-z0-9_\-+/]{32,}={0,2}\b/g;
 
 function isTelemetryEnabled(): boolean {
   const optOut = process.env.TEALSTREET_TELEMETRY;
@@ -34,26 +32,6 @@ function shouldSend(key: string): boolean {
 
   entry.count++;
   return true;
-}
-
-function scrubString(value: string): string {
-  return value.replace(KEY_SHAPED_VALUE, '[redacted]');
-}
-
-function scrub(value: unknown, depth = 0): unknown {
-  if (depth > 4) return '[truncated]';
-  if (typeof value === 'string') return scrubString(value);
-  if (Array.isArray(value)) return value.slice(0, 16).map((item) => scrub(item, depth + 1));
-
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value as Record<string, unknown>).slice(0, 32)) {
-      out[key] = SENSITIVE_KEY_PATTERN.test(key) ? '[redacted]' : scrub(child, depth + 1);
-    }
-    return out;
-  }
-
-  return value;
 }
 
 function eventKey(event: Sentry.ErrorEvent): string {
