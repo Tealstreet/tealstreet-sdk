@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@tealstreet/grvt-client": "*",
-    "@metamask/eth-sig-util": "^8.2.0",
+    "@metamask/eth-sig-util": "^9.0.0",
     "@types/ws": "^8.18.1",
     "ethers": "^6.17.0",
     "set-cookie-parser": "^3.1.2",
