@@ -6,6 +6,9 @@ import { resolveExchangeRouting } from '../routing/resolveExchangeRouting';
 
 // Lighter's public proxy WS host, now sourced from the routing table (was WS_PROXY_URL.public).
 const WS_PROXY_PUBLIC = resolveExchangeRouting('lighter', { tealstreetWsRoute: true }).wsPublic.host!;
+const WS_PROXY_PUBLIC_ROBINHOOD = resolveExchangeRouting('lighter-robinhood', {
+  tealstreetWsRoute: true,
+}).wsPublic.host!;
 const LIGHTER_MAINNET_WS = resolveLighterDeploymentProfile({ exchangeName: 'lighter', testnet: false }).wsUrl;
 const LIGHTER_ROBINHOOD_WS = resolveLighterDeploymentProfile({
   exchangeName: 'lighter-robinhood',
@@ -96,7 +99,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     expect(firstUrl).not.toContain(WS_PROXY_PUBLIC);
   });
 
-  it('uses the Robinhood public endpoint directly even when ws route is enabled', () => {
+  it('uses the Robinhood public proxy endpoint when ws route is enabled', () => {
     const parent = createMockParent({
       name: 'lighter-robinhood',
       lighterDeploymentProfile: resolveLighterDeploymentProfile({
@@ -110,8 +113,9 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
-    expect(firstUrl).toContain(LIGHTER_ROBINHOOD_WS);
+    expect(firstUrl).toContain(WS_PROXY_PUBLIC_ROBINHOOD);
     expect(firstUrl).not.toContain(WS_PROXY_PUBLIC);
+    expect(firstUrl).not.toContain(LIGHTER_ROBINHOOD_WS);
   });
 
   it('primes ticker REST fallback immediately on socket open', async () => {

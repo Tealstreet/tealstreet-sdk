@@ -42,8 +42,8 @@ export const LIGHTER_DEPLOYMENT_PROFILES: Record<LighterDeploymentNetwork, Light
     wsUrl: 'wss://api.rh.lighter.xyz/stream',
     signerChainId: 466324,
     quoteCurrency: 'USDG',
-    usesRestProxy: false,
-    supportsWsProxy: false,
+    usesRestProxy: true,
+    supportsWsProxy: true,
   },
   'robinhood-testnet': {
     network: 'robinhood-testnet',

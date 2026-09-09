@@ -241,7 +241,7 @@ describe('exchangeMetadata', () => {
       expect(lighterRobinhood.enabledInDev).toBe(true);
       expect(lighterRobinhood.enableInPreview).toBe(true);
       expect(lighterRobinhood.defaultQuote).toBe('USDG');
-      expect(lighterRobinhood.supportsWsRoute).toBe(false);
+      expect(lighterRobinhood.supportsWsRoute).toBe(true);
     });
 
     it('should preserve executions-history gating for key exchanges', () => {

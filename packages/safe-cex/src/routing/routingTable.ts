@@ -34,6 +34,7 @@ const WS = {
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
   lighterPublic: `${JP}/lighter/stream?readonly=true`,
   lighterPrivate: `${JP}/lighter/stream`,
+  lighterRh: `${JP}/lighter-rh/stream`,
   bybitBraPrivate: `${ASIA}/bybitbra/v5/private`,
   bybitBraPublicLinear: `${ASIA}/bybitbra/v5/public/linear`,
   bybitBraPublicInverse: `${ASIA}/bybitbra/v5/public/inverse`,
@@ -100,6 +101,10 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
   lighter: {
     public: { kind: 'wsRouteCandidates', proxy: WS.lighterPublic },
     private: { kind: 'wsRouteCandidates', proxy: WS.lighterPrivate },
+  },
+  'lighter-robinhood': {
+    public: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
+    private: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
   },
   bybit: {
     public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicLinear },

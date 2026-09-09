@@ -3,10 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WS_MIN_RECONNECTION_DELAY } from '../config/config';
 import { resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
 import { LighterPrivateWebsocket } from '../exchanges/lighter/lighter.ws-private';
+import { resolveExchangeRouting } from '../routing/resolveExchangeRouting';
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 const MOCK_RATE_LIMIT_WARNING =
   'Lighter rate limit temporarily active for this account/session. Please wait before retrying.';
+const WS_PROXY_PRIVATE_ROBINHOOD = resolveExchangeRouting('lighter-robinhood', {
+  tealstreetWsRoute: true,
+}).wsPrivate.host!;
 
 const createMockParent = () =>
   ({
@@ -118,6 +122,24 @@ describe('LighterPrivateWebsocket close/backoff behavior', () => {
     expect(ws.isReadonlyFallbackActive()).toBe(false);
     expect((ws as any).failedHandshakes).toBe(3);
     expect((ws as any).readonlyFallbackFailures).toBe(0);
+  });
+
+  it('uses the Robinhood private proxy endpoint when ws route is enabled', async () => {
+    const parent = createMockParent();
+    parent.name = 'lighter-robinhood';
+    parent.lighterDeploymentProfile = resolveLighterDeploymentProfile({
+      exchangeName: 'lighter-robinhood',
+      testnet: false,
+    });
+    parent.options.tealstreetWsRoute = true;
+    const ws = new LighterPrivateWebsocket(parent);
+    const createWebsocketSpy = vi.spyOn(ws as any, 'createWebsocket').mockReturnValue(createOpenWs());
+
+    await ws.connectAndSubscribe();
+
+    const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
+    expect(firstUrl).toBe(WS_PROXY_PRIVATE_ROBINHOOD);
+    expect(firstUrl).not.toContain(parent.lighterDeploymentProfile.wsUrl);
   });
 
   it('uses backoff for early post-open close without private stream messages', () => {

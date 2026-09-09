@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLighterSDKClient, stripUnsupportedLighterRestHeaders } from '../exchanges/lighter/lighter.api';
+import { getPublicCorsProxy } from '../utils/transportResolution';
 
 const axiosMocks = vi.hoisted(() => {
   return {
@@ -79,7 +80,7 @@ describe('Lighter API client', () => {
     });
   });
 
-  it('uses the direct Robinhood API host for the Robinhood exchange variant', () => {
+  it('uses the proxied Robinhood API host for the Robinhood exchange variant', () => {
     const exchange = { emitAndLogError: vi.fn(), name: 'lighter-robinhood' };
     createLighterSDKClient(
       {
@@ -91,7 +92,7 @@ describe('Lighter API client', () => {
 
     expect(axiosMocks.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        baseURL: 'https://api.rh.lighter.xyz',
+        baseURL: `${getPublicCorsProxy()}/https://api.rh.lighter.xyz`,
       }),
     );
   });

@@ -2311,7 +2311,7 @@ const LighterRobinhoodMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportedOnMobile: false,
-  supportsWsRoute: false,
+  supportsWsRoute: true,
   latencyDomain: 'api.rh.lighter.xyz',
 };
 

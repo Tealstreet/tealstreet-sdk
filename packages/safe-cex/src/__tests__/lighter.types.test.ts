@@ -24,11 +24,11 @@ describe('resolveLighterDeploymentProfile', () => {
       network: 'robinhood',
       quoteCurrency: 'USDG',
       signerChainId: 466324,
-      usesRestProxy: false,
-      supportsWsProxy: false,
+      usesRestProxy: true,
+      supportsWsProxy: true,
       wsUrl: 'wss://api.rh.lighter.xyz/stream',
     });
-    expect(getLighterApiBaseUrl({ exchangeName: 'lighter-robinhood', testnet: false })).toBe(
+    expect(getLighterApiBaseUrl({ exchangeName: 'lighter-robinhood', testnet: false })).toContain(
       'https://api.rh.lighter.xyz',
     );
   });

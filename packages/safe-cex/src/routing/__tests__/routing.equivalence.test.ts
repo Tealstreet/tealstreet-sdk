@@ -154,6 +154,13 @@ describe('routing table / resolver (Epic 1 net)', () => {
       'wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true',
     );
     expect(resolveExchangeRouting('lighter', proxy).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('lighter-robinhood', wsRoute).wsPrivate.host).toBe(
+      'wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream',
+    );
+    expect(resolveExchangeRouting('lighter-robinhood', wsRoute).wsPublic.host).toBe(
+      'wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream',
+    );
+    expect(resolveExchangeRouting('lighter-robinhood', proxy).wsPrivate).toEqual({ tunnelled: false });
 
     // bybitBrazilConditional: Bybit Brazil uses a dedicated proxy path that
     // injects x-site-id upstream. It is keyed only by bybitSiteId, not proxy flags.
