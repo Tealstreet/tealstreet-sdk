@@ -12,7 +12,7 @@ import { updateOrderBook } from '../../utils/updateOrderBook';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { LighterExchange } from './lighter.exchange';
-import { BASE_WS_URL, ENDPOINTS, resolveLighterInterval } from './lighter.types';
+import { ENDPOINTS, resolveLighterInterval } from './lighter.types';
 import { calculateLighterPublicReconnectDelay, classifyLighterPublicClose } from './lighter.ws-policy';
 import {
   buildLighterCandleTopic,
@@ -117,7 +117,9 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
   }
 
   private isWsProxyRouteEnabled = (): boolean =>
-    (this.parent.options.tealstreetWsRoute ?? false) && !(this.parent.options.testnet ?? false);
+    this.parent.lighterDeploymentProfile.supportsWsProxy &&
+    (this.parent.options.tealstreetWsRoute ?? false) &&
+    !(this.parent.options.testnet ?? false);
 
   private isTickerRestFallbackCoolingDown = (): boolean =>
     virtualClock.getCurrentTimeMs() < this.tickerRestFallbackCooldownUntil;
@@ -158,7 +160,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       const shouldUseReadonlyDirectRoute = this.useReadonlyDirectRoute && !shouldUseProxyRoute;
       const endpoint = shouldUseProxyRoute
         ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic.host!
-        : BASE_WS_URL.public[this.parent.options.testnet ? 'testnet' : 'livenet'];
+        : this.parent.lighterDeploymentProfile.wsUrl;
       const separator = endpoint.includes('?') ? '&' : '?';
       const query = `requestId=${nanoid()}${shouldUseReadonlyDirectRoute ? '&readonly=true' : ''}`;
 

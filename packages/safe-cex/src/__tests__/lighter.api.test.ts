@@ -48,7 +48,7 @@ describe('Lighter API client', () => {
   });
 
   it('does not inject CORS-blocking timestamp headers through the request interceptor', () => {
-    const exchange = { emitAndLogError: vi.fn() };
+    const exchange = { emitAndLogError: vi.fn(), name: 'lighter' };
     createLighterSDKClient(
       {
         apiKeyIndex: '7',
@@ -77,5 +77,22 @@ describe('Lighter API client', () => {
     expect(config.headers).toEqual({
       authorization: 'auth-token',
     });
+  });
+
+  it('uses the direct Robinhood API host for the Robinhood exchange variant', () => {
+    const exchange = { emitAndLogError: vi.fn(), name: 'lighter-robinhood' };
+    createLighterSDKClient(
+      {
+        apiKeyIndex: '7',
+        testnet: false,
+      } as any,
+      exchange as any,
+    );
+
+    expect(axiosMocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: 'https://api.rh.lighter.xyz',
+      }),
+    );
   });
 });

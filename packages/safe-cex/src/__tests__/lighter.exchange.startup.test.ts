@@ -188,6 +188,27 @@ describe('LighterExchange startup sequencing', () => {
     });
   });
 
+  it('does not treat account position initial margin as the market max leverage cap', async () => {
+    const exchange = createExchange();
+    exchange.store.update({ markets: coreMarkets });
+    (exchange as any).fetchAccountSnapshot = vi.fn().mockResolvedValue({
+      positions: [
+        {
+          market_id: 1,
+          position: '0',
+          avg_entry_price: '0',
+          initial_margin_fraction: 5000,
+          margin_mode: 0,
+        },
+      ],
+    });
+
+    const positions = await exchange.fetchPositions();
+
+    expect(exchange.store.marketsBySymbol['BTC/USDT'].limits.leverage.max).toBe(50);
+    expect(positions.find((position) => position.symbol === 'BTC/USDT')?.leverage).toBe(2);
+  });
+
   it('derives isolated Lighter liquidation price when API returns a profit-side value', async () => {
     const exchange = createExchange();
     exchange.store.update({

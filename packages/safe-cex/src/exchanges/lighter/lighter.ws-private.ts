@@ -8,7 +8,6 @@ import { LogSeverity, OrderStatus, Position, PositionSide } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL } from './lighter.types';
 import {
   calculateLighterPrivateReconnectDelay,
   classifyLighterPrivateClose,
@@ -146,7 +145,7 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
   private getRateLimitWarningMessage = (): string => this.parent.getAccountRateLimitGuidanceMessage();
 
   private getReadonlyFallbackWarningKey = (): string => {
-    const environment = this.parent.options.testnet ? 'testnet' : 'livenet';
+    const environment = this.parent.lighterDeploymentProfile.network;
     const accountIndex = this.parent.getPrivateWsAccountIndex();
     return `${environment}:${accountIndex}`;
   };
@@ -170,7 +169,9 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
     !this.hasReceivedAccountAllOrdersAck || this.useReadonlyFallback;
 
   private isWsProxyRouteEnabled = (): boolean =>
-    (this.parent.options.tealstreetWsRoute ?? false) && !(this.parent.options.testnet ?? false);
+    this.parent.lighterDeploymentProfile.supportsWsProxy &&
+    (this.parent.options.tealstreetWsRoute ?? false) &&
+    !(this.parent.options.testnet ?? false);
 
   private shouldUseGeorestrictedConnectivityWarning = (isPolicyRestrictionError = false): boolean =>
     !this.isWsProxyRouteEnabled() &&
@@ -697,7 +698,7 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
     const useWsProxyRoute = this.isWsProxyRouteEnabled();
     const baseUrl = useWsProxyRoute
       ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.host!
-      : BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'];
+      : this.parent.lighterDeploymentProfile.wsUrl;
     const shouldUseReadonlyFallback = this.useReadonlyFallback && !useWsProxyRoute;
     const wsUrl = shouldUseReadonlyFallback ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}readonly=true` : baseUrl;
     const connectionMode = useWsProxyRoute ? 'proxy-route' : shouldUseReadonlyFallback ? 'readonly-fallback' : 'direct';

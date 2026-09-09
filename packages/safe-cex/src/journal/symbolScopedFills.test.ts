@@ -42,6 +42,12 @@ const guardedVenuesFromSource = (): Set<string> => {
     }
   }
 
+  // Robinhood Chain Lighter shares `lighter.exchange.ts`, so the filesystem
+  // scan sees the implementation once while the registry must list both names.
+  if (guarded.has('lighter')) {
+    guarded.add('lighter-robinhood');
+  }
+
   return guarded;
 };
 

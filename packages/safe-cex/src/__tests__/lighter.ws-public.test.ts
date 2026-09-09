@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BASE_WS_URL, ENDPOINTS } from '../exchanges/lighter/lighter.types';
+import { ENDPOINTS, resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
 import { LighterPublicWebsocket } from '../exchanges/lighter/lighter.ws-public';
 import { resolveExchangeRouting } from '../routing/resolveExchangeRouting';
 
 // Lighter's public proxy WS host, now sourced from the routing table (was WS_PROXY_URL.public).
 const WS_PROXY_PUBLIC = resolveExchangeRouting('lighter', { tealstreetWsRoute: true }).wsPublic.host!;
+const LIGHTER_MAINNET_WS = resolveLighterDeploymentProfile({ exchangeName: 'lighter', testnet: false }).wsUrl;
+const LIGHTER_ROBINHOOD_WS = resolveLighterDeploymentProfile({
+  exchangeName: 'lighter-robinhood',
+  testnet: false,
+}).wsUrl;
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 
@@ -21,6 +26,7 @@ const lighterMarketStore = () => ({
 const createMockParent = (overrides?: Partial<Record<string, unknown>>) =>
   ({
     name: 'lighter',
+    lighterDeploymentProfile: resolveLighterDeploymentProfile({ exchangeName: 'lighter', testnet: false }),
     options: {
       tealstreetWsRoute: true,
       testnet: false,
@@ -70,7 +76,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
     expect(firstUrl).toContain(WS_PROXY_PUBLIC);
-    expect(firstUrl).not.toContain(BASE_WS_URL.public.livenet);
+    expect(firstUrl).not.toContain(LIGHTER_MAINNET_WS);
   });
 
   it('uses direct public endpoint when ws route is disabled', () => {
@@ -86,7 +92,25 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
-    expect(firstUrl).toContain(BASE_WS_URL.public.livenet);
+    expect(firstUrl).toContain(LIGHTER_MAINNET_WS);
+    expect(firstUrl).not.toContain(WS_PROXY_PUBLIC);
+  });
+
+  it('uses the Robinhood public endpoint directly even when ws route is enabled', () => {
+    const parent = createMockParent({
+      name: 'lighter-robinhood',
+      lighterDeploymentProfile: resolveLighterDeploymentProfile({
+        exchangeName: 'lighter-robinhood',
+        testnet: false,
+      }),
+    });
+    const ws = new LighterPublicWebsocket(parent);
+    const createWebsocketSpy = vi.spyOn(ws as any, 'createWebsocket').mockReturnValue(createMockWs());
+
+    ws.connectAndSubscribe();
+
+    const firstUrl = String(createWebsocketSpy.mock.calls[0]?.[0] || '');
+    expect(firstUrl).toContain(LIGHTER_ROBINHOOD_WS);
     expect(firstUrl).not.toContain(WS_PROXY_PUBLIC);
   });
 
@@ -637,7 +661,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const latestUrl = String(createWebsocketSpy.mock.calls.at(-1)?.[0] || '');
-    expect(latestUrl).toContain(BASE_WS_URL.public.livenet);
+    expect(latestUrl).toContain(LIGHTER_MAINNET_WS);
     expect(latestUrl).not.toContain(WS_PROXY_PUBLIC);
   });
 
@@ -686,7 +710,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     const latestUrl = String(createWebsocketSpy.mock.calls.at(-1)?.[0] || '');
     expect(latestUrl).toContain(WS_PROXY_PUBLIC);
-    expect(latestUrl).not.toContain(BASE_WS_URL.public.livenet);
+    expect(latestUrl).not.toContain(LIGHTER_MAINNET_WS);
   });
 
   it('promotes direct route to readonly mode after repeated failures', () => {
@@ -708,7 +732,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     ws.connectAndSubscribe();
 
     const latestUrl = String(createWebsocketSpy.mock.calls.at(-1)?.[0] || '');
-    expect(latestUrl).toContain(BASE_WS_URL.public.livenet);
+    expect(latestUrl).toContain(LIGHTER_MAINNET_WS);
     expect(latestUrl).toContain('readonly=true');
   });
 

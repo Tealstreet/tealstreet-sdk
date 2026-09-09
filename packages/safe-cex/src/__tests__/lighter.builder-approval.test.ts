@@ -10,16 +10,21 @@ import {
 const { lighterApiGetMock, lighterApiGetNextNonceMock, lighterApiInstances } = vi.hoisted(() => ({
   lighterApiGetMock: vi.fn(),
   lighterApiGetNextNonceMock: vi.fn(),
-  lighterApiInstances: [] as Array<{ addRequestInterceptor: ReturnType<typeof vi.fn> }>,
+  lighterApiInstances: [] as Array<{
+    addRequestInterceptor: ReturnType<typeof vi.fn>;
+    config?: Record<string, unknown>;
+  }>,
 }));
 
 vi.mock('@tealstreet/lighter-sdk', () => ({
   LighterApiClient: class {
+    config?: Record<string, unknown>;
     addRequestInterceptor = vi.fn();
     get = lighterApiGetMock;
     getNextNonce = lighterApiGetNextNonceMock;
 
-    constructor() {
+    constructor(config?: Record<string, unknown>) {
+      this.config = config;
       lighterApiInstances.push(this);
     }
   },
@@ -105,11 +110,36 @@ describe('lighter.builder-approval utilities', () => {
     });
 
     expect(context.nonce).toBe(919n);
+    expect(context.signerChainId).toBe(304);
     expect(lighterApiGetNextNonceMock).toHaveBeenCalledWith(718895n, 2);
     expect(lighterApiInstances).toHaveLength(2);
     for (const instance of lighterApiInstances) {
       expect(instance.addRequestInterceptor).not.toHaveBeenCalled();
     }
+  });
+
+  it('prepares Robinhood approval context with the Robinhood signer chain id', async () => {
+    lighterApiGetNextNonceMock.mockResolvedValueOnce(920n);
+    lighterApiGetMock.mockResolvedValueOnce({
+      accounts: [
+        {
+          l1_address: '0x22b270B95599989A3D2A54BdcCbb75e21e772630',
+          approved_integrators: [],
+        },
+      ],
+    });
+
+    const context = await prepareLighterBuilderApprovalContext({
+      accountIdentifier: '718895',
+      apiKeyIndex: 2,
+      exchangeName: 'lighter-robinhood',
+      integratorAccountIndex: 123456n,
+    });
+
+    expect(context.nonce).toBe(920n);
+    expect(context.signerChainId).toBe(466324);
+    expect(context.integratorAccountIndex).toBe(123456n);
+    expect(lighterApiInstances[0]?.config?.baseUrl).toContain('https://api.rh.lighter.xyz');
   });
 
   it('treats an unexpired approval below the default taker fee cap as not approved', async () => {

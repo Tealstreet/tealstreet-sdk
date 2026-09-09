@@ -53,6 +53,7 @@ const EXCHANGE_NAMES = [
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  'lighter-robinhood',
   'mexc',
   'okx',
   'okxdemo',

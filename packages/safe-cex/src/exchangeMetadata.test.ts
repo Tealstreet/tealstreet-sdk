@@ -233,6 +233,17 @@ describe('exchangeMetadata', () => {
       expect(lighter.requiresApiKeyIndex).toBe(true);
     });
 
+    it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
+      const lighterRobinhood = exchangeMetadata['lighter-robinhood'];
+
+      expect(lighterRobinhood.exchangeName).toBe('lighter-robinhood');
+      expect(lighterRobinhood.enabled).toBe(false);
+      expect(lighterRobinhood.enabledInDev).toBe(true);
+      expect(lighterRobinhood.enableInPreview).toBe(true);
+      expect(lighterRobinhood.defaultQuote).toBe('USDG');
+      expect(lighterRobinhood.supportsWsRoute).toBe(false);
+    });
+
     it('should preserve executions-history gating for key exchanges', () => {
       expect(exchangeMetadata.bybit.supportsExecutionsHistory).toBe(true);
       expect(exchangeMetadata.bybitdemo.supportsExecutionsHistory).toBe(true);
@@ -348,6 +359,7 @@ describe('exchangeMetadata', () => {
         'kucoin',
         'kucoinspot',
         'lighter',
+        'lighter-robinhood',
         'mexc',
         'okx',
         'okxdemo',
@@ -377,6 +389,7 @@ describe('exchangeMetadata', () => {
         'bybitspot',
         'hyperliquidspot',
         'krakenspot',
+        'lighter-robinhood',
         'okxdemo',
         'okxeu',
         'okxeudemo',

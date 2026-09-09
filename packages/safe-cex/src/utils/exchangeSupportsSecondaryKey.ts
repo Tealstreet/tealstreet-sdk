@@ -19,6 +19,7 @@ export const exchangesWithoutSecondaryKey: ExchangeName[] = [
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  'lighter-robinhood',
   'paradex',
   'polymarket',
   'woofi',

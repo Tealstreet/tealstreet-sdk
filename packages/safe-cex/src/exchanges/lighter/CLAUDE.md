@@ -8,7 +8,7 @@ This directory contains the Lighter exchange integration for Tealstreet. Lighter
 - **Signing**: Poseidon hash-based cryptography (WASM)
 - **Margin**: Cross and isolated (switchable via signed leverage update)
 - **Position Mode**: One-way / net only. Hedge mode is not supported as of 2026-05-23; live testing showed an opposite-side non-reduce fill reduced the existing position instead of opening a separate hedge.
-- **Quote Currency**: USDC for perp margin/quote handling. Lighter's `/api/v1/orderBooks` also returns spot `/USDC` books; this perps exchange must filter spot rows out via `market_type`.
+- **Quote Currency**: USDC for zkLighter perp margin/quote handling; USDG for `lighter-robinhood`. Lighter's `/api/v1/orderBooks` also returns spot books; this perps exchange must filter spot rows out via `market_type`.
 - **Status**: Enabled in production and dev (`enabled: true`, `enabledInDev: true`, preview-enabled)
 
 ## API Documentation
@@ -20,24 +20,24 @@ Official API documentation:
 - Account tiers: <https://apidocs.lighter.xyz/docs/account-types>
 - Premium volume quota: <https://apidocs.lighter.xyz/docs/volume-quota-program>
 
-Lighter is not available in CCXT. Use <https://github.com/ccxt/ccxt> for general exchange pattern reference only.
+CCXT has a Lighter adapter, but Tealstreet uses the internal `@tealstreet/lighter-sdk` signer/API path here. Use CCXT only as a loose reference, not as the source of truth for Robinhood deployment config.
 
 ## File Structure
 
-| File                    | Description                                                                                                |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `lighter.api.ts`        | SDK-based API client factory; creates `LighterApiClient` with request/response/error interceptors          |
-| `lighter.exchange.ts`   | Main exchange class (`LighterExchange`) extending `BaseExchange`; implements all trading operations        |
-| `lighter.types.ts`      | Constants and type mappings: URLs, endpoints, interval/order/status maps, Grafana endpoints                |
-| `lighter.utils.ts`      | Utility functions: client order ID generation, precision extraction, hex prefix helpers, BigInt conversion |
-| `lighter.ws-public.ts`  | Public WebSocket (`LighterPublicWebsocket`); market data: tickers, orderbook, candles, trades              |
-| `lighter.ws-public-ohlcv.ts` | Public candle/trade channel builders and OHLCV recovery guards                                      |
-| `lighter.ws-public-parsers.ts` | Public-frame dispatch and numeric parsing helpers                                               |
-| `lighter.ws-policy.ts` | Public/private close classification and reconnect delay policy                                          |
-| `lighter.signer.ts` | Lighter transaction signer adapter                                                                          |
-| `lighter.builder-approval.ts` | Builder/integrator approval status and submission helpers                                       |
-| `lighter.builder-fee.ts` | Integrator fee mode and transaction attribution helpers                                             |
-| `lighter.ws-private.ts` | Private WebSocket (`LighterPrivateWebsocket`); account events: orders, positions, fills, balance           |
+| File                           | Description                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `lighter.api.ts`               | SDK-based API client factory; creates `LighterApiClient` with request/response/error interceptors          |
+| `lighter.exchange.ts`          | Main exchange class (`LighterExchange`) extending `BaseExchange`; implements all trading operations        |
+| `lighter.types.ts`             | Constants and type mappings: deployment profiles, URLs, endpoints, interval/order/status maps              |
+| `lighter.utils.ts`             | Utility functions: client order ID generation, precision extraction, hex prefix helpers, BigInt conversion |
+| `lighter.ws-public.ts`         | Public WebSocket (`LighterPublicWebsocket`); market data: tickers, orderbook, candles, trades              |
+| `lighter.ws-public-ohlcv.ts`   | Public candle/trade channel builders and OHLCV recovery guards                                             |
+| `lighter.ws-public-parsers.ts` | Public-frame dispatch and numeric parsing helpers                                                          |
+| `lighter.ws-policy.ts`         | Public/private close classification and reconnect delay policy                                             |
+| `lighter.signer.ts`            | Lighter transaction signer adapter                                                                         |
+| `lighter.builder-approval.ts`  | Builder/integrator approval status and submission helpers                                                  |
+| `lighter.builder-fee.ts`       | Integrator fee mode and transaction attribution helpers                                                    |
+| `lighter.ws-private.ts`        | Private WebSocket (`LighterPrivateWebsocket`); account events: orders, positions, fills, balance           |
 
 `fetchOrders()` coalesces and returns the REST order snapshot without mutating
 the store. The periodic private snapshot and throttled private-WebSocket heal
@@ -70,7 +70,7 @@ For write operations (placing/cancelling orders), a `TransactionClient` from `@t
 - **Private key**: From `options.secret`
 - **Account index**: Fetched from the `/api/v1/account` endpoint and stored as `BigInt`
 - **API key index**: Parsed from `options.apiKeyIndex` (converted to integer via `parseInt`)
-- **Signer domain chain ID**: `304` (livenet) or `300` (testnet)
+- **Signer domain chain ID**: resolved via `resolveLighterDeploymentProfile()` — `304` (livenet), `300` (testnet), or `466324` (Robinhood Chain Lighter)
 
 The signer adapter wraps `TransactionClient` operations for:
 
@@ -124,11 +124,11 @@ Signer startup resolves account index, initializes Poseidon WASM, validates API 
 
 ### Account
 
-| Endpoint                    | Method | Description                                                   |
-| --------------------------- | ------ | ------------------------------------------------------------- |
-| `/api/v1/account`           | GET    | Get account info (`accountIndex`, `referrer`)                 |
-| `/api/v1/accountLimits`     | GET    | Get account tier/limits (`user_tier`, `user_tier_name`)       |
-| `/api/v1/changeAccountTier` | POST   | Change account tier (`standard`, `premium`, `plus`)           |
+| Endpoint                    | Method | Description                                             |
+| --------------------------- | ------ | ------------------------------------------------------- |
+| `/api/v1/account`           | GET    | Get account info (`accountIndex`, `referrer`)           |
+| `/api/v1/accountLimits`     | GET    | Get account tier/limits (`user_tier`, `user_tier_name`) |
+| `/api/v1/changeAccountTier` | POST   | Change account tier (`standard`, `premium`, `plus`)     |
 
 Additional account-related endpoints used in discovery/integration:
 
@@ -140,20 +140,20 @@ Additional account-related endpoints used in discovery/integration:
 
 ### Market Data
 
-| Endpoint                   | Method | Description                                                                                   |
-| -------------------------- | ------ | --------------------------------------------------------------------------------------------- |
-| `/api/v1/orderBookDetails` | GET    | Preferred market metadata source: margin mode, margin fractions, precision, and limits         |
-| `/api/v1/orderBooks`       | GET    | Fallback active-market list (perps + spot rows), missing some risk metadata                   |
-| `/api/v1/exchangeStats`    | GET    | Public ticker/statistics fallback (`order_book_stats`)                                        |
-| `/api/v1/candles`          | GET    | Candlestick data for supported raw resolutions                                                |
-| `/api/v1/orderBookOrders`  | GET    | Current orderbook levels (`market_id`, `limit`), via `OrderApi.getOrderBookOrders()`          |
-| `/api/v1/trades`           | GET    | Get recent trades                                                                             |
+| Endpoint                   | Method | Description                                                                          |
+| -------------------------- | ------ | ------------------------------------------------------------------------------------ |
+| `/api/v1/orderBookDetails` | GET    | Preferred market metadata source: margin mode, margin fractions, precision, limits   |
+| `/api/v1/orderBooks`       | GET    | Fallback active-market list (perps + spot rows), missing some risk metadata          |
+| `/api/v1/exchangeStats`    | GET    | Public ticker/statistics fallback (`order_book_stats`)                               |
+| `/api/v1/candles`          | GET    | Candlestick data for supported raw resolutions                                       |
+| `/api/v1/orderBookOrders`  | GET    | Current orderbook levels (`market_id`, `limit`), via `OrderApi.getOrderBookOrders()` |
+| `/api/v1/trades`           | GET    | Get recent trades                                                                    |
 
 ### Orders
 
-| Endpoint                        | Method | Description                                                    |
-| ------------------------------- | ------ | -------------------------------------------------------------- |
-| `/api/v1/accountActiveOrders`   | GET    | Open-order reconciliation                                      |
+| Endpoint                        | Method | Description                                                         |
+| ------------------------------- | ------ | ------------------------------------------------------------------- |
+| `/api/v1/accountActiveOrders`   | GET    | Open-order reconciliation                                           |
 | `/api/v1/accountInactiveOrders` | GET    | Account inactive order history (primary for `fetchHistoricalFills`) |
 
 ### Transactions
@@ -182,13 +182,13 @@ Additional account-related endpoints used in discovery/integration:
 
 Topics are tracked per channel and re-subscribed on reconnect.
 
-| Channel Pattern              | Description                                                  |
-| ---------------------------- | ------------------------------------------------------------ |
-| `market_stats/all`           | Market stats snapshot/update stream                          |
-| `ticker/<marketId>`          | Per-market BBO/ticker updates                                |
-| `order_book/<marketId>`      | Order book snapshots and incremental updates                 |
+| Channel Pattern                  | Description                                                        |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `market_stats/all`               | Market stats snapshot/update stream                                |
+| `ticker/<marketId>`              | Per-market BBO/ticker updates                                      |
+| `order_book/<marketId>`          | Order book snapshots and incremental updates                       |
 | `candle/<marketId>/<resolution>` | Candlestick updates for a specific market and supported resolution |
-| `trade/<marketId>`              | Trade stream (secondary source for real-time candle updates)       |
+| `trade/<marketId>`               | Trade stream (secondary source for real-time candle updates)       |
 
 **Ping/pong**: Sends ping on open, responds to server ping with pong, and tracks latency via base WS helpers.
 
@@ -225,7 +225,7 @@ Topics are tracked per channel and re-subscribed on reconnect.
 
 **Connection**:
 
-- Direct route: `BASE_WS_URL.private` (`wss://mainnet.zklighter.elliot.ai/stream` or testnet equivalent)
+- Direct route: `parent.lighterDeploymentProfile.wsUrl` (`wss://mainnet.zklighter.elliot.ai/stream`, testnet equivalent, or `wss://api.rh.lighter.xyz/stream`)
 - Proxy route (when `tealstreetWsRoute` is enabled): `resolveExchangeRouting(name, options).wsPrivate.host` (routing table)
 - Readonly fallback appends `?readonly=true` on direct route only
 
@@ -405,7 +405,7 @@ The `recentlyCancelledOrders` map (with 30-second TTL) prevents race conditions 
 
 Perp markets use the symbol directly as returned from the API (for current Lighter perps this is usually the bare base, e.g. `BTC`, `ETH`, `LIT`). The market ID is a numeric string (e.g., `"0"`, `"1"`).
 
-`/api/v1/orderBooks` also includes spot markets such as `ETH/USDC` with `market_type: "spot"` and high market ids. Do not expose those through `LighterExchange`; the exchange class is perps-only. Bare perp symbols should be modeled as USDC-quoted/margined internally, while explicit suffix symbols (`BTCUSDC`, `ETH/USDT`) should keep the parsed quote if Lighter returns them.
+`/api/v1/orderBooks` also includes spot markets such as `ETH/USDC` with `market_type: "spot"` and high market ids. Do not expose those through `LighterExchange`; the exchange class is perps-only. Bare perp symbols should be modeled with the deployment's quote/margin currency internally (`USDC` for zkLighter, `USDG` for Robinhood), while explicit suffix symbols (`BTCUSDC`, `ETH/USDT`, `BTCUSDG`) should keep the parsed quote if Lighter returns them.
 
 ## Data Precision & Conversion
 
@@ -425,7 +425,7 @@ Extracted from market data during `fetchMarketsHelper()`:
 - `precision.price` — Derived from `supported_price_decimals`
 - `limits.amount.min` — From `min_base_amount`
 - `limits.amount.max` — From `order_quote_limit`
-- `limits.leverage.max` — Derived from `min_initial_margin_fraction` when available; runtime position data can still tighten market/account leverage limits
+- `limits.leverage.max` — Derived from market metadata `min_initial_margin_fraction` when available; do not tighten this from account position `initial_margin_fraction`, which represents current leverage/margin state and can be much lower than the market cap
 - `market.info.market_config.market_margin_mode` — Used as the flat-position display/default risk mode when no live position row has confirmed account state
 
 `/api/v1/orderBookDetails` is the preferred source and `/api/v1/orderBooks` is only a fallback. Some active markets expose `market_config.market_margin_mode: 1` and reject cross-mode risk transactions. Keep `market_config.market_margin_mode` in `market.info`, but remember it is market configuration, not proof that the user's account has already applied that mode. If order placement later returns `invalid margin mode`, refresh position/account state and make the UI require an explicit re-apply of the intended mode instead of silently auto-switching or retrying.
@@ -542,32 +542,37 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 
 ### Network Configuration
 
-**REST API** (proxied through Tealstreet exchange proxy):
+**REST API**:
 
-- **Livenet**: `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai`
-- **Testnet**: `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet-api.lighter.xyz`
+- **Livenet**: proxied through `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai`
+- **Testnet**: proxied through `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet-api.lighter.xyz`
+- **Robinhood**: direct `https://api.rh.lighter.xyz` (the venue sends browser CORS headers; the Tealstreet REST proxy does not serve this upstream)
 
 **WebSocket** (direct + optional proxy route):
 
 - **Direct Public (Livenet)**: `wss://mainnet.zklighter.elliot.ai/stream`
 - **Direct Public (Testnet)**: `wss://testnet.zklighter.elliot.ai/stream`
+- **Direct Public (Robinhood)**: `wss://api.rh.lighter.xyz/stream`
 - **Direct Private (Livenet)**: `wss://mainnet.zklighter.elliot.ai/stream`
 - **Direct Private (Testnet)**: `wss://testnet.zklighter.elliot.ai/stream`
+- **Direct Private (Robinhood)**: `wss://api.rh.lighter.xyz/stream`
 - **Proxy Public**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true`
 - **Proxy Private**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream`
 
 When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets start on the Tealstreet proxy route. Public ticker/orderbook priming must not wait for direct-route failure promotion, because the order form and ticks chart depend on those public streams even when private connectivity is proxied. Keep rare fallbacks available for proxy-infra development: public ticker REST fallback should run while proxy WS is slow/down, and direct public WS should only be probed after repeated proxy-route failures before returning to proxy if that probe also fails.
 
-### Chain IDs (Arbitrum)
+### Chain IDs
 
 - **Mainnet**: `42161`
 - **Testnet (Sepolia)**: `421614`
-- Note: these are network IDs; transaction signer domain IDs used by `TransactionClient` are `304` (livenet) and `300` (testnet).
+- **Robinhood L1 EVM chain**: `4663`
+- Note: these are network IDs; transaction signer domain IDs used by `TransactionClient` are `304` (livenet), `300` (testnet), and `466324` (Robinhood Chain Lighter).
 
 ### Known Differences
 
 - Testnet is **disabled** in metadata (`supportsTestnet: false`), though URLs are defined
-- Signer domain ID selection is based on `options.testnet` (`304` livenet, `300` testnet)
+- Signer domain ID selection is based on `resolveLighterDeploymentProfile({ exchangeName, testnet })`, not only `options.testnet`.
+- `lighter-robinhood` is a separate deployment with its own REST/WS hosts, USDG collateral, and no Tealstreet WS proxy route by default.
 
 ## Known Quirks / Implementation Notes
 
@@ -616,6 +621,7 @@ Two error interceptors handle API responses:
 
 - **Account index not available**: private order sync returns existing store orders and logs a cooldown-gated warning until account index resolves
 - **Signer unavailable**: order placement/cancellation/leverage updates throw actionable signer initialization/auth errors
+- **`invalid auth: couldnt find account`**: authenticated order reconciliation returns existing store orders and logs one warning; do not let this fail the whole private snapshot because positions/balance can still update while the user fixes the account index/API key index/private key tuple
 - **Market not found**: warning logged during cancellation target resolution; error thrown during placement
 - **WASM not ready**: signer initialization retries once after explicit runtime warmup, then cooldown-gates further retries when needed
 - **Stale browser WASM artifact**: If runtime throws `globalThis.poseidon2HashFp5 is not a function`, `/wasm/poseidon_crypto.wasm` is outdated versus SDK code. Ensure the updated binary exists at `apps/web/public/wasm/poseidon_crypto.wasm`.
@@ -689,6 +695,7 @@ This section supersedes older notes that reference direct `transactionClient` us
   - globally via constants in `lighter.builder-fee.ts`, or
   - per-account via `options.extra.lighterIntegratorAccountIndex`.
 - Integrator account index must be a numeric `accountIndex` value (not API key or API key index).
+- `lighter-robinhood` intentionally has no default Tealstreet integrator index yet. Do not reuse the zkLighter mainnet index; only attach attribution when a Robinhood-specific index is explicitly configured.
 - `ApproveIntegrator` flow now has local SDK signing + transport support (`tx_type = 45`).
 - Existing/legacy saved Lighter accounts may predate Tealstreet's builder-fee approval flow. Do not assume an account is approved just because it can trade or has an API key.
 - Lighter rejects attributed create-order transactions with `21149 integrator is not approved` when `L2TxAttributes` are present but the account has no valid approval for the configured integrator/fee caps.

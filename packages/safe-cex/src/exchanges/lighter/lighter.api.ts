@@ -2,7 +2,7 @@ import type { ExchangeOptions } from '../../types';
 
 import { LighterApiClient } from '@tealstreet/lighter-sdk';
 import { BaseExchange } from '../base';
-import { getBaseUrl, RECV_WINDOW } from './lighter.types';
+import { getLighterApiBaseUrl, RECV_WINDOW } from './lighter.types';
 
 const UNSUPPORTED_LIGHTER_REST_HEADERS = ['x-timestamp', 'x-account-index'];
 
@@ -33,7 +33,10 @@ export const stripUnsupportedLighterRestHeaders = (headers: unknown): void => {
  * @returns LighterApiClient instance
  */
 export const createLighterSDKClient = (options: ExchangeOptions, exchange: BaseExchange): LighterApiClient => {
-  const baseUrl = getBaseUrl(options.testnet ? 'testnet' : 'livenet');
+  const baseUrl = getLighterApiBaseUrl({
+    exchangeName: exchange.name,
+    testnet: options.testnet,
+  });
 
   const client = new LighterApiClient({
     baseUrl,

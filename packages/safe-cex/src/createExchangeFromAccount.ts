@@ -37,6 +37,9 @@ const parseKucoinBrokerVerify = (value: string | undefined): boolean | undefined
   return undefined;
 };
 
+const isLighterExchange = (exchangeName: ExchangeAccountConfig['exchange']): boolean =>
+  exchangeName === 'lighter' || exchangeName === 'lighter-robinhood';
+
 const getKucoinBrokerEnv = (prefix: string, suffix: 'PARTNER' | 'KEY' | 'NAME' | 'VERIFY'): string | undefined =>
   getPublicEnv(`${prefix}_${suffix}`) ?? getPublicEnv(`NEXT_PUBLIC_KUCOIN_BROKER_${suffix}`);
 
@@ -78,8 +81,8 @@ export function accountToExchangeOptions(
   const { extra: overrideExtra, ...optionOverrides } = overrides ?? {};
   const metadata = getExchangeMetadata(account.exchange);
   const shouldForwardApplicationId =
-    metadata.requiresApplicationId || account.exchange === 'lighter' || account.exchange === 'asterdex';
-  const shouldForwardApiKeyIndex = metadata.requiresApiKeyIndex || account.exchange === 'lighter';
+    metadata.requiresApplicationId || isLighterExchange(account.exchange) || account.exchange === 'asterdex';
+  const shouldForwardApiKeyIndex = metadata.requiresApiKeyIndex || isLighterExchange(account.exchange);
   const publicKucoinBrokerConfig = resolvePublicKucoinBrokerConfig(account.exchange);
   const extra = {
     ...(publicKucoinBrokerConfig ? { kucoinBroker: publicKucoinBrokerConfig } : {}),

@@ -2102,6 +2102,23 @@
       "binance": "AZTECUSDC"
     }
   ],
+  "lighter-robinhood": [
+    {
+      "symbol": "BTC",
+      "base": "BTC",
+      "quote": "USDG",
+      "id": "0",
+      "_source": "docs-robinhood",
+      "binance": "BTCUSDG"
+    },
+    {
+      "symbol": "ETH",
+      "base": "ETH",
+      "quote": "USDG",
+      "id": "1",
+      "binance": "ETHUSDG"
+    }
+  ],
   "mexc": [
     {
       "symbol": "BTC_USDT",

@@ -35,6 +35,7 @@ export const SYMBOL_SCOPED_FILLS: ReadonlySet<ExchangeName> = new Set([
   'hyperliquid',
   'kucoinspot',
   'lighter',
+  'lighter-robinhood',
   'mexc',
   'okx',
   'paradex',

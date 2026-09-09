@@ -12,6 +12,7 @@ const getUpdateLeverageTransactionMock = vi.fn();
 const getApproveIntegratorTransactionMock = vi.fn();
 const getAuthTokenMock = vi.fn();
 const sendRawTxMock = vi.fn();
+const transactionClientConstructorMock = vi.fn();
 
 vi.mock('@tealstreet/poseidon-crypto', () => ({
   isWasmReady: vi.fn(() => true),
@@ -21,6 +22,10 @@ vi.mock('@tealstreet/poseidon-crypto', () => ({
 
 vi.mock('@tealstreet/lighter-sdk', () => ({
   TransactionClient: class {
+    constructor(params: unknown) {
+      transactionClientConstructorMock(params);
+    }
+
     getCreateOrderTransaction = getCreateOrderTransactionMock;
     getCreateOrderTransactions = getCreateOrderTransactionsMock;
     getCreateGroupedOrdersTransaction = getCreateGroupedOrdersTransactionMock;
@@ -44,6 +49,7 @@ describe('createLighterSignerAdapter', () => {
     getApproveIntegratorTransactionMock.mockResolvedValue({ type: 'approve_integrator' });
     getAuthTokenMock.mockResolvedValue('auth-token');
     sendRawTxMock.mockResolvedValue('tx-hash');
+    transactionClientConstructorMock.mockClear();
   });
 
   it('signs and submits create/cancel/leverage transactions through the internal provider', async () => {
@@ -58,6 +64,7 @@ describe('createLighterSignerAdapter', () => {
     } as unknown as ExchangeOptions;
 
     const signer = await createLighterSignerAdapter({
+      exchangeName: 'lighter',
       options,
       apiClient: { sendRawTx: sendRawTxMock } as any,
       accountIndex: 123n,
@@ -128,6 +135,34 @@ describe('createLighterSignerAdapter', () => {
       maxSpotMakerFee: 300,
       approvalExpiry: 1777585206059n,
     });
+    expect(transactionClientConstructorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chainId: 304,
+      }),
+    );
+  });
+
+  it('uses the Robinhood L2 signer chain id for the Robinhood exchange variant', async () => {
+    const options = {
+      key: '',
+      secret: '0xabc',
+      apiKeyIndex: '0',
+      testnet: false,
+    } as unknown as ExchangeOptions;
+
+    await createLighterSignerAdapter({
+      exchangeName: 'lighter-robinhood',
+      options,
+      apiClient: { sendRawTx: sendRawTxMock } as any,
+      accountIndex: 123n,
+      apiKeyIndex: 0,
+    });
+
+    expect(transactionClientConstructorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chainId: 466324,
+      }),
+    );
   });
 
   it('signs and submits create-order batches through sendTxBatch', async () => {
@@ -140,6 +175,7 @@ describe('createLighterSignerAdapter', () => {
     const sendRawTxBatchMock = vi.fn().mockResolvedValue({ txHashes: ['tx-1', 'tx-2'] });
 
     const signer = await createLighterSignerAdapter({
+      exchangeName: 'lighter',
       options,
       apiClient: {
         sendRawTx: sendRawTxMock,
@@ -186,6 +222,7 @@ describe('createLighterSignerAdapter', () => {
     } as unknown as ExchangeOptions;
 
     const signer = await createLighterSignerAdapter({
+      exchangeName: 'lighter',
       options,
       apiClient: { sendRawTx: sendRawTxMock } as any,
       accountIndex: 123n,
@@ -238,6 +275,7 @@ describe('createLighterSignerAdapter', () => {
 
     await expect(
       createLighterSignerAdapter({
+        exchangeName: 'lighter',
         options,
         apiClient: { sendRawTx: sendRawTxMock } as any,
         accountIndex: 123n,

@@ -1,18 +1,21 @@
+import type { ExchangeName } from '../../types';
+
 import { LighterApiClient, TransactionClient } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
 import {
   LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
   LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
   TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET,
+  TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_ROBINHOOD,
   TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET,
 } from './lighter.builder-fee';
-import { getBaseUrl as getLighterBaseUrl, RECV_WINDOW } from './lighter.types';
+import {
+  getLighterApiBaseUrl,
+  isLighterRobinhoodExchange,
+  RECV_WINDOW,
+  resolveLighterDeploymentProfile,
+} from './lighter.types';
 import { isLighterL1Address, parseLighterPositiveIntegerString } from './lighter.utils';
-
-const LIGHTER_CHAIN_ID = {
-  livenet: 304,
-  testnet: 300,
-} as const;
 
 const DEFAULT_APPROVAL_WINDOW_MS = 365 * 24 * 60 * 60 * 1000;
 const MAX_UINT64 = (1n << 64n) - 1n;
@@ -41,6 +44,7 @@ export type LighterBuilderApprovalContext = {
   maxSpotMakerFee: number;
   maxSpotTakerFee: number;
   nonce: bigint;
+  signerChainId: number;
   testnet: boolean;
 };
 
@@ -79,11 +83,15 @@ export type LighterBuilderApprovalResult = {
   txHash?: string;
 };
 
-const getBaseUrl = (testnet: boolean, overrideBaseUrl?: string): string => {
+const getBaseUrl = (params: { exchangeName?: ExchangeName; overrideBaseUrl?: string; testnet: boolean }): string => {
+  const overrideBaseUrl = params.overrideBaseUrl;
   if (overrideBaseUrl && overrideBaseUrl.trim().length > 0) {
     return overrideBaseUrl.trim().replace(/\/$/, '');
   }
-  return testnet ? getLighterBaseUrl('testnet') : getLighterBaseUrl('livenet');
+  return getLighterApiBaseUrl({
+    exchangeName: params.exchangeName,
+    testnet: params.testnet,
+  });
 };
 
 const toBigInt = (value: unknown): bigint | undefined => {
@@ -133,10 +141,12 @@ const resolveApprovalFeeCaps = (params: {
   };
 };
 
-const getDefaultIntegratorAccountIndex = (testnet: boolean): bigint => {
-  const raw = testnet
-    ? TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET
-    : TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET;
+const getDefaultIntegratorAccountIndex = (params: { exchangeName?: ExchangeName; testnet: boolean }): bigint => {
+  const raw = isLighterRobinhoodExchange(params.exchangeName)
+    ? TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_ROBINHOOD
+    : params.testnet
+      ? TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET
+      : TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET;
   const parsed = parseLighterPositiveIntegerString(raw);
   if (!parsed) {
     throw new Error('Lighter integrator account index is not configured for this network');
@@ -144,9 +154,13 @@ const getDefaultIntegratorAccountIndex = (testnet: boolean): bigint => {
   return BigInt(parsed);
 };
 
-const createApprovalClient = (opts: { baseUrl?: string; testnet: boolean }): LighterApiClient =>
+const createApprovalClient = (opts: { baseUrl?: string; exchangeName?: ExchangeName; testnet: boolean }): LighterApiClient =>
   new LighterApiClient({
-    baseUrl: getBaseUrl(opts.testnet, opts.baseUrl),
+    baseUrl: getBaseUrl({
+      exchangeName: opts.exchangeName,
+      overrideBaseUrl: opts.baseUrl,
+      testnet: opts.testnet,
+    }),
     timeout: RECV_WINDOW,
     headers: {
       'Content-Type': 'application/json',
@@ -156,6 +170,7 @@ const createApprovalClient = (opts: { baseUrl?: string; testnet: boolean }): Lig
 const resolveAccountIndex = async (params: {
   accountIdentifier: string;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   testnet: boolean;
 }): Promise<bigint> => {
   const trimmed = params.accountIdentifier.trim();
@@ -170,7 +185,11 @@ const resolveAccountIndex = async (params: {
 
   // l1_address account-index lookup does not require account headers.
   const lookupClient = new LighterApiClient({
-    baseUrl: getBaseUrl(params.testnet, params.baseUrl),
+    baseUrl: getBaseUrl({
+      exchangeName: params.exchangeName,
+      overrideBaseUrl: params.baseUrl,
+      testnet: params.testnet,
+    }),
     timeout: RECV_WINDOW,
     headers: {
       'Content-Type': 'application/json',
@@ -201,10 +220,12 @@ const resolveAccountIndex = async (params: {
 const fetchAccountSnapshot = async (params: {
   accountIndex: bigint;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   testnet: boolean;
 }): Promise<LighterAccountSnapshot> => {
   const client = createApprovalClient({
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet: params.testnet,
   });
 
@@ -244,10 +265,12 @@ const getNextNonce = async (params: {
   accountIndex: bigint;
   apiKeyIndex: number;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   testnet: boolean;
 }): Promise<bigint> => {
   const client = createApprovalClient({
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet: params.testnet,
   });
   return client.getNextNonce(params.accountIndex, params.apiKeyIndex);
@@ -316,6 +339,7 @@ export const createLighterL1SignatureHelperUrl = (params: {
 export const checkLighterBuilderApproved = async (params: {
   accountIdentifier: string;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   integratorAccountIndex?: bigint;
   requiredFeeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
   requiredFeeValue?: number;
@@ -325,12 +349,15 @@ export const checkLighterBuilderApproved = async (params: {
   const accountIndex = await resolveAccountIndex({
     accountIdentifier: params.accountIdentifier,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet,
   });
-  const integratorAccountIndex = params.integratorAccountIndex ?? getDefaultIntegratorAccountIndex(testnet);
+  const integratorAccountIndex =
+    params.integratorAccountIndex ?? getDefaultIntegratorAccountIndex({ exchangeName: params.exchangeName, testnet });
   const snapshot = await fetchAccountSnapshot({
     accountIndex,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet,
   });
 
@@ -375,6 +402,7 @@ export const prepareLighterBuilderApprovalContext = async (params: {
   apiKeyIndex: number;
   approvalWindowMs?: number;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   integratorAccountIndex?: bigint;
   maxFeeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
   maxFeeValue?: number;
@@ -384,9 +412,11 @@ export const prepareLighterBuilderApprovalContext = async (params: {
   const accountIndex = await resolveAccountIndex({
     accountIdentifier: params.accountIdentifier,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet,
   });
-  const integratorAccountIndex = params.integratorAccountIndex ?? getDefaultIntegratorAccountIndex(testnet);
+  const integratorAccountIndex =
+    params.integratorAccountIndex ?? getDefaultIntegratorAccountIndex({ exchangeName: params.exchangeName, testnet });
   const maxFeeCaps = resolveApprovalFeeCaps({
     feeCaps: params.maxFeeCaps,
     feeValue: params.maxFeeValue,
@@ -397,13 +427,19 @@ export const prepareLighterBuilderApprovalContext = async (params: {
     accountIndex,
     apiKeyIndex: params.apiKeyIndex,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet,
   });
   const snapshot = await fetchAccountSnapshot({
     accountIndex,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet,
   });
+  const signerChainId = resolveLighterDeploymentProfile({
+    exchangeName: params.exchangeName,
+    testnet,
+  }).signerChainId;
 
   return {
     accountIndex,
@@ -416,6 +452,7 @@ export const prepareLighterBuilderApprovalContext = async (params: {
     maxSpotMakerFee: maxFeeCaps.maxSpotMakerFee,
     maxSpotTakerFee: maxFeeCaps.maxSpotTakerFee,
     nonce,
+    signerChainId,
     testnet,
   };
 };
@@ -517,6 +554,7 @@ export const submitLighterBuilderApprovalWithL1Signature = async (params: {
   apiPrivateKey: string;
   approvalExpiryMs: number;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   integratorAccountIndex: bigint;
   l1Signature: string;
   maxPerpsMakerFee: number;
@@ -529,6 +567,7 @@ export const submitLighterBuilderApprovalWithL1Signature = async (params: {
   const testnet = Boolean(params.testnet);
   const apiClient = createApprovalClient({
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     testnet,
   });
 
@@ -539,7 +578,10 @@ export const submitLighterBuilderApprovalWithL1Signature = async (params: {
   const txClient = new TransactionClient({
     httpClient: apiClient,
     crypto: getCryptoApi(),
-    chainId: testnet ? LIGHTER_CHAIN_ID.testnet : LIGHTER_CHAIN_ID.livenet,
+    chainId: resolveLighterDeploymentProfile({
+      exchangeName: params.exchangeName,
+      testnet,
+    }).signerChainId,
     privateKey: params.apiPrivateKey,
     accountIndex: params.accountIndex,
     apiKeyIndex: params.apiKeyIndex,
@@ -576,6 +618,7 @@ export const approveLighterBuilderFeeWithBrowserWallet = async (params: {
   apiPrivateKey: string;
   approvalWindowMs?: number;
   baseUrl?: string;
+  exchangeName?: ExchangeName;
   integratorAccountIndex?: bigint;
   maxFeeCaps?: Partial<LighterBuilderApprovalFeeCaps>;
   maxFeeValue?: number;
@@ -586,18 +629,18 @@ export const approveLighterBuilderFeeWithBrowserWallet = async (params: {
     apiKeyIndex: params.apiKeyIndex,
     approvalWindowMs: params.approvalWindowMs,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     integratorAccountIndex: params.integratorAccountIndex,
     maxFeeCaps: params.maxFeeCaps,
     maxFeeValue: params.maxFeeValue,
     testnet: params.testnet,
   });
 
-  const chainId = context.testnet ? LIGHTER_CHAIN_ID.testnet : LIGHTER_CHAIN_ID.livenet;
   const signatureResult = await signLighterApproveIntegratorWithBrowserWallet({
     accountIndex: context.accountIndex,
     apiKeyIndex: context.apiKeyIndex,
     approvalExpiryMs: context.approvalExpiryMs,
-    chainId,
+    chainId: context.signerChainId,
     expectedWalletAddress: context.l1Address,
     integratorAccountIndex: context.integratorAccountIndex,
     maxPerpsMakerFee: context.maxPerpsMakerFee,
@@ -620,6 +663,7 @@ export const approveLighterBuilderFeeWithBrowserWallet = async (params: {
     apiPrivateKey: params.apiPrivateKey,
     approvalExpiryMs: context.approvalExpiryMs,
     baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
     integratorAccountIndex: context.integratorAccountIndex,
     l1Signature: signatureResult.l1Signature,
     maxPerpsMakerFee: context.maxPerpsMakerFee,

@@ -49,6 +49,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   kucoin: 'https://api-futures.kucoin.com',
   kucoinspot: 'https://api.kucoin.com',
   lighter: 'https://mainnet.zklighter.elliot.ai',
+  'lighter-robinhood': 'https://api.rh.lighter.xyz',
   mexc: 'https://api.mexc.com',
   mode: 'https://api-evm.orderly.org',
   okx: 'https://www.okx.com',

@@ -95,6 +95,26 @@ describe('reconciliation fetch result ownership', () => {
     expect(commitOrders).toHaveBeenCalledWith(orders);
   });
 
+  it('keeps Lighter private snapshots alive when order auth cannot find the account', async () => {
+    const exchange = createLighter();
+    exchange.store.update({ orders });
+    (exchange as any).accountIndex = 123n;
+    (exchange as any).getPrivateWsAuthToken = vi.fn().mockResolvedValue('token');
+    (exchange as any).lighterApiClient = {
+      get: vi.fn().mockRejectedValue({
+        message: 'Request failed with status code 401',
+        response: {
+          data: {
+            code: 20013,
+            message: 'invalid auth: couldnt find account',
+          },
+        },
+      }),
+    };
+
+    await expect(exchange.fetchOrders()).resolves.toEqual(orders);
+  });
+
   it('leaves Lighter orders unchanged when reconciliation fails or resolves after disposal', async () => {
     const exchange = createLighter();
     const commitOrders = vi.spyOn(exchange.store, 'addOrUpdateOrdersFull');

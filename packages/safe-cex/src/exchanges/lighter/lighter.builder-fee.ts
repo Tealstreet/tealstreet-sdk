@@ -1,4 +1,6 @@
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
+
+import { isLighterRobinhoodExchange } from './lighter.types';
 
 export type LighterBuilderFeeMode = 'dynamic' | 'static';
 
@@ -6,6 +8,7 @@ export type LighterBuilderFeeMode = 'dynamic' | 'static';
 export const TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET = '158385';
 export const TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET =
   'REPLACE_WITH_LIGHTER_TESTNET_INTEGRATOR_ACCOUNT_INDEX';
+export const TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_ROBINHOOD = '';
 
 // Lighter partner fee value unit: fee_value / 1e6 of trade size.
 // 250 = 2.5 bps.
@@ -44,14 +47,28 @@ const parsePositiveIntegerBigInt = (value: unknown): bigint | undefined => {
   }
 };
 
-export const resolveLighterBuilderFeeConfig = (options: ExchangeOptions): LighterBuilderFeeConfig | undefined => {
-  const mode = resolveMode(options.extra?.lighterBuilderFeeMode);
-  const configuredIntegratorIndex = options.extra?.lighterIntegratorAccountIndex;
-  const placeholderIntegratorIndex = options.testnet
+const getDefaultIntegratorAccountIndex = (
+  options: ExchangeOptions,
+  exchangeName?: ExchangeName,
+): string | undefined => {
+  if (isLighterRobinhoodExchange(exchangeName)) {
+    return TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_ROBINHOOD || undefined;
+  }
+
+  return options.testnet
     ? TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_TESTNET
     : TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_MAINNET;
+};
 
-  const integratorAccountIndex = parsePositiveIntegerBigInt(configuredIntegratorIndex ?? placeholderIntegratorIndex);
+export const resolveLighterBuilderFeeConfig = (
+  options: ExchangeOptions,
+  exchangeName?: ExchangeName,
+): LighterBuilderFeeConfig | undefined => {
+  const mode = resolveMode(options.extra?.lighterBuilderFeeMode);
+  const configuredIntegratorIndex = options.extra?.lighterIntegratorAccountIndex;
+  const defaultIntegratorIndex = getDefaultIntegratorAccountIndex(options, exchangeName);
+
+  const integratorAccountIndex = parsePositiveIntegerBigInt(configuredIntegratorIndex ?? defaultIntegratorIndex);
   if (integratorAccountIndex === undefined) {
     return undefined;
   }

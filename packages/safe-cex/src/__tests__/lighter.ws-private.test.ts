@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WS_MIN_RECONNECTION_DELAY } from '../config/config';
+import { resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
 import { LighterPrivateWebsocket } from '../exchanges/lighter/lighter.ws-private';
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
@@ -10,6 +11,7 @@ const MOCK_RATE_LIMIT_WARNING =
 const createMockParent = () =>
   ({
     name: 'lighter',
+    lighterDeploymentProfile: resolveLighterDeploymentProfile({ exchangeName: 'lighter', testnet: false }),
     options: {
       tealstreetWsRoute: false,
       testnet: false,

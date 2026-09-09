@@ -33,7 +33,9 @@ The following `ApproveIntegrator` details are confirmed from official references
 
 ## Information still needed
 
-- Tealstreet integrator account indexes for mainnet/testnet.
+- Tealstreet integrator account indexes for testnet and Robinhood Chain.
+- Robinhood Chain builder attribution is not configured yet; do not reuse the
+  ordinary zkLighter mainnet integrator account index for Robinhood.
 - First required production flow:
   - same-master (`L2` signature only), or
   - cross-master (`L1Sig` required).
@@ -56,24 +58,28 @@ logging and explored account/configuration reads plus candidate
 `ApproveIntegrator` and revocation payloads. Those observations are
 historical evidence only; use the official references above and a separately
 authorized, purpose-built procedure for any future live investigation.
-## SDK implementation checklist (post-discovery)
 
-- Add `ApproveIntegrator` tx support in local `TransactionClient`:
-  - params typing
-  - hash/sign input ordering
-  - validation ranges
-- Extend `http-types` with `L2ApproveIntegratorTxInfo` shape.
-- Extend `sendRawTx()` mapping to include tx type `45`.
-- Add optional `L1Sig` pass-through for cross-master flow.
-- Add tests:
-  - tx payload serialization
-  - validation/revocation rules
-  - transport payload mapping for tx type `45`
-- Gate production UI/flow behind a feature flag until real integrator indexes are set.
+## Implemented SDK support
+
+Local `@tealstreet/lighter-sdk` now has `ApproveIntegrator` support:
+
+- `TransactionClient.getApproveIntegratorTransaction()` signs tx type `45`.
+- `http-types` includes the `L2ApproveIntegratorTxInfo` shape.
+- `sendRawTx()` maps approval payloads through the tx type `45` transport path.
+- Optional `L1Sig` pass-through exists for cross-master approval contexts.
+- Tests cover tx payload serialization, validation/revocation rules, and
+  transport payload mapping.
+
+Keep future SDK work focused on contract drift or new upstream requirements,
+not re-adding the already implemented tx type.
 
 ## Current status
 
 - SDK support for `ApproveIntegrator` is implemented in local `@tealstreet/lighter-sdk` (tx type `45`, signing, transport mapping).
 - Account-form wiring exists via:
   - `apps/web/src/components/settings/accountsSettings/LighterBuilderFeeApproval.tsx`
-  - helper route `apps/web/src/app/[locale]/trade/lighter-l1sig/page.tsx`
+  - helper route `apps/web/src/app/[locale]/(bare)/trade/lighter-l1sig/page.tsx`
+- Ordinary zkLighter mainnet has a configured default integrator account index.
+- Robinhood Chain Lighter deliberately has no default integrator account index;
+  attribution should remain disabled until a Robinhood-specific Tealstreet
+  integrator account index is obtained and validated.

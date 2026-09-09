@@ -68,6 +68,20 @@ describe('transport resolution (golden master)', () => {
     expect(matrix).toMatchSnapshot();
   });
 
+  it('forwards Robinhood Lighter account index and API key index', () => {
+    const options = accountToExchangeOptions({
+      exchange: 'lighter-robinhood',
+      name: 'test-robinhood-lighter',
+      apiKey: 'key',
+      apiSecret: 'secret',
+      applicationId: '718895',
+      apiKeyIndex: '2',
+    });
+
+    expect(options.applicationId).toBe('718895');
+    expect(options.apiKeyIndex).toBe('2');
+  });
+
   it('getProxyForAxios: representative base URLs x proxy/region/auth permutations', () => {
     const URLS: Array<[string, ExchangeName]> = [
       ['https://api.bybit.com', 'bybit'],

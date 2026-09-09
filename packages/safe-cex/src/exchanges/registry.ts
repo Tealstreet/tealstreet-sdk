@@ -170,6 +170,8 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   // Lighter (heavy - WASM crypto dependencies)
   lighter: () =>
     import(/* webpackChunkName: "exchange-lighter" */ './lighter/lighter.exchange').then((m) => m.LighterExchange),
+  'lighter-robinhood': () =>
+    import(/* webpackChunkName: "exchange-lighter" */ './lighter/lighter.exchange').then((m) => m.LighterExchange),
 
   // MEXC
   mexc: () => import(/* webpackChunkName: "exchange-mexc" */ './mexc/mexc.exchange').then((m) => m.MexcExchange),

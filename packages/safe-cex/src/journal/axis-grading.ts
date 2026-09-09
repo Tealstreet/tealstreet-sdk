@@ -115,6 +115,7 @@ const AVAILABLE_AXES: Partial<Record<ExchangeName, readonly HistoryAxis[]>> = {
   bingx: ['fills'],
   apexomni: ['fills'],
   lighter: ['fills'],
+  'lighter-robinhood': ['fills'],
   mexc: ['fills'],
   backpack: ['fills'],
   phemex: ['fills'],

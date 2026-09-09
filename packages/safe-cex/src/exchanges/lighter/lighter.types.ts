@@ -1,23 +1,93 @@
+import type { ExchangeName } from '../../types';
+
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, Timeframe } from '../../types';
 import { getPublicCorsProxy } from '../../utils/transportResolution';
 
 export const RECV_WINDOW = 20_000;
 
-// Resolved at CALL time (not a module-eval const) so the public CORS host is never
-// baked into a module-eval string.
-export const getBaseUrl = (net: 'livenet' | 'testnet'): string =>
-  `${getPublicCorsProxy()}/${net === 'livenet' ? 'https://mainnet.zklighter.elliot.ai' : 'https://testnet-api.lighter.xyz'}`;
+export type LighterDeploymentNetwork = 'livenet' | 'testnet' | 'robinhood' | 'robinhood-testnet';
 
-export const BASE_WS_URL = {
-  public: {
-    livenet: 'wss://mainnet.zklighter.elliot.ai/stream',
-    testnet: 'wss://testnet.zklighter.elliot.ai/stream',
+export type LighterDeploymentProfile = {
+  network: LighterDeploymentNetwork;
+  apiBaseUrl: string;
+  wsUrl: string;
+  signerChainId: number;
+  quoteCurrency: 'USDC' | 'USDG';
+  usesRestProxy: boolean;
+  supportsWsProxy: boolean;
+};
+
+export const LIGHTER_DEPLOYMENT_PROFILES: Record<LighterDeploymentNetwork, LighterDeploymentProfile> = {
+  livenet: {
+    network: 'livenet',
+    apiBaseUrl: 'https://mainnet.zklighter.elliot.ai',
+    wsUrl: 'wss://mainnet.zklighter.elliot.ai/stream',
+    signerChainId: 304,
+    quoteCurrency: 'USDC',
+    usesRestProxy: true,
+    supportsWsProxy: true,
   },
-  private: {
-    livenet: 'wss://mainnet.zklighter.elliot.ai/stream',
-    testnet: 'wss://testnet.zklighter.elliot.ai/stream',
+  testnet: {
+    network: 'testnet',
+    apiBaseUrl: 'https://testnet-api.lighter.xyz',
+    wsUrl: 'wss://testnet.zklighter.elliot.ai/stream',
+    signerChainId: 300,
+    quoteCurrency: 'USDC',
+    usesRestProxy: true,
+    supportsWsProxy: false,
+  },
+  robinhood: {
+    network: 'robinhood',
+    apiBaseUrl: 'https://api.rh.lighter.xyz',
+    wsUrl: 'wss://api.rh.lighter.xyz/stream',
+    signerChainId: 466324,
+    quoteCurrency: 'USDG',
+    usesRestProxy: false,
+    supportsWsProxy: false,
+  },
+  'robinhood-testnet': {
+    network: 'robinhood-testnet',
+    apiBaseUrl: 'https://api.rh-testnet.lighter.xyz',
+    wsUrl: 'wss://api.rh-testnet.lighter.xyz/stream',
+    signerChainId: 300,
+    quoteCurrency: 'USDG',
+    usesRestProxy: false,
+    supportsWsProxy: false,
   },
 };
+
+export const isLighterRobinhoodExchange = (exchangeName?: ExchangeName): boolean => exchangeName === 'lighter-robinhood';
+
+export const resolveLighterDeploymentNetwork = (params: {
+  exchangeName?: ExchangeName;
+  testnet?: boolean;
+}): LighterDeploymentNetwork => {
+  if (isLighterRobinhoodExchange(params.exchangeName)) {
+    return params.testnet ? 'robinhood-testnet' : 'robinhood';
+  }
+
+  return params.testnet ? 'testnet' : 'livenet';
+};
+
+export const resolveLighterDeploymentProfile = (params: {
+  exchangeName?: ExchangeName;
+  testnet?: boolean;
+}): LighterDeploymentProfile => {
+  return LIGHTER_DEPLOYMENT_PROFILES[resolveLighterDeploymentNetwork(params)];
+};
+
+// Resolved at CALL time (not a module-eval const) so the public CORS host is never
+// baked into a module-eval string.
+export const getBaseUrl = (net: LighterDeploymentNetwork): string =>
+  LIGHTER_DEPLOYMENT_PROFILES[net].usesRestProxy
+    ? `${getPublicCorsProxy()}/${LIGHTER_DEPLOYMENT_PROFILES[net].apiBaseUrl}`
+    : LIGHTER_DEPLOYMENT_PROFILES[net].apiBaseUrl;
+
+export const getLighterApiBaseUrl = (params: { exchangeName?: ExchangeName; testnet?: boolean }): string =>
+  getBaseUrl(resolveLighterDeploymentNetwork(params));
+
+export const getLighterWsUrl = (params: { exchangeName?: ExchangeName; testnet?: boolean }): string =>
+  resolveLighterDeploymentProfile(params).wsUrl;
 
 export const ENDPOINTS = {
   ACCOUNT: '/api/v1/account',

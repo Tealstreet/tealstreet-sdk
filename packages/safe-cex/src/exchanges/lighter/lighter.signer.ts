@@ -1,7 +1,8 @@
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { LighterApiClient, TransactionClient } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
+import { resolveLighterDeploymentProfile } from './lighter.types';
 
 export type LighterSignerProvider = 'tealstreet-sdk';
 
@@ -62,12 +63,6 @@ export interface LighterSignerAdapter {
   dispose?(): Promise<void>;
 }
 
-const CHAIN_ID = {
-  // Lighter uses signer domain chain IDs (not Arbitrum chain IDs).
-  livenet: 304,
-  testnet: 300,
-} as const;
-
 function getProvider(options: ExchangeOptions): string | undefined {
   return (options.extra as { lighterSignerProvider?: string } | undefined)?.lighterSignerProvider;
 }
@@ -85,6 +80,7 @@ class TealstreetLighterSignerAdapter implements LighterSignerAdapter {
 
   constructor(
     private readonly options: ExchangeOptions,
+    private readonly exchangeName: ExchangeName,
     private readonly apiClient: LighterApiClient,
     private readonly accountIndex: bigint,
     private readonly apiKeyIndex: number,
@@ -119,7 +115,10 @@ class TealstreetLighterSignerAdapter implements LighterSignerAdapter {
       this.transactionClient = new TransactionClient({
         httpClient: this.apiClient,
         crypto,
-        chainId: this.options.testnet ? CHAIN_ID.testnet : CHAIN_ID.livenet,
+        chainId: resolveLighterDeploymentProfile({
+          exchangeName: this.exchangeName,
+          testnet: this.options.testnet,
+        }).signerChainId,
         privateKey: this.options.secret,
         accountIndex: this.accountIndex,
         apiKeyIndex: this.apiKeyIndex,
@@ -356,6 +355,7 @@ class TealstreetLighterSignerAdapter implements LighterSignerAdapter {
 }
 
 export async function createLighterSignerAdapter(params: {
+  exchangeName: ExchangeName;
   options: ExchangeOptions;
   apiClient: LighterApiClient;
   accountIndex: bigint;
@@ -370,6 +370,7 @@ export async function createLighterSignerAdapter(params: {
 
   const adapter = new TealstreetLighterSignerAdapter(
     params.options,
+    params.exchangeName,
     params.apiClient,
     params.accountIndex,
     params.apiKeyIndex,

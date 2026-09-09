@@ -2301,6 +2301,20 @@ const LighterMetadata: ExchangeMetadata = {
   },
 };
 
+const LighterRobinhoodMetadata: ExchangeMetadata = {
+  ...LighterMetadata,
+  exchangeName: 'lighter-robinhood' as ExchangeName,
+  refLink: 'https://lighter.xyz',
+  prettyName: 'Lighter Robinhood',
+  defaultQuote: 'USDG',
+  enabled: false,
+  enabledInDev: true,
+  enableInPreview: true,
+  supportedOnMobile: false,
+  supportsWsRoute: false,
+  latencyDomain: 'api.rh.lighter.xyz',
+};
+
 export const exchangeMetadata: {
   [key in ExchangeName]: ExchangeMetadata;
 } = {
@@ -2331,6 +2345,7 @@ export const exchangeMetadata: {
   breakoutprop: BreakoutpropMetadata,
   blofin: BlofinMetadata,
   lighter: LighterMetadata,
+  'lighter-robinhood': LighterRobinhoodMetadata,
   okx: OkxMetadata,
   okxdemo: OkxDemoMetadata,
   okxeu: OkxEUMetadata,

@@ -5,7 +5,7 @@ import type { ExchangeName } from '../types';
 // ---------------------------------------------------------------------------
 
 /** Known quote currencies, ordered longest-first for greedy matching */
-const KNOWN_QUOTES = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'USDY', 'USDD', 'USDP', 'USD', 'EUR'];
+const KNOWN_QUOTES = ['USDT', 'USDC', 'USDG', 'BUSD', 'FDUSD', 'USDY', 'USDD', 'USDP', 'USD', 'EUR'];
 
 /**
  * Extract base/quote from a Binance-format symbol (concatenated, e.g., BTCUSDT).
@@ -204,6 +204,13 @@ export function toBinance(symbol: string, from: ExchangeName): string {
       // Perp symbols are base-only and USDC-margined.
       return symbol + 'USDC';
     }
+    case 'lighter-robinhood': {
+      if (symbol.includes('/')) {
+        return symbol.replace('/', '');
+      }
+      // Robinhood Chain Lighter perps are base-only and USDG-margined.
+      return symbol + 'USDG';
+    }
 
     // -- Polymarket: non-standard, best effort ------------------------------
     case 'polymarket':
@@ -364,6 +371,9 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
 
     // -- Lighter: APTUSDC/APTUSDT → APT. Lighter spot uses slash symbols but the perps exchange filters spot out.
     case 'lighter': {
+      return parseBinanceSymbol(symbol).base;
+    }
+    case 'lighter-robinhood': {
       return parseBinanceSymbol(symbol).base;
     }
 

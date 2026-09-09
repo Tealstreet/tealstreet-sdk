@@ -96,6 +96,12 @@ describe('buildExchangeAccountConfig', () => {
       'applicationId',
       'apiKeyIndex',
     ]);
+    expect(getExchangeAccountCredentialSchema('lighter-robinhood')?.requiredFields).toEqual([
+      'apiKey',
+      'apiSecret',
+      'applicationId',
+      'apiKeyIndex',
+    ]);
   });
 
   it('lists Paradex as an addable exchange from safe-cex metadata', () => {
