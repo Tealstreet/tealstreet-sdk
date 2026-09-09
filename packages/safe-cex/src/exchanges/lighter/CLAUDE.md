@@ -546,7 +546,7 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 
 - **Livenet**: proxied through `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai`
 - **Testnet**: proxied through `https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://testnet-api.lighter.xyz`
-- **Robinhood**: direct `https://api.rh.lighter.xyz` (the venue sends browser CORS headers; the Tealstreet REST proxy does not serve this upstream)
+- **Robinhood**: direct `https://api.rh.lighter.xyz` (the venue sends browser CORS headers). Since 2026-09-09 the Tokyo REST proxy fleet DOES serve this upstream (`https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz/...`) and tradetunnel allowlists it; the deployment profile still has `usesRestProxy: false` pending the proxy-backed re-test (account linking, streams, order placement)
 
 **WebSocket** (direct + optional proxy route):
 
@@ -558,6 +558,7 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 - **Direct Private (Robinhood)**: `wss://api.rh.lighter.xyz/stream`
 - **Proxy Public**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true`
 - **Proxy Private**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream`
+- **Proxy Public/Private (Robinhood)**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream` — live since 2026-09-09 (`tealstreet-ws-lighter-rh` deployment, Tokyo EKS); the Robinhood deployment profile still has `supportsWsProxy: false` until the proxy-backed route is re-tested and wired into the routing table
 
 When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets start on the Tealstreet proxy route. Public ticker/orderbook priming must not wait for direct-route failure promotion, because the order form and ticks chart depend on those public streams even when private connectivity is proxied. Keep rare fallbacks available for proxy-infra development: public ticker REST fallback should run while proxy WS is slow/down, and direct public WS should only be probed after repeated proxy-route failures before returning to proxy if that probe also fails.
 
