@@ -11,6 +11,7 @@ interface SymbolIntervalSub {
   // separate counter desyncs on a duplicate subId and strands the subscription.
   subIds: Set<string>;
   lastCandleTimestamp: number;
+  payloadDataBySubId: Map<string, any>;
 }
 
 export class OHLCVSubscriptionsHandler extends BaseHandler {
@@ -21,8 +22,10 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
   // In dedicated worker mode this is a no-op (one session = one subId per symbol+interval).
   private _subsByKey = new Map<string, SymbolIntervalSub>();
 
-  private _sendCandleUpdate = (data: any, c: Candle) => {
-    this._ctx.postMessage({ op: 'listenOHLCV', data: { ...data, candle: c } });
+  private _sendCandleUpdate = (sub: SymbolIntervalSub, c: Candle) => {
+    for (const [subId, data] of sub.payloadDataBySubId) {
+      this._ctx.postMessage({ op: 'listenOHLCV', data: { ...data, subId, candle: c } });
+    }
   };
 
   private _getKey(symbol: string, interval: string): string {
@@ -51,23 +54,24 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         if (existing) {
           // Already subscribed to this symbol:interval — just track the subscriber
           existing.subIds.add(subId);
+          existing.payloadDataBySubId.set(subId, { ...payload.data });
           return;
         }
 
         // Create new subscription
-        const data = { ...payload.data };
+        const sub: SymbolIntervalSub = {
+          unsub: () => {},
+          throttleFn: undefined,
+          subIds: new Set([subId]),
+          lastCandleTimestamp: 0,
+          payloadDataBySubId: new Map([[subId, { ...payload.data }]]),
+        };
         const f = throttle(
-          this._sendCandleUpdate.bind(this, data),
+          this._sendCandleUpdate.bind(this, sub),
           60 * (this._exchange.options?.tuning?.dataUpdateThrottleMultiplier || 1),
           { trailing: true },
         );
-
-        const sub: SymbolIntervalSub = {
-          unsub: () => {},
-          throttleFn: f,
-          subIds: new Set([subId]),
-          lastCandleTimestamp: 0,
-        };
+        sub.throttleFn = f;
 
         const ohlcvSub = this._exchange.listenOHLCV(payload.data, (c) => {
           if (c.timestamp !== sub.lastCandleTimestamp) {
@@ -92,6 +96,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         for (const [key, sub] of this._subsByKey) {
           if (sub.subIds.has(subId)) {
             sub.subIds.delete(subId);
+            sub.payloadDataBySubId.delete(subId);
 
             if (sub.subIds.size === 0) {
               // Last subscriber — actually unsubscribe from exchange

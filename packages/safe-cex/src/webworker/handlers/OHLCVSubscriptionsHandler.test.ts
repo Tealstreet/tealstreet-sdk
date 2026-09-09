@@ -175,6 +175,52 @@ describe('OHLCVSubscriptionsHandler', () => {
         // Should have posted all candles
         expect(mockPostMessage).toHaveBeenCalledTimes(3);
       });
+
+      it('should deliver coalesced candle updates to every active subId', () => {
+        const firstPayload: StoreWorkerPayload = {
+          op: 'subscribeOHLCV',
+          data: { subId: 'sub-a', symbol: 'BTCUSDT', interval: '1h' },
+        };
+        const secondPayload: StoreWorkerPayload = {
+          op: 'subscribeOHLCV',
+          data: { subId: 'sub-b', symbol: 'BTCUSDT', interval: '1h' },
+        };
+
+        handler.handle(firstPayload);
+        handler.handle(secondPayload);
+
+        expect(mockListenOHLCV).toHaveBeenCalledTimes(1);
+        const callback = mockListenOHLCV.mock.calls[0][1];
+        const candle = {
+          timestamp: 1234567890000,
+          open: 50000,
+          high: 50100,
+          low: 49900,
+          close: 50050,
+          volume: 100,
+        };
+
+        callback(candle);
+
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'listenOHLCV',
+          data: {
+            subId: 'sub-a',
+            symbol: 'BTCUSDT',
+            interval: '1h',
+            candle,
+          },
+        });
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'listenOHLCV',
+          data: {
+            subId: 'sub-b',
+            symbol: 'BTCUSDT',
+            interval: '1h',
+            candle,
+          },
+        });
+      });
     });
 
     describe('unsubscribeOHLCV', () => {

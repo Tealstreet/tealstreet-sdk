@@ -555,8 +555,8 @@ For order signatures, size and price are scaled by `1e8`:
 
 ### OHLCV Timestamps
 
-- REST API uses Unix **seconds** for `from`/`to` parameters (`paradex.exchange.ts:543-544`)
-- Response timestamps also in seconds, converted to milliseconds for internal use (`paradex.exchange.ts:568`)
+- `/markets/klines` uses Unix **milliseconds** for `start_at` / `end_at` parameters and returns millisecond candle timestamps.
+- `/tradingview/history` uses Unix **seconds** for `from` / `to` parameters and returns second candle timestamps, which are converted to milliseconds internally.
 
 ## Rate Limiting
 

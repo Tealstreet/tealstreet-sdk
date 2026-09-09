@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { ENDPOINTS } from '../../exchanges/paradex/paradex.types';
@@ -6,6 +6,11 @@ import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>
   new ParadexExchange('paradex', { publicDataOnly: true, tuning: { consoleLogging: false } } as any, new DefaultStore());
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('audit regression: Paradex current REST and lifecycle contracts', () => {
   it('allows the legacy TradingView route without a JWT in public-data-only mode', async () => {
@@ -125,5 +130,124 @@ describe('audit regression: Paradex current REST and lifecycle contracts', () =>
     expect(terminate).toHaveBeenCalledOnce();
     expect((socket as any).forceClosed).toBe(true);
     expect(socket.ws).toBeUndefined();
+  });
+
+  it('keeps a shared OHLCV listener alive when an older same-key listener unsubscribes', () => {
+    vi.useFakeTimers();
+    const exchange = createExchange();
+    const websocket = exchange.publicWebsocket;
+    vi.spyOn(exchange, 'fetchOHLCV').mockResolvedValue([]);
+    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+    websocket.ws = { readyState: WebSocket.OPEN, send: vi.fn() } as any;
+
+    const first = vi.fn();
+    const second = vi.fn();
+    const firstCleanup = websocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, first);
+    const secondCleanup = websocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, second);
+
+    firstCleanup();
+    (websocket as any).handleTradesUpdate({
+      channel: 'trades.BTC-USD-PERP',
+      data: {
+        market: 'BTC-USD-PERP',
+        price: '101',
+        size: '2',
+        created_at: 1_700_000_060_500,
+      },
+    });
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith({
+      timestamp: 1_700_000_040_000,
+      open: 101,
+      high: 101,
+      low: 101,
+      close: 101,
+      volume: 2,
+    });
+
+    secondCleanup();
+    expect((websocket as any).ohlcvCallbacks.has('BTC-USD-PERP:1m')).toBe(false);
+    exchange.dispose();
+  });
+
+  it('processes batched trade updates using Paradex trade timestamps', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    const exchange = createExchange();
+    const websocket = exchange.publicWebsocket;
+    vi.spyOn(exchange, 'fetchOHLCV').mockResolvedValue([]);
+    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+
+    const candles = vi.fn();
+    const cleanup = websocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, candles);
+
+    (websocket as any).handleTradesUpdate({
+      channel: 'trades.BTC-USD-PERP',
+      data: [
+        { market: 'BTC-USD-PERP', price: '100', size: '1', created_at: 1_700_000_060_500 },
+        { market: 'BTC-USD-PERP', price: '105', size: '2', created_at: 1_700_000_061_500 },
+      ],
+    });
+
+    expect(candles).toHaveBeenNthCalledWith(1, {
+      timestamp: 1_700_000_040_000,
+      open: 100,
+      high: 100,
+      low: 100,
+      close: 100,
+      volume: 1,
+    });
+    expect(candles).toHaveBeenNthCalledWith(2, {
+      timestamp: 1_700_000_040_000,
+      open: 100,
+      high: 105,
+      low: 100,
+      close: 105,
+      volume: 3,
+    });
+
+    cleanup();
+    exchange.dispose();
+  });
+
+  it('retries failed Paradex trade channel subscriptions while the symbol is still desired', async () => {
+    vi.useFakeTimers();
+    const exchange = createExchange();
+    const websocket = exchange.publicWebsocket;
+    vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+    const send = vi.fn();
+    websocket.ws = { readyState: WebSocket.OPEN, send } as any;
+
+    websocket.subscribeToTrades('BTC-USD-PERP');
+    expect(send).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: 0,
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'trades.BTC-USD-PERP' },
+      }),
+    );
+
+    websocket.onMessage({
+      data: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        error: { message: 'temporary subscription failure' },
+      }),
+    } as MessageEvent);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(send).toHaveBeenLastCalledWith(
+      JSON.stringify({
+        id: 1,
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'trades.BTC-USD-PERP' },
+      }),
+    );
+
+    exchange.dispose();
   });
 });

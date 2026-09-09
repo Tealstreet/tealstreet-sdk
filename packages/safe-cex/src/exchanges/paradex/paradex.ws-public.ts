@@ -1,7 +1,7 @@
 import throttle from 'lodash/throttle';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker } from '../../types';
+import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, timeframeToSeconds } from '../../types';
 import { BaseWebSocket } from '../base.ws';
 import { ParadexExchange } from './paradex.exchange';
 import { BASE_WS_URL } from './paradex.types';
@@ -12,20 +12,37 @@ type MessageHandlers = {
 };
 
 const getOrderBookChannel = (symbol: string) => `order_book.${symbol}.snapshot@15@100ms`;
+const OHLCV_POLL_INTERVAL_MS = 3_000;
+const OHLCV_TRADE_STALE_MS = 20_000;
+const OHLCV_RECOVERY_COOLDOWN_MS = 30_000;
+const SUBSCRIPTION_RETRY_DELAY_MS = 1_000;
+const MAX_SUBSCRIPTION_RETRIES = 2;
+
+type PendingSubscribeRequest = {
+  channel: string;
+  attempt: number;
+};
 
 export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   connectUrl = '';
   private pingInterval?: NodeJS.Timeout;
   private orderbookCallbacks: Map<string, Set<(orderbook: OrderBook) => void>> = new Map();
   private tradeSubscriptionCounts: Map<string, number> = new Map();
+  private desiredTradeSymbols = new Set<string>();
+  private sentTradeSymbols = new Set<string>();
+  private pendingSubscribeRequests = new Map<number, PendingSubscribeRequest>();
+  private subscriptionRetryTimeouts = new Set<NodeJS.Timeout>();
   private messageId = 0;
 
   // OHLCV polling state + trades integration
   private ohlcvPollingTimeouts = new Map<string, NodeJS.Timeout>();
   private ohlcvPollingActive = new Map<string, boolean>();
+  private ohlcvSubscriptionVersions = new Map<string, number>();
   private lastCandleCache = new Map<string, Candle>();
-  private ohlcvCallbacks = new Map<string, (candle: Candle) => void>(); // Store callbacks for trade updates
+  private ohlcvCallbacks = new Map<string, Set<(candle: Candle) => void>>(); // Store callbacks for trade updates
   private ohlcvIntervals = new Map<string, number>(); // Store interval in ms for each subscription
+  private ohlcvLastTradeAt = new Map<string, number>();
+  private ohlcvLastRecoveryAt = new Map<string, number>();
 
   messageHandlers: MessageHandlers = {
     ping: [() => this.handlePongEvent()],
@@ -59,6 +76,8 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     if (!this.isDisposed) {
       this.parent.log('Paradex public WebSocket connected', LogSeverity.Info);
       this.ping();
+      this.sentTradeSymbols.clear();
+      this.pendingSubscribeRequests.clear();
 
       // Verify websocket is still connected before subscribing
       if (!this.isConnected) {
@@ -104,6 +123,13 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
         }
         // Handle responses (success/error)
         else if (data.id !== undefined) {
+          const pendingSubscribe = this.pendingSubscribeRequests.get(data.id);
+          if (pendingSubscribe) {
+            this.pendingSubscribeRequests.delete(data.id);
+            if (data.error) {
+              this.retrySubscribeChannel(pendingSubscribe.channel, pendingSubscribe.attempt, data.error?.message);
+            }
+          }
           if (data.error) {
             this.parent.log(`WebSocket error for request ${data.id}: ${data.error.message}`, LogSeverity.Error);
           }
@@ -139,7 +165,96 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       clearTimeout(this.pingInterval);
       this.pingInterval = undefined;
     }
+    this.subscriptionRetryTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+    this.subscriptionRetryTimeouts.clear();
+    this.ohlcvPollingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+    this.ohlcvPollingTimeouts.clear();
     super.dispose();
+  };
+
+  private sendJsonRpcSubscription = (method: 'subscribe' | 'unsubscribe', channel: string, attempt = 0) => {
+    if (!this.isConnected) {
+      return;
+    }
+
+    const id = this.messageId++;
+    if (method === 'subscribe') {
+      this.pendingSubscribeRequests.set(id, { channel, attempt });
+    }
+
+    this.send(
+      JSON.stringify({
+        id,
+        jsonrpc: '2.0',
+        method,
+        params: { channel },
+      }),
+    );
+  };
+
+  private retrySubscribeChannel = (channel: string, attempt: number, reason?: string) => {
+    if (attempt >= MAX_SUBSCRIPTION_RETRIES || !this.hasActiveSubscriptionInterest(channel)) {
+      return;
+    }
+
+    if (channel.startsWith('trades.')) {
+      const symbol = channel.split('.')[1];
+      if (symbol) {
+        this.sentTradeSymbols.delete(symbol);
+      }
+    }
+
+    this.parent.log(
+      `Retrying Paradex subscription ${channel} after error${reason ? `: ${reason}` : ''}`,
+      LogSeverity.Warning,
+    );
+
+    const timeoutId = setTimeout(() => {
+      this.subscriptionRetryTimeouts.delete(timeoutId);
+      if (this.isDisposed || !this.hasActiveSubscriptionInterest(channel)) {
+        return;
+      }
+      this.sendJsonRpcSubscription('subscribe', channel, attempt + 1);
+    }, SUBSCRIPTION_RETRY_DELAY_MS * (attempt + 1));
+
+    this.subscriptionRetryTimeouts.add(timeoutId);
+  };
+
+  private hasActiveSubscriptionInterest = (channel: string): boolean => {
+    if (channel === 'markets_summary') {
+      return this.parent.store.markets.length > 0;
+    }
+
+    if (channel.startsWith('trades.')) {
+      const symbol = channel.split('.')[1];
+      return Boolean(
+        symbol && (this.desiredTradeSymbols.has(symbol) || this.parent.store.markets.some((m) => m.symbol === symbol)),
+      );
+    }
+
+    if (channel.startsWith('bbo.')) {
+      const symbol = channel.split('.')[1];
+      return Boolean(symbol && this.parent.store.markets.some((m) => m.symbol === symbol));
+    }
+
+    if (channel.startsWith('order_book.')) {
+      const symbol = channel.split('.')[1];
+      return Boolean(symbol && this.orderbookCallbacks.get(symbol)?.size);
+    }
+
+    return false;
+  };
+
+  private sendTradeSubscribe = (symbol: string, force = false, attempt = 0) => {
+    if (!symbol) {
+      return;
+    }
+    this.desiredTradeSymbols.add(symbol);
+    if (!force && this.sentTradeSymbols.has(symbol)) {
+      return;
+    }
+    this.sentTradeSymbols.add(symbol);
+    this.sendJsonRpcSubscription('subscribe', `trades.${symbol}`, attempt);
   };
 
   private handleBBOUpdate = throttle(
@@ -313,48 +428,55 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       // Debug: log when trades handler is called (commented out to reduce log spam)
       // this.parent.log(`Trades handler called with data: ${JSON.stringify(data)}`, LogSeverity.Debug);
 
-      const rawData = Array.isArray(data?.data) ? data.data[0] : data?.data || data;
+      const rawTrades = Array.isArray(data?.data) ? data.data : [data?.data || data];
       const channel = String(data?.channel || '');
       const channelSymbol = channel.split('.')[1];
-      const tradesData = rawData && typeof rawData === 'object' ? rawData : {};
 
-      if (!tradesData || Object.keys(tradesData).length === 0) {
+      if (rawTrades.length === 0) {
         this.parent.log(`Trades data is undefined. Full data: ${JSON.stringify(data)}`, LogSeverity.Warning);
         return;
       }
 
-      const symbol = String(tradesData.market || channelSymbol || '');
-      if (!symbol) {
-        this.parent.log(`Trade missing market symbol. Data: ${JSON.stringify(tradesData)}`, LogSeverity.Warning);
-        return;
-      }
+      for (const rawTrade of rawTrades) {
+        const tradesData = rawTrade && typeof rawTrade === 'object' ? rawTrade : {};
+        if (Object.keys(tradesData).length === 0) {
+          continue;
+        }
 
-      // Update last price from trade
-      const tradePrice = parseFloat(tradesData.price || '0');
-      const tradeSize = parseFloat(tradesData.size || '0');
-      const tradeTimestamp = Date.now(); // Use current time as trade timestamp
+        const symbol = String(tradesData.market || channelSymbol || '');
+        if (!symbol) {
+          this.parent.log(`Trade missing market symbol. Data: ${JSON.stringify(tradesData)}`, LogSeverity.Warning);
+          continue;
+        }
 
-      if (tradePrice > 0) {
-        // this.parent.log(
-        //   `✅ Updating last price from trade: ${symbol} = ${tradePrice} (size=${tradesData.size || 'N/A'})`,
-        //   LogSeverity.Info,
-        // );
+        // Update last price from trade
+        const tradePrice = parseFloat(tradesData.price || '0');
+        const tradeSize = parseFloat(tradesData.size || '0');
+        const createdAt = Number(tradesData.created_at ?? tradesData.timestamp);
+        const tradeTimestamp = Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now();
 
-        this.parent.store.updateTicker(
-          { id: symbol },
-          {
-            symbol,
-            last: tradePrice,
-            mark: tradePrice,
-          },
-        );
+        if (Number.isFinite(tradePrice) && tradePrice > 0) {
+          // this.parent.log(
+          //   `✅ Updating last price from trade: ${symbol} = ${tradePrice} (size=${tradesData.size || 'N/A'})`,
+          //   LogSeverity.Info,
+          // );
 
-        // Update OHLCV candles for all active subscriptions for this symbol
-        this.updateOHLCVFromTrade(symbol, tradePrice, tradeSize, tradeTimestamp);
+          this.parent.store.updateTicker(
+            { id: symbol },
+            {
+              symbol,
+              last: tradePrice,
+              mark: tradePrice,
+            },
+          );
 
-        // console.log(symbol, tradePrice);
-      } else {
-        this.parent.log(`Trade price is 0 or invalid: ${tradesData.price}`, LogSeverity.Warning);
+          // Update OHLCV candles for all active subscriptions for this symbol
+          this.updateOHLCVFromTrade(symbol, tradePrice, Number.isFinite(tradeSize) ? tradeSize : 0, tradeTimestamp);
+
+          // console.log(symbol, tradePrice);
+        } else {
+          this.parent.log(`Trade price is 0 or invalid: ${tradesData.price}`, LogSeverity.Warning);
+        }
       }
     } catch (err) {
       this.parent.log(`Error handling trades update: ${err}`, LogSeverity.Error);
@@ -363,7 +485,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
 
   private updateOHLCVFromTrade(symbol: string, price: number, size: number, timestamp: number) {
     // Check all active OHLCV subscriptions for this symbol
-    for (const [pollKey, callback] of this.ohlcvCallbacks.entries()) {
+    for (const [pollKey, callbacks] of this.ohlcvCallbacks.entries()) {
       // Extract symbol from pollKey (format: "SYMBOL:interval")
       const [subscriptionSymbol] = pollKey.split(':');
 
@@ -376,6 +498,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       if (!intervalMs) {
         continue;
       }
+      this.ohlcvLastTradeAt.set(pollKey, Date.now());
 
       // Get or create the current candle
       let currentCandle = this.lastCandleCache.get(pollKey);
@@ -415,10 +538,30 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
         previousCandle.volume !== currentCandle.volume
       ) {
         this.lastCandleCache.set(pollKey, currentCandle);
-        callback(currentCandle);
+        callbacks.forEach((callback) => callback(currentCandle));
       }
     }
   }
+
+  private maybeRecoverOhlcvTradeStream = (opts: OHLCVOptions, pollKey: string) => {
+    const now = Date.now();
+    const lastTradeAt = this.ohlcvLastTradeAt.get(pollKey) || 0;
+    if (lastTradeAt > 0 && now - lastTradeAt <= OHLCV_TRADE_STALE_MS) {
+      return;
+    }
+
+    const lastRecoveryAt = this.ohlcvLastRecoveryAt.get(pollKey) || 0;
+    if (now - lastRecoveryAt < OHLCV_RECOVERY_COOLDOWN_MS) {
+      return;
+    }
+
+    this.ohlcvLastRecoveryAt.set(pollKey, now);
+    this.parent.log(
+      `No Paradex trade updates for ${opts.symbol} ${opts.interval}; re-subscribing trade channel`,
+      LogSeverity.Warning,
+    );
+    this.sendTradeSubscribe(opts.symbol, true);
+  };
 
   private subscribeToChannels = () => {
     const markets = this.parent.store.markets;
@@ -427,37 +570,16 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     // updates on the watchlist and positions table. markets_summary alone is too slow
     // for tick-rate UX. Orderbook stays on-demand to avoid subscribing to 100+ books.
     markets.forEach((market) => {
-      this.send(
-        JSON.stringify({
-          id: this.messageId++,
-          jsonrpc: '2.0',
-          method: 'subscribe',
-          params: { channel: `bbo.${market.symbol}` },
-        }),
-      );
+      this.sendJsonRpcSubscription('subscribe', `bbo.${market.symbol}`);
     });
 
     markets.forEach((market) => {
-      this.send(
-        JSON.stringify({
-          id: this.messageId++,
-          jsonrpc: '2.0',
-          method: 'subscribe',
-          params: { channel: `trades.${market.symbol}` },
-        }),
-      );
+      this.sendTradeSubscribe(market.symbol, true);
     });
 
     // markets_summary: bonus aggregate for slow-changing fields (volume_24h,
     // open_interest, funding_rate, etc.) that bbo doesn't carry.
-    this.send(
-      JSON.stringify({
-        id: this.messageId++,
-        jsonrpc: '2.0',
-        method: 'subscribe',
-        params: { channel: 'markets_summary' },
-      }),
-    );
+    this.sendJsonRpcSubscription('subscribe', 'markets_summary');
 
     this.parent.log(`Subscribed to bbo + trades for ${markets.length} markets + markets_summary`, LogSeverity.Info);
 
@@ -479,13 +601,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       // Paradex uses JSON-RPC 2.0 format with channel format:
       // Paradex public WS orderbook channel format: order_book.{market}.snapshot@{depth}@{refresh_rate}
       const channel = getOrderBookChannel(symbol);
-      const subscribeMsg = {
-        id: this.messageId++,
-        jsonrpc: '2.0',
-        method: 'subscribe',
-        params: { channel },
-      };
-      this.send(JSON.stringify(subscribeMsg));
+      this.sendJsonRpcSubscription('subscribe', channel);
       // this.parent.log(`Subscribing to orderbook: ${channel}`, LogSeverity.Debug);
     }
   };
@@ -493,25 +609,19 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   unsubscribeFromOrderBook = (symbol: string) => {
     if (this.isConnected) {
       const channel = getOrderBookChannel(symbol);
-      const unsubscribeMsg = {
-        id: this.messageId++,
-        jsonrpc: '2.0',
-        method: 'unsubscribe',
-        params: { channel },
-      };
-      this.send(JSON.stringify(unsubscribeMsg));
+      this.sendJsonRpcSubscription('unsubscribe', channel);
       // this.parent.log(`Unsubscribing from orderbook: ${channel}`, LogSeverity.Debug);
     }
   };
 
-  // trades.{symbol} is now broadcast-subscribed for every market in subscribeToChannels.
-  // The OHLCV listener flow still calls subscribeToTrades/unsubscribeFromTrades for
-  // historical reasons, but we keep them as ref-counted no-ops so that an OHLCV cleanup
-  // can never tear down a trades subscription that the watchlist/positions UI still
-  // depends on for last-price updates. We retain the counter only for diagnostics.
+  // trades.{symbol} is broadcast-subscribed for every market in subscribeToChannels,
+  // but active OHLCV listeners also ask for their symbol explicitly. That gives
+  // chart resubscribe/liveness paths a way to repair a missed or failed trade
+  // channel without tearing down the whole public socket.
   subscribeToTrades = (symbol: string) => {
     const currentCount = this.tradeSubscriptionCounts.get(symbol) || 0;
     this.tradeSubscriptionCounts.set(symbol, currentCount + 1);
+    this.sendTradeSubscribe(symbol);
   };
 
   unsubscribeFromTrades = (symbol: string) => {
@@ -563,28 +673,37 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
 
     const pollKey = `${opts.symbol}:${opts.interval}`;
 
-    // Clear any existing polling for this key
-    if (this.ohlcvPollingTimeouts.has(pollKey)) {
-      clearTimeout(this.ohlcvPollingTimeouts.get(pollKey)!);
-      this.ohlcvPollingTimeouts.delete(pollKey);
+    // Calculate interval in milliseconds for trade updates
+    const intervalMs = (timeframeToSeconds[opts.interval] || 60) * 1000;
+
+    // Store callback and interval for trade-based updates. Multiple chart
+    // listeners can share a symbol:interval; one cleanup must not tear down
+    // another active listener.
+    const callbacks = this.ohlcvCallbacks.get(pollKey);
+    if (callbacks) {
+      callbacks.add(callback);
+      this.subscribeToTrades(opts.symbol);
+
+      return () => {
+        const latestCallbacks = this.ohlcvCallbacks.get(pollKey);
+        latestCallbacks?.delete(callback);
+        this.unsubscribeFromTrades(opts.symbol);
+        if (latestCallbacks && latestCallbacks.size > 0) {
+          return;
+        }
+        this.cleanupOhlcvSubscription(pollKey);
+      };
     }
 
-    // Calculate interval in milliseconds for trade updates
-    const intervalMatch = opts.interval.match(/^(\d+)([mh])$/);
-    const intervalMs = intervalMatch
-      ? intervalMatch[2] === 'h'
-        ? parseInt(intervalMatch[1]) * 60 * 60 * 1000
-        : parseInt(intervalMatch[1]) * 60 * 1000
-      : 60 * 1000; // Default to 1 minute
-
-    // Store callback and interval for trade-based updates
-    this.ohlcvCallbacks.set(pollKey, callback);
+    this.ohlcvCallbacks.set(pollKey, new Set([callback]));
     this.ohlcvIntervals.set(pollKey, intervalMs);
 
     // Subscribe to symbol trades while this OHLCV listener is active.
     this.subscribeToTrades(opts.symbol);
 
     // Mark polling as active
+    const subscriptionVersion = (this.ohlcvSubscriptionVersions.get(pollKey) || 0) + 1;
+    this.ohlcvSubscriptionVersions.set(pollKey, subscriptionVersion);
     this.ohlcvPollingActive.set(pollKey, true);
 
     // Asynchronously set max slippage to 20% when listening to OHLCV
@@ -605,13 +724,6 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
         const now = Date.now();
 
         // Calculate how far back to fetch based on interval
-        // Parse interval (e.g., "1m", "5m", "1h") to milliseconds
-        const intervalMatch = opts.interval.match(/^(\d+)([mh])$/);
-        const intervalMs = intervalMatch
-          ? intervalMatch[2] === 'h'
-            ? parseInt(intervalMatch[1]) * 60 * 60 * 1000
-            : parseInt(intervalMatch[1]) * 60 * 1000
-          : 60 * 1000; // Default to 1 minute
 
         // Fetch last 2 candles (go back 3x interval to be safe)
         const from = now - intervalMs * 3;
@@ -622,6 +734,13 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           from: from,
           to: now,
         });
+
+        if (
+          !this.ohlcvPollingActive.get(pollKey) ||
+          this.ohlcvSubscriptionVersions.get(pollKey) !== subscriptionVersion
+        ) {
+          return;
+        }
 
         if (candles.length > 0) {
           const latestCandle = candles[candles.length - 1];
@@ -634,17 +753,21 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
             previousCandle.close !== latestCandle.close ||
             previousCandle.volume !== latestCandle.volume
           ) {
-            callback(latestCandle);
             this.lastCandleCache.set(pollKey, latestCandle);
+            this.ohlcvCallbacks.get(pollKey)?.forEach((activeCallback) => activeCallback(latestCandle));
           }
         }
+        this.maybeRecoverOhlcvTradeStream(opts, pollKey);
       } catch {
         // this.parent.log(`Error polling OHLCV for ${opts.symbol}: ${err}`, LogSeverity.Warning);
       }
 
       // Schedule next poll only if still active (poll every 3 seconds)
-      if (this.ohlcvPollingActive.get(pollKey)) {
-        const timeoutId = setTimeout(pollCandle, 3000);
+      if (
+        this.ohlcvPollingActive.get(pollKey) &&
+        this.ohlcvSubscriptionVersions.get(pollKey) === subscriptionVersion
+      ) {
+        const timeoutId = setTimeout(pollCandle, OHLCV_POLL_INTERVAL_MS);
         this.ohlcvPollingTimeouts.set(pollKey, timeoutId);
       }
     };
@@ -654,22 +777,32 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
 
     // Return cleanup function
     return () => {
-      // Mark as inactive
-      this.ohlcvPollingActive.set(pollKey, false);
-
-      // Clear timeout if exists
-      if (this.ohlcvPollingTimeouts.has(pollKey)) {
-        clearTimeout(this.ohlcvPollingTimeouts.get(pollKey)!);
-        this.ohlcvPollingTimeouts.delete(pollKey);
+      const latestCallbacks = this.ohlcvCallbacks.get(pollKey);
+      latestCallbacks?.delete(callback);
+      this.unsubscribeFromTrades(opts.symbol);
+      if (latestCallbacks && latestCallbacks.size > 0) {
+        return;
       }
 
-      // Clear callback and interval for trades
-      this.ohlcvCallbacks.delete(pollKey);
-      this.ohlcvIntervals.delete(pollKey);
-      this.unsubscribeFromTrades(opts.symbol);
-
-      // Clear cache
-      this.lastCandleCache.delete(pollKey);
+      this.cleanupOhlcvSubscription(pollKey);
     };
+  };
+
+  private cleanupOhlcvSubscription = (pollKey: string) => {
+    // Mark as inactive and bump the generation so an in-flight REST poll cannot
+    // schedule itself again after a new listener has replaced this one.
+    this.ohlcvPollingActive.set(pollKey, false);
+    this.ohlcvSubscriptionVersions.set(pollKey, (this.ohlcvSubscriptionVersions.get(pollKey) || 0) + 1);
+
+    if (this.ohlcvPollingTimeouts.has(pollKey)) {
+      clearTimeout(this.ohlcvPollingTimeouts.get(pollKey)!);
+      this.ohlcvPollingTimeouts.delete(pollKey);
+    }
+
+    this.ohlcvCallbacks.delete(pollKey);
+    this.ohlcvIntervals.delete(pollKey);
+    this.ohlcvLastTradeAt.delete(pollKey);
+    this.ohlcvLastRecoveryAt.delete(pollKey);
+    this.lastCandleCache.delete(pollKey);
   };
 }
