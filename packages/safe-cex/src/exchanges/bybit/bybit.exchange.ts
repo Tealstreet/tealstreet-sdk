@@ -1,7 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
-import type { ExchangeName, RemoteSignerRequest, RemoteSignerResponse } from '../../types';
+import type { ExchangeName } from '../../types';
 import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
 import rateLimit from 'axios-rate-limit';
@@ -12,9 +12,6 @@ import omit from 'lodash/omit';
 import orderBy from 'lodash/orderBy';
 import times from 'lodash/times';
 import { nanoid } from 'nanoid';
-import qs from 'qs';
-import { createHmac } from 'crypto';
-import { tryParseJson } from '../../utils/tryParseJson';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
@@ -89,7 +86,8 @@ import {
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
   POSITION_SIDE,
-  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE, RECV_WINDOW } from './bybit.types';
+  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+} from './bybit.types';
 import { BybitPrivateWebsocket } from './bybit.ws-private';
 import { BybitPublicWebsocket } from './bybit.ws-public';
 import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
@@ -892,74 +890,6 @@ export class BybitExchange extends BaseExchange {
 
     this.marginType = data?.result?.marginMode === 'ISOLATED_MARGIN' ? MarginType.Isolated : MarginType.Cross;
     this.unifiedMarginStatus = data?.result?.unifiedMarginStatus;
-  };
-
-
-  /**
-   * POC — bybit only. Sign directly instead of dispatching a whole axios
-   * request to watch what its interceptors produced.
-   *
-   * `BaseExchange.signHttpRequest` builds a real axios request with a fake
-   * adapter purely to CAPTURE the signed config. The HMAC in that path is
-   * microseconds; the cost is the dozen promise hops around it — interceptors,
-   * adapter, response interceptors, axios-retry — and this runs on the MAIN
-   * THREAD, so every hop waits behind whatever the tab is rendering. Measured
-   * 2026-09-11: 107ms average and 746ms worst inside `signHttpRequest`, against
-   * an 84ms wire, degrading exactly when the UI got busy.
-   *
-   * This mirrors the interceptor in `bybit.api.ts` byte for byte, and it has to
-   * stay that way or the venue authenticates garbage:
-   *   - `requestId` is added to params BEFORE signing, so it must be in both
-   *     the signed payload and the returned params
-   *   - GET signs `qs.stringify(params)`, everything else signs the JSON body
-   *   - the digest is over [timestamp, key, recvWindow, payload].join('')
-   *
-   * NOT the shipping fix. It proves where the time goes; a general answer has
-   * to work for 26 venues and cannot be 26 hand-copied signing expressions.
-   */
-  /** The inherited implementation, captured before the field below shadows it.
-   * `super.x` is not available for a class FIELD, and this POC must be able to
-   * fall back to the path that is known to be correct. */
-  private baseSignHttpRequest = (
-    this as unknown as { signHttpRequest: (r: RemoteSignerRequest) => Promise<RemoteSignerResponse> }
-  ).signHttpRequest;
-
-  public signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
-    const { key, secret } = this.options;
-    const cfg = request.config;
-    if (!key || !secret || !cfg) return this.baseSignHttpRequest(request);
-
-    try {
-      const recvWindow = (this.options as any)?.extra?.recvWindow ?? RECV_WINDOW;
-      const method = String(cfg.method ?? 'get').toLowerCase();
-      const params = { ...(tryParseJson(cfg.params) as Record<string, unknown> | undefined), requestId: nanoid() };
-      const data = tryParseJson(cfg.data);
-
-      const payload = method === 'get' ? qs.stringify(params) : data === undefined ? '' : JSON.stringify(data);
-      const timestamp = virtualClock.getCurrentTimeMs();
-      const signature = createHmac('sha256', secret)
-        .update([timestamp, key, recvWindow, payload].join(''))
-        .digest('hex');
-
-      return {
-        id: request.id,
-        config: {
-          headers: {
-            ...(cfg.headers as Record<string, string> | undefined),
-            'X-BAPI-SIGN': signature,
-            'X-BAPI-API-KEY': key,
-            'X-BAPI-TIMESTAMP': String(timestamp),
-            'X-BAPI-RECV-WINDOW': String(recvWindow),
-          },
-          url: cfg.url,
-          params,
-          data,
-        },
-      };
-    } catch {
-      // Any doubt at all falls back to the path that is known to be correct.
-      return this.baseSignHttpRequest(request);
-    }
   };
 
   tick = async () => {
