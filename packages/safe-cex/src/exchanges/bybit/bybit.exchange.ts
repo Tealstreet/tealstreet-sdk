@@ -816,10 +816,36 @@ export class BybitExchange extends BaseExchange {
     await this.fetchAndSetPrivateSnapshotHelper();
   };
 
+  /**
+   * The three fetches run CONCURRENTLY, and on the remote-signing path that is
+   * the difference between keeping the tick and missing it.
+   *
+   * Every one of these is an authenticated REST call, and with a browser-side
+   * signer each costs a container -> browser -> container round trip. Measured
+   * live on 2026-09-11 during CPI: p50 102-272ms per round trip depending on
+   * shard, p95 up to 443ms. Run in sequence that is 544ms of signing for the
+   * two-call tick alone, against a 500ms `tickInterval` — so the tick was
+   * permanently late and the store kept being refreshed from data that had
+   * already aged out, which is what "flapping" looks like from the outside.
+   *
+   * Concurrency does not change the number of signatures, only how long they
+   * take end to end. The store writes stay in their original order below,
+   * because positions still has to see `lastWebsocketPositionsUpdate` as it
+   * stands when the fetch resolves.
+   */
   fetchAndSetPrivateSnapshotHelper = async (fetchOrders = true) => {
     try {
-      if (fetchOrders) {
-        const orders = await this.fetchOrders();
+      const ordersPromise = fetchOrders ? this.fetchOrders() : undefined;
+      const positionsPromise = this.fetchPositions();
+      const balancePromise = this.fetchBalance();
+      // Nothing here is allowed to reject unhandled just because a sibling
+      // rejected first: all three are awaited below, inside this try.
+      ordersPromise?.catch(() => undefined);
+      positionsPromise.catch(() => undefined);
+      balancePromise.catch(() => undefined);
+
+      if (ordersPromise) {
+        const orders = await ordersPromise;
         if (this.isDisposed) return;
 
         this.store.update({
@@ -828,7 +854,7 @@ export class BybitExchange extends BaseExchange {
         });
       }
 
-      const fetchedPositions = await this.fetchPositions();
+      const fetchedPositions = await positionsPromise;
       if (this.isDisposed) return;
       const positions =
         this.lastWebsocketPositionsUpdate !== undefined &&
@@ -842,7 +868,7 @@ export class BybitExchange extends BaseExchange {
         loaded: { ...this.store.loaded, positions: true },
       });
 
-      const balance = await this.fetchBalance();
+      const balance = await balancePromise;
 
       if (this.isDisposed) return;
       this.store.update({
