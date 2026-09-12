@@ -189,6 +189,15 @@ describe('audit regression: Bitget UTA routing', () => {
     );
   });
 
+  it('does not fall back to Classic v2 fill history for UTA accounts', async () => {
+    const exchange = createExchange();
+
+    await expect(
+      exchange.fetchHistoricalFills({ from: 1_700_000_000_000, to: 1_700_086_400_000 }),
+    ).resolves.toEqual([]);
+    expect(exchange.xhr.get).not.toHaveBeenCalled();
+  });
+
   it('places normal UTA limit orders with category, qty, posSide, and clientOid only', async () => {
     const exchange = createExchange();
     (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);

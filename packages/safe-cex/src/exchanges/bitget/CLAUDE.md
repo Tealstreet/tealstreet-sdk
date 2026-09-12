@@ -35,6 +35,12 @@ trade/fill history, bills, standalone TP/SL, trailing stops, and attached TP/SL
 on normal UTA orders. Those paths must keep using Classic v2 behavior until
 their own slices land.
 
+UTA historical fills are intentionally short-circuited to an empty result for
+now, before any Classic v2 request is sent. Bitget's documented replacement is
+`GET /api/v3/trade/fills`, which has a 30-day max start/end window and cursor
+pagination; implement and map that endpoint before claiming UTA history support
+or treating the empty result as collected UTA history.
+
 When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
 Account API is not supported", surface the Tealstreet-owned UTA unsupported
 message from `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` for variants that do not

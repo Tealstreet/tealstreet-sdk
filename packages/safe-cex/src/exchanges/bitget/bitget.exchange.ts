@@ -941,6 +941,10 @@ export class BitgetExchange extends BaseExchange {
    */
   fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) return [];
+    if (this.usesUtaRouting) {
+      // UTA fill history needs `/api/v3/trade/fills`; do not fall through to Classic v2.
+      return [];
+    }
 
     const { symbol, from, to, limit = BITGET_FILLS_PAGE_LIMIT } = opts;
 
