@@ -18,7 +18,7 @@ const market = {
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 125 } },
 };
 
-const createExchange = () => {
+const createExchange = (opts: { isUta?: boolean; accountTypeDetected?: boolean } = {}) => {
   const store = new DefaultStore();
   store.update({ markets: [market] as any });
   const exchange = new BitgetExchange(
@@ -26,7 +26,8 @@ const createExchange = () => {
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
     store,
   );
-  (exchange as any).isUta = true;
+  (exchange as any).isUta = opts.isUta ?? true;
+  (exchange as any)._accountTypeDetected = opts.accountTypeDetected ?? true;
   exchange.xhr = { get: vi.fn(), post: vi.fn() } as any;
   exchange.unlimitedXHR = { get: vi.fn(), post: vi.fn() } as any;
   return exchange;
@@ -53,7 +54,7 @@ const accountSettingsResponse = {
 
 describe('audit regression: Bitget UTA routing', () => {
   it('validates UTA accounts through v3 account assets after detection', async () => {
-    const exchange = createExchange();
+    const exchange = createExchange({ accountTypeDetected: false });
     (exchange.xhr.get as any)
       .mockResolvedValueOnce(accountSettingsResponse)
       .mockResolvedValueOnce({
@@ -75,6 +76,62 @@ describe('audit regression: Bitget UTA routing', () => {
     });
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ACCOUNT_ASSETS);
+  });
+
+  it('lazily detects UTA before routing private reads on an unstarted instance', async () => {
+    const exchange = createExchange({ isUta: false, accountTypeDetected: false });
+    (exchange.xhr.get as any)
+      .mockResolvedValueOnce(accountSettingsResponse)
+      .mockResolvedValueOnce({
+        data: {
+          code: '00000',
+          msg: 'success',
+          data: {
+            accountEquity: '105',
+            effEquity: '98',
+            unrealisedPnl: '5',
+            assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
+          },
+        },
+      });
+
+    await expect(exchange.fetchBalance()).resolves.toEqual(
+      expect.objectContaining({ total: 100, free: 98, used: 7, upnl: 5 }),
+    );
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ACCOUNT_ASSETS);
+  });
+
+  it('shares one in-flight UTA detection across concurrent private reads', async () => {
+    const exchange = createExchange({ isUta: false, accountTypeDetected: false });
+    (exchange.xhr.get as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.ACCOUNT_SETTINGS_V3) return Promise.resolve(accountSettingsResponse);
+      if (endpoint === ENDPOINTS.UTA_ACCOUNT_ASSETS) {
+        return Promise.resolve({
+          data: {
+            code: '00000',
+            msg: 'success',
+            data: {
+              accountEquity: '105',
+              effEquity: '98',
+              unrealisedPnl: '5',
+              assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
+            },
+          },
+        });
+      }
+      if (endpoint === ENDPOINTS.UTA_POSITIONS) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: { list: [] } } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    await Promise.all([exchange.fetchBalance(), exchange.fetchOpenPositions()]);
+
+    const accountSettingsCalls = (exchange.xhr.get as any).mock.calls.filter(
+      ([endpoint]: [string]) => endpoint === ENDPOINTS.ACCOUNT_SETTINGS_V3,
+    );
+    expect(accountSettingsCalls).toHaveLength(1);
   });
 
   it('maps UTA positions including hold mode, side, margin mode, and blank liquidation fallback', async () => {
@@ -198,8 +255,8 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(exchange.xhr.get).not.toHaveBeenCalled();
   });
 
-  it('places normal UTA limit orders with category, qty, posSide, and clientOid only', async () => {
-    const exchange = createExchange();
+  it('lazily detects UTA before placing normal limit orders with v3 fields only', async () => {
+    const exchange = createExchange({ isUta: false, accountTypeDetected: false });
     (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
     (exchange.unlimitedXHR.post as any).mockResolvedValue({
       data: { code: '00000', msg: 'success', data: { orderId: null, clientOid: 'client-1' } },
@@ -227,6 +284,7 @@ describe('audit regression: Bitget UTA routing', () => {
         clientOid: expect.any(String),
       }),
     );
+    expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
     const [, payload] = (exchange.unlimitedXHR.post as any).mock.calls[0];
     expect(payload).not.toHaveProperty('productType');
     expect(payload).not.toHaveProperty('marginCoin');
@@ -326,7 +384,7 @@ describe('audit regression: Bitget UTA routing', () => {
   });
 
   it('awaits Bitget account-type detection before private WS and tick startup', async () => {
-    const exchange = createExchange();
+    const exchange = createExchange({ accountTypeDetected: false });
     const events: string[] = [];
 
     (exchange as any).initExternalPublicData = vi.fn().mockResolvedValue(true);

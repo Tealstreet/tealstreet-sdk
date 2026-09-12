@@ -30,6 +30,12 @@ USDT-futures only**:
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
 
+Account-type detection is eager during validation/startup and lazy on private
+methods that choose between Classic v2 and UTA v3. The lazy path shares one
+in-flight `ACCOUNT_SETTINGS_V3` probe and then memoizes the result on the
+exchange instance, so unstarted main-thread instances can still route UTA
+orders/reads correctly without racing multiple probes.
+
 Still out of scope for this slice: `bitgetusdc`, `bitgetinverse`, testnet UTA,
 trade/fill history, bills, standalone TP/SL, trailing stops, and attached TP/SL
 on normal UTA orders. Those paths must keep using Classic v2 behavior until
@@ -40,6 +46,18 @@ now, before any Classic v2 request is sent. Bitget's documented replacement is
 `GET /api/v3/trade/fills`, which has a 30-day max start/end window and cursor
 pagination; implement and map that endpoint before claiming UTA history support
 or treating the empty result as collected UTA history.
+
+CCXT's current Bitget UTA support uses the same credential model (`key`,
+`secret`, `passphrase`) and does not suggest an extra account-linking key. The
+remaining useful comparison items are additional UTA slices: map
+`GET /api/v3/trade/fills` with `execId`, `execPrice`, `execQty`, `execValue`,
+`execPnl`, `createdTime`, `feeDetail[]`, `tradeScope`, `side`, and `tradeSide`;
+add cursor pagination and the documented 30-day window; add UTA history-orders;
+add strategy-order TP/SL endpoints (`place`, `unfilled`, `history`, `modify`,
+`cancel`); add UTA batch place/modify/cancel; and revisit v3 public market/WS
+streams only if we decide to move public data off Classic v2. Keep USDC,
+coin-margined, and testnet UTA disabled until each has its own confirmed
+Bitget behavior and regression coverage.
 
 When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
 Account API is not supported", surface the Tealstreet-owned UTA unsupported

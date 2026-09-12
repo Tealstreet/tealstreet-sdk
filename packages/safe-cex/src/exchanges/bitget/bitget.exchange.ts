@@ -136,12 +136,14 @@ export class BitgetExchange extends BaseExchange {
   // v3 honors per-side via `posSide`, but v3 endpoints return 40084 "Classic
   // Account mode" on non-UTA accounts. We can't distinguish UTA from Classic
   // from BALANCE/account responses (`assetMode` and `unionAvailable` are
-  // populated on Classic too). Set definitively by `_detectAccountType()`
-  // which probes a cheap v3 endpoint once during `start()`. Every v3-routing
-  // method (current: setLeverage; future: anything else under /api/v3/) reads
-  // this flag — keep it the single source of truth.
+  // populated on Classic too). Set definitively by one shared account-settings
+  // probe during start/validation, or lazily before a private v2/v3 branch on
+  // unstarted instances. Every v3-routing method reads this flag — keep it the
+  // single source of truth.
   protected isUta = false;
   protected supportsUtaRouting = true;
+  private _accountTypeDetected = false;
+  private _accountTypeDetectionInflight: Promise<void> | null = null;
 
   get usesUtaRouting(): boolean {
     return this.isUta && this.supportsUtaRouting && !this.options.testnet;
@@ -256,7 +258,7 @@ export class BitgetExchange extends BaseExchange {
 
   validateAccount = async () => {
     try {
-      await this._detectAccountType();
+      await this.ensureAccountTypeDetected();
       // fetchBalance hits the BALANCE endpoint (validating the key) and throws on
       // auth failure, so it doubles as the validation call — one round-trip.
       const balance = await this.fetchBalance();
@@ -329,7 +331,7 @@ export class BitgetExchange extends BaseExchange {
       return;
     }
 
-    await this._detectAccountType();
+    await this.ensureAccountTypeDetected();
     if (this.isDisposed) return;
 
     this.privateWebsocket.connectAndSubscribe();
@@ -417,10 +419,23 @@ export class BitgetExchange extends BaseExchange {
         // mistakenly route Classic accounts to v3.
         this.log(`Bitget account type probe failed; assuming Classic: ${err?.message ?? err}`);
       }
+    } finally {
+      this._accountTypeDetected = true;
     }
   };
 
+  private ensureAccountTypeDetected = async (): Promise<void> => {
+    if (this.isPublicDataOnly || this._accountTypeDetected) return;
+    if (!this._accountTypeDetectionInflight) {
+      this._accountTypeDetectionInflight = this._detectAccountType().finally(() => {
+        this._accountTypeDetectionInflight = null;
+      });
+    }
+    return this._accountTypeDetectionInflight;
+  };
+
   fetchBalance = async ({ preferFast = false }: { preferFast?: boolean } = {}) => {
+    await this.ensureAccountTypeDetected();
     const client = preferFast ? this.unlimitedXHR : this.xhr;
     if (this.usesUtaRouting) {
       return this.fetchUtaBalance(client);
@@ -525,6 +540,7 @@ export class BitgetExchange extends BaseExchange {
   fetchPositionMetadata = async (
     symbols: string[],
   ): Promise<Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>[]> => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       return this.fetchUtaPositionMetadata(symbols);
     }
@@ -704,6 +720,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   fetchOpenPositions = async () => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       return this.fetchUtaOpenPositions();
     }
@@ -941,6 +958,7 @@ export class BitgetExchange extends BaseExchange {
    */
   fetchHistoricalFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
     if (this.isPublicDataOnly) return [];
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       // UTA fill history needs `/api/v3/trade/fills`; do not fall through to Classic v2.
       return [];
@@ -1162,6 +1180,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   fetchOrders = async () => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       return this.fetchUtaOrders();
     }
@@ -1174,6 +1193,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   fetchNormalOrders = async () => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       return this.fetchUtaOrders();
     }
@@ -1404,6 +1424,7 @@ export class BitgetExchange extends BaseExchange {
 
   cancelAllOrders = async () => {
     try {
+      await this.ensureAccountTypeDetected();
       if (this.usesUtaRouting) {
         const orders = await this.fetchUtaOrders();
         await this.cancelUtaNormalOrders(orders);
@@ -1429,6 +1450,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   cancelNormalOrders = async (orders: Order[]) => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       return this.cancelUtaNormalOrders(orders);
     }
@@ -1587,6 +1609,7 @@ export class BitgetExchange extends BaseExchange {
   }
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       if (this.isAlgoOrder(opts)) {
         const msg = 'Bitget UTA TP/SL and trailing-stop orders are not supported yet.';
@@ -1608,6 +1631,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    await this.ensureAccountTypeDetected();
     const [algoOrders, normalOrders] = partition(orders, this.isAlgoOrder);
 
     if (this.usesUtaRouting) {
@@ -1632,6 +1656,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   formatCreateOrder = async (opts: PlaceOrderOpts) => {
+    await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       return this.formatUtaCreateOrder(opts);
     }
@@ -2018,6 +2043,7 @@ export class BitgetExchange extends BaseExchange {
       return this.updateAlgoOrder({ order, update });
     }
 
+    await this.ensureAccountTypeDetected();
     const shouldUseLegacyBitgetDragUpdate = Boolean(order.info?.__tealstreetUseLegacyBitgetDragUpdate);
     if (order.type === OrderType.Limit && !shouldUseLegacyBitgetDragUpdate && !this.usesUtaRouting) {
       const amendedOrderIds = await this.tryAmendLimitOrder(order, update);
@@ -2107,6 +2133,7 @@ export class BitgetExchange extends BaseExchange {
         // accounts (couples both sides); v3 honors per-side via `posSide`. Route to
         // v3 only when both conditions hold; v2 stays the default for cross / one-way
         // / classic accounts.
+        await this.ensureAccountTypeDetected();
         const isPerSide = position.positionMode === PositionMode.Hedged && position.marginType === MarginType.Isolated;
         const useV3 = this.usesUtaRouting && isPerSide;
 
@@ -2151,6 +2178,7 @@ export class BitgetExchange extends BaseExchange {
       throw new Error('Symbol is required');
     }
     try {
+      await this.ensureAccountTypeDetected();
       if (this.usesUtaRouting) {
         const market = this.store.marketsBySymbol[symbol];
         if (!market) throw new Error(`Market ${symbol} not found`);
@@ -2199,6 +2227,7 @@ export class BitgetExchange extends BaseExchange {
 
   changePositionMode = async (hedged: boolean) => {
     try {
+      await this.ensureAccountTypeDetected();
       if (this.usesUtaRouting) {
         const { data } = await this.xhr.post(ENDPOINTS.UTA_SET_HOLD_MODE, {
           holdMode: hedged ? 'hedge_mode' : 'one_way_mode',
