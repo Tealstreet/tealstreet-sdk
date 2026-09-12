@@ -11,6 +11,7 @@ import {
 } from './perfFixture';
 import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
 import { TelegramWorker } from './TelgramWorker';
+import { serializeWorkerErrorForSentry } from './workerErrorSerialization';
 
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
 export const exchangeWorkers: { [key: string]: ExchangeWorker } = {};
@@ -458,6 +459,7 @@ if (typeof self !== 'undefined' && !self.document) {
   self.addEventListener('error', (event: ErrorEvent) => {
     const error = event.error || event;
     const message = error?.message || event?.message || 'Unknown error';
+    const serializedError = serializeWorkerErrorForSentry(error, message);
 
     // Always prevent default to avoid duplicate reporting
     // event.preventDefault();
@@ -477,7 +479,7 @@ if (typeof self !== 'undefined' && !self.document) {
       // Extract additional context from enhanced errors
       const extra: any = {
         originalMessage: message,
-        errorType: error?.name || 'Error',
+        errorType: serializedError.name,
         context: context,
       };
 
@@ -512,11 +514,11 @@ if (typeof self !== 'undefined' && !self.document) {
           {
             sendToSentry: true,
             sentryData: {
-              error: error instanceof Error ? error : new Error(message),
+              error: serializedError,
               tags: {
                 source: 'webworker-uncaught',
                 module: 'StoreWebWorker',
-                errorName: error?.name || 'Error',
+                errorName: serializedError.name,
                 ...(error?.exchange ? { exchange: error.exchange } : {}),
                 ...(error?.webSocketState ? { wsState: error.webSocketState } : {}),
               },
@@ -537,6 +539,7 @@ if (typeof self !== 'undefined' && !self.document) {
     const reason: any = event?.reason;
     const message =
       typeof reason === 'string' ? reason : reason?.message || (reason ? String(reason) : 'Unhandled rejection');
+    const serializedError = serializeWorkerErrorForSentry(reason, message);
 
     try {
       const accountNames = Object.keys(exchangeWorkers);
@@ -577,7 +580,7 @@ if (typeof self !== 'undefined' && !self.document) {
           {
             sendToSentry: true,
             sentryData: {
-              error: reason instanceof Error ? reason : new Error(message),
+              error: serializedError,
               tags: {
                 source: 'webworker-unhandledrejection',
                 module: 'StoreWebWorker',
