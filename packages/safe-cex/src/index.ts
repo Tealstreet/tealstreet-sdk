@@ -313,6 +313,13 @@ export {
   submitLighterBuilderApprovalWithL1Signature,
 } from './exchanges/lighter/lighter.builder-approval';
 
+export {
+  LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE,
+  LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
+} from './exchanges/lighter/lighter.account-tier';
+
+export type { LighterAccountTier } from './exchanges/lighter/lighter.account-tier';
+
 export type {
   LighterBuilderApprovalCheckResult,
   LighterBuilderApprovalContext,

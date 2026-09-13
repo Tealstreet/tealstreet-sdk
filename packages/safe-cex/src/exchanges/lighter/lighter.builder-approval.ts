@@ -1,7 +1,15 @@
 import type { ExchangeName } from '../../types';
+import type { LighterAccountTier } from './lighter.account-tier';
 
 import { LighterApiClient, TransactionClient } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
+import {
+  extractLighterAccountTierFromPayload,
+  hasNonZeroLighterIntegratorFee,
+  isLighterAccountTierEligibleForPartnerAttribution,
+  isLighterPartnerAttributionTierRejection,
+  LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE,
+} from './lighter.account-tier';
 import {
   LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
   LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
@@ -22,6 +30,7 @@ const MAX_UINT64 = (1n << 64n) - 1n;
 
 type LighterAccountSnapshot = {
   accountIndex: bigint;
+  accountTier?: LighterAccountTier;
   l1Address?: string;
   approvedIntegrators: Array<{
     accountIndex: bigint;
@@ -50,9 +59,10 @@ export type LighterBuilderApprovalContext = {
 
 export type LighterBuilderApprovalCheckResult = {
   accountIndex: bigint;
+  accountTier?: LighterAccountTier;
   approved: boolean;
   approvalExpiryMs?: number;
-  approvalStatus: 'approved' | 'missing' | 'expired' | 'insufficient_fee_cap';
+  approvalStatus: 'approved' | 'missing' | 'expired' | 'insufficient_fee_cap' | 'account_tier_ineligible';
   integratorAccountIndex: bigint;
   l1Address?: string;
   maxPerpsMakerFee?: number;
@@ -141,6 +151,16 @@ const resolveApprovalFeeCaps = (params: {
   };
 };
 
+const approvalFeeCapsHaveNonZeroFees = (feeCaps: LighterBuilderApprovalFeeCaps): boolean =>
+  hasNonZeroLighterIntegratorFee({
+    integratorMakerFee: feeCaps.maxPerpsMakerFee,
+    integratorTakerFee: feeCaps.maxPerpsTakerFee,
+  }) ||
+  hasNonZeroLighterIntegratorFee({
+    integratorMakerFee: feeCaps.maxSpotMakerFee,
+    integratorTakerFee: feeCaps.maxSpotTakerFee,
+  });
+
 const getDefaultIntegratorAccountIndex = (params: { exchangeName?: ExchangeName; testnet: boolean }): bigint => {
   const raw = isLighterRobinhoodExchange(params.exchangeName)
     ? TEALSTREET_LIGHTER_INTEGRATOR_ACCOUNT_INDEX_ROBINHOOD
@@ -166,6 +186,104 @@ const createApprovalClient = (opts: { baseUrl?: string; exchangeName?: ExchangeN
       'Content-Type': 'application/json',
     },
   });
+
+const ensureWasmReady = async (): Promise<void> => {
+  if (!isWasmReady()) {
+    await initWasm();
+  }
+};
+
+const createApprovalTransactionClient = (params: {
+  accountIndex: bigint;
+  apiClient: LighterApiClient;
+  apiKeyIndex: number;
+  apiPrivateKey: string;
+  exchangeName?: ExchangeName;
+  testnet: boolean;
+}): TransactionClient =>
+  new TransactionClient({
+    httpClient: params.apiClient,
+    crypto: getCryptoApi(),
+    chainId: resolveLighterDeploymentProfile({
+      exchangeName: params.exchangeName,
+      testnet: params.testnet,
+    }).signerChainId,
+    privateKey: params.apiPrivateKey,
+    accountIndex: params.accountIndex,
+    apiKeyIndex: params.apiKeyIndex,
+  });
+
+const fetchAccountLimitsForApproval = async (params: {
+  accountIndex: bigint;
+  apiKeyIndex: number;
+  apiPrivateKey: string;
+  baseUrl?: string;
+  exchangeName?: ExchangeName;
+  testnet: boolean;
+}): Promise<Record<string, unknown> | undefined> => {
+  await ensureWasmReady();
+  const apiClient = createApprovalClient({
+    baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
+    testnet: params.testnet,
+  });
+  const txClient = createApprovalTransactionClient({
+    accountIndex: params.accountIndex,
+    apiClient,
+    apiKeyIndex: params.apiKeyIndex,
+    apiPrivateKey: params.apiPrivateKey,
+    exchangeName: params.exchangeName,
+    testnet: params.testnet,
+  });
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60);
+  const authToken = await txClient.getAuthToken(deadline);
+
+  return apiClient.get<Record<string, unknown>>('/api/v1/accountLimits', {
+    params: {
+      account_index: params.accountIndex.toString(),
+    },
+    headers: {
+      authorization: authToken,
+    },
+  });
+};
+
+const assertPartnerAttributionTierEligibleForApproval = async (params: {
+  accountIndex: bigint;
+  apiKeyIndex?: number;
+  apiPrivateKey?: string;
+  baseUrl?: string;
+  exchangeName?: ExchangeName;
+  feeCaps: LighterBuilderApprovalFeeCaps;
+  testnet: boolean;
+}): Promise<void> => {
+  if (!approvalFeeCapsHaveNonZeroFees(params.feeCaps) || params.apiKeyIndex === undefined || !params.apiPrivateKey) {
+    return;
+  }
+
+  try {
+    const accountLimits = await fetchAccountLimitsForApproval({
+      accountIndex: params.accountIndex,
+      apiKeyIndex: params.apiKeyIndex,
+      apiPrivateKey: params.apiPrivateKey,
+      baseUrl: params.baseUrl,
+      exchangeName: params.exchangeName,
+      testnet: params.testnet,
+    });
+    const tier = extractLighterAccountTierFromPayload(accountLimits);
+    if (tier && !isLighterAccountTierEligibleForPartnerAttribution(tier)) {
+      throw new Error(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE);
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE
+    ) {
+      throw error;
+    }
+    // Account tier lookup is best-effort here; sendTx still normalizes code 21520.
+  }
+};
 
 const resolveAccountIndex = async (params: {
   accountIdentifier: string;
@@ -247,6 +365,7 @@ const fetchAccountSnapshot = async (params: {
 
   return {
     accountIndex: params.accountIndex,
+    accountTier: extractLighterAccountTierFromPayload(account),
     l1Address: typeof (account as any).l1_address === 'string' ? (account as any).l1_address : undefined,
     approvedIntegrators: approvedIntegratorsRaw
       .map((item) => ({
@@ -367,6 +486,7 @@ export const checkLighterBuilderApproved = async (params: {
     feeCaps: params.requiredFeeCaps,
     feeValue: params.requiredFeeValue,
   });
+  const requiresEligibleTier = approvalFeeCapsHaveNonZeroFees(requiredFeeCaps);
   const hasSufficientFeeCap = Boolean(
     integrator &&
     integrator.maxPerpsTakerFee >= requiredFeeCaps.maxPerpsTakerFee &&
@@ -374,7 +494,13 @@ export const checkLighterBuilderApproved = async (params: {
     integrator.maxSpotTakerFee >= requiredFeeCaps.maxSpotTakerFee &&
     integrator.maxSpotMakerFee >= requiredFeeCaps.maxSpotMakerFee,
   );
-  const approvalStatus = !integrator
+  const hasIneligibleTier =
+    requiresEligibleTier &&
+    snapshot.accountTier &&
+    !isLighterAccountTierEligibleForPartnerAttribution(snapshot.accountTier);
+  const approvalStatus = hasIneligibleTier
+    ? 'account_tier_ineligible'
+    : !integrator
     ? 'missing'
     : integrator.approvalExpiry <= now
       ? 'expired'
@@ -385,6 +511,7 @@ export const checkLighterBuilderApproved = async (params: {
 
   return {
     accountIndex,
+    accountTier: snapshot.accountTier,
     approved,
     approvalStatus,
     approvalExpiryMs: integrator?.approvalExpiry,
@@ -400,6 +527,7 @@ export const checkLighterBuilderApproved = async (params: {
 export const prepareLighterBuilderApprovalContext = async (params: {
   accountIdentifier: string;
   apiKeyIndex: number;
+  apiPrivateKey?: string;
   approvalWindowMs?: number;
   baseUrl?: string;
   exchangeName?: ExchangeName;
@@ -420,6 +548,15 @@ export const prepareLighterBuilderApprovalContext = async (params: {
   const maxFeeCaps = resolveApprovalFeeCaps({
     feeCaps: params.maxFeeCaps,
     feeValue: params.maxFeeValue,
+  });
+  await assertPartnerAttributionTierEligibleForApproval({
+    accountIndex,
+    apiKeyIndex: params.apiKeyIndex,
+    apiPrivateKey: params.apiPrivateKey,
+    baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
+    feeCaps: maxFeeCaps,
+    testnet,
   });
   const approvalWindowMs = params.approvalWindowMs ?? DEFAULT_APPROVAL_WINDOW_MS;
   const approvalExpiryMs = Date.now() + approvalWindowMs;
@@ -571,20 +708,29 @@ export const submitLighterBuilderApprovalWithL1Signature = async (params: {
     testnet,
   });
 
-  if (!isWasmReady()) {
-    await initWasm();
-  }
-
-  const txClient = new TransactionClient({
-    httpClient: apiClient,
-    crypto: getCryptoApi(),
-    chainId: resolveLighterDeploymentProfile({
-      exchangeName: params.exchangeName,
-      testnet,
-    }).signerChainId,
-    privateKey: params.apiPrivateKey,
+  await ensureWasmReady();
+  await assertPartnerAttributionTierEligibleForApproval({
     accountIndex: params.accountIndex,
     apiKeyIndex: params.apiKeyIndex,
+    apiPrivateKey: params.apiPrivateKey,
+    baseUrl: params.baseUrl,
+    exchangeName: params.exchangeName,
+    feeCaps: {
+      maxPerpsMakerFee: params.maxPerpsMakerFee,
+      maxPerpsTakerFee: params.maxPerpsTakerFee,
+      maxSpotMakerFee: params.maxSpotMakerFee,
+      maxSpotTakerFee: params.maxSpotTakerFee,
+    },
+    testnet,
+  });
+
+  const txClient = createApprovalTransactionClient({
+    accountIndex: params.accountIndex,
+    apiClient,
+    apiKeyIndex: params.apiKeyIndex,
+    apiPrivateKey: params.apiPrivateKey,
+    exchangeName: params.exchangeName,
+    testnet,
   });
 
   try {
@@ -605,6 +751,17 @@ export const submitLighterBuilderApprovalWithL1Signature = async (params: {
       txHash,
     };
   } catch (error) {
+    if (
+      isLighterPartnerAttributionTierRejection({
+        code: (error as any)?.code ?? (error as any)?.response?.data?.code ?? (error as any)?.response?.data?.error?.code,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    ) {
+      return {
+        success: false,
+        message: LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE,
+      };
+    }
     return {
       success: false,
       message: error instanceof Error ? error.message : 'Failed to submit Lighter builder approval',
@@ -627,6 +784,7 @@ export const approveLighterBuilderFeeWithBrowserWallet = async (params: {
   const context = await prepareLighterBuilderApprovalContext({
     accountIdentifier: params.accountIdentifier,
     apiKeyIndex: params.apiKeyIndex,
+    apiPrivateKey: params.apiPrivateKey,
     approvalWindowMs: params.approvalWindowMs,
     baseUrl: params.baseUrl,
     exchangeName: params.exchangeName,

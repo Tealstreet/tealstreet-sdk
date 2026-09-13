@@ -6,14 +6,16 @@ import {
   createLighterL1SignatureHelperUrl,
   prepareLighterBuilderApprovalContext,
 } from '../exchanges/lighter/lighter.builder-approval';
+import { LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE } from '../exchanges/lighter/lighter.account-tier';
 
-const { lighterApiGetMock, lighterApiGetNextNonceMock, lighterApiInstances } = vi.hoisted(() => ({
+const { lighterApiGetMock, lighterApiGetNextNonceMock, lighterApiInstances, txGetAuthTokenMock } = vi.hoisted(() => ({
   lighterApiGetMock: vi.fn(),
   lighterApiGetNextNonceMock: vi.fn(),
   lighterApiInstances: [] as Array<{
     addRequestInterceptor: ReturnType<typeof vi.fn>;
     config?: Record<string, unknown>;
   }>,
+  txGetAuthTokenMock: vi.fn(),
 }));
 
 vi.mock('@tealstreet/lighter-sdk', () => ({
@@ -28,7 +30,9 @@ vi.mock('@tealstreet/lighter-sdk', () => ({
       lighterApiInstances.push(this);
     }
   },
-  TransactionClient: class {},
+  TransactionClient: class {
+    getAuthToken = txGetAuthTokenMock;
+  },
 }));
 
 vi.mock('@tealstreet/poseidon-crypto', () => ({
@@ -41,6 +45,7 @@ describe('lighter.builder-approval utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lighterApiInstances.length = 0;
+    txGetAuthTokenMock.mockResolvedValue('auth-token');
   });
 
   it('builds the expected L1 message template', () => {
@@ -168,6 +173,54 @@ describe('lighter.builder-approval utilities', () => {
     expect(result.approved).toBe(false);
     expect(result.approvalStatus).toBe('insufficient_fee_cap');
     expect(result.maxPerpsTakerFee).toBe(200);
+  });
+
+  it('reports known Standard accounts as ineligible for non-zero integrator approval', async () => {
+    lighterApiGetMock.mockResolvedValueOnce({
+      accounts: [
+        {
+          user_tier_name: 'Standard',
+          l1_address: '0x22b270B95599989A3D2A54BdcCbb75e21e772630',
+          approved_integrators: [
+            {
+              account_index: 158385,
+              approval_expiry: Date.now() + 60_000,
+              max_perps_taker_fee: 250,
+              max_perps_maker_fee: 0,
+              max_spot_taker_fee: 250,
+              max_spot_maker_fee: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await checkLighterBuilderApproved({
+      accountIdentifier: '718895',
+    });
+
+    expect(result.approved).toBe(false);
+    expect(result.accountTier).toBe('standard');
+    expect(result.approvalStatus).toBe('account_tier_ineligible');
+  });
+
+  it('blocks approval preparation for Standard accounts when account limits are available', async () => {
+    lighterApiGetMock.mockResolvedValueOnce({
+      code: 200,
+      data: {
+        user_tier_name: 'Standard',
+      },
+    });
+
+    await expect(
+      prepareLighterBuilderApprovalContext({
+        accountIdentifier: '718895',
+        apiKeyIndex: 2,
+        apiPrivateKey: 'lighter-private-key',
+      }),
+    ).rejects.toThrow(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE);
+
+    expect(lighterApiGetNextNonceMock).not.toHaveBeenCalled();
   });
 
   it('approves when maker caps are zero and taker caps cover the default fee value', async () => {

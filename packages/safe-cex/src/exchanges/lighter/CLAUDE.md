@@ -691,6 +691,12 @@ This section supersedes older notes that reference direct `transactionClient` us
 - Current default runtime attribution is maker-free and taker-priced:
   - `IntegratorMakerFee = 0` (`0 bps`)
   - `IntegratorTakerFee = 250` (`2.5 bps`)
+- Starting with Lighter's September 2026 partner-attribution rule, non-zero
+  integrator fees require the client's account tier to be Plus or Premium. Order
+  placement checks `/api/v1/accountLimits` when attribution is configured and
+  blocks known Standard accounts before signing; sendTx rejection code `21520`
+  is normalized to the same user-facing upgrade guidance for stale/unknown
+  tier caches.
 - `options.extra.lighterBuilderFeeMode` is retained as a legacy compatibility knob, but both current modes resolve to the same maker/taker fee split.
 - Integrator index can be provided either:
   - globally via constants in `lighter.builder-fee.ts`, or
@@ -700,6 +706,7 @@ This section supersedes older notes that reference direct `transactionClient` us
 - `ApproveIntegrator` flow now has local SDK signing + transport support (`tx_type = 45`).
 - Existing/legacy saved Lighter accounts may predate Tealstreet's builder-fee approval flow. Do not assume an account is approved just because it can trade or has an API key.
 - Lighter rejects attributed create-order transactions with `21149 integrator is not approved` when `L2TxAttributes` are present but the account has no valid approval for the configured integrator/fee caps.
+- Lighter rejects Standard accounts for integrator approval with the same Plus/Premium account-tier policy. Approval helpers use authenticated `/api/v1/accountLimits` when the API private key is available, skip the check when it is not, and normalize `21520` responses from submission.
 - Approval checks must validate expiry and each fee cap against the runtime maker/taker fee requirements, not merely that any non-zero approval exists. Existing approvals capped at `300` still cover the current `0` maker / `250` taker split.
 
 ### Account-form approval wiring

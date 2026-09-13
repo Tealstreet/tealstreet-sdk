@@ -1,6 +1,8 @@
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { LighterAccountTier } from './lighter.account-tier';
+import type { LighterBuilderFeeConfig } from './lighter.builder-fee';
 import type { LighterCreateOrderRequest, LighterSignerAdapter } from './lighter.signer';
 
 import dayjs from 'dayjs';
@@ -44,6 +46,13 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createLighterSDKClient } from './lighter.api';
+import {
+  extractLighterAccountTierFromPayload,
+  hasNonZeroLighterIntegratorFee,
+  isLighterAccountTierEligibleForPartnerAttribution,
+  isLighterPartnerAttributionTierRejection,
+  LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
+} from './lighter.account-tier';
 import { resolveLighterBuilderFeeConfig } from './lighter.builder-fee';
 import { createLighterSignerAdapter } from './lighter.signer';
 import {
@@ -106,20 +115,6 @@ type LighterPlacedOrderHint = {
 type LighterAccountLookupParams = {
   by: 'index' | 'l1_address';
   value: string;
-};
-
-type LighterAccountTier = 'standard' | 'premium' | 'plus';
-
-const normalizeLighterAccountTier = (value: unknown): LighterAccountTier | undefined => {
-  const normalized = String(value ?? '')
-    .trim()
-    .toLowerCase();
-
-  if (normalized === 'std') {
-    return 'standard';
-  }
-
-  return normalized === 'standard' || normalized === 'premium' || normalized === 'plus' ? normalized : undefined;
 };
 
 const parseLighterMarketSymbol = (
@@ -610,22 +605,32 @@ export class LighterExchange extends BaseExchange {
   };
 
   private getCachedAccountTier = (): LighterAccountTier | undefined => {
-    const limits = this.accountLimits;
-    if (!limits || typeof limits !== 'object') {
-      return undefined;
+    return extractLighterAccountTierFromPayload(this.accountLimits);
+  };
+
+  private ensurePartnerAttributionTierEligible = async (
+    builderFeeConfig: LighterBuilderFeeConfig | undefined,
+  ): Promise<void> => {
+    if (!builderFeeConfig || !hasNonZeroLighterIntegratorFee(builderFeeConfig)) {
+      return;
     }
 
-    const data = limits.data && typeof limits.data === 'object' ? (limits.data as Record<string, any>) : undefined;
-    return normalizeLighterAccountTier(
-      limits.user_tier_name ??
-        limits.userTierName ??
-        limits.user_tier ??
-        limits.userTier ??
-        data?.user_tier_name ??
-        data?.userTierName ??
-        data?.user_tier ??
-        data?.userTier,
-    );
+    let accountLimits: Record<string, any> | undefined;
+    try {
+      accountLimits = await this.fetchAccountLimits();
+    } catch (error: any) {
+      this.log(
+        `Lighter partner-attribution account tier lookup skipped: ${error?.message || String(error)}`,
+        LogSeverity.Debug,
+      );
+      return;
+    }
+
+    const tier = extractLighterAccountTierFromPayload(accountLimits);
+    if (tier && !isLighterAccountTierEligibleForPartnerAttribution(tier)) {
+      this.emitAndLogError(LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+      throw new Error(LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+    }
   };
 
   getAccountRateLimitGuidanceMessage = (): string => {
@@ -2081,6 +2086,14 @@ export class LighterExchange extends BaseExchange {
     return code === '21613' || normalizedMessage.includes('invalid margin mode');
   };
 
+  private isPartnerAttributionTierOrderError = (error: unknown, message: string): boolean => {
+    const record = error as Record<string, any> | undefined;
+    return isLighterPartnerAttributionTierRejection({
+      code: record?.code ?? record?.response?.data?.code ?? record?.response?.data?.error?.code,
+      message,
+    });
+  };
+
   private buildInvalidMarginModeOrderMessage = (symbol: string): string => {
     const configuredMarginMode = this.getMarketConfiguredMarginMode(this.store.marketsBySymbol[symbol]);
     const requiredMode =
@@ -2121,6 +2134,9 @@ export class LighterExchange extends BaseExchange {
     const normalizedMessage = rawMessage.toLowerCase();
     if (this.isRateLimitOrderError(error, rawMessage)) {
       return this.getAccountRateLimitGuidanceMessage();
+    }
+    if (this.isPartnerAttributionTierOrderError(error, rawMessage)) {
+      return LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE;
     }
     if (this.isInvalidMarginModeOrderError(error, rawMessage)) {
       return this.buildInvalidMarginModeOrderMessage(opts.symbol);
@@ -2330,6 +2346,7 @@ export class LighterExchange extends BaseExchange {
         ? 'market'
         : 'limit';
     const builderFeeConfig = resolveLighterBuilderFeeConfig(this.options, this.name);
+    await this.ensurePartnerAttributionTierEligible(builderFeeConfig);
 
     // Build order parameters for TransactionClient
     const orderParams = {
@@ -2503,6 +2520,7 @@ export class LighterExchange extends BaseExchange {
     }
 
     const builderFeeConfig = resolveLighterBuilderFeeConfig(this.options, this.name);
+    await this.ensurePartnerAttributionTierEligible(builderFeeConfig);
     const maxClientOrderIndex = (1n << 48n) - 1n;
     const baseOrderId = (BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000))) % maxClientOrderIndex;
 
