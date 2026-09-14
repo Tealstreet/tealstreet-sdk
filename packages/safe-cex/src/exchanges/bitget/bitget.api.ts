@@ -20,6 +20,10 @@ import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
 // supported" message instead of the exchange's credential-looking envelope.
 const SILENT_ERROR_CODES = new Set<string>(['40084', '40085']);
 
+const shouldSilenceBitgetResponseError = (code: string, message: unknown): boolean =>
+  SILENT_ERROR_CODES.has(code) ||
+  (typeof message === 'string' && message.toLowerCase().includes('environment is incorrect'));
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
 
@@ -92,8 +96,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   xhr.interceptors.response.use(async (response) => {
     if (response.data && !v(response.data, 'data') && v(response.data, 'code') !== '00000') {
       const code = String(v(response.data, 'code') ?? '');
-      if (v(response.data, 'msg') && !SILENT_ERROR_CODES.has(code)) {
-        exchange.emitAndLogError(appendHttpFailure(String(v(response.data, 'msg')), response));
+      const message = v(response.data, 'msg');
+      if (message && !shouldSilenceBitgetResponseError(code, message)) {
+        exchange.emitAndLogError(appendHttpFailure(String(message), response));
       }
     }
     return response;

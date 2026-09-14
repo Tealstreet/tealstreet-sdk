@@ -116,6 +116,9 @@ const getBitgetApiErrorMessage = (payload: { code?: string | number; msg?: strin
   return payload?.msg || fallback;
 };
 
+const isBitgetEnvironmentMismatch = (message?: string): boolean =>
+  message?.toLowerCase().includes('environment is incorrect') ?? false;
+
 export class BitgetExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
@@ -267,7 +270,7 @@ export class BitgetExchange extends BaseExchange {
       const errorMsg = getBitgetApiErrorMessage(err?.response?.data, err?.message || 'Invalid API key or secret');
 
       // Detect environment mismatch and provide helpful message
-      if (errorMsg?.toLowerCase().includes('environment is incorrect')) {
+      if (isBitgetEnvironmentMismatch(errorMsg)) {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';
         const suggestedMode = this.options.testnet ? 'Live/Production' : 'Demo/Testnet';
         const helpfulMsg = `API key environment mismatch: Your API key appears to be for ${suggestedMode} trading, but Tealstreet is configured for ${currentMode}. Please check your Testnet setting.`;
@@ -404,23 +407,44 @@ export class BitgetExchange extends BaseExchange {
 
   // One-time probe: GET a cheap v3 endpoint and observe whether Bitget routes
   // the call (UTA) or returns 40084 "Classic Account mode" (Classic). Result
-  // is sticky for the worker's lifetime; a probe failure other than 40084
-  // (network, timeout) leaves `isUta=false` so we degrade safely to v2.
+  // is sticky for the worker's lifetime; transport-only probe failures leave
+  // `isUta=false` so we degrade safely to v2. Auth/environment errors are
+  // terminal validation failures and must not fall through to Classic.
   private _detectAccountType = async (): Promise<void> => {
+    let shouldPropagateProbeError = false;
+    let detected = false;
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT_SETTINGS_V3);
-      this.isUta = parseInt(data?.code || '0') === 0;
+      const code = `${data?.code ?? ''}`;
+      if (isBitgetSuccessCode(data?.code)) {
+        this.isUta = true;
+        detected = true;
+      } else if (code === '40084') {
+        this.isUta = false;
+        detected = true;
+      } else {
+        shouldPropagateProbeError = true;
+        throw new Error(getBitgetApiErrorMessage(data, 'Bitget account type probe failed'));
+      }
     } catch (err: any) {
-      const code = err?.response?.data?.code;
+      if (shouldPropagateProbeError) {
+        throw err;
+      }
+
+      const code = `${err?.response?.data?.code ?? ''}`;
       if (code === '40084') {
         this.isUta = false;
+        detected = true;
+      } else if (err?.response?.data?.code || isBitgetEnvironmentMismatch(err?.response?.data?.msg)) {
+        throw err;
       } else {
         // Network or transient error — leave default (false) so we don't
         // mistakenly route Classic accounts to v3.
         this.log(`Bitget account type probe failed; assuming Classic: ${err?.message ?? err}`);
+        detected = true;
       }
     } finally {
-      this._accountTypeDetected = true;
+      this._accountTypeDetected = detected;
     }
   };
 
@@ -734,7 +758,7 @@ export class BitgetExchange extends BaseExchange {
 
     if (!isBitgetSuccessCode(data.code)) {
       // Detect environment mismatch and provide helpful message
-      if (data.msg?.toLowerCase().includes('environment is incorrect')) {
+      if (isBitgetEnvironmentMismatch(data.msg)) {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';
         const suggestedMode = this.options.testnet ? 'Live/Production' : 'Demo/Testnet';
         this.emitAndLogError(
