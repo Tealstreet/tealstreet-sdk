@@ -1869,7 +1869,27 @@ export class BitgetExchange extends BaseExchange {
     const positionMode = await this.getOrFetchPositionMode(opts.symbol);
     const { side, posSide } = this.getUtaStrategyOrderSide(opts, positionMode);
     const [, rawAmount] = await this.getOrderPlanTypeAndAmount(opts);
-    const qty = rawAmount > 0 ? adjust(rawAmount, market.precision.amount) : 0;
+    let qty = rawAmount > 0 ? adjust(rawAmount, market.precision.amount) : 0;
+
+    // Infinity-stops marker from the UI (amount = 0) means "close the whole position".
+    // Bitget's docs describe `tpslMode: 'full'` (no qty) for that, but CCXT and every
+    // other Bitget adapter always send `partial` with an explicit qty from the live
+    // position. Match the CCXT-proven shape whenever we have a size to send; fall
+    // back to the documented `full` shape only if there is no live position to
+    // reference (pre-position TP/SL). This avoids relying on Bitget behavior that
+    // no live adapter has proven for us.
+    if (qty === 0) {
+      const positions = await this.getOrFetchPositionsForSymbol(opts.symbol);
+      const targetPositionSide = opts.side === OrderSide.Sell ? PositionSide.Long : PositionSide.Short;
+      const targetPosition =
+        positionMode === PositionMode.Hedged
+          ? positions.find((p) => p.side === targetPositionSide && p.contracts > 0)
+          : positions.find((p) => p.contracts > 0);
+      if (targetPosition && targetPosition.contracts > 0) {
+        qty = adjust(targetPosition.contracts, market.precision.amount);
+      }
+    }
+
     const triggerPrice = `${adjust(opts.price, market.precision.price)}`;
 
     return omitUndefined({

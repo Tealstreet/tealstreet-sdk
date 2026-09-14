@@ -473,6 +473,60 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('marginCoin');
   });
 
+  it('resolves live position size for infinity-marker UTA TP/SL and sends the partial+qty shape', async () => {
+    const exchange = createExchange();
+    const longPosition = {
+      id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      entryPrice: 50_000,
+      notional: 75_000,
+      leverage: 10,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      contracts: 1.5,
+      liquidationPrice: 40_000,
+      positionMode: PositionMode.Hedged,
+      marginType: MarginType.Cross,
+      info: {},
+    };
+    exchange.store.update({ positions: [longPosition] as any });
+    vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([longPosition] as any);
+    (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'sl-live', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0,
+        price: 49_000,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    ).resolves.toEqual(['sl-live']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        type: 'tpsl',
+        side: 'sell',
+        posSide: 'long',
+        tpslMode: 'partial',
+        qty: '1.5',
+        stopLoss: '49000',
+        slTriggerBy: 'mark',
+        slOrderType: 'market',
+      }),
+    );
+    const [, payload] = (exchange.unlimitedXHR.post as any).mock.calls[0];
+    expect(payload).toHaveProperty('qty', '1.5');
+  });
+
   it('places partial UTA take-profit orders with qty and market trigger mapping', async () => {
     const exchange = createExchange();
     const longPosition = {

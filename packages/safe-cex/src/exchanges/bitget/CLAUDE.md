@@ -29,7 +29,13 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   `size` fields.
 - Standalone TP/SL placement, open-order fetch, and cancel use v3 strategy
   endpoints (`type: "tpsl"`; `tpslMode: "full"` without `qty`, or
-  `tpslMode: "partial"` with base-coin `qty`).
+  `tpslMode: "partial"` with base-coin `qty`). Bitget's docs describe both
+  shapes, but only `partial + qty` is exercised by CCXT and other Bitget
+  adapters in the wild. `formatUtaStrategyOrder` therefore resolves the live
+  position size when the UI sends `amount: 0` (infinity-stops marker) so the
+  request goes out as `partial + qty` whenever a position exists. Only the
+  pre-position case (user sets TP/SL before opening) falls back to the
+  documented `tpslMode: "full"` shape.
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
 
