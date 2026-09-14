@@ -5,7 +5,7 @@ import { BitgetInverseExchange } from '../../exchanges/bitget/bitgetinverse.exch
 import { BitgetUSDCExchange } from '../../exchanges/bitget/bitgetusdc.exchange';
 import { BASE_WS_PRIVATE_UTA_URL, ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
-import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 
 const market = {
@@ -198,41 +198,50 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('maps empty UTA position snapshots and paged open orders without v2 fields', async () => {
     const exchange = createExchange();
-    (exchange.xhr.get as any)
-      .mockResolvedValueOnce({
-        data: { code: '00000', msg: 'success', data: { list: [] } },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          code: '00000',
-          msg: 'success',
+    let utaOrderPages = 0;
+    (exchange.xhr.get as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UTA_POSITIONS) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: { list: [] } } });
+      }
+      if (endpoint === ENDPOINTS.UTA_ORDERS) {
+        utaOrderPages += 1;
+        return Promise.resolve({
           data: {
-            cursor: 'next',
-            list: [
-              {
-                orderId: 'order-1',
-                category: 'USDT-FUTURES',
-                symbol: 'BTCUSDT',
-                orderStatus: 'new',
-                orderType: 'limit',
-                side: 'buy',
-                qty: '1',
-                cumExecQty: '0.25',
-                price: '50000',
-                timeInForce: 'gtc',
-              },
-            ],
+            code: '00000',
+            msg: 'success',
+            data:
+              utaOrderPages === 1
+                ? {
+                    cursor: 'next',
+                    list: [
+                      {
+                        orderId: 'order-1',
+                        category: 'USDT-FUTURES',
+                        symbol: 'BTCUSDT',
+                        orderStatus: 'new',
+                        orderType: 'limit',
+                        side: 'buy',
+                        qty: '1',
+                        cumExecQty: '0.25',
+                        price: '50000',
+                        timeInForce: 'gtc',
+                      },
+                    ],
+                  }
+                : { cursor: 'next', list: [] },
           },
-        },
-      })
-      .mockResolvedValueOnce({
-        data: { code: '00000', msg: 'success', data: { cursor: 'next', list: [] } },
-      });
+        });
+      }
+      if (endpoint === ENDPOINTS.UTA_STRATEGY_ORDERS) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: [] } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
 
     await expect(exchange.fetchOpenPositions()).resolves.toEqual([]);
     const orders = await exchange.fetchOrders();
 
-    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ORDERS, {
+    expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.UTA_ORDERS, {
       params: { category: 'USDT-FUTURES', limit: '100' },
     });
     expect(orders[0]).toEqual(
@@ -289,6 +298,178 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('productType');
     expect(payload).not.toHaveProperty('marginCoin');
     expect(payload).not.toHaveProperty('size');
+  });
+
+  it('places full-position UTA stop-loss orders through v3 strategy orders', async () => {
+    const exchange = createExchange();
+    (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'sl-1', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0,
+        price: 49_000,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    ).resolves.toEqual(['sl-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        type: 'tpsl',
+        side: 'sell',
+        posSide: 'long',
+        tpslMode: 'full',
+        reduceOnly: 'yes',
+        stopLoss: '49000',
+        slTriggerBy: 'mark',
+        slOrderType: 'market',
+        clientOid: expect.any(String),
+      }),
+    );
+    const [, payload] = (exchange.unlimitedXHR.post as any).mock.calls[0];
+    expect(payload).not.toHaveProperty('qty');
+    expect(payload).not.toHaveProperty('productType');
+    expect(payload).not.toHaveProperty('marginCoin');
+  });
+
+  it('places partial UTA take-profit orders with qty and market trigger mapping', async () => {
+    const exchange = createExchange();
+    const longPosition = {
+      id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      entryPrice: 50_000,
+      notional: 50_000,
+      leverage: 10,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      contracts: 1,
+      liquidationPrice: 40_000,
+      positionMode: PositionMode.Hedged,
+      marginType: MarginType.Cross,
+      info: {},
+    };
+    exchange.store.update({ positions: [longPosition] as any });
+    vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([longPosition] as any);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'tp-1', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.TakeProfit,
+        side: OrderSide.Sell,
+        amount: 0.5,
+        price: 55_000,
+        tpTriggerType: OrderStopTriggerType.LastPrice,
+      }),
+    ).resolves.toEqual(['tp-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        type: 'tpsl',
+        side: 'sell',
+        posSide: 'long',
+        tpslMode: 'partial',
+        qty: '0.5',
+        takeProfit: '55000',
+        tpTriggerBy: 'market',
+        tpOrderType: 'market',
+      }),
+    );
+  });
+
+  it('fetches and cancels UTA strategy stop-loss orders through v3 strategy endpoints', async () => {
+    const exchange = createExchange();
+    (exchange.xhr.get as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UTA_ORDERS) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: { list: [] } } });
+      }
+      if (endpoint === ENDPOINTS.UTA_STRATEGY_ORDERS) {
+        return Promise.resolve({
+          data: {
+            code: '00000',
+            msg: 'success',
+            data: [
+              {
+                orderId: 'sl-1',
+                clientOid: 'client-1',
+                category: 'USDT-FUTURES',
+                symbol: 'BTCUSDT',
+                qty: '0.5',
+                posSide: 'long',
+                status: 'pending',
+                stopLoss: '49000',
+                slTriggerBy: 'mark',
+                slOrderType: 'market',
+              },
+            ],
+          },
+        });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({ data: { code: '00000', msg: 'success', data: null } });
+
+    const orders = await exchange.fetchOrders();
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toEqual(
+      expect.objectContaining({
+        id: 'sl-1',
+        status: OrderStatus.Open,
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        price: 49_000,
+        amount: 0.5,
+        reduceOnly: true,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    );
+
+    await exchange.cancelOrders(orders);
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER, {
+      orderId: 'sl-1',
+      clientOid: 'client-1',
+    });
+  });
+
+  it('does not route UTA TP/SL updates to Classic v2 algo modify', async () => {
+    const exchange = createExchange();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'sl-1',
+          symbol: 'BTCUSDT',
+          status: OrderStatus.Open,
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49_000,
+          amount: 0,
+          filled: 0,
+          remaining: 0,
+          reduceOnly: true,
+          lastUpdate: Date.now(),
+          info: { orderId: 'sl-1' },
+        },
+        update: { price: 48_000 },
+      }),
+    ).rejects.toThrow('Bitget UTA in-place TP/SL updates are not supported yet');
+
+    expect(exchange.unlimitedXHR.post).not.toHaveBeenCalledWith(ENDPOINTS.UPDATE_ALGO_ORDER, expect.anything());
   });
 
   it('subscribes and routes UTA private WS topics', async () => {

@@ -27,6 +27,9 @@ USDT-futures only**:
 - Normal market/limit place and cancel use v3 payloads (`category`, `qty`,
   `posSide`, `clientOid`) and do not send v2 `productType`, `marginCoin`, or
   `size` fields.
+- Standalone TP/SL placement, open-order fetch, and cancel use v3 strategy
+  endpoints (`type: "tpsl"`; `tpslMode: "full"` without `qty`, or
+  `tpslMode: "partial"` with base-coin `qty`).
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
 
@@ -37,9 +40,9 @@ exchange instance, so unstarted main-thread instances can still route UTA
 orders/reads correctly without racing multiple probes.
 
 Still out of scope for this slice: `bitgetusdc`, `bitgetinverse`, testnet UTA,
-trade/fill history, bills, standalone TP/SL, trailing stops, and attached TP/SL
-on normal UTA orders. Those paths must keep using Classic v2 behavior until
-their own slices land.
+trade/fill history, bills, trailing stops, attached TP/SL on normal UTA orders,
+and in-place modify of UTA strategy orders. Those paths must keep using Classic
+v2 behavior until their own slices land.
 
 UTA historical fills are intentionally short-circuited to an empty result for
 now, before any Classic v2 request is sent. Bitget's documented replacement is
@@ -53,10 +56,10 @@ remaining useful comparison items are additional UTA slices: map
 `GET /api/v3/trade/fills` with `execId`, `execPrice`, `execQty`, `execValue`,
 `execPnl`, `createdTime`, `feeDetail[]`, `tradeScope`, `side`, and `tradeSide`;
 add cursor pagination and the documented 30-day window; add UTA history-orders;
-add strategy-order TP/SL endpoints (`place`, `unfilled`, `history`, `modify`,
-`cancel`); add UTA batch place/modify/cancel; and revisit v3 public market/WS
-streams only if we decide to move public data off Classic v2. Keep USDC,
-coin-margined, and testnet UTA disabled until each has its own confirmed
+add UTA strategy-order history and modify endpoints; add UTA trailing-stop
+strategy placement; add UTA batch place/modify/cancel; and revisit v3 public
+market/WS streams only if we decide to move public data off Classic v2. Keep
+USDC, coin-margined, and testnet UTA disabled until each has its own confirmed
 Bitget behavior and regression coverage.
 
 When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
@@ -171,29 +174,32 @@ below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
 
 ### Order Management
 
-| Constant            | Path                                    | Usage                                              |
-| ------------------- | --------------------------------------- | -------------------------------------------------- |
-| `PLACE_ORDER`       | `/api/v2/mix/order/place-order`         | Place single order (not used; batch is preferred)  |
-| `BATCH_ORDERS`      | `/api/v2/mix/order/batch-place-order`   | Place batch orders (up to 50 per symbol)           |
-| `UPDATE_ORDER`      | `/api/v2/mix/order/modify-order`        | Modify a normal order                              |
-| `ORDERS`            | `/api/v2/mix/order/orders-pending`      | Fetch pending normal orders (paginated, limit 200) |
-| `ORDER_HISTORY`     | `/api/v2/mix/order/orders-history`      | Fetch historical filled orders                     |
-| `CANCEL_ORDERS`     | `/api/v2/mix/order/batch-cancel-orders` | Batch cancel normal orders                         |
-| `CANCEL_ALL_ORDERS` | `/api/v2/mix/order/cancel-all-orders`   | Cancel all orders                                  |
-| `UTA_PLACE_ORDER`   | `/api/v3/trade/place-order`             | UTA normal market/limit order placement            |
-| `UTA_CANCEL_ORDER`  | `/api/v3/trade/cancel-order`            | UTA normal order cancellation                      |
-| `UTA_CANCEL_BATCH`  | `/api/v3/trade/cancel-batch`            | UTA batch cancellation constant, not preferred yet |
-| `UTA_MODIFY_ORDER`  | `/api/v3/trade/modify-order`            | UTA modify-order constant, not preferred yet       |
+| Constant                    | Path                                      | Usage                                              |
+| --------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| `PLACE_ORDER`               | `/api/v2/mix/order/place-order`           | Place single order (not used; batch is preferred)  |
+| `BATCH_ORDERS`              | `/api/v2/mix/order/batch-place-order`     | Place batch orders (up to 50 per symbol)           |
+| `UPDATE_ORDER`              | `/api/v2/mix/order/modify-order`          | Modify a normal order                              |
+| `ORDERS`                    | `/api/v2/mix/order/orders-pending`        | Fetch pending normal orders (paginated, limit 200) |
+| `ORDER_HISTORY`             | `/api/v2/mix/order/orders-history`        | Fetch historical filled orders                     |
+| `CANCEL_ORDERS`             | `/api/v2/mix/order/batch-cancel-orders`   | Batch cancel normal orders                         |
+| `CANCEL_ALL_ORDERS`         | `/api/v2/mix/order/cancel-all-orders`     | Cancel all orders                                  |
+| `UTA_PLACE_ORDER`           | `/api/v3/trade/place-order`               | UTA normal market/limit order placement            |
+| `UTA_PLACE_STRATEGY_ORDER`  | `/api/v3/trade/place-strategy-order`      | UTA standalone TP/SL strategy placement            |
+| `UTA_CANCEL_ORDER`          | `/api/v3/trade/cancel-order`              | UTA normal order cancellation                      |
+| `UTA_CANCEL_STRATEGY_ORDER` | `/api/v3/trade/cancel-strategy-order`     | UTA standalone strategy order cancellation         |
+| `UTA_CANCEL_BATCH`          | `/api/v3/trade/cancel-batch`              | UTA batch cancellation constant, not preferred yet |
+| `UTA_MODIFY_ORDER`          | `/api/v3/trade/modify-order`              | UTA modify-order constant, not preferred yet       |
 
 ### Algo/Stop Orders
 
-| Constant                    | Path                                    | Usage                     |
-| --------------------------- | --------------------------------------- | ------------------------- |
-| `PLACE_ALGO_ORDER`          | `/api/v2/mix/order/place-tpsl-order`    | Place TP/SL algo order    |
-| `UPDATE_ALGO_ORDER`         | `/api/v2/mix/order/modify-tpsl-order`   | Modify TP/SL algo order   |
-| `ALGO_ORDERS`               | `/api/v2/mix/order/orders-plan-pending` | Fetch pending algo orders |
-| `CANCEL_ALGO_ORDER`         | `/api/v2/mix/order/cancel-plan-order`   | Cancel an algo order      |
-| `PLACE_TRAILING_STOP_ORDER` | `/api/v2/mix/order/place-plan-order`    | Place trailing stop order |
+| Constant                    | Path                                       | Usage                      |
+| --------------------------- | ------------------------------------------ | -------------------------- |
+| `PLACE_ALGO_ORDER`          | `/api/v2/mix/order/place-tpsl-order`       | Place TP/SL algo order     |
+| `UPDATE_ALGO_ORDER`         | `/api/v2/mix/order/modify-tpsl-order`      | Modify TP/SL algo order    |
+| `ALGO_ORDERS`               | `/api/v2/mix/order/orders-plan-pending`    | Fetch pending algo orders  |
+| `UTA_STRATEGY_ORDERS`       | `/api/v3/trade/unfilled-strategy-orders`   | UTA standalone TP/SL fetch |
+| `CANCEL_ALGO_ORDER`         | `/api/v2/mix/order/cancel-plan-order`      | Cancel an algo order       |
+| `PLACE_TRAILING_STOP_ORDER` | `/api/v2/mix/order/place-plan-order`       | Place trailing stop order  |
 
 ### Account Settings
 
@@ -666,7 +672,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 20. **Trailing stop orders response format**: `fetchTrailingStopOrders()` handles both array and `{ entrustedList }` response formats (`bitget.exchange.ts:824-828`).
 
-21. **UTA vs Classic routing is explicit and USDT-only for now**: UTA accounts are detected by `_detectAccountType()` (`bitget.exchange.ts`), a one-time probe of `ACCOUNT_SETTINGS_V3` during validation/startup — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The private startup path now awaits this probe before `privateWebsocket.connectAndSubscribe()` and before `tick()`, so v3-routed accounts do not race into v2 private endpoints. Every v3 path must read `usesUtaRouting`, not bare `isUta`; `supportsUtaRouting` stays false on `bitgetusdc` and `bitgetinverse` until their own UTA slices exist. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. For variants still on Classic routing, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
+21. **UTA vs Classic routing is explicit and USDT-only for now**: UTA accounts are detected by `_detectAccountType()`, a shared probe of `ACCOUNT_SETTINGS_V3` during validation/startup and lazily before private v2/v3 branch points on unstarted instances — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The private startup path awaits this probe before `privateWebsocket.connectAndSubscribe()` and before `tick()`, so v3-routed accounts do not race into v2 private endpoints. Every v3 path must read `usesUtaRouting`, not bare `isUta`; `supportsUtaRouting` stays false on `bitgetusdc` and `bitgetinverse` until their own UTA slices exist. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. For variants still on Classic routing, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
 
 22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 
@@ -683,6 +689,8 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
     which is why only batch placement was affected. The `formatCreateOrder`
     line directly above it in `placeOrders` already had the correct
     `await Promise.all(...)` shape — match it.
+
+25. **UTA standalone TP/SL uses strategy endpoints, not normal order endpoints.** `OrderType.StopLoss` and `OrderType.TakeProfit` route to `POST /api/v3/trade/place-strategy-order` with `type: "tpsl"`. Full-position stops send `tpslMode: "full"` and no `qty`; sized stops send `tpslMode: "partial"` plus base-coin `qty`. Fetch active standalone TP/SL through `GET /api/v3/trade/unfilled-strategy-orders?type=tpsl`, and cancel them through `POST /api/v3/trade/cancel-strategy-order` without a `category`. Do not route UTA standalone stops to Classic `PLACE_ALGO_ORDER` / `CANCEL_ALGO_ORDER`; those return the UTA-vs-Classic `40085` failure. Trailing stops and in-place strategy modify remain separate, unimplemented slices.
 
 ## Error Handling
 

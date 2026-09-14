@@ -1195,7 +1195,7 @@ export class BitgetExchange extends BaseExchange {
   fetchNormalOrders = async () => {
     await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
-      return this.fetchUtaOrders();
+      return this.fetchUtaNormalOrders();
     }
 
     const allOrders: Array<Record<string, any>> = [];
@@ -1238,6 +1238,11 @@ export class BitgetExchange extends BaseExchange {
   };
 
   private fetchUtaOrders = async (): Promise<Order[]> => {
+    const [normalOrders, strategyOrders] = await Promise.all([this.fetchUtaNormalOrders(), this.fetchUtaStrategyOrders()]);
+    return [...normalOrders, ...strategyOrders];
+  };
+
+  private fetchUtaNormalOrders = async (): Promise<Order[]> => {
     const allOrders: BITGET_UTA_ORDER[] = [];
     let cursor: string | undefined;
     const maxIterations = 20;
@@ -1266,6 +1271,28 @@ export class BitgetExchange extends BaseExchange {
     }
 
     return allOrders.flatMap(this.mapOrder);
+  };
+
+  private fetchUtaStrategyOrders = async (): Promise<Order[]> => {
+    const { data } = await this.xhr.get<{
+      code: string;
+      msg: string;
+      requestTime: number;
+      data: BITGET_UTA_ORDER[] | { list?: BITGET_UTA_ORDER[] } | null;
+    }>(ENDPOINTS.UTA_STRATEGY_ORDERS, {
+      params: {
+        category: this.apiUtaCategory,
+        type: 'tpsl',
+      },
+    });
+
+    if (!isBitgetSuccessCode(data.code)) {
+      this.emitAndLogError(getBitgetApiErrorMessage(data, 'Bitget UTA strategy orders request failed'));
+      return [];
+    }
+
+    const rows = Array.isArray(data.data) ? data.data : Array.isArray(data.data?.list) ? data.data.list : [];
+    return rows.flatMap(this.mapOrder);
   };
 
   fetchAlgoOrders = async () => {
@@ -1426,8 +1453,9 @@ export class BitgetExchange extends BaseExchange {
     try {
       await this.ensureAccountTypeDetected();
       if (this.usesUtaRouting) {
-        const orders = await this.fetchUtaOrders();
-        await this.cancelUtaNormalOrders(orders);
+        const [normalOrders, strategyOrders] = await Promise.all([this.fetchUtaNormalOrders(), this.fetchUtaStrategyOrders()]);
+        await this.cancelUtaNormalOrders(normalOrders);
+        await this.cancelUtaStrategyOrders(strategyOrders);
         return;
       }
 
@@ -1514,7 +1542,34 @@ export class BitgetExchange extends BaseExchange {
     }
   };
 
+  private cancelUtaStrategyOrders = async (orders: Order[]) => {
+    const normalizedOrders = uniqBy(orders, 'id');
+
+    for (const order of normalizedOrders) {
+      try {
+        const orderId = order.info?.orderId || (order.info?.clientOid === order.id ? undefined : order.id);
+        const clientOid = order.info?.clientOid || (!orderId ? order.id : undefined);
+
+        await this.unlimitedXHR.post(
+          ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER,
+          omitUndefined({
+            orderId,
+            clientOid,
+          }),
+        );
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw err;
+      }
+    }
+  };
+
   cancelAlgoOrders = async (orders: Order[]) => {
+    await this.ensureAccountTypeDetected();
+    if (this.usesUtaRouting) {
+      return this.cancelUtaStrategyOrders(orders);
+    }
+
     for (const order of orders) {
       try {
         const planType = this.getCancelPlanType(order);
@@ -1612,9 +1667,12 @@ export class BitgetExchange extends BaseExchange {
     await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       if (this.isAlgoOrder(opts)) {
-        const msg = 'Bitget UTA TP/SL and trailing-stop orders are not supported yet.';
-        this.emitAndLogError(msg);
-        throw new Error(msg);
+        if (opts.type === OrderType.TrailingStopLoss) {
+          const msg = 'Bitget UTA trailing-stop orders are not supported yet.';
+          this.emitAndLogError(msg);
+          throw new Error(msg);
+        }
+        return await this.placeUtaStrategyOrders([await this.formatUtaStrategyOrder(opts)]);
       }
 
       const payloads = await this.formatUtaCreateOrder(opts);
@@ -1635,15 +1693,17 @@ export class BitgetExchange extends BaseExchange {
     const [algoOrders, normalOrders] = partition(orders, this.isAlgoOrder);
 
     if (this.usesUtaRouting) {
-      if (algoOrders.length > 0) {
-        const msg = 'Bitget UTA TP/SL and trailing-stop orders are not supported yet.';
+      const trailingStopOrder = algoOrders.find((order) => order.type === OrderType.TrailingStopLoss);
+      if (trailingStopOrder) {
+        const msg = 'Bitget UTA trailing-stop orders are not supported yet.';
         this.emitAndLogError(msg);
         throw new Error(msg);
       }
 
       const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatUtaCreateOrder(o)))).flat();
       const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => this.toFiniteNumber(o.qty) > 0);
-      return await this.placeUtaOrders(normalOrdersOpts);
+      const strategyOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatUtaStrategyOrder(o)));
+      return [...(await this.placeUtaOrders(normalOrdersOpts)), ...(await this.placeUtaStrategyOrders(strategyOrdersOpts))];
     }
 
     const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatCreateOrder(o)))).flat();
@@ -1790,6 +1850,47 @@ export class BitgetExchange extends BaseExchange {
     return payloads;
   };
 
+  private formatUtaStrategyOrder = async (opts: PlaceOrderOpts): Promise<Record<string, any>> => {
+    if (opts.type !== OrderType.StopLoss && opts.type !== OrderType.TakeProfit) {
+      const msg = 'Bitget UTA currently supports only standalone stop-loss and take-profit strategy orders.';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    if (!opts.price) {
+      const msg = `Bitget UTA ${opts.type} orders require a trigger price.`;
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (!market) throw new Error(`Market ${opts.symbol} not found`);
+
+    const positionMode = await this.getOrFetchPositionMode(opts.symbol);
+    const { side, posSide } = this.getUtaStrategyOrderSide(opts, positionMode);
+    const [, rawAmount] = await this.getOrderPlanTypeAndAmount(opts);
+    const qty = rawAmount > 0 ? adjust(rawAmount, market.precision.amount) : 0;
+    const triggerPrice = `${adjust(opts.price, market.precision.price)}`;
+
+    return omitUndefined({
+      category: this.apiUtaCategory,
+      symbol: market.id,
+      type: 'tpsl',
+      side,
+      posSide,
+      tpslMode: qty > 0 ? 'partial' : 'full',
+      qty: qty > 0 ? `${qty}` : undefined,
+      reduceOnly: 'yes',
+      clientOid: uuid(),
+      takeProfit: opts.type === OrderType.TakeProfit ? triggerPrice : undefined,
+      stopLoss: opts.type === OrderType.StopLoss ? triggerPrice : undefined,
+      tpTriggerBy: opts.type === OrderType.TakeProfit ? this.getUtaStrategyTriggerBy(opts.tpTriggerType) : undefined,
+      slTriggerBy: opts.type === OrderType.StopLoss ? this.getUtaStrategyTriggerBy(opts.slTriggerType) : undefined,
+      tpOrderType: opts.type === OrderType.TakeProfit ? 'market' : undefined,
+      slOrderType: opts.type === OrderType.StopLoss ? 'market' : undefined,
+    });
+  };
+
   formatAlgoOrder = async (opts: PlaceOrderOpts) => {
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) throw new Error(`Market ${opts.symbol} not found`);
@@ -1904,6 +2005,28 @@ export class BitgetExchange extends BaseExchange {
 
         if (!isBitgetSuccessCode(data?.code)) {
           throw new Error(data?.msg || 'Bitget UTA place order request failed');
+        }
+
+        const orderId = data?.data?.orderId || data?.data?.clientOid || payload.clientOid;
+        if (orderId) newOrderIds.push(orderId);
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw err;
+      }
+    }
+
+    return newOrderIds;
+  };
+
+  private placeUtaStrategyOrders = async (payloads: Array<Record<string, any>>) => {
+    const newOrderIds: string[] = [];
+
+    for (const payload of payloads) {
+      try {
+        const { data } = await this.unlimitedXHR.post(ENDPOINTS.UTA_PLACE_STRATEGY_ORDER, payload);
+
+        if (!isBitgetSuccessCode(data?.code)) {
+          throw new Error(data?.msg || 'Bitget UTA place strategy order request failed');
         }
 
         const orderId = data?.data?.orderId || data?.data?.clientOid || payload.clientOid;
@@ -2040,6 +2163,12 @@ export class BitgetExchange extends BaseExchange {
 
     // Standalone algo orders (not attached to a limit order)
     if (this.isAlgoOrder(order)) {
+      await this.ensureAccountTypeDetected();
+      if (this.usesUtaRouting) {
+        const msg = 'Bitget UTA in-place TP/SL updates are not supported yet. Cancel and replace the order instead.';
+        this.emitAndLogError(msg);
+        throw new Error(msg);
+      }
       return this.updateAlgoOrder({ order, update });
     }
 
@@ -2330,6 +2459,33 @@ export class BitgetExchange extends BaseExchange {
       if (order.info?.posMode === 'hedge_mode') {
         order.side = o.side === 'buy' ? OrderSide.Sell : OrderSide.Buy;
       }
+    } else if (!order.type && (this.toFiniteNumber(o.stopLoss) > 0 || this.toFiniteNumber(o.takeProfit) > 0)) {
+      const strategySide =
+        ORDER_SIDE[o.side] || (o.posSide === 'short' ? OrderSide.Buy : o.posSide === 'long' ? OrderSide.Sell : order.side);
+      const strategyOrders: Writable<Order>[] = [];
+
+      if (this.toFiniteNumber(o.stopLoss) > 0) {
+        strategyOrders.push({
+          ...order,
+          side: strategySide,
+          type: OrderType.StopLoss,
+          price: this.toFiniteNumber(o.stopLoss),
+          reduceOnly: true,
+          slTriggerType: o.slTriggerBy === 'market' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice,
+        });
+      }
+      if (this.toFiniteNumber(o.takeProfit) > 0) {
+        strategyOrders.push({
+          ...order,
+          side: strategySide,
+          type: OrderType.TakeProfit,
+          price: this.toFiniteNumber(o.takeProfit),
+          reduceOnly: true,
+          tpTriggerType: o.tpTriggerBy === 'market' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice,
+        });
+      }
+
+      return strategyOrders;
     } else if (order.info?.reduceOnly === 'YES' && order.info?.posMode === 'hedge_mode') {
       order.side = o.side === 'buy' ? OrderSide.Sell : OrderSide.Buy;
     }
@@ -2495,6 +2651,26 @@ export class BitgetExchange extends BaseExchange {
       side,
       posSide: opts.side === OrderSide.Buy ? 'long' : 'short',
     };
+  };
+
+  private getUtaStrategyOrderSide = (
+    opts: PlaceOrderOpts,
+    positionMode: PositionMode,
+  ): { side: 'buy' | 'sell'; posSide?: 'long' | 'short' } => {
+    const side = opts.side === OrderSide.Buy ? 'buy' : 'sell';
+
+    if (positionMode !== PositionMode.Hedged) {
+      return { side };
+    }
+
+    return {
+      side,
+      posSide: opts.side === OrderSide.Buy ? 'short' : 'long',
+    };
+  };
+
+  private getUtaStrategyTriggerBy = (triggerType?: OrderStopTriggerType): 'market' | 'mark' => {
+    return triggerType === OrderStopTriggerType.LastPrice ? 'market' : 'mark';
   };
 
   private getAlgoOrderSide = (opts: PlaceOrderOpts, positionMode: PositionMode) => {
