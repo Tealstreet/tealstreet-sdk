@@ -6,6 +6,9 @@ export const LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE =
 export const LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE =
   'Lighter requires Plus or Premium account tier before approving Tealstreet partner attribution with non-zero integrator fees. Switch this account to Plus or Premium, then retry.';
 
+export const LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE =
+  'Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click "Approve Builder Fee" and retry.';
+
 export const normalizeLighterAccountTier = (value: unknown): LighterAccountTier | undefined => {
   const normalized = String(value ?? '')
     .trim()
@@ -86,4 +89,17 @@ export const isLighterPartnerAttributionTierRejection = (params: {
     (message.includes('integrator') || message.includes('partner attribution')) &&
     (message.includes('plus') || message.includes('premium') || message.includes('account type'))
   );
+};
+
+export const isLighterPartnerAttributionApprovalMissingRejection = (params: {
+  code?: unknown;
+  message?: unknown;
+}): boolean => {
+  const code = String(params.code ?? '').trim();
+  if (code === '21149') {
+    return true;
+  }
+
+  const message = String(params.message ?? '').toLowerCase();
+  return message.includes('integrator') && (message.includes('not approved') || message.includes('is not approved'));
 };

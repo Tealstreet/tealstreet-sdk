@@ -722,6 +722,7 @@ This section supersedes older notes that reference direct `transactionClient` us
 - Approval helper REST calls must not attach legacy `X-Timestamp` / `X-Account-Index` headers. `account` and `nextNonce` use documented query params, and the extra headers can trigger browser/proxy preflight failures that surface as "No response received from server" before the signature helper opens.
 - `AccountForm` submit button is blocked while required Lighter approval is missing (same UX pattern as Hyperliquid/GRVT).
 - Standard-tier accounts are the exception: account linking remains allowed, the approval helper shows a non-blocking Plus/Premium warning, and attributed orders are blocked later by `LighterExchange` until the user changes tier.
+- After a Standard user upgrades to Plus/Premium, they still need to complete `ApproveIntegrator`. `LighterExchange.ensurePartnerAttributionApproved` catches this at trade time and throws `LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE`, which names Account Settings → Edit → Approve Builder Fee as the fix. `sendTx` also normalizes venue code `21149 integrator is not approved` to the same branded message as a defense in depth.
 - After approval, refresh the account-form status and verify it shows approved before expecting attributed orders to succeed.
 
 ### ApproveIntegrator discovery status (current)

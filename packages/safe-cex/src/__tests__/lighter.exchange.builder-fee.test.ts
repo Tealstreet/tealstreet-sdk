@@ -2,7 +2,10 @@ import type { ExchangeOptions } from '../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE } from '../exchanges/lighter/lighter.account-tier';
+import {
+  LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
+  LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
+} from '../exchanges/lighter/lighter.account-tier';
 import { LighterExchange } from '../exchanges/lighter/lighter.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../types';
@@ -186,6 +189,18 @@ describe('LighterExchange builder fee order wiring', () => {
   it('normalizes Lighter 21520 attributed-order rejection', async () => {
     const exchange = createExchange();
     (exchange as any).fetchAccountLimits = vi.fn().mockResolvedValue(undefined);
+    (exchange as any).fetchAccountSnapshot = vi.fn().mockResolvedValue({
+      approved_integrators: [
+        {
+          account_index: '158385',
+          approval_expiry: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          max_perps_taker_fee: 300,
+          max_perps_maker_fee: 300,
+          max_spot_taker_fee: 300,
+          max_spot_maker_fee: 300,
+        },
+      ],
+    });
     createOrderMock.mockRejectedValueOnce({
       code: 21520,
       message: 'trades via partner attribution with non-zero integrator fees require plus or premium accounts',
@@ -202,5 +217,119 @@ describe('LighterExchange builder fee order wiring', () => {
         timeInForce: OrderTimeInForce.GoodTillCancel,
       }),
     ).rejects.toThrow(LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+  });
+
+  it('blocks attributed orders when tier is eligible but ApproveIntegrator has never been signed', async () => {
+    const exchange = createExchange();
+    (exchange as any).fetchAccountLimits = vi.fn().mockResolvedValue({
+      code: 200,
+      data: { user_tier_name: 'Plus' },
+    });
+    (exchange as any).fetchAccountSnapshot = vi.fn().mockResolvedValue({
+      approved_integrators: [],
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC/USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+        reduceOnly: false,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      }),
+    ).rejects.toThrow(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE);
+
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks attributed orders when the existing ApproveIntegrator has expired', async () => {
+    const exchange = createExchange();
+    (exchange as any).fetchAccountLimits = vi.fn().mockResolvedValue({
+      code: 200,
+      data: { user_tier_name: 'Premium' },
+    });
+    (exchange as any).fetchAccountSnapshot = vi.fn().mockResolvedValue({
+      approved_integrators: [
+        {
+          account_index: '158385',
+          approval_expiry: Date.now() - 60_000,
+          max_perps_taker_fee: 300,
+          max_perps_maker_fee: 300,
+          max_spot_taker_fee: 300,
+          max_spot_maker_fee: 300,
+        },
+      ],
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC/USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+        reduceOnly: false,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      }),
+    ).rejects.toThrow(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE);
+
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('lets attributed orders through when tier is eligible and an unexpired approval exists', async () => {
+    const exchange = createExchange();
+    (exchange as any).fetchAccountLimits = vi.fn().mockResolvedValue({
+      code: 200,
+      data: { user_tier_name: 'Plus' },
+    });
+    (exchange as any).fetchAccountSnapshot = vi.fn().mockResolvedValue({
+      approved_integrators: [
+        {
+          account_index: '158385',
+          approval_expiry: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          max_perps_taker_fee: 300,
+          max_perps_maker_fee: 300,
+          max_spot_taker_fee: 300,
+          max_spot_maker_fee: 300,
+        },
+      ],
+    });
+
+    await exchange.placeOrder({
+      symbol: 'BTC/USDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 100,
+      reduceOnly: false,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    expect(createOrderMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes Lighter 21149 integrator-not-approved rejection to the branded message', async () => {
+    const exchange = createExchange();
+    (exchange as any).fetchAccountLimits = vi.fn().mockResolvedValue(undefined);
+    // Skip the pre-send approval check so the raw venue rejection reaches sendTx normalization.
+    (exchange as any).fetchAccountSnapshot = vi.fn().mockRejectedValue(new Error('snapshot unavailable'));
+    createOrderMock.mockRejectedValueOnce({
+      code: 21149,
+      message: 'integrator is not approved',
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC/USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+        reduceOnly: false,
+        timeInForce: OrderTimeInForce.GoodTillCancel,
+      }),
+    ).rejects.toThrow(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE);
   });
 });

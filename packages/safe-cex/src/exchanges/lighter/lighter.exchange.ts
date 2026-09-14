@@ -50,7 +50,9 @@ import {
   extractLighterAccountTierFromPayload,
   hasNonZeroLighterIntegratorFee,
   isLighterAccountTierEligibleForPartnerAttribution,
+  isLighterPartnerAttributionApprovalMissingRejection,
   isLighterPartnerAttributionTierRejection,
+  LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
   LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
 } from './lighter.account-tier';
 import { resolveLighterBuilderFeeConfig } from './lighter.builder-fee';
@@ -630,6 +632,42 @@ export class LighterExchange extends BaseExchange {
     if (tier && !isLighterAccountTierEligibleForPartnerAttribution(tier)) {
       this.emitAndLogError(LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
       throw new Error(LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+    }
+  };
+
+  private ensurePartnerAttributionApproved = async (
+    builderFeeConfig: LighterBuilderFeeConfig | undefined,
+  ): Promise<void> => {
+    if (!builderFeeConfig || !hasNonZeroLighterIntegratorFee(builderFeeConfig)) {
+      return;
+    }
+
+    let account: Record<string, any> | undefined;
+    try {
+      account = await this.fetchAccountSnapshot({ allowRecent: true });
+    } catch (error: any) {
+      // Approval lookup is best-effort; sendTx still normalizes code 21149 on rejection.
+      this.log(
+        `Lighter partner-attribution approval lookup skipped: ${error?.message || String(error)}`,
+        LogSeverity.Debug,
+      );
+      return;
+    }
+
+    const approvedIntegrators = Array.isArray(account?.approved_integrators) ? account!.approved_integrators : [];
+    const integratorIndexString = builderFeeConfig.integratorAccountIndex.toString();
+    const now = virtualClock.getCurrentTimeMs();
+    const hasValidApproval = approvedIntegrators.some((entry: any) => {
+      const entryIndex = String(entry?.account_index ?? entry?.accountIndex ?? '').trim();
+      if (entryIndex !== integratorIndexString) return false;
+      const expiryRaw = entry?.approval_expiry ?? entry?.approvalExpiry ?? 0;
+      const expiry = Number(expiryRaw);
+      return Number.isFinite(expiry) && expiry > now;
+    });
+
+    if (!hasValidApproval) {
+      this.emitAndLogError(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE);
+      throw new Error(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE);
     }
   };
 
@@ -2094,6 +2132,14 @@ export class LighterExchange extends BaseExchange {
     });
   };
 
+  private isPartnerAttributionApprovalMissingOrderError = (error: unknown, message: string): boolean => {
+    const record = error as Record<string, any> | undefined;
+    return isLighterPartnerAttributionApprovalMissingRejection({
+      code: record?.code ?? record?.response?.data?.code ?? record?.response?.data?.error?.code,
+      message,
+    });
+  };
+
   private buildInvalidMarginModeOrderMessage = (symbol: string): string => {
     const configuredMarginMode = this.getMarketConfiguredMarginMode(this.store.marketsBySymbol[symbol]);
     const requiredMode =
@@ -2137,6 +2183,9 @@ export class LighterExchange extends BaseExchange {
     }
     if (this.isPartnerAttributionTierOrderError(error, rawMessage)) {
       return LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE;
+    }
+    if (this.isPartnerAttributionApprovalMissingOrderError(error, rawMessage)) {
+      return LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE;
     }
     if (this.isInvalidMarginModeOrderError(error, rawMessage)) {
       return this.buildInvalidMarginModeOrderMessage(opts.symbol);
@@ -2347,6 +2396,7 @@ export class LighterExchange extends BaseExchange {
         : 'limit';
     const builderFeeConfig = resolveLighterBuilderFeeConfig(this.options, this.name);
     await this.ensurePartnerAttributionTierEligible(builderFeeConfig);
+    await this.ensurePartnerAttributionApproved(builderFeeConfig);
 
     // Build order parameters for TransactionClient
     const orderParams = {
@@ -2521,6 +2571,7 @@ export class LighterExchange extends BaseExchange {
 
     const builderFeeConfig = resolveLighterBuilderFeeConfig(this.options, this.name);
     await this.ensurePartnerAttributionTierEligible(builderFeeConfig);
+    await this.ensurePartnerAttributionApproved(builderFeeConfig);
     const maxClientOrderIndex = (1n << 48n) - 1n;
     const baseOrderId = (BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000))) % maxClientOrderIndex;
 
