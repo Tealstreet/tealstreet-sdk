@@ -401,6 +401,38 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('size');
   });
 
+  it('places UTA USDC stop-loss orders through USDC-FUTURES strategy orders', async () => {
+    const exchange = createUsdcExchange();
+    (exchange.xhr.get as any).mockResolvedValue(usdcAccountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'sl-1', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDC',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 0,
+        price: 49_000,
+      }),
+    ).resolves.toEqual(['sl-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+      expect.objectContaining({
+        category: 'USDC-FUTURES',
+        symbol: 'BTCUSDC',
+        type: 'tpsl',
+        side: 'sell',
+        posSide: 'long',
+        tpslMode: 'full',
+        stopLoss: '49000',
+        slOrderType: 'market',
+      }),
+    );
+  });
+
   it('places full-position UTA stop-loss orders through v3 strategy orders', async () => {
     const exchange = createExchange();
     (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
