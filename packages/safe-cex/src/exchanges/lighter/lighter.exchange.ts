@@ -3053,7 +3053,9 @@ export class LighterExchange extends BaseExchange {
     };
 
     const rawType = readLooseField('orderTypeValue', 'order_type_value', 'Type', 'orderType', 'order_type', 'type');
-    const normalizedType = String(rawType ?? '').toUpperCase();
+    const normalizedType = String(rawType ?? '')
+      .toUpperCase()
+      .replace(/[-\s]/g, '_');
     const rawTif = readLooseField(
       'timeInForceValue',
       'time_in_force_value',
@@ -3259,8 +3261,8 @@ export class LighterExchange extends BaseExchange {
       }
     }
 
-    let price =
-      (type === OrderType.StopLoss || type === OrderType.TakeProfit ? (triggerPrice ?? limitPrice) : limitPrice) ?? 0;
+    const isProtectiveOrder = type === OrderType.StopLoss || type === OrderType.TakeProfit;
+    let price = (isProtectiveOrder && triggerPrice !== undefined && triggerPrice > 0 ? triggerPrice : limitPrice) ?? 0;
     if ((!Number.isFinite(price) || price <= 0) && placedOrderHint?.price && placedOrderHint.price > 0) {
       price = placedOrderHint.price;
     }

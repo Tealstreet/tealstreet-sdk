@@ -501,7 +501,7 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
   throttled WebSocket heal call `addOrUpdateOrdersFull()` after disposal guards.
 - `recentlyCancelledOrders` map filters out orders pending cancellation
 - Submission-time `placedOrderHints` preserve conditional intent (`StopLoss`/`TakeProfit`), side, reduceOnly, and TIF during WS/REST reconciliation by order ID.
-- Conditional price mapping prioritizes `triggerPrice` over `limitPrice`; if payload is incomplete, reconciliation falls back to stored hint price.
+- Conditional price mapping prioritizes positive `triggerPrice` / `trigger_price` over `limitPrice` / `price`; Lighter active-order snapshots use documented hyphenated types like `take-profit`, so normalize those before deciding which price to render.
 - WebSocket order handler:
   - FILLED orders: Update status to `Closed`, emit `fill` event if fresh
   - CANCELLED/CANCELED: Remove from store via `removeOrders()`

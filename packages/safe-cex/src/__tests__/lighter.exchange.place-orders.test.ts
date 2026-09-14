@@ -548,6 +548,37 @@ describe('LighterExchange batched placeOrders', () => {
     );
   });
 
+  it('maps documented Lighter take-profit snapshots at trigger price, not execution guard price', () => {
+    const exchange = createExchange();
+
+    const orders = exchange.mapOrder({
+      order: {
+        order_id: '555',
+        market_index: 1,
+        type: 'take-profit',
+        time_in_force: 'immediate-or-cancel',
+        is_ask: true,
+        price: '0.13663',
+        trigger_price: '0.13801',
+        initial_base_amount: '100',
+        remaining_base_amount: '100',
+        reduce_only: true,
+        status: 'open',
+      },
+    });
+
+    expect(orders[0]).toEqual(
+      expect.objectContaining({
+        id: '555',
+        type: OrderType.TakeProfit,
+        side: OrderSide.Sell,
+        reduceOnly: true,
+        price: 0.13801,
+        timeInForce: OrderTimeInForce.ImmediateOrCancel,
+      }),
+    );
+  });
+
   it('keeps profit-side reduce-only sell limits as limits', async () => {
     const exchange = createExchange();
     exchange.store.update({

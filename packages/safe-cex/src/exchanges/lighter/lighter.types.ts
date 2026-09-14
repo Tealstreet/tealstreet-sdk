@@ -159,7 +159,9 @@ export const ORDER_SIDE: Record<string, OrderSide> = {
 
 export const ORDER_TIME_IN_FORCE: Record<string, OrderTimeInForce> = {
   GTC: OrderTimeInForce.GoodTillCancel,
+  GOOD_TILL_TIME: OrderTimeInForce.GoodTillCancel,
   IOC: OrderTimeInForce.ImmediateOrCancel,
+  IMMEDIATE_OR_CANCEL: OrderTimeInForce.ImmediateOrCancel,
   FOK: OrderTimeInForce.FillOrKill,
   POST_ONLY: OrderTimeInForce.PostOnly,
 };
