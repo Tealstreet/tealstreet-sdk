@@ -19,8 +19,8 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 ## UTA Support Status
 
 Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade
-endpoints. The adapter now has a first UTA slice for **livenet `bitget`
-USDT-futures only**:
+endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
+**livenet `bitgetusdc` USDC-futures**:
 
 - Validation, balance, open positions, and open normal orders route through
   `/api/v3/*` after the account-type probe marks `isUta = true`.
@@ -39,10 +39,10 @@ in-flight `ACCOUNT_SETTINGS_V3` probe and then memoizes the result on the
 exchange instance, so unstarted main-thread instances can still route UTA
 orders/reads correctly without racing multiple probes.
 
-Still out of scope for this slice: `bitgetusdc`, `bitgetinverse`, testnet UTA,
-trade/fill history, bills, trailing stops, attached TP/SL on normal UTA orders,
-and in-place modify of UTA strategy orders. Those paths must keep using Classic
-v2 behavior until their own slices land.
+Still out of scope for this slice: `bitgetinverse`, testnet UTA, trade/fill
+history, bills, trailing stops, attached TP/SL on normal UTA orders, and
+in-place modify of UTA strategy orders. Those paths must keep using Classic v2
+behavior until their own slices land.
 
 UTA historical fills are intentionally short-circuited to an empty result for
 now, before any Classic v2 request is sent. Bitget's documented replacement is
@@ -59,8 +59,8 @@ add cursor pagination and the documented 30-day window; add UTA history-orders;
 add UTA strategy-order history and modify endpoints; add UTA trailing-stop
 strategy placement; add UTA batch place/modify/cancel; and revisit v3 public
 market/WS streams only if we decide to move public data off Classic v2. Keep
-USDC, coin-margined, and testnet UTA disabled until each has its own confirmed
-Bitget behavior and regression coverage.
+coin-margined and testnet UTA disabled until each has its own confirmed Bitget
+behavior and regression coverage.
 
 When a v2 private endpoint returns `40085` / "Unified Account mode ... Classic
 Account API is not supported", surface the Tealstreet-owned UTA unsupported
@@ -148,7 +148,7 @@ Each step checks `this.isDisposed` to allow early exit if the exchange is dispos
 
 Private trading/account endpoints are Classic v2 unless explicitly marked as v3
 below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
-!testnet`) and is currently true only for livenet `bitget`.
+!testnet`) and is currently true for livenet `bitget` and `bitgetusdc`.
 
 ### Market Data
 
@@ -672,7 +672,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 20. **Trailing stop orders response format**: `fetchTrailingStopOrders()` handles both array and `{ entrustedList }` response formats (`bitget.exchange.ts:824-828`).
 
-21. **UTA vs Classic routing is explicit and USDT-only for now**: UTA accounts are detected by `_detectAccountType()`, a shared probe of `ACCOUNT_SETTINGS_V3` during validation/startup and lazily before private v2/v3 branch points on unstarted instances — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The private startup path awaits this probe before `privateWebsocket.connectAndSubscribe()` and before `tick()`, so v3-routed accounts do not race into v2 private endpoints. Every v3 path must read `usesUtaRouting`, not bare `isUta`; `supportsUtaRouting` stays false on `bitgetusdc` and `bitgetinverse` until their own UTA slices exist. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. For variants still on Classic routing, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
+21. **UTA vs Classic routing is explicit and linear-only for now**: UTA accounts are detected by `_detectAccountType()`, a shared probe of `ACCOUNT_SETTINGS_V3` during validation/startup and lazily before private v2/v3 branch points on unstarted instances — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. The private startup path awaits this probe before `privateWebsocket.connectAndSubscribe()` and before `tick()`, so v3-routed accounts do not race into v2 private endpoints. Every v3 path must read `usesUtaRouting`, not bare `isUta`; `supportsUtaRouting` is inherited by livenet `bitget` and `bitgetusdc`, but stays false on `bitgetinverse` until its own UTA slice exists. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. For variants still on Classic routing, translate that to `BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE` and fail validation/action clearly.
 
 22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 
@@ -737,7 +737,7 @@ Some methods (like `tick()`) catch errors without re-throwing to prevent tick lo
 - **Product type**: `usdc-futures` / `susdc-futures` (testnet)
 - **Margin coin**: `USDC` / `SUSDC` (testnet)
 - **Status**: Enabled
-- Minimal override (`bitgetusdc.exchange.ts`): only changes `apiProductType` and `apiMarginCoin` getters
+- Minimal override (`bitgetusdc.exchange.ts`): changes `apiProductType` and `apiMarginCoin` getters, inheriting livenet UTA routing as `USDC-FUTURES`
 - Uses type assertion (`as any`) since the getter return types don't match the base class
 - Inherits all trading logic, WebSocket handlers, and order management from base class
 

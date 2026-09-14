@@ -18,11 +18,33 @@ const market = {
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 125 } },
 };
 
+const usdcMarket = {
+  ...market,
+  id: 'BTCUSDC',
+  symbol: 'BTCUSDC',
+  quote: 'USDC',
+};
+
 const createExchange = (opts: { isUta?: boolean; accountTypeDetected?: boolean } = {}) => {
   const store = new DefaultStore();
   store.update({ markets: [market] as any });
   const exchange = new BitgetExchange(
     'bitget',
+    { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
+    store,
+  );
+  (exchange as any).isUta = opts.isUta ?? true;
+  (exchange as any)._accountTypeDetected = opts.accountTypeDetected ?? true;
+  exchange.xhr = { get: vi.fn(), post: vi.fn() } as any;
+  exchange.unlimitedXHR = { get: vi.fn(), post: vi.fn() } as any;
+  return exchange;
+};
+
+const createUsdcExchange = (opts: { isUta?: boolean; accountTypeDetected?: boolean } = {}) => {
+  const store = new DefaultStore();
+  store.update({ markets: [usdcMarket] as any });
+  const exchange = new BitgetUSDCExchange(
+    'bitgetusdc',
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
     store,
   );
@@ -43,6 +65,25 @@ const accountSettingsResponse = {
         {
           category: 'USDT-FUTURES',
           symbol: 'BTCUSDT',
+          marginMode: 'crossed',
+          longLeverage: '10',
+          shortLeverage: '7',
+        },
+      ],
+    },
+  },
+};
+
+const usdcAccountSettingsResponse = {
+  data: {
+    code: '00000',
+    msg: 'success',
+    data: {
+      holdMode: 'hedge_mode',
+      symbolConfigList: [
+        {
+          category: 'USDC-FUTURES',
+          symbol: 'BTCUSDC',
           marginMode: 'crossed',
           longLeverage: '10',
           shortLeverage: '7',
@@ -73,6 +114,31 @@ describe('audit regression: Bitget UTA routing', () => {
     await expect(exchange.validateAccount()).resolves.toEqual({
       error: '',
       balance: expect.objectContaining({ total: 100, free: 98, used: 7, upnl: 5 }),
+    });
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ACCOUNT_ASSETS);
+  });
+
+  it('validates UTA USDC accounts through v3 account assets', async () => {
+    const exchange = createUsdcExchange({ isUta: false, accountTypeDetected: false });
+    (exchange.xhr.get as any)
+      .mockResolvedValueOnce(usdcAccountSettingsResponse)
+      .mockResolvedValueOnce({
+        data: {
+          code: '00000',
+          msg: 'success',
+          data: {
+            accountEquity: '205',
+            effEquity: '198',
+            unrealisedPnl: '5',
+            assets: [{ coin: 'USDC', available: '198', equity: '205', usdValue: '205' }],
+          },
+        },
+      });
+
+    await expect(exchange.validateAccount()).resolves.toEqual({
+      error: '',
+      balance: expect.objectContaining({ total: 200, free: 198, used: 7, upnl: 5 }),
     });
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
     expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ACCOUNT_ASSETS);
@@ -300,6 +366,41 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('size');
   });
 
+  it('places UTA USDC linear orders with the USDC-FUTURES category', async () => {
+    const exchange = createUsdcExchange();
+    (exchange.xhr.get as any).mockResolvedValue(usdcAccountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: null, clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDC',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.5,
+        price: 50_000,
+      }),
+    ).resolves.toEqual(['client-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_ORDER,
+      expect.objectContaining({
+        category: 'USDC-FUTURES',
+        symbol: 'BTCUSDC',
+        qty: '0.5',
+        side: 'buy',
+        posSide: 'long',
+        marginMode: 'crossed',
+        clientOid: expect.any(String),
+      }),
+    );
+    const [, payload] = (exchange.unlimitedXHR.post as any).mock.calls[0];
+    expect(payload).not.toHaveProperty('productType');
+    expect(payload).not.toHaveProperty('marginCoin');
+    expect(payload).not.toHaveProperty('size');
+  });
+
   it('places full-position UTA stop-loss orders through v3 strategy orders', async () => {
     const exchange = createExchange();
     (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
@@ -521,30 +622,7 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(exchange.store.orders[0]).toEqual(expect.objectContaining({ id: 'uta-order', amount: 1 }));
   });
 
-  it('keeps USDC and inverse variants on the UTA unsupported guard', async () => {
-    const usdc = new BitgetUSDCExchange(
-      'bitgetusdc',
-      { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
-      new DefaultStore(),
-    );
-    (usdc as any).isUta = true;
-    usdc.xhr = {
-      get: vi
-        .fn()
-        .mockResolvedValueOnce(accountSettingsResponse)
-        .mockResolvedValueOnce({
-          data: {
-            code: '40085',
-            msg: 'You are in Unified Account mode, and the Classic Account API is not supported at this time',
-            data: null,
-          },
-        }),
-    } as any;
-    vi.spyOn(usdc, 'emitAndLogError').mockImplementation(() => undefined as any);
-
-    await expect(usdc.validateAccount()).resolves.toEqual({ error: BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE });
-    expect(usdc.xhr.get).toHaveBeenLastCalledWith(ENDPOINTS.BALANCE, { params: { productType: 'usdc-futures' } });
-
+  it('keeps inverse variants on the UTA unsupported guard', async () => {
     const inverse = new BitgetInverseExchange(
       'bitgetinverse',
       { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
