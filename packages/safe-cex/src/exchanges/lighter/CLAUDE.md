@@ -721,6 +721,7 @@ This section supersedes older notes that reference direct `transactionClient` us
   - opens `/trade/lighter-l1sig` in system browser for L1 signature capture, then user pastes `L1Sig` back into account form and submits.
 - Approval helper REST calls must not attach legacy `X-Timestamp` / `X-Account-Index` headers. `account` and `nextNonce` use documented query params, and the extra headers can trigger browser/proxy preflight failures that surface as "No response received from server" before the signature helper opens.
 - `AccountForm` submit button is blocked while required Lighter approval is missing (same UX pattern as Hyperliquid/GRVT).
+- Standard-tier accounts are the exception: account linking remains allowed, the approval helper shows a non-blocking Plus/Premium warning, and attributed orders are blocked later by `LighterExchange` until the user changes tier.
 - After approval, refresh the account-form status and verify it shows approved before expecting attributed orders to succeed.
 
 ### ApproveIntegrator discovery status (current)
