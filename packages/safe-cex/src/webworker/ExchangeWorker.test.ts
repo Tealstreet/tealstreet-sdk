@@ -117,11 +117,62 @@ const createWorker = () => {
   return { worker, messages };
 };
 
+const createHostedWorker = () => {
+  const messages: any[] = [];
+  const ctx = {
+    postMessage: vi.fn((message) => {
+      messages.push(message);
+    }),
+  } as unknown as Worker;
+  const worker = new ExchangeWorker(
+    ctx,
+    'test-account',
+    'bybit' as ExchangeName,
+    { hostedMode: true } as ExchangeOptions,
+    {} as any,
+    {} as any,
+    'test-session',
+    false,
+  );
+
+  return { worker, messages };
+};
+
 const emitStoreUpdate = (worker: ExchangeWorker) => {
   (worker as any)._storeUpdate(worker.store.serialize());
 };
 
 describe('ExchangeWorker store payloads', () => {
+  // Two delta layers must never stack, and hosted mode is where they would.
+  //
+  // The far side there is a VirtualWorkerContext that throttles payloads and
+  // does its own per-item partial diff of `tickers`. Packing deltas here as
+  // well is unsafe because the layers have different properties: a full array
+  // is idempotent (drop one, the next carries current values) while a delta is
+  // not — `_packTickerDeltasSinceBaseline` advances the baseline WHILE packing,
+  // so anything dropped downstream is never sent again. That froze tickers in
+  // production on 2026-09-14 and priced BBO hotkeys off a dead book while every
+  // WS topic still reported fresh.
+  it('never packs ticker deltas in hosted mode', () => {
+    const { worker, messages } = createHostedWorker();
+    worker.store.update({ tickers: [createTicker()] });
+
+    (worker as any)._storeUpdate(worker.store.serialize(), { forceFullStore: true });
+
+    // The same sequence that produces `tickerDeltas` outside hosted mode — see
+    // 'sends packed ticker deltas after a full ticker baseline'.
+    worker.store.updateTicker({ id: 'BTCUSDT' }, { last: 51000 });
+    emitStoreUpdate(worker);
+
+    const payload = messages.at(-1)?.data;
+    expect(payload).not.toHaveProperty('tickerDeltas');
+
+    // The full array keeps flowing instead, which is what makes a dropped
+    // payload harmless: the next one carries current values.
+    expect(payload.tickers).toHaveLength(1);
+    expect(payload.tickers[0].last).toBe(51000);
+  });
+
   it('cleans up exchange-owned chasers before disposing the exchange', () => {
     const { worker } = createWorker();
     const exchange = { dispose: vi.fn() } as any;

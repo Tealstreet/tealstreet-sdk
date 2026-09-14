@@ -60,6 +60,22 @@ The main-thread worker fallback is
 `apps/web/src/utils/shim/worker/WorkerShim.ts`; it is not part of this
 directory.
 
+## Ticker delta packing is browser-worker-only
+
+`_prepareStorePayload` packs `tickerDeltas` against a mutable baseline to
+shrink the structured clone across a real `postMessage`. It is gated on
+`!options.hostedMode` and must stay that way.
+
+In hosted mode the far side is exchange-server's `VirtualWorkerContext`,
+which already does its own per-item partial diff of `tickers` AND throttles
+payloads. Stacking the two is unsafe because they have different properties:
+a full array is idempotent, so a dropped payload costs nothing, whereas
+`_packTickerDeltasSinceBaseline` advances the baseline WHILE packing — so a
+delta lost downstream is never re-sent. That froze the browser's ticker while
+every WS topic still reported fresh, and BBO hotkeys priced orders ~60-75
+points off a live book on 2026-09-14. See
+`services/exchange-server/CLAUDE.md` → "Never stack two delta layers".
+
 ## Worker → main thread bridge: structured-clone race
 
 `_storeUpdate` runs on every store notify (throttled to 250 ms

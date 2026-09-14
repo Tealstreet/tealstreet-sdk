@@ -486,7 +486,23 @@ export class ExchangeWorker {
       return payload;
     };
 
+    // Packing ticker deltas is a BROWSER-worker optimization: it shrinks the
+    // structured clone across a real `postMessage`. In hosted mode the far side
+    // is a VirtualWorkerContext that already does its own per-item partial diff
+    // of `tickers` (`PARTIAL_DELTA_KEYS`), so packing here stacks two delta
+    // layers — and that stack is what froze tickers in production on
+    // 2026-09-14.
+    //
+    // Stacking is unsafe because the layers have different properties. A full
+    // array is idempotent: drop it and the next one carries current values. A
+    // delta is not: this function advances `_lastSentTickerBaseline` WHILE
+    // packing, so anything lost downstream is never sent again. The outer layer
+    // both throttles (dropping payloads) and treats the inner delta list as
+    // accumulated STATE, which is exactly the mismatch.
+    const packTickerDeltas = !this._options.hostedMode;
+
     const shouldSendFullTickers =
+      !packTickerDeltas ||
       options?.forceFullStore ||
       this._lastSentTickersVersion !== tickersVersion ||
       this._lastSentTickerBaseline === null;
@@ -501,7 +517,9 @@ export class ExchangeWorker {
 
     if (shouldSendFullTickers) {
       this._lastSentTickersVersion = tickersVersion;
-      this._copyTickerBaseline(tickers);
+      // No baseline in hosted mode: nothing consumes it, and maintaining it is
+      // an O(tickers) copy on every payload.
+      if (packTickerDeltas) this._copyTickerBaseline(tickers);
     } else {
       const packedTickerDeltas = this._packTickerDeltasSinceBaseline(tickers);
       if (packedTickerDeltas === null) {
