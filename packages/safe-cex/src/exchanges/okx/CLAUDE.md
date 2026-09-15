@@ -52,6 +52,7 @@ Signing is performed in an axios request interceptor:
 3. **String to sign**: Concatenation of `timestamp + METHOD + url + body`
    - `url` includes query parameters (decoded via `qs.stringify`)
    - `body` is JSON-stringified data or empty string
+   - The signing interceptor writes that exact JSON string back to `config.data` and preserves already-serialized bodies. Do not sign `JSON.stringify(config.data)` without also pinning the sent body; proxy/remote-signing/retry paths can otherwise sign quoted JSON while transmitting unquoted JSON, which OKX rejects as `50113 Invalid Sign`.
 4. **Signature**: HMAC-SHA256 of the string-to-sign using the API secret, output as **base64**
 5. **Headers**:
    - `OK-ACCESS-KEY`: API key

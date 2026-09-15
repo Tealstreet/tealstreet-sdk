@@ -32,7 +32,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     {
       baseURL,
       timeout: options?.extra?.recvWindow ?? RECV_WINDOW,
-      headers: options.testnet ? { 'x-simulated-trading': 1 } : {},
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.testnet ? { 'x-simulated-trading': 1 } : {}),
+      },
     },
     options,
     exchange,
@@ -74,13 +77,13 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     }
 
     const method = config.method?.toUpperCase?.() || 'GET';
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
     const params = config.params ? decodeURIComponent(qs.stringify(config.params)) : null;
     const url = `${config.url}${params ? `?${params}` : ''}`;
-    const data = config.data ? JSON.stringify(config.data) : null;
+    const hasBody = config.data !== undefined && config.data !== null;
+    const data = hasBody ? (typeof config.data === 'string' ? config.data : JSON.stringify(config.data) || '') : '';
 
     const timestamp = virtualClock.getCurrentTime().toISOString();
-    const toSign = [timestamp, method, url, data ? data : ''];
+    const toSign = [timestamp, method, url, data];
 
     const signature = createHmac('sha256', options.secret).update(toSign.join('')).digest('base64');
 
@@ -92,7 +95,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       'OK-ACCESS-PASSPHRASE': passphrase || '',
     });
 
-    return { ...nextConfig, headers };
+    return { ...nextConfig, ...(hasBody ? { data } : {}), headers };
   });
 
   if (options.tealstreetTunnel) {
