@@ -24,6 +24,58 @@ import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
 import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
 
+type WorkerSentryControl = {
+  reportKey?: string;
+  reportCooldownMs?: number;
+  tags?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+};
+
+type WorkerSentryControlledError = {
+  safeCexSentryReportKey?: unknown;
+  safeCexSentryReportCooldownMs?: unknown;
+  safeCexSentryTags?: unknown;
+  safeCexSentryExtra?: unknown;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const getWorkerSentryControl = (error: unknown): WorkerSentryControl => {
+  if (!isRecord(error)) return {};
+
+  const controlled = error as WorkerSentryControlledError;
+  return {
+    reportKey:
+      typeof controlled.safeCexSentryReportKey === 'string' && controlled.safeCexSentryReportKey
+        ? controlled.safeCexSentryReportKey
+        : undefined,
+    reportCooldownMs:
+      typeof controlled.safeCexSentryReportCooldownMs === 'number' &&
+      Number.isFinite(controlled.safeCexSentryReportCooldownMs) &&
+      controlled.safeCexSentryReportCooldownMs > 0
+        ? controlled.safeCexSentryReportCooldownMs
+        : undefined,
+    tags: isRecord(controlled.safeCexSentryTags) ? controlled.safeCexSentryTags : undefined,
+    extra: isRecord(controlled.safeCexSentryExtra) ? controlled.safeCexSentryExtra : undefined,
+  };
+};
+
+const splitWorkerLogExtra = (extra: Record<string, any> | undefined) => {
+  if (!isRecord(extra)) {
+    return { extra: {}, sentryTags: {}, sentryExtra: {}, suppressConsoleLog: false };
+  }
+
+  const sentryTags = isRecord(extra.sentryTags) ? extra.sentryTags : {};
+  const sentryExtra = isRecord(extra.sentryExtra) ? extra.sentryExtra : {};
+  const suppressConsoleLog = Boolean(extra.suppressConsoleLog);
+  const plainExtra = Object.fromEntries(
+    Object.entries(extra).filter(([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog'),
+  );
+
+  return { extra: plainExtra, sentryTags, sentryExtra, suppressConsoleLog };
+};
+
 export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
   private readonly _accountName: string;
@@ -66,6 +118,7 @@ export class ExchangeWorker {
   private _lastSentOrdersUpdateId: number | null = null;
   private _lastSentPositionsUpdateId: number | null = null;
   private _lastPayloadHadActiveChasers = false;
+  private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
     ctx: Worker,
@@ -116,6 +169,34 @@ export class ExchangeWorker {
    * Helper method to send errors through the worker messaging system
    */
   private logError(message: string, error: Error | unknown, extra?: Record<string, any>, sendToSentry = true) {
+    const workerSentryControl = getWorkerSentryControl(error);
+    const splitExtra = splitWorkerLogExtra(extra);
+    let effectiveSendToSentry = sendToSentry;
+    let suppressConsoleLog = splitExtra.suppressConsoleLog;
+    let suppressedRepeatedReports = 0;
+
+    if (sendToSentry && workerSentryControl.reportKey && workerSentryControl.reportCooldownMs) {
+      const now = Date.now();
+      const previous = this._sentryReportCooldowns.get(workerSentryControl.reportKey);
+      const shouldReport =
+        previous === undefined || now - previous.lastReportedAt >= workerSentryControl.reportCooldownMs;
+
+      if (shouldReport) {
+        suppressedRepeatedReports = previous?.suppressedCount ?? 0;
+        this._sentryReportCooldowns.set(workerSentryControl.reportKey, {
+          lastReportedAt: now,
+          suppressedCount: 0,
+        });
+      } else {
+        effectiveSendToSentry = false;
+        suppressConsoleLog = true;
+        this._sentryReportCooldowns.set(workerSentryControl.reportKey, {
+          lastReportedAt: previous.lastReportedAt,
+          suppressedCount: previous.suppressedCount + 1,
+        });
+      }
+    }
+
     // Create a serializable error object
     const serializableError =
       error instanceof Error
@@ -136,7 +217,8 @@ export class ExchangeWorker {
         data: [
           message,
           {
-            sendToSentry,
+            sendToSentry: effectiveSendToSentry,
+            suppressConsoleLog,
             sentryData: {
               error: serializableError,
               tags: {
@@ -144,9 +226,14 @@ export class ExchangeWorker {
                 module: 'ExchangeWorker',
                 exchange: this._exchangeName,
                 account: this._accountName,
+                ...splitExtra.sentryTags,
+                ...workerSentryControl.tags,
               },
               extra: {
-                ...extra,
+                ...splitExtra.extra,
+                ...splitExtra.sentryExtra,
+                ...workerSentryControl.extra,
+                ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
               },
             },
           },
@@ -262,7 +349,8 @@ export class ExchangeWorker {
         console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
       }
-      this.logError(`Error starting exchange: ${this._exchangeName}`, e);
+      const detail = e instanceof Error && e.message ? `: ${e.message}` : '';
+      this.logError(`Error starting exchange: ${this._exchangeName}${detail}`, e);
       return false;
     } finally {
       if (startupToken === this._startupToken) {
