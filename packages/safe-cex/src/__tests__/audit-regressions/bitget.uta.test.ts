@@ -366,6 +366,50 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('size');
   });
 
+  it('places UTA normal orders with attached TP/SL fields on the v3 place-order endpoint', async () => {
+    const exchange = createExchange();
+    (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'order-1', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.5,
+        price: 50_000,
+        takeProfit: 55_000,
+        stopLoss: 49_000,
+        tpTriggerType: OrderStopTriggerType.LastPrice,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        qty: '0.5',
+        side: 'buy',
+        posSide: 'long',
+        orderType: 'limit',
+        takeProfit: '55000',
+        stopLoss: '49000',
+        tpTriggerBy: 'market',
+        slTriggerBy: 'mark',
+        tpOrderType: 'market',
+        slOrderType: 'market',
+      }),
+    );
+    expect(exchange.unlimitedXHR.post).not.toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+      expect.anything(),
+    );
+  });
+
   it('places UTA USDC linear orders with the USDC-FUTURES category', async () => {
     const exchange = createUsdcExchange();
     (exchange.xhr.get as any).mockResolvedValue(usdcAccountSettingsResponse);
@@ -399,6 +443,39 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('productType');
     expect(payload).not.toHaveProperty('marginCoin');
     expect(payload).not.toHaveProperty('size');
+  });
+
+  it('places UTA USDC normal orders with attached stop-loss fields', async () => {
+    const exchange = createUsdcExchange();
+    (exchange.xhr.get as any).mockResolvedValue(usdcAccountSettingsResponse);
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'order-1', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDC',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.5,
+        price: 50_000,
+        stopLoss: 49_000,
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_ORDER,
+      expect.objectContaining({
+        category: 'USDC-FUTURES',
+        symbol: 'BTCUSDC',
+        qty: '0.5',
+        side: 'buy',
+        posSide: 'long',
+        stopLoss: '49000',
+        slTriggerBy: 'mark',
+        slOrderType: 'market',
+      }),
+    );
   });
 
   it('places UTA USDC stop-loss orders through USDC-FUTURES strategy orders', async () => {

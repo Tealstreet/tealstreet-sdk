@@ -1818,12 +1818,6 @@ export class BitgetExchange extends BaseExchange {
       throw new Error(msg);
     }
 
-    if (opts.takeProfit || opts.stopLoss) {
-      const msg = 'Bitget UTA attached TP/SL fields are not supported yet.';
-      this.emitAndLogError(msg);
-      throw new Error(msg);
-    }
-
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) throw new Error(`Market ${opts.symbol} not found`);
 
@@ -1851,6 +1845,12 @@ export class BitgetExchange extends BaseExchange {
       timeInForce: opts.type !== OrderType.Market ? (timeInForce === 'normal' ? 'gtc' : timeInForce) : undefined,
       reduceOnly: positionMode === PositionMode.Hedged ? undefined : opts.reduceOnly ? 'yes' : 'no',
       marginMode: marginType === MarginType.Cross ? 'crossed' : 'isolated',
+      takeProfit: opts.takeProfit ? `${adjust(opts.takeProfit, pPrice)}` : undefined,
+      stopLoss: opts.stopLoss ? `${adjust(opts.stopLoss, pPrice)}` : undefined,
+      tpTriggerBy: opts.takeProfit ? this.getUtaStrategyTriggerBy(opts.tpTriggerType) : undefined,
+      slTriggerBy: opts.stopLoss ? this.getUtaStrategyTriggerBy(opts.slTriggerType) : undefined,
+      tpOrderType: opts.takeProfit ? 'market' : undefined,
+      slOrderType: opts.stopLoss ? 'market' : undefined,
     });
 
     const shouldSplit = maxSize > 0 && amount > maxSize;

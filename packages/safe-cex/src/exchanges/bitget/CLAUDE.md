@@ -26,7 +26,9 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   `/api/v3/*` after the account-type probe marks `isUta = true`.
 - Normal market/limit place and cancel use v3 payloads (`category`, `qty`,
   `posSide`, `clientOid`) and do not send v2 `productType`, `marginCoin`, or
-  `size` fields.
+  `size` fields. Attached TP/SL on normal UTA orders rides the same
+  `/api/v3/trade/place-order` request via `takeProfit` / `stopLoss`,
+  `tpTriggerBy` / `slTriggerBy`, and market strategy order types.
 - Standalone TP/SL placement, open-order fetch, and cancel use v3 strategy
   endpoints (`type: "tpsl"`; `tpslMode: "full"` without `qty`, or
   `tpslMode: "partial"` with base-coin `qty`). Bitget's docs describe both
@@ -46,9 +48,8 @@ exchange instance, so unstarted main-thread instances can still route UTA
 orders/reads correctly without racing multiple probes.
 
 Still out of scope for this slice: `bitgetinverse`, testnet UTA, trade/fill
-history, bills, trailing stops, attached TP/SL on normal UTA orders, and
-in-place modify of UTA strategy orders. Those paths must keep using Classic v2
-behavior until their own slices land.
+history, bills, trailing stops, and in-place modify of UTA strategy orders.
+Those paths must keep using Classic v2 behavior until their own slices land.
 
 UTA historical fills are intentionally short-circuited to an empty result for
 now, before any Classic v2 request is sent. Bitget's documented replacement is
@@ -696,7 +697,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
     line directly above it in `placeOrders` already had the correct
     `await Promise.all(...)` shape — match it.
 
-25. **UTA standalone TP/SL uses strategy endpoints, not normal order endpoints.** `OrderType.StopLoss` and `OrderType.TakeProfit` route to `POST /api/v3/trade/place-strategy-order` with `type: "tpsl"`. Full-position stops send `tpslMode: "full"` and no `qty`; sized stops send `tpslMode: "partial"` plus base-coin `qty`. Fetch active standalone TP/SL through `GET /api/v3/trade/unfilled-strategy-orders?type=tpsl`, and cancel them through `POST /api/v3/trade/cancel-strategy-order` without a `category`. Do not route UTA standalone stops to Classic `PLACE_ALGO_ORDER` / `CANCEL_ALGO_ORDER`; those return the UTA-vs-Classic `40085` failure. Trailing stops and in-place strategy modify remain separate, unimplemented slices.
+25. **UTA attached TP/SL and standalone TP/SL are different endpoints.** Attached TP/SL on a normal market/limit order rides `POST /api/v3/trade/place-order` as `takeProfit` / `stopLoss`, trigger fields, and market strategy order types; do not split those into separate strategy orders. Standalone `OrderType.StopLoss` and `OrderType.TakeProfit` route to `POST /api/v3/trade/place-strategy-order` with `type: "tpsl"`. Full-position standalone stops send `tpslMode: "full"` and no `qty`; sized stops send `tpslMode: "partial"` plus base-coin `qty`. Fetch active standalone TP/SL through `GET /api/v3/trade/unfilled-strategy-orders?type=tpsl`, and cancel them through `POST /api/v3/trade/cancel-strategy-order` without a `category`. Do not route UTA standalone stops to Classic `PLACE_ALGO_ORDER` / `CANCEL_ALGO_ORDER`; those return the UTA-vs-Classic `40085` failure. Trailing stops and in-place strategy modify remain separate, unimplemented slices.
 
 ## Error Handling
 
