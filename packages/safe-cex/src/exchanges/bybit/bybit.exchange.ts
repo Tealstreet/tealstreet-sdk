@@ -100,6 +100,8 @@ const PRIVATE_SNAPSHOT_REFRESH_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
+const BYBIT_TRADING_MARKETS_RETRY_DELAY_MS = 1_000;
+export const BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS = 5 * 60_000;
 // How long a just-placed order is shielded from wholesale REST order-snapshot
 // replacement while no REST/WS sighting has confirmed it. Covers api-demo's
 // order-indexing lag with margin; short enough that a phantom row for an order
@@ -116,27 +118,93 @@ const FILL_RECONCILIATION_MAX_PAGES = 20;
  * would split one issue into thousands.
  */
 export const describeBybitMarketsFailure = (cause: unknown): string => {
+  return getBybitMarketsFailureTelemetry(cause).reason;
+};
+
+const stringOrUndefined = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined);
+
+const numberOrUndefined = (value: unknown): number | undefined => {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(numeric) ? numeric : undefined;
+};
+
+export const getBybitMarketsFailureTelemetry = (cause: unknown) => {
   const err = cause as
-    | { response?: { status?: number; data?: { retMsg?: unknown } }; code?: unknown; message?: unknown }
+    | {
+        response?: { status?: number; data?: { retMsg?: unknown; ret_msg?: unknown; retCode?: unknown; ret_code?: unknown } };
+        config?: { url?: unknown; method?: unknown };
+        code?: unknown;
+        message?: unknown;
+      }
     | null
     | undefined;
 
-  const retMsg = String(err?.response?.data?.retMsg ?? '').toLowerCase();
+  const retMsg = String(err?.response?.data?.retMsg ?? err?.response?.data?.ret_msg ?? '').toLowerCase();
   const message = String(err?.message ?? '').toLowerCase();
-  const status = err?.response?.status;
+  const httpStatus = err?.response?.status;
+  const errorCode = stringOrUndefined(err?.code);
+  const retCode = numberOrUndefined(err?.response?.data?.retCode ?? err?.response?.data?.ret_code);
+  const endpoint = stringOrUndefined(err?.config?.url);
+  const method = stringOrUndefined(err?.config?.method)?.toUpperCase();
 
-  if (retMsg.includes('too many') || retMsg.includes('rate limit') || status === 429) return 'rate-limited';
-  if (retMsg.includes('banned') || status === 403) return 'blocked';
-  if (message.includes('timeout') || message.includes('timed out') || err?.code === 'ECONNABORTED') return 'timeout';
-  if (typeof status === 'number') return `HTTP ${status}`;
-  if (message.includes('network')) return 'network';
-  return 'unknown';
+  let reason = 'unknown';
+  if (retMsg.includes('too many') || retMsg.includes('rate limit') || httpStatus === 429) reason = 'rate-limited';
+  else if (retMsg.includes('banned') || httpStatus === 403) reason = 'blocked';
+  else if (message.includes('timeout') || message.includes('timed out') || errorCode === 'ECONNABORTED') reason = 'timeout';
+  else if (typeof httpStatus === 'number') reason = `HTTP ${httpStatus}`;
+  else if (message.includes('network')) reason = 'network';
+
+  return {
+    reason,
+    httpStatus,
+    errorCode,
+    retCode,
+    endpoint,
+    method,
+  };
+};
+
+const isRetryableBybitTradingMarketsFailure = (cause: unknown): boolean => {
+  const { reason, httpStatus } = getBybitMarketsFailureTelemetry(cause);
+  return (
+    reason === 'timeout' ||
+    reason === 'network' ||
+    httpStatus === 408 ||
+    (httpStatus !== undefined && httpStatus >= 500 && httpStatus < 600)
+  );
 };
 
 class BybitTradingMarketsRequestError extends Error {
-  constructor(readonly cause: unknown) {
-    super(`Failed to fetch Bybit Trading markets (${describeBybitMarketsFailure(cause)})`);
+  readonly safeCexSentryReportKey: string;
+  readonly safeCexSentryReportCooldownMs = BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS;
+  readonly safeCexSentryTags: Record<string, string | number>;
+  readonly safeCexSentryExtra: Record<string, string | number>;
+
+  constructor(
+    readonly cause: unknown,
+    retryCount = 0,
+  ) {
+    const telemetry = getBybitMarketsFailureTelemetry(cause);
+    super(`Failed to fetch Bybit Trading markets (${telemetry.reason})`);
     this.name = 'BybitTradingMarketsRequestError';
+    this.safeCexSentryReportKey = `bybit:trading-markets:${telemetry.reason}`;
+    this.safeCexSentryTags = {
+      worker_error_family: 'bybit_markets_startup',
+      bybit_markets_failure_reason: telemetry.reason,
+      bybit_markets_retry_count: retryCount,
+      ...(telemetry.httpStatus !== undefined ? { bybit_markets_http_status: telemetry.httpStatus } : {}),
+      ...(telemetry.errorCode ? { bybit_markets_error_code: telemetry.errorCode } : {}),
+      ...(telemetry.retCode !== undefined ? { bybit_markets_ret_code: telemetry.retCode } : {}),
+    };
+    this.safeCexSentryExtra = {
+      bybitMarketsFailureReason: telemetry.reason,
+      bybitMarketsRetryCount: retryCount,
+      ...(telemetry.httpStatus !== undefined ? { bybitMarketsHttpStatus: telemetry.httpStatus } : {}),
+      ...(telemetry.errorCode ? { bybitMarketsErrorCode: telemetry.errorCode } : {}),
+      ...(telemetry.retCode !== undefined ? { bybitMarketsRetCode: telemetry.retCode } : {}),
+      ...(telemetry.endpoint ? { bybitMarketsEndpoint: telemetry.endpoint } : {}),
+      ...(telemetry.method ? { bybitMarketsMethod: telemetry.method } : {}),
+    };
   }
 }
 
@@ -1323,6 +1391,33 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
+  private fetchTradingMarketsResponse = async (category: string) => {
+    try {
+      return await this.xhr.get(ENDPOINTS.MARKETS, {
+        params: { category, limit: 1000 },
+      });
+    } catch (error) {
+      if (!isRetryableBybitTradingMarketsFailure(error)) {
+        throw new BybitTradingMarketsRequestError(error);
+      }
+
+      const reason = describeBybitMarketsFailure(error);
+      this.log(
+        `Failed to fetch Bybit Trading markets (${reason}), retrying once in ${BYBIT_TRADING_MARKETS_RETRY_DELAY_MS}ms`,
+        LogSeverity.Warning,
+      );
+      await sleep(BYBIT_TRADING_MARKETS_RETRY_DELAY_MS);
+
+      try {
+        return await this.xhr.get(ENDPOINTS.MARKETS, {
+          params: { category, limit: 1000 },
+        });
+      } catch (retryError) {
+        throw new BybitTradingMarketsRequestError(retryError, 1);
+      }
+    }
+  };
+
   fetchMarketsHelper = async (category: string) => {
     const fees = this.isPublicDataOnly ? [] : await this.fetchFees(category);
 
@@ -1347,13 +1442,7 @@ export class BybitExchange extends BaseExchange {
         return [];
       });
 
-    const tradingResponse = await this.xhr
-      .get(ENDPOINTS.MARKETS, {
-        params: { category, limit: 1000 },
-      })
-      .catch((error) => {
-        throw new BybitTradingMarketsRequestError(error);
-      });
+    const tradingResponse = await this.fetchTradingMarketsResponse(category);
 
     const { data } = tradingResponse;
     if (v(data, 'retMsg') !== 'OK') {

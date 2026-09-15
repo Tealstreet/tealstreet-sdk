@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { describeBybitMarketsFailure } from './bybit.exchange';
+import { getBybitMarketsFailureTelemetry, describeBybitMarketsFailure } from './bybit.exchange';
 
 describe('describeBybitMarketsFailure', () => {
   it('names a rate limit from the retMsg', () => {
@@ -53,5 +53,30 @@ describe('describeBybitMarketsFailure', () => {
     ];
     const described = new Set(causes.map(describeBybitMarketsFailure));
     expect(described.size).toBeLessThanOrEqual(causes.length);
+  });
+
+  it('returns safe telemetry fields without exposing raw venue messages', () => {
+    const telemetry = getBybitMarketsFailureTelemetry({
+      code: 'ECONNABORTED',
+      config: { method: 'get', url: '/v5/market/instruments-info' },
+      response: {
+        status: 429,
+        data: {
+          retCode: '10006',
+          retMsg: 'Too many visits; IP(18.178.14.27) banned until 1788351953047',
+        },
+      },
+    });
+
+    expect(telemetry).toEqual({
+      reason: 'rate-limited',
+      httpStatus: 429,
+      errorCode: 'ECONNABORTED',
+      retCode: 10006,
+      endpoint: '/v5/market/instruments-info',
+      method: 'GET',
+    });
+    expect(JSON.stringify(telemetry)).not.toContain('18.178.14.27');
+    expect(JSON.stringify(telemetry)).not.toContain('1788351953047');
   });
 });

@@ -79,6 +79,55 @@ describe('Bybit market startup', () => {
     expect(log).toHaveBeenCalledWith('Failed to refresh Bybit markets, using cached markets', expect.any(String));
   });
 
+  it('retries transient Trading market failures once before completing startup', async () => {
+    vi.useFakeTimers();
+    const { exchange } = createExchange();
+    const tradingMarket = marketPayload('BTCUSDT');
+    const transientError = {
+      code: 'ERR_NETWORK',
+      config: { method: 'get', url: ENDPOINTS.MARKETS },
+      message: 'Network Error',
+    };
+    let tradingCalls = 0;
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') return Promise.resolve(ok([]));
+      tradingCalls += 1;
+      if (tradingCalls === 1) return Promise.reject(transientError);
+      return Promise.resolve(ok([tradingMarket]));
+    });
+    const log = vi.spyOn(exchange, 'log');
+
+    const marketsPromise = exchange.fetchMarkets();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(marketsPromise).resolves.toMatchObject([{ symbol: 'BTCUSDT' }]);
+    expect(tradingCalls).toBe(2);
+    expect(log).toHaveBeenCalledWith(
+      'Failed to fetch Bybit Trading markets (network), retrying once in 1000ms',
+      expect.any(String),
+    );
+  });
+
+  it('does not retry blocked or rate-limited Trading market failures', async () => {
+    const { exchange } = createExchange();
+    let tradingCalls = 0;
+
+    (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
+      expect(url).toBe(ENDPOINTS.MARKETS);
+      if (config.params.status === 'PreLaunch') return Promise.resolve(ok([]));
+      tradingCalls += 1;
+      return Promise.reject({
+        config: { method: 'get', url: ENDPOINTS.MARKETS },
+        response: { status: 429, data: { retMsg: 'too many requests' } },
+      });
+    });
+
+    await expect(exchange.fetchMarkets()).rejects.toThrow('Failed to fetch Bybit Trading markets (rate-limited)');
+    expect(tradingCalls).toBe(1);
+  });
+
   it('fails startup when the required Trading response is not OK', async () => {
     const { exchange, store } = createExchange();
     store.update({ markets: [marketPayload('ETHUSDT') as any] });
