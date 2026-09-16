@@ -49,7 +49,9 @@ orders/reads correctly without racing multiple probes.
 
 Still out of scope for this slice: `bitgetinverse`, testnet UTA, trade/fill
 history, bills, trailing stops, and in-place modify of UTA strategy orders.
-Those paths must keep using Classic v2 behavior until their own slices land.
+UTA TP/SL updates use cancel-and-replace through the v3 strategy cancel/place
+endpoints instead. The other paths must keep using Classic v2 behavior until
+their own slices land.
 
 UTA historical fills are intentionally short-circuited to an empty result for
 now, before any Classic v2 request is sent. Bitget's documented replacement is
@@ -374,9 +376,10 @@ ioc -> ImmediateOrCancel
 
 - **Normal orders** (`updateOrder`, `bitget.exchange.ts:1258-1291`): Always **cancel + re-place** (no server-side amend). The existing order is canceled, then a new order is placed with updated parameters.
 - **Virtual TP/SL orders** (`updateVirtualTpSlOrder`, `bitget.exchange.ts:1211-1256`): Cancels the parent limit order and re-places it with updated preset prices. All related orders (parent + `__stop_loss` + `__take_profit`) are found by splitting on `__`.
-- **Standalone algo orders** (`updateAlgoOrder`, `bitget.exchange.ts:1293-1334`): Uses the `UPDATE_ALGO_ORDER` endpoint for in-place modification. When `size` is empty string, it indicates a position-level stop (no specific quantity).
+- **Standalone Classic algo orders** (`updateAlgoOrder`, `bitget.exchange.ts:1293-1334`): Uses the `UPDATE_ALGO_ORDER` endpoint for in-place modification. When `size` is empty string, it indicates a position-level stop (no specific quantity).
   - If updating amount to 0, preserves the order's current size to avoid converting sized stops to position-level
   - Position-level orders (amount=0) require `payload.size = ''`
+- **Standalone UTA TP/SL orders**: Do not use in-place modify. `updateUtaStrategyOrder` formats the replacement from the existing order fields plus the requested price or amount change, then cancels via `UTA_CANCEL_STRATEGY_ORDER` and re-places through `UTA_PLACE_STRATEGY_ORDER`.
 
 ### Order Cancellation
 

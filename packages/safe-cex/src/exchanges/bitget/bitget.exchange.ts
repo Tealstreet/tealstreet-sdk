@@ -2209,9 +2209,7 @@ export class BitgetExchange extends BaseExchange {
     if (this.isAlgoOrder(order)) {
       await this.ensureAccountTypeDetected();
       if (this.usesUtaRouting) {
-        const msg = 'Bitget UTA in-place TP/SL updates are not supported yet. Cancel and replace the order instead.';
-        this.emitAndLogError(msg);
-        throw new Error(msg);
+        return this.updateUtaStrategyOrder({ order, update });
       }
       return this.updateAlgoOrder({ order, update });
     }
@@ -2243,6 +2241,33 @@ export class BitgetExchange extends BaseExchange {
 
     await this.cancelOrders([order]);
     return await this.placeOrder(newOrder);
+  };
+
+  private updateUtaStrategyOrder = async ({ order, update }: UpdateOrderOpts) => {
+    if (order.type === OrderType.TrailingStopLoss) {
+      const msg = 'Bitget UTA trailing-stop orders are not supported yet.';
+      this.emitAndLogError(msg);
+      throw new Error(msg);
+    }
+
+    const replacementOrder: Writable<PlaceOrderOpts> = {
+      symbol: order.symbol,
+      type: order.type,
+      side: order.side,
+      price: order.price,
+      amount: order.amount,
+      reduceOnly: order.reduceOnly || false,
+      timeInForce: order.timeInForce,
+    };
+
+    if ('tpTriggerType' in order) replacementOrder.tpTriggerType = order.tpTriggerType;
+    if ('slTriggerType' in order) replacementOrder.slTriggerType = order.slTriggerType;
+    if ('price' in update) replacementOrder.price = update.price;
+    if ('amount' in update) replacementOrder.amount = update.amount;
+
+    const payload = await this.formatUtaStrategyOrder(replacementOrder);
+    await this.cancelUtaStrategyOrders([order]);
+    return await this.placeUtaStrategyOrders([payload]);
   };
 
   updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {

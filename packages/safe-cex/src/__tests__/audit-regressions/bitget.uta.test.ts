@@ -709,9 +709,36 @@ describe('audit regression: Bitget UTA routing', () => {
     });
   });
 
-  it('does not route UTA TP/SL updates to Classic v2 algo modify', async () => {
+  it('updates UTA TP/SL orders by canceling and replacing through v3 strategy endpoints', async () => {
     const exchange = createExchange();
-    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+    exchange.store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 50_000,
+          leverage: 10,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 40_000,
+          positionMode: PositionMode.Hedged,
+          marginType: MarginType.Cross,
+          info: {},
+        },
+      ] as any,
+    });
+    (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: null } });
+      }
+      if (endpoint === ENDPOINTS.UTA_PLACE_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: { orderId: 'sl-2' } } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
 
     await expect(
       exchange.updateOrder({
@@ -727,12 +754,33 @@ describe('audit regression: Bitget UTA routing', () => {
           remaining: 0,
           reduceOnly: true,
           lastUpdate: Date.now(),
-          info: { orderId: 'sl-1' },
+          info: { orderId: 'sl-1', clientOid: 'client-1' },
         },
         update: { price: 48_000 },
       }),
-    ).rejects.toThrow('Bitget UTA in-place TP/SL updates are not supported yet');
+    ).resolves.toEqual(['sl-2']);
 
+    expect(exchange.unlimitedXHR.post).toHaveBeenNthCalledWith(1, ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER, {
+      orderId: 'sl-1',
+      clientOid: 'client-1',
+    });
+    expect(exchange.unlimitedXHR.post).toHaveBeenNthCalledWith(
+      2,
+      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        type: 'tpsl',
+        side: 'sell',
+        posSide: 'long',
+        tpslMode: 'partial',
+        qty: '1',
+        reduceOnly: 'yes',
+        stopLoss: '48000',
+        slTriggerBy: 'mark',
+        slOrderType: 'market',
+      }),
+    );
     expect(exchange.unlimitedXHR.post).not.toHaveBeenCalledWith(ENDPOINTS.UPDATE_ALGO_ORDER, expect.anything());
   });
 
