@@ -62,7 +62,7 @@
     "pg": "^8.23.0",
     "tcp-websocket": "^1.0.0",
     "ws": "^8.21.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
