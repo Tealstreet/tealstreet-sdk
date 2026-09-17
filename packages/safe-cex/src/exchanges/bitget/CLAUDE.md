@@ -380,6 +380,8 @@ ioc -> ImmediateOrCancel
   - If updating amount to 0, preserves the order's current size to avoid converting sized stops to position-level
   - Position-level orders (amount=0) require `payload.size = ''`
 - **Standalone UTA TP/SL orders**: Do not use in-place modify. `updateUtaStrategyOrder` formats the replacement from the existing order fields plus the requested price or amount change, then cancels via `UTA_CANCEL_STRATEGY_ORDER` and re-places through `UTA_PLACE_STRATEGY_ORDER`.
+  - The original order is snapshotted as a placeable payload **before** the cancel fires so a rollback can restore it if the replacement place call fails. Building the snapshot after the cancel would race the position state that `formatUtaStrategyOrder` reads (position size, hedge mode) and could produce an unplaceable rollback payload.
+  - On place-failure the handler attempts one best-effort rollback place; whether the rollback succeeds or not it re-throws the original place error so the caller sees the update as failed. On rollback failure the emitted error explicitly tells the user the stop is not on the book and needs to be re-added.
 
 ### Order Cancellation
 

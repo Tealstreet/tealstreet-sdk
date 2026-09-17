@@ -784,6 +784,210 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(exchange.unlimitedXHR.post).not.toHaveBeenCalledWith(ENDPOINTS.UPDATE_ALGO_ORDER, expect.anything());
   });
 
+  it('updates the qty on the replacement payload when the caller changes amount instead of price', async () => {
+    // Mirror of the price-update path: the amount branch must reach the
+    // replacement payload as `qty`, not silently regress to the position size.
+    const exchange = createExchange();
+    exchange.store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 50_000,
+          leverage: 10,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 40_000,
+          positionMode: PositionMode.Hedged,
+          marginType: MarginType.Cross,
+          info: {},
+        },
+      ] as any,
+    });
+    (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: null } });
+      }
+      if (endpoint === ENDPOINTS.UTA_PLACE_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: { orderId: 'sl-2' } } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'sl-1',
+          symbol: 'BTCUSDT',
+          status: OrderStatus.Open,
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49_000,
+          amount: 1,
+          filled: 0,
+          remaining: 1,
+          reduceOnly: true,
+          lastUpdate: Date.now(),
+          info: { orderId: 'sl-1', clientOid: 'client-1' },
+        },
+        update: { amount: 0.5 },
+      }),
+    ).resolves.toEqual(['sl-2']);
+
+    const placeCall = (exchange.unlimitedXHR.post as any).mock.calls.find(
+      ([endpoint]: [string]) => endpoint === ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
+    );
+    expect(placeCall?.[1]).toEqual(
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        type: 'tpsl',
+        side: 'sell',
+        posSide: 'long',
+        tpslMode: 'partial',
+        qty: '0.5',
+        // Price was not part of the update; the original trigger must be preserved.
+        stopLoss: '49000',
+      }),
+    );
+  });
+
+  it('rolls back to the original stop when the replacement place call fails', async () => {
+    // Regression: cancel-and-replace has no in-place amend. If cancel succeeds
+    // and place fails, updateUtaStrategyOrder must attempt to re-place the
+    // original stop so the user is not left unprotected. The place error is
+    // still re-thrown so the caller knows the update did not land.
+    const exchange = createExchange();
+    exchange.store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 50_000,
+          leverage: 10,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 40_000,
+          positionMode: PositionMode.Hedged,
+          marginType: MarginType.Cross,
+          info: {},
+        },
+      ] as any,
+    });
+
+    const placePayloads: Array<Record<string, any>> = [];
+    (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string, payload: Record<string, any>) => {
+      if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: null } });
+      }
+      if (endpoint === ENDPOINTS.UTA_PLACE_STRATEGY_ORDER) {
+        placePayloads.push(payload);
+        // First place is the replacement (fails), second place is the rollback (succeeds).
+        if (placePayloads.length === 1) {
+          return Promise.resolve({ data: { code: '40808', msg: 'insufficient margin', data: null } });
+        }
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: { orderId: 'sl-restored' } } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'sl-1',
+          symbol: 'BTCUSDT',
+          status: OrderStatus.Open,
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49_000,
+          amount: 0,
+          filled: 0,
+          remaining: 0,
+          reduceOnly: true,
+          lastUpdate: Date.now(),
+          info: { orderId: 'sl-1', clientOid: 'client-1' },
+        },
+        update: { price: 48_000 },
+      }),
+    ).rejects.toThrow('insufficient margin');
+
+    expect(placePayloads).toHaveLength(2);
+    // Replacement attempted with the updated price
+    expect(placePayloads[0]).toEqual(expect.objectContaining({ stopLoss: '48000' }));
+    // Rollback attempted with the ORIGINAL price
+    expect(placePayloads[1]).toEqual(expect.objectContaining({ stopLoss: '49000' }));
+    // User is informed the update failed but the original stop is restored
+    expect(emitAndLogError.mock.calls.some(([msg]) => String(msg).includes('Original stop was restored'))).toBe(true);
+  });
+
+  it('emits an actionable "please re-add" error when both the replacement and the rollback fail', async () => {
+    // If cancel succeeds, replacement fails, AND rollback fails, the user
+    // truly has no stop on the book. Silence is unacceptable here.
+    const exchange = createExchange();
+    exchange.store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 50_000,
+          leverage: 10,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 40_000,
+          positionMode: PositionMode.Hedged,
+          marginType: MarginType.Cross,
+          info: {},
+        },
+      ] as any,
+    });
+
+    (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '00000', msg: 'success', data: null } });
+      }
+      if (endpoint === ENDPOINTS.UTA_PLACE_STRATEGY_ORDER) {
+        return Promise.resolve({ data: { code: '40808', msg: 'insufficient margin', data: null } });
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'sl-1',
+          symbol: 'BTCUSDT',
+          status: OrderStatus.Open,
+          type: OrderType.StopLoss,
+          side: OrderSide.Sell,
+          price: 49_000,
+          amount: 0,
+          filled: 0,
+          remaining: 0,
+          reduceOnly: true,
+          lastUpdate: Date.now(),
+          info: { orderId: 'sl-1', clientOid: 'client-1' },
+        },
+        update: { price: 48_000 },
+      }),
+    ).rejects.toThrow('insufficient margin');
+
+    expect(
+      emitAndLogError.mock.calls.some(([msg]) =>
+        String(msg).includes('Your stop is not on the book — please re-add it.'),
+      ),
+    ).toBe(true);
+  });
+
   it('subscribes and routes UTA private WS topics', async () => {
     const exchange = createExchange();
     const ws = exchange.privateWebsocket as any;

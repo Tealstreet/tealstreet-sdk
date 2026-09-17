@@ -2250,7 +2250,42 @@ export class BitgetExchange extends BaseExchange {
       throw new Error(msg);
     }
 
-    const replacementOrder: Writable<PlaceOrderOpts> = {
+    // Snapshot the original as a placeable payload BEFORE cancel, so a
+    // rollback on place-failure can restore the stop the user thought they
+    // had. UTA has no in-place amend, and a naive cancel+place pattern will
+    // silently strand the user without a stop if the replacement fails
+    // (rate limit, min-notional, size guard, position closed between calls).
+    const originalPayload = await this.formatUtaStrategyOrder(this.buildUtaStrategyPlaceOptsFromOrder(order));
+
+    const replacementOpts = this.buildUtaStrategyPlaceOptsFromOrder(order);
+    if ('price' in update) replacementOpts.price = update.price;
+    if ('amount' in update) replacementOpts.amount = update.amount;
+    const replacementPayload = await this.formatUtaStrategyOrder(replacementOpts);
+
+    await this.cancelUtaStrategyOrders([order]);
+    try {
+      return await this.placeUtaStrategyOrders([replacementPayload]);
+    } catch (placeErr: any) {
+      // Cancel already succeeded — the user has no live stop right now. Try
+      // to restore the original as a best-effort rollback. Whether or not the
+      // rollback succeeds we surface the original place failure so the caller
+      // knows the requested update did not land.
+      try {
+        await this.placeUtaStrategyOrders([originalPayload]);
+        this.emitAndLogError(
+          `Bitget UTA update failed: ${placeErr?.message || 'place failed'}. Original stop was restored; please retry the update.`,
+        );
+      } catch (rollbackErr: any) {
+        this.emitAndLogError(
+          `Bitget UTA update failed and rollback also failed: ${placeErr?.message || 'place failed'} / ${rollbackErr?.message || 'rollback failed'}. Your stop is not on the book — please re-add it.`,
+        );
+      }
+      throw placeErr;
+    }
+  };
+
+  private buildUtaStrategyPlaceOptsFromOrder = (order: Order): Writable<PlaceOrderOpts> => {
+    const opts: Writable<PlaceOrderOpts> = {
       symbol: order.symbol,
       type: order.type,
       side: order.side,
@@ -2259,15 +2294,9 @@ export class BitgetExchange extends BaseExchange {
       reduceOnly: order.reduceOnly || false,
       timeInForce: order.timeInForce,
     };
-
-    if ('tpTriggerType' in order) replacementOrder.tpTriggerType = order.tpTriggerType;
-    if ('slTriggerType' in order) replacementOrder.slTriggerType = order.slTriggerType;
-    if ('price' in update) replacementOrder.price = update.price;
-    if ('amount' in update) replacementOrder.amount = update.amount;
-
-    const payload = await this.formatUtaStrategyOrder(replacementOrder);
-    await this.cancelUtaStrategyOrders([order]);
-    return await this.placeUtaStrategyOrders([payload]);
+    if ('tpTriggerType' in order) opts.tpTriggerType = order.tpTriggerType;
+    if ('slTriggerType' in order) opts.slTriggerType = order.slTriggerType;
+    return opts;
   };
 
   updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
