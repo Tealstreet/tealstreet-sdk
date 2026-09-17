@@ -49,7 +49,12 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
       }
     } catch (err: any) {
       this.emitAndLogError(err?.message || 'Coinbase private WebSocket subscription signing failed');
-      this.forceClose();
+      // A transient signing failure (remote signer offline, brief network blip)
+      // must not permanently wedge the private WS. Close the socket so the base
+      // reconnect path (with exponential backoff and failure-streak circuit
+      // breaker) can retry, instead of `forceClose()` which sets
+      // `forceClosed=true` and skips reconnect until an explicit `forceOpen()`.
+      this.ws?.close();
     }
   };
 

@@ -103,4 +103,29 @@ describe('Coinbase private WebSocket auth', () => {
       'Coinbase private WebSocket requires an API key and signing secret',
     );
   });
+
+  it('closes but does not force-close when subscribe-time signing fails, so backoff can reconnect', async () => {
+    // Regression: a transient remote-signer failure must not set `forceClosed=true`,
+    // which would permanently skip reconnect in `base.ws.ts` until an explicit
+    // `forceOpen()` call. See `coinbase.ws-private.ts` onOpen catch block.
+    const remoteSigner = {
+      accountName: 'hosted-account',
+      sign: vi.fn(async () => ({ id: 'x', error: 'remote signer offline' })),
+      isAvailable: () => true,
+      onAvailabilityChange: () => () => undefined,
+    } satisfies RemoteSigner;
+    const { exchange, websocket } = createSubject({ secret: '', remoteSigner });
+
+    const close = vi.fn();
+    (websocket as any).ws = { close };
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const forceClose = vi.spyOn(websocket, 'forceClose');
+
+    await websocket.onOpen();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(forceClose).not.toHaveBeenCalled();
+    expect((websocket as any).forceClosed).toBeFalsy();
+    expect(emitAndLogError.mock.calls[0]?.[0]).toContain('remote signer offline');
+  });
 });

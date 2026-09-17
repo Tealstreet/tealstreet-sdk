@@ -481,6 +481,8 @@ Both `user` and `heartbeats` channels are subscribed sequentially in a loop, eac
 
 - On open, calls `subscribe()` to re-authenticate
 - If `ENABLE_RECONNECTING_WEBSOCKET` is true, calls `this.parent.fetchAndSetPrivateSnapshot()` (which is a no-op for Coinbase)
+- If per-channel JWT signing throws (remote-signer offline, brief network blip), the handler closes the socket via `this.ws?.close()` — never `forceClose()`. `forceClose()` sets `forceClosed=true` and the base reconnect path in `base.ws.ts` refuses to reconnect until an explicit `forceOpen()`; a plain `close()` lets the exponential-backoff/failure-streak circuit breaker retry, which is the right posture for a transient hosted-signer glitch.
+- A monotonic `subscriptionAttempt` counter guards `subscribe()` and `onOpen`: a stale in-flight JWT from a previous socket generation is dropped instead of being sent on a fresh socket.
 
 **Grafana logging**: If `ENABLE_PWS_LOG` is true (default), every private WebSocket message is emitted as `'grafana-pws'` event (`coinbase.ws-private.ts`)
 
