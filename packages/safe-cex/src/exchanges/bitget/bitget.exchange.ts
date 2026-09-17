@@ -168,6 +168,11 @@ export class BitgetExchange extends BaseExchange {
 
   private _planTypePositionsCache: { at: number; value: Position[] } | null = null;
   private _planTypePositionsInflight: Promise<Position[]> | null = null;
+  private _suppressBitgetValidationErrorEmission = false;
+
+  get suppressBitgetValidationErrorEmission(): boolean {
+    return this._suppressBitgetValidationErrorEmission;
+  }
 
   // private leverageHash: Record<string, number> = {};
 
@@ -260,6 +265,8 @@ export class BitgetExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
+    const previousSuppressValidationErrorEmission = this._suppressBitgetValidationErrorEmission;
+    this._suppressBitgetValidationErrorEmission = true;
     try {
       await this.ensureAccountTypeDetected();
       // fetchBalance hits the BALANCE endpoint (validating the key) and throws on
@@ -274,12 +281,12 @@ export class BitgetExchange extends BaseExchange {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';
         const suggestedMode = this.options.testnet ? 'Live/Production' : 'Demo/Testnet';
         const helpfulMsg = `API key environment mismatch: Your API key appears to be for ${suggestedMode} trading, but Tealstreet is configured for ${currentMode}. Please check your Testnet setting.`;
-        this.emitAndLogError(helpfulMsg);
         return { error: helpfulMsg };
       }
 
-      this.emitAndLogError(errorMsg);
       return { error: errorMsg || 'Invalid API key or secret' };
+    } finally {
+      this._suppressBitgetValidationErrorEmission = previousSuppressValidationErrorEmission;
     }
   };
 

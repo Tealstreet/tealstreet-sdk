@@ -29,6 +29,9 @@ const shouldSilenceBitgetResponseError = (code: string, message: unknown, url?: 
   (typeof message === 'string' && message.toLowerCase().includes('environment is incorrect')) ||
   (url?.includes(ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) === true && isBitgetUtaStrategyOrderNotFound(message));
 
+const shouldSuppressValidationErrorEmission = (exchange: BaseExchange): boolean =>
+  (exchange as { suppressBitgetValidationErrorEmission?: boolean }).suppressBitgetValidationErrorEmission === true;
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
 
@@ -102,7 +105,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     if (response.data && !v(response.data, 'data') && v(response.data, 'code') !== '00000') {
       const code = String(v(response.data, 'code') ?? '');
       const message = v(response.data, 'msg');
-      if (message && !shouldSilenceBitgetResponseError(code, message, response.config?.url)) {
+      if (
+        message &&
+        !shouldSuppressValidationErrorEmission(exchange) &&
+        !shouldSilenceBitgetResponseError(code, message, response.config?.url)
+      ) {
         exchange.emitAndLogError(appendHttpFailure(String(message), response));
       }
     }
