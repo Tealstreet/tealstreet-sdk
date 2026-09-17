@@ -2,6 +2,11 @@ import { CoinbaseExchange } from './coinbase.exchange';
 import type { LIST_PORTFOLIOS_RESPONSE } from './coinbase.types';
 import { ENDPOINTS } from './coinbase.types';
 
+const shouldRethrowPortfolioProbeError = (err: any) => {
+  const status = err?.response?.status;
+  return status === 429 || status >= 500 || status === undefined;
+};
+
 export class CoinbaseSpotExchange extends CoinbaseExchange {
   supportSpot = true;
 
@@ -14,7 +19,15 @@ export class CoinbaseSpotExchange extends CoinbaseExchange {
   };
 
   findSelectedPortfolio = async (): Promise<LIST_PORTFOLIOS_RESPONSE['portfolios'][0]> => {
-    const portfolios = await this.fetchPortfolios();
+    let portfolios: LIST_PORTFOLIOS_RESPONSE['portfolios'];
+    try {
+      const { data } = await this.xhr.get<LIST_PORTFOLIOS_RESPONSE>(ENDPOINTS.LIST_PORTFOLIOS);
+      portfolios = data.portfolios;
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      throw err;
+    }
+
     for (const portfolio of portfolios) {
       if (portfolio.type === 'INTX') continue;
 
@@ -25,7 +38,11 @@ export class CoinbaseSpotExchange extends CoinbaseExchange {
           },
         });
         return portfolio;
-      } catch {
+      } catch (err: any) {
+        if (shouldRethrowPortfolioProbeError(err)) {
+          this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+          throw err;
+        }
         // Keep probing; spot accounts must not fall through to CFM detection.
       }
     }

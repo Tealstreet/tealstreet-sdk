@@ -52,6 +52,49 @@ describe('Coinbase Spot stays isolated from futures endpoints', () => {
     });
   });
 
+  it('preserves a portfolio-list 429 as a rate-limit failure instead of reporting missing permissions', async () => {
+    const exchange = makeExchange();
+    const rateLimitError = new Error('GET /api/v3/brokerage/portfolios failed with 429') as Error & {
+      response?: { status: number };
+    };
+    rateLimitError.response = { status: 429 };
+    const get = vi.fn().mockRejectedValue(rateLimitError);
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.findSelectedPortfolio()).rejects.toThrow('GET /api/v3/brokerage/portfolios failed with 429');
+    expect(emitAndLogError.mock.calls[0]?.[0]).toBe(rateLimitError);
+    expect(
+      emitAndLogError.mock.calls.some(([message]) => message === 'No Coinbase spot portfolio with permissions found'),
+    ).toBe(false);
+  });
+
+  it('preserves a portfolio-breakdown 429 instead of treating it as a permissions miss', async () => {
+    const exchange = makeExchange();
+    const rateLimitError = new Error('GET /api/v3/brokerage/portfolios/{portfolio_uuid} failed with 429') as Error & {
+      response?: { status: number };
+    };
+    rateLimitError.response = { status: 429 };
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          portfolios: [{ name: 'Default', uuid: 'spot-portfolio', type: 'DEFAULT', deleted: false }],
+        },
+      })
+      .mockRejectedValueOnce(rateLimitError);
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    exchange.xhr = { get } as any;
+
+    await expect(exchange.findSelectedPortfolio()).rejects.toThrow(
+      'GET /api/v3/brokerage/portfolios/{portfolio_uuid} failed with 429',
+    );
+    expect(emitAndLogError.mock.calls[0]?.[0]).toBe(rateLimitError);
+    expect(
+      emitAndLogError.mock.calls.some(([message]) => message === 'No Coinbase spot portfolio with permissions found'),
+    ).toBe(false);
+  });
+
   it('fetches only spot products for ticker search instead of failing the whole market load on CFM 429s', async () => {
     const exchange = makeExchange();
     exchange.selectedPortfolio = { name: 'Default', uuid: 'spot-portfolio', type: 'DEFAULT', deleted: false };
