@@ -38,7 +38,6 @@ import { adjust, multiply, round } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
 import { createAPI } from './coinbase.api';
-import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
   BALANCE_RESPONSE,
   BALANCE_RESPONSE_CFM,
@@ -49,7 +48,6 @@ import {
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   INTX_INSTRUMENTS_RESPONSE,
-  LIST_ORDERS_RESPONSE,
   LIST_PORTFOLIOS_RESPONSE,
   LIST_POSITIONS_CFM_RESPONSE,
   LIST_POSITIONS_INTX_RESPONSE,
@@ -59,24 +57,12 @@ import {
   PLACE_ORDER_RESPONSE,
   PORTFOLIO_BREAKDOWN_RESPONSE,
 } from './coinbase.types';
-import {
-  normalizeCfmContractSize,
-  normalizeCoinbaseUsdEquivalentProductId,
-  resolveCoinbaseUsdEquivalentMarket,
-  sign,
-} from './coinbase.utils';
+import { normalizeCfmContractSize, sign } from './coinbase.utils';
 import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
 import { CoinbasePublicWebsocket } from './coinbase.ws-public';
 
 const COINBASE_UNSIGNED_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const COINBASE_ZERO_DECIMAL = /^0(?:\.0+)?$/;
-const COINBASE_OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED'];
-const COINBASE_ORDER_PAGE_LIMIT = 100;
-const COINBASE_ORDER_POLL_INTERVAL_MS = 10_000;
-// REST replication for a freshly placed order can lag WS by a few hundred ms.
-// Preserve open WS-only orders whose lastUpdate is within this window so a
-// snapshot poll doesn't briefly evict them from the store on a race.
-const COINBASE_ORDER_REST_LAG_TOLERANCE_MS = 5_000;
 
 const isCoinbaseUnsignedDecimal = (value: unknown): value is string =>
   typeof value === 'string' && COINBASE_UNSIGNED_DECIMAL.test(value);
@@ -95,7 +81,6 @@ export class CoinbaseExchange extends BaseExchange {
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
   selectedPortfolio: LIST_PORTFOLIOS_RESPONSE['portfolios'][0] | null = null;
-  private lastOrdersPollAt = 0;
 
   supportSpot = true;
 
@@ -185,9 +170,7 @@ export class CoinbaseExchange extends BaseExchange {
     //
     // start ticking live data
     // balance, tickers, positions
-    if (!this.selectedPortfolio) {
-      this.selectedPortfolio = await this.findSelectedPortfolio();
-    }
+    this.selectedPortfolio = await this.findSelectedPortfolio();
     if (this.isDisposed) return;
 
     await this.tick();
@@ -269,19 +252,6 @@ export class CoinbaseExchange extends BaseExchange {
           positions,
           loaded: { ...this.store.loaded, positions: true },
         });
-
-        if (this.shouldPollOrders()) {
-          try {
-            const orders = await this.fetchOpenOrdersSnapshot();
-            if (this.isDisposed) return;
-            this.store.update({
-              orders: this.mergeRestOrdersWithFreshWsState(orders),
-              loaded: { ...this.store.loaded, orders: true },
-            });
-          } catch (err: any) {
-            this.emitOrdersFetchError(err);
-          }
-        }
       } catch (err: any) {
         this.emitAndLogError(err, err?.message);
       }
@@ -290,49 +260,6 @@ export class CoinbaseExchange extends BaseExchange {
         loop(() => this.tick(), this.getTickInterval());
       }
     }
-  };
-
-  private shouldPollOrders = () => {
-    if (this.store.loaded.orders) {
-      return false;
-    }
-
-    const now = Date.now();
-    if (this.lastOrdersPollAt === 0 || now - this.lastOrdersPollAt >= COINBASE_ORDER_POLL_INTERVAL_MS) {
-      this.lastOrdersPollAt = now;
-      return true;
-    }
-    return false;
-  };
-
-  /**
-   * Merge a REST orders snapshot with any WS-only in-flight orders currently in
-   * the store. Freshly placed orders often reach us over WS before Coinbase's
-   * REST listing catches up; a wholesale replace briefly evicts them until the
-   * next WS event or poll. We preserve store orders that (a) are missing from
-   * the REST snapshot, (b) are still Open, and (c) were last updated within
-   * `COINBASE_ORDER_REST_LAG_TOLERANCE_MS` — anything older than that we treat
-   * as authoritatively gone from REST's point of view.
-   */
-  private mergeRestOrdersWithFreshWsState = (restOrders: Order[]): Order[] => {
-    const restIds = new Set(restOrders.map((order) => order.id));
-    const now = Date.now();
-    const preservedInFlight = this.store.orders.filter(
-      (existing) =>
-        !restIds.has(existing.id) &&
-        existing.status === OrderStatus.Open &&
-        now - existing.lastUpdate < COINBASE_ORDER_REST_LAG_TOLERANCE_MS,
-    );
-    if (preservedInFlight.length === 0) return restOrders;
-    return [...restOrders, ...preservedInFlight];
-  };
-
-  private emitOrdersFetchError = (err: any) => {
-    this.emitAndLogError(err, err?.response?.data?.message || err?.message);
-  };
-
-  private resolveMarketByCoinbaseProductId = (productId: string): Market | undefined => {
-    return resolveCoinbaseUsdEquivalentMarket(productId, this.store.marketsById);
   };
 
   getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
@@ -1064,86 +991,6 @@ export class CoinbaseExchange extends BaseExchange {
     }
   };
 
-  fetchOrders = async (): Promise<Order[]> => {
-    try {
-      return await this.fetchOpenOrdersSnapshot();
-    } catch (err: any) {
-      this.emitOrdersFetchError(err);
-      throw err;
-    }
-  };
-
-  private fetchOpenOrdersSnapshot = async (): Promise<Order[]> => {
-    if (this.isPublicDataOnly) {
-      return [];
-    }
-
-    const supportedTypes = await this.getSupportedTypes();
-    const requests = supportedTypes.map((type) => ({
-      product_type: type === 'spot' ? 'SPOT' : 'FUTURE',
-      ...(type === 'cfm' ? { contract_expiry_type: 'EXPIRING' } : {}),
-      ...(type === 'intx' ? { contract_expiry_type: 'PERPETUAL' } : {}),
-    }));
-
-    const ordersById = new Map<string, Order>();
-    // A single poll can produce hundreds of skip messages if a product is
-    // missing from the store or if a REST shape is unsupported (common for
-    // spot products, in-flight edits, and preview markets). Aggregate the
-    // counts by product_id and reason and emit at most one summary line per
-    // reason per poll, rather than one error per order per 10s tick.
-    const missingMarketByProduct = new Map<string, number>();
-    const unsupportedShapeByProduct = new Map<string, number>();
-
-    for (const request of requests) {
-      let cursor: string | undefined;
-      do {
-        const { data } = await this.xhr.get<LIST_ORDERS_RESPONSE>(ENDPOINTS.LIST_ORDERS, {
-          params: {
-            ...request,
-            order_status: COINBASE_OPEN_ORDER_STATUSES,
-            limit: COINBASE_ORDER_PAGE_LIMIT,
-            ...(cursor ? { cursor } : {}),
-          },
-        });
-        for (const rawOrder of data.orders) {
-          const market = this.resolveMarketByCoinbaseProductId(rawOrder.product_id);
-          if (!market) {
-            missingMarketByProduct.set(
-              rawOrder.product_id,
-              (missingMarketByProduct.get(rawOrder.product_id) ?? 0) + 1,
-            );
-            continue;
-          }
-          const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
-          if (!order) {
-            unsupportedShapeByProduct.set(
-              rawOrder.product_id,
-              (unsupportedShapeByProduct.get(rawOrder.product_id) ?? 0) + 1,
-            );
-            continue;
-          }
-          ordersById.set(order.id, order);
-        }
-        cursor = data.has_next ? data.cursor : undefined;
-      } while (cursor);
-    }
-
-    if (missingMarketByProduct.size > 0) {
-      const summary = Array.from(missingMarketByProduct.entries())
-        .map(([productId, count]) => `${productId} (${count})`)
-        .join(', ');
-      this.emitAndLogError(`Coinbase orders skipped, missing market: ${summary}`);
-    }
-    if (unsupportedShapeByProduct.size > 0) {
-      const summary = Array.from(unsupportedShapeByProduct.entries())
-        .map(([productId, count]) => `${productId} (${count})`)
-        .join(', ');
-      this.emitAndLogError(`Coinbase orders skipped, unsupported REST shape: ${summary}`);
-    }
-
-    return Array.from(ordersById.values());
-  };
-
   fetchOpenPositionsIntx = async () => {
     if (!this.selectedPortfolio || this.selectedPortfolio.type !== 'INTX') {
       this.emitAndLogError('No INTX portfolio found');
@@ -1215,7 +1062,7 @@ export class CoinbaseExchange extends BaseExchange {
 
     const { data } = await this.xhr.get<CANDLES_RESPONSE>(ENDPOINTS.KLINE, {
       params: {
-        product_id: normalizeCoinbaseUsdEquivalentProductId(opts.symbol),
+        product_id: opts.symbol,
         granularity,
         start: Math.round(start.valueOf() / 1000),
         end: Math.round(end.valueOf() / 1000),
@@ -1330,16 +1177,13 @@ export class CoinbaseExchange extends BaseExchange {
     const rawStopPrice = raw?.stop_price;
     const hasNoTrigger =
       typeof rawStopPrice === 'string' && (rawStopPrice === '' || isCoinbaseZeroDecimal(rawStopPrice));
-    const rawProductMatchesMarket =
-      typeof rawProductId === 'string' &&
-      (rawProductId === market.id ||
-        normalizeCoinbaseUsdEquivalentProductId(rawProductId) === normalizeCoinbaseUsdEquivalentProductId(market.id));
     if (
       canonicalOrder.status !== OrderStatus.Open ||
       canonicalOrder.type !== OrderType.Limit ||
       typeof rawOrderId !== 'string' ||
       rawOrderId !== canonicalOrder.id ||
-      !rawProductMatchesMarket ||
+      typeof rawProductId !== 'string' ||
+      rawProductId !== market.id ||
       typeof rawStatus !== 'string' ||
       rawStatus !== 'OPEN' ||
       typeof rawType !== 'string' ||
@@ -1642,4 +1486,6 @@ export class CoinbaseExchange extends BaseExchange {
     //
     // return payloads;
   };
+
+  fetchAndSetPrivateSnapshot = async () => {};
 }

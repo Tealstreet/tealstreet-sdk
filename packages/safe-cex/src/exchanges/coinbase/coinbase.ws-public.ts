@@ -9,7 +9,6 @@ import { updateOrderBook } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
 import type { CoinbaseExchange } from './coinbase.exchange';
 import { BASE_WS_URL, CANDLE_EVENT, LEVEL2_EVENT, TRADE_EVENT } from './coinbase.types';
-import { normalizeCoinbaseUsdEquivalentProductId } from './coinbase.utils';
 
 export type Data = Record<string, any>;
 type MessageHandlers = {
@@ -143,7 +142,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
           });
         }
         for (let [symbol, candles] of Object.entries(updatesBySymbol)) {
-          symbol = normalizeCoinbaseUsdEquivalentProductId(symbol);
+          symbol = symbol.replace('USDC', 'USD'); // coinbase USDC book is fake and is really USD
           const handler = `candles.${symbol}`;
           const callbacks = this.messageHandlers[handler];
           if (!callbacks?.length) continue;
@@ -186,7 +185,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const symbol = normalizeCoinbaseUsdEquivalentProductId(opts.symbol);
+    const symbol = opts.symbol.replace('USDC', 'USD'); // coinbase USDC book is fake and is really USD
     // {
     //   "type": "subscribe",
     //   "product_ids": [
@@ -294,7 +293,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
         if (shouldSubscribe) {
           const payload = {
             type: 'subscribe',
-            product_ids: [symbol],
+            product_ids: [opts.symbol],
             channel: 'candles',
           };
           this.send(JSON.stringify(payload));
@@ -308,7 +307,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
           if (shouldSubscribeSecondary) {
             const secondaryPayload = {
               type: 'subscribe',
-              product_ids: [symbol],
+              product_ids: [opts.symbol],
               channel: 'market_trades',
             };
             this.send(JSON.stringify(secondaryPayload));
@@ -335,7 +334,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
       if (this.isConnected && !this.messageHandlers[handler].length) {
         const payload = {
           type: 'unsubscribe',
-          product_ids: [symbol],
+          product_ids: [opts.symbol],
           channel: 'candles',
         };
         this.send(JSON.stringify(payload));
@@ -344,7 +343,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
       if (this.isConnected && !this.messageHandlers[secondaryHandler].length) {
         const secondaryPayload = {
           type: 'unsubscribe',
-          product_ids: [symbol],
+          product_ids: [opts.symbol],
           channel: 'market_trades',
         };
         this.send(JSON.stringify(secondaryPayload));
@@ -367,7 +366,7 @@ export class CoinbasePublicWebsocket extends BaseWebSocket<CoinbaseExchange> {
   };
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
-    symbol = normalizeCoinbaseUsdEquivalentProductId(symbol);
+    symbol = symbol.replace('USDC', 'USD'); // coinbase USDC book is fake and is really USD
     const topic = `level2.${symbol}`;
     const handler = `level2.${symbol}`;
 

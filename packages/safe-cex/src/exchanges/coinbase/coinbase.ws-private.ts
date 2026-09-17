@@ -4,11 +4,10 @@ import {
   formatOrderState,
   formatOrderType,
   normalizeCfmContractSize,
-  resolveCoinbaseUsdEquivalentMarket,
   sign,
 } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
-import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
-import { ENABLE_PWS_LOG } from '../../config/config';
+import { Order, OrderSide } from '@tealstreet/safe-cex/src/types';
+import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { add, multiply } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -45,14 +44,12 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     try {
       await this.subscribe(attempt);
       if (this.isDisposed || attempt !== this.subscriptionAttempt) return;
+      if (ENABLE_RECONNECTING_WEBSOCKET) {
+        this.parent.fetchAndSetPrivateSnapshot();
+      }
     } catch (err: any) {
       this.emitAndLogError(err?.message || 'Coinbase private WebSocket subscription signing failed');
-      // A transient signing failure (remote signer offline, brief network blip)
-      // must not permanently wedge the private WS. Close the socket so the base
-      // reconnect path (with exponential backoff and failure-streak circuit
-      // breaker) can retry, instead of `forceClose()` which sets
-      // `forceClosed=true` and skips reconnect until an explicit `forceOpen()`.
-      this.ws?.close();
+      this.forceClose();
     }
   };
 
@@ -64,9 +61,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
       }
 
       const json = JSON.parse(data);
-      if (json.type === 'error' || json.error) {
-        this.emitAndLogError(json.message || json.error?.message || 'Coinbase private WebSocket error');
-      } else if (json.channel === 'user') {
+      if (json.channel === 'user') {
         this.handleUserEvent(json);
       } else if (json.channel === 'heartbeats') {
         this.handlePongEvent();
@@ -93,7 +88,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     for (const order of data.orders) {
       const filledNative = parseFloat(order.cumulative_quantity);
       const remainingNative = parseFloat(order.leaves_quantity);
-      const market = this.resolveOrderMarket(order.product_id);
+      const market = this.store.marketsById[order.product_id];
       if (!market) {
         this.emitAndLogError(`Coinbase order skipped: missing market for ${order.product_id}`);
         continue;
@@ -110,7 +105,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         id: order.order_id,
         parentId: order.client_order_id,
         status: formatOrderState(order.status),
-        symbol: market.symbol,
+        symbol: order.product_id,
         type: formatOrderType(order.order_type),
         side: order.order_side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
         price: parseFloat(order.stop_price || order.limit_price || '0'),
@@ -151,10 +146,6 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   };
 
   handlePositionTopic = (_data: Array<Record<string, any>>) => {};
-
-  private resolveOrderMarket = (productId: string): Market | undefined => {
-    return resolveCoinbaseUsdEquivalentMarket(productId, this.store.marketsById);
-  };
 
   private subscribe = async (attempt: number) => {
     for (const channel of ['user', 'heartbeats']) {

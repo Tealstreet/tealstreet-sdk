@@ -46,30 +46,6 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private wsPositionUpdatedAtById = new Map<string, number>();
   private readonly positionRestStaleGuardMs = 5_000;
 
-  private normalizeOrderStatus = (status: unknown): string => String(status ?? '').toLowerCase().replace(/-/g, '_');
-
-  private getRawOrderStatus = (order: Record<string, any>): string =>
-    this.normalizeOrderStatus(order.status ?? order.state ?? order.planStatus ?? order.orderStatus);
-
-  /**
-   * The shared `ORDER_STATUS` map treats several strings as `OrderStatus.Closed`,
-   * including `success` and `executed`. Those two are ambiguous on Bitget WS —
-   * they appear on non-fill acknowledgements (successful cancel/modify frames)
-   * for some topics — and firing `emit('fill', ...)` plus `throttledFetchPositions`
-   * on them causes phantom fills and unnecessary REST reconciliation storms.
-   * Only the explicit fill statuses trigger fill emission and position/balance
-   * refetches; other closed statuses still flow through `updateOrderStatus` +
-   * `markOrderAsTerminal` so the local order row transitions correctly.
-   */
-  private static readonly BITGET_TERMINAL_FILL_STATUSES: ReadonlySet<string> = new Set([
-    'triggered',
-    'filled',
-    'full_fill',
-  ]);
-
-  private isTerminalFillStatus = (normalizedStatus: string): boolean =>
-    BitgetPrivateWebsocket.BITGET_TERMINAL_FILL_STATUSES.has(normalizedStatus);
-
   private toFiniteNumber = (value: unknown, fallback = 0): number => {
     if (typeof value === 'number') {
       return Number.isFinite(value) ? value : fallback;
@@ -273,18 +249,16 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     const rawOrders = data.data;
 
     for (const rawOrder of rawOrders) {
-      const normalizedStatus = this.getRawOrderStatus(rawOrder);
-      const mappedStatus = ORDER_STATUS[normalizedStatus];
+      const normalizedStatus = String(rawOrder.status || '').toLowerCase();
       const isPartialFill =
+        normalizedStatus === 'partial-fill' ||
         normalizedStatus === 'partial_fill' ||
         normalizedStatus === 'partially_filled';
-      // Only explicit fill statuses count as fills for emission and reconciliation.
-      // `success` / `executed` may map to Closed but are frequently non-fill acks.
-      const isFullFill = this.isTerminalFillStatus(normalizedStatus);
+      const isFullFill =
+        normalizedStatus === 'filled' || normalizedStatus === 'full-fill' || normalizedStatus === 'full_fill';
 
       const orders = this.parent.mapOrder({
         ...rawOrder,
-        status: normalizedStatus || rawOrder.status,
         // invert side for hedge mode because bitget developers are ...
         side:
           rawOrder.posMode === 'hedge_mode' && rawOrder.reduceOnly === 'yes'
@@ -313,24 +287,21 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.throttledFetchBalance();
       }
 
-      if (mappedStatus === OrderStatus.Canceled) {
+      if (rawOrder.status === 'cancel' || rawOrder.status === 'canceled' || rawOrder.status === 'cancelled') {
         orders.forEach((order) => {
           this.store.updateOrderStatus(order, OrderStatus.Canceled);
           this.markOrderAsTerminal(order.id);
         });
       }
 
-      if (mappedStatus === OrderStatus.Closed) {
-        // Terminal Closed transition applies to both explicit fills and
-        // ambiguous closed statuses (e.g. `success` / `executed`); only the
-        // explicit fill statuses above emit fills and refetch.
+      if (isFullFill) {
         orders.forEach((order) => {
           this.store.updateOrderStatus(order, OrderStatus.Closed);
           this.markOrderAsTerminal(order.id);
         });
       }
 
-      if (mappedStatus === OrderStatus.Open) {
+      if (rawOrder.status === 'new' || isPartialFill || rawOrder.status === 'live') {
         orders.forEach((order) => {
           this.store.addOrUpdateOrder(order);
           this.markOrderAsOpenFromWs(order.id);
@@ -358,33 +329,35 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     const rawOrders = data.data;
 
     for (const rawOrder of rawOrders) {
-      const normalizedStatus = this.getRawOrderStatus(rawOrder);
-      const mappedStatus = ORDER_STATUS[normalizedStatus];
       const orders = this.parent.mapOrder({
         ...rawOrder,
-        status: normalizedStatus || rawOrder.status,
         // invert side for hedge mode because bitget developers are ...
         side: rawOrder.posMode === 'hedge_mode' ? (rawOrder.side === 'sell' ? 'buy' : 'sell') : rawOrder.side,
       });
       const parentOrder = orders[0];
 
-      const isTerminalFill = this.isTerminalFillStatus(normalizedStatus);
-
-      if (mappedStatus === OrderStatus.Open) {
+      // Update order status based on the status field
+      if (rawOrder.status === 'live') {
         this.store.addOrUpdateOrder(parentOrder);
         this.markOrderAsOpenFromWs(parentOrder.id);
-      } else if (mappedStatus === OrderStatus.Canceled) {
+      } else if (rawOrder.status === 'cancel' || rawOrder.status === 'canceled' || rawOrder.status === 'cancelled') {
         this.store.updateOrderStatus(parentOrder, OrderStatus.Canceled);
         this.markOrderAsTerminal(parentOrder.id);
-      } else if (mappedStatus === OrderStatus.Closed) {
+      } else if (rawOrder.status === 'triggered' || rawOrder.status === 'filled') {
         this.store.updateOrderStatus(parentOrder, OrderStatus.Closed);
         this.markOrderAsTerminal(parentOrder.id);
+      } else if (ORDER_STATUS[rawOrder.status]) {
+        const mappedStatus = ORDER_STATUS[rawOrder.status];
+        this.store.updateOrderStatus(parentOrder, mappedStatus);
+        if (mappedStatus === OrderStatus.Open) {
+          this.markOrderAsOpenFromWs(parentOrder.id);
+        } else if (mappedStatus === OrderStatus.Canceled || mappedStatus === OrderStatus.Closed) {
+          this.markOrderAsTerminal(parentOrder.id);
+        }
       }
 
-      // Only emit a fill and reconcile positions/balance when the algo order
-      // reached an explicit fill status; ambiguous Closed statuses transition
-      // the store above but do not trigger side effects.
-      if (isTerminalFill && rawOrder.actualSize) {
+      // Emit fill event if the order was triggered
+      if ((rawOrder.status === 'triggered' || rawOrder.status === 'filled') && rawOrder.actualSize) {
         this.emitter.emit('fill', {
           id: parentOrder.id,
           side: parentOrder.side,
@@ -395,7 +368,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.throttledFetchBalance();
       }
 
-      if (isTerminalFill) {
+      if (rawOrder.status === 'triggered' || rawOrder.status === 'filled') {
         this.throttledFetchPositions();
         this.throttledFetchBalance();
       }

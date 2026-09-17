@@ -35,7 +35,7 @@ describe('audit regression: Bitget account validation', () => {
     await expect(exchange.validateAccount()).resolves.toEqual({
       error: 'Bad API key, API secret or incorrect IP whitelist.',
     });
-    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith('Bad API key, API secret or incorrect IP whitelist.');
     expect(get).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
   });
@@ -55,7 +55,7 @@ describe('audit regression: Bitget account validation', () => {
     await expect(exchange.validateAccount()).resolves.toEqual({
       error: BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE,
     });
-    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE);
     expect(get).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
   });
@@ -76,7 +76,7 @@ describe('audit regression: Bitget account validation', () => {
       'API key environment mismatch: Your API key appears to be for Demo/Testnet trading, but Tealstreet is configured for Live/Production. Please check your Testnet setting.';
 
     await expect(exchange.validateAccount()).resolves.toEqual({ error: helpfulMsg });
-    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(emitAndLogError).toHaveBeenCalledWith(helpfulMsg);
     expect(get).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
   });
@@ -95,48 +95,5 @@ describe('audit regression: Bitget account validation', () => {
     });
 
     expect(emitAndLogError).not.toHaveBeenCalled();
-  });
-
-  it('returns validation-owned signature errors without emitting from the interceptor or validateAccount', async () => {
-    const exchange = createExchange();
-    (exchange as any)._accountTypeDetected = true;
-    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
-    const api = createAPI(
-      { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
-      exchange,
-    );
-
-    api.defaults.adapter = vi.fn(async (config: any) => ({
-      data: {
-        code: '40009',
-        msg: 'sign signature error',
-        data: null,
-      },
-      status: 400,
-      statusText: 'Bad Request',
-      headers: {},
-      config,
-    }));
-    exchange.xhr = api;
-
-    await expect(exchange.validateAccount()).resolves.toEqual({ error: 'sign signature error' });
-    expect(emitAndLogError).not.toHaveBeenCalled();
-  });
-
-  it('still emits resolved Bitget API errors outside account validation', async () => {
-    const exchange = createExchange();
-    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
-
-    await runResponseInterceptor(exchange, {
-      data: {
-        code: '40009',
-        msg: 'sign signature error',
-      },
-      status: 400,
-      statusText: 'Bad Request',
-      config: { url: ENDPOINTS.BALANCE },
-    });
-
-    expect(emitAndLogError).toHaveBeenCalledWith('sign signature error (HTTP 400)');
   });
 });

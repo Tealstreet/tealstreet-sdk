@@ -3,42 +3,6 @@ import { OrderStatus, OrderType } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 
-const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
-
-export const normalizeCoinbaseUsdEquivalentProductId = (productId: string): string => {
-  if (productId.endsWith('-USDC') && !COINBASE_USDC_ALIAS_EXCEPTIONS.has(productId)) {
-    return `${productId.slice(0, -5)}-USD`;
-  }
-  return productId;
-};
-
-export const getCoinbaseUsdEquivalentAliasProductId = (productId: string): string | undefined => {
-  const normalized = normalizeCoinbaseUsdEquivalentProductId(productId);
-  if (normalized !== productId) return normalized;
-
-  if (productId.endsWith('-USD')) {
-    return `${productId.slice(0, -4)}-USDC`;
-  }
-
-  return undefined;
-};
-
-export const resolveCoinbaseUsdEquivalentMarket = <T>(
-  productId: string,
-  marketsById: Record<string, T>,
-): T | undefined => {
-  const exact = marketsById[productId];
-  const aliasProductId = getCoinbaseUsdEquivalentAliasProductId(productId);
-  const alias = aliasProductId ? marketsById[aliasProductId] : undefined;
-
-  // Coinbase often reports ordinary USDC-book activity on the equivalent USD
-  // product. Prefer the user-facing USDC market when both are loaded so exact
-  // symbol filters in the UI still match the selected market.
-  if (productId.endsWith('-USD') && alias) return alias;
-
-  return exact ?? alias;
-};
-
 // Cache imported CryptoKey to avoid re-importing on every request
 let cachedCryptoKey: CryptoKey | null = null;
 let cachedKeySecret = '';

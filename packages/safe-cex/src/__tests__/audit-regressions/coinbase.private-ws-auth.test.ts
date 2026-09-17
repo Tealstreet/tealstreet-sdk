@@ -57,9 +57,8 @@ describe('Coinbase private WebSocket auth', () => {
       isAvailable: () => true,
       onAvailabilityChange: () => () => undefined,
     } satisfies RemoteSigner;
-    const { exchange, websocket } = createSubject({ secret: '', remoteSigner });
+    const { websocket } = createSubject({ secret: '', remoteSigner });
     const send = vi.spyOn(websocket, 'sendWithLog').mockImplementation(() => undefined);
-    const fetchRestSnapshot = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot').mockResolvedValue(undefined);
 
     await websocket.onOpen();
 
@@ -90,7 +89,6 @@ describe('Coinbase private WebSocket auth', () => {
       { type: 'subscribe', channel: 'user', jwt: 'remote-user-jwt' },
       { type: 'subscribe', channel: 'heartbeats', jwt: 'remote-heartbeats-jwt' },
     ]);
-    expect(fetchRestSnapshot).not.toHaveBeenCalled();
   });
 
   it('refuses to open a private socket when neither a local secret nor remote signer is available', () => {
@@ -104,39 +102,5 @@ describe('Coinbase private WebSocket auth', () => {
     expect(emitAndLogError.mock.calls[0]?.[0]).toBe(
       'Coinbase private WebSocket requires an API key and signing secret',
     );
-  });
-
-  it('surfaces private WebSocket error frames', () => {
-    const { exchange, websocket } = createSubject();
-    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
-
-    websocket.onMessage({ data: JSON.stringify({ type: 'error', message: 'product_ids required' }) } as MessageEvent);
-
-    expect(emitAndLogError.mock.calls[0]?.[0]).toBe('product_ids required');
-  });
-
-  it('closes but does not force-close when subscribe-time signing fails, so backoff can reconnect', async () => {
-    // Regression: a transient remote-signer failure must not set `forceClosed=true`,
-    // which would permanently skip reconnect in `base.ws.ts` until an explicit
-    // `forceOpen()` call. See `coinbase.ws-private.ts` onOpen catch block.
-    const remoteSigner = {
-      accountName: 'hosted-account',
-      sign: vi.fn(async () => ({ id: 'x', error: 'remote signer offline' })),
-      isAvailable: () => true,
-      onAvailabilityChange: () => () => undefined,
-    } satisfies RemoteSigner;
-    const { exchange, websocket } = createSubject({ secret: '', remoteSigner });
-
-    const close = vi.fn();
-    (websocket as any).ws = { close };
-    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
-    const forceClose = vi.spyOn(websocket, 'forceClose');
-
-    await websocket.onOpen();
-
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(forceClose).not.toHaveBeenCalled();
-    expect((websocket as any).forceClosed).toBeFalsy();
-    expect(emitAndLogError.mock.calls[0]?.[0]).toContain('remote signer offline');
   });
 });

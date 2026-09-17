@@ -50,7 +50,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { paginateIncomeRange } from '../income-paging';
-import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
+import { createAPI } from './bitget.api';
 import { mapBitgetBills } from './bitget.income';
 import { mapBitgetFills } from './bitget.fills';
 import { splitTimeRange } from '../../utils/splitTimeRange';
@@ -71,6 +71,7 @@ import {
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TYPE,
+  POSITION_SIDE,
   TIME_IN_FORCE,
 } from './bitget.types';
 import { BitgetPrivateWebsocket } from './bitget.ws-private';
@@ -167,11 +168,6 @@ export class BitgetExchange extends BaseExchange {
 
   private _planTypePositionsCache: { at: number; value: Position[] } | null = null;
   private _planTypePositionsInflight: Promise<Position[]> | null = null;
-  private _suppressBitgetValidationErrorEmission = false;
-
-  get suppressBitgetValidationErrorEmission(): boolean {
-    return this._suppressBitgetValidationErrorEmission;
-  }
 
   // private leverageHash: Record<string, number> = {};
 
@@ -209,39 +205,6 @@ export class BitgetExchange extends BaseExchange {
       return Number.isFinite(parsed) ? parsed : fallback;
     }
     return fallback;
-  }
-
-  private firstFiniteNumber(values: unknown[], fallback = 0): number {
-    for (const value of values) {
-      const parsed = this.toFiniteNumber(value, NaN);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return fallback;
-  }
-
-  private normalizeBitgetSymbol(value: unknown): string {
-    const rawSymbol = String(value ?? '');
-    const productSuffix = this.apiProductType.toUpperCase();
-    const strippedSymbol = rawSymbol
-      .replace(new RegExp(`_${productSuffix}$`, 'i'), '')
-      .replace(/_(?:S?UMCBL|DMCBL|CMCBL)$/i, '');
-    return this._resolveMarket(strippedSymbol)?.symbol ?? strippedSymbol;
-  }
-
-  private normalizeBitgetPositionMode(value: Record<string, any>): PositionMode {
-    const rawMode = String(value.posMode ?? value.holdMode ?? '').toLowerCase();
-    return rawMode === 'hedge_mode' || rawMode === 'double_hold' ? PositionMode.Hedged : PositionMode.OneWay;
-  }
-
-  private normalizeBitgetMarginType(value: unknown): MarginType {
-    const rawMarginType = String(value ?? '').toLowerCase();
-    return rawMarginType === 'crossed' || rawMarginType === 'cross' ? MarginType.Cross : MarginType.Isolated;
-  }
-
-  private normalizeBitgetPositionSide(value: Record<string, any>): PositionSide {
-    const rawSide = String(value.holdSide ?? value.posSide ?? value.side ?? '').toLowerCase();
-    if (rawSide === 'short' || rawSide === 'sell') return PositionSide.Short;
-    return PositionSide.Long;
   }
 
   calculateUpnlFromLastPrice(positions: Position[] = this.store.positions): number {
@@ -297,8 +260,6 @@ export class BitgetExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
-    const previousSuppressValidationErrorEmission = this._suppressBitgetValidationErrorEmission;
-    this._suppressBitgetValidationErrorEmission = true;
     try {
       await this.ensureAccountTypeDetected();
       // fetchBalance hits the BALANCE endpoint (validating the key) and throws on
@@ -313,12 +274,12 @@ export class BitgetExchange extends BaseExchange {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';
         const suggestedMode = this.options.testnet ? 'Live/Production' : 'Demo/Testnet';
         const helpfulMsg = `API key environment mismatch: Your API key appears to be for ${suggestedMode} trading, but Tealstreet is configured for ${currentMode}. Please check your Testnet setting.`;
+        this.emitAndLogError(helpfulMsg);
         return { error: helpfulMsg };
       }
 
+      this.emitAndLogError(errorMsg);
       return { error: errorMsg || 'Invalid API key or secret' };
-    } finally {
-      this._suppressBitgetValidationErrorEmission = previousSuppressValidationErrorEmission;
     }
   };
 
@@ -809,7 +770,41 @@ export class BitgetExchange extends BaseExchange {
       return [];
     }
 
-    return data.data.map(this.mapPosition);
+    const positions: Position[] = data.data.map((p) => {
+      const contracts = parseFloat(p.total);
+      const price = parseFloat(p.markPrice);
+
+      const symbol = p.symbol.replace(`_${this.apiProductType.toUpperCase()}`, '');
+      const positionMode = p.posMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
+      const marginMode = p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
+      const side = POSITION_SIDE[p.holdSide];
+      const positionId = createPositionId(symbol, side, positionMode);
+
+      const marginSize = p.marginSize != null ? parseFloat(p.marginSize) : undefined;
+      const position: Position = {
+        id: positionId,
+        symbol,
+        side,
+        entryPrice: parseFloat(p.openPriceAvg),
+        notional: multiply(contracts, price),
+        leverage: parseFloat(p.leverage),
+        unrealizedPnl: parseFloat(p.unrealizedPL || '0'),
+        contracts,
+        realizedPnl:
+          (p.achievedProfits ? parseFloat(p.achievedProfits) : 0) +
+          (p.totalFee ? parseFloat(p.totalFee) : 0) -
+          (p.deductedFee ? parseFloat(p.deductedFee) : 0),
+        liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice),
+        marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
+        positionMode,
+        marginType: marginMode,
+        info: p,
+        lastUpdate: virtualClock.getCurrentTimeMs(),
+      };
+
+      return position;
+    });
+    return positions;
   };
 
   private fetchUtaOpenPositions = async (): Promise<Position[]> => {
@@ -1571,11 +1566,7 @@ export class BitgetExchange extends BaseExchange {
     }
   };
 
-  private cancelUtaStrategyOrders = async (
-    orders: Order[],
-    opts: { readonly treatNotFoundAsSuccess?: boolean } = {},
-  ) => {
-    const treatNotFoundAsSuccess = opts.treatNotFoundAsSuccess ?? true;
+  private cancelUtaStrategyOrders = async (orders: Order[]) => {
     const normalizedOrders = uniqBy(orders, 'id');
 
     for (const order of normalizedOrders) {
@@ -1583,29 +1574,15 @@ export class BitgetExchange extends BaseExchange {
         const orderId = order.info?.orderId || (order.info?.clientOid === order.id ? undefined : order.id);
         const clientOid = order.info?.clientOid || (!orderId ? order.id : undefined);
 
-        const { data } = await this.unlimitedXHR.post(
+        await this.unlimitedXHR.post(
           ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER,
           omitUndefined({
             orderId,
             clientOid,
           }),
         );
-
-        if (!isBitgetSuccessCode(data?.code)) {
-          const message = getBitgetApiErrorMessage(data, 'Bitget UTA cancel strategy order request failed');
-          if (treatNotFoundAsSuccess && isBitgetUtaStrategyOrderNotFound(message)) {
-            this.log(`Bitget UTA strategy order ${order.id} was already absent during cancel`, LogSeverity.Debug);
-            continue;
-          }
-          throw new Error(message);
-        }
       } catch (err: any) {
-        const message = err?.response?.data?.msg || err?.message;
-        if (treatNotFoundAsSuccess && isBitgetUtaStrategyOrderNotFound(message)) {
-          this.log(`Bitget UTA strategy order ${order.id} was already absent during cancel`, LogSeverity.Debug);
-          continue;
-        }
-        this.emitAndLogError(message);
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
         throw err;
       }
     }
@@ -2273,42 +2250,7 @@ export class BitgetExchange extends BaseExchange {
       throw new Error(msg);
     }
 
-    // Snapshot the original as a placeable payload BEFORE cancel, so a
-    // rollback on place-failure can restore the stop the user thought they
-    // had. UTA has no in-place amend, and a naive cancel+place pattern will
-    // silently strand the user without a stop if the replacement fails
-    // (rate limit, min-notional, size guard, position closed between calls).
-    const originalPayload = await this.formatUtaStrategyOrder(this.buildUtaStrategyPlaceOptsFromOrder(order));
-
-    const replacementOpts = this.buildUtaStrategyPlaceOptsFromOrder(order);
-    if ('price' in update) replacementOpts.price = update.price;
-    if ('amount' in update) replacementOpts.amount = update.amount;
-    const replacementPayload = await this.formatUtaStrategyOrder(replacementOpts);
-
-    await this.cancelUtaStrategyOrders([order], { treatNotFoundAsSuccess: false });
-    try {
-      return await this.placeUtaStrategyOrders([replacementPayload]);
-    } catch (placeErr: any) {
-      // Cancel already succeeded — the user has no live stop right now. Try
-      // to restore the original as a best-effort rollback. Whether or not the
-      // rollback succeeds we surface the original place failure so the caller
-      // knows the requested update did not land.
-      try {
-        await this.placeUtaStrategyOrders([originalPayload]);
-        this.emitAndLogError(
-          `Bitget UTA update failed: ${placeErr?.message || 'place failed'}. Original stop was restored; please retry the update.`,
-        );
-      } catch (rollbackErr: any) {
-        this.emitAndLogError(
-          `Bitget UTA update failed and rollback also failed: ${placeErr?.message || 'place failed'} / ${rollbackErr?.message || 'rollback failed'}. Your stop is not on the book — please re-add it.`,
-        );
-      }
-      throw placeErr;
-    }
-  };
-
-  private buildUtaStrategyPlaceOptsFromOrder = (order: Order): Writable<PlaceOrderOpts> => {
-    const opts: Writable<PlaceOrderOpts> = {
+    const replacementOrder: Writable<PlaceOrderOpts> = {
       symbol: order.symbol,
       type: order.type,
       side: order.side,
@@ -2317,9 +2259,15 @@ export class BitgetExchange extends BaseExchange {
       reduceOnly: order.reduceOnly || false,
       timeInForce: order.timeInForce,
     };
-    if ('tpTriggerType' in order) opts.tpTriggerType = order.tpTriggerType;
-    if ('slTriggerType' in order) opts.slTriggerType = order.slTriggerType;
-    return opts;
+
+    if ('tpTriggerType' in order) replacementOrder.tpTriggerType = order.tpTriggerType;
+    if ('slTriggerType' in order) replacementOrder.slTriggerType = order.slTriggerType;
+    if ('price' in update) replacementOrder.price = update.price;
+    if ('amount' in update) replacementOrder.amount = update.amount;
+
+    const payload = await this.formatUtaStrategyOrder(replacementOrder);
+    await this.cancelUtaStrategyOrders([order]);
+    return await this.placeUtaStrategyOrders([payload]);
   };
 
   updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
@@ -2638,15 +2586,15 @@ export class BitgetExchange extends BaseExchange {
   };
 
   mapUtaPosition = (p: BITGET_UTA_POSITION): Position => {
-    const symbol = this.normalizeBitgetSymbol(p.symbol);
-    const positionMode = this.normalizeBitgetPositionMode(p);
-    const side = this.normalizeBitgetPositionSide(p);
-    const marginMode = this.normalizeBitgetMarginType(p.marginMode);
-    const contracts = this.firstFiniteNumber([p.total, p.size]);
-    const markPrice = this.firstFiniteNumber([p.markPrice, (p as Record<string, any>).marketPrice]);
-    const entryPrice = this.firstFiniteNumber([p.avgPrice, p.openPriceAvg, (p as Record<string, any>).openAvgPrice, (p as Record<string, any>).avgPx]);
+    const symbol = (p.symbol || '').replace(`_${this.apiProductType.toUpperCase()}`, '');
+    const positionMode = p.holdMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
+    const side = POSITION_SIDE[p.posSide || p.holdSide || 'long'] || PositionSide.Long;
+    const marginMode = p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
+    const contracts = this.toFiniteNumber(p.total, this.toFiniteNumber(p.size));
+    const markPrice = this.toFiniteNumber(p.markPrice);
+    const entryPrice = this.toFiniteNumber(p.avgPrice, this.toFiniteNumber(p.openPriceAvg));
     const positionId = createPositionId(symbol, side, positionMode);
-    const marginSize = this.firstFiniteNumber([p.positionBalance, p.marginSize], NaN);
+    const marginSize = p.positionBalance != null ? this.toFiniteNumber(p.positionBalance) : this.toFiniteNumber(p.marginSize);
 
     return {
       id: positionId,
@@ -2654,8 +2602,8 @@ export class BitgetExchange extends BaseExchange {
       side,
       entryPrice,
       notional: multiply(contracts, markPrice || entryPrice),
-      leverage: this.firstFiniteNumber([p.leverage, (p as Record<string, any>).lever], 1),
-      unrealizedPnl: this.firstFiniteNumber([p.unrealisedPnl, p.unrealizedPL, (p as Record<string, any>).upl], 0),
+      leverage: this.toFiniteNumber(p.leverage, 1),
+      unrealizedPnl: this.toFiniteNumber(p.unrealisedPnl, this.toFiniteNumber(p.unrealizedPL)),
       realizedPnl:
         this.toFiniteNumber(p.curRealisedPnl) +
         this.toFiniteNumber(p.totalFunding) +
@@ -2663,7 +2611,7 @@ export class BitgetExchange extends BaseExchange {
         this.toFiniteNumber(p.closeFeeTotal) -
         this.toFiniteNumber(p.deductedFee),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? (p as Record<string, any>).liqPx),
+      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice),
       marginSize: marginSize > 0 ? marginSize : undefined,
       positionMode,
       marginType: marginMode,
@@ -2696,37 +2644,37 @@ export class BitgetExchange extends BaseExchange {
       };
     }
 
-    const contracts = this.firstFiniteNumber([p.total, p.size, p.pos, p.openTotalPos, p.available]);
-    const entryPrice = this.firstFiniteNumber([p.openPriceAvg, p.openAvgPrice, p.avgPrice, p.avgPx, p.averageOpenPrice]);
-    const markPrice = this.firstFiniteNumber([p.markPrice, p.marketPrice], entryPrice);
-    const symbol = this.normalizeBitgetSymbol(p.instId ?? p.symbol);
-    const positionMode = this.normalizeBitgetPositionMode(p);
-    const marginMode = this.normalizeBitgetMarginType(p.marginMode);
-    const side = this.normalizeBitgetPositionSide(p);
+    // Log warning if required fields are missing
+    if (!p.total || !p.openPriceAvg) {
+      console.log(`[Bitget] mapPosition received incomplete data: total=${p.total}, openPriceAvg=${p.openPriceAvg}`);
+    }
 
-    const marginSize = this.firstFiniteNumber([p.marginSize, p.margin, p.positionBalance], NaN);
+    // Handle cases where total might be undefined or missing
+    const contracts = p.total ? parseFloat(p.total) : 0;
+    const price = p.openPriceAvg ? parseFloat(p.openPriceAvg) : 0;
+
+    // Handle different field names between REST API and WebSocket
+    const symbol = (p.instId || p.symbol || '').replace(`_${this.apiProductType.toUpperCase()}`, '');
+    const positionMode = p.posMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
+    const marginMode = p.marginMode === 'crossed' ? MarginType.Cross : MarginType.Isolated;
+    const side = POSITION_SIDE[p.holdSide];
+
+    const marginSize = p.marginSize != null ? parseFloat(p.marginSize) : undefined;
     const positionId = createPositionId(symbol, side, positionMode);
-    // Bitget V2 non-UTA position payloads (REST `POSITIONS_V2` and the
-    // corresponding private WS `positions` topic) report realized PnL as
-    // `achievedProfits + totalFee - deductedFee`. The UTA endpoint uses
-    // `curRealisedPnl + totalFunding + openFee/closeFeeTotal - deductedFee`
-    // via `mapUtaPosition`. Do NOT sum both here — for a UTA payload it
-    // double-counts, and for a non-UTA payload the UTA fields are absent
-    // (which we relied on earlier, but is fragile). Keep the branches split.
     const position: Position = {
       id: positionId,
       symbol,
       side,
-      entryPrice,
-      notional: multiply(contracts, markPrice || entryPrice),
-      leverage: this.firstFiniteNumber([p.leverage, p.lever], 1),
-      unrealizedPnl: this.firstFiniteNumber([p.unrealizedPL, p.unrealisedPnl, p.upl], 0),
+      entryPrice: price,
+      notional: multiply(contracts, price),
+      leverage: p.leverage ? parseFloat(p.leverage) : 1,
+      unrealizedPnl: p.unrealizedPL ? parseFloat(p.unrealizedPL) : 0,
       realizedPnl:
-        this.toFiniteNumber(p.achievedProfits) +
-        this.toFiniteNumber(p.totalFee) -
-        this.toFiniteNumber(p.deductedFee),
+        (p.achievedProfits ? parseFloat(p.achievedProfits) : 0) +
+        (p.totalFee ? parseFloat(p.totalFee) : 0) -
+        (p.deductedFee ? parseFloat(p.deductedFee) : 0),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? p.liqPx),
+      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice),
       marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
       positionMode,
       marginType: marginMode,
