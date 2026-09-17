@@ -586,6 +586,30 @@ must not be widened to other non-ready shapes.
 - Batches are processed **sequentially** via `forEachSeries`
 - After each batch cancel, `store.updateOrdersStatus()` is called to mark those orders as canceled locally
 
+### Open Feature: Scaled Limit / Ladder Orders
+
+Verified against the official Advanced Trade Create Order docs on 2026-09-17:
+Coinbase publishes `scaled_limit_gtc` as an `order_configuration` shape on the
+existing `POST /api/v3/brokerage/orders` endpoint. The docs describe it as a
+scaled order that divides a large order into multiple smaller limit orders
+placed incrementally across a user-defined price range. This is not a separate
+batch-create endpoint; the documented batch endpoint remains
+`/api/v3/brokerage/orders/batch_cancel` for canceling orders.
+
+The published `ScaledLimitGtc` schema includes explicit child `orders`
+(`LimitLimitGtc[]`) plus declarative ladder fields: `quote_size`, `base_size`,
+`num_orders`, `min_price`, `max_price`, `price_distribution`
+(`FLAT`, `LINEAR_INCREASING`, `LINEAR_DECREASING`,
+`CUSTOM_PRICE_DISTRIBUTION`), `size_distribution` (`INCREASING`, `DECREASING`,
+`EVENLY_SPLIT`, `CUSTOM_SIZE_DISTRIBUTION`), `size_diff`, and `size_ratio`.
+
+The active adapter does not currently support this: `formatCreateOrder()` emits
+only `market_market_ioc`, `limit_limit_gtc`, and `stop_limit_stop_limit_gtc`.
+Before adding Tealstreet ladder-order support, verify live response identity
+semantics (parent order ID vs child IDs), private WebSocket child-order events,
+product availability across spot/CFM/INTX, and how local cancel/update
+reconciliation should treat the generated child orders.
+
 ### Order State from WebSocket (`coinbase.ws-private.ts`)
 
 **Snapshot** (`type === 'snapshot'`): A genuinely empty snapshot clears the
@@ -606,6 +630,7 @@ last-known-good orders and loaded state.
 
 - TakeProfit orders (commented out in `formatCreateOrder`)
 - TrailingStopLoss orders (commented out)
+- Scaled limit / ladder orders via Coinbase `scaled_limit_gtc`
 - `trigger_bracket_gtc` / `trigger_bracket_gtd` (types defined but not used)
 - `limit_limit_gtd` (types defined but not used)
 - `sor_limit_ioc` (types defined but not used)
