@@ -387,6 +387,7 @@ ioc -> ImmediateOrCancel
 
 - **Normal orders** (`cancelNormalOrders`, `bitget.exchange.ts:922-951`): Virtual TPSL suffixes are stripped to get the actual `orderId`; orders are deduped by ID, grouped by symbol, chunked into lots of 50.
 - **Algo orders** (`cancelAlgoOrders`, `bitget.exchange.ts:953-969`): Canceled one at a time; requires correct `planType` from `getCancelPlanType()`.
+- **UTA strategy orders** (`cancelUtaStrategyOrders`): Bitget can return `"Failed to stop the strategy because the corresponding strategy ID could not be found"` for a stale local TP/SL line whose strategy order is already absent. Treat that exact cancel-strategy response as idempotent success on user cancel/cancel-all, including HOW-resolved HTTP 400 envelopes; do not emit a user-facing exchange error for it. Keep the cancel leg of `updateUtaStrategyOrder` strict, because placing a replacement after the old strategy ID is already gone can recreate stale protection.
 - **Cancel all** (`cancelAllOrders`, `bitget.exchange.ts:902-911`): Single POST to `CANCEL_ALL_ORDERS`.
 
 ### Plan Type Determination

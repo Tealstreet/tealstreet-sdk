@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { createAPI } from '../../exchanges/bitget/bitget.api';
 import { BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE, BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
 import { BitgetInverseExchange } from '../../exchanges/bitget/bitgetinverse.exchange';
 import { BitgetUSDCExchange } from '../../exchanges/bitget/bitgetusdc.exchange';
@@ -92,6 +93,25 @@ const usdcAccountSettingsResponse = {
     },
   },
 };
+
+const BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE =
+  'Failed to stop the strategy because the corresponding strategy ID could not be found';
+
+const createUtaStopLossOrder = (overrides: Record<string, any> = {}) => ({
+  id: 'sl-1',
+  symbol: 'BTCUSDT',
+  status: OrderStatus.Open,
+  type: OrderType.StopLoss,
+  side: OrderSide.Sell,
+  price: 49_000,
+  amount: 0.5,
+  filled: 0,
+  remaining: 0.5,
+  reduceOnly: true,
+  lastUpdate: Date.now(),
+  info: { orderId: 'sl-1', clientOid: 'client-1' },
+  ...overrides,
+});
 
 describe('audit regression: Bitget UTA routing', () => {
   it('validates UTA accounts through v3 account assets after detection', async () => {
@@ -707,6 +727,117 @@ describe('audit regression: Bitget UTA routing', () => {
       orderId: 'sl-1',
       clientOid: 'client-1',
     });
+  });
+
+  it('treats already-missing UTA strategy orders as idempotent cancel success', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+    const log = vi.spyOn(exchange, 'log').mockImplementation(() => undefined as any);
+
+    (exchange.unlimitedXHR.post as any)
+      .mockResolvedValueOnce({
+        data: {
+          code: '40830',
+          msg: BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE,
+          data: null,
+        },
+      })
+      .mockRejectedValueOnce({
+        response: {
+          data: {
+            code: '40830',
+            msg: BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE,
+          },
+        },
+      });
+
+    await expect(exchange.cancelOrders([createUtaStopLossOrder({ id: 'sl-resolved' })])).resolves.toBeUndefined();
+    await expect(exchange.cancelOrders([createUtaStopLossOrder({ id: 'sl-rejected' })])).resolves.toBeUndefined();
+
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not emit when the Bitget interceptor sees resolved strategy-cancel not-found responses', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+    const api = createAPI(
+      { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
+      exchange,
+    );
+
+    api.defaults.adapter = vi.fn(async (config: any) => ({
+      data: {
+        code: '40830',
+        msg: BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE,
+        data: null,
+      },
+      status: 400,
+      statusText: 'Bad Request',
+      headers: {},
+      config,
+    }));
+
+    await expect(api.post(ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER, { orderId: 'sl-1' })).resolves.toMatchObject({
+      data: {
+        code: '40830',
+        msg: BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE,
+      },
+    });
+    expect(emitAndLogError).not.toHaveBeenCalled();
+  });
+
+  it('does not place a UTA strategy replacement when update cancel finds the original already gone', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 50_000,
+          notional: 50_000,
+          leverage: 10,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: 40_000,
+          positionMode: PositionMode.Hedged,
+          marginType: MarginType.Cross,
+          info: {},
+        },
+      ] as any,
+    });
+    (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
+      if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
+        return Promise.resolve({
+          data: {
+            code: '40830',
+            msg: BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE,
+            data: null,
+          },
+        });
+      }
+      if (endpoint === ENDPOINTS.UTA_PLACE_STRATEGY_ORDER) {
+        throw new Error('replacement should not be placed');
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+
+    await expect(
+      exchange.updateOrder({
+        order: createUtaStopLossOrder({ amount: 0, remaining: 0 }),
+        update: { price: 48_000 },
+      }),
+    ).rejects.toThrow(BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE);
+
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledTimes(1);
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER, {
+      orderId: 'sl-1',
+      clientOid: 'client-1',
+    });
+    expect(emitAndLogError).toHaveBeenCalledWith(BITGET_STRATEGY_ORDER_NOT_FOUND_MESSAGE);
   });
 
   it('updates UTA TP/SL orders by canceling and replacing through v3 strategy endpoints', async () => {

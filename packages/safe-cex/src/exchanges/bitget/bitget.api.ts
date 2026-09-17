@@ -20,9 +20,14 @@ import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
 // supported" message instead of the exchange's credential-looking envelope.
 const SILENT_ERROR_CODES = new Set<string>(['40084', '40085']);
 
-const shouldSilenceBitgetResponseError = (code: string, message: unknown): boolean =>
+export const isBitgetUtaStrategyOrderNotFound = (message: unknown): boolean =>
+  typeof message === 'string' &&
+  message.toLowerCase().includes('corresponding strategy id could not be found');
+
+const shouldSilenceBitgetResponseError = (code: string, message: unknown, url?: string): boolean =>
   SILENT_ERROR_CODES.has(code) ||
-  (typeof message === 'string' && message.toLowerCase().includes('environment is incorrect'));
+  (typeof message === 'string' && message.toLowerCase().includes('environment is incorrect')) ||
+  (url?.includes(ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) === true && isBitgetUtaStrategyOrderNotFound(message));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
@@ -97,7 +102,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     if (response.data && !v(response.data, 'data') && v(response.data, 'code') !== '00000') {
       const code = String(v(response.data, 'code') ?? '');
       const message = v(response.data, 'msg');
-      if (message && !shouldSilenceBitgetResponseError(code, message)) {
+      if (message && !shouldSilenceBitgetResponseError(code, message, response.config?.url)) {
         exchange.emitAndLogError(appendHttpFailure(String(message), response));
       }
     }

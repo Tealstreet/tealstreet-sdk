@@ -50,7 +50,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { paginateIncomeRange } from '../income-paging';
-import { createAPI } from './bitget.api';
+import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
 import { mapBitgetBills } from './bitget.income';
 import { mapBitgetFills } from './bitget.fills';
 import { splitTimeRange } from '../../utils/splitTimeRange';
@@ -1566,7 +1566,11 @@ export class BitgetExchange extends BaseExchange {
     }
   };
 
-  private cancelUtaStrategyOrders = async (orders: Order[]) => {
+  private cancelUtaStrategyOrders = async (
+    orders: Order[],
+    opts: { readonly treatNotFoundAsSuccess?: boolean } = {},
+  ) => {
+    const treatNotFoundAsSuccess = opts.treatNotFoundAsSuccess ?? true;
     const normalizedOrders = uniqBy(orders, 'id');
 
     for (const order of normalizedOrders) {
@@ -1574,15 +1578,29 @@ export class BitgetExchange extends BaseExchange {
         const orderId = order.info?.orderId || (order.info?.clientOid === order.id ? undefined : order.id);
         const clientOid = order.info?.clientOid || (!orderId ? order.id : undefined);
 
-        await this.unlimitedXHR.post(
+        const { data } = await this.unlimitedXHR.post(
           ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER,
           omitUndefined({
             orderId,
             clientOid,
           }),
         );
+
+        if (!isBitgetSuccessCode(data?.code)) {
+          const message = getBitgetApiErrorMessage(data, 'Bitget UTA cancel strategy order request failed');
+          if (treatNotFoundAsSuccess && isBitgetUtaStrategyOrderNotFound(message)) {
+            this.log(`Bitget UTA strategy order ${order.id} was already absent during cancel`, LogSeverity.Debug);
+            continue;
+          }
+          throw new Error(message);
+        }
       } catch (err: any) {
-        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        const message = err?.response?.data?.msg || err?.message;
+        if (treatNotFoundAsSuccess && isBitgetUtaStrategyOrderNotFound(message)) {
+          this.log(`Bitget UTA strategy order ${order.id} was already absent during cancel`, LogSeverity.Debug);
+          continue;
+        }
+        this.emitAndLogError(message);
         throw err;
       }
     }
@@ -2262,7 +2280,7 @@ export class BitgetExchange extends BaseExchange {
     if ('amount' in update) replacementOpts.amount = update.amount;
     const replacementPayload = await this.formatUtaStrategyOrder(replacementOpts);
 
-    await this.cancelUtaStrategyOrders([order]);
+    await this.cancelUtaStrategyOrders([order], { treatNotFoundAsSuccess: false });
     try {
       return await this.placeUtaStrategyOrders([replacementPayload]);
     } catch (placeErr: any) {
