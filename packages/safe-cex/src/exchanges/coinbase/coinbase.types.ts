@@ -12,8 +12,8 @@ export const BASE_WS_URL = {
     testnet: 'wss://advanced-trade-ws.coinbase.com',
   },
   private: {
-    livenet: 'wss://advanced-trade-ws.coinbase.com',
-    testnet: 'wss://advanced-trade-ws.coinbase.com',
+    livenet: 'wss://advanced-trade-ws-user.coinbase.com',
+    testnet: 'wss://advanced-trade-ws-user.coinbase.com',
   },
 };
 

@@ -14,9 +14,19 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 
+const COINBASE_WS_AUTH_REQUEST_PREFIX = 'coinbase-ws-auth';
+
 export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
+  private subscriptionAttempt = 0;
+
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
+      const { key, secret, remoteSigner } = this.parent.options;
+      if (!key || (!secret && !remoteSigner)) {
+        this.emitAndLogError('Coinbase private WebSocket requires an API key and signing secret');
+        return;
+      }
+
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
       this.ws = this.createWebsocket(
         route.tunnelled ? route.host! : BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'],
@@ -27,12 +37,19 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     }
   };
 
-  onOpen = () => {
-    if (!this.isDisposed) {
-      this.subscribe();
+  onOpen = async () => {
+    if (this.isDisposed) return;
+    const attempt = ++this.subscriptionAttempt;
+
+    try {
+      await this.subscribe(attempt);
+      if (this.isDisposed || attempt !== this.subscriptionAttempt) return;
       if (ENABLE_RECONNECTING_WEBSOCKET) {
         this.parent.fetchAndSetPrivateSnapshot();
       }
+    } catch (err: any) {
+      this.emitAndLogError(err?.message || 'Coinbase private WebSocket subscription signing failed');
+      this.forceClose();
     }
   };
 
@@ -130,9 +147,10 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
 
   handlePositionTopic = (_data: Array<Record<string, any>>) => {};
 
-  private subscribe = async () => {
+  private subscribe = async (attempt: number) => {
     for (const channel of ['user', 'heartbeats']) {
-      const jwt = await sign(this.parent.options.key, this.parent.options.secret);
+      const jwt = await this.buildSubscriptionJwt(channel);
+      if (this.isDisposed || attempt !== this.subscriptionAttempt) return;
       this.sendWithLog(
         JSON.stringify({
           type: 'subscribe',
@@ -141,5 +159,30 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         }),
       );
     }
+  };
+
+  private buildSubscriptionJwt = async (channel: string): Promise<string> => {
+    const { key, secret, remoteSigner } = this.parent.options;
+    if (remoteSigner) {
+      const result = await remoteSigner.sign({
+        id: `${COINBASE_WS_AUTH_REQUEST_PREFIX}.${channel}`,
+        type: 'ws-auth',
+        exchangeName: this.parent.name,
+        accountName: remoteSigner.accountName,
+        wsAuth: {
+          toSign: `coinbase-websocket-jwt.${channel}`,
+          outputFormat: 'coinbase-jwt',
+          extraData: { channel },
+        },
+      });
+
+      if (result.error || !result.wsAuthSignature) {
+        throw new Error(result.error || 'Remote signer returned no Coinbase WebSocket JWT');
+      }
+
+      return result.wsAuthSignature;
+    }
+
+    return sign(key, secret);
   };
 }

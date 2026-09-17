@@ -75,6 +75,12 @@ describe('BaseExchange.signWsAuth output formats', () => {
     expect(result.error).toContain('KrakenExchange');
   });
 
+  it('errors instead of mis-signing when coinbase-jwt reaches the base signer', async () => {
+    const result = await sign('coinbase-jwt', 'coinbase-websocket-jwt.user');
+    expect(result.wsAuthSignature).toBeUndefined();
+    expect(result.error).toContain('CoinbaseExchange');
+  });
+
   it('errors instead of mis-signing an unknown output format', async () => {
     const result = await sign('some-future-format', 'anything');
     expect(result.wsAuthSignature).toBeUndefined();

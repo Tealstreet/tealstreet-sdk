@@ -284,7 +284,8 @@ Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
 - **Escaped newlines**: The secret has `\\n` replaced with actual `\n` before parsing (`coinbase.utils.ts`)
 - **Time source**: Uses `virtualClock.getCurrentTimeMs()` for JWT timestamps, not `Date.now()`
 - **REST requests**: The `uri` parameter is `"METHOD api.coinbase.com/path"` (e.g., `"GET api.coinbase.com/api/v3/brokerage/products"`)
-- **WebSocket auth**: JWT is generated without a `uri` parameter and sent in the subscribe message payload
+- **Hosted REST signing**: When `options.remoteSigner` is present, the server-side interceptor must not call the local ES256 signer because hosted mode has `secret: ''`. It returns the unsigned private request for `createRemoteSigningAdapter`, which delegates signing to the browser/device copy of this same interceptor.
+- **WebSocket auth**: JWT is generated without a `uri` parameter and sent in the subscribe message payload. Hosted private WebSocket subscriptions use the `coinbase-jwt` `ws-auth` output format and carry the resulting JWT in `wsAuthSignature`.
 - **Header format**: `Authorization: Bearer <jwt>` (when using tealstreetTunnel) or `Coinbase-Authorization: Bearer <jwt>` (direct connection) (`coinbase.api.ts`)
 
 ## Startup Sequence
@@ -357,7 +358,7 @@ All endpoints are defined in `ENDPOINTS` constant in `coinbase.types.ts`:
 
 ### Public vs Private Endpoints
 
-Only `INTX_INSTRUMENTS` is treated as a public endpoint (no JWT auth). All other endpoints require JWT authentication. The `PUBLIC_ENDPOINTS` array in `coinbase.types.ts` contains commented-out entries for MARKETS, tickers, klines, and orderbook -- these were once considered public but now require auth.
+Only `INTX_INSTRUMENTS` is treated as public by the active adapter (no JWT auth and remote-signing skip tag). Coinbase also publishes unauthenticated Advanced Trade market-data routes under `/api/v3/brokerage/market/...`, but this adapter still uses the authenticated private equivalents (`/products`, `/product_book`, `/products/{id}/candles`) for account-backed sessions. Do not mark all public-data mode traffic as remote-signing-skippable; tag only URL-proven public endpoints.
 
 ### Base URLs
 
@@ -454,7 +455,7 @@ For each `listenOHLCV` call, **two channels** are subscribed:
 
 **URL**:
 
-- **Direct**: `wss://advanced-trade-ws.coinbase.com`
+- **Direct**: `wss://advanced-trade-ws-user.coinbase.com`
 - **Via proxy/tunnel**: the `wsPrivate` route returned by
   `resolveExchangeRouting()`; the shared routing table is authoritative and no
   hostname is hardcoded here
@@ -474,7 +475,7 @@ For each `listenOHLCV` call, **two channels** are subscribed:
 }
 ```
 
-Both `user` and `heartbeats` channels are subscribed sequentially in a loop, each with a fresh JWT.
+Both `user` and `heartbeats` channels are subscribed sequentially in a loop, each with a fresh JWT. In hosted mode, each JWT is requested from `options.remoteSigner`; do not gate this path on `options.secret`, because the hosted server never holds the secret.
 
 **Reconnection behavior** (`coinbase.ws-private.ts`):
 
@@ -727,7 +728,8 @@ Key metadata settings (from `exchangeMetadata.ts`):
 Coinbase has **no testnet support** (`supportsTestnet: false`). Both livenet and testnet URLs in `BASE_URL` and `BASE_WS_URL` point to the same production endpoints (`coinbase.types.ts`):
 
 - REST: `https://api.coinbase.com`
-- WebSocket: `wss://advanced-trade-ws.coinbase.com`
+- Public WebSocket: `wss://advanced-trade-ws.coinbase.com`
+- Private WebSocket: `wss://advanced-trade-ws-user.coinbase.com`
 
 The testnet option is accepted but has no effect.
 

@@ -5,6 +5,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { getProxyForAxios, safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { replaceUrlParams } from '../../utils/replaceUrlParams';
 import { BaseExchange } from '../base';
@@ -37,7 +38,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       ...replaceUrlParams(config.url, config.params),
     };
 
-    const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`) || options.publicDataOnly;
+    const isPublicEndpointUrl = PUBLIC_ENDPOINTS.includes(`${config.url}`);
+    if (isPublicEndpointUrl) markSkipRemoteSigning(config);
+
+    const isPublicEndPoint = isPublicEndpointUrl || options.publicDataOnly;
 
     // proxy use with non base url
     if (config?.url?.startsWith('http')) {
@@ -54,6 +58,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         }),
         timeout: 20_000,
       };
+    }
+
+    if (options.remoteSigner) {
+      return { ...config, timeout: 20_000 };
     }
 
     const request_method = config.method?.toUpperCase() || 'GET';

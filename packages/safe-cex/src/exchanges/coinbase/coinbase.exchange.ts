@@ -26,6 +26,8 @@ import {
   Position,
   PositionMode,
   PositionSide,
+  RemoteSignerRequest,
+  RemoteSignerResponse,
   Ticker,
   Timeframe,
   UpdateOrderOpts,
@@ -55,7 +57,7 @@ import {
   PLACE_ORDER_RESPONSE,
   PORTFOLIO_BREAKDOWN_RESPONSE,
 } from './coinbase.types';
-import { normalizeCfmContractSize } from './coinbase.utils';
+import { normalizeCfmContractSize, sign } from './coinbase.utils';
 import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
 import { CoinbasePublicWebsocket } from './coinbase.ws-public';
 
@@ -96,6 +98,21 @@ export class CoinbaseExchange extends BaseExchange {
     super.dispose();
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
+  };
+
+  signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (request.wsAuth?.outputFormat !== 'coinbase-jwt') {
+      return { id: request.id, error: `Unsupported Coinbase WS auth outputFormat: ${request.wsAuth?.outputFormat}` };
+    }
+    if (!this.options.key || !this.options.secret) {
+      return { id: request.id, error: 'No Coinbase key or secret available for WS auth signing' };
+    }
+
+    try {
+      return { id: request.id, wsAuthSignature: await sign(this.options.key, this.options.secret) };
+    } catch (err: any) {
+      return { id: request.id, error: err?.message || 'Coinbase WS auth signing failed' };
+    }
   };
 
   getAccount = async () => {
