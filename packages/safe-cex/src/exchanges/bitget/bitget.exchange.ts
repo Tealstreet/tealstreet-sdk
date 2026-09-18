@@ -71,7 +71,6 @@ import {
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TYPE,
-  POSITION_SIDE,
   TIME_IN_FORCE,
 } from './bitget.types';
 import { BitgetPrivateWebsocket } from './bitget.ws-private';
@@ -210,6 +209,39 @@ export class BitgetExchange extends BaseExchange {
       return Number.isFinite(parsed) ? parsed : fallback;
     }
     return fallback;
+  }
+
+  private firstFiniteNumber(values: unknown[], fallback = 0): number {
+    for (const value of values) {
+      const parsed = this.toFiniteNumber(value, NaN);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
+  }
+
+  private normalizeBitgetSymbol(value: unknown): string {
+    const rawSymbol = String(value ?? '');
+    const productSuffix = this.apiProductType.toUpperCase();
+    const strippedSymbol = rawSymbol
+      .replace(new RegExp(`_${productSuffix}$`, 'i'), '')
+      .replace(/_(?:S?UMCBL|DMCBL|CMCBL)$/i, '');
+    return this._resolveMarket(strippedSymbol)?.symbol ?? strippedSymbol;
+  }
+
+  private normalizeBitgetPositionMode(value: Record<string, any>): PositionMode {
+    const rawMode = String(value.posMode ?? value.holdMode ?? '').toLowerCase();
+    return rawMode === 'hedge_mode' || rawMode === 'double_hold' ? PositionMode.Hedged : PositionMode.OneWay;
+  }
+
+  private normalizeBitgetMarginType(value: unknown): MarginType {
+    const rawMarginType = String(value ?? '').toLowerCase();
+    return rawMarginType === 'crossed' || rawMarginType === 'cross' ? MarginType.Cross : MarginType.Isolated;
+  }
+
+  private normalizeBitgetPositionSide(value: Record<string, any>): PositionSide {
+    const rawSide = String(value.holdSide ?? value.posSide ?? value.side ?? '').toLowerCase();
+    if (rawSide === 'short' || rawSide === 'sell') return PositionSide.Short;
+    return PositionSide.Long;
   }
 
   calculateUpnlFromLastPrice(positions: Position[] = this.store.positions): number {
@@ -777,41 +809,7 @@ export class BitgetExchange extends BaseExchange {
       return [];
     }
 
-    const positions: Position[] = data.data.map((p) => {
-      const contracts = parseFloat(p.total);
-      const price = parseFloat(p.markPrice);
-
-      const symbol = p.symbol.replace(`_${this.apiProductType.toUpperCase()}`, '');
-      const positionMode = p.posMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
-      const marginMode = p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
-      const side = POSITION_SIDE[p.holdSide];
-      const positionId = createPositionId(symbol, side, positionMode);
-
-      const marginSize = p.marginSize != null ? parseFloat(p.marginSize) : undefined;
-      const position: Position = {
-        id: positionId,
-        symbol,
-        side,
-        entryPrice: parseFloat(p.openPriceAvg),
-        notional: multiply(contracts, price),
-        leverage: parseFloat(p.leverage),
-        unrealizedPnl: parseFloat(p.unrealizedPL || '0'),
-        contracts,
-        realizedPnl:
-          (p.achievedProfits ? parseFloat(p.achievedProfits) : 0) +
-          (p.totalFee ? parseFloat(p.totalFee) : 0) -
-          (p.deductedFee ? parseFloat(p.deductedFee) : 0),
-        liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice),
-        marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
-        positionMode,
-        marginType: marginMode,
-        info: p,
-        lastUpdate: virtualClock.getCurrentTimeMs(),
-      };
-
-      return position;
-    });
-    return positions;
+    return data.data.map(this.mapPosition);
   };
 
   private fetchUtaOpenPositions = async (): Promise<Position[]> => {
@@ -2640,15 +2638,15 @@ export class BitgetExchange extends BaseExchange {
   };
 
   mapUtaPosition = (p: BITGET_UTA_POSITION): Position => {
-    const symbol = (p.symbol || '').replace(`_${this.apiProductType.toUpperCase()}`, '');
-    const positionMode = p.holdMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
-    const side = POSITION_SIDE[p.posSide || p.holdSide || 'long'] || PositionSide.Long;
-    const marginMode = p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
-    const contracts = this.toFiniteNumber(p.total, this.toFiniteNumber(p.size));
-    const markPrice = this.toFiniteNumber(p.markPrice);
-    const entryPrice = this.toFiniteNumber(p.avgPrice, this.toFiniteNumber(p.openPriceAvg));
+    const symbol = this.normalizeBitgetSymbol(p.symbol);
+    const positionMode = this.normalizeBitgetPositionMode(p);
+    const side = this.normalizeBitgetPositionSide(p);
+    const marginMode = this.normalizeBitgetMarginType(p.marginMode);
+    const contracts = this.firstFiniteNumber([p.total, p.size]);
+    const markPrice = this.firstFiniteNumber([p.markPrice, (p as Record<string, any>).marketPrice]);
+    const entryPrice = this.firstFiniteNumber([p.avgPrice, p.openPriceAvg, (p as Record<string, any>).openAvgPrice, (p as Record<string, any>).avgPx]);
     const positionId = createPositionId(symbol, side, positionMode);
-    const marginSize = p.positionBalance != null ? this.toFiniteNumber(p.positionBalance) : this.toFiniteNumber(p.marginSize);
+    const marginSize = this.firstFiniteNumber([p.positionBalance, p.marginSize], NaN);
 
     return {
       id: positionId,
@@ -2656,8 +2654,8 @@ export class BitgetExchange extends BaseExchange {
       side,
       entryPrice,
       notional: multiply(contracts, markPrice || entryPrice),
-      leverage: this.toFiniteNumber(p.leverage, 1),
-      unrealizedPnl: this.toFiniteNumber(p.unrealisedPnl, this.toFiniteNumber(p.unrealizedPL)),
+      leverage: this.firstFiniteNumber([p.leverage, (p as Record<string, any>).lever], 1),
+      unrealizedPnl: this.firstFiniteNumber([p.unrealisedPnl, p.unrealizedPL, (p as Record<string, any>).upl], 0),
       realizedPnl:
         this.toFiniteNumber(p.curRealisedPnl) +
         this.toFiniteNumber(p.totalFunding) +
@@ -2665,7 +2663,7 @@ export class BitgetExchange extends BaseExchange {
         this.toFiniteNumber(p.closeFeeTotal) -
         this.toFiniteNumber(p.deductedFee),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice),
+      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? (p as Record<string, any>).liqPx),
       marginSize: marginSize > 0 ? marginSize : undefined,
       positionMode,
       marginType: marginMode,
@@ -2698,37 +2696,34 @@ export class BitgetExchange extends BaseExchange {
       };
     }
 
-    // Log warning if required fields are missing
-    if (!p.total || !p.openPriceAvg) {
-      console.log(`[Bitget] mapPosition received incomplete data: total=${p.total}, openPriceAvg=${p.openPriceAvg}`);
-    }
+    const contracts = this.firstFiniteNumber([p.total, p.size, p.pos, p.openTotalPos, p.available]);
+    const entryPrice = this.firstFiniteNumber([p.openPriceAvg, p.openAvgPrice, p.avgPrice, p.avgPx, p.averageOpenPrice]);
+    const markPrice = this.firstFiniteNumber([p.markPrice, p.marketPrice], entryPrice);
+    const symbol = this.normalizeBitgetSymbol(p.instId ?? p.symbol);
+    const positionMode = this.normalizeBitgetPositionMode(p);
+    const marginMode = this.normalizeBitgetMarginType(p.marginMode);
+    const side = this.normalizeBitgetPositionSide(p);
 
-    // Handle cases where total might be undefined or missing
-    const contracts = p.total ? parseFloat(p.total) : 0;
-    const price = p.openPriceAvg ? parseFloat(p.openPriceAvg) : 0;
-
-    // Handle different field names between REST API and WebSocket
-    const symbol = (p.instId || p.symbol || '').replace(`_${this.apiProductType.toUpperCase()}`, '');
-    const positionMode = p.posMode === 'hedge_mode' ? PositionMode.Hedged : PositionMode.OneWay;
-    const marginMode = p.marginMode === 'crossed' ? MarginType.Cross : MarginType.Isolated;
-    const side = POSITION_SIDE[p.holdSide];
-
-    const marginSize = p.marginSize != null ? parseFloat(p.marginSize) : undefined;
+    const marginSize = this.firstFiniteNumber([p.marginSize, p.margin, p.positionBalance], NaN);
     const positionId = createPositionId(symbol, side, positionMode);
     const position: Position = {
       id: positionId,
       symbol,
       side,
-      entryPrice: price,
-      notional: multiply(contracts, price),
-      leverage: p.leverage ? parseFloat(p.leverage) : 1,
-      unrealizedPnl: p.unrealizedPL ? parseFloat(p.unrealizedPL) : 0,
+      entryPrice,
+      notional: multiply(contracts, markPrice || entryPrice),
+      leverage: this.firstFiniteNumber([p.leverage, p.lever], 1),
+      unrealizedPnl: this.firstFiniteNumber([p.unrealizedPL, p.unrealisedPnl, p.upl], 0),
       realizedPnl:
-        (p.achievedProfits ? parseFloat(p.achievedProfits) : 0) +
-        (p.totalFee ? parseFloat(p.totalFee) : 0) -
-        (p.deductedFee ? parseFloat(p.deductedFee) : 0),
+        this.toFiniteNumber(p.achievedProfits) +
+        this.toFiniteNumber(p.curRealisedPnl) +
+        this.toFiniteNumber(p.totalFunding) +
+        this.toFiniteNumber(p.openFeeTotal) +
+        this.toFiniteNumber(p.closeFeeTotal) +
+        this.toFiniteNumber(p.totalFee) -
+        this.toFiniteNumber(p.deductedFee),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice),
+      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? p.liqPx),
       marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
       positionMode,
       marginType: marginMode,

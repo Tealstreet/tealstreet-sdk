@@ -46,6 +46,11 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private wsPositionUpdatedAtById = new Map<string, number>();
   private readonly positionRestStaleGuardMs = 5_000;
 
+  private normalizeOrderStatus = (status: unknown): string => String(status ?? '').toLowerCase().replace(/-/g, '_');
+
+  private getRawOrderStatus = (order: Record<string, any>): string =>
+    this.normalizeOrderStatus(order.status ?? order.state ?? order.planStatus ?? order.orderStatus);
+
   private toFiniteNumber = (value: unknown, fallback = 0): number => {
     if (typeof value === 'number') {
       return Number.isFinite(value) ? value : fallback;
@@ -249,16 +254,16 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     const rawOrders = data.data;
 
     for (const rawOrder of rawOrders) {
-      const normalizedStatus = String(rawOrder.status || '').toLowerCase();
+      const normalizedStatus = this.getRawOrderStatus(rawOrder);
+      const mappedStatus = ORDER_STATUS[normalizedStatus];
       const isPartialFill =
-        normalizedStatus === 'partial-fill' ||
         normalizedStatus === 'partial_fill' ||
         normalizedStatus === 'partially_filled';
-      const isFullFill =
-        normalizedStatus === 'filled' || normalizedStatus === 'full-fill' || normalizedStatus === 'full_fill';
+      const isFullFill = mappedStatus === OrderStatus.Closed;
 
       const orders = this.parent.mapOrder({
         ...rawOrder,
+        status: normalizedStatus || rawOrder.status,
         // invert side for hedge mode because bitget developers are ...
         side:
           rawOrder.posMode === 'hedge_mode' && rawOrder.reduceOnly === 'yes'
@@ -287,7 +292,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.throttledFetchBalance();
       }
 
-      if (rawOrder.status === 'cancel' || rawOrder.status === 'canceled' || rawOrder.status === 'cancelled') {
+      if (mappedStatus === OrderStatus.Canceled) {
         orders.forEach((order) => {
           this.store.updateOrderStatus(order, OrderStatus.Canceled);
           this.markOrderAsTerminal(order.id);
@@ -301,7 +306,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         });
       }
 
-      if (rawOrder.status === 'new' || isPartialFill || rawOrder.status === 'live') {
+      if (mappedStatus === OrderStatus.Open) {
         orders.forEach((order) => {
           this.store.addOrUpdateOrder(order);
           this.markOrderAsOpenFromWs(order.id);
@@ -329,35 +334,29 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     const rawOrders = data.data;
 
     for (const rawOrder of rawOrders) {
+      const normalizedStatus = this.getRawOrderStatus(rawOrder);
+      const mappedStatus = ORDER_STATUS[normalizedStatus];
       const orders = this.parent.mapOrder({
         ...rawOrder,
+        status: normalizedStatus || rawOrder.status,
         // invert side for hedge mode because bitget developers are ...
         side: rawOrder.posMode === 'hedge_mode' ? (rawOrder.side === 'sell' ? 'buy' : 'sell') : rawOrder.side,
       });
       const parentOrder = orders[0];
 
-      // Update order status based on the status field
-      if (rawOrder.status === 'live') {
+      if (mappedStatus === OrderStatus.Open) {
         this.store.addOrUpdateOrder(parentOrder);
         this.markOrderAsOpenFromWs(parentOrder.id);
-      } else if (rawOrder.status === 'cancel' || rawOrder.status === 'canceled' || rawOrder.status === 'cancelled') {
+      } else if (mappedStatus === OrderStatus.Canceled) {
         this.store.updateOrderStatus(parentOrder, OrderStatus.Canceled);
         this.markOrderAsTerminal(parentOrder.id);
-      } else if (rawOrder.status === 'triggered' || rawOrder.status === 'filled') {
+      } else if (mappedStatus === OrderStatus.Closed) {
         this.store.updateOrderStatus(parentOrder, OrderStatus.Closed);
         this.markOrderAsTerminal(parentOrder.id);
-      } else if (ORDER_STATUS[rawOrder.status]) {
-        const mappedStatus = ORDER_STATUS[rawOrder.status];
-        this.store.updateOrderStatus(parentOrder, mappedStatus);
-        if (mappedStatus === OrderStatus.Open) {
-          this.markOrderAsOpenFromWs(parentOrder.id);
-        } else if (mappedStatus === OrderStatus.Canceled || mappedStatus === OrderStatus.Closed) {
-          this.markOrderAsTerminal(parentOrder.id);
-        }
       }
 
       // Emit fill event if the order was triggered
-      if ((rawOrder.status === 'triggered' || rawOrder.status === 'filled') && rawOrder.actualSize) {
+      if (mappedStatus === OrderStatus.Closed && rawOrder.actualSize) {
         this.emitter.emit('fill', {
           id: parentOrder.id,
           side: parentOrder.side,
@@ -368,7 +367,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.throttledFetchBalance();
       }
 
-      if (rawOrder.status === 'triggered' || rawOrder.status === 'filled') {
+      if (mappedStatus === OrderStatus.Closed) {
         this.throttledFetchPositions();
         this.throttledFetchBalance();
       }

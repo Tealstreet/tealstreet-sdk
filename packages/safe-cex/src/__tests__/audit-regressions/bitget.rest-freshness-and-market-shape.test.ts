@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
-import { PositionMode, PositionSide } from '../../types';
+import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 
 const createExchange = () => {
@@ -46,6 +46,20 @@ const rawPosition = (overrides: Record<string, any> = {}) => ({
   assetMode: 'single',
   cTime: '1000',
   uTime: '1000',
+  ...overrides,
+});
+
+const rawAlgoOrder = (overrides: Record<string, any> = {}) => ({
+  orderId: 'stop-1',
+  symbol: 'BTCUSDT',
+  planType: 'profit_plan',
+  status: 'not_trigger',
+  side: 'sell',
+  triggerPrice: '51000',
+  size: '1',
+  actualSize: '0',
+  posMode: 'one_way_mode',
+  triggerType: 'mark_price',
   ...overrides,
 });
 
@@ -172,6 +186,91 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
       expect.objectContaining({
         contracts: 0,
         entryPrice: 0,
+      }),
+    );
+  });
+
+  it('keeps and updates Classic TP/SL rows from not_trigger algo WS frames', async () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', triggerPrice: '51000', status: 'not_trigger' })],
+    });
+
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({
+        id: 'tp-1',
+        status: OrderStatus.Open,
+        type: OrderType.TakeProfit,
+        side: OrderSide.Sell,
+        price: 51000,
+      }),
+    ]);
+
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', triggerPrice: '52000', planStatus: 'not_trigger', status: undefined })],
+    });
+
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({
+        id: 'tp-1',
+        status: OrderStatus.Open,
+        price: 52000,
+      }),
+    ]);
+  });
+
+  it('refreshes positions after terminal Classic algo WS statuses beyond filled/triggered', () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    const executePositionFetch = vi.spyOn(websocket, 'executePositionFetch').mockResolvedValue(undefined);
+    vi.spyOn(websocket, 'executeBalanceFetch').mockResolvedValue(undefined);
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+
+    exchange.store.addOrUpdateOrder(
+      exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
+    );
+
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', status: 'executed', actualSize: '1' })],
+    });
+
+    expect(exchange.store.orders[0]).toEqual(expect.objectContaining({ id: 'tp-1', status: OrderStatus.Closed }));
+    expect(executePositionFetch).toHaveBeenCalled();
+  });
+
+  it('normalizes Classic WS position aliases for side, mode, size, entry, and liquidation', () => {
+    const exchange = createExchange();
+
+    const position = exchange.mapPosition({
+      instId: 'ETHUSDT',
+      posSide: 'short',
+      holdMode: 'double_hold',
+      pos: '2',
+      avgPx: '3200',
+      marketPrice: '3190',
+      marginMode: 'fixed',
+      lever: '5',
+      upl: '20',
+      liqPx: '3400',
+      uTime: '2000',
+    });
+
+    expect(position).toEqual(
+      expect.objectContaining({
+        id: createPositionId('ETHUSDT', PositionSide.Short, PositionMode.Hedged),
+        symbol: 'ETHUSDT',
+        side: PositionSide.Short,
+        positionMode: PositionMode.Hedged,
+        marginType: MarginType.Isolated,
+        contracts: 2,
+        entryPrice: 3200,
+        notional: 6380,
+        leverage: 5,
+        unrealizedPnl: 20,
+        liquidationPrice: 3400,
       }),
     );
   });
