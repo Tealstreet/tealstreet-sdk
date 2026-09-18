@@ -25,6 +25,7 @@ export const ENDPOINTS = {
   LIST_POSITIONS_CFM: '/api/v3/brokerage/cfm/positions',
   KLINE: '/api/v3/brokerage/products/{product_id}/candles',
   ORDER_BOOK: '/api/v3/brokerage/product_book',
+  LIST_ORDERS: '/api/v3/brokerage/orders/historical/batch',
   INTX_INSTRUMENTS: 'https://api.international.coinbase.com/api/v1/instruments/',
   BALANCE: '/api/v3/brokerage/intx/portfolio/{portfolio_uuid}',
   BALANCE_CFM: '/api/v3/brokerage/cfm/balance_summary',
@@ -58,6 +59,7 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.LIST_PORTFOLIOS,
   ENDPOINTS.LIST_POSITIONS_INTX,
   ENDPOINTS.LIST_POSITIONS_CFM,
+  ENDPOINTS.LIST_ORDERS,
   ENDPOINTS.BALANCE,
   ENDPOINTS.BALANCE_CFM,
   ENDPOINTS.PORTFOLIO_BREAKDOWN,
@@ -467,6 +469,85 @@ export type ORDER_EVENT = {
     cancel_reason: string;
     reject_reason: string;
   }[];
+};
+
+export type LIST_ORDERS_RESPONSE = {
+  orders: {
+    order_id: string;
+    client_order_id: string;
+    product_id: string;
+    side: 'BUY' | 'SELL';
+    status:
+      | 'PENDING'
+      | 'OPEN'
+      | 'FILLED'
+      | 'CANCELLED'
+      | 'EXPIRED'
+      | 'FAILED'
+      | 'UNKNOWN_ORDER_STATUS'
+      | 'QUEUED'
+      | 'CANCEL_QUEUED'
+      | 'EDIT_QUEUED';
+    order_type:
+      | 'UNKNOWN_ORDER_TYPE'
+      | 'MARKET'
+      | 'LIMIT'
+      | 'STOP'
+      | 'STOP_LIMIT'
+      | 'BRACKET'
+      | 'TWAP'
+      | 'ROLL_OPEN'
+      | 'ROLL_CLOSE'
+      | 'LIQUIDATION'
+      | 'SCALED';
+    created_time: string;
+    filled_size?: string;
+    average_filled_price?: string;
+    total_fees?: string;
+    order_configuration?: {
+      market_market_ioc?: {
+        base_size?: string;
+        quote_size?: string;
+      };
+      market_market_fok?: {
+        base_size?: string;
+        quote_size?: string;
+      };
+      sor_limit_ioc?: {
+        base_size?: string;
+        quote_size?: string;
+        limit_price?: string;
+      };
+      limit_limit_gtc?: {
+        base_size?: string;
+        quote_size?: string;
+        limit_price?: string;
+        post_only?: boolean;
+      };
+      limit_limit_gtd?: {
+        base_size?: string;
+        quote_size?: string;
+        limit_price?: string;
+      };
+      limit_limit_fok?: {
+        base_size?: string;
+        quote_size?: string;
+        limit_price?: string;
+      };
+      stop_limit_stop_limit_gtc?: {
+        base_size?: string;
+        limit_price?: string;
+        stop_price?: string;
+      };
+      stop_limit_stop_limit_gtd?: {
+        base_size?: string;
+        limit_price?: string;
+        stop_price?: string;
+      };
+    };
+  }[];
+  has_next: boolean;
+  cursor?: string;
 };
 
 export type STOP_DIRECTION = 'STOP_DIRECTION_STOP_UP' | 'STOP_DIRECTION_STOP_DOWN';

@@ -691,14 +691,17 @@ Each tick makes (at minimum):
 1. `MARKETS` or `INTX_INSTRUMENTS` (for tickers, 1-2 calls depending on supported types)
 2. `BALANCE` or `BALANCE_CFM` (1 call)
 3. `LIST_POSITIONS_INTX` or `LIST_POSITIONS_CFM` (1 call for futures types)
+4. `LIST_ORDERS` (open orders only when the initial snapshot is missing or every 10 seconds)
 
-With 3 RPS limit, a single tick cycle takes approximately 1-2 seconds of API time.
+With 3 RPS limit, a single tick cycle takes approximately 1-2 seconds of API time; order polling is intentionally throttled separately to avoid turning the 1-second ticker/balance loop into an order-history loop.
 
 ## State Reconciliation
 
 ### Orders
 
-- **Initial load**: Orders come exclusively from the WebSocket `user` channel snapshot (REST `fetchOrders` is commented out).
+- **Initial load**: Orders are hydrated from the WebSocket `user` channel snapshot and from REST `GET /api/v3/brokerage/orders/historical/batch` when the initial snapshot is missing.
+- **REST polling** (`coinbase.exchange.ts`): `fetchOrders()` requests only active statuses (`PENDING`, `OPEN`, `QUEUED`, `CANCEL_QUEUED`, `EDIT_QUEUED`) and paginates with `cursor`. The tick loop polls this at startup and then every 10 seconds as a fallback for missed WS snapshots/updates.
+- **Reconnect healing**: Coinbase uses the base `fetchAndSetPrivateSnapshot()`, so private WS reconnects refetch open orders over REST before relying on fresh WS updates.
 - **Snapshot handling** (`coinbase.ws-private.ts`): Empty or valid-bearing
   snapshots are authoritative and replace the store. Invalid-only non-empty
   snapshots preserve last-known-good state; mixed snapshots retain their valid
@@ -745,7 +748,7 @@ Key metadata settings (from `exchangeMetadata.ts`):
 | `supportsChaser`              | `false`                                                                          |
 | `supportsPartialStops`        | `true`                                                                           |
 | `supportsInfinityStops`       | `false`                                                                          |
-| `autoDownSizeReduceOrders`    | `true` (the create-order API has no server-side reduce-only cap)                  |
+| `autoDownSizeReduceOrders`    | `true` (no server-side reduce-only cap)                                          |
 | `tvIntraDayMultipliers`       | `['1', '5', '15', '30', '60', '120', '360']`                                     |
 | `tvMaxGetBarFetches`          | `20`                                                                             |
 | `latencyDomain`               | `api.international.coinbase.com`                                                 |

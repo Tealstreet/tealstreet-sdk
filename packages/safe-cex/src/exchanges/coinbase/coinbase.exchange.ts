@@ -38,6 +38,7 @@ import { adjust, multiply, round } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
 import { createAPI } from './coinbase.api';
+import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
   BALANCE_RESPONSE,
   BALANCE_RESPONSE_CFM,
@@ -48,6 +49,7 @@ import {
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   INTX_INSTRUMENTS_RESPONSE,
+  LIST_ORDERS_RESPONSE,
   LIST_PORTFOLIOS_RESPONSE,
   LIST_POSITIONS_CFM_RESPONSE,
   LIST_POSITIONS_INTX_RESPONSE,
@@ -63,6 +65,9 @@ import { CoinbasePublicWebsocket } from './coinbase.ws-public';
 
 const COINBASE_UNSIGNED_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const COINBASE_ZERO_DECIMAL = /^0(?:\.0+)?$/;
+const COINBASE_OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED'];
+const COINBASE_ORDER_PAGE_LIMIT = 100;
+const COINBASE_ORDER_POLL_INTERVAL_MS = 10_000;
 
 const isCoinbaseUnsignedDecimal = (value: unknown): value is string =>
   typeof value === 'string' && COINBASE_UNSIGNED_DECIMAL.test(value);
@@ -81,6 +86,7 @@ export class CoinbaseExchange extends BaseExchange {
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
   selectedPortfolio: LIST_PORTFOLIOS_RESPONSE['portfolios'][0] | null = null;
+  private lastOrdersPollAt = 0;
 
   supportSpot = true;
 
@@ -252,6 +258,15 @@ export class CoinbaseExchange extends BaseExchange {
           positions,
           loaded: { ...this.store.loaded, positions: true },
         });
+
+        if (this.shouldPollOrders()) {
+          const orders = await this.fetchOrders();
+          if (this.isDisposed) return;
+          this.store.update({
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          });
+        }
       } catch (err: any) {
         this.emitAndLogError(err, err?.message);
       }
@@ -260,6 +275,15 @@ export class CoinbaseExchange extends BaseExchange {
         loop(() => this.tick(), this.getTickInterval());
       }
     }
+  };
+
+  private shouldPollOrders = () => {
+    const now = Date.now();
+    if (!this.store.loaded.orders || now - this.lastOrdersPollAt >= COINBASE_ORDER_POLL_INTERVAL_MS) {
+      this.lastOrdersPollAt = now;
+      return true;
+    }
+    return false;
   };
 
   getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
@@ -991,6 +1015,55 @@ export class CoinbaseExchange extends BaseExchange {
     }
   };
 
+  fetchOrders = async (): Promise<Order[]> => {
+    if (this.isPublicDataOnly) {
+      return [];
+    }
+
+    try {
+      const supportedTypes = await this.getSupportedTypes();
+      const requests = supportedTypes.map((type) => ({
+        product_type: type === 'spot' ? 'SPOT' : 'FUTURE',
+        ...(type === 'cfm' ? { contract_expiry_type: 'EXPIRING' } : {}),
+        ...(type === 'intx' ? { contract_expiry_type: 'PERPETUAL' } : {}),
+      }));
+
+      const ordersById = new Map<string, Order>();
+      for (const request of requests) {
+        let cursor: string | undefined;
+        do {
+          const { data } = await this.xhr.get<LIST_ORDERS_RESPONSE>(ENDPOINTS.LIST_ORDERS, {
+            params: {
+              ...request,
+              order_status: COINBASE_OPEN_ORDER_STATUSES,
+              limit: COINBASE_ORDER_PAGE_LIMIT,
+              ...(cursor ? { cursor } : {}),
+            },
+          });
+          for (const rawOrder of data.orders) {
+            const market = this.store.marketsById[rawOrder.product_id];
+            if (!market) {
+              this.emitAndLogError(`Coinbase order skipped: missing market for ${rawOrder.product_id}`);
+              continue;
+            }
+            const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
+            if (!order) {
+              this.emitAndLogError(`Coinbase order skipped: unsupported REST order shape for ${rawOrder.order_id}`);
+              continue;
+            }
+            ordersById.set(order.id, order);
+          }
+          cursor = data.has_next ? data.cursor : undefined;
+        } while (cursor);
+      }
+
+      return Array.from(ordersById.values());
+    } catch (err: any) {
+      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      return this.store.orders;
+    }
+  };
+
   fetchOpenPositionsIntx = async () => {
     if (!this.selectedPortfolio || this.selectedPortfolio.type !== 'INTX') {
       this.emitAndLogError('No INTX portfolio found');
@@ -1486,6 +1559,4 @@ export class CoinbaseExchange extends BaseExchange {
     //
     // return payloads;
   };
-
-  fetchAndSetPrivateSnapshot = async () => {};
 }
