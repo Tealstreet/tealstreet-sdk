@@ -180,7 +180,9 @@ export class CoinbaseExchange extends BaseExchange {
     //
     // start ticking live data
     // balance, tickers, positions
-    this.selectedPortfolio = await this.findSelectedPortfolio();
+    if (!this.selectedPortfolio) {
+      this.selectedPortfolio = await this.findSelectedPortfolio();
+    }
     if (this.isDisposed) return;
 
     await this.tick();
@@ -264,12 +266,16 @@ export class CoinbaseExchange extends BaseExchange {
         });
 
         if (this.shouldPollOrders()) {
-          const orders = await this.fetchOrders();
-          if (this.isDisposed) return;
-          this.store.update({
-            orders: this.mergeRestOrdersWithFreshWsState(orders),
-            loaded: { ...this.store.loaded, orders: true },
-          });
+          try {
+            const orders = await this.fetchOpenOrdersSnapshot();
+            if (this.isDisposed) return;
+            this.store.update({
+              orders: this.mergeRestOrdersWithFreshWsState(orders),
+              loaded: { ...this.store.loaded, orders: true },
+            });
+          } catch (err: any) {
+            this.emitOrdersFetchError(err);
+          }
         }
       } catch (err: any) {
         this.emitAndLogError(err, err?.message);
@@ -282,8 +288,12 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   private shouldPollOrders = () => {
+    if (this.store.loaded.orders) {
+      return false;
+    }
+
     const now = Date.now();
-    if (!this.store.loaded.orders || now - this.lastOrdersPollAt >= COINBASE_ORDER_POLL_INTERVAL_MS) {
+    if (this.lastOrdersPollAt === 0 || now - this.lastOrdersPollAt >= COINBASE_ORDER_POLL_INTERVAL_MS) {
       this.lastOrdersPollAt = now;
       return true;
     }
@@ -310,6 +320,10 @@ export class CoinbaseExchange extends BaseExchange {
     );
     if (preservedInFlight.length === 0) return restOrders;
     return [...restOrders, ...preservedInFlight];
+  };
+
+  private emitOrdersFetchError = (err: any) => {
+    this.emitAndLogError(err, err?.response?.data?.message || err?.message);
   };
 
   getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
@@ -1042,79 +1056,83 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   fetchOrders = async (): Promise<Order[]> => {
+    try {
+      return await this.fetchOpenOrdersSnapshot();
+    } catch (err: any) {
+      this.emitOrdersFetchError(err);
+      throw err;
+    }
+  };
+
+  private fetchOpenOrdersSnapshot = async (): Promise<Order[]> => {
     if (this.isPublicDataOnly) {
       return [];
     }
 
-    try {
-      const supportedTypes = await this.getSupportedTypes();
-      const requests = supportedTypes.map((type) => ({
-        product_type: type === 'spot' ? 'SPOT' : 'FUTURE',
-        ...(type === 'cfm' ? { contract_expiry_type: 'EXPIRING' } : {}),
-        ...(type === 'intx' ? { contract_expiry_type: 'PERPETUAL' } : {}),
-      }));
+    const supportedTypes = await this.getSupportedTypes();
+    const requests = supportedTypes.map((type) => ({
+      product_type: type === 'spot' ? 'SPOT' : 'FUTURE',
+      ...(type === 'cfm' ? { contract_expiry_type: 'EXPIRING' } : {}),
+      ...(type === 'intx' ? { contract_expiry_type: 'PERPETUAL' } : {}),
+    }));
 
-      const ordersById = new Map<string, Order>();
-      // A single poll can produce hundreds of skip messages if a product is
-      // missing from the store or if a REST shape is unsupported (common for
-      // spot products, in-flight edits, and preview markets). Aggregate the
-      // counts by product_id and reason and emit at most one summary line per
-      // reason per poll, rather than one error per order per 10s tick.
-      const missingMarketByProduct = new Map<string, number>();
-      const unsupportedShapeByProduct = new Map<string, number>();
+    const ordersById = new Map<string, Order>();
+    // A single poll can produce hundreds of skip messages if a product is
+    // missing from the store or if a REST shape is unsupported (common for
+    // spot products, in-flight edits, and preview markets). Aggregate the
+    // counts by product_id and reason and emit at most one summary line per
+    // reason per poll, rather than one error per order per 10s tick.
+    const missingMarketByProduct = new Map<string, number>();
+    const unsupportedShapeByProduct = new Map<string, number>();
 
-      for (const request of requests) {
-        let cursor: string | undefined;
-        do {
-          const { data } = await this.xhr.get<LIST_ORDERS_RESPONSE>(ENDPOINTS.LIST_ORDERS, {
-            params: {
-              ...request,
-              order_status: COINBASE_OPEN_ORDER_STATUSES,
-              limit: COINBASE_ORDER_PAGE_LIMIT,
-              ...(cursor ? { cursor } : {}),
-            },
-          });
-          for (const rawOrder of data.orders) {
-            const market = this.store.marketsById[rawOrder.product_id];
-            if (!market) {
-              missingMarketByProduct.set(
-                rawOrder.product_id,
-                (missingMarketByProduct.get(rawOrder.product_id) ?? 0) + 1,
-              );
-              continue;
-            }
-            const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
-            if (!order) {
-              unsupportedShapeByProduct.set(
-                rawOrder.product_id,
-                (unsupportedShapeByProduct.get(rawOrder.product_id) ?? 0) + 1,
-              );
-              continue;
-            }
-            ordersById.set(order.id, order);
+    for (const request of requests) {
+      let cursor: string | undefined;
+      do {
+        const { data } = await this.xhr.get<LIST_ORDERS_RESPONSE>(ENDPOINTS.LIST_ORDERS, {
+          params: {
+            ...request,
+            order_status: COINBASE_OPEN_ORDER_STATUSES,
+            limit: COINBASE_ORDER_PAGE_LIMIT,
+            ...(cursor ? { cursor } : {}),
+          },
+        });
+        for (const rawOrder of data.orders) {
+          const market = this.store.marketsById[rawOrder.product_id];
+          if (!market) {
+            missingMarketByProduct.set(
+              rawOrder.product_id,
+              (missingMarketByProduct.get(rawOrder.product_id) ?? 0) + 1,
+            );
+            continue;
           }
-          cursor = data.has_next ? data.cursor : undefined;
-        } while (cursor);
-      }
-
-      if (missingMarketByProduct.size > 0) {
-        const summary = Array.from(missingMarketByProduct.entries())
-          .map(([productId, count]) => `${productId} (${count})`)
-          .join(', ');
-        this.emitAndLogError(`Coinbase orders skipped, missing market: ${summary}`);
-      }
-      if (unsupportedShapeByProduct.size > 0) {
-        const summary = Array.from(unsupportedShapeByProduct.entries())
-          .map(([productId, count]) => `${productId} (${count})`)
-          .join(', ');
-        this.emitAndLogError(`Coinbase orders skipped, unsupported REST shape: ${summary}`);
-      }
-
-      return Array.from(ordersById.values());
-    } catch (err: any) {
-      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
-      return this.store.orders;
+          const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
+          if (!order) {
+            unsupportedShapeByProduct.set(
+              rawOrder.product_id,
+              (unsupportedShapeByProduct.get(rawOrder.product_id) ?? 0) + 1,
+            );
+            continue;
+          }
+          ordersById.set(order.id, order);
+        }
+        cursor = data.has_next ? data.cursor : undefined;
+      } while (cursor);
     }
+
+    if (missingMarketByProduct.size > 0) {
+      const summary = Array.from(missingMarketByProduct.entries())
+        .map(([productId, count]) => `${productId} (${count})`)
+        .join(', ');
+      this.emitAndLogError(`Coinbase orders skipped, missing market: ${summary}`);
+    }
+    if (unsupportedShapeByProduct.size > 0) {
+      const summary = Array.from(unsupportedShapeByProduct.entries())
+        .map(([productId, count]) => `${productId} (${count})`)
+        .join(', ');
+      this.emitAndLogError(`Coinbase orders skipped, unsupported REST shape: ${summary}`);
+    }
+
+    return Array.from(ordersById.values());
   };
 
   fetchOpenPositionsIntx = async () => {

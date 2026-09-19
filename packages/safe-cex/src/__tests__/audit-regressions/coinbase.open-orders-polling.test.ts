@@ -156,7 +156,7 @@ describe('Coinbase REST open-order polling', () => {
     ]);
   });
 
-  it('preserves last-known-good orders when REST polling is rate limited', async () => {
+  it('rejects rate-limited REST polling without mutating last-known-good orders', async () => {
     const { exchange, store } = createExchange();
     const existingOrder = {
       id: 'existing-order',
@@ -180,7 +180,9 @@ describe('Coinbase REST open-order polling', () => {
     rateLimitError.response = { status: 429, data: { message: 'rate limited' } };
     exchange.xhr = { get: vi.fn().mockRejectedValue(rateLimitError) } as unknown as Axios;
 
-    await expect(exchange.fetchOrders()).resolves.toEqual([existingOrder]);
+    await expect(exchange.fetchOrders()).rejects.toBe(rateLimitError);
+    expect(store.orders).toEqual([existingOrder]);
+    expect(store.loaded.orders).toBe(false);
     expect(exchange.emitAndLogError).toHaveBeenCalledWith(rateLimitError, 'rate limited');
   });
 
@@ -296,5 +298,19 @@ describe('Coinbase REST open-order polling', () => {
 
     expect(store.orders).toEqual(orders);
     expect(store.loaded.orders).toBe(true);
+  });
+
+  it('does not mark orders loaded when a reconnect snapshot fetch fails', async () => {
+    const { exchange, store } = createExchange();
+    const rateLimitError = new Error('GET /orders/historical/batch failed with 429') as Error & {
+      response?: { status: number; data?: { message?: string } };
+    };
+    rateLimitError.response = { status: 429, data: { message: 'rate limited' } };
+    vi.spyOn(exchange, 'fetchOrders').mockRejectedValue(rateLimitError);
+
+    await exchange.fetchAndSetPrivateSnapshot();
+
+    expect(store.orders).toEqual([]);
+    expect(store.loaded.orders).toBe(false);
   });
 });

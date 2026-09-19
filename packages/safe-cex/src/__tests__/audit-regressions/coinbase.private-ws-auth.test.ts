@@ -57,8 +57,9 @@ describe('Coinbase private WebSocket auth', () => {
       isAvailable: () => true,
       onAvailabilityChange: () => () => undefined,
     } satisfies RemoteSigner;
-    const { websocket } = createSubject({ secret: '', remoteSigner });
+    const { exchange, websocket } = createSubject({ secret: '', remoteSigner });
     const send = vi.spyOn(websocket, 'sendWithLog').mockImplementation(() => undefined);
+    const fetchRestSnapshot = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot').mockResolvedValue(undefined);
 
     await websocket.onOpen();
 
@@ -89,6 +90,7 @@ describe('Coinbase private WebSocket auth', () => {
       { type: 'subscribe', channel: 'user', jwt: 'remote-user-jwt' },
       { type: 'subscribe', channel: 'heartbeats', jwt: 'remote-heartbeats-jwt' },
     ]);
+    expect(fetchRestSnapshot).not.toHaveBeenCalled();
   });
 
   it('refuses to open a private socket when neither a local secret nor remote signer is available', () => {

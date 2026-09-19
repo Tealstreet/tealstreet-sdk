@@ -257,4 +257,25 @@ describe('Coinbase CFM contract-size quarantine', () => {
       ]),
     );
   });
+
+  it('maps USDC-equivalent spot order events to loaded USD markets', () => {
+    const { exchange, store } = createExchange([
+      makeMarket({ id: 'BTC-USD', symbol: 'BTC-USD', isExpiring: false, isSpot: true, contractSize: 1 }),
+    ]);
+
+    exchange.privateWebsocket.handleUserEventOrders(
+      makeOrderEvent([makeOrder({ order_id: 'spot-usdc-order', product_id: 'BTC-USDC' })]),
+    );
+
+    expect(store.orders).toEqual([
+      expect.objectContaining({
+        id: 'spot-usdc-order',
+        symbol: 'BTC-USD',
+        amount: 1.5,
+        filled: 1.2,
+        remaining: 0.3,
+      }),
+    ]);
+    expect(store.loaded.orders).toBe(true);
+  });
 });

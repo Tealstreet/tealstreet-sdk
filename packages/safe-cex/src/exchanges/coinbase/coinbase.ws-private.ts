@@ -6,8 +6,8 @@ import {
   normalizeCfmContractSize,
   sign,
 } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
-import { Order, OrderSide } from '@tealstreet/safe-cex/src/types';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
+import { ENABLE_PWS_LOG } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { add, multiply } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -15,6 +15,7 @@ import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 
 const COINBASE_WS_AUTH_REQUEST_PREFIX = 'coinbase-ws-auth';
+const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
 
 export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   private subscriptionAttempt = 0;
@@ -44,9 +45,6 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     try {
       await this.subscribe(attempt);
       if (this.isDisposed || attempt !== this.subscriptionAttempt) return;
-      if (ENABLE_RECONNECTING_WEBSOCKET) {
-        this.parent.fetchAndSetPrivateSnapshot();
-      }
     } catch (err: any) {
       this.emitAndLogError(err?.message || 'Coinbase private WebSocket subscription signing failed');
       // A transient signing failure (remote signer offline, brief network blip)
@@ -93,7 +91,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     for (const order of data.orders) {
       const filledNative = parseFloat(order.cumulative_quantity);
       const remainingNative = parseFloat(order.leaves_quantity);
-      const market = this.store.marketsById[order.product_id];
+      const market = this.resolveOrderMarket(order.product_id);
       if (!market) {
         this.emitAndLogError(`Coinbase order skipped: missing market for ${order.product_id}`);
         continue;
@@ -110,7 +108,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         id: order.order_id,
         parentId: order.client_order_id,
         status: formatOrderState(order.status),
-        symbol: order.product_id,
+        symbol: market.symbol,
         type: formatOrderType(order.order_type),
         side: order.order_side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
         price: parseFloat(order.stop_price || order.limit_price || '0'),
@@ -151,6 +149,21 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   };
 
   handlePositionTopic = (_data: Array<Record<string, any>>) => {};
+
+  private resolveOrderMarket = (productId: string): Market | undefined => {
+    const exact = this.store.marketsById[productId];
+    if (exact) return exact;
+
+    if (productId.endsWith('-USDC') && !COINBASE_USDC_ALIAS_EXCEPTIONS.has(productId)) {
+      return this.store.marketsById[`${productId.slice(0, -5)}-USD`];
+    }
+
+    if (productId.endsWith('-USD')) {
+      return this.store.marketsById[`${productId.slice(0, -4)}-USDC`];
+    }
+
+    return undefined;
+  };
 
   private subscribe = async (attempt: number) => {
     for (const channel of ['user', 'heartbeats']) {

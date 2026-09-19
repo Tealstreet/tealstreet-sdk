@@ -52,6 +52,18 @@ describe('Coinbase Spot stays isolated from futures endpoints', () => {
     });
   });
 
+  it('does not re-list portfolios during private startup after spot portfolio selection', async () => {
+    const exchange = makeExchange();
+    exchange.selectedPortfolio = { name: 'Default', uuid: 'spot-portfolio', type: 'DEFAULT', deleted: false };
+    vi.spyOn(exchange.privateWebsocket, 'connectAndSubscribe').mockImplementation(() => undefined);
+    vi.spyOn(exchange, 'tick').mockResolvedValue(undefined);
+    const findSelectedPortfolio = vi.spyOn(exchange, 'findSelectedPortfolio');
+
+    await exchange._startPrivate();
+
+    expect(findSelectedPortfolio).not.toHaveBeenCalled();
+  });
+
   it('preserves a portfolio-list 429 as a rate-limit failure instead of reporting missing permissions', async () => {
     const exchange = makeExchange();
     const rateLimitError = new Error('GET /api/v3/brokerage/portfolios failed with 429') as Error & {
