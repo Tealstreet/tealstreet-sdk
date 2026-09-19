@@ -3,6 +3,7 @@ import type { CoinbaseExchange } from './coinbase.exchange';
 import {
   formatOrderState,
   formatOrderType,
+  getCoinbaseUsdEquivalentAliasProductId,
   normalizeCfmContractSize,
   sign,
 } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
@@ -15,7 +16,6 @@ import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 
 const COINBASE_WS_AUTH_REQUEST_PREFIX = 'coinbase-ws-auth';
-const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
 
 export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   private subscriptionAttempt = 0;
@@ -154,15 +154,8 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     const exact = this.store.marketsById[productId];
     if (exact) return exact;
 
-    if (productId.endsWith('-USDC') && !COINBASE_USDC_ALIAS_EXCEPTIONS.has(productId)) {
-      return this.store.marketsById[`${productId.slice(0, -5)}-USD`];
-    }
-
-    if (productId.endsWith('-USD')) {
-      return this.store.marketsById[`${productId.slice(0, -4)}-USDC`];
-    }
-
-    return undefined;
+    const aliasProductId = getCoinbaseUsdEquivalentAliasProductId(productId);
+    return aliasProductId ? this.store.marketsById[aliasProductId] : undefined;
   };
 
   private subscribe = async (attempt: number) => {

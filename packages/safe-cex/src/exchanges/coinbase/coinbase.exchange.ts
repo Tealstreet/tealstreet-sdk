@@ -59,7 +59,12 @@ import {
   PLACE_ORDER_RESPONSE,
   PORTFOLIO_BREAKDOWN_RESPONSE,
 } from './coinbase.types';
-import { normalizeCfmContractSize, sign } from './coinbase.utils';
+import {
+  getCoinbaseUsdEquivalentAliasProductId,
+  normalizeCfmContractSize,
+  normalizeCoinbaseUsdEquivalentProductId,
+  sign,
+} from './coinbase.utils';
 import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
 import { CoinbasePublicWebsocket } from './coinbase.ws-public';
 
@@ -324,6 +329,14 @@ export class CoinbaseExchange extends BaseExchange {
 
   private emitOrdersFetchError = (err: any) => {
     this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+  };
+
+  private resolveMarketByCoinbaseProductId = (productId: string): Market | undefined => {
+    const exact = this.store.marketsById[productId];
+    if (exact) return exact;
+
+    const aliasProductId = getCoinbaseUsdEquivalentAliasProductId(productId);
+    return aliasProductId ? this.store.marketsById[aliasProductId] : undefined;
   };
 
   getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
@@ -1097,7 +1110,7 @@ export class CoinbaseExchange extends BaseExchange {
           },
         });
         for (const rawOrder of data.orders) {
-          const market = this.store.marketsById[rawOrder.product_id];
+          const market = this.resolveMarketByCoinbaseProductId(rawOrder.product_id);
           if (!market) {
             missingMarketByProduct.set(
               rawOrder.product_id,
@@ -1206,7 +1219,7 @@ export class CoinbaseExchange extends BaseExchange {
 
     const { data } = await this.xhr.get<CANDLES_RESPONSE>(ENDPOINTS.KLINE, {
       params: {
-        product_id: opts.symbol,
+        product_id: normalizeCoinbaseUsdEquivalentProductId(opts.symbol),
         granularity,
         start: Math.round(start.valueOf() / 1000),
         end: Math.round(end.valueOf() / 1000),

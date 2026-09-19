@@ -3,6 +3,26 @@ import { OrderStatus, OrderType } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 
+const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
+
+export const normalizeCoinbaseUsdEquivalentProductId = (productId: string): string => {
+  if (productId.endsWith('-USDC') && !COINBASE_USDC_ALIAS_EXCEPTIONS.has(productId)) {
+    return `${productId.slice(0, -5)}-USD`;
+  }
+  return productId;
+};
+
+export const getCoinbaseUsdEquivalentAliasProductId = (productId: string): string | undefined => {
+  const normalized = normalizeCoinbaseUsdEquivalentProductId(productId);
+  if (normalized !== productId) return normalized;
+
+  if (productId.endsWith('-USD')) {
+    return `${productId.slice(0, -4)}-USDC`;
+  }
+
+  return undefined;
+};
+
 // Cache imported CryptoKey to avoid re-importing on every request
 let cachedCryptoKey: CryptoKey | null = null;
 let cachedKeySecret = '';

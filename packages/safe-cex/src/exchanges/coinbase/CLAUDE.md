@@ -643,9 +643,12 @@ last-known-good orders and loaded state.
 - **CFM Futures**: Product IDs as returned by the API (e.g., `BIT-28AUG24-CDE` for dated futures)
 - **INTX Perpetuals**: `BTC-PERP-INTX` format (the exchange appends `-INTX` to the INTX instrument symbol in `fetchTickersIntx`)
 - **USDC/USD quirk**: The WebSocket public channels substitute `USDC` with
-  `USD` in symbol lookups because Coinbase treats the USDC book as equivalent
-  to USD. OHLCV handler keys, reconnect stats, and unsubscribe cleanup all use
-  the normalized symbol so entries do not leak after the listener is removed.
+  `USD` in symbol lookups because Coinbase treats ordinary `*-USDC` books as
+  equivalent to `*-USD`. REST candle requests, public WebSocket
+  subscribe/unsubscribe payloads, OHLCV handler keys, reconnect stats, and
+  unsubscribe cleanup all use the normalized symbol so `BTC-USDC` charts do not
+  fail with a Coinbase symbol error or leak stats. `USDT-USDC` and `EURC-USDC`
+  remain exact exceptions.
 - **Default quote**: `USD`
 - **Symbol conversion**: When converting from other exchanges, a hyphen is inserted before `USD` if not present (e.g., `BTCUSD` becomes `BTC-USD`)
 
@@ -796,7 +799,7 @@ The testnet option is accepted but has no effect.
 
 15. **Portfolio detection caching** (`coinbase.exchange.ts`): `findSelectedPortfolio()` is called by `start()` before market loading. `_startPrivate()` reuses that value and only probes if no portfolio was selected yet, so saved spot-only accounts do not spend an extra rate-limited portfolio-list request during load.
 
-16. **Private order USD/USDC aliases** (`coinbase.ws-private.ts`): the private `user` channel may deliver spot orders with `-USDC` product IDs while the loaded/displayed market is the Coinbase-equivalent `-USD` product. Resolve those aliases for ordinary `*-USDC` pairs before quarantining an order as a missing market; keep `USDT-USDC` and `EURC-USDC` exact because Coinbase documents them as exceptions to the USD-equivalence rule.
+16. **Order USD/USDC aliases** (`coinbase.ws-private.ts`, `coinbase.exchange.ts`, `coinbase.orders.ts`): private `user` channel and REST open-order rows may deliver spot orders with `-USDC` product IDs while the loaded/displayed market is the Coinbase-equivalent `-USD` product. Resolve those aliases for ordinary `*-USDC` pairs before quarantining an order as a missing market, and emit/store the loaded market symbol; keep `USDT-USDC` and `EURC-USDC` exact because Coinbase documents them as exceptions to the USD-equivalence rule.
 
 17. **Account validation shape**: `validateAccount()` returns
     `{ error: '', balance }` on success and `{ error }` on failure. Balance is

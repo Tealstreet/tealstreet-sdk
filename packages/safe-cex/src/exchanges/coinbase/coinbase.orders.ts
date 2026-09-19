@@ -106,7 +106,7 @@ export const mapCoinbaseRestOrder = (
     id: rawOrder.order_id,
     parentId: rawOrder.client_order_id,
     status,
-    symbol: rawOrder.product_id,
+    symbol: market.symbol,
     type: resolved.type,
     side: rawOrder.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
     price: parseUnsignedDecimal(resolved.price) ?? 0,

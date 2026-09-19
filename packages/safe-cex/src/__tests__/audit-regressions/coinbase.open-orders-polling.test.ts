@@ -225,6 +225,29 @@ describe('Coinbase REST open-order polling', () => {
     expect(unsupportedShapeCalls[0]).toContain('BTC-USD (2)');
   });
 
+  it('maps REST open-order USDC aliases to loaded USD markets', async () => {
+    const { exchange } = createExchange();
+    const get = vi.fn().mockResolvedValueOnce({
+      data: {
+        orders: [makeRestOrder({ order_id: 'usdc-alias-rest-order', product_id: 'BTC-USDC' })],
+        has_next: false,
+      },
+    });
+    exchange.xhr = { get } as unknown as Axios;
+
+    const orders = await exchange.fetchOrders();
+
+    expect(orders).toEqual([
+      expect.objectContaining({
+        id: 'usdc-alias-rest-order',
+        symbol: 'BTC-USD',
+      }),
+    ]);
+    expect(exchange.emitAndLogError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Coinbase orders skipped, missing market'),
+    );
+  });
+
   it('preserves fresh WS-only orders when the REST snapshot has not caught up', async () => {
     const { exchange, store } = createExchange();
     const now = Date.now();
