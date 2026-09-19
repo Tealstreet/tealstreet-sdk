@@ -184,6 +184,94 @@ describe('Coinbase REST open-order polling', () => {
     expect(exchange.emitAndLogError).toHaveBeenCalledWith(rateLimitError, 'rate limited');
   });
 
+  it('deduplicates repeated skip reasons into one summary error per poll', async () => {
+    const { exchange } = createExchange();
+    const get = vi.fn().mockResolvedValueOnce({
+      data: {
+        orders: [
+          makeRestOrder({ order_id: 'unknown-1', product_id: 'UNKNOWN-PROD' }),
+          makeRestOrder({ order_id: 'unknown-2', product_id: 'UNKNOWN-PROD' }),
+          makeRestOrder({ order_id: 'unknown-3', product_id: 'OTHER-PROD' }),
+          makeRestOrder({
+            order_id: 'bad-shape-1',
+            order_configuration: undefined,
+          }),
+          makeRestOrder({
+            order_id: 'bad-shape-2',
+            order_configuration: undefined,
+          }),
+        ],
+        has_next: false,
+      },
+    });
+    exchange.xhr = { get } as unknown as Axios;
+
+    const orders = await exchange.fetchOrders();
+
+    expect(orders).toEqual([]);
+    // One line per reason for the whole poll — not one line per skipped order.
+    const calls = (exchange.emitAndLogError as any).mock.calls;
+    const messages = calls.map((call: unknown[]) => call[0]);
+    const missingMarketCalls = messages.filter((m: string) => m?.startsWith?.('Coinbase orders skipped, missing market'));
+    const unsupportedShapeCalls = messages.filter((m: string) =>
+      m?.startsWith?.('Coinbase orders skipped, unsupported REST shape'),
+    );
+    expect(missingMarketCalls).toHaveLength(1);
+    expect(unsupportedShapeCalls).toHaveLength(1);
+    expect(missingMarketCalls[0]).toContain('UNKNOWN-PROD (2)');
+    expect(missingMarketCalls[0]).toContain('OTHER-PROD (1)');
+    expect(unsupportedShapeCalls[0]).toContain('BTC-USD (2)');
+  });
+
+  it('preserves fresh WS-only orders when the REST snapshot has not caught up', async () => {
+    const { exchange, store } = createExchange();
+    const now = Date.now();
+    const freshWsOrder = {
+      id: 'fresh-ws-order',
+      status: OrderStatus.Open,
+      symbol: 'BTC-USD',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      price: 51_000,
+      amount: 1,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: false,
+      info: {},
+      // WS event received ~500 ms ago; REST is still behind.
+      lastUpdate: now - 500,
+    };
+    const staleWsOrder = {
+      ...freshWsOrder,
+      id: 'stale-ws-order',
+      // Older than the 5s REST-lag tolerance; treat REST as authoritative.
+      lastUpdate: now - 10_000,
+    };
+    store.update({ orders: [freshWsOrder, staleWsOrder] });
+
+    const restOrder = makeRestOrder({ order_id: 'rest-only-order', filled_size: '0' });
+    const merged = (exchange as any).mergeRestOrdersWithFreshWsState([
+      {
+        id: restOrder.order_id,
+        status: OrderStatus.Open,
+        symbol: SPOT_MARKET.symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        price: 50_000,
+        amount: 1.25,
+        filled: 0,
+        remaining: 1.25,
+        reduceOnly: false,
+        info: {},
+        lastUpdate: now,
+      },
+    ]) as Array<{ id: string }>;
+
+    const ids = merged.map((order) => order.id).sort();
+    expect(ids).toEqual(['fresh-ws-order', 'rest-only-order']);
+    expect(ids).not.toContain('stale-ws-order');
+  });
+
   it('uses the inherited reconnect snapshot fetch instead of a Coinbase no-op', async () => {
     const { exchange, store } = createExchange();
     const orders = [
