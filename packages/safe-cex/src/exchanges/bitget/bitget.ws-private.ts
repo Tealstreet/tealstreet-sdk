@@ -51,6 +51,25 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private getRawOrderStatus = (order: Record<string, any>): string =>
     this.normalizeOrderStatus(order.status ?? order.state ?? order.planStatus ?? order.orderStatus);
 
+  /**
+   * The shared `ORDER_STATUS` map treats several strings as `OrderStatus.Closed`,
+   * including `success` and `executed`. Those two are ambiguous on Bitget WS —
+   * they appear on non-fill acknowledgements (successful cancel/modify frames)
+   * for some topics — and firing `emit('fill', ...)` plus `throttledFetchPositions`
+   * on them causes phantom fills and unnecessary REST reconciliation storms.
+   * Only the explicit fill statuses trigger fill emission and position/balance
+   * refetches; other closed statuses still flow through `updateOrderStatus` +
+   * `markOrderAsTerminal` so the local order row transitions correctly.
+   */
+  private static readonly BITGET_TERMINAL_FILL_STATUSES: ReadonlySet<string> = new Set([
+    'triggered',
+    'filled',
+    'full_fill',
+  ]);
+
+  private isTerminalFillStatus = (normalizedStatus: string): boolean =>
+    BitgetPrivateWebsocket.BITGET_TERMINAL_FILL_STATUSES.has(normalizedStatus);
+
   private toFiniteNumber = (value: unknown, fallback = 0): number => {
     if (typeof value === 'number') {
       return Number.isFinite(value) ? value : fallback;
@@ -259,7 +278,9 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       const isPartialFill =
         normalizedStatus === 'partial_fill' ||
         normalizedStatus === 'partially_filled';
-      const isFullFill = mappedStatus === OrderStatus.Closed;
+      // Only explicit fill statuses count as fills for emission and reconciliation.
+      // `success` / `executed` may map to Closed but are frequently non-fill acks.
+      const isFullFill = this.isTerminalFillStatus(normalizedStatus);
 
       const orders = this.parent.mapOrder({
         ...rawOrder,
@@ -299,7 +320,10 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         });
       }
 
-      if (isFullFill) {
+      if (mappedStatus === OrderStatus.Closed) {
+        // Terminal Closed transition applies to both explicit fills and
+        // ambiguous closed statuses (e.g. `success` / `executed`); only the
+        // explicit fill statuses above emit fills and refetch.
         orders.forEach((order) => {
           this.store.updateOrderStatus(order, OrderStatus.Closed);
           this.markOrderAsTerminal(order.id);
@@ -344,6 +368,8 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       });
       const parentOrder = orders[0];
 
+      const isTerminalFill = this.isTerminalFillStatus(normalizedStatus);
+
       if (mappedStatus === OrderStatus.Open) {
         this.store.addOrUpdateOrder(parentOrder);
         this.markOrderAsOpenFromWs(parentOrder.id);
@@ -355,8 +381,10 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.markOrderAsTerminal(parentOrder.id);
       }
 
-      // Emit fill event if the order was triggered
-      if (mappedStatus === OrderStatus.Closed && rawOrder.actualSize) {
+      // Only emit a fill and reconcile positions/balance when the algo order
+      // reached an explicit fill status; ambiguous Closed statuses transition
+      // the store above but do not trigger side effects.
+      if (isTerminalFill && rawOrder.actualSize) {
         this.emitter.emit('fill', {
           id: parentOrder.id,
           side: parentOrder.side,
@@ -367,7 +395,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.throttledFetchBalance();
       }
 
-      if (mappedStatus === OrderStatus.Closed) {
+      if (isTerminalFill) {
         this.throttledFetchPositions();
         this.throttledFetchBalance();
       }
