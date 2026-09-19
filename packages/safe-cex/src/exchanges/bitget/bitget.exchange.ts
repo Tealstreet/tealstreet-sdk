@@ -2706,6 +2706,13 @@ export class BitgetExchange extends BaseExchange {
 
     const marginSize = this.firstFiniteNumber([p.marginSize, p.margin, p.positionBalance], NaN);
     const positionId = createPositionId(symbol, side, positionMode);
+    // Bitget V2 non-UTA position payloads (REST `POSITIONS_V2` and the
+    // corresponding private WS `positions` topic) report realized PnL as
+    // `achievedProfits + totalFee - deductedFee`. The UTA endpoint uses
+    // `curRealisedPnl + totalFunding + openFee/closeFeeTotal - deductedFee`
+    // via `mapUtaPosition`. Do NOT sum both here — for a UTA payload it
+    // double-counts, and for a non-UTA payload the UTA fields are absent
+    // (which we relied on earlier, but is fragile). Keep the branches split.
     const position: Position = {
       id: positionId,
       symbol,
@@ -2716,10 +2723,6 @@ export class BitgetExchange extends BaseExchange {
       unrealizedPnl: this.firstFiniteNumber([p.unrealizedPL, p.unrealisedPnl, p.upl], 0),
       realizedPnl:
         this.toFiniteNumber(p.achievedProfits) +
-        this.toFiniteNumber(p.curRealisedPnl) +
-        this.toFiniteNumber(p.totalFunding) +
-        this.toFiniteNumber(p.openFeeTotal) +
-        this.toFiniteNumber(p.closeFeeTotal) +
         this.toFiniteNumber(p.totalFee) -
         this.toFiniteNumber(p.deductedFee),
       contracts,
