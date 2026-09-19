@@ -68,6 +68,10 @@ const COINBASE_ZERO_DECIMAL = /^0(?:\.0+)?$/;
 const COINBASE_OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED'];
 const COINBASE_ORDER_PAGE_LIMIT = 100;
 const COINBASE_ORDER_POLL_INTERVAL_MS = 10_000;
+// REST replication for a freshly placed order can lag WS by a few hundred ms.
+// Preserve open WS-only orders whose lastUpdate is within this window so a
+// snapshot poll doesn't briefly evict them from the store on a race.
+const COINBASE_ORDER_REST_LAG_TOLERANCE_MS = 5_000;
 
 const isCoinbaseUnsignedDecimal = (value: unknown): value is string =>
   typeof value === 'string' && COINBASE_UNSIGNED_DECIMAL.test(value);
@@ -263,7 +267,7 @@ export class CoinbaseExchange extends BaseExchange {
           const orders = await this.fetchOrders();
           if (this.isDisposed) return;
           this.store.update({
-            orders,
+            orders: this.mergeRestOrdersWithFreshWsState(orders),
             loaded: { ...this.store.loaded, orders: true },
           });
         }
@@ -284,6 +288,28 @@ export class CoinbaseExchange extends BaseExchange {
       return true;
     }
     return false;
+  };
+
+  /**
+   * Merge a REST orders snapshot with any WS-only in-flight orders currently in
+   * the store. Freshly placed orders often reach us over WS before Coinbase's
+   * REST listing catches up; a wholesale replace briefly evicts them until the
+   * next WS event or poll. We preserve store orders that (a) are missing from
+   * the REST snapshot, (b) are still Open, and (c) were last updated within
+   * `COINBASE_ORDER_REST_LAG_TOLERANCE_MS` — anything older than that we treat
+   * as authoritatively gone from REST's point of view.
+   */
+  private mergeRestOrdersWithFreshWsState = (restOrders: Order[]): Order[] => {
+    const restIds = new Set(restOrders.map((order) => order.id));
+    const now = Date.now();
+    const preservedInFlight = this.store.orders.filter(
+      (existing) =>
+        !restIds.has(existing.id) &&
+        existing.status === OrderStatus.Open &&
+        now - existing.lastUpdate < COINBASE_ORDER_REST_LAG_TOLERANCE_MS,
+    );
+    if (preservedInFlight.length === 0) return restOrders;
+    return [...restOrders, ...preservedInFlight];
   };
 
   getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
@@ -1029,6 +1055,14 @@ export class CoinbaseExchange extends BaseExchange {
       }));
 
       const ordersById = new Map<string, Order>();
+      // A single poll can produce hundreds of skip messages if a product is
+      // missing from the store or if a REST shape is unsupported (common for
+      // spot products, in-flight edits, and preview markets). Aggregate the
+      // counts by product_id and reason and emit at most one summary line per
+      // reason per poll, rather than one error per order per 10s tick.
+      const missingMarketByProduct = new Map<string, number>();
+      const unsupportedShapeByProduct = new Map<string, number>();
+
       for (const request of requests) {
         let cursor: string | undefined;
         do {
@@ -1043,18 +1077,37 @@ export class CoinbaseExchange extends BaseExchange {
           for (const rawOrder of data.orders) {
             const market = this.store.marketsById[rawOrder.product_id];
             if (!market) {
-              this.emitAndLogError(`Coinbase order skipped: missing market for ${rawOrder.product_id}`);
+              missingMarketByProduct.set(
+                rawOrder.product_id,
+                (missingMarketByProduct.get(rawOrder.product_id) ?? 0) + 1,
+              );
               continue;
             }
             const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
             if (!order) {
-              this.emitAndLogError(`Coinbase order skipped: unsupported REST order shape for ${rawOrder.order_id}`);
+              unsupportedShapeByProduct.set(
+                rawOrder.product_id,
+                (unsupportedShapeByProduct.get(rawOrder.product_id) ?? 0) + 1,
+              );
               continue;
             }
             ordersById.set(order.id, order);
           }
           cursor = data.has_next ? data.cursor : undefined;
         } while (cursor);
+      }
+
+      if (missingMarketByProduct.size > 0) {
+        const summary = Array.from(missingMarketByProduct.entries())
+          .map(([productId, count]) => `${productId} (${count})`)
+          .join(', ');
+        this.emitAndLogError(`Coinbase orders skipped, missing market: ${summary}`);
+      }
+      if (unsupportedShapeByProduct.size > 0) {
+        const summary = Array.from(unsupportedShapeByProduct.entries())
+          .map(([productId, count]) => `${productId} (${count})`)
+          .join(', ');
+        this.emitAndLogError(`Coinbase orders skipped, unsupported REST shape: ${summary}`);
       }
 
       return Array.from(ordersById.values());
