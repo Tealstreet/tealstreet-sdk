@@ -205,6 +205,49 @@ describe('Coinbase CFM contract-size quarantine', () => {
     expect(mixed.store.orders.map((order) => order.id)).toEqual(['valid-mixed']);
     expect(mixed.store.loaded.orders).toBe(true);
     expect(mixedError.mock.calls.some(([message]) => message === 'Coinbase order skipped: missing market for UNKNOWN')).toBe(true);
+
+    const invalidBatched = createExchange([valid]);
+    vi.spyOn(invalidBatched.exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    invalidBatched.exchange.privateWebsocket.handleUserEventOrders(
+      makeOrderEvent([makeOrder({ order_id: 'old-invalid-batched', product_id: 'BTC-VALID' })], 'update'),
+    );
+    invalidBatched.exchange.privateWebsocket.handleUserEventOrders(
+      makeOrderEvent(
+        Array.from({ length: 50 }, (_, index) =>
+          makeOrder({ order_id: `quarantined-batched-${index}`, product_id: 'UNKNOWN' }),
+        ),
+      ),
+    );
+    invalidBatched.exchange.privateWebsocket.handleUserEventOrders(makeOrderEvent([]));
+    expect(invalidBatched.store.orders.map((order) => order.id)).toEqual(['old-invalid-batched']);
+    expect(invalidBatched.store.loaded.orders).toBe(false);
+  });
+
+  it('assembles Coinbase private order snapshot batches before replacing store orders', () => {
+    const valid = makeMarket({ id: 'BTC-VALID', symbol: 'BTC-VALID', contractSize: 0.01 });
+    const { exchange, store } = createExchange([valid]);
+    exchange.privateWebsocket.handleUserEventOrders(
+      makeOrderEvent([makeOrder({ order_id: 'old-order', product_id: 'BTC-VALID' })], 'update'),
+    );
+
+    const firstBatch = Array.from({ length: 50 }, (_, index) =>
+      makeOrder({ order_id: `snapshot-${index}`, product_id: 'BTC-VALID' }),
+    );
+    const finalBatch = [
+      makeOrder({ order_id: 'snapshot-50', product_id: 'BTC-VALID' }),
+      makeOrder({ order_id: 'snapshot-51', product_id: 'BTC-VALID' }),
+    ];
+
+    exchange.privateWebsocket.handleUserEventOrders(makeOrderEvent(firstBatch));
+    expect(store.orders.map((order) => order.id)).toEqual(['old-order']);
+    expect(store.loaded.orders).toBe(false);
+
+    exchange.privateWebsocket.handleUserEventOrders(makeOrderEvent(finalBatch));
+
+    expect(store.orders).toHaveLength(52);
+    expect(store.orders[0].id).toBe('snapshot-0');
+    expect(store.orders.at(-1)?.id).toBe('snapshot-51');
+    expect(store.loaded.orders).toBe(true);
   });
 
   it('skips only unresolved or invalid CFM positions instead of publishing guessed or mixed units', async () => {

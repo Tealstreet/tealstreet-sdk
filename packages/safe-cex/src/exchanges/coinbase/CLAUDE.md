@@ -317,6 +317,11 @@ Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
 2. **Portfolio reuse**: the portfolio selected by `start()` is reused. `_startPrivate()` only calls `findSelectedPortfolio()` if startup did not select one yet; this avoids duplicate `/api/v3/brokerage/portfolios` calls during account load.
 3. **First tick**: `tick()` is called, which sequentially fetches tickers, balance, positions, and, only while orders are still unloaded, a throttled REST open-order bootstrap snapshot.
 4. **Order authority**: orders are loaded and refreshed from the WebSocket `user` channel snapshot/updates. REST open-order fetching is a bootstrap/manual fallback only; failed REST order reconciliation rethrows and does not mark orders loaded, so last-known-good order state remains in the store.
+5. **Snapshot batching**: Coinbase sends open-order `user` snapshots in
+   batches of 50. `coinbase.ws-private.ts` accumulates snapshot frames until
+   the first batch with fewer than 50 raw orders before replacing the order
+   store; otherwise accounts with more than 50 open orders would show only the
+   last snapshot batch.
 
 ### `_startPublicDataOnly()`
 
@@ -492,7 +497,7 @@ Both `user` and `heartbeats` channels are subscribed sequentially in a loop, eac
 
 **Grafana logging**: If `ENABLE_PWS_LOG` is true (default), every private WebSocket message is emitted as `'grafana-pws'` event (`coinbase.ws-private.ts`)
 
-**Order snapshot authority**: An upstream `orders: []` snapshot canonically clears the store and marks orders loaded. A non-empty snapshot whose every order is quarantined for missing or invalid market/CFM metadata is not authoritative: it preserves last-known-good orders and their loaded state. Mixed snapshots replace the store with valid siblings and emit an error for each skipped record.
+**Order snapshot authority**: Coinbase sends snapshot order rows in batches of 50; accumulate them until the first batch with fewer than 50 raw orders before replacing the store. An upstream empty final snapshot canonically clears the store and marks orders loaded. A non-empty final snapshot whose every order is quarantined for missing or invalid market/CFM metadata is not authoritative: it preserves last-known-good orders and their loaded state. Mixed snapshots replace the store with valid siblings and emit an error for each skipped record. Treat `CANCEL_QUEUED` as an open queued-cancel state per Coinbase's official user-channel schema unless Coinbase documents a behavior change.
 
 ## Order Types and Mappings
 

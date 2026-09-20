@@ -16,9 +16,12 @@ import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 
 const COINBASE_WS_AUTH_REQUEST_PREFIX = 'coinbase-ws-auth';
+const COINBASE_USER_ORDER_SNAPSHOT_BATCH_SIZE = 50;
 
 export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   private subscriptionAttempt = 0;
+  private snapshotOrdersById: Map<string, Order> | undefined;
+  private snapshotRawOrderCount = 0;
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
@@ -41,6 +44,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   onOpen = async () => {
     if (this.isDisposed) return;
     const attempt = ++this.subscriptionAttempt;
+    this.resetOrderSnapshotAssembly();
 
     try {
       await this.subscribe(attempt);
@@ -125,16 +129,14 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         lastUpdate: virtualClock.getCurrentTimeMs(),
       });
     }
-    // An empty upstream snapshot is authoritative and clears orders. A non-empty
-    // snapshot that yielded no orders only contained quarantined records, so it
-    // must not replace last-known-good state or mark orders as loaded.
-    if (data.type === 'snapshot' && (data.orders.length === 0 || orders.length > 0)) {
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+    if (data.type === 'snapshot') {
+      this.applyOrderSnapshotBatch(data.orders.length, orders);
     } else if (data.type === 'update') {
-      this.store.addOrUpdateOrders(orders);
+      if (this.snapshotOrdersById) {
+        this.mergeSnapshotOrders(orders);
+      } else {
+        this.store.addOrUpdateOrders(orders);
+      }
       // emit fills
       orders.forEach((order) => {
         if (order.info.status === 'FILLED') {
@@ -151,6 +153,44 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   };
 
   handlePositionTopic = (_data: Array<Record<string, any>>) => {};
+
+  private resetOrderSnapshotAssembly = () => {
+    this.snapshotOrdersById = undefined;
+    this.snapshotRawOrderCount = 0;
+  };
+
+  private mergeSnapshotOrders = (orders: Order[]) => {
+    if (!this.snapshotOrdersById) {
+      this.snapshotOrdersById = new Map();
+    }
+
+    orders.forEach((order) => {
+      this.snapshotOrdersById?.set(order.id, order);
+    });
+  };
+
+  private applyOrderSnapshotBatch = (rawOrderCount: number, orders: Order[]) => {
+    this.mergeSnapshotOrders(orders);
+    this.snapshotRawOrderCount += rawOrderCount;
+
+    if (rawOrderCount >= COINBASE_USER_ORDER_SNAPSHOT_BATCH_SIZE) {
+      return;
+    }
+
+    const snapshotOrders = Array.from(this.snapshotOrdersById?.values() ?? []);
+    const snapshotRawOrderCount = this.snapshotRawOrderCount;
+    this.resetOrderSnapshotAssembly();
+
+    // An empty upstream snapshot is authoritative and clears orders. A non-empty
+    // snapshot that yielded no orders only contained quarantined records, so it
+    // must not replace last-known-good state or mark orders as loaded.
+    if (snapshotRawOrderCount === 0 || snapshotOrders.length > 0) {
+      this.store.update({
+        orders: snapshotOrders,
+        loaded: { ...this.store.loaded, orders: true },
+      });
+    }
+  };
 
   private resolveOrderMarket = (productId: string): Market | undefined => {
     return resolveCoinbaseUsdEquivalentMarket(productId, this.store.marketsById);
