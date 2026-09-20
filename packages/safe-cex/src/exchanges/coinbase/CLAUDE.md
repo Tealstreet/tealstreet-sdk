@@ -275,6 +275,11 @@ Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
 
 - **API Key** (`options.key`): Used as the JWT `kid` (Key ID) and `sub` (Subject) claims
 - **API Secret** (`options.secret`): An EC private key in PEM format (SEC1 or PKCS8)
+- Advanced Trade downloaded JSON credentials are accepted directly: `name` is
+  used as the API key (`organizations/{org_id}/apiKeys/{key_id}`) and
+  `privateKey` / `private_key` is used as the API secret. A bare key ID or a
+  non-PEM secret fails before request setup with an actionable validation
+  message.
 - The `sign()` function in `coinbase.utils.ts`:
   1. Constructs a JWT header with `alg: "ES256"`, `typ: "JWT"`, `kid`, and a random `nonce` (UUID)
   2. Constructs a payload with `iss: "coinbase-cloud"`, `nbf` (current time), `exp` (120 seconds from now), `sub`, and optionally `uri` (for REST requests)

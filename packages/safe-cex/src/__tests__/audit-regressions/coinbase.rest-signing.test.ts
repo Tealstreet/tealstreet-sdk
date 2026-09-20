@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createAPI } from '../../exchanges/coinbase/coinbase.api';
 import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
+import { normalizeCoinbaseApiCredentials } from '../../exchanges/coinbase/coinbase.utils';
 
 const stubExchange = () =>
   ({
@@ -46,6 +47,27 @@ const HOSTED = {
 };
 
 describe('Coinbase REST signing and public endpoint tagging', () => {
+  it('normalizes downloaded Advanced Trade JSON credentials', () => {
+    const json = JSON.stringify({
+      name: 'organizations/org-id/apiKeys/key-id',
+      privateKey: '-----BEGIN EC PRIVATE KEY-----\\nabc\\n-----END EC PRIVATE KEY-----',
+    });
+
+    expect(normalizeCoinbaseApiCredentials(json, '')).toEqual({
+      keyName: 'organizations/org-id/apiKeys/key-id',
+      keySecret: '-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----',
+    });
+  });
+
+  it('rejects Coinbase credentials before WebCrypto when the wrong field is pasted', () => {
+    expect(() => normalizeCoinbaseApiCredentials('api-key-id-only', 'api-secret')).toThrow(
+      'Coinbase API key must be the Advanced Trade CDP key name',
+    );
+    expect(() => normalizeCoinbaseApiCredentials('organizations/org-id/apiKeys/key-id', 'api-secret')).toThrow(
+      'Coinbase API secret must be the Advanced Trade privateKey PEM',
+    );
+  });
+
   it('tags the public INTX instruments endpoint and leaves it unsigned', async () => {
     const config = await capture(buildXhr({}), ENDPOINTS.INTX_INSTRUMENTS);
 

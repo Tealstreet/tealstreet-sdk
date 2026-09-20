@@ -4,6 +4,14 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 
 const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
+const COINBASE_KEY_NAME_PATTERN = /^organizations\/[^/]+\/apiKeys\/[^/]+$/;
+const COINBASE_PRIVATE_KEY_PATTERN = /-----BEGIN (?:EC )?PRIVATE KEY-----[\s\S]+-----END (?:EC )?PRIVATE KEY-----/;
+
+type CoinbaseCredentialJson = {
+  name?: unknown;
+  privateKey?: unknown;
+  private_key?: unknown;
+};
 
 export const normalizeCoinbaseUsdEquivalentProductId = (productId: string): string => {
   if (productId.endsWith('-USDC') && !COINBASE_USDC_ALIAS_EXCEPTIONS.has(productId)) {
@@ -37,6 +45,53 @@ export const resolveCoinbaseUsdEquivalentMarket = <T>(
   if (productId.endsWith('-USD') && alias) return alias;
 
   return exact ?? alias;
+};
+
+const parseCoinbaseCredentialJson = (value: string): CoinbaseCredentialJson | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{')) return undefined;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as CoinbaseCredentialJson) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export const normalizeCoinbaseApiCredentials = (
+  key: string,
+  secret: string,
+): { keyName: string; keySecret: string } => {
+  const keyJson = parseCoinbaseCredentialJson(key);
+  const secretJson = parseCoinbaseCredentialJson(secret);
+  const keyName = (typeof keyJson?.name === 'string' ? keyJson.name : key).trim();
+  const keySecret = (
+    typeof secretJson?.privateKey === 'string'
+      ? secretJson.privateKey
+      : typeof secretJson?.private_key === 'string'
+        ? secretJson.private_key
+        : typeof keyJson?.privateKey === 'string'
+          ? keyJson.privateKey
+          : typeof keyJson?.private_key === 'string'
+            ? keyJson.private_key
+            : secret
+  )
+    .replace(/\\n/g, '\n')
+    .trim();
+
+  if (!COINBASE_KEY_NAME_PATTERN.test(keyName)) {
+    throw new Error(
+      'Coinbase API key must be the Advanced Trade CDP key name, like organizations/{org_id}/apiKeys/{key_id}.',
+    );
+  }
+  if (!COINBASE_PRIVATE_KEY_PATTERN.test(keySecret)) {
+    throw new Error(
+      'Coinbase API secret must be the Advanced Trade privateKey PEM from the downloaded API key JSON.',
+    );
+  }
+
+  return { keyName, keySecret };
 };
 
 // Cache imported CryptoKey to avoid re-importing on every request
@@ -124,8 +179,7 @@ async function getSigningKey(secret: string): Promise<CryptoKey> {
 }
 
 export const sign = async (key: string, secret: string, uri?: string): Promise<string> => {
-  const key_name = key;
-  const key_secret = secret.replace(/\\n/g, '\n');
+  const { keyName: key_name, keySecret: key_secret } = normalizeCoinbaseApiCredentials(key, secret);
 
   const now = virtualClock.getCurrentTimeMs();
 
