@@ -27,6 +27,13 @@ const SPOT_MARKET: Market = {
   info: { product_type: 'SPOT' },
 };
 
+const SPOT_USDC_MARKET: Market = {
+  ...SPOT_MARKET,
+  id: 'BTC-USDC',
+  symbol: 'BTC-USDC',
+  quote: 'USDC',
+};
+
 const makeRestOrder = (
   overrides: Partial<LIST_ORDERS_RESPONSE['orders'][number]> = {},
 ): LIST_ORDERS_RESPONSE['orders'][number] => ({
@@ -246,6 +253,26 @@ describe('Coinbase REST open-order polling', () => {
     expect(exchange.emitAndLogError).not.toHaveBeenCalledWith(
       expect.stringContaining('Coinbase orders skipped, missing market'),
     );
+  });
+
+  it('prefers loaded USDC markets when REST reports equivalent USD open orders', async () => {
+    const { exchange } = createExchange([SPOT_MARKET, SPOT_USDC_MARKET]);
+    const get = vi.fn().mockResolvedValueOnce({
+      data: {
+        orders: [makeRestOrder({ order_id: 'usd-rest-order', product_id: 'BTC-USD' })],
+        has_next: false,
+      },
+    });
+    exchange.xhr = { get } as unknown as Axios;
+
+    const orders = await exchange.fetchOrders();
+
+    expect(orders).toEqual([
+      expect.objectContaining({
+        id: 'usd-rest-order',
+        symbol: 'BTC-USDC',
+      }),
+    ]);
   });
 
   it('preserves fresh WS-only orders when the REST snapshot has not caught up', async () => {

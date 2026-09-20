@@ -278,4 +278,22 @@ describe('Coinbase CFM contract-size quarantine', () => {
     ]);
     expect(store.loaded.orders).toBe(true);
   });
+
+  it('prefers loaded USDC markets when Coinbase reports equivalent USD private orders', () => {
+    const { exchange, store } = createExchange([
+      makeMarket({ id: 'BTC-USD', symbol: 'BTC-USD', isExpiring: false, isSpot: true, contractSize: 1 }),
+      makeMarket({ id: 'BTC-USDC', symbol: 'BTC-USDC', isExpiring: false, isSpot: true, contractSize: 1 }),
+    ]);
+
+    exchange.privateWebsocket.handleUserEventOrders(
+      makeOrderEvent([makeOrder({ order_id: 'spot-usd-order', product_id: 'BTC-USD' })]),
+    );
+
+    expect(store.orders).toEqual([
+      expect.objectContaining({
+        id: 'spot-usd-order',
+        symbol: 'BTC-USDC',
+      }),
+    ]);
+  });
 });

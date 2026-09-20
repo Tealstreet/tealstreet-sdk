@@ -23,6 +23,22 @@ export const getCoinbaseUsdEquivalentAliasProductId = (productId: string): strin
   return undefined;
 };
 
+export const resolveCoinbaseUsdEquivalentMarket = <T>(
+  productId: string,
+  marketsById: Record<string, T>,
+): T | undefined => {
+  const exact = marketsById[productId];
+  const aliasProductId = getCoinbaseUsdEquivalentAliasProductId(productId);
+  const alias = aliasProductId ? marketsById[aliasProductId] : undefined;
+
+  // Coinbase often reports ordinary USDC-book activity on the equivalent USD
+  // product. Prefer the user-facing USDC market when both are loaded so exact
+  // symbol filters in the UI still match the selected market.
+  if (productId.endsWith('-USD') && alias) return alias;
+
+  return exact ?? alias;
+};
+
 // Cache imported CryptoKey to avoid re-importing on every request
 let cachedCryptoKey: CryptoKey | null = null;
 let cachedKeySecret = '';

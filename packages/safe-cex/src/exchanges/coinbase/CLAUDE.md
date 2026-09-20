@@ -799,7 +799,7 @@ The testnet option is accepted but has no effect.
 
 15. **Portfolio detection caching** (`coinbase.exchange.ts`): `findSelectedPortfolio()` is called by `start()` before market loading. `_startPrivate()` reuses that value and only probes if no portfolio was selected yet, so saved spot-only accounts do not spend an extra rate-limited portfolio-list request during load.
 
-16. **Order USD/USDC aliases** (`coinbase.ws-private.ts`, `coinbase.exchange.ts`, `coinbase.orders.ts`): private `user` channel and REST open-order rows may deliver spot orders with `-USDC` product IDs while the loaded/displayed market is the Coinbase-equivalent `-USD` product. Resolve those aliases for ordinary `*-USDC` pairs before quarantining an order as a missing market, and emit/store the loaded market symbol; keep `USDT-USDC` and `EURC-USDC` exact because Coinbase documents them as exceptions to the USD-equivalence rule.
+16. **Order USD/USDC aliases** (`coinbase.ws-private.ts`, `coinbase.exchange.ts`, `coinbase.orders.ts`): private `user` channel and REST open-order rows may deliver ordinary spot orders on either side of Coinbase's `*-USD` / `*-USDC` equivalence while the loaded/displayed market is the other side. Resolve aliases before quarantining an order as a missing market. When both equivalent markets are loaded, prefer the `*-USDC` display symbol so active-market open-order tabs, orderbook overlays, and chart lines match the symbol users commonly select; keep `USDT-USDC` and `EURC-USDC` exact because Coinbase documents them as exceptions to the USD-equivalence rule.
 
 17. **Account validation shape**: `validateAccount()` returns
     `{ error: '', balance }` on success and `{ error }` on failure. Balance is

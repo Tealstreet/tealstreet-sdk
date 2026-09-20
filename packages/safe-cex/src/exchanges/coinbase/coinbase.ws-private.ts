@@ -3,8 +3,8 @@ import type { CoinbaseExchange } from './coinbase.exchange';
 import {
   formatOrderState,
   formatOrderType,
-  getCoinbaseUsdEquivalentAliasProductId,
   normalizeCfmContractSize,
+  resolveCoinbaseUsdEquivalentMarket,
   sign,
 } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
 import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
@@ -64,7 +64,9 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
       }
 
       const json = JSON.parse(data);
-      if (json.channel === 'user') {
+      if (json.type === 'error' || json.error) {
+        this.emitAndLogError(json.message || json.error?.message || 'Coinbase private WebSocket error');
+      } else if (json.channel === 'user') {
         this.handleUserEvent(json);
       } else if (json.channel === 'heartbeats') {
         this.handlePongEvent();
@@ -151,11 +153,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   handlePositionTopic = (_data: Array<Record<string, any>>) => {};
 
   private resolveOrderMarket = (productId: string): Market | undefined => {
-    const exact = this.store.marketsById[productId];
-    if (exact) return exact;
-
-    const aliasProductId = getCoinbaseUsdEquivalentAliasProductId(productId);
-    return aliasProductId ? this.store.marketsById[aliasProductId] : undefined;
+    return resolveCoinbaseUsdEquivalentMarket(productId, this.store.marketsById);
   };
 
   private subscribe = async (attempt: number) => {

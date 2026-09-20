@@ -60,9 +60,9 @@ import {
   PORTFOLIO_BREAKDOWN_RESPONSE,
 } from './coinbase.types';
 import {
-  getCoinbaseUsdEquivalentAliasProductId,
   normalizeCfmContractSize,
   normalizeCoinbaseUsdEquivalentProductId,
+  resolveCoinbaseUsdEquivalentMarket,
   sign,
 } from './coinbase.utils';
 import { CoinbasePrivateWebsocket } from './coinbase.ws-private';
@@ -332,11 +332,7 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   private resolveMarketByCoinbaseProductId = (productId: string): Market | undefined => {
-    const exact = this.store.marketsById[productId];
-    if (exact) return exact;
-
-    const aliasProductId = getCoinbaseUsdEquivalentAliasProductId(productId);
-    return aliasProductId ? this.store.marketsById[aliasProductId] : undefined;
+    return resolveCoinbaseUsdEquivalentMarket(productId, this.store.marketsById);
   };
 
   getSupportedTypes = async (): Promise<('spot' | 'cfm' | 'intx')[]> => {
@@ -1334,13 +1330,16 @@ export class CoinbaseExchange extends BaseExchange {
     const rawStopPrice = raw?.stop_price;
     const hasNoTrigger =
       typeof rawStopPrice === 'string' && (rawStopPrice === '' || isCoinbaseZeroDecimal(rawStopPrice));
+    const rawProductMatchesMarket =
+      typeof rawProductId === 'string' &&
+      (rawProductId === market.id ||
+        normalizeCoinbaseUsdEquivalentProductId(rawProductId) === normalizeCoinbaseUsdEquivalentProductId(market.id));
     if (
       canonicalOrder.status !== OrderStatus.Open ||
       canonicalOrder.type !== OrderType.Limit ||
       typeof rawOrderId !== 'string' ||
       rawOrderId !== canonicalOrder.id ||
-      typeof rawProductId !== 'string' ||
-      rawProductId !== market.id ||
+      !rawProductMatchesMarket ||
       typeof rawStatus !== 'string' ||
       rawStatus !== 'OPEN' ||
       typeof rawType !== 'string' ||

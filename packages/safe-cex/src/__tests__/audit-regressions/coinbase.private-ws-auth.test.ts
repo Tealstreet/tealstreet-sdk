@@ -106,6 +106,15 @@ describe('Coinbase private WebSocket auth', () => {
     );
   });
 
+  it('surfaces private WebSocket error frames', () => {
+    const { exchange, websocket } = createSubject();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+
+    websocket.onMessage({ data: JSON.stringify({ type: 'error', message: 'product_ids required' }) } as MessageEvent);
+
+    expect(emitAndLogError.mock.calls[0]?.[0]).toBe('product_ids required');
+  });
+
   it('closes but does not force-close when subscribe-time signing fails, so backoff can reconnect', async () => {
     // Regression: a transient remote-signer failure must not set `forceClosed=true`,
     // which would permanently skip reconnect in `base.ws.ts` until an explicit
