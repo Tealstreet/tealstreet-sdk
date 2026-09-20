@@ -1,16 +1,25 @@
 import { ORDER_EVENT } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.types';
 import { OrderStatus, OrderType } from '@tealstreet/safe-cex/src/types';
+import { hashes, sign as ed25519Sign } from '@noble/ed25519';
+import { sha512 } from '@noble/hashes/sha2.js';
+
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 
 const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
 const COINBASE_KEY_NAME_PATTERN = /^organizations\/[^/]+\/apiKeys\/[^/]+$/;
 const COINBASE_PRIVATE_KEY_PATTERN = /-----BEGIN (?:EC )?PRIVATE KEY-----[\s\S]+-----END (?:EC )?PRIVATE KEY-----/;
+const COINBASE_ED25519_PREFIX = /^ed25519:/i;
+
+hashes.sha512 = (message) => Uint8Array.from(sha512(message));
 
 type CoinbaseCredentialJson = {
   name?: unknown;
   privateKey?: unknown;
   private_key?: unknown;
+  keySecret?: unknown;
+  key_secret?: unknown;
+  secret?: unknown;
 };
 
 export const normalizeCoinbaseUsdEquivalentProductId = (productId: string): string => {
@@ -47,6 +56,15 @@ export const resolveCoinbaseUsdEquivalentMarket = <T>(
   return exact ?? alias;
 };
 
+const getCoinbaseJsonSecret = (value: CoinbaseCredentialJson | undefined): string | undefined => {
+  if (typeof value?.privateKey === 'string') return value.privateKey;
+  if (typeof value?.private_key === 'string') return value.private_key;
+  if (typeof value?.keySecret === 'string') return value.keySecret;
+  if (typeof value?.key_secret === 'string') return value.key_secret;
+  if (typeof value?.secret === 'string') return value.secret;
+  return undefined;
+};
+
 const parseCoinbaseCredentialJson = (value: string): CoinbaseCredentialJson | undefined => {
   const trimmed = value.trim();
   if (!trimmed.startsWith('{')) return undefined;
@@ -59,39 +77,45 @@ const parseCoinbaseCredentialJson = (value: string): CoinbaseCredentialJson | un
   }
 };
 
+const base64ToBytes = (value: string): Uint8Array | undefined => {
+  const normalized = value.replace(COINBASE_ED25519_PREFIX, '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  if (!normalized || !/^[A-Za-z0-9+/=]+$/.test(normalized)) return undefined;
+
+  try {
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
+};
+
 export const normalizeCoinbaseApiCredentials = (
   key: string,
   secret: string,
-): { keyName: string; keySecret: string } => {
+): { algorithm: 'ES256' | 'EdDSA'; ed25519Seed?: Uint8Array; keyName: string; keySecret: string } => {
   const keyJson = parseCoinbaseCredentialJson(key);
   const secretJson = parseCoinbaseCredentialJson(secret);
   const keyName = (typeof keyJson?.name === 'string' ? keyJson.name : key).trim();
-  const keySecret = (
-    typeof secretJson?.privateKey === 'string'
-      ? secretJson.privateKey
-      : typeof secretJson?.private_key === 'string'
-        ? secretJson.private_key
-        : typeof keyJson?.privateKey === 'string'
-          ? keyJson.privateKey
-          : typeof keyJson?.private_key === 'string'
-            ? keyJson.private_key
-            : secret
-  )
-    .replace(/\\n/g, '\n')
-    .trim();
+  const keySecret = (getCoinbaseJsonSecret(secretJson) ?? getCoinbaseJsonSecret(keyJson) ?? secret).replace(/\\n/g, '\n').trim();
 
   if (!COINBASE_KEY_NAME_PATTERN.test(keyName)) {
     throw new Error(
       'Coinbase API key must be the Advanced Trade CDP key name, like organizations/{org_id}/apiKeys/{key_id}.',
     );
   }
-  if (!COINBASE_PRIVATE_KEY_PATTERN.test(keySecret)) {
-    throw new Error(
-      'Coinbase API secret must be the Advanced Trade privateKey PEM from the downloaded API key JSON.',
-    );
+
+  if (COINBASE_PRIVATE_KEY_PATTERN.test(keySecret)) {
+    return { algorithm: 'ES256', keyName, keySecret };
   }
 
-  return { keyName, keySecret };
+  const ed25519Secret = base64ToBytes(keySecret);
+  if (ed25519Secret && (ed25519Secret.length === 32 || ed25519Secret.length === 64)) {
+    return { algorithm: 'EdDSA', ed25519Seed: ed25519Secret.slice(0, 32), keyName, keySecret };
+  }
+
+  throw new Error(
+    'Coinbase API secret must be the Advanced Trade private key: either an ES256 privateKey PEM or an Ed25519 base64 key secret from Coinbase.',
+  );
 };
 
 // Cache imported CryptoKey to avoid re-importing on every request
@@ -179,35 +203,44 @@ async function getSigningKey(secret: string): Promise<CryptoKey> {
 }
 
 export const sign = async (key: string, secret: string, uri?: string): Promise<string> => {
-  const { keyName: key_name, keySecret: key_secret } = normalizeCoinbaseApiCredentials(key, secret);
+  const { algorithm, ed25519Seed, keyName: key_name, keySecret: key_secret } = normalizeCoinbaseApiCredentials(key, secret);
 
   const now = virtualClock.getCurrentTimeMs();
 
   const header = {
-    alg: 'ES256',
+    alg: algorithm,
     typ: 'JWT',
     kid: key_name,
     nonce: uuid(),
   };
 
-  const payload = {
-    iss: 'coinbase-cloud',
-    nbf: Math.floor(now / 1000),
-    exp: Math.floor(now / 1000) + 120,
-    sub: key_name,
-    ...(uri ? { uri } : {}),
-  };
+  const payload =
+    algorithm === 'EdDSA'
+      ? {
+          iss: 'cdp',
+          aud: ['cdp_service'],
+          nbf: Math.floor(now / 1000),
+          exp: Math.floor(now / 1000) + 120,
+          sub: key_name,
+          ...(uri ? { uri } : {}),
+        }
+      : {
+          iss: 'coinbase-cloud',
+          nbf: Math.floor(now / 1000),
+          exp: Math.floor(now / 1000) + 120,
+          sub: key_name,
+          ...(uri ? { uri } : {}),
+        };
 
   const encodedHeader = base64UrlEncodeString(JSON.stringify(header));
   const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
   const signingInput = `${encodedHeader}.${encodedPayload}`;
 
-  const signingKey = await getSigningKey(key_secret);
-  const signature = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    signingKey as any,
-    new TextEncoder().encode(signingInput),
-  );
+  const message = new TextEncoder().encode(signingInput);
+  const signature =
+    algorithm === 'EdDSA'
+      ? ed25519Sign(message, ed25519Seed!)
+      : await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, (await getSigningKey(key_secret)) as any, message);
 
   return `${signingInput}.${base64UrlEncode(signature)}`;
 };

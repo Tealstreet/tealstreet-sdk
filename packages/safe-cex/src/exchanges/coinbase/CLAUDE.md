@@ -271,20 +271,23 @@ resolve the unlabelled PnL-unit blocker.
 
 ## Authentication
 
-Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
+Coinbase uses **JWT-based authentication**. Existing CDP keys may be ES256
+(ECDSA P-256 PEM), while current CDP-created keys may be Ed25519 base64
+secrets:
 
 - **API Key** (`options.key`): Used as the JWT `kid` (Key ID) and `sub` (Subject) claims
-- **API Secret** (`options.secret`): An EC private key in PEM format (SEC1 or PKCS8)
+- **API Secret** (`options.secret`): Either an EC private key in PEM format
+  (SEC1 or PKCS8) or an Ed25519 base64 key secret
 - Advanced Trade downloaded JSON credentials are accepted directly: `name` is
-  used as the API key (`organizations/{org_id}/apiKeys/{key_id}`) and
-  `privateKey` / `private_key` is used as the API secret. A bare key ID or a
-  non-PEM secret fails before request setup with an actionable validation
-  message.
+  used as the API key (`organizations/{org_id}/apiKeys/{key_id}`), while
+  `privateKey` / `private_key` / `keySecret` / `key_secret` / `secret` is used
+  as the API secret. A bare key ID or unsupported secret shape fails before
+  request setup with an actionable validation message.
 - The `sign()` function in `coinbase.utils.ts`:
-  1. Constructs a JWT header with `alg: "ES256"`, `typ: "JWT"`, `kid`, and a random `nonce` (UUID)
-  2. Constructs a payload with `iss: "coinbase-cloud"`, `nbf` (current time), `exp` (120 seconds from now), `sub`, and optionally `uri` (for REST requests)
-  3. Signs with ECDSA P-256 + SHA-256 via `crypto.subtle`
-  4. The `CryptoKey` is cached after first import to avoid repeated PEM parsing (`cachedCryptoKey`/`cachedKeySecret` module-level variables in `coinbase.utils.ts`)
+  1. Constructs a JWT header with `alg: "ES256"` or `alg: "EdDSA"`, `typ: "JWT"`, `kid`, and a random `nonce` (UUID)
+  2. Constructs a payload with `nbf` (current time), `exp` (120 seconds from now), `sub`, and optionally `uri` (for REST requests). Ed25519 keys use Coinbase's current `iss: "cdp"` and `aud: ["cdp_service"]` claims; ES256 keeps the existing `iss: "coinbase-cloud"` payload for compatibility.
+  3. Signs ES256 with ECDSA P-256 + SHA-256 via `crypto.subtle`, or Ed25519 with `@noble/ed25519`
+  4. The ES256 `CryptoKey` is cached after first import to avoid repeated PEM parsing (`cachedCryptoKey`/`cachedKeySecret` module-level variables in `coinbase.utils.ts`)
 - **PEM conversion** (`coinbase.utils.ts`): Coinbase provides SEC1 format keys (`-----BEGIN EC PRIVATE KEY-----`) but Web Crypto API requires PKCS8. The `pemToPkcs8Der()` function detects the format and wraps SEC1 keys in a PKCS8 `PrivateKeyInfo` ASN.1 structure with P-256 OIDs. PKCS8 keys (`-----BEGIN PRIVATE KEY-----`) are passed through as-is.
 - **Escaped newlines**: The secret has `\\n` replaced with actual `\n` before parsing (`coinbase.utils.ts`)
 - **Time source**: Uses `virtualClock.getCurrentTimeMs()` for JWT timestamps, not `Date.now()`

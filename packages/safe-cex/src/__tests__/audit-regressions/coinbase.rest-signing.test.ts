@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 import { createAPI } from '../../exchanges/coinbase/coinbase.api';
 import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
-import { normalizeCoinbaseApiCredentials } from '../../exchanges/coinbase/coinbase.utils';
+import { normalizeCoinbaseApiCredentials, sign } from '../../exchanges/coinbase/coinbase.utils';
+
+const KEY_NAME = 'organizations/org-id/apiKeys/key-id';
 
 const stubExchange = () =>
   ({
@@ -35,6 +37,8 @@ const capture = async (xhr: AxiosInstance, url: string) => {
 const isTagged = (config: InternalAxiosRequestConfig) =>
   (config as unknown as Record<string, unknown>).safeCexSkipRemoteSigning === true;
 
+const decodeJwtPart = <T>(value: string): T => JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as T;
+
 const HOSTED = {
   key: 'api-key',
   secret: '',
@@ -49,14 +53,40 @@ const HOSTED = {
 describe('Coinbase REST signing and public endpoint tagging', () => {
   it('normalizes downloaded Advanced Trade JSON credentials', () => {
     const json = JSON.stringify({
-      name: 'organizations/org-id/apiKeys/key-id',
+      name: KEY_NAME,
       privateKey: '-----BEGIN EC PRIVATE KEY-----\\nabc\\n-----END EC PRIVATE KEY-----',
     });
 
     expect(normalizeCoinbaseApiCredentials(json, '')).toEqual({
-      keyName: 'organizations/org-id/apiKeys/key-id',
+      algorithm: 'ES256',
+      keyName: KEY_NAME,
       keySecret: '-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----',
     });
+  });
+
+  it('normalizes current Ed25519 Coinbase CDP key secrets', async () => {
+    const seed = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const secret = Buffer.concat([Buffer.from(seed), Buffer.alloc(32, 7)]).toString('base64');
+
+    const normalized = normalizeCoinbaseApiCredentials(KEY_NAME, secret);
+    expect(normalized).toMatchObject({
+      algorithm: 'EdDSA',
+      keyName: KEY_NAME,
+      keySecret: secret,
+    });
+    expect(normalized.ed25519Seed).toEqual(seed);
+
+    const token = await sign(KEY_NAME, secret, 'GET api.coinbase.com/api/v3/brokerage/products');
+    const [encodedHeader, encodedPayload, encodedSignature] = token.split('.');
+
+    expect(decodeJwtPart<Record<string, unknown>>(encodedHeader)).toMatchObject({ alg: 'EdDSA', kid: KEY_NAME });
+    expect(decodeJwtPart<Record<string, unknown>>(encodedPayload)).toMatchObject({
+      iss: 'cdp',
+      aud: ['cdp_service'],
+      sub: KEY_NAME,
+      uri: 'GET api.coinbase.com/api/v3/brokerage/products',
+    });
+    expect(encodedSignature).toBeTruthy();
   });
 
   it('rejects Coinbase credentials before WebCrypto when the wrong field is pasted', () => {
@@ -64,7 +94,7 @@ describe('Coinbase REST signing and public endpoint tagging', () => {
       'Coinbase API key must be the Advanced Trade CDP key name',
     );
     expect(() => normalizeCoinbaseApiCredentials('organizations/org-id/apiKeys/key-id', 'api-secret')).toThrow(
-      'Coinbase API secret must be the Advanced Trade privateKey PEM',
+      'Coinbase API secret must be the Advanced Trade private key',
     );
   });
 
