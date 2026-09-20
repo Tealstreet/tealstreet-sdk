@@ -253,7 +253,7 @@ resolve the unlabelled PnL-unit blocker.
 | File                       | Description                                                                                                                                                             |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `coinbase.exchange.ts`     | Main exchange class (`CoinbaseExchange`) extending `BaseExchange`. Handles portfolio detection, balance/ticker/position fetching, order placement, and OHLCV retrieval. |
-| `coinbasespot.exchange.ts` | Spot variant (`CoinbaseSpotExchange`). Trivial subclass that just sets `supportSpot = true` (same as parent default). Currently disabled in metadata.                   |
+| `coinbasespot.exchange.ts` | Spot-only saved-account compatibility variant (`CoinbaseSpotExchange`). Currently disabled for new accounts in metadata.                                                |
 | `coinbase.api.ts`          | Axios-based REST client factory. Configures JWT auth interceptor, retry logic (3 retries on network errors), proxy/tunnel support, and public endpoint bypass.          |
 | `coinbase.types.ts`        | All TypeScript types: REST response shapes, WebSocket event types, endpoint constants, order configuration types, and lookup maps for order side/type/TIF.              |
 | `coinbase.utils.ts`        | JWT signing via Web Crypto API (ES256/ECDSA P-256), PEM-to-PKCS8 conversion, order state/type formatting helpers.                                                       |
@@ -296,8 +296,9 @@ Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
    shared provider is available, local market loading and the public WebSocket
    are skipped.
 2. **Portfolio detection**: Private mode selects a permitted portfolio before
-   loading markets. Public-only mode intentionally skips this authenticated
-   call and supports INTX public data only.
+   loading markets and reuses that selection during private startup. Public-only
+   mode intentionally skips this authenticated call and supports INTX public
+   data only.
 3. **Market loading**: Without an external provider, `fetchMarkets()` loads
    markets, updates `loaded.markets`, and starts the public WebSocket. In
    public-only mode the market source is `fetchMarketsFromIntxInstruments()`.
@@ -308,9 +309,9 @@ Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
 ### `_startPrivate()`
 
 1. **Private WebSocket**: `privateWebsocket.connectAndSubscribe()` (non-blocking).
-2. **Re-detect portfolio**: `findSelectedPortfolio()` is called again (refreshes portfolio data after WebSocket connects).
-3. **First tick**: `tick()` is called, which sequentially fetches tickers, balance, and positions.
-4. **Note**: Order fetching via REST is intentionally disabled. Orders are loaded exclusively from the WebSocket `user` channel snapshot.
+2. **Portfolio reuse**: the portfolio selected by `start()` is reused. `_startPrivate()` only calls `findSelectedPortfolio()` if startup did not select one yet; this avoids duplicate `/api/v3/brokerage/portfolios` calls during account load.
+3. **First tick**: `tick()` is called, which sequentially fetches tickers, balance, positions, and, only while orders are still unloaded, a throttled REST open-order bootstrap snapshot.
+4. **Order authority**: orders are loaded and refreshed from the WebSocket `user` channel snapshot/updates. REST open-order fetching is a bootstrap/manual fallback only; failed REST order reconciliation rethrows and does not mark orders loaded, so last-known-good order state remains in the store.
 
 ### `_startPublicDataOnly()`
 
@@ -481,6 +482,8 @@ Both `user` and `heartbeats` channels are subscribed sequentially in a loop, eac
 
 - On open, calls `subscribe()` to re-authenticate
 - If `ENABLE_RECONNECTING_WEBSOCKET` is true, calls `this.parent.fetchAndSetPrivateSnapshot()` (which is a no-op for Coinbase)
+- If per-channel JWT signing throws (remote-signer offline, brief network blip), the handler closes the socket via `this.ws?.close()` — never `forceClose()`. `forceClose()` sets `forceClosed=true` and the base reconnect path in `base.ws.ts` refuses to reconnect until an explicit `forceOpen()`; a plain `close()` lets the exponential-backoff/failure-streak circuit breaker retry, which is the right posture for a transient hosted-signer glitch.
+- A monotonic `subscriptionAttempt` counter guards `subscribe()` and `onOpen`: a stale in-flight JWT from a previous socket generation is dropped instead of being sent on a fresh socket.
 
 **Grafana logging**: If `ENABLE_PWS_LOG` is true (default), every private WebSocket message is emitted as `'grafana-pws'` event (`coinbase.ws-private.ts`)
 
@@ -584,6 +587,30 @@ must not be widened to other non-ready shapes.
 - Batches are processed **sequentially** via `forEachSeries`
 - After each batch cancel, `store.updateOrdersStatus()` is called to mark those orders as canceled locally
 
+### Open Feature: Scaled Limit / Ladder Orders
+
+Verified against the official Advanced Trade Create Order docs on 2026-09-17:
+Coinbase publishes `scaled_limit_gtc` as an `order_configuration` shape on the
+existing `POST /api/v3/brokerage/orders` endpoint. The docs describe it as a
+scaled order that divides a large order into multiple smaller limit orders
+placed incrementally across a user-defined price range. This is not a separate
+batch-create endpoint; the documented batch endpoint remains
+`/api/v3/brokerage/orders/batch_cancel` for canceling orders.
+
+The published `ScaledLimitGtc` schema includes explicit child `orders`
+(`LimitLimitGtc[]`) plus declarative ladder fields: `quote_size`, `base_size`,
+`num_orders`, `min_price`, `max_price`, `price_distribution`
+(`FLAT`, `LINEAR_INCREASING`, `LINEAR_DECREASING`,
+`CUSTOM_PRICE_DISTRIBUTION`), `size_distribution` (`INCREASING`, `DECREASING`,
+`EVENLY_SPLIT`, `CUSTOM_SIZE_DISTRIBUTION`), `size_diff`, and `size_ratio`.
+
+The active adapter does not currently support this: `formatCreateOrder()` emits
+only `market_market_ioc`, `limit_limit_gtc`, and `stop_limit_stop_limit_gtc`.
+Before adding Tealstreet ladder-order support, verify live response identity
+semantics (parent order ID vs child IDs), private WebSocket child-order events,
+product availability across spot/CFM/INTX, and how local cancel/update
+reconciliation should treat the generated child orders.
+
 ### Order State from WebSocket (`coinbase.ws-private.ts`)
 
 **Snapshot** (`type === 'snapshot'`): A genuinely empty snapshot clears the
@@ -604,6 +631,7 @@ last-known-good orders and loaded state.
 
 - TakeProfit orders (commented out in `formatCreateOrder`)
 - TrailingStopLoss orders (commented out)
+- Scaled limit / ladder orders via Coinbase `scaled_limit_gtc`
 - `trigger_bracket_gtc` / `trigger_bracket_gtd` (types defined but not used)
 - `limit_limit_gtd` (types defined but not used)
 - `sor_limit_ioc` (types defined but not used)
@@ -615,9 +643,12 @@ last-known-good orders and loaded state.
 - **CFM Futures**: Product IDs as returned by the API (e.g., `BIT-28AUG24-CDE` for dated futures)
 - **INTX Perpetuals**: `BTC-PERP-INTX` format (the exchange appends `-INTX` to the INTX instrument symbol in `fetchTickersIntx`)
 - **USDC/USD quirk**: The WebSocket public channels substitute `USDC` with
-  `USD` in symbol lookups because Coinbase treats the USDC book as equivalent
-  to USD. OHLCV handler keys, reconnect stats, and unsubscribe cleanup all use
-  the normalized symbol so entries do not leak after the listener is removed.
+  `USD` in symbol lookups because Coinbase treats ordinary `*-USDC` books as
+  equivalent to `*-USD`. REST candle requests, public WebSocket
+  subscribe/unsubscribe payloads, OHLCV handler keys, reconnect stats, and
+  unsubscribe cleanup all use the normalized symbol so `BTC-USDC` charts do not
+  fail with a Coinbase symbol error or leak stats. `USDT-USDC` and `EURC-USDC`
+  remain exact exceptions.
 - **Default quote**: `USD`
 - **Symbol conversion**: When converting from other exchanges, a hyphen is inserted before `USD` if not present (e.g., `BTCUSD` becomes `BTC-USD`)
 
@@ -664,14 +695,17 @@ Each tick makes (at minimum):
 1. `MARKETS` or `INTX_INSTRUMENTS` (for tickers, 1-2 calls depending on supported types)
 2. `BALANCE` or `BALANCE_CFM` (1 call)
 3. `LIST_POSITIONS_INTX` or `LIST_POSITIONS_CFM` (1 call for futures types)
+4. `LIST_ORDERS` (only while orders are not loaded yet, and at most every 10 seconds if the first attempt fails)
 
-With 3 RPS limit, a single tick cycle takes approximately 1-2 seconds of API time.
+With 3 RPS limit, a single tick cycle takes approximately 1-2 seconds of API time; order polling is intentionally throttled separately to avoid turning the 1-second ticker/balance loop into an order-history loop.
 
 ## State Reconciliation
 
 ### Orders
 
-- **Initial load**: Orders come exclusively from the WebSocket `user` channel snapshot (REST `fetchOrders` is commented out).
+- **Initial load**: Orders are hydrated from the WebSocket `user` channel snapshot and from REST `GET /api/v3/brokerage/orders/historical/batch` when the initial snapshot is missing.
+- **WebSocket refresh** (`coinbase.ws-private.ts`): the `user` channel is the automatic order source. Private WS opens/reconnects do not kick off a REST order snapshot; the channel's own snapshot/update events refresh the store without spending REST budget.
+- **REST fallback** (`coinbase.exchange.ts`): `fetchOrders()` requests only active statuses (`PENDING`, `OPEN`, `QUEUED`, `CANCEL_QUEUED`, `EDIT_QUEUED`) and paginates with `cursor`. The tick loop uses this only while orders are still unloaded, throttled to at most every 10 seconds. Manual worker calls can still invoke it. Rate limits and other transport failures are non-authoritative: they preserve last-known-good store state by throwing before any caller can mark the failed snapshot loaded.
 - **Snapshot handling** (`coinbase.ws-private.ts`): Empty or valid-bearing
   snapshots are authoritative and replace the store. Invalid-only non-empty
   snapshots preserve last-known-good state; mixed snapshots retain their valid
@@ -718,7 +752,7 @@ Key metadata settings (from `exchangeMetadata.ts`):
 | `supportsChaser`              | `false`                                                                          |
 | `supportsPartialStops`        | `true`                                                                           |
 | `supportsInfinityStops`       | `false`                                                                          |
-| `autoDownSizeReduceOrders`    | `true` (the create-order API has no server-side reduce-only cap)                  |
+| `autoDownSizeReduceOrders`    | `true` (no server-side reduce-only cap)                                          |
 | `tvIntraDayMultipliers`       | `['1', '5', '15', '30', '60', '120', '360']`                                     |
 | `tvMaxGetBarFetches`          | `20`                                                                             |
 | `latencyDomain`               | `api.international.coinbase.com`                                                 |
@@ -763,19 +797,21 @@ The testnet option is accepted but has no effect.
 
 14. **Trade tape gaps** (`coinbase.ws-public.ts`): Only the first trade in each `market_trades` event is used for candle patching. There is a TODO: `// TODO: if you want actual trade tape without holes fix this...`
 
-15. **Duplicate portfolio detection call** (`coinbase.exchange.ts`): `findSelectedPortfolio()` is called twice during startup -- once at the beginning of `start()` and once at the beginning of `_startPrivate()`. This results in redundant API calls.
+15. **Portfolio detection caching** (`coinbase.exchange.ts`): `findSelectedPortfolio()` is called by `start()` before market loading. `_startPrivate()` reuses that value and only probes if no portfolio was selected yet, so saved spot-only accounts do not spend an extra rate-limited portfolio-list request during load.
 
-16. **Account validation shape**: `validateAccount()` returns
+16. **Order USD/USDC aliases** (`coinbase.ws-private.ts`, `coinbase.exchange.ts`, `coinbase.orders.ts`): private `user` channel and REST open-order rows may deliver ordinary spot orders on either side of Coinbase's `*-USD` / `*-USDC` equivalence while the loaded/displayed market is the other side. Resolve aliases before quarantining an order as a missing market. When both equivalent markets are loaded, prefer the `*-USDC` display symbol so active-market open-order tabs, orderbook overlays, and chart lines match the symbol users commonly select; keep `USDT-USDC` and `EURC-USDC` exact because Coinbase documents them as exceptions to the USD-equivalence rule.
+
+17. **Account validation shape**: `validateAccount()` returns
     `{ error: '', balance }` on success and `{ error }` on failure. Balance is
     best-effort after the authenticated markets probe.
 
-17. **market_trades secondary channel only when not publicDataOnly** (`coinbase.ws-public.ts`): The trade stream for candle patching is only subscribed when `!this.parent.options.publicDataOnly`, meaning public-only mode has degraded sub-5min candle quality.
+18. **market_trades secondary channel only when not publicDataOnly** (`coinbase.ws-public.ts`): The trade stream for candle patching is only subscribed when `!this.parent.options.publicDataOnly`, meaning public-only mode has degraded sub-5min candle quality.
 
 ## Error Handling
 
 ### REST Error Pattern
 
-All REST methods follow a consistent try/catch pattern:
+Most private-state REST readers follow a best-effort try/catch pattern:
 
 ```typescript
 try {
@@ -786,7 +822,10 @@ try {
 }
 ```
 
-This means REST failures are **non-fatal**: the tick loop continues, and the store retains its previous state.
+This means most REST failures are **non-fatal**: the tick loop continues, and
+the store retains its previous state. Open-order reconciliation is stricter:
+`fetchOrders()` rethrows transport/rate-limit failures so generic snapshot
+callers cannot commit stale orders as a successfully loaded snapshot.
 
 ### Place Order Error Handling (`coinbase.exchange.ts`)
 
@@ -876,7 +915,12 @@ The primary variant. Registered as `CoinbaseExchange`. Supports:
 
 ### `coinbasespot` (Spot Only)
 
-Registered as `CoinbaseSpotExchange`. Inherits everything from `CoinbaseExchange` with `supportSpot = true`. Currently **disabled** in metadata (`enabled: false`, `enabledInDev: false`). The spot variant is effectively redundant since the main `coinbase` variant already has `supportSpot = true`.
+Registered as `CoinbaseSpotExchange`. Currently **disabled** in metadata (`enabled: false`, `enabledInDev: false`) but kept runnable for previously saved accounts. Unlike the main `coinbase` variant, it is intentionally spot-only:
+
+- `findSelectedPortfolio()` skips `INTX` portfolios and picks the first non-INTX portfolio whose portfolio breakdown is readable.
+- `getSupportedTypes()` always returns `['spot']` after portfolio selection.
+- It must not call `BALANCE_CFM` to detect futures support; doing so can rate-limit saved spot-only accounts and make market loading fail before ticker search has any symbols.
+- Portfolio-list/probe rate limits, 5xx, and network failures must be rethrown as the original transport error. Only expected per-portfolio permission misses should be skipped; otherwise a real 429 gets mislabeled as "No Coinbase spot portfolio with permissions found" and reconnect handling sees the wrong error family.
 
 Both variants are loaded from the same directory (no separate `coinbasespot/` directory).
 

@@ -23,6 +23,12 @@ const SPOT_MARKET: Market = {
   contractSize: 1,
   info: { product_type: 'SPOT' },
 };
+const SPOT_USDC_MARKET: Market = {
+  ...SPOT_MARKET,
+  id: 'BTC-USDC',
+  symbol: 'BTC-USDC',
+  quote: 'USDC',
+};
 
 const TINY_NONZERO_DECIMAL = `0.${'0'.repeat(400)}1`;
 
@@ -61,9 +67,9 @@ const makeOrder = (overrides: Partial<Order> = {}): Order => ({
   ...overrides,
 });
 
-const createExchange = (market: Market = SPOT_MARKET, order: Order = makeOrder()) => {
+const createExchange = (market: Market | Market[] = SPOT_MARKET, order: Order = makeOrder()) => {
   const store = new DefaultStore();
-  store.update({ markets: [market], orders: [order] });
+  store.update({ markets: Array.isArray(market) ? market : [market], orders: [order] });
   const exchange = new CoinbaseExchange(
     'coinbase',
     { key: 'test-key', secret: 'test-secret', tealstreetTunnel: false } as ExchangeOptions,
@@ -110,6 +116,27 @@ describe('Coinbase Advanced stable-ID native edit', () => {
       'ORDER_NOT_EDITABLE, INVALID_SIZE',
     );
 
+    expect(cancelOrders).not.toHaveBeenCalled();
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('allows native edit when Coinbase raw product id is the equivalent USD market', async () => {
+    const aliasOrder = makeOrder({
+      symbol: SPOT_USDC_MARKET.symbol,
+      info: rawOrder({ product_id: SPOT_MARKET.id }),
+    });
+    const { exchange, post, cancelOrders, placeOrder } = createExchange([SPOT_MARKET, SPOT_USDC_MARKET], aliasOrder);
+    post.mockResolvedValue({ data: { success: true, errors: [] } });
+
+    await expect(exchange.updateOrder({ order: aliasOrder, update: { price: 50_100 } })).resolves.toEqual([
+      'coinbase-order-id',
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.EDIT_ORDER, {
+      order_id: 'coinbase-order-id',
+      price: '50100',
+      size: '1.25',
+    });
     expect(cancelOrders).not.toHaveBeenCalled();
     expect(placeOrder).not.toHaveBeenCalled();
   });

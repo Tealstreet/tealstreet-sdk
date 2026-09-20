@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
-import { PositionMode, PositionSide } from '../../types';
+import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 
 const createExchange = () => {
@@ -46,6 +46,20 @@ const rawPosition = (overrides: Record<string, any> = {}) => ({
   assetMode: 'single',
   cTime: '1000',
   uTime: '1000',
+  ...overrides,
+});
+
+const rawAlgoOrder = (overrides: Record<string, any> = {}) => ({
+  orderId: 'stop-1',
+  symbol: 'BTCUSDT',
+  planType: 'profit_plan',
+  status: 'not_trigger',
+  side: 'sell',
+  triggerPrice: '51000',
+  size: '1',
+  actualSize: '0',
+  posMode: 'one_way_mode',
+  triggerType: 'mark_price',
   ...overrides,
 });
 
@@ -172,6 +186,197 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
       expect.objectContaining({
         contracts: 0,
         entryPrice: 0,
+      }),
+    );
+  });
+
+  it('keeps and updates Classic TP/SL rows from not_trigger algo WS frames', async () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', triggerPrice: '51000', status: 'not_trigger' })],
+    });
+
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({
+        id: 'tp-1',
+        status: OrderStatus.Open,
+        type: OrderType.TakeProfit,
+        side: OrderSide.Sell,
+        price: 51000,
+      }),
+    ]);
+
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', triggerPrice: '52000', planStatus: 'not_trigger', status: undefined })],
+    });
+
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({
+        id: 'tp-1',
+        status: OrderStatus.Open,
+        price: 52000,
+      }),
+    ]);
+  });
+
+  it('refreshes positions and emits a fill on explicit algo fill statuses (triggered / filled / full_fill)', () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    const executePositionFetch = vi.spyOn(websocket, 'executePositionFetch').mockResolvedValue(undefined);
+    vi.spyOn(websocket, 'executeBalanceFetch').mockResolvedValue(undefined);
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+    const fillListener = vi.fn();
+    exchange.on('fill', fillListener);
+
+    exchange.store.addOrUpdateOrder(
+      exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
+    );
+
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', status: 'triggered', actualSize: '1' })],
+    });
+
+    expect(exchange.store.orders[0]).toEqual(expect.objectContaining({ id: 'tp-1', status: OrderStatus.Closed }));
+    expect(executePositionFetch).toHaveBeenCalled();
+    expect(fillListener).toHaveBeenCalled();
+  });
+
+  it('treats ambiguous Closed algo statuses (executed / success) as terminal only, without phantom fills', () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    const executePositionFetch = vi.spyOn(websocket, 'executePositionFetch').mockResolvedValue(undefined);
+    const executeBalanceFetch = vi.spyOn(websocket, 'executeBalanceFetch').mockResolvedValue(undefined);
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+    const fillListener = vi.fn();
+    exchange.on('fill', fillListener);
+
+    exchange.store.addOrUpdateOrder(
+      exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
+    );
+
+    // The shared ORDER_STATUS map treats `executed` and `success` as Closed,
+    // but on Bitget WS those strings often mean a successful cancel/modify ack
+    // rather than a real fill. The local row should transition to Closed but
+    // the exchange must not emit a phantom `fill` event or hammer positions/
+    // balance REST endpoints for what is not actually a fill.
+    websocket.handleAlgoOrdersTopic({
+      data: [rawAlgoOrder({ orderId: 'tp-1', status: 'executed', actualSize: '1' })],
+    });
+
+    expect(exchange.store.orders[0]).toEqual(expect.objectContaining({ id: 'tp-1', status: OrderStatus.Closed }));
+    expect(fillListener).not.toHaveBeenCalled();
+    expect(executePositionFetch).not.toHaveBeenCalled();
+    expect(executeBalanceFetch).not.toHaveBeenCalled();
+  });
+
+  it('treats ambiguous Closed order-topic statuses (success) as terminal only', () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    const executePositionFetch = vi.spyOn(websocket, 'executePositionFetch').mockResolvedValue(undefined);
+    const executeBalanceFetch = vi.spyOn(websocket, 'executeBalanceFetch').mockResolvedValue(undefined);
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+    const fillListener = vi.fn();
+    exchange.on('fill', fillListener);
+
+    exchange.store.addOrUpdateOrder(
+      exchange.mapOrder({
+        orderId: 'o-1',
+        symbol: 'BTCUSDT',
+        orderType: 'limit',
+        status: 'live',
+        side: 'buy',
+        price: '50000',
+        size: '1',
+      })[0],
+    );
+
+    websocket.handleOrderTopic({
+      data: [
+        {
+          orderId: 'o-1',
+          symbol: 'BTCUSDT',
+          orderType: 'limit',
+          status: 'success',
+          side: 'buy',
+          price: '50000',
+          size: '1',
+          baseVolume: '1',
+        },
+      ],
+    });
+
+    expect(exchange.store.orders[0]).toEqual(expect.objectContaining({ id: 'o-1', status: OrderStatus.Closed }));
+    expect(fillListener).not.toHaveBeenCalled();
+    expect(executePositionFetch).not.toHaveBeenCalled();
+    expect(executeBalanceFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not double-count realized PnL for non-UTA REST positions with UTA-only fee fields present', () => {
+    // Bitget V2 non-UTA `POSITIONS_V2` reports realized PnL as
+    // `achievedProfits + totalFee - deductedFee`. `mapPosition` must not
+    // additionally sum UTA-only fields (`curRealisedPnl`, `totalFunding`,
+    // `openFeeTotal`, `closeFeeTotal`) — those are already baked into the
+    // primary field on the non-UTA shape, and summing again inflates the
+    // number. UTA payloads go through `mapUtaPosition` with its own formula.
+    const exchange = createExchange();
+
+    const position = exchange.mapPosition({
+      symbol: 'BTCUSDT',
+      holdSide: 'long',
+      total: '1',
+      openPriceAvg: '50000',
+      markPrice: '50000',
+      marginMode: 'crossed',
+      posMode: 'one_way_mode',
+      leverage: '10',
+      unrealizedPL: '0',
+      liquidationPrice: '45000',
+      achievedProfits: '10',
+      totalFee: '2',
+      deductedFee: '1',
+      // Legacy stray UTA-shaped fields that MUST NOT be double-counted:
+      curRealisedPnl: '100',
+      totalFunding: '5',
+      openFeeTotal: '3',
+      closeFeeTotal: '4',
+    });
+
+    expect(position.realizedPnl).toBe(11); // 10 + 2 - 1
+  });
+
+  it('normalizes Classic WS position aliases for side, mode, size, entry, and liquidation', () => {
+    const exchange = createExchange();
+
+    const position = exchange.mapPosition({
+      instId: 'ETHUSDT',
+      posSide: 'short',
+      holdMode: 'double_hold',
+      pos: '2',
+      avgPx: '3200',
+      marketPrice: '3190',
+      marginMode: 'fixed',
+      lever: '5',
+      upl: '20',
+      liqPx: '3400',
+      uTime: '2000',
+    });
+
+    expect(position).toEqual(
+      expect.objectContaining({
+        id: createPositionId('ETHUSDT', PositionSide.Short, PositionMode.Hedged),
+        symbol: 'ETHUSDT',
+        side: PositionSide.Short,
+        positionMode: PositionMode.Hedged,
+        marginType: MarginType.Isolated,
+        contracts: 2,
+        entryPrice: 3200,
+        notional: 6380,
+        leverage: 5,
+        unrealizedPnl: 20,
+        liquidationPrice: 3400,
       }),
     );
   });
