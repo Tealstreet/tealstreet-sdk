@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
-import { ExchangeOptions, Market, OrderSide, OrderStatus, OrderType } from '../../types';
+import { ExchangeOptions, LogSeverity, Market, OrderSide, OrderStatus, OrderType } from '../../types';
 
 const OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED'];
 
@@ -163,7 +163,7 @@ describe('Coinbase REST open-order polling', () => {
     ]);
   });
 
-  it('rejects rate-limited REST polling without mutating last-known-good orders', async () => {
+  it('rejects rate-limited REST polling without mutating state or surfacing auth-looking errors', async () => {
     const { exchange, store } = createExchange();
     const existingOrder = {
       id: 'existing-order',
@@ -184,13 +184,16 @@ describe('Coinbase REST open-order polling', () => {
     const rateLimitError = new Error('GET /orders/historical/batch failed with 429') as Error & {
       response?: { status: number; data?: { message?: string } };
     };
-    rateLimitError.response = { status: 429, data: { message: 'rate limited' } };
+    rateLimitError.response = { status: 429, data: { message: 'authentication failure' } };
     exchange.xhr = { get: vi.fn().mockRejectedValue(rateLimitError) } as unknown as Axios;
+    const log = vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
 
     await expect(exchange.fetchOrders()).rejects.toBe(rateLimitError);
     expect(store.orders).toEqual([existingOrder]);
     expect(store.loaded.orders).toBe(false);
-    expect(exchange.emitAndLogError).toHaveBeenCalledWith(rateLimitError, 'rate limited');
+    expect(exchange.emitAndLogError).not.toHaveBeenCalledWith(rateLimitError, 'authentication failure');
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('rate limited (429)'), LogSeverity.Warning);
+    expect((exchange as any).nextOrdersPollAt).toBeGreaterThan(Date.now() + 50_000);
   });
 
   it('deduplicates repeated skip reasons into one summary error per poll', async () => {

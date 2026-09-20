@@ -13,6 +13,7 @@ import {
   Candle,
   ExchangeName,
   ExchangeOptions,
+  LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
@@ -73,6 +74,7 @@ const COINBASE_ZERO_DECIMAL = /^0(?:\.0+)?$/;
 const COINBASE_OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED'];
 const COINBASE_ORDER_PAGE_LIMIT = 100;
 const COINBASE_ORDER_POLL_INTERVAL_MS = 10_000;
+const COINBASE_ORDER_RATE_LIMIT_BACKOFF_MS = 60_000;
 // REST replication for a freshly placed order can lag WS by a few hundred ms.
 // Preserve open WS-only orders whose lastUpdate is within this window so a
 // snapshot poll doesn't briefly evict them from the store on a race.
@@ -95,7 +97,7 @@ export class CoinbaseExchange extends BaseExchange {
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
   selectedPortfolio: LIST_PORTFOLIOS_RESPONSE['portfolios'][0] | null = null;
-  private lastOrdersPollAt = 0;
+  private nextOrdersPollAt = 0;
 
   supportSpot = true;
 
@@ -298,8 +300,8 @@ export class CoinbaseExchange extends BaseExchange {
     }
 
     const now = Date.now();
-    if (this.lastOrdersPollAt === 0 || now - this.lastOrdersPollAt >= COINBASE_ORDER_POLL_INTERVAL_MS) {
-      this.lastOrdersPollAt = now;
+    if (now >= this.nextOrdersPollAt) {
+      this.nextOrdersPollAt = now + COINBASE_ORDER_POLL_INTERVAL_MS;
       return true;
     }
     return false;
@@ -328,6 +330,12 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   private emitOrdersFetchError = (err: any) => {
+    if (err?.response?.status === 429) {
+      this.nextOrdersPollAt = Date.now() + COINBASE_ORDER_RATE_LIMIT_BACKOFF_MS;
+      this.log('Coinbase open-order REST fallback rate limited (429); waiting before retrying', LogSeverity.Warning);
+      return;
+    }
+
     this.emitAndLogError(err, err?.response?.data?.message || err?.message);
   };
 
