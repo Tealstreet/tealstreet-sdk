@@ -322,6 +322,10 @@ Coinbase uses **JWT-based authentication** with ES256 (ECDSA P-256) signatures:
    the first batch with fewer than 50 raw orders before replacing the order
    store; otherwise accounts with more than 50 open orders would show only the
    last snapshot batch.
+6. **REST active-status filter**: `/api/v3/brokerage/orders/historical/batch`
+   rejects multiple active `order_status` values in one request. The bootstrap
+   fallback queries `PENDING`, `OPEN`, `QUEUED`, `CANCEL_QUEUED`, and
+   `EDIT_QUEUED` one status at a time and deduplicates by order ID.
 
 ### `_startPublicDataOnly()`
 

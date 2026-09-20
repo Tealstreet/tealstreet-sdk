@@ -1103,37 +1103,39 @@ export class CoinbaseExchange extends BaseExchange {
     const unsupportedShapeByProduct = new Map<string, number>();
 
     for (const request of requests) {
-      let cursor: string | undefined;
-      do {
-        const { data } = await this.xhr.get<LIST_ORDERS_RESPONSE>(ENDPOINTS.LIST_ORDERS, {
-          params: {
-            ...request,
-            order_status: COINBASE_OPEN_ORDER_STATUSES,
-            limit: COINBASE_ORDER_PAGE_LIMIT,
-            ...(cursor ? { cursor } : {}),
-          },
-        });
-        for (const rawOrder of data.orders) {
-          const market = this.resolveMarketByCoinbaseProductId(rawOrder.product_id);
-          if (!market) {
-            missingMarketByProduct.set(
-              rawOrder.product_id,
-              (missingMarketByProduct.get(rawOrder.product_id) ?? 0) + 1,
-            );
-            continue;
+      for (const orderStatus of COINBASE_OPEN_ORDER_STATUSES) {
+        let cursor: string | undefined;
+        do {
+          const { data } = await this.xhr.get<LIST_ORDERS_RESPONSE>(ENDPOINTS.LIST_ORDERS, {
+            params: {
+              ...request,
+              order_status: orderStatus,
+              limit: COINBASE_ORDER_PAGE_LIMIT,
+              ...(cursor ? { cursor } : {}),
+            },
+          });
+          for (const rawOrder of data.orders) {
+            const market = this.resolveMarketByCoinbaseProductId(rawOrder.product_id);
+            if (!market) {
+              missingMarketByProduct.set(
+                rawOrder.product_id,
+                (missingMarketByProduct.get(rawOrder.product_id) ?? 0) + 1,
+              );
+              continue;
+            }
+            const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
+            if (!order) {
+              unsupportedShapeByProduct.set(
+                rawOrder.product_id,
+                (unsupportedShapeByProduct.get(rawOrder.product_id) ?? 0) + 1,
+              );
+              continue;
+            }
+            ordersById.set(order.id, order);
           }
-          const order = mapCoinbaseRestOrder(rawOrder, market, Date.now());
-          if (!order) {
-            unsupportedShapeByProduct.set(
-              rawOrder.product_id,
-              (unsupportedShapeByProduct.get(rawOrder.product_id) ?? 0) + 1,
-            );
-            continue;
-          }
-          ordersById.set(order.id, order);
-        }
-        cursor = data.has_next ? data.cursor : undefined;
-      } while (cursor);
+          cursor = data.has_next ? data.cursor : undefined;
+        } while (cursor);
+      }
     }
 
     if (missingMarketByProduct.size > 0) {

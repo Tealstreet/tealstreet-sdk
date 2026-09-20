@@ -69,20 +69,40 @@ const createExchange = (markets: Market[] = [SPOT_MARKET]) => {
   return { exchange, store };
 };
 
+type ListOrdersPage = {
+  orders: LIST_ORDERS_RESPONSE['orders'];
+  has_next: boolean;
+  cursor?: string;
+};
+
+const emptyListOrdersPage = (): ListOrdersPage => ({
+  orders: [],
+  has_next: false,
+});
+
+const mockListOrdersByStatus = (pagesByStatus: Partial<Record<string, ListOrdersPage[]>>) => {
+  const nextPageByStatus = new Map<string, number>();
+
+  return vi.fn((_endpoint: string, config: { params: { order_status: string } }) => {
+    const status = config.params.order_status;
+    const pages = pagesByStatus[status] ?? [emptyListOrdersPage()];
+    const index = nextPageByStatus.get(status) ?? 0;
+    nextPageByStatus.set(status, index + 1);
+    return Promise.resolve({ data: pages[Math.min(index, pages.length - 1)] });
+  });
+};
+
 describe('Coinbase REST open-order polling', () => {
   it('fetches paginated open spot orders and maps documented REST order fields', async () => {
     const { exchange } = createExchange();
-    const get = vi
-      .fn()
-      .mockResolvedValueOnce({
-        data: {
+    const get = mockListOrdersByStatus({
+      OPEN: [
+        {
           orders: [makeRestOrder()],
           has_next: true,
           cursor: 'next-page',
         },
-      })
-      .mockResolvedValueOnce({
-        data: {
+        {
           orders: [
             makeRestOrder({
               order_id: 'second-order-id',
@@ -109,7 +129,8 @@ describe('Coinbase REST open-order polling', () => {
           ],
           has_next: false,
         },
-      });
+      ],
+    });
     exchange.xhr = { get } as unknown as Axios;
 
     const orders = await exchange.fetchOrders();
@@ -117,18 +138,33 @@ describe('Coinbase REST open-order polling', () => {
     expect(get).toHaveBeenNthCalledWith(1, ENDPOINTS.LIST_ORDERS, {
       params: {
         product_type: 'SPOT',
-        order_status: OPEN_ORDER_STATUSES,
+        order_status: 'PENDING',
         limit: 100,
       },
     });
     expect(get).toHaveBeenNthCalledWith(2, ENDPOINTS.LIST_ORDERS, {
       params: {
         product_type: 'SPOT',
-        order_status: OPEN_ORDER_STATUSES,
+        order_status: 'OPEN',
+        limit: 100,
+      },
+    });
+    expect(get).toHaveBeenNthCalledWith(3, ENDPOINTS.LIST_ORDERS, {
+      params: {
+        product_type: 'SPOT',
+        order_status: 'OPEN',
         limit: 100,
         cursor: 'next-page',
       },
     });
+    expect(get.mock.calls.map(([, config]) => config.params.order_status)).toEqual([
+      'PENDING',
+      'OPEN',
+      'OPEN',
+      'QUEUED',
+      'CANCEL_QUEUED',
+      'EDIT_QUEUED',
+    ]);
     expect(orders).toEqual([
       expect.objectContaining({
         id: 'coinbase-order-id',
@@ -198,23 +234,25 @@ describe('Coinbase REST open-order polling', () => {
 
   it('deduplicates repeated skip reasons into one summary error per poll', async () => {
     const { exchange } = createExchange();
-    const get = vi.fn().mockResolvedValueOnce({
-      data: {
-        orders: [
-          makeRestOrder({ order_id: 'unknown-1', product_id: 'UNKNOWN-PROD' }),
-          makeRestOrder({ order_id: 'unknown-2', product_id: 'UNKNOWN-PROD' }),
-          makeRestOrder({ order_id: 'unknown-3', product_id: 'OTHER-PROD' }),
-          makeRestOrder({
-            order_id: 'bad-shape-1',
-            order_configuration: undefined,
-          }),
-          makeRestOrder({
-            order_id: 'bad-shape-2',
-            order_configuration: undefined,
-          }),
-        ],
-        has_next: false,
-      },
+    const get = mockListOrdersByStatus({
+      OPEN: [
+        {
+          orders: [
+            makeRestOrder({ order_id: 'unknown-1', product_id: 'UNKNOWN-PROD' }),
+            makeRestOrder({ order_id: 'unknown-2', product_id: 'UNKNOWN-PROD' }),
+            makeRestOrder({ order_id: 'unknown-3', product_id: 'OTHER-PROD' }),
+            makeRestOrder({
+              order_id: 'bad-shape-1',
+              order_configuration: undefined,
+            }),
+            makeRestOrder({
+              order_id: 'bad-shape-2',
+              order_configuration: undefined,
+            }),
+          ],
+          has_next: false,
+        },
+      ],
     });
     exchange.xhr = { get } as unknown as Axios;
 
@@ -237,11 +275,13 @@ describe('Coinbase REST open-order polling', () => {
 
   it('maps REST open-order USDC aliases to loaded USD markets', async () => {
     const { exchange } = createExchange();
-    const get = vi.fn().mockResolvedValueOnce({
-      data: {
-        orders: [makeRestOrder({ order_id: 'usdc-alias-rest-order', product_id: 'BTC-USDC' })],
-        has_next: false,
-      },
+    const get = mockListOrdersByStatus({
+      OPEN: [
+        {
+          orders: [makeRestOrder({ order_id: 'usdc-alias-rest-order', product_id: 'BTC-USDC' })],
+          has_next: false,
+        },
+      ],
     });
     exchange.xhr = { get } as unknown as Axios;
 
@@ -260,11 +300,13 @@ describe('Coinbase REST open-order polling', () => {
 
   it('prefers loaded USDC markets when REST reports equivalent USD open orders', async () => {
     const { exchange } = createExchange([SPOT_MARKET, SPOT_USDC_MARKET]);
-    const get = vi.fn().mockResolvedValueOnce({
-      data: {
-        orders: [makeRestOrder({ order_id: 'usd-rest-order', product_id: 'BTC-USD' })],
-        has_next: false,
-      },
+    const get = mockListOrdersByStatus({
+      OPEN: [
+        {
+          orders: [makeRestOrder({ order_id: 'usd-rest-order', product_id: 'BTC-USD' })],
+          has_next: false,
+        },
+      ],
     });
     exchange.xhr = { get } as unknown as Axios;
 
