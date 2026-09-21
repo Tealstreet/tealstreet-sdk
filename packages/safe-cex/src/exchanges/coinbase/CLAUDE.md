@@ -727,6 +727,12 @@ With 3 RPS limit, a single tick cycle takes approximately 1-2 seconds of API tim
   snapshots are authoritative and replace the store. Invalid-only non-empty
   snapshots preserve last-known-good state; mixed snapshots retain their valid
   siblings.
+- **Native edit source shapes** (`coinbase.exchange.ts`): stable-ID spot LIMIT
+  edits accept strictly reconciled open orders from either private `user`
+  WebSocket shape (`order_side`, `order_type: "Limit"`, `leaves_quantity`) or
+  REST `LIST_ORDERS` shape (`side`, `order_type: "LIMIT"`,
+  `order_configuration.*.base_size`). Keep both aliases in sync when adjusting
+  edit preflight logic.
 - **Update handling** (`coinbase.ws-private.ts`): On an `update` event, `store.addOrUpdateOrders(orders)` is called, which merges by order ID.
 - **Local cancel optimism** (`coinbase.exchange.ts`): After sending a batch cancel REST request, `store.updateOrdersStatus()` immediately marks orders as canceled locally, before the WebSocket confirms it.
 - **No deduplication**: The WebSocket handler does not deduplicate orders. If the same order appears in both snapshot and update, `addOrUpdateOrders` handles the merge by ID.

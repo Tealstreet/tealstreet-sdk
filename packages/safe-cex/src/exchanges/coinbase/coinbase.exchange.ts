@@ -55,7 +55,6 @@ import {
   LIST_POSITIONS_CFM_RESPONSE,
   LIST_POSITIONS_INTX_RESPONSE,
   MARKET_RESPONSE,
-  ORDER_EVENT,
   PLACE_ORDER_REQUEST,
   PLACE_ORDER_RESPONSE,
   PORTFOLIO_BREAKDOWN_RESPONSE,
@@ -1330,14 +1329,20 @@ export class CoinbaseExchange extends BaseExchange {
       );
     }
 
-    const raw = canonicalOrder.info as Partial<ORDER_EVENT['orders'][number]> | undefined;
+    const raw = canonicalOrder.info as Record<string, any> | undefined;
+    const rawLimitConfig =
+      raw?.order_configuration?.limit_limit_gtc ||
+      raw?.order_configuration?.limit_limit_gtd ||
+      raw?.order_configuration?.limit_limit_fok ||
+      raw?.order_configuration?.sor_limit_ioc;
     const rawOrderId = raw?.order_id;
     const rawProductId = raw?.product_id;
     const rawStatus = raw?.status;
     const rawType = raw?.order_type;
-    const rawSide = raw?.order_side;
+    const rawSide = raw?.order_side ?? raw?.side;
     const expectedSide = canonicalOrder.side === OrderSide.Buy ? 'BUY' : 'SELL';
-    const rawStopPrice = raw?.stop_price;
+    const rawStopPrice = raw?.stop_price ?? '';
+    const rawTypeIsOrdinaryLimit = rawType === 'Limit' || rawType === 'LIMIT';
     const hasNoTrigger =
       typeof rawStopPrice === 'string' && (rawStopPrice === '' || isCoinbaseZeroDecimal(rawStopPrice));
     const rawProductMatchesMarket =
@@ -1353,7 +1358,7 @@ export class CoinbaseExchange extends BaseExchange {
       typeof rawStatus !== 'string' ||
       rawStatus !== 'OPEN' ||
       typeof rawType !== 'string' ||
-      rawType !== 'Limit' ||
+      !rawTypeIsOrdinaryLimit ||
       typeof rawSide !== 'string' ||
       rawSide !== expectedSide ||
       !hasNoTrigger ||
@@ -1367,9 +1372,9 @@ export class CoinbaseExchange extends BaseExchange {
       );
     }
 
-    const rawFilled = raw?.cumulative_quantity;
-    const rawRemaining = raw?.leaves_quantity;
-    const rawPrice = raw?.limit_price;
+    const rawFilled = raw?.cumulative_quantity ?? raw?.filled_size;
+    const rawRemaining = raw?.leaves_quantity ?? rawLimitConfig?.base_size;
+    const rawPrice = raw?.limit_price ?? rawLimitConfig?.limit_price;
     const currentAmount = adjust(canonicalOrder.amount, market.precision.amount);
     const currentRemaining = adjust(canonicalOrder.remaining, market.precision.amount);
     const currentPrice = adjust(canonicalOrder.price, market.precision.price);

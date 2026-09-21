@@ -3,7 +3,7 @@ import type { Axios } from 'axios';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { ENDPOINTS, ORDER_EVENT } from '../../exchanges/coinbase/coinbase.types';
+import { ENDPOINTS, LIST_ORDERS_RESPONSE, ORDER_EVENT } from '../../exchanges/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 
@@ -48,6 +48,28 @@ const rawOrder = (overrides: Partial<ORDER_EVENT['orders'][number]> = {}): ORDER
   order_type: 'Limit',
   cancel_reason: '',
   reject_reason: '',
+  ...overrides,
+});
+
+const rawRestOrder = (
+  overrides: Partial<LIST_ORDERS_RESPONSE['orders'][number]> = {},
+): LIST_ORDERS_RESPONSE['orders'][number] => ({
+  order_id: 'coinbase-order-id',
+  client_order_id: 'tealstreet-client-id',
+  product_id: SPOT_MARKET.id,
+  side: 'BUY',
+  status: 'OPEN',
+  order_type: 'LIMIT',
+  created_time: '2026-07-15T00:00:00Z',
+  filled_size: '0',
+  average_filled_price: '0',
+  total_fees: '0',
+  order_configuration: {
+    limit_limit_gtc: {
+      base_size: '1.25',
+      limit_price: '50000',
+    },
+  },
   ...overrides,
 });
 
@@ -129,6 +151,24 @@ describe('Coinbase Advanced stable-ID native edit', () => {
     post.mockResolvedValue({ data: { success: true, errors: [] } });
 
     await expect(exchange.updateOrder({ order: aliasOrder, update: { price: 50_100 } })).resolves.toEqual([
+      'coinbase-order-id',
+    ]);
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.EDIT_ORDER, {
+      order_id: 'coinbase-order-id',
+      price: '50100',
+      size: '1.25',
+    });
+    expect(cancelOrders).not.toHaveBeenCalled();
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('allows native edit when the reconciled canonical order came from REST list-order shape', async () => {
+    const restBackedOrder = makeOrder({ info: rawRestOrder() });
+    const { exchange, post, cancelOrders, placeOrder } = createExchange(SPOT_MARKET, restBackedOrder);
+    post.mockResolvedValue({ data: { success: true, errors: [] } });
+
+    await expect(exchange.updateOrder({ order: restBackedOrder, update: { price: 50_100 } })).resolves.toEqual([
       'coinbase-order-id',
     ]);
 
