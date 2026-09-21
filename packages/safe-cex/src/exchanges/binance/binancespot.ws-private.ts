@@ -2,7 +2,6 @@ import type { BinanceSpotExchange } from './binancespot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import createHmac from 'create-hmac';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import { OrderStatus, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -62,9 +61,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse(data);
       if (!json) return;

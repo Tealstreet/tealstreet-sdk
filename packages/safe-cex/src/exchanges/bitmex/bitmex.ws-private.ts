@@ -4,7 +4,7 @@ import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { OrderSide, Position } from '../../types';
 import { vn } from '../../utils/get-key';
@@ -267,9 +267,7 @@ export class BitmexPrivateWebsocket extends BaseWebSocket<BitmexExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       if (data === 'pong') {
         this.handlePongEvent();

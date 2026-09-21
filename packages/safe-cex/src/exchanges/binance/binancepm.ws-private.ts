@@ -1,7 +1,6 @@
 import type { BinancePMExchange } from './binancepm.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import { OrderStatus, OrderType, PositionSide } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -114,9 +113,7 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse(data);
 

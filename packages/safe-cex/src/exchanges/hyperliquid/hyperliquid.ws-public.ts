@@ -280,13 +280,17 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
   private sendWithDiagnostics = (data: string) => {
     this.send(data);
     if (shouldEmitHyperliquidWsSendDiagnostic(data)) {
-      this.parent.emitter.emit('grafana-pws-sub', formatHyperliquidWsDiagnostic('public', data));
+      this.emitWsDiagnosticSend(data, {
+        format: (message) => formatHyperliquidWsDiagnostic('public', message),
+      });
     }
   };
 
   private emitReceiveDiagnostics = (data: unknown, json: unknown) => {
     if (shouldEmitHyperliquidWsReceiveDiagnostic('public', json)) {
-      this.parent.emitter.emit('grafana-pws', formatHyperliquidWsDiagnostic('public', data));
+      this.emitWsDiagnosticReceive(data, {
+        format: (message) => formatHyperliquidWsDiagnostic('public', message),
+      });
     }
   };
 

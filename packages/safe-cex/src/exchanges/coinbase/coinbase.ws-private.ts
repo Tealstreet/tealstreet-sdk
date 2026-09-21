@@ -8,7 +8,6 @@ import {
   sign,
 } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
 import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { add, multiply } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -63,9 +62,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   onMessage = ({ data }: MessageEvent) => {
     this.trackLastReceived();
     if (!this.isDisposed) {
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = JSON.parse(data);
       if (json.type === 'error' || json.error) {

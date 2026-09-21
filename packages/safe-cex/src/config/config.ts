@@ -12,7 +12,6 @@ export const WS_BACKOFF_FACTOR = 2; // Double delay each attempt
 export const WS_FAILURE_STREAK_PAUSE_THRESHOLD = 8; // Pause reconnects after N consecutive close failures
 export const WS_FAILURE_STREAK_PAUSE_MS = 120000; // 2 minute pause window for persistent failures
 export const ENABLE_RECONNECTING_WEBSOCKET = false;
-export const ENABLE_PWS_LOG = false;
 export const SIMULATE_HTTP_OVER_WEBSOCKET = Boolean(+(process.env.NEXT_PUBLIC_SIMULATE_HTTP_OVER_WEBSOCKET || '0'));
 
 /**

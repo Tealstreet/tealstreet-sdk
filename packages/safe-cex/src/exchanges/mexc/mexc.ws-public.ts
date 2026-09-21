@@ -248,12 +248,16 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
 
   private sendWithDiagnostics = (data: string) => {
     this.send(data);
-    this.parent.emitter.emit('grafana-pws-sub', `[mexc public] ${data}`);
+    this.emitWsDiagnosticSend(data, {
+      format: (message) => `[mexc public] ${message}`,
+    });
   };
 
   private emitReceiveDiagnostics = (data: unknown, json: Record<string, any>) => {
-    if (json.channel === 'push.ticker' || json.channel === 'push.depth' || json.channel === 'push.depth.full') return;
-    this.parent.emitter.emit('grafana-pws', `[mexc public] ${String(data)}`);
+    this.emitWsDiagnosticReceive(data, {
+      allowChannel: () => json.channel !== 'push.ticker' && json.channel !== 'push.depth' && json.channel !== 'push.depth.full',
+      format: (message) => `[mexc public] ${String(message)}`,
+    });
   };
 
   private addHandler = (key: string, handler: MessageHandler) => {

@@ -847,7 +847,7 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 - **Stablecoin mark price fallback**: When calculating balance equity notional, if no ticker is found for a currency (e.g., USDT), the mark price defaults to 1.
 - **Trailing stop price calculation**: For trailing stop loss orders, the displayed price is calculated relative to the position entry price and last price, with special handling when a position exists.
 - **`afterMethodCalledInWorker`**: When `changePositionMode` is called in a WebWorker, the local `_accountPositionMode` cache is updated to match.
-- **Grafana logging**: `ENABLE_PWS_LOG` is enabled by default. All private and business WebSocket messages are emitted to `grafana-pws` for monitoring. Subscription messages are emitted to `grafana-pws-sub`.
+- **WebSocket diagnostics**: Private and business WebSocket diagnostics go through `BaseWebSocket`'s runtime-gated `emitWsDiagnostic*` helpers. They populate the web Requests drawer only when WS diagnostics are enabled through the Requests Log toggle; Grafana upload is a separate opt-in.
 - **Potential follow-up (not confirmed bug)**: Inverse close sizing in the web layer currently prefers `Math.max(extra.contractsNative, notional/contractSize)` in [`getPositionNativeSize.ts`](mdc:apps/web/src/utils/position/getPositionNativeSize.ts) to avoid partial closes. This can theoretically oversize if notional is briefly inflated or stale. Re-evaluate if oversize-close reports appear; consider freshness/tolerance-based bounds instead of raw max/min switching.
 
 ## Income History / Account Bills

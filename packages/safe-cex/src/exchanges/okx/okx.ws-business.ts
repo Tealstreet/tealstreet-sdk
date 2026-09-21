@@ -5,7 +5,7 @@ import flatten from 'lodash/flatten';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { virtualClock } from '../../utils/virtualClock';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
@@ -140,9 +140,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       if (data === 'pong') {
         this.handlePongEvent();

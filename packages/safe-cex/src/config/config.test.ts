@@ -9,7 +9,6 @@ import {
   WS_FAILURE_STREAK_PAUSE_THRESHOLD,
   WS_FAILURE_STREAK_PAUSE_MS,
   ENABLE_RECONNECTING_WEBSOCKET,
-  ENABLE_PWS_LOG,
 } from './config';
 
 describe('config', () => {
@@ -56,9 +55,6 @@ describe('config', () => {
       expect(typeof ENABLE_RECONNECTING_WEBSOCKET).toBe('boolean');
     });
 
-    it('should disable raw private WebSocket logging by default', () => {
-      expect(ENABLE_PWS_LOG).toBe(false);
-    });
   });
 
   describe('Config relationships', () => {

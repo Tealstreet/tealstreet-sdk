@@ -426,13 +426,17 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
   private sendWithDiagnostics = (data: string) => {
     this.send(data);
     if (shouldEmitHyperliquidWsSendDiagnostic(data)) {
-      this.parent.emitter.emit('grafana-pws-sub', formatHyperliquidWsDiagnostic('private', data));
+      this.emitWsDiagnosticSend(data, {
+        format: (message) => formatHyperliquidWsDiagnostic('private', message),
+      });
     }
   };
 
   private emitReceiveDiagnostics = (data: unknown, json: unknown) => {
     if (shouldEmitHyperliquidWsReceiveDiagnostic('private', json)) {
-      this.parent.emitter.emit('grafana-pws', formatHyperliquidWsDiagnostic('private', data));
+      this.emitWsDiagnosticReceive(data, {
+        format: (message) => formatHyperliquidWsDiagnostic('private', message),
+      });
     }
   };
 

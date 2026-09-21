@@ -1,7 +1,6 @@
 import type { BitrueExchange } from './bitrue.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
@@ -40,9 +39,7 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
       let json: any;
       try {
         json = bigIntAsStringJsonParse(data);

@@ -2,7 +2,7 @@ import type { LighterExchange } from './lighter.exchange';
 import type { LighterPrivateCloseClassification } from './lighter.ws-policy';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET, WS_MIN_RECONNECTION_DELAY } from '../../config/config';
+import { ENABLE_RECONNECTING_WEBSOCKET, WS_MIN_RECONNECTION_DELAY } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { LogSeverity, OrderStatus, Position, PositionSide } from '../../types';
 import { v } from '../../utils/get-key';
@@ -859,9 +859,7 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse<any>(data);
 

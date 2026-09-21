@@ -5,7 +5,7 @@ import sumBy from 'lodash/sumBy';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { OrderStatus } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
@@ -132,9 +132,7 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       if (data.includes('event":"subscribe"')) {
         return;

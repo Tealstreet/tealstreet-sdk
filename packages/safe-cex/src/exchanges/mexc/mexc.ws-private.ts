@@ -67,9 +67,9 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     if (json.channel === 'rs.login') {
       if (json.data === 'success' || json.success === true) {
         this.subscribePrivateFeeds();
-        this.parent.emitter.emit('grafana-pws', '[mexc login] success');
+        this.emitReceiveDiagnostics('[mexc login] success');
       } else {
-        this.parent.emitter.emit('grafana-pws', `[mexc login] failed ${JSON.stringify(json)}`);
+        this.emitReceiveDiagnostics(`[mexc login] failed ${JSON.stringify(json)}`);
         this.parent.emitAndLogError('MEXC private ws login failed, double check your key and secret');
       }
       return;
@@ -214,11 +214,15 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
 
   private sendWithDiagnostics = (data: string, options?: { redactAuth?: boolean }) => {
     this.send(data);
-    this.parent.emitter.emit('grafana-pws-sub', `[mexc private] ${options?.redactAuth ? this.redactAuthFrame(data) : data}`);
+    this.emitWsDiagnosticSend(data, {
+      format: (message) => `[mexc private] ${options?.redactAuth ? this.redactAuthFrame(message) : message}`,
+    });
   };
 
   private emitReceiveDiagnostics = (data: unknown) => {
-    this.parent.emitter.emit('grafana-pws', `[mexc private] ${String(data)}`);
+    this.emitWsDiagnosticReceive(data, {
+      format: (message) => `[mexc private] ${String(message)}`,
+    });
   };
 
   private redactAuthFrame = (data: string): string => {

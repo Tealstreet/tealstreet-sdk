@@ -276,7 +276,7 @@ Private data can arrive as:
 
 **Order throttle fetch**: Uses debounced `throttleFetchOrders()` (default 500ms) to avoid excessive API calls. Only triggers when reconciliation needs REST backfill; cancellation flows are handled specially to avoid resurrecting recently canceled orders.
 
-**Grafana logging**: Emits `grafana-pws` events when `ENABLE_PWS_LOG` is true.
+**WebSocket diagnostics**: Private WebSocket messages go through `BaseWebSocket`'s runtime-gated diagnostics helpers. They populate the web Requests drawer only when WS diagnostics are enabled through the Requests Log toggle; Grafana upload is a separate opt-in.
 
 ## Order Types and Mappings
 

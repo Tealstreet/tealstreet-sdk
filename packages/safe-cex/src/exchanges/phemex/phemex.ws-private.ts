@@ -8,7 +8,6 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { add, divide1, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import { OrderStatus, Position } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
 import { virtualClock } from '../../utils/virtualClock';
@@ -140,9 +139,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse(data);
 

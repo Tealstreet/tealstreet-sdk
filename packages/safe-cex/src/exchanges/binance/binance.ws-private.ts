@@ -1,7 +1,6 @@
 import type { BinanceExchange } from './binance.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import { MarginType, OrderRejectReason, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
@@ -45,9 +44,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = bigIntAsStringJsonParse(data);
 

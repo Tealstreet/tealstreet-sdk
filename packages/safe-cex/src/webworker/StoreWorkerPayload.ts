@@ -124,6 +124,11 @@ export interface WorkerConfig {
    * Dev-only benchmarking harness. Absent in production. See `perfFixture.ts`.
    */
   perfFixture?: PerfFixtureConfig;
+  /**
+   * Runtime gate for raw WebSocket diagnostics. Kept flat because this type is
+   * mirrored through the public SDK surface and should stay narrow.
+   */
+  wsDiagnosticsEnabled?: boolean;
 }
 
 /** One captured outbound worker message, stamped relative to recording start. */

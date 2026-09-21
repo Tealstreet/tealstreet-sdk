@@ -1,7 +1,7 @@
 import type { KucoinExchange } from './kucoin.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { OrderStatus } from '../../types';
 import { BaseWebSocket } from '../base.ws';
 import { ENDPOINTS } from './kucoin.types';
@@ -71,9 +71,7 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse<Record<string, any>>(data);
       if (!json) return;

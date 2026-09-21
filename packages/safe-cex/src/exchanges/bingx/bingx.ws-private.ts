@@ -64,9 +64,7 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
         if (this.isDisposed) return;
       }
 
-      if (typeof strData === 'string' && !strData.match(/^(Ping|Pong)$/i)) {
-        this.parent.emitter.emit('grafana-pws', `${strData}`);
-      }
+      this.emitWsDiagnosticReceive(strData);
 
       // Bingx uses big ints (orderId in particular). We need to replace them with strings to avoid JS rounding errors
       const json: any = bigIntAsStringJsonParse(strData);

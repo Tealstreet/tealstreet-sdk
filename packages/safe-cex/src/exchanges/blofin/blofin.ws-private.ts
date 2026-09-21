@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
-import { ENABLE_PWS_LOG, ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { roundUSD } from '../../utils/roundUSD';
 import { multiply, subtract } from '../../utils/safe-math';
@@ -149,9 +149,7 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       this.logLastLog(data);
 

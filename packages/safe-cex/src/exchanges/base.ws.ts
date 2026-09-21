@@ -4,7 +4,6 @@ import { RingBuffer } from '@tealstreet/data-structures/src/RingBuffer';
 import { Options, ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
-  ENABLE_PWS_LOG,
   ENABLE_RECONNECTING_WEBSOCKET,
   ENABLE_WS_LIFECYCLE_DEBUG_LOGS,
   RECONNECTING_WEBSOCKET_TUNING,
@@ -16,6 +15,7 @@ import {
   WS_MIN_RECONNECTION_DELAY,
 } from '../config/config';
 import { LogSeverity } from '../types';
+import { isWsDiagnosticsEnabled, redactWsDiagnosticPayload, stringifyWsDiagnosticPayload } from '../utils/wsDiagnostics';
 import { MessageHandlers, MessageHandlersStats } from './types';
 
 type FreshHeadersProvider = () => Record<string, string>;
@@ -47,6 +47,9 @@ const STATS_RECONCILE_INTERVAL_MS = 5000;
 // several fire in a single teardown, so closing many panels at once would
 // otherwise be O(panels x topics).
 const STATS_RECONCILE_FORCE_MIN_MS = 250;
+const WS_DIAGNOSTIC_RATE_WINDOW_MS = 1000;
+const WS_DIAGNOSTIC_MAX_FRAMES_PER_WINDOW = 200;
+const WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS = 4096;
 
 const TEALSTREET_WS_HEADERS = {
   Origin: 'https://preview.tealstreet.io',
@@ -66,6 +69,17 @@ const isTealstreetWebSocketUrl = (url: string): boolean => {
 type ModuleWithCreateRequire = {
   createRequire?: (url: string | URL) => (id: string) => unknown;
 };
+
+export interface WsDiagnosticReceiveOptions {
+  allowChannel?: (json: unknown) => boolean;
+  format?: (data: unknown) => string | null | undefined;
+  redact?: (message: string) => string | null | undefined;
+}
+
+export interface WsDiagnosticSendOptions {
+  format?: (redactedMessage: string) => string | null | undefined;
+  redact?: (message: string) => string | null | undefined;
+}
 
 const getNodeWebSocket = (): typeof WebSocket | undefined => {
   if (typeof process === 'undefined' || !(process.versions?.node || (process as any).isBun)) return undefined;
@@ -240,6 +254,9 @@ export class BaseWebSocket<T extends BaseExchange> {
   private wsErrorLogSignature: string | null = null;
   private wsErrorLogLastAt = 0;
   private wsErrorLogSuppressedCount = 0;
+  private wsDiagnosticWindowStartedAt = 0;
+  private wsDiagnosticFrameCount = 0;
+  private wsDiagnosticSuppressedCount = 0;
 
   /**
    * When true, the pong-miss reconnect path is suppressed: any inbound message
@@ -384,9 +401,94 @@ export class BaseWebSocket<T extends BaseExchange> {
     this.reconcileMessageHandlerStats(Date.now(), true);
   }
 
+  private parseWsDiagnosticJson(data: unknown): unknown {
+    if (typeof data !== 'string') return data;
+    try {
+      return JSON.parse(data);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private shouldDropWsDiagnostic(): boolean {
+    const now = Date.now();
+    if (now - this.wsDiagnosticWindowStartedAt >= WS_DIAGNOSTIC_RATE_WINDOW_MS) {
+      this.wsDiagnosticWindowStartedAt = now;
+      this.wsDiagnosticFrameCount = 0;
+    }
+
+    this.wsDiagnosticFrameCount += 1;
+    if (this.wsDiagnosticFrameCount <= WS_DIAGNOSTIC_MAX_FRAMES_PER_WINDOW) {
+      return false;
+    }
+
+    this.wsDiagnosticSuppressedCount += 1;
+    return true;
+  }
+
+  private capWsDiagnosticPayload(message: string): string {
+    if (message.length <= WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS) return message;
+    return `${message.slice(0, WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS)}...truncated (${message.length} chars)`;
+  }
+
+  private emitWsDiagnosticEvent(eventName: 'grafana-pws' | 'grafana-pws-sub', message: string): void {
+    const suppressed = this.wsDiagnosticSuppressedCount;
+    if (suppressed > 0) {
+      this.wsDiagnosticSuppressedCount = 0;
+      this.parent.emitter.emit(
+        eventName,
+        `[${this.parent.name}] suppressed ${suppressed} websocket diagnostic frame(s) due to rate limit`,
+      );
+    }
+    this.parent.emitter.emit(eventName, this.capWsDiagnosticPayload(message));
+  }
+
+  protected emitWsDiagnosticReceive(data: unknown, options: WsDiagnosticReceiveOptions = {}): void {
+    if (!isWsDiagnosticsEnabled()) return;
+
+    const rawMessage = stringifyWsDiagnosticPayload(data);
+    if (isHeartbeatFrame(rawMessage)) return;
+
+    if (options.allowChannel) {
+      let allowed = false;
+      try {
+        allowed = options.allowChannel(this.parseWsDiagnosticJson(data));
+      } catch {
+        allowed = false;
+      }
+      if (!allowed) return;
+    }
+
+    if (this.shouldDropWsDiagnostic()) return;
+
+    const formatted = options.format ? options.format(data) : rawMessage;
+    if (!formatted) return;
+
+    const redacted = redactWsDiagnosticPayload(formatted);
+    const exchangeRedacted = options.redact?.(redacted) ?? redacted;
+    if (!exchangeRedacted) return;
+
+    this.emitWsDiagnosticEvent('grafana-pws', exchangeRedacted);
+  }
+
+  protected emitWsDiagnosticSend(data: string, options: WsDiagnosticSendOptions = {}): void {
+    if (!isWsDiagnosticsEnabled()) return;
+    if (isHeartbeatFrame(data)) return;
+    if (this.shouldDropWsDiagnostic()) return;
+
+    const redacted = redactWsDiagnosticPayload(data);
+    const formatted = options.format ? options.format(redacted) : redacted;
+    if (!formatted) return;
+
+    const exchangeRedacted = options.redact?.(formatted) ?? formatted;
+    if (!exchangeRedacted) return;
+
+    this.emitWsDiagnosticEvent('grafana-pws-sub', exchangeRedacted);
+  }
+
   sendWithLog = (data: string) => {
     this.send(data);
-    if (ENABLE_PWS_LOG) this.parent.emitter.emit('grafana-pws-sub', `${data}`);
+    this.emitWsDiagnosticSend(data);
   };
 
   emitAndLogError(err: string | Error, msg?: string, extraData?: Record<string, any>) {

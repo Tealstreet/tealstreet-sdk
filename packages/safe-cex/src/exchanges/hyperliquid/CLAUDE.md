@@ -459,7 +459,7 @@ Subscribed for the user (or vault address):
 
 ## WebSocket Diagnostics
 
-Hyperliquid public/private WebSockets emit `grafana-pws-sub` for selected outbound frames and `grafana-pws` for selected inbound frames so the web Requests drawer and Grafana diagnostics can show useful WS control/order traffic without enabling the global `ENABLE_PWS_LOG` firehose. Keep wallet/user addresses redacted before emission.
+Hyperliquid public/private WebSocket diagnostics go through `BaseWebSocket`'s runtime-gated `emitWsDiagnostic*` helpers. They only populate the web Requests drawer when the Requests Log toggle enables WS diagnostics, and Grafana upload remains behind the separate WS upload opt-in. Keep wallet/user addresses redacted before emission.
 
 Public diagnostics should include outbound subscribe/unsubscribe control frames and inbound subscription/error control frames. Do not log high-volume public market-data inbound frames (`allMids`, `fastAssetCtxs`, `l2Book`, `bbo`, `candle`) on the receive side.
 

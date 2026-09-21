@@ -4,7 +4,6 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { ENABLE_PWS_LOG } from '../../config/config';
 import {
   Order,
   OrderSide,
@@ -141,9 +140,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
       this.trackLastReceived();
       this.messageCount++; // Increment message counter
 
-      if (ENABLE_PWS_LOG) {
-        this.parent.emitter.emit('grafana-pws', `${data}`);
-      }
+      this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse(data);
 
@@ -447,9 +444,9 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
           break;
         case 'login':
           if (json?.data?.result) {
-            this.parent.emitter.emit('grafana-pws', `[bitunix login] success`);
+            this.emitWsDiagnosticReceive('[bitunix login] success');
           } else {
-            this.parent.emitter.emit('grafana-pws', `[bitunix login] failed ${JSON.stringify(json)}`);
+            this.emitWsDiagnosticReceive(`[bitunix login] failed ${JSON.stringify(json)}`);
             this.parent.emitAndLogError('Bitunix private ws login failed, double check your key and secret');
             (async () => {
               await virtualClock.syncBybitClientServerTime();

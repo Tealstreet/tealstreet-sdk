@@ -58,7 +58,7 @@ Hosted mode must use the remote signer for this login signature. The secret is i
 
 ## WebSocket Diagnostics
 
-MEXC public/private WebSockets emit `grafana-pws-sub` for outbound frames and `grafana-pws` for inbound frames so the web Requests drawer and Grafana diagnostics can show WS traffic even while the global `ENABLE_PWS_LOG` flag remains off. Keep private login frames redacted before emission. Public `push.ticker`, `push.depth`, and `push.depth.full` frames are intentionally skipped because ticker/depth fanout is high-volume; subscriptions, pongs, klines, trades, and private account frames should still be visible.
+MEXC public/private WebSocket diagnostics go through `BaseWebSocket`'s runtime-gated `emitWsDiagnostic*` helpers. They only populate the web Requests drawer when the Requests Log toggle enables WS diagnostics, and Grafana upload remains behind the separate WS upload opt-in. Keep private login frames redacted before emission. Public `push.ticker`, `push.depth`, and `push.depth.full` frames are intentionally skipped because ticker/depth fanout is high-volume; subscriptions, pongs, klines, trades, and private account frames should still be visible.
 
 MEXC `rs.*` channels are one-shot control responses (for example `rs.sub.ticker` / `rs.sub.kline`), not liveness feeds. They may be logged for diagnostics, but do not record them in `messageHandlersStats`; otherwise the generic stale-topic health check treats the naturally quiet ack row as a dead feed and reloads the account around the timeout window.
 
