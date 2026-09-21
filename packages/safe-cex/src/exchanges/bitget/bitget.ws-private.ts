@@ -51,6 +51,8 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private getRawOrderStatus = (order: Record<string, any>): string =>
     this.normalizeOrderStatus(order.status ?? order.state ?? order.planStatus ?? order.orderStatus);
 
+  private normalizeChannel = (channel: unknown): string => String(channel ?? '').toLowerCase().replace(/[-_]/g, '');
+
   /**
    * The shared `ORDER_STATUS` map treats several strings as `OrderStatus.Closed`,
    * including `success` and `executed`. Those two are ambiguous on Bitget WS —
@@ -214,6 +216,9 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
 
     const json = jsonParse<Record<string, any>>(data);
+    if (!json) return;
+
+    const channel = this.normalizeChannel(json?.arg?.channel);
 
     if (json?.event === 'login') {
       if (`${json.code}` === '0') {
@@ -242,25 +247,25 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       return;
     }
 
-    if (json?.arg?.channel === 'orders' && json?.event !== 'subscribe') {
+    if (channel === 'orders' && json?.event !== 'subscribe') {
       this.recordMessageHandlerStats('order');
       this.handleOrderTopic(json);
       return;
     }
 
-    if (json?.arg?.channel === 'orders-algo' && json?.event !== 'subscribe') {
+    if (channel === 'ordersalgo' && json?.event !== 'subscribe') {
       this.recordMessageHandlerStats('order-algo');
       this.handleAlgoOrdersTopic(json);
       return;
     }
 
-    if (json?.arg?.channel === 'positions' && json?.event !== 'subscribe') {
+    if (channel === 'positions' && json?.event !== 'subscribe') {
       this.recordMessageHandlerStats('position');
       this.handlePositionsTopic(json);
       return;
     }
 
-    if (json?.arg?.channel === 'account' && json?.event !== 'subscribe') {
+    if (channel === 'account' && json?.event !== 'subscribe') {
       this.recordMessageHandlerStats('account');
       this.handleAccountTopic(json);
       return;

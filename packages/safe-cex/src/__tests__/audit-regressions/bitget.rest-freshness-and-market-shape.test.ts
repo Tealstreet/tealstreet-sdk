@@ -222,6 +222,29 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     ]);
   });
 
+  it('routes Classic ordersAlgo WS channel aliases to the algo-order handler', () => {
+    const exchange = createExchange();
+    const websocket = exchange.privateWebsocket as any;
+    vi.spyOn(websocket, 'throttledFetchOrders').mockImplementation(() => {});
+
+    websocket.onMessage({
+      data: JSON.stringify({
+        action: 'update',
+        arg: { instType: 'USDT-FUTURES', channel: 'ordersAlgo', instId: 'default' },
+        data: [rawAlgoOrder({ orderId: 'tp-1', triggerPrice: '51000', status: 'not_trigger' })],
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.orders).toEqual([
+      expect.objectContaining({
+        id: 'tp-1',
+        status: OrderStatus.Open,
+        type: OrderType.TakeProfit,
+        price: 51000,
+      }),
+    ]);
+  });
+
   it('refreshes positions and emits a fill on explicit algo fill statuses (triggered / filled / full_fill)', () => {
     const exchange = createExchange();
     const websocket = exchange.privateWebsocket as any;

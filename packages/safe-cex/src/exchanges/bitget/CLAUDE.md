@@ -260,6 +260,8 @@ The implementation uses **four WebSocket connections** simultaneously:
   - `positions` - Position changes (snapshot + incremental updates)
   - `orders` - Normal order updates (new, partial-fill, filled, cancel)
   - `orders-algo` - Algo/stop order updates (live, triggered, cancel)
+    Inbound dispatch accepts both `orders-algo` and `ordersAlgo`; Bitget/CCXT
+    examples have used both spellings for Classic trigger-order frames.
 - **UTA topics subscribed**:
   - `{ instType: "UTA", topic: "account" }`
   - `{ instType: "UTA", topic: "position" }`
