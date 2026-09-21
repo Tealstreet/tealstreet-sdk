@@ -46,25 +46,25 @@ import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, multiply, subtract } from '../../utils/safe-math';
+import { splitTimeRange } from '../../utils/splitTimeRange';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
-import { mapBitgetBills } from './bitget.income';
 import { mapBitgetFills } from './bitget.fills';
-import { splitTimeRange } from '../../utils/splitTimeRange';
+import { mapBitgetBills } from './bitget.income';
 import {
   BITGET_UTA_CATEGORY,
   BITGET_UTA_ORDER,
   BITGET_UTA_POSITION,
   ENDPOINTS,
+  FETCH_POSITIONS_V2_RESPONSE,
+  FETCH_SINGLE_ACCOUNT_RESPONSE,
   FETCH_UTA_ACCOUNT_ASSETS_RESPONSE,
   FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE,
   FETCH_UTA_ORDERS_RESPONSE,
   FETCH_UTA_POSITIONS_RESPONSE,
-  FETCH_POSITIONS_V2_RESPONSE,
-  FETCH_SINGLE_ACCOUNT_RESPONSE,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   INTERVAL,
@@ -1747,7 +1747,9 @@ export class BitgetExchange extends BaseExchange {
         throw new Error(msg);
       }
 
-      const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatUtaCreateOrder(o)))).flat();
+      const normalOrdersOptsWithEmpty = (
+        await Promise.all(normalOrders.map((o) => this.formatUtaCreateOrder(o)))
+      ).flat();
       const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => this.toFiniteNumber(o.qty) > 0);
       const strategyOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatUtaStrategyOrder(o)));
       return [...(await this.placeUtaOrders(normalOrdersOpts)), ...(await this.placeUtaStrategyOrders(strategyOrdersOpts))];

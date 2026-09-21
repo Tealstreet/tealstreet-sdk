@@ -253,7 +253,7 @@ resolve the unlabelled PnL-unit blocker.
 | File                       | Description                                                                                                                                                             |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `coinbase.exchange.ts`     | Main exchange class (`CoinbaseExchange`) extending `BaseExchange`. Handles portfolio detection, balance/ticker/position fetching, order placement, and OHLCV retrieval. |
-| `coinbasespot.exchange.ts` | Spot-only saved-account compatibility variant (`CoinbaseSpotExchange`). Currently disabled for new accounts in metadata.                                                |
+| `coinbasespot.exchange.ts` | Saved-account compatibility spot variant (`CoinbaseSpotExchange`). Forces spot-only portfolio/type selection and must not probe INTX or CFM futures endpoints. Currently disabled for new accounts in metadata. |
 | `coinbase.api.ts`          | Axios-based REST client factory. Configures JWT auth interceptor, retry logic (3 retries on network errors), proxy/tunnel support, and public endpoint bypass.          |
 | `coinbase.types.ts`        | All TypeScript types: REST response shapes, WebSocket event types, endpoint constants, order configuration types, and lookup maps for order side/type/TIF.              |
 | `coinbase.utils.ts`        | JWT signing via Web Crypto API (ES256/ECDSA P-256), PEM-to-PKCS8 conversion, order state/type formatting helpers.                                                       |
