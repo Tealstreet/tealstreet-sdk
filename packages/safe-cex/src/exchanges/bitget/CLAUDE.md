@@ -153,6 +153,16 @@ Each step checks `this.isDisposed` to allow early exit if the exchange is dispos
 
 **Note**: There is no `publicDataOnly` mode -- Bitget always requires authentication.
 
+### Private WS Degraded State
+
+After Bitget order writes (place/cancel/update), the exchange starts a short
+private-stream grace window. If no private order/algo/position/account frame
+arrives within that window, it sets `socketHealth.privateDegradedReason` so the
+web topbar can show a degraded private stream even though REST writes still
+succeed and the socket may appear connected. Any authenticated private payload
+clears the degraded reason. This mirrors Coinbase's post-write user-stream
+watchdog and is intentionally lighter than Lighter's full route-recovery system.
+
 ## REST API Endpoints
 
 Private trading/account endpoints are Classic v2 unless explicitly marked as v3

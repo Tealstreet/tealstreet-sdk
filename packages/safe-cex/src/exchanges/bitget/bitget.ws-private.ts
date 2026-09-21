@@ -273,6 +273,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   handleOrderTopic = (data: Record<string, any>) => {
+    this.parent.markPrivateStreamMessageReceived();
     const rawOrders = data.data;
 
     for (const rawOrder of rawOrders) {
@@ -358,6 +359,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   handleAlgoOrdersTopic = (data: Record<string, any>) => {
+    this.parent.markPrivateStreamMessageReceived();
     const rawOrders = data.data;
 
     for (const rawOrder of rawOrders) {
@@ -409,6 +411,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   handlePositionsTopic = (data: Record<string, any>) => {
+    this.parent.markPrivateStreamMessageReceived();
     const action = typeof data?.action === 'string' ? data.action : undefined;
     const rawList = Array.isArray(data?.data) ? (data.data as Array<Record<string, any>>) : [];
     const validItems = rawList.filter((p) => p && typeof p === 'object');
@@ -444,6 +447,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   handleUtaPositionsTopic = (data: Record<string, any>) => {
+    this.parent.markPrivateStreamMessageReceived();
     const action = typeof data?.action === 'string' ? data.action : undefined;
     const rawList = Array.isArray(data?.data) ? (data.data as Array<Record<string, any>>) : [];
     const validItems = rawList.filter((p) => p && typeof p === 'object');
@@ -475,6 +479,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   handleAccountTopic = (data: Record<string, any>) => {
+    this.parent.markPrivateStreamMessageReceived();
     const rawList = Array.isArray(data?.data) ? (data.data as Array<Record<string, any>>) : [];
     const acct = rawList.find((b) => b.marginCoin === this.parent.apiMarginCoin);
     if (!acct) return;
@@ -503,6 +508,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   };
 
   handleUtaAccountTopic = (data: Record<string, any>) => {
+    this.parent.markPrivateStreamMessageReceived();
     const raw = Array.isArray(data?.data) ? data.data[0] : data?.data;
     if (!raw || typeof raw !== 'object') {
       this.throttledFetchBalance();

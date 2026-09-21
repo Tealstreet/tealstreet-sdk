@@ -245,6 +245,77 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     ]);
   });
 
+  it('marks Bitget private WS degraded when no private stream update follows a REST write', async () => {
+    vi.useFakeTimers();
+    try {
+      const exchange = createExchange();
+      const warning = vi.spyOn(exchange.emitter, 'emit');
+      exchange.unlimitedXHR = {
+        post: vi.fn().mockResolvedValue({ data: { code: '00000', data: { orderId: 'tp-1' } } }),
+      } as any;
+
+      await expect(
+        exchange.placeAlgoOrders([
+          {
+            symbol: 'BTCUSDT',
+            marginCoin: 'USDT',
+            productType: 'usdt-futures',
+            planType: 'profit_plan',
+            triggerPrice: '51000',
+          },
+        ]),
+      ).resolves.toEqual(['tp-1']);
+
+      await vi.advanceTimersByTimeAsync(8_000);
+
+      expect(exchange.store.socketHealth?.privateDegradedReason).toContain(
+        'Bitget private WS is not receiving live order/position updates',
+      );
+      expect(warning).toHaveBeenCalledWith(
+        'warning',
+        expect.stringContaining('Bitget private WS is not receiving live order/position updates'),
+        { forceToast: true },
+      );
+      exchange.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps Bitget private WS healthy when a private stream update follows a REST write', async () => {
+    vi.useFakeTimers();
+    try {
+      const exchange = createExchange();
+      const warning = vi.spyOn(exchange.emitter, 'emit');
+      exchange.unlimitedXHR = {
+        post: vi.fn().mockResolvedValue({ data: { code: '00000', data: { orderId: 'tp-1' } } }),
+      } as any;
+
+      await exchange.placeAlgoOrders([
+        {
+          symbol: 'BTCUSDT',
+          marginCoin: 'USDT',
+          productType: 'usdt-futures',
+          planType: 'profit_plan',
+          triggerPrice: '51000',
+        },
+      ]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      exchange.markPrivateStreamMessageReceived();
+      await vi.advanceTimersByTimeAsync(7_000);
+
+      expect(exchange.store.socketHealth?.privateDegradedReason).toBeUndefined();
+      expect(warning).not.toHaveBeenCalledWith(
+        'warning',
+        expect.stringContaining('Bitget private WS is not receiving live order/position updates'),
+        { forceToast: true },
+      );
+      exchange.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refreshes positions and emits a fill on explicit algo fill statuses (triggered / filled / full_fill)', () => {
     const exchange = createExchange();
     const websocket = exchange.privateWebsocket as any;

@@ -93,6 +93,9 @@ const BITGET_FILLS_MAX_PAGES = 100;
 const BILL_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 /** Bitget rejects candle requests whose paired start/end range reaches the documented 90-day edge. */
 const BITGET_CANDLE_MAX_WINDOW_MS = 89 * 24 * 60 * 60 * 1000;
+const BITGET_PRIVATE_STREAM_WRITE_GRACE_MS = 8_000;
+const BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE =
+  'Bitget private WS is not receiving live order/position updates. Tealstreet will reconcile through REST; if this account uses IP whitelisting, verify the terminal-listed browser/server WebSocket IPs are allowed.';
 
 export const BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE =
   'This Bitget API key belongs to a Unified Trading Account (UTA), but Tealstreet currently uses Bitget Classic API endpoints for this adapter. Please use a Classic-mode Bitget account/sub-account until the Bitget v3 migration is complete.';
@@ -168,6 +171,9 @@ export class BitgetExchange extends BaseExchange {
   private _planTypePositionsCache: { at: number; value: Position[] } | null = null;
   private _planTypePositionsInflight: Promise<Position[]> | null = null;
   private _suppressBitgetValidationErrorEmission = false;
+  private privateStreamWriteCheckTimeout: NodeJS.Timeout | undefined;
+  private lastPrivateStreamMessageAt = 0;
+  private hasWarnedPrivateStreamDegraded = false;
 
   get suppressBitgetValidationErrorEmission(): boolean {
     return this._suppressBitgetValidationErrorEmission;
@@ -324,10 +330,45 @@ export class BitgetExchange extends BaseExchange {
 
   dispose = () => {
     super.dispose();
+    if (this.privateStreamWriteCheckTimeout) {
+      clearTimeout(this.privateStreamWriteCheckTimeout);
+      this.privateStreamWriteCheckTimeout = undefined;
+    }
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
     this.secondsTickersWebsocket.dispose();
     this.thirdTickersWebsocket.dispose();
+  };
+
+  markPrivateStreamMessageReceived = () => {
+    this.lastPrivateStreamMessageAt = Date.now();
+    this.hasWarnedPrivateStreamDegraded = false;
+    this.store.updateSocketHealth({ privateDegradedReason: undefined });
+  };
+
+  private markPrivateStreamDegraded = (reason = BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
+    this.store.updateSocketHealth({ privateDegradedReason: reason });
+    this.log(reason, LogSeverity.Warning);
+    if (forceToast && !this.hasWarnedPrivateStreamDegraded) {
+      this.hasWarnedPrivateStreamDegraded = true;
+      this.emitter.emit('warning', reason, { forceToast: true });
+    }
+  };
+
+  private schedulePrivateStreamWriteCheck = () => {
+    const lastPrivateFrameAtSchedule = this.lastPrivateStreamMessageAt;
+    if (this.privateStreamWriteCheckTimeout) {
+      clearTimeout(this.privateStreamWriteCheckTimeout);
+    }
+
+    this.privateStreamWriteCheckTimeout = setTimeout(() => {
+      this.privateStreamWriteCheckTimeout = undefined;
+      if (this.isDisposed || this.lastPrivateStreamMessageAt > lastPrivateFrameAtSchedule) {
+        return;
+      }
+
+      this.markPrivateStreamDegraded(BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE, true);
+    }, BITGET_PRIVATE_STREAM_WRITE_GRACE_MS);
   };
 
   start = async () => {
@@ -1492,6 +1533,7 @@ export class BitgetExchange extends BaseExchange {
         productType: this.apiProductType,
         marginCoin: this.apiMarginCoin,
       });
+      this.schedulePrivateStreamWriteCheck();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
     }
@@ -1540,6 +1582,9 @@ export class BitgetExchange extends BaseExchange {
         }
       }
     }
+    if (orders.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
+    }
   };
 
   private cancelUtaNormalOrders = async (orders: Order[]) => {
@@ -1568,6 +1613,9 @@ export class BitgetExchange extends BaseExchange {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
         throw err;
       }
+    }
+    if (normalizedOrders.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
     }
   };
 
@@ -1609,6 +1657,9 @@ export class BitgetExchange extends BaseExchange {
         throw err;
       }
     }
+    if (normalizedOrders.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
+    }
   };
 
   cancelAlgoOrders = async (orders: Order[]) => {
@@ -1631,6 +1682,9 @@ export class BitgetExchange extends BaseExchange {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
         throw err;
       }
+    }
+    if (orders.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
     }
   };
 
@@ -2062,6 +2116,9 @@ export class BitgetExchange extends BaseExchange {
       }
     }
 
+    if (newOrderIds.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
+    }
     return newOrderIds;
   };
 
@@ -2084,6 +2141,9 @@ export class BitgetExchange extends BaseExchange {
       }
     }
 
+    if (newOrderIds.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
+    }
     return newOrderIds;
   };
 
@@ -2106,6 +2166,9 @@ export class BitgetExchange extends BaseExchange {
       }
     }
 
+    if (newOrderIds.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
+    }
     return newOrderIds;
   };
 
@@ -2132,6 +2195,9 @@ export class BitgetExchange extends BaseExchange {
       }
     }
 
+    if (newOrderIds.length > 0) {
+      this.schedulePrivateStreamWriteCheck();
+    }
     return newOrderIds;
   };
 
@@ -2214,6 +2280,7 @@ export class BitgetExchange extends BaseExchange {
       if (parseInt(data?.code || '0') !== 0) {
         return null;
       }
+      this.schedulePrivateStreamWriteCheck();
       return [data?.data?.orderId || order.id];
     } catch {
       return null;
@@ -2360,6 +2427,9 @@ export class BitgetExchange extends BaseExchange {
       const {
         data: { data },
       } = await this.unlimitedXHR.post(ENDPOINTS.UPDATE_ALGO_ORDER, payload);
+      if (data?.orderId) {
+        this.schedulePrivateStreamWriteCheck();
+      }
       return data?.orderId ? [data.orderId] : [];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
