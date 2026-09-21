@@ -115,6 +115,17 @@ describe('Coinbase private WebSocket auth', () => {
     expect(emitAndLogError.mock.calls[0]?.[0]).toBe('product_ids required');
   });
 
+  it('marks private WebSocket auth failures as degraded instead of emitting an error toast', () => {
+    const { exchange, websocket } = createSubject();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+
+    websocket.onMessage({ data: JSON.stringify({ type: 'error', message: 'authentication failure' }) } as MessageEvent);
+
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(exchange.store.socketHealth?.privateDegradedReason).toContain('Coinbase private WS authentication failed');
+    expect(exchange.store.socketHealth?.privateDegradedReason).toContain('authentication failure');
+  });
+
   it('closes but does not force-close when subscribe-time signing fails, so backoff can reconnect', async () => {
     // Regression: a transient remote-signer failure must not set `forceClosed=true`,
     // which would permanently skip reconnect in `base.ws.ts` until an explicit

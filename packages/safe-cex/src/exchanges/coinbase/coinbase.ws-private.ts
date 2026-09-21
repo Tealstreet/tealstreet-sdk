@@ -66,7 +66,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
 
       const json = JSON.parse(data);
       if (json.type === 'error' || json.error) {
-        this.emitAndLogError(json.message || json.error?.message || 'Coinbase private WebSocket error');
+        this.handlePrivateStreamError(json.message || json.error?.message || 'Coinbase private WebSocket error');
       } else if (json.channel === 'user') {
         this.handleUserEvent(json);
       } else if (json.channel === 'heartbeats') {
@@ -77,6 +77,15 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
 
   // no ping for coinbase, only heartbeats
   ping = (): void => {};
+
+  private handlePrivateStreamError = (message: string) => {
+    if (/auth|authentication|unauthorized|permission|api[-_\s]?key|credential/i.test(message)) {
+      this.parent.markPrivateUserStreamAuthFailed(message);
+      return;
+    }
+
+    this.emitAndLogError(message);
+  };
 
   handleUserEvent = (data: Record<string, any>) => {
     this.parent.markPrivateUserStreamMessageReceived();
