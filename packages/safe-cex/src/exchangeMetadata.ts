@@ -1887,8 +1887,9 @@ const CoinbaseSpotMetadata: ExchangeMetadata = {
   ...CoinbaseMetadata,
   supportsPublicOnly: false,
   exchangeName: 'coinbasespot' as ExchangeName,
-  enabled: false,
-  enabledInDev: false,
+  enabled: true,
+  enabledInDev: true,
+  enableInPreview: true,
   prettyName: 'Coinbase Spot',
 };
 

@@ -233,6 +233,15 @@ describe('exchangeMetadata', () => {
       expect(lighter.requiresApiKeyIndex).toBe(true);
     });
 
+    it('should keep Coinbase Spot enabled in every web environment', () => {
+      const coinbaseSpot = exchangeMetadata.coinbasespot;
+
+      expect(coinbaseSpot.exchangeName).toBe('coinbasespot');
+      expect(coinbaseSpot.enabled).toBe(true);
+      expect(coinbaseSpot.enabledInDev).toBe(true);
+      expect(coinbaseSpot.enableInPreview).toBe(true);
+    });
+
     it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
       const lighterRobinhood = exchangeMetadata['lighter-robinhood'];
 
