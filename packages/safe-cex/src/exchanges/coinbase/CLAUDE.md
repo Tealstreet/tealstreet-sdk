@@ -295,6 +295,11 @@ secrets:
 - **Hosted REST signing**: When `options.remoteSigner` is present, the server-side interceptor must not call the local ES256 signer because hosted mode has `secret: ''`. It returns the unsigned private request for `createRemoteSigningAdapter`, which delegates signing to the browser/device copy of this same interceptor.
 - **WebSocket auth**: JWT is generated without a `uri` parameter and sent in the subscribe message payload. Hosted private WebSocket subscriptions use the `coinbase-jwt` `ws-auth` output format and carry the resulting JWT in `wsAuthSignature`.
 - **Header format**: `Authorization: Bearer <jwt>` (when using tealstreetTunnel) or `Coinbase-Authorization: Bearer <jwt>` (direct connection) (`coinbase.api.ts`)
+- **IP allowlists**: Browser REST uses the Tealstreet REST proxy/tunnel, while
+  direct Coinbase private WS can originate from the user's browser IP when the
+  WS proxy route is unavailable or disabled. For restricted Coinbase keys,
+  users may need both the standard Tealstreet proxy IPs and their current
+  browser IP whitelisted to receive live `user` order frames.
 
 ## Startup Sequence
 
@@ -723,6 +728,16 @@ With 3 RPS limit, a single tick cycle takes approximately 1-2 seconds of API tim
 - **Initial load**: Orders are hydrated from the WebSocket `user` channel snapshot and from REST `GET /api/v3/brokerage/orders/historical/batch` when the initial snapshot is missing.
 - **WebSocket refresh** (`coinbase.ws-private.ts`): the `user` channel is the automatic order source. Private WS opens/reconnects do not kick off a REST order snapshot; the channel's own snapshot/update events refresh the store without spending REST budget.
 - **REST fallback** (`coinbase.exchange.ts`): `fetchOrders()` requests only active statuses (`PENDING`, `OPEN`, `QUEUED`, `CANCEL_QUEUED`, `EDIT_QUEUED`) and paginates with `cursor`. The tick loop uses this only while orders are still unloaded, throttled to at most every 10 seconds. Manual worker calls can still invoke it. Rate limits and other transport failures are non-authoritative: they preserve last-known-good store state by throwing before any caller can mark the failed snapshot loaded.
+- **Write reconciliation** (`coinbase.exchange.ts`): Successful place/edit/cancel
+  writes schedule a delayed REST open-order reconciliation instead of creating
+  session-only optimistic orders. This keeps refreshes and multi-device sessions
+  authoritative even when direct private WS `user` frames are unavailable.
+- **Private WS degraded state** (`coinbase.exchange.ts` / `coinbase.ws-private.ts`):
+  After a successful REST write, Coinbase expects a `user` update shortly after
+  when private WS is usable. If no `user` frame arrives within the write grace
+  window, mark `socketHealth.privateDegradedReason`, force-toast the IP allowlist
+  guidance, and rely on REST reconciliation for open orders. Clear the degraded
+  marker as soon as any `user` frame arrives.
 - **Snapshot handling** (`coinbase.ws-private.ts`): Empty or valid-bearing
   snapshots are authoritative and replace the store. Invalid-only non-empty
   snapshots preserve last-known-good state; mixed snapshots retain their valid
