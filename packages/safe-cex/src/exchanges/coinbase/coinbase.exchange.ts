@@ -78,6 +78,8 @@ const COINBASE_ORDER_WRITE_RECONCILE_DELAY_MS = 2_000;
 const COINBASE_PRIVATE_USER_STREAM_WRITE_GRACE_MS = 8_000;
 const COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE =
   'Coinbase private WS is not receiving live order updates. Orders will reconcile through REST; if your Coinbase key restricts IPs, whitelist both Tealstreet proxy IPs and your current browser IP.';
+const COINBASE_PRIVATE_USER_STREAM_AUTH_DEGRADED_MESSAGE =
+  'Coinbase private WS authentication failed. REST trading can continue, but live order updates require your current browser IP to be whitelisted or a Coinbase WS proxy route.';
 // REST replication for a freshly placed order can lag WS by a few hundred ms.
 // Preserve open WS-only orders whose lastUpdate is within this window so a
 // snapshot poll doesn't briefly evict them from the store on a race.
@@ -328,6 +330,20 @@ export class CoinbaseExchange extends BaseExchange {
     this.store.updateSocketHealth({ privateDegradedReason: undefined });
   };
 
+  markPrivateUserStreamDegraded = (reason = COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
+    this.store.updateSocketHealth({ privateDegradedReason: reason });
+    this.log(reason, LogSeverity.Warning);
+    if (forceToast && !this.hasWarnedPrivateUserStreamDegraded) {
+      this.hasWarnedPrivateUserStreamDegraded = true;
+      this.emitter.emit('warning', reason, { forceToast: true });
+    }
+  };
+
+  markPrivateUserStreamAuthFailed = (message?: string) => {
+    const detail = message ? ` Coinbase message: ${message}` : '';
+    this.markPrivateUserStreamDegraded(`${COINBASE_PRIVATE_USER_STREAM_AUTH_DEGRADED_MESSAGE}${detail}`);
+  };
+
   private schedulePrivateUserStreamWriteCheck = () => {
     const lastUserFrameAtSchedule = this.lastPrivateUserStreamMessageAt;
     if (this.privateUserStreamWriteCheckTimeout) {
@@ -339,15 +355,7 @@ export class CoinbaseExchange extends BaseExchange {
         return;
       }
 
-      this.store.updateSocketHealth({ privateDegradedReason: COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE });
-      this.log(
-        'Coinbase private WS did not deliver user order updates after a REST write; using REST order reconciliation',
-        LogSeverity.Warning,
-      );
-      if (!this.hasWarnedPrivateUserStreamDegraded) {
-        this.hasWarnedPrivateUserStreamDegraded = true;
-        this.emitter.emit('warning', COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE, { forceToast: true });
-      }
+      this.markPrivateUserStreamDegraded(COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE, true);
     }, COINBASE_PRIVATE_USER_STREAM_WRITE_GRACE_MS);
   };
 
@@ -396,6 +404,43 @@ export class CoinbaseExchange extends BaseExchange {
     );
     if (preservedInFlight.length === 0) return restOrders;
     return [...restOrders, ...preservedInFlight];
+  };
+
+  private buildOptimisticOrderFromCreate = (
+    payload: PLACE_ORDER_REQUEST,
+    orderId: string,
+    response: PLACE_ORDER_RESPONSE,
+  ): Order | undefined => {
+    if (!payload.product_id || !payload.order_configuration) return undefined;
+    const market = this.resolveMarketByCoinbaseProductId(payload.product_id);
+    if (!market || market.isSpot !== true || market.isExpiring === true || market.contractSize !== 1) return undefined;
+
+    const config = response.order_configuration ?? payload.order_configuration;
+    const limit = config.limit_limit_gtc || config.limit_limit_gtd || config.sor_limit_ioc;
+    if (!limit) return undefined;
+
+    const amount = Number(limit.base_size);
+    const price = Number(limit.limit_price);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(price) || price <= 0) return undefined;
+
+    return {
+      id: orderId,
+      parentId: payload.client_order_id,
+      status: OrderStatus.Open,
+      symbol: market.symbol,
+      type: OrderType.Limit,
+      side: payload.side === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
+      price,
+      amount,
+      filled: 0,
+      remaining: amount,
+      extra: {
+        remainingNative: amount,
+      },
+      reduceOnly: false,
+      info: { ...response, optimisticFromCreateOrder: true },
+      lastUpdate: Date.now(),
+    };
   };
 
   private emitOrdersFetchError = (err: any) => {
@@ -1535,6 +1580,10 @@ export class CoinbaseExchange extends BaseExchange {
       const orderId = data.success_response?.order_id ?? data.order_id;
       if (!orderId) {
         throw new Error('Coinbase create-order response did not include an order ID');
+      }
+      const optimisticOrder = this.buildOptimisticOrderFromCreate(payload, orderId, data);
+      if (optimisticOrder) {
+        this.store.addOrUpdateOrder(optimisticOrder);
       }
       this.scheduleOpenOrdersRestReconciliation('place-order');
       this.schedulePrivateUserStreamWriteCheck();
