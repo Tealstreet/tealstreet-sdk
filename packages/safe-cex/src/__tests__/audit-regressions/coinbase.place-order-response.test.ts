@@ -3,32 +3,51 @@ import { describe, expect, it, vi } from 'vitest';
 import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
+import { Order, OrderSide, OrderStatus, OrderType } from '../../types';
 
 const createExchange = () => {
+  const store = new DefaultStore();
   const exchange = new CoinbaseExchange(
     'coinbase' as any,
     { key: 'test', secret: 'test', tealstreetTunnel: false } as any,
-    new DefaultStore(),
+    store,
   );
   vi.spyOn(exchange as any, 'formatCreateOrder').mockReturnValue({ client_order_id: 'client-order-id' });
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
-  return exchange;
+  return { exchange, store };
 };
+
+const openOrder = (overrides: Partial<Order> = {}): Order => ({
+  id: 'documented-order-id',
+  status: OrderStatus.Open,
+  symbol: 'ARB-USDC',
+  type: OrderType.Limit,
+  side: OrderSide.Buy,
+  price: 0.19695,
+  amount: 100,
+  filled: 0,
+  remaining: 100,
+  reduceOnly: false,
+  lastUpdate: 1_790_013_277_868,
+  ...overrides,
+});
 
 describe('Coinbase create-order response audit regression', () => {
   it('returns the documented nested success response order ID', async () => {
-    const exchange = createExchange();
+    const { exchange } = createExchange();
     const post = vi.fn().mockResolvedValue({
       data: { success: true, success_response: { order_id: 'documented-order-id' } },
     });
     exchange.xhr = { post } as any;
+    vi.spyOn(exchange as any, 'fetchOpenOrdersSnapshot').mockResolvedValue([]);
 
     await expect(exchange.placeOrder({} as any)).resolves.toEqual(['documented-order-id']);
     expect(post).toHaveBeenCalledWith(ENDPOINTS.ORDER, { client_order_id: 'client-order-id' });
+    exchange.dispose();
   });
 
   it('surfaces the documented new-order failure reason', async () => {
-    const exchange = createExchange();
+    const { exchange } = createExchange();
     exchange.xhr = {
       post: vi.fn().mockResolvedValue({
         data: {
@@ -40,5 +59,88 @@ describe('Coinbase create-order response audit regression', () => {
     } as any;
 
     await expect(exchange.placeOrder({} as any)).rejects.toThrow('documented reason');
+  });
+
+  it('does not seed a session-only optimistic order and reconciles open orders through REST after writes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { exchange, store } = createExchange();
+      const post = vi.fn().mockResolvedValue({
+        data: { success: true, success_response: { order_id: 'documented-order-id' } },
+      });
+      exchange.xhr = { post } as any;
+      const fetchOpenOrdersSnapshot = vi
+        .spyOn(exchange as any, 'fetchOpenOrdersSnapshot')
+        .mockResolvedValue([openOrder()]);
+
+      await expect(exchange.placeOrder({} as any)).resolves.toEqual(['documented-order-id']);
+
+      expect(store.orders).toEqual([]);
+      expect(fetchOpenOrdersSnapshot).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(fetchOpenOrdersSnapshot).toHaveBeenCalledOnce();
+      expect(store.orders).toEqual([openOrder()]);
+      exchange.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks Coinbase private WS degraded when no user stream update follows a REST write', async () => {
+    vi.useFakeTimers();
+    try {
+      const { exchange, store } = createExchange();
+      const warning = vi.spyOn(exchange.emitter, 'emit');
+      exchange.xhr = {
+        post: vi.fn().mockResolvedValue({
+          data: { success: true, success_response: { order_id: 'documented-order-id' } },
+        }),
+      } as any;
+      vi.spyOn(exchange as any, 'fetchOpenOrdersSnapshot').mockResolvedValue([openOrder()]);
+
+      await expect(exchange.placeOrder({} as any)).resolves.toEqual(['documented-order-id']);
+      await vi.advanceTimersByTimeAsync(8_000);
+
+      expect(store.socketHealth?.privateDegradedReason).toContain('Coinbase private WS is not receiving live order updates');
+      expect(warning).toHaveBeenCalledWith(
+        'warning',
+        expect.stringContaining('Coinbase private WS is not receiving live order updates'),
+        { forceToast: true },
+      );
+      exchange.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps Coinbase private WS healthy when a user stream update follows a REST write', async () => {
+    vi.useFakeTimers();
+    try {
+      const { exchange, store } = createExchange();
+      const warning = vi.spyOn(exchange.emitter, 'emit');
+      exchange.xhr = {
+        post: vi.fn().mockResolvedValue({
+          data: { success: true, success_response: { order_id: 'documented-order-id' } },
+        }),
+      } as any;
+      vi.spyOn(exchange as any, 'fetchOpenOrdersSnapshot').mockResolvedValue([openOrder()]);
+
+      await expect(exchange.placeOrder({} as any)).resolves.toEqual(['documented-order-id']);
+      await vi.advanceTimersByTimeAsync(1_000);
+      exchange.markPrivateUserStreamMessageReceived();
+      await vi.advanceTimersByTimeAsync(7_000);
+
+      expect(store.socketHealth?.privateDegradedReason).toBeUndefined();
+      expect(warning).not.toHaveBeenCalledWith(
+        'warning',
+        expect.stringContaining('Coinbase private WS is not receiving live order updates'),
+        { forceToast: true },
+      );
+      exchange.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

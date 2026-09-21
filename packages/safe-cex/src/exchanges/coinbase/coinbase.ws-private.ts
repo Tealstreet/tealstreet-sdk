@@ -79,6 +79,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
   ping = (): void => {};
 
   handleUserEvent = (data: Record<string, any>) => {
+    this.parent.markPrivateUserStreamMessageReceived();
     const events = data?.events;
     if (events) {
       events.forEach((event: Record<string, any>) => {

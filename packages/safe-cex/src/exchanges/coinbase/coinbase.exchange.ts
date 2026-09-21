@@ -74,6 +74,10 @@ const COINBASE_OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUE
 const COINBASE_ORDER_PAGE_LIMIT = 100;
 const COINBASE_ORDER_POLL_INTERVAL_MS = 10_000;
 const COINBASE_ORDER_RATE_LIMIT_BACKOFF_MS = 60_000;
+const COINBASE_ORDER_WRITE_RECONCILE_DELAY_MS = 2_000;
+const COINBASE_PRIVATE_USER_STREAM_WRITE_GRACE_MS = 8_000;
+const COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE =
+  'Coinbase private WS is not receiving live order updates. Orders will reconcile through REST; if your Coinbase key restricts IPs, whitelist both Tealstreet proxy IPs and your current browser IP.';
 // REST replication for a freshly placed order can lag WS by a few hundred ms.
 // Preserve open WS-only orders whose lastUpdate is within this window so a
 // snapshot poll doesn't briefly evict them from the store on a race.
@@ -97,6 +101,10 @@ export class CoinbaseExchange extends BaseExchange {
 
   selectedPortfolio: LIST_PORTFOLIOS_RESPONSE['portfolios'][0] | null = null;
   private nextOrdersPollAt = 0;
+  private orderWriteReconcileTimeout: NodeJS.Timeout | undefined;
+  private privateUserStreamWriteCheckTimeout: NodeJS.Timeout | undefined;
+  private lastPrivateUserStreamMessageAt = 0;
+  private hasWarnedPrivateUserStreamDegraded = false;
 
   supportSpot = true;
 
@@ -112,6 +120,14 @@ export class CoinbaseExchange extends BaseExchange {
 
   dispose = () => {
     super.dispose();
+    if (this.orderWriteReconcileTimeout) {
+      clearTimeout(this.orderWriteReconcileTimeout);
+      this.orderWriteReconcileTimeout = undefined;
+    }
+    if (this.privateUserStreamWriteCheckTimeout) {
+      clearTimeout(this.privateUserStreamWriteCheckTimeout);
+      this.privateUserStreamWriteCheckTimeout = undefined;
+    }
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
   };
@@ -304,6 +320,60 @@ export class CoinbaseExchange extends BaseExchange {
       return true;
     }
     return false;
+  };
+
+  markPrivateUserStreamMessageReceived = () => {
+    this.lastPrivateUserStreamMessageAt = Date.now();
+    this.hasWarnedPrivateUserStreamDegraded = false;
+    this.store.updateSocketHealth({ privateDegradedReason: undefined });
+  };
+
+  private schedulePrivateUserStreamWriteCheck = () => {
+    const lastUserFrameAtSchedule = this.lastPrivateUserStreamMessageAt;
+    if (this.privateUserStreamWriteCheckTimeout) {
+      clearTimeout(this.privateUserStreamWriteCheckTimeout);
+    }
+    this.privateUserStreamWriteCheckTimeout = setTimeout(() => {
+      this.privateUserStreamWriteCheckTimeout = undefined;
+      if (this.isDisposed || this.lastPrivateUserStreamMessageAt > lastUserFrameAtSchedule) {
+        return;
+      }
+
+      this.store.updateSocketHealth({ privateDegradedReason: COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE });
+      this.log(
+        'Coinbase private WS did not deliver user order updates after a REST write; using REST order reconciliation',
+        LogSeverity.Warning,
+      );
+      if (!this.hasWarnedPrivateUserStreamDegraded) {
+        this.hasWarnedPrivateUserStreamDegraded = true;
+        this.emitter.emit('warning', COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE, { forceToast: true });
+      }
+    }, COINBASE_PRIVATE_USER_STREAM_WRITE_GRACE_MS);
+  };
+
+  private reconcileOpenOrdersFromRest = async (reason: string) => {
+    try {
+      const orders = await this.fetchOpenOrdersSnapshot();
+      if (this.isDisposed) return;
+      this.store.update({
+        orders: this.mergeRestOrdersWithFreshWsState(orders),
+        loaded: { ...this.store.loaded, orders: true },
+      });
+    } catch (err: any) {
+      this.log(`Coinbase ${reason} REST order reconciliation failed`, LogSeverity.Warning);
+      this.emitOrdersFetchError(err);
+    }
+  };
+
+  private scheduleOpenOrdersRestReconciliation = (reason: string) => {
+    if (this.isPublicDataOnly) return;
+    if (this.orderWriteReconcileTimeout) {
+      clearTimeout(this.orderWriteReconcileTimeout);
+    }
+    this.orderWriteReconcileTimeout = setTimeout(() => {
+      this.orderWriteReconcileTimeout = undefined;
+      void this.reconcileOpenOrdersFromRest(reason);
+    }, COINBASE_ORDER_WRITE_RECONCILE_DELAY_MS);
   };
 
   /**
@@ -1277,6 +1347,8 @@ export class CoinbaseExchange extends BaseExchange {
           OrderStatus.Canceled,
         );
       });
+      this.scheduleOpenOrdersRestReconciliation('cancel-order');
+      this.schedulePrivateUserStreamWriteCheck();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
     }
@@ -1438,6 +1510,8 @@ export class CoinbaseExchange extends BaseExchange {
               : 'Coinbase edit order failed'),
         );
       }
+      this.scheduleOpenOrdersRestReconciliation('edit-order');
+      this.schedulePrivateUserStreamWriteCheck();
       return [canonicalOrder.id];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message || String(err));
@@ -1462,6 +1536,8 @@ export class CoinbaseExchange extends BaseExchange {
       if (!orderId) {
         throw new Error('Coinbase create-order response did not include an order ID');
       }
+      this.scheduleOpenOrdersRestReconciliation('place-order');
+      this.schedulePrivateUserStreamWriteCheck();
       return [orderId];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);

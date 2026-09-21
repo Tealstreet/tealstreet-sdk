@@ -1023,6 +1023,12 @@ export type StoreData = {
     privateCloseStreak?: number;
     publicReconnectPaused?: boolean;
     privateReconnectPaused?: boolean;
+    /**
+     * Optional exchange-specific private stream degradation reason. This covers
+     * cases where the socket itself is alive but the authenticated account/order
+     * stream is not delivering the data users depend on.
+     */
+    privateDegradedReason?: string;
   };
 };
 
