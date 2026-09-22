@@ -97,6 +97,94 @@ describe('audit regression: BingX', () => {
     expect(handlePongEvent).toHaveBeenCalledTimes(2);
   });
 
+  it('does not keep stale startup ask prices after live public ticker updates', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [
+        {
+          id: 'OG-USDT',
+          symbol: 'OGUSDT',
+          base: 'OG',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 1, price: 0.0001 },
+          limits: { amount: { min: 1, max: Infinity }, leverage: { min: 1, max: 100 } },
+        },
+      ],
+      tickers: [
+        {
+          id: 'OG-USDT',
+          symbol: 'OGUSDT',
+          bid: 0.2073,
+          ask: 0.2769,
+          last: 0.2077,
+          mark: 0.2077,
+          index: 0.2077,
+          percentage: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+          openInterest: 0,
+        },
+      ],
+    });
+
+    await exchange.publicWebsocket.onMessage({
+      data: JSON.stringify({
+        dataType: 'market.contracts',
+        data: {
+          contracts: [
+            {
+              symbol: 'OG-USDT',
+              tradePrice: '0.2077',
+              fairPrice: '0.2076',
+              indexPrice: '0.2075',
+              changePercentage: '-0.67',
+              fundingRate: '0.01',
+              volumeF: '1000',
+              valueF: '207.7',
+            },
+          ],
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.tickersBySymbol.OGUSDT).toMatchObject({
+      last: 0.2077,
+      bid: 0.2076,
+      ask: 0.2078,
+    });
+
+    await exchange.publicWebsocket.onMessage({
+      data: JSON.stringify({
+        dataType: 'market.contracts',
+        data: {
+          contracts: [
+            {
+              symbol: 'OG-USDT',
+              tradePrice: '0.208',
+              bidPrice: '0.2079',
+              askPrice: '0.2081',
+              fairPrice: '0.208',
+              indexPrice: '0.208',
+              changePercentage: '-0.5',
+              fundingRate: '0.01',
+              volumeF: '1001',
+              valueF: '208',
+            },
+          ],
+        },
+      }),
+    } as MessageEvent);
+
+    expect(exchange.store.tickersBySymbol.OGUSDT).toMatchObject({
+      last: 0.208,
+      bid: 0.2079,
+      ask: 0.2081,
+    });
+  });
+
   it('continues individual cancels and marks only confirmed or already-absent orders canceled', async () => {
     const exchange = createExchange();
     const deleteOrder = vi

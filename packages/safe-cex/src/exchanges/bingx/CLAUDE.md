@@ -194,6 +194,8 @@ The `formatTickers()` method joins them by `symbol`.
 **Ticker update fields**:
 
 - `tradePrice` -> `last`
+- `bidPrice` / `askPrice` -> `bid` / `ask` when the frame includes them
+- If the frame omits `bidPrice` / `askPrice`, derive `bid` / `ask` as one price tick around `tradePrice` so market-order touch pricing does not keep stale REST startup BBO values
 - `fairPrice` -> `mark`
 - `indexPrice` -> `index`
 - `fundingRate` -> `fundingRate` (divided by 100)
