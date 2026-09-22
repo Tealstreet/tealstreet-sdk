@@ -162,6 +162,11 @@ web topbar can show a degraded private stream even though REST writes still
 succeed and the socket may appear connected. Any authenticated private payload
 clears the degraded reason. This mirrors Coinbase's post-write user-stream
 watchdog and is intentionally lighter than Lighter's full route-recovery system.
+For Classic private WS, the watchdog also promotes the connection to the
+Tealstreet fallback route and reconnects. Literal `pong` heartbeat frames must
+not count as private-stream payloads for this decision: a browser can keep the
+direct socket alive with pongs while receiving zero authenticated order,
+position, or account data.
 
 ## REST API Endpoints
 
@@ -288,6 +293,8 @@ All WebSocket connections implement a **fallback URL mechanism** (`bitget.ws-pub
 - After `MAX_ATTEMPTS` (2) consecutive connections with zero messages, `useFallbackUrl` is set to `true`
 - On switch to fallback, a `grafana-info` event is emitted for monitoring
 - `messageCount` is reset to 0 on every new connection
+- Private WS counts non-heartbeat frames only. Pongs prove socket liveness, not
+  authenticated channel delivery.
 
 ### Ping/Pong Heartbeat
 

@@ -349,6 +349,7 @@ export class BitgetExchange extends BaseExchange {
   private markPrivateStreamDegraded = (reason = BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
     this.store.updateSocketHealth({ privateDegradedReason: reason });
     this.log(reason, LogSeverity.Warning);
+    this.privateWebsocket.recoverMissingPrivateStream(reason);
     if (forceToast && !this.hasWarnedPrivateStreamDegraded) {
       this.hasWarnedPrivateStreamDegraded = true;
       this.emitter.emit('warning', reason, { forceToast: true });

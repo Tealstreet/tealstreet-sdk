@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { OrderStatus, OrderType } from '../../types';
+import { LogSeverity, OrderStatus, OrderType } from '../../types';
 import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -20,6 +20,8 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private lastMessageCount = 0;
   private connectionAttempts = 0;
   private readonly MAX_ATTEMPTS = 2;
+  private lastPrivateStreamRecoveryAt = 0;
+  private readonly privateStreamRecoveryCooldownMs = 30_000;
   private lastPositionFetchTime = 0;
   private positionFetchThrottleMs = 500;
   private positionFetchScheduled = false;
@@ -201,10 +203,36 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
   };
 
+  recoverMissingPrivateStream = (reason: string) => {
+    if (this.isDisposed) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - this.lastPrivateStreamRecoveryAt < this.privateStreamRecoveryCooldownMs) {
+      return;
+    }
+    this.lastPrivateStreamRecoveryAt = now;
+
+    if (!this.parent.usesUtaRouting && !this.useFallbackUrl) {
+      this.useFallbackUrl = true;
+      this.parent.log(
+        `Bitget private WS received no authenticated stream payloads after a write; switching to Tealstreet fallback route. Reason: ${reason}`,
+        LogSeverity.Warning,
+      );
+    } else {
+      this.parent.log(
+        `Bitget private WS received no authenticated stream payloads after a write; reconnecting current route. Reason: ${reason}`,
+        LogSeverity.Warning,
+      );
+    }
+
+    this.reconnect();
+  };
+
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      this.messageCount++; // Increment message counter
 
       this.emitWsDiagnosticReceive(data);
 
@@ -213,6 +241,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         return;
       }
 
+      this.messageCount++; // Count non-heartbeat frames for fallback routing.
     }
 
     const json = jsonParse<Record<string, any>>(data);
