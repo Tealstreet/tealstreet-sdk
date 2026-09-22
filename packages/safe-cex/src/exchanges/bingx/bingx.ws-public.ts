@@ -45,7 +45,7 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
         //params: ['!ticker@arr', '!bookTicker', '!markPrice@arr@1s'],
       };
 
-      this.send(JSON.stringify(payload));
+      this.sendWithLog(JSON.stringify(payload));
       this.subscribe();
       this.ping();
     }
@@ -55,8 +55,8 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
     if (!this.isDisposed) {
       try {
         this.pingAt = performance.now();
-        this.send('Ping');
-        this.send(`{"ping":"${nanoid()}","time":"${new Date(virtualClock.getCurrentTimeMs()).toISOString()}"}`);
+        this.sendWithLog('Ping');
+        this.sendWithLog(`{"ping":"${nanoid()}","time":"${new Date(virtualClock.getCurrentTimeMs()).toISOString()}"}`);
       } catch {
         // Ignored
       }
@@ -65,7 +65,7 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
 
   subscribe = () => {
     for (const topic of Object.keys(this.topics)) {
-      this.send(JSON.stringify({ reqType: 'sub', dataType: topic, id: nanoid() }));
+      this.sendWithLog(JSON.stringify({ reqType: 'sub', dataType: topic, id: nanoid() }));
     }
   };
 
@@ -78,9 +78,16 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
         if (this.isDisposed) return;
       }
       const json = jsonParse(strData);
+      this.emitWsDiagnosticReceive(strData, {
+        allowChannel: () => {
+          const topic = json?.dataType;
+          return topic === 'market.contracts' || Boolean(topic && this.messageHandlers[topic]?.length);
+        },
+        format: (message) => `[bingx public] ${String(message)}`,
+      });
 
       if (strData === 'Ping' || json?.ping) {
-        this.send('Pong');
+        this.sendWithLog('Pong');
         return;
       }
 
@@ -172,7 +179,7 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
         this.topics[topic] = (this.topics[topic] || 0) + 1;
 
         const payload = { reqType: 'sub', dataType: topic, id: nanoid() };
-        this.send(JSON.stringify(payload));
+        this.sendWithLog(JSON.stringify(payload));
         //this.parent.log(`Switched to [${opts.symbol}:${opts.interval}]`);
       } else {
         setTimeout(() => waitForConnectedAndSubscribe(), 100);
@@ -189,7 +196,7 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
       if (this.isConnected && !this.messageHandlers[handler].length) {
         const payload = { reqType: 'unsub', dataType: topic, id: nanoid() };
         this.cleanupMessageHandlerStats(handler);
-        this.send(JSON.stringify(payload));
+        this.sendWithLog(JSON.stringify(payload));
       }
     };
   };
@@ -233,7 +240,7 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
         this.topics[topic] = (this.topics[topic] || 0) + 1;
 
         const payload = { reqType: 'sub', dataType: topic, id: nanoid() };
-        this.send(JSON.stringify(payload));
+        this.sendWithLog(JSON.stringify(payload));
       } else {
         timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);
       }
@@ -256,7 +263,7 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
       if (this.isConnected && !this.messageHandlers[handler].length) {
         const payload = { reqType: 'unsub', dataType: topic, id: nanoid() };
         this.cleanupMessageHandlerStats(handler);
-        this.send(JSON.stringify(payload));
+        this.sendWithLog(JSON.stringify(payload));
       }
     };
   };
