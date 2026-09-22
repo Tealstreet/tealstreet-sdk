@@ -753,11 +753,14 @@ export class BitgetExchange extends BaseExchange {
             row.symbol === venueSymbol &&
             (!row.category || row.category.toUpperCase() === this.apiUtaCategory.toUpperCase()),
         );
-        if (!config?.marginMode) continue;
 
-        const marginType = config.marginMode === 'crossed' ? MarginType.Cross : MarginType.Isolated;
-        const longLeverage = this.toFiniteNumber(config.longLeverage, this.toFiniteNumber(config.leverage, 1));
-        const shortLeverage = this.toFiniteNumber(config.shortLeverage, this.toFiniteNumber(config.leverage, 1));
+        // Bitget documents `marginMode` as defaulting to cross when omitted on
+        // UTA futures orders. Fresh/flat symbols can be absent from
+        // symbolConfigList, but the account-level holdMode is still enough to
+        // format side semantics.
+        const marginType = config?.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross;
+        const longLeverage = this.toFiniteNumber(config?.longLeverage, this.toFiniteNumber(config?.leverage, 1));
+        const shortLeverage = this.toFiniteNumber(config?.shortLeverage, this.toFiniteNumber(config?.leverage, 1));
 
         metadata.push({
           symbol,

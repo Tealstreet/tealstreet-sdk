@@ -29,6 +29,12 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   `size` fields. Attached TP/SL on normal UTA orders rides the same
   `/api/v3/trade/place-order` request via `takeProfit` / `stopLoss`,
   `tpTriggerBy` / `slTriggerBy`, and market strategy order types.
+- UTA position mode comes from account-level `holdMode` on
+  `/api/v3/account/settings`; per-symbol `marginMode` comes from
+  `symbolConfigList` when present. Fresh/flat symbols can be absent from that
+  list, and Bitget documents UTA futures order `marginMode` as defaulting to
+  `crossed`, so metadata fallback must still return `holdMode` plus cross
+  margin instead of blocking order placement.
 - Standalone TP/SL placement, open-order fetch, and cancel use v3 strategy
   endpoints (`type: "tpsl"`; `tpslMode: "full"` without `qty`, or
   `tpslMode: "partial"` with base-coin `qty`). Bitget's docs describe both

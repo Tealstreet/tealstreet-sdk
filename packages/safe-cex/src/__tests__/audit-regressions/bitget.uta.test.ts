@@ -386,6 +386,48 @@ describe('audit regression: Bitget UTA routing', () => {
     expect(payload).not.toHaveProperty('size');
   });
 
+  it('uses documented UTA cross-margin default when account settings omit a flat symbol config', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+    (exchange.xhr.get as any).mockResolvedValue({
+      data: {
+        code: '00000',
+        msg: 'success',
+        data: {
+          holdMode: 'hedge_mode',
+          symbolConfigList: [],
+        },
+      },
+    });
+    (exchange.unlimitedXHR.post as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { orderId: 'order-1', clientOid: 'client-1' } },
+    });
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.5,
+        price: 50_000,
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(exchange.unlimitedXHR.post).toHaveBeenCalledWith(
+      ENDPOINTS.UTA_PLACE_ORDER,
+      expect.objectContaining({
+        category: 'USDT-FUTURES',
+        symbol: 'BTCUSDT',
+        qty: '0.5',
+        side: 'buy',
+        posSide: 'long',
+        marginMode: 'crossed',
+        clientOid: expect.any(String),
+      }),
+    );
+  });
+
   it('places UTA normal orders with attached TP/SL fields on the v3 place-order endpoint', async () => {
     const exchange = createExchange();
     (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
