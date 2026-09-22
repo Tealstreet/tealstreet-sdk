@@ -46,6 +46,11 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   documented `tpslMode: "full"` shape.
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
+  The existing Tealstreet Bitget private WS fallback route only targets Classic
+  v2 (`/bitget/v2/private`). Before routing UTA private WS through the proxy
+  fleet, add infra support for a v3 upstream path (for example
+  `/bitget/v3/private` -> `wss://ws.bitget.com/v3/ws/private`) and then wire
+  the client routing table/fallback logic to that route.
 
 Account-type detection is eager during validation/startup and lazy on private
 methods that choose between Classic v2 and UTA v3. The lazy path shares one
