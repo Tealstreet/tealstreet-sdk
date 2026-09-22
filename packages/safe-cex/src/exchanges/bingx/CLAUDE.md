@@ -215,7 +215,7 @@ The `formatTickers()` method joins them by `symbol`.
 
 Non-ticker frames use direct lookup by exact `dataType`; only a matched topic records handler statistics and dispatches callbacks. Ping/Pong control frames return before topic routing.
 
-Public WS sends and selected receives emit through the shared rate-limited websocket diagnostic path when diagnostics are enabled, so request-drawer captures include public subscribe frames plus `market.contracts` and actively subscribed topic frames. Heartbeat frames are still suppressed by the shared diagnostic filter.
+Public WS sends emit through the shared rate-limited websocket diagnostic path when diagnostics are enabled. Public receives log only compact `market.contracts` snapshots filtered to symbols that have active kline/depth topics; high-volume kline/depth payloads are intentionally suppressed. Heartbeat frames are still suppressed by the shared diagnostic filter.
 
 ### Private WebSocket (`bingx.ws-private.ts`)
 

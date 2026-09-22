@@ -26,6 +26,31 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
 
   topics: { [key: string]: number } = {};
 
+  private getDiagnosticSymbols = () => {
+    const symbols = new Set<string>();
+    for (const topic of Object.keys(this.messageHandlers)) {
+      const match = topic.match(/^market\.(?:kline|depth)\.([^.]+)\./);
+      if (match?.[1]) {
+        symbols.add(match[1]);
+      }
+    }
+    return symbols;
+  };
+
+  private formatMarketContractsDiagnostic = (json: any, symbols: Set<string>) => {
+    const contracts = Array.isArray(json?.data?.contracts)
+      ? json.data.contracts.filter((contract: Record<string, any>) => symbols.has(contract?.symbol))
+      : [];
+    return `[bingx public] ${JSON.stringify({
+      ...json,
+      data: {
+        ...json?.data,
+        contracts,
+        filteredForSymbols: [...symbols],
+      },
+    })}`;
+  };
+
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       this.ws = this.createWebsocket(BASE_WS_URL.public[this.parent.options.testnet ? 'testnet' : 'livenet']);
@@ -78,12 +103,18 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
         if (this.isDisposed) return;
       }
       const json = jsonParse(strData);
+      const topic = json?.dataType;
+      const diagnosticSymbols = topic === 'market.contracts' ? this.getDiagnosticSymbols() : undefined;
       this.emitWsDiagnosticReceive(strData, {
         allowChannel: () => {
-          const topic = json?.dataType;
-          return topic === 'market.contracts' || Boolean(topic && this.messageHandlers[topic]?.length);
+          return topic === 'market.contracts' && diagnosticSymbols !== undefined && diagnosticSymbols.size > 0;
         },
-        format: (message) => `[bingx public] ${String(message)}`,
+        format: () => {
+          if (topic === 'market.contracts' && diagnosticSymbols) {
+            return this.formatMarketContractsDiagnostic(json, diagnosticSymbols);
+          }
+          return null;
+        },
       });
 
       if (strData === 'Ping' || json?.ping) {
