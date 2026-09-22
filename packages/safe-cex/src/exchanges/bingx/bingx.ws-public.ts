@@ -7,7 +7,6 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { v } from '../../utils/get-key';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { readBlob } from '../../utils/readBlob';
-import { add, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL } from './bingx.types';
@@ -102,15 +101,13 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
 
           if (ticker) {
             const last = parsePositiveFiniteNumber(v(contract, 'tradePrice'));
-            const bid = parsePositiveFiniteNumber(v(contract, 'bidPrice'));
-            const ask = parsePositiveFiniteNumber(v(contract, 'askPrice'));
-            const pricePrecision = this.parent.store.marketsBySymbol[ticker.symbol]?.precision?.price;
-            const fallbackSpread = Number.isFinite(pricePrecision) && pricePrecision > 0 ? pricePrecision : 0;
+            const market = this.parent.store.marketsBySymbol[ticker.symbol];
+            const touchPrices = last && market ? this.parent.deriveTickerBidAsk(market, last) : undefined;
 
             this.store.updateTicker(ticker, {
               last: last ?? ticker.last,
-              bid: bid ?? (last ? Math.max(subtract(last, fallbackSpread), 0) : ticker.bid),
-              ask: ask ?? (last ? add(last, fallbackSpread) : ticker.ask),
+              bid: touchPrices?.bid ?? ticker.bid,
+              ask: touchPrices?.ask ?? ticker.ask,
               percentage: parseFloat(v(contract, 'changePercentage')),
               volume: parseFloat(v(contract, 'volumeF')),
               quoteVolume: parseFloat(v(contract, 'valueF')),

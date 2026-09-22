@@ -97,6 +97,53 @@ describe('audit regression: BingX', () => {
     expect(handlePongEvent).toHaveBeenCalledTimes(2);
   });
 
+  it('derives REST ticker touch prices from last price instead of BingX askPrice', () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [
+        {
+          id: 'PUMP-BTC',
+          symbol: 'PUMPBTC',
+          base: 'PUMP',
+          quote: 'BTC',
+          active: true,
+          precision: { amount: 1, price: 0.0001 },
+          limits: { amount: { min: 1, max: Infinity }, leverage: { min: 1, max: 100 } },
+        },
+      ],
+    });
+
+    const [ticker] = exchange.formatTickers({
+      dailys: [
+        {
+          symbol: 'PUMP-BTC',
+          bidPrice: '0.2403',
+          askPrice: '0.7702',
+          lastPrice: '0.2408',
+          priceChangePercent: '-0.67',
+          volume: '4360000',
+          quoteVolume: '1049.888',
+        },
+      ],
+      prices: [
+        {
+          symbol: 'PUMP-BTC',
+          markPrice: '0.2408',
+          indexPrice: '0.2407',
+          lastFundingRate: '0.01',
+          nextFundingTime: '1800000000000',
+        },
+      ],
+    });
+
+    expect(ticker).toMatchObject({
+      symbol: 'PUMPBTC',
+      last: 0.2408,
+      bid: 0.2407,
+      ask: 0.2409,
+    });
+  });
+
   it('does not keep stale startup ask prices after live public ticker updates', async () => {
     const exchange = createExchange();
     exchange.store.update({
@@ -164,8 +211,8 @@ describe('audit regression: BingX', () => {
             {
               symbol: 'OG-USDT',
               tradePrice: '0.208',
-              bidPrice: '0.2079',
-              askPrice: '0.2081',
+              bidPrice: '0.1000',
+              askPrice: '0.7702',
               fairPrice: '0.208',
               indexPrice: '0.208',
               changePercentage: '-0.5',

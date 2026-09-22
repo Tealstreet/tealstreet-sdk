@@ -42,7 +42,7 @@ import { v } from '../../utils/get-key';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
 import { omitUndefined } from '../../utils/omitUndefined';
-import { adjust, subtract } from '../../utils/safe-math';
+import { add, adjust, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -110,6 +110,17 @@ export class BingxExchange extends BaseExchange {
     }
 
     return errorMessage;
+  };
+
+  deriveTickerBidAsk = (market: Pick<Market, 'precision'>, last: number) => {
+    if (!Number.isFinite(last) || last <= 0) {
+      return { bid: 0, ask: 0 };
+    }
+    const priceStep = Number.isFinite(market.precision?.price) && market.precision.price > 0 ? market.precision.price : 0;
+    return {
+      bid: Math.max(subtract(last, priceStep), 0),
+      ask: add(last, priceStep),
+    };
   };
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
@@ -377,12 +388,14 @@ export class BingxExchange extends BaseExchange {
 
       if (!market || !daily || !price) return acc;
 
+      const last = parseFloat(v(daily, 'lastPrice'));
+      const touchPrices = this.deriveTickerBidAsk(market, last);
       const ticker = {
         id: market.id,
         symbol: market.symbol,
-        bid: parseFloat(v(daily, 'bidPrice')),
-        ask: parseFloat(v(daily, 'askPrice')),
-        last: parseFloat(v(daily, 'lastPrice')),
+        bid: touchPrices.bid,
+        ask: touchPrices.ask,
+        last,
         mark: parseFloat(v(price, 'markPrice')),
         index: parseFloat(v(price, 'indexPrice')),
         percentage: parseFloat(v(daily, 'priceChangePercent')),

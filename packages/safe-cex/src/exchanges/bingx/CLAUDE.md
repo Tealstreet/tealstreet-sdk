@@ -194,8 +194,7 @@ The `formatTickers()` method joins them by `symbol`.
 **Ticker update fields**:
 
 - `tradePrice` -> `last`
-- `bidPrice` / `askPrice` -> `bid` / `ask` when the frame includes them
-- If the frame omits `bidPrice` / `askPrice`, derive `bid` / `ask` as one price tick around `tradePrice` so market-order touch pricing does not keep stale REST startup BBO values
+- `bid` / `ask` are derived as one price tick around `tradePrice` / `lastPrice`; BingX ticker BBO fields can drift far from the live market on some symbols, and fresh subscribed order book data remains the authoritative BBO when available
 - `fairPrice` -> `mark`
 - `indexPrice` -> `index`
 - `fundingRate` -> `fundingRate` (divided by 100)
