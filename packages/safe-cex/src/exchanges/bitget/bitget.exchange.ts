@@ -98,8 +98,8 @@ const BITGET_PRIVATE_STREAM_DEGRADED_RECONCILE_MS = 10_000;
 const BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE =
   'Bitget private WS is not receiving live order/position updates. Tealstreet will reconcile through REST; if this account uses IP whitelisting, verify the terminal-listed browser/server WebSocket IPs are allowed.';
 
-export const BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE =
-  'This Bitget API key belongs to a Unified Trading Account (UTA), but Tealstreet currently uses Bitget Classic API endpoints for this adapter. Please use a Classic-mode Bitget account/sub-account until the Bitget v3 migration is complete.';
+export const BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE =
+  'Bitget UTA routing is available for USDT-M and USDC-M only; this market variant is not enabled for UTA yet.';
 
 const isBitgetSuccessCode = (code: unknown): boolean => parseInt(`${code ?? 0}`, 10) === 0;
 
@@ -113,9 +113,6 @@ const isBitgetUtaClassicUnsupported = (payload?: { code?: string | number; msg?:
 };
 
 const getBitgetApiErrorMessage = (payload: { code?: string | number; msg?: string } | undefined, fallback: string) => {
-  if (isBitgetUtaClassicUnsupported(payload)) {
-    return BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE;
-  }
   return payload?.msg || fallback;
 };
 
@@ -621,6 +618,16 @@ export class BitgetExchange extends BaseExchange {
     return this._accountTypeDetectionInflight;
   };
 
+  private promoteUtaRoutingFromClassicUnsupported = (payload?: { code?: string | number; msg?: string }): boolean => {
+    if (!isBitgetUtaClassicUnsupported(payload) || !this.supportsUtaRouting || this.options.testnet) {
+      return false;
+    }
+
+    this.isUta = true;
+    this._accountTypeDetected = true;
+    return true;
+  };
+
   fetchBalance = async ({ preferFast = false }: { preferFast?: boolean } = {}) => {
     await this.ensureAccountTypeDetected();
     const client = preferFast ? this.unlimitedXHR : this.xhr;
@@ -637,6 +644,9 @@ export class BitgetExchange extends BaseExchange {
     });
 
     if (!isBitgetSuccessCode(response.code)) {
+      if (this.promoteUtaRoutingFromClassicUnsupported(response)) {
+        return this.fetchUtaBalance(client);
+      }
       throw new Error(getBitgetApiErrorMessage(response, 'Bitget account balance request failed'));
     }
 
@@ -923,6 +933,9 @@ export class BitgetExchange extends BaseExchange {
     });
 
     if (!isBitgetSuccessCode(data.code)) {
+      if (this.promoteUtaRoutingFromClassicUnsupported(data)) {
+        return this.fetchUtaOpenPositions();
+      }
       // Detect environment mismatch and provide helpful message
       if (isBitgetEnvironmentMismatch(data.msg)) {
         const currentMode = this.options.testnet ? 'Demo/Testnet' : 'Live/Production';

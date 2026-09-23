@@ -16,7 +16,7 @@ import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, Posit
 import { createPositionId } from '../../utils/createPositionId';
 import { adjust, multiply, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
-import { BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE, BitgetExchange } from './bitget.exchange';
+import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from './bitget.exchange';
 import {
   ENDPOINTS,
   FETCH_POSITIONS_V2_RESPONSE,
@@ -136,7 +136,7 @@ export class BitgetInverseExchange extends BitgetExchange {
 
     if (parseInt(`${(response as any).code ?? 0}`, 10) !== 0) {
       const message = `${(response as any).code ?? ''}` === '40085'
-        ? BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE
+        ? BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE
         : (response as any).msg || 'Bitget inverse account balance request failed';
       throw new Error(message);
     }

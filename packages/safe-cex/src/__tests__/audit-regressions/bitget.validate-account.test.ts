@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAPI } from '../../exchanges/bitget/bitget.api';
-import { BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE, BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 
@@ -40,24 +40,47 @@ describe('audit regression: Bitget account validation', () => {
     expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
   });
 
-  it('returns an actionable UTA message when the account-type probe rejects unified accounts', async () => {
+  it('promotes supported linear accounts to UTA when a Classic fallback returns 40085', async () => {
     const exchange = createExchange();
-    const get = vi.fn().mockResolvedValue({
-      data: {
-        code: '40085',
-        msg: 'You are in Unified Account mode, and the Classic Account API is not supported at this time',
-        data: null,
-      },
-    });
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary account-type probe failure'))
+      .mockResolvedValueOnce({
+        data: {
+          code: '40085',
+          msg: 'You are in Unified Account mode, and the Classic Account API is not supported at this time',
+          data: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          code: '00000',
+          data: {
+            accountEquity: '100',
+            effEquity: '95',
+            unrealisedPnl: '1',
+            assets: [{ coin: 'USDT', available: '95', equity: '100' }],
+          },
+        },
+      });
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     exchange.xhr = { get } as any;
 
     await expect(exchange.validateAccount()).resolves.toEqual({
-      error: BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE,
+      error: '',
+      balance: expect.objectContaining({
+        free: 95,
+        total: 99,
+        upnl: 1,
+      }),
     });
     expect(emitAndLogError).not.toHaveBeenCalled();
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(get).toHaveBeenNthCalledWith(1, ENDPOINTS.ACCOUNT_SETTINGS_V3);
+    expect(get).toHaveBeenNthCalledWith(2, ENDPOINTS.BALANCE, {
+      params: { productType: 'usdt-futures' },
+    });
+    expect(get).toHaveBeenNthCalledWith(3, ENDPOINTS.UTA_ACCOUNT_ASSETS);
   });
 
   it('returns the helpful environment mismatch message from the account-type probe without falling through', async () => {

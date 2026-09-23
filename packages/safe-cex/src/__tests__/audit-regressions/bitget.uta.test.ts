@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAPI } from '../../exchanges/bitget/bitget.api';
-import { BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE, BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
 import { BitgetInverseExchange } from '../../exchanges/bitget/bitgetinverse.exchange';
 import { BitgetUSDCExchange } from '../../exchanges/bitget/bitgetusdc.exchange';
 import { BASE_WS_PRIVATE_UTA_URL, ENDPOINTS } from '../../exchanges/bitget/bitget.types';
@@ -1227,7 +1227,7 @@ describe('audit regression: Bitget UTA routing', () => {
       }),
     } as any;
 
-    await expect(inverse.fetchBalance()).rejects.toThrow(BITGET_UTA_CLASSIC_UNSUPPORTED_MESSAGE);
+    await expect(inverse.fetchBalance()).rejects.toThrow(BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE);
   });
 
   it('awaits Bitget account-type detection before private WS and tick startup', async () => {
