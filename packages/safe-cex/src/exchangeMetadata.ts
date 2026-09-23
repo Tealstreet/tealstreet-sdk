@@ -1964,7 +1964,7 @@ const KrakenMetadata: ExchangeMetadata = {
   logo: '/static/exchanges/logos/KRAKEN/logo.svg',
   lightLogo: '/static/exchanges/logos/KRAKEN/light.png',
   darkLogo: '/static/exchanges/logos/KRAKEN/dark.png',
-  refLink: 'https://www.kraken.com',
+  refLink: 'teal.link/kraken',
   refImage: '/static/exchanges/reflinks/kraken/ref.png',
   requiresPassphrase: false,
   requiresApplicationId: false,
