@@ -183,6 +183,63 @@ describe('Kraken remaining July audit regressions', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it('surfaces rejected futures limit edits from nested editStatus', async () => {
+    const { exchange } = createFuturesExchange();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const post = vi.fn().mockResolvedValue({
+      data: { result: 'success', editStatus: { status: 'invalidPrice', orderId: 'limit-id' } },
+    });
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.updateOrder({
+        order: {
+          id: 'limit-id',
+          status: OrderStatus.Open,
+          symbol: 'PF_XBTUSD',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 50_000,
+          amount: 2,
+          filled: 0,
+          remaining: 2,
+          reduceOnly: false,
+          lastUpdate: 1,
+          info: {},
+        },
+        update: { price: 50_000.1 },
+      }),
+    ).rejects.toThrow('Order update rejected: invalidPrice');
+  });
+
+  it('surfaces rejected futures cancellations from nested cancel statuses', async () => {
+    const { exchange } = createFuturesExchange();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const post = vi.fn().mockResolvedValue({
+      data: { result: 'success', cancelStatus: { status: 'notFound', order_id: 'limit-id' } },
+    });
+    exchange.unlimitedXHR = { post } as unknown as Axios;
+
+    await expect(
+      exchange.cancelOrders([
+        {
+          id: 'limit-id',
+          status: OrderStatus.Open,
+          symbol: 'PF_XBTUSD',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          price: 50_000,
+          amount: 2,
+          filled: 0,
+          remaining: 2,
+          reduceOnly: false,
+          lastUpdate: 1,
+          info: {},
+        },
+      ]),
+    ).rejects.toThrow('Order cancellation rejected: notFound');
+  });
+
   it('places a Spot trailing stop with Kraken\'s required relative price', async () => {
     const { exchange } = createSpotExchange();
     const post = vi.fn().mockResolvedValue({ data: { error: [], result: { txid: ['spot-trailing-id'] } } });

@@ -111,7 +111,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange, base
         // Batch orders use special json= format
         const jsonStr = JSON.stringify(dataObj);
         postData = 'json=' + encodeURIComponent(jsonStr);
-        (config as any).data = 'json=' + jsonStr;
+        (config as any).data = postData;
       } else if (dataObj) {
         // Form-encode with + for spaces (RFC 1738 / application/x-www-form-urlencoded standard)
         postData = qs.stringify(dataObj, { arrayFormat: 'repeat', sort, format: 'RFC1738' });

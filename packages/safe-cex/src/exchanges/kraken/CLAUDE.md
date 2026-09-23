@@ -55,7 +55,7 @@ Signature algorithm: `base64(HMAC_SHA512(SHA256(postData + nonce + endpointPath)
 
 The encoded PostData string used to build `Authent` must be byte-for-byte identical to the encoded body/query that is sent. This is Kraken's post-October-1-2025 signing method; signing a decoded form and then transmitting an encoded form breaks authentication.
 
-**Batch orders**: Use special `json=` format -- the body is `json=` + URL-encoded JSON string (`kraken.api.ts`).
+**Batch orders**: Use special `json=` format -- the body is `json=` + URL-encoded JSON string (`kraken.api.ts`). The signed `postData` and sent body must stay byte-for-byte identical; signing the encoded JSON while sending raw JSON produces the same silent-auth failure class as mismatched GET query ordering.
 
 **Public endpoints bypass**: Endpoints in `PUBLIC_ENDPOINTS` array (`/v3/instruments`, `/v3/tickers`, `/v3/orderbook`) skip authentication (`kraken.api.ts`).
 
@@ -437,11 +437,13 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
   2. Place new order with updated params via `placeOrder()`
 - **Limit orders**: Use `/v3/editorder` endpoint with `orderId`, optional `size` and `limitPrice`
 - **Trailing stops**: Reject edits before any cancellation/write. Cancel-and-recreate would reset the exchange-maintained trailing state.
+- Validate nested `editStatus.status`, not only top-level `result`. Kraken can return `result: "success"` while the edit status is `invalidPrice`, `orderForEditNotFound`, or another rejection.
 
 ### Canceling Orders (`kraken.exchange.ts`)
 
 - **Single order**: POST `/v3/cancelorder` with `order_id`
 - **Multiple orders**: POST `/v3/batchorder` with array of `{ order: 'cancel', order_id }` entries
+- Validate nested `cancelStatus.status` / `batchStatus[].status`; top-level `result: "success"` only means Kraken processed the request envelope.
 
 ### WebSocket Order Updates (`kraken.ws-private.ts`)
 

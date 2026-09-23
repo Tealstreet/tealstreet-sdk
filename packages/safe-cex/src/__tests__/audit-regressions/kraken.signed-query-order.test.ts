@@ -43,6 +43,20 @@ const captureQuery = async (params: Record<string, unknown>) => {
   return sentUrl;
 };
 
+const captureBatchBody = async (body: Record<string, unknown>) => {
+  const exchange: any = { name: 'kraken', on: () => {}, emitter: { emit: () => {} } };
+  const xhr = createAPI(options, exchange);
+
+  let sentBody = '';
+  xhr.defaults.adapter = async (config: any) => {
+    sentBody = String(config.data ?? '');
+    return { data: { result: 'success', batchStatus: [] }, status: 200, statusText: 'OK', headers: {}, config };
+  };
+
+  await xhr.post('/v3/batchorder', body);
+  return sentBody;
+};
+
 describe('kraken signed query', () => {
   it('sends the SORTED query even when the caller declares params out of order', async () => {
     const sent = await captureQuery({ since: 1784095822483, count: 500 });
@@ -61,5 +75,15 @@ describe('kraken signed query', () => {
     const sent = await captureQuery({ since: 1, count: 2 });
     expect(sent.match(/count=/g)).toHaveLength(1);
     expect(sent.match(/since=/g)).toHaveLength(1);
+  });
+
+  it('sends the same encoded batch json string that the request signs', async () => {
+    const sent = await captureBatchBody({
+      batchOrder: [{ order: 'cancel', order_id: 'e35d61dd-8a30-4d5f-a574-b5593ef0c050' }],
+    });
+
+    expect(sent).toBe(
+      'json=%7B%22batchOrder%22%3A%5B%7B%22order%22%3A%22cancel%22%2C%22order_id%22%3A%22e35d61dd-8a30-4d5f-a574-b5593ef0c050%22%7D%5D%7D',
+    );
   });
 });

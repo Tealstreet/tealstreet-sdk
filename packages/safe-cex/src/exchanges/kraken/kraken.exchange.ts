@@ -65,6 +65,8 @@ const ACCOUNT_LOG_PAGE_LIMIT = 500;
 const FILLS_PAGE_SIZE = 100;
 const FILLS_MAX_PAGES = 50;
 const ACCOUNT_LOG_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const KRAKEN_EDIT_SUCCESS_STATUSES = new Set(['edited', 'filled']);
+const KRAKEN_CANCEL_SUCCESS_STATUSES = new Set(['cancelled']);
 
 const parseTriggerSignal = (value: unknown): OrderStopTriggerType | undefined => {
   switch (String(value || '').toLowerCase()) {
@@ -632,6 +634,11 @@ export class KrakenExchange extends BaseExchange {
         throw new Error(errorMessage);
       }
 
+      const editStatus = data?.editStatus?.status;
+      if (editStatus && !KRAKEN_EDIT_SUCCESS_STATUSES.has(editStatus)) {
+        throw new Error(`Order update rejected: ${editStatus}`);
+      }
+
       const editedId = String(data?.editStatus?.orderId || data?.editStatus?.order_id || order.id);
       return editedId ? [editedId] : [];
     } catch (err: any) {
@@ -649,6 +656,10 @@ export class KrakenExchange extends BaseExchange {
           const errorMessage = data?.error || 'Order cancellation failed';
           throw new Error(errorMessage);
         }
+        const cancelStatus = data?.cancelStatus?.status;
+        if (cancelStatus && !KRAKEN_CANCEL_SUCCESS_STATUSES.has(cancelStatus)) {
+          throw new Error(`Order cancellation rejected: ${cancelStatus}`);
+        }
         return;
       }
       const batchOrder = orders.map((o) => ({ order: 'cancel', order_id: o.id }));
@@ -656,6 +667,13 @@ export class KrakenExchange extends BaseExchange {
       if (data?.result !== 'success') {
         const errorMessage = data?.error || 'Batch order cancellation failed';
         throw new Error(errorMessage);
+      }
+      const rejected = (Array.isArray(data?.batchStatus) ? data.batchStatus : []).find(
+        (status: Record<string, any>) =>
+          status?.status && !KRAKEN_CANCEL_SUCCESS_STATUSES.has(String(status.status)),
+      );
+      if (rejected) {
+        throw new Error(`Batch order cancellation rejected: ${rejected.status}`);
       }
     } catch (err: any) {
       const errorMessage = err?.response?.data?.error || err?.message || 'Failed to cancel orders';
