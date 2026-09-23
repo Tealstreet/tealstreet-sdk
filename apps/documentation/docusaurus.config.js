@@ -353,10 +353,10 @@ const config = {
                 label: 'Bybit',
                 href: 'https://teal.link/bybit1',
               },
-              // {
-              //   label: 'BitMEX',
-              //   href: 'https://teal.link/BitMEX',
-              // },
+              {
+                label: 'Kraken',
+                href: 'https://teal.link/kraken',
+              },
               {
                 label: 'BloFin',
                 href: 'https://teal.link/blofin',
