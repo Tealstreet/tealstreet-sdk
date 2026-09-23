@@ -5,6 +5,7 @@ import axios, { AxiosHeaders, InternalAxiosRequestConfig } from 'axios';
 import { nanoid } from 'nanoid';
 
 import { tryParseJson } from './utils/tryParseJson';
+import { markRestSigned } from './utils/venueRestDiagnostics';
 
 /**
  * Set by an exchange's signing interceptor on a public market-data endpoint, to
@@ -146,7 +147,9 @@ export const createRemoteSigningAdapter = (
       },
     };
 
+    const signStartedAt = Date.now();
     const response = await remoteSigner.sign(request);
+    const signMs = Date.now() - signStartedAt;
     if (response.error) {
       throw new Error(`Remote signing failed: ${response.error}`);
     }
@@ -170,6 +173,11 @@ export const createRemoteSigningAdapter = (
         { url: signedConfig.url, params: signedConfig.params },
       );
     }
+
+    // Stamped after the merge so the signature age is read off the headers the
+    // venue will actually receive, and timed here rather than at the response
+    // so a request that never comes back still carries what signing cost.
+    markRestSigned(signedConfig, signMs);
 
     return execute(signedConfig);
   };

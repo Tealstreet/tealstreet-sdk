@@ -9,6 +9,7 @@ import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
 import { isSigningCaptureRequest } from './utils/signingCapture';
+import { markRestRequestStart, noteRestFailure, noteRestSuccess } from './utils/venueRestDiagnostics';
 import { getPublicCorsProxy } from './utils/transportResolution';
 
 /**
@@ -235,6 +236,7 @@ export const safeCexAxiosCreateNoProxy = (
   axiosInstance.interceptors.request.use(
     (config) => {
       httpStats.recordRequest(exchange.name);
+      markRestRequestStart(config);
       return config;
     },
     (error) => Promise.reject(error),
@@ -252,11 +254,13 @@ export const safeCexAxiosCreateNoProxy = (
       // tests, and an interceptor that throws on a missing method would fail the
       // REQUEST. Telemetry must never be able to do that.
       if (!isSigningCaptureRequest(response.config)) exchange.noteHttpResponse?.(response, response.config?.url);
+      if (!isSigningCaptureRequest(response.config)) noteRestSuccess(exchange.name, response);
       return response;
     },
     (error) => {
       httpStats.recordError();
       recordRequestOutcome(exchange, error?.response?.status, Boolean(error?.response), error?.config);
+      if (!isSigningCaptureRequest(error?.config)) noteRestFailure(exchange.name, error);
       // Enhance the error with more context
       const enhancedError = enhanceAxiosError(error, exchange.name);
       return Promise.reject(enhancedError);
@@ -305,6 +309,7 @@ export const safeCexAxiosCreate = (
   axiosInstance.interceptors.request.use(
     (config) => {
       httpStats.recordRequest(exchange.name);
+      markRestRequestStart(config);
       return config;
     },
     (error) => Promise.reject(error),
@@ -408,6 +413,7 @@ export const safeCexAxiosCreate = (
       // tests, and an interceptor that throws on a missing method would fail the
       // REQUEST. Telemetry must never be able to do that.
       if (!isSigningCaptureRequest(response.config)) exchange.noteHttpResponse?.(response, response.config?.url);
+      if (!isSigningCaptureRequest(response.config)) noteRestSuccess(exchange.name, response);
       let shouldLog = isDevelopment;
       /* Logging */
       if (!shouldLog) {
@@ -459,6 +465,7 @@ export const safeCexAxiosCreate = (
       const status = error?.response?.status;
 
       recordRequestOutcome(exchange, status, Boolean(error?.response), error?.config);
+      if (!isSigningCaptureRequest(error?.config)) noteRestFailure(exchange.name, error);
 
       // Detect proxy/tunnel failures — surface them clearly instead of letting
       // them cascade into cryptic downstream errors or silent broken state.

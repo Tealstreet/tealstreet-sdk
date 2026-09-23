@@ -241,6 +241,19 @@ drift measurement.
   stripped before being indexed, because `kraken.api.ts` rewrites `config.url`
   to `path?postData`. Expect a low hit rate — the tick loop runs parallel
   requests, so a concurrent success can clear the slot first.
+- `venueRestDiagnostics.ts` — per-venue REST aggregates for the hosted server:
+  request rate, the total-vs-signing latency split, the venue's OWN remaining
+  quota read off response headers, and a drained buffer of failure samples.
+  Three things are load-bearing. It reads **response** headers only — request
+  headers carry signatures, so they are never touched. The URL is reduced to a
+  path before storage, because several venues bake signed params into the query
+  string. And like `socketHealth`, it imports no telemetry client: the OSS
+  mirror forbids that, so the host process reads the snapshot and reports it.
+  Built because a 403 from something in front of a venue, a reset mid-response,
+  and a client timeout are indistinguishable from outside the container, and
+  everything that separates them was being discarded at request time. Note the
+  quota headers are observable on SUCCESS, so how close a poll runs to a venue's
+  limit never needs a failure to sample.
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals
