@@ -94,6 +94,7 @@ const BILL_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 /** Bitget rejects candle requests whose paired start/end range reaches the documented 90-day edge. */
 const BITGET_CANDLE_MAX_WINDOW_MS = 89 * 24 * 60 * 60 * 1000;
 const BITGET_PRIVATE_STREAM_WRITE_GRACE_MS = 8_000;
+const BITGET_PRIVATE_STREAM_DEGRADED_RECONCILE_MS = 10_000;
 const BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE =
   'Bitget private WS is not receiving live order/position updates. Tealstreet will reconcile through REST; if this account uses IP whitelisting, verify the terminal-listed browser/server WebSocket IPs are allowed.';
 
@@ -172,6 +173,9 @@ export class BitgetExchange extends BaseExchange {
   private _planTypePositionsInflight: Promise<Position[]> | null = null;
   private _suppressBitgetValidationErrorEmission = false;
   private privateStreamWriteCheckTimeout: NodeJS.Timeout | undefined;
+  private privateStreamDegradedReconcileTimeout: NodeJS.Timeout | undefined;
+  private privateStreamDegradedReconcileRunning = false;
+  private isPrivateStreamDegraded = false;
   private lastPrivateStreamMessageAt = 0;
   private hasWarnedPrivateStreamDegraded = false;
 
@@ -334,6 +338,10 @@ export class BitgetExchange extends BaseExchange {
       clearTimeout(this.privateStreamWriteCheckTimeout);
       this.privateStreamWriteCheckTimeout = undefined;
     }
+    if (this.privateStreamDegradedReconcileTimeout) {
+      clearTimeout(this.privateStreamDegradedReconcileTimeout);
+      this.privateStreamDegradedReconcileTimeout = undefined;
+    }
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
     this.secondsTickersWebsocket.dispose();
@@ -341,18 +349,92 @@ export class BitgetExchange extends BaseExchange {
   };
 
   markPrivateStreamMessageReceived = () => {
+    this.isPrivateStreamDegraded = false;
     this.lastPrivateStreamMessageAt = Date.now();
     this.hasWarnedPrivateStreamDegraded = false;
     this.store.updateSocketHealth({ privateDegradedReason: undefined });
+    this.stopPrivateStreamDegradedReconcile();
   };
 
   private markPrivateStreamDegraded = (reason = BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
+    this.isPrivateStreamDegraded = true;
     this.store.updateSocketHealth({ privateDegradedReason: reason });
     this.log(reason, LogSeverity.Warning);
     this.privateWebsocket.recoverMissingPrivateStream(reason);
+    this.startPrivateStreamDegradedReconcile();
     if (forceToast && !this.hasWarnedPrivateStreamDegraded) {
       this.hasWarnedPrivateStreamDegraded = true;
       this.emitter.emit('warning', reason, { forceToast: true });
+    }
+  };
+
+  private startPrivateStreamDegradedReconcile = () => {
+    if (this.privateStreamDegradedReconcileRunning || this.privateStreamDegradedReconcileTimeout) {
+      return;
+    }
+    void this.reconcilePrivateStateFromRest();
+  };
+
+  private stopPrivateStreamDegradedReconcile = () => {
+    if (this.privateStreamDegradedReconcileTimeout) {
+      clearTimeout(this.privateStreamDegradedReconcileTimeout);
+      this.privateStreamDegradedReconcileTimeout = undefined;
+    }
+  };
+
+  private schedulePrivateStreamDegradedReconcile = () => {
+    if (this.isDisposed || !this.isPrivateStreamDegraded || this.privateStreamDegradedReconcileTimeout) {
+      return;
+    }
+
+    this.privateStreamDegradedReconcileTimeout = setTimeout(() => {
+      this.privateStreamDegradedReconcileTimeout = undefined;
+      void this.reconcilePrivateStateFromRest();
+    }, BITGET_PRIVATE_STREAM_DEGRADED_RECONCILE_MS);
+  };
+
+  private reconcilePrivateStateFromRest = async () => {
+    if (this.isDisposed || !this.isPrivateStreamDegraded || this.privateStreamDegradedReconcileRunning) {
+      return;
+    }
+
+    this.privateStreamDegradedReconcileRunning = true;
+    try {
+      const [positionsResult, ordersResult, balanceResult] = await Promise.allSettled([
+        this.fetchPositions(),
+        this.fetchOrders(),
+        this.fetchBalance({ preferFast: true }),
+      ]);
+
+      if (this.isDisposed || !this.isPrivateStreamDegraded) {
+        return;
+      }
+
+      const loaded = { ...this.store.loaded };
+      const update: Record<string, unknown> = {};
+
+      if (positionsResult.status === 'fulfilled') {
+        this.store.addOrUpdatePositionsFull(positionsResult.value);
+        loaded.positions = true;
+      }
+
+      if (ordersResult.status === 'fulfilled') {
+        update.orders = ordersResult.value;
+        loaded.orders = true;
+      }
+
+      if (balanceResult.status === 'fulfilled') {
+        update.balance = balanceResult.value;
+        loaded.balance = true;
+      }
+
+      this.store.update({
+        ...update,
+        loaded,
+      });
+    } finally {
+      this.privateStreamDegradedReconcileRunning = false;
+      this.schedulePrivateStreamDegradedReconcile();
     }
   };
 

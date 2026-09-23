@@ -177,7 +177,11 @@ For Classic private WS, the watchdog also promotes the connection to the
 Tealstreet fallback route and reconnects. Literal `pong` heartbeat frames must
 not count as private-stream payloads for this decision: a browser can keep the
 direct socket alive with pongs while receiving zero authenticated order,
-position, or account data.
+position, or account data. While degraded, Bitget runs its own periodic REST
+private snapshot (`fetchPositions`, full `fetchOrders`, fast `fetchBalance`)
+until a real private frame arrives. Do not rely on private WS reconnect-open
+handlers for this: `ENABLE_RECONNECTING_WEBSOCKET` is false in this repo, and
+the ordinary tick loop does not poll standalone Classic algo TP/SL orders.
 
 ## REST API Endpoints
 

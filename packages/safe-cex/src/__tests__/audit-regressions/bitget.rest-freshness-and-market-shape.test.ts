@@ -252,6 +252,16 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
       const warning = vi.spyOn(exchange.emitter, 'emit');
       const privateWebsocket = exchange.privateWebsocket as any;
       const reconnect = vi.spyOn(privateWebsocket, 'reconnect').mockImplementation(() => {});
+      const fetchedStop = exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger' }))[0];
+      vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
+      const fetchOrders = vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([fetchedStop]);
+      vi.spyOn(exchange, 'fetchBalance').mockResolvedValue({
+        free: 100,
+        used: 0,
+        total: 100,
+        upnl: 0,
+        info: {},
+      });
       exchange.unlimitedXHR = {
         post: vi.fn().mockResolvedValue({ data: { code: '00000', data: { orderId: 'tp-1' } } }),
       } as any;
@@ -280,6 +290,8 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
       );
       expect(privateWebsocket.useFallbackUrl).toBe(true);
       expect(reconnect).toHaveBeenCalled();
+      expect(fetchOrders).toHaveBeenCalled();
+      expect(exchange.store.orders).toEqual([expect.objectContaining({ id: 'tp-1', status: OrderStatus.Open })]);
       exchange.dispose();
     } finally {
       vi.useRealTimers();
