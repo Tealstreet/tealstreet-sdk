@@ -305,7 +305,13 @@ export interface ExchangeAccountConfig {
   lastSymbol?: string;
 
   /** Runtime health status — set by error classification, auto-clears on successful connect */
-  healthStatus?: 'ok' | 'auth_error' | 'auth_expired' | 'permissions_error';
+  /**
+   * `startup_failed` is not an auth verdict: the exchange's `start()` threw, so
+   * the account is alive with no sockets and the topic watchdog reloads it on a
+   * loop. It exists so that failure has a visible name instead of a silent
+   * reconnect spinner. Device-local (see `DEVICE_LOCAL_ACCOUNT_FIELDS`).
+   */
+  healthStatus?: 'ok' | 'auth_error' | 'auth_expired' | 'permissions_error' | 'startup_failed';
 
   /** Last write timestamp (ms since epoch). Used for last-write-wins
    *  across CLI ↔ web account sync. Missing → treated as 0 for LWW. */

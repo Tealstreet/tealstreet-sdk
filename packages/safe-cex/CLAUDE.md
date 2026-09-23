@@ -83,6 +83,14 @@ control-flow and response knowledge.
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
 pause automatic account reloads after terminal credential/permission failures.
+
+There is a fourth terminal family, `startup_failed`, which this file cannot
+produce and must not try to: it is keyed off the `worker_error_phase: 'startup'`
+TAG that `ExchangeWorker.start()`'s catch attaches, because the string "Error
+starting exchange" is the log message rather than `error.message` and so never
+reaches `processMessage` at all. Do not add a pattern for it here — a venue
+message that happens to mention starting up is not the same fact, and the
+controller applies the tag only when this file produced no category.
 When an exchange emits a known bad-key, expired-key, signature, or IP-allowlist
 message, keep the health patterns aligned so it enters that terminal family.
 Do not classify transient network, 5xx, timeout, or rate-limit messages as auth.
