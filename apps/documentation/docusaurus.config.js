@@ -15,8 +15,8 @@ const config = {
   onDuplicateRoutes: 'warn',
   onBrokenAnchors: 'warn',
   favicon: 'img/_favicon.ico',
-  organizationName: 'tealstreetio', // Usually your GitHub org/user name.
-  projectName: 'tealstreet-docs', // Usually your repo name.
+  organizationName: 'Tealstreet', // Usually your GitHub org/user name.
+  projectName: 'tealstreet-docs-monorepo', // Usually your repo name.
   future: {
     faster: {
       swcJsLoader: true,
