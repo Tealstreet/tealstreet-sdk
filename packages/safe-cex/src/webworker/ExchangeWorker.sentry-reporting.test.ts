@@ -9,7 +9,16 @@ const createWorker = () => {
       messages.push(message);
     }),
   };
-  const worker = new ExchangeWorker(ctx as any, 'bybit-main', 'bybit', {} as any, {} as any, {} as any, 'session', false);
+  const worker = new ExchangeWorker(
+    ctx as any,
+    'bybit-main',
+    'bybit',
+    {} as any,
+    {} as any,
+    {} as any,
+    'session',
+    false,
+  );
 
   return { messages, worker };
 };
@@ -73,6 +82,33 @@ describe('ExchangeWorker Sentry reporting', () => {
           suppressedRepeatedReports: 1,
         },
       },
+    });
+  });
+
+  // Regression guard rather than a prove-failable assertion: this held before
+  // the phase tag existed and must keep holding, or every worker error in the
+  // process would read as a startup failure.
+  it('leaves non-startup worker errors unphased', () => {
+    const { messages, worker } = createWorker();
+
+    (worker as any).logError('Something else broke', new Error('boom'));
+
+    expect(messages[0].data[1].sentryData.tags).not.toHaveProperty('worker_error_phase');
+  });
+
+  // The phase is orthogonal to the family. bybit already self-tags its markets
+  // failure, and that tag spreads last — this pins that the two coexist rather
+  // than one clobbering the other.
+  it('keeps the bybit family tag alongside the startup phase', () => {
+    const { messages, worker } = createWorker();
+
+    (worker as any).logError('Error starting exchange: bybit', controlledBybitMarketsError(), {
+      sentryTags: { worker_error_phase: 'startup' },
+    });
+
+    expect(messages[0].data[1].sentryData.tags).toMatchObject({
+      worker_error_family: 'bybit_markets_startup',
+      worker_error_phase: 'startup',
     });
   });
 });

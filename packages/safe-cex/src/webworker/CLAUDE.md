@@ -186,6 +186,57 @@ socket-health scalars. Do not add raw account names, symbols, topics, payload
 objects, or request bodies here; the web Sentry sanitizer is allowed to index
 the resulting `worker_error_family=markets_not_loaded` tag.
 
+## Startup failures are identified by `worker_error_phase`, not by message text
+
+`start()`'s catch posts `sentryTags: { worker_error_phase: 'startup' }`. That is
+the only thing that marks it: the string "Error starting exchange" is the LOG
+MESSAGE argument, not `error.message`, so the web sanitizer's
+`worker_error_family` classifier — which reads `error.message` — cannot see it.
+Before the phase tag, only bybit was findable, because
+`BybitTradingMarketsRequestError` carries its own `safeCexSentryTags`.
+
+The two tags are orthogonal and both ride: the family says what broke
+(`timeout`, `network`, `rate_limit`), the phase says when. Controlled-error tags
+spread last and would win a collision, so do not add `worker_error_phase` to any
+`safeCexSentryTags`.
+
+This matters because a thrown `start()` is not a cosmetic failure. Every venue
+connects its public WebSocket only after a startup REST call resolves, so a
+rejection can leave the exchange instance with **no public socket at all** for
+its whole life — `publicInitialized` false forever, no
+`messageHandlerStats.public` key, and the web watchdog then synthesizes a
+`Disconnected` topic and reloads on a loop.
+
+Exactly which rejection costs the socket is per-venue, so check before assuming:
+binance awaits BOTH `fetchMarkets()` and `fetchTickers()` before connecting, so
+either one loses it; bybit calls `connectAndSubscribe()` INSIDE
+`fetchMarkets().then(...)`, so a `fetchTickersWithoutParse` rejection in the same
+`Promise.all` still leaves a live public socket.
+`auditSocketHealth` cannot rescue it: all of its cases require
+`socket.ws?.readyState === OPEN`, and a socket whose `connectAndSubscribe` never
+ran has no `ws`.
+
+**The 30 s `START_TIMEOUT_MS` race rejects into the same catch**, so a timeout is
+tagged `worker_error_phase: 'startup'` with `worker_error_family: 'timeout'`.
+That pairing is the point, not conflation.
+
+**The `try` deliberately spans the WHOLE of `start()`, not just
+`_exchange.start()`.** Half of startup runs before the exchange exists — the
+registry lookup, the dynamic `loader()` chunk fetch, the constructor,
+`_initializeProcessorsAndHandlers`, `_setupExchangeEventListeners` — and those
+used to reject out of `start()` altogether. The only caller
+(`store.webworker.ts`) awaits it without a catch, so a chunk-load failure or an
+unknown venue reached the global `unhandledrejection` handler as
+`webworker-uncaught` with no phase tag, **and** skipped that caller's
+`if (!started)` branch, leaving a half-initialized worker in the map. Every
+failure now returns `false` and the caller cleans up. Do not narrow this back.
+
+**A controlled error inside its own report cooldown is suppressed entirely.**
+When an error carries BOTH `safeCexSentryReportKey` and
+`safeCexSentryReportCooldownMs`, `logError` sets `effectiveSendToSentry = false`
+until the cooldown expires — so repeated bybit startup failures compute the
+phase tag and never ship it. Counts from this tag are a floor, not a census.
+
 ## Other notes
 
 - `dispose()` tears down every chaser owned by the current exchange before it

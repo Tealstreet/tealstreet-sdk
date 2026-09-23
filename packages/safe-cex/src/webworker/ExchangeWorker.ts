@@ -10,8 +10,8 @@ import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { isNonPrivateDataAccount } from '../utils/isNonPrivateDataAccount';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
-import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
 import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
+import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
 import { BaseHandler } from './handlers/BaseHandler';
 import { CallMethodHandler } from './handlers/CallMethodHandler';
 import { ChaserOrderHandler } from './handlers/ChaserOrderHandler';
@@ -70,7 +70,9 @@ const splitWorkerLogExtra = (extra: Record<string, any> | undefined) => {
   const sentryExtra = isRecord(extra.sentryExtra) ? extra.sentryExtra : {};
   const suppressConsoleLog = Boolean(extra.suppressConsoleLog);
   const plainExtra = Object.fromEntries(
-    Object.entries(extra).filter(([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog'),
+    Object.entries(extra).filter(
+      ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog',
+    ),
   );
 
   return { extra: plainExtra, sentryTags, sentryExtra, suppressConsoleLog };
@@ -294,42 +296,49 @@ export class ExchangeWorker {
       };
     });
 
-    await virtualClock.start();
-    if (startupToken !== this._startupToken) {
-      return false;
-    }
-
-    const loader = exchangeRegistry[this._exchangeName];
-    if (!loader) {
-      throw new Error(`Unknown exchange: ${this._exchangeName}`);
-    }
-    const Exchange = await loader();
-    if (startupToken !== this._startupToken) {
-      return false;
-    }
-    this._exchange = new Exchange(this._exchangeName, this._options, this._store);
-
-    // When privateOnly, disable public websocket connections before start().
-    // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
-    if (this._options.privateOnly) {
-      this._exchange.disablePublicWebsockets();
-    }
-
-    this._initializeProcessorsAndHandlers();
-    this._setupExchangeEventListeners();
-
-    this.log('info', `Starting exchange in webworker: ${this._exchangeName}`);
-
-    const START_TIMEOUT_MS = 30_000;
-    const startPromise = this._exchange.start().then(() => 'started' as const);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(
-        () => reject(new Error(`Exchange start timed out after ${START_TIMEOUT_MS / 1000}s`)),
-        START_TIMEOUT_MS,
-      );
-    });
-
+    // The try spans the WHOLE body, not just the exchange's own start(). Half
+    // of startup runs before it — the registry lookup, the dynamic `loader()`
+    // chunk fetch, the constructor, handler wiring — and those used to reject
+    // out of `start()` entirely. The only caller (`store.webworker.ts`) awaits
+    // without a catch, so they reached the global `unhandledrejection` handler
+    // as `webworker-uncaught` with no phase tag, AND skipped that caller's
+    // `!started` cleanup, leaving a half-initialized worker in the map.
     try {
+      await virtualClock.start();
+      if (startupToken !== this._startupToken) {
+        return false;
+      }
+
+      const loader = exchangeRegistry[this._exchangeName];
+      if (!loader) {
+        throw new Error(`Unknown exchange: ${this._exchangeName}`);
+      }
+      const Exchange = await loader();
+      if (startupToken !== this._startupToken) {
+        return false;
+      }
+      this._exchange = new Exchange(this._exchangeName, this._options, this._store);
+
+      // When privateOnly, disable public websocket connections before start().
+      // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
+      if (this._options.privateOnly) {
+        this._exchange.disablePublicWebsockets();
+      }
+
+      this._initializeProcessorsAndHandlers();
+      this._setupExchangeEventListeners();
+
+      this.log('info', `Starting exchange in webworker: ${this._exchangeName}`);
+
+      const START_TIMEOUT_MS = 30_000;
+      const startPromise = this._exchange.start().then(() => 'started' as const);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error(`Exchange start timed out after ${START_TIMEOUT_MS / 1000}s`)),
+          START_TIMEOUT_MS,
+        );
+      });
+
       const result = await Promise.race([startPromise, timeoutPromise, cancelledPromise]);
       if (result === 'cancelled' || startupToken !== this._startupToken || this._exchange?.isDisposed) {
         return false;
@@ -350,7 +359,14 @@ export class ExchangeWorker {
         return false;
       }
       const detail = e instanceof Error && e.message ? `: ${e.message}` : '';
-      this.logError(`Error starting exchange: ${this._exchangeName}${detail}`, e);
+      // "Error starting exchange" is the LOG MESSAGE, not `error.message`, so
+      // nothing downstream can classify a startup failure from the error alone.
+      // Only bybit self-tags (BybitTradingMarketsRequestError); every other
+      // venue arrived unlabelled and indistinguishable from any other worker
+      // error. The phase is orthogonal to `worker_error_family` — both ride.
+      this.logError(`Error starting exchange: ${this._exchangeName}${detail}`, e, {
+        sentryTags: { worker_error_phase: 'startup' },
+      });
       return false;
     } finally {
       if (startupToken === this._startupToken) {
