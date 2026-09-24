@@ -14,8 +14,8 @@
  * into the isolated config and never printed.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { readRows } from '../../../scripts/keys/lib/sheet';
@@ -69,6 +69,26 @@ const run = (args: string[], home: string): Promise<Outcome> =>
       });
     });
   });
+
+/**
+ * Copy ONLY the `auth` block from the operator's real config into the isolated
+ * one. Several venues force the Tealstreet tunnel, which refuses an
+ * unauthenticated client, so without this the harness can only ever exercise
+ * failure paths. Accounts are never copied - the isolated config gets its own
+ * from the sheet. The token is read and written, never printed.
+ */
+function seedAuth(home: string): boolean {
+  const realConfig = join(process.env.TORTURE_REAL_HOME ?? homedir(), '.tealstreet', 'config.json');
+  if (!existsSync(realConfig)) return false;
+  const auth = (JSON.parse(readFileSync(realConfig, 'utf8')) as { auth?: unknown }).auth;
+  if (!auth) return false;
+
+  const target = join(home, '.tealstreet', 'config.json');
+  mkdirSync(join(home, '.tealstreet'), { recursive: true });
+  const existing = existsSync(target) ? JSON.parse(readFileSync(target, 'utf8')) : { accounts: [] };
+  writeFileSync(target, JSON.stringify({ ...existing, auth }, null, 2), { mode: 0o600 });
+  return true;
+}
 
 async function seed(home: string): Promise<string[]> {
   const rows = await readRows();
@@ -128,6 +148,7 @@ async function main(): Promise<void> {
   console.log(`isolated HOME: ${home}`);
   console.log(`timeout: ${TIMEOUT_MS}ms  exchanges: ${EXCHANGES.join(', ')}`);
 
+  console.log(seedAuth(home) ? 'copied the auth token into the isolated config' : 'NO auth token found - tunnel venues will refuse');
   console.log('seeding accounts...');
   const accounts = await seed(home);
   if (accounts.length === 0) console.log('  WARNING: no accounts seeded; exchange commands will exit early');
