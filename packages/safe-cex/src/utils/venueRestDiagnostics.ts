@@ -58,6 +58,7 @@ export interface VenueRestFailureSample {
   bodySnippet?: string;
   errorName?: string;
   errorMessage?: string;
+  endpoint?: string;
   headers: Record<string, string>;
 }
 
@@ -74,6 +75,7 @@ interface ExchangeDiagnostics {
   statusCounts: Record<string, number>;
   codeCounts: Record<string, number>;
   errorCounts: Record<string, number>;
+  lastEndpoint?: string;
   maxSignatureAgeMs?: number;
 }
 
@@ -210,6 +212,25 @@ const bumpBounded = (counts: Record<string, number>, key: string) => {
   counts[key] = (counts[key] ?? 0) + 1;
 };
 
+/**
+ * The host we actually dialled, which is the question a CloudFront 403 cannot
+ * answer on its own: both the venue and our own tunnel sit behind CloudFront
+ * and return a byte-identical error page, and the distribution id in `via` is
+ * scrubbed before it reaches anywhere readable.
+ *
+ * The proxied form embeds the upstream (`https://<proxy>/https://api.bybit.com`),
+ * so keeping the whole base URL minus its query is what distinguishes direct
+ * from tunnelled at a glance. No credential rides in a base URL.
+ */
+const endpointOf = (config: unknown): string | undefined => {
+  const typed = config as { baseURL?: unknown; url?: unknown } | undefined;
+  const base = typeof typed?.baseURL === 'string' ? typed.baseURL : '';
+  const url = typeof typed?.url === 'string' ? typed.url : '';
+  const absolute = /^https?:\/\//i.test(url) ? url : base;
+  if (!absolute) return undefined;
+  return absolute.split('?')[0].slice(0, 120);
+};
+
 export const markRestRequestStart = <T>(config: T, now = Date.now()): T => {
   try {
     (config as Record<string, unknown>)[T0] = now;
@@ -264,6 +285,9 @@ export const noteRestSuccess = (exchange: string, response: unknown, now = Date.
     if (startedAt !== undefined) push(diagnostics.totalMs, now - startedAt);
     const signMs = readConfigNumber(typed?.config, SIGN_MS);
     if (signMs !== undefined) push(diagnostics.signMs, signMs);
+
+    const endpoint = endpointOf(typed?.config);
+    if (endpoint) diagnostics.lastEndpoint = endpoint;
 
     const quota = readHeaders(typed?.headers, QUOTA_HEADERS);
     if (Object.keys(quota).length > 0) {
@@ -325,6 +349,7 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
       signatureAgeMs,
       bodyKind,
       bodySnippet,
+      endpoint: endpointOf(typed?.config),
       errorName: typeof errorName === 'string' ? errorName : undefined,
       errorMessage: message ? scrub(message) : undefined,
       headers: {
@@ -377,6 +402,8 @@ export const getVenueRestStats = (now = Date.now()): Record<string, unknown> => 
       // only field here derived from error TEXT, so it is normalised hard
       // before it reaches a public payload.
       errorCounts: diagnostics.errorCounts,
+      // Answers "direct or through our tunnel" without waiting for a failure.
+      lastEndpoint: diagnostics.lastEndpoint,
     };
   }
   return out;

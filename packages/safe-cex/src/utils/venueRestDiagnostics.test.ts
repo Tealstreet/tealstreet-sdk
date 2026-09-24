@@ -207,6 +207,32 @@ describe('venueRestDiagnostics', () => {
     expect(statsFor('bybit').errorCounts).toEqual({});
   });
 
+  // Both the venue and our own tunnel sit behind CloudFront and return a
+  // byte-identical error page, so the dialled host is what tells them apart.
+  it('records the dialled endpoint, keeping the upstream a proxy embeds', () => {
+    noteRestSuccess('bybit', { config: { baseURL: 'https://api.bybit.com' }, headers: {} });
+    expect(statsFor('bybit').lastEndpoint).toBe('https://api.bybit.com');
+
+    noteRestFailure('bybit', {
+      config: { baseURL: 'https://fsjnpy143pbz.jp.tealstreet.io/https://api.bybit.com', url: '/v5/position/list' },
+      response: { status: 403, headers: {}, data: '' },
+    });
+
+    const [sample] = drainVenueRestFailureSamples();
+    expect(sample.endpoint).toBe('https://fsjnpy143pbz.jp.tealstreet.io/https://api.bybit.com');
+  });
+
+  it('strips a query string off the dialled endpoint', () => {
+    noteRestFailure('bybit', {
+      config: { url: 'https://api.bybit.com/v5/position/list?api_key=SECRETKEY&sign=SIG' },
+      response: { status: 403, headers: {}, data: '' },
+    });
+
+    const [sample] = drainVenueRestFailureSamples();
+    expect(sample.endpoint).toBe('https://api.bybit.com/v5/position/list');
+    expect(JSON.stringify(sample)).not.toContain('SECRETKEY');
+  });
+
   it('drains so one burst is not reported on every tick', () => {
     noteRestFailure('bybit', { config: {}, response: { status: 403, headers: {}, data: '' } });
 
