@@ -385,6 +385,14 @@ and large payloads are truncated.
 
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
 
+**Anything module-level in `logger.ts` that holds the event loop must be
+`unref()`'d.** `src/index.ts` imports this module at the top, so every
+subcommand pays for it: a ref'd `setInterval` here meant `account add`, `exec`
+and friends printed their output, finished, and then hung until the user hit
+Ctrl+C. Users read that as "the CLI never exits". `logger.event-loop.test.ts`
+is the gate — it counts `process.getActiveResourcesInfo()` timers across the
+import and fails if the count moves.
+
 ## Commands
 
 ```bash

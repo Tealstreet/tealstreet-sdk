@@ -57,8 +57,10 @@ let rateLimitWarningShown = false;
 const DEDUP_WINDOW_MS = 10_000;
 const recentMessageHashes: Map<string, number> = new Map();
 
-// Clean up old hashes periodically
-setInterval(() => {
+// Clean up old hashes periodically. MUST stay unref'd: every CLI subcommand
+// imports this module, and a ref'd interval holds the event loop open forever —
+// `account add`, `exec` etc. finished their work and then hung until Ctrl+C.
+const dedupCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [hash, timestamp] of recentMessageHashes) {
     if (now - timestamp > DEDUP_WINDOW_MS) {
@@ -66,6 +68,7 @@ setInterval(() => {
     }
   }
 }, 5000);
+dedupCleanupTimer.unref?.();
 
 /**
  * Check if a message is a duplicate (seen within DEDUP_WINDOW_MS)
