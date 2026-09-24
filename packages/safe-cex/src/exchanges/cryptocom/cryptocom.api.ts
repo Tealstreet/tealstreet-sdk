@@ -12,6 +12,8 @@ import { BASE_URLS, ENDPOINTS, PUBLIC_ENDPOINTS } from './cryptocom.types';
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const CRYPTOCOM_AUTHENTICATION_ERROR_CODE = '40101';
+
 const stringifyResponseBody = (body: unknown): string => {
   if (typeof body === 'string') return body;
   try {
@@ -81,6 +83,16 @@ export const formatCryptocomApiError = (error: any): string | undefined => {
   }
   return `Crypto.com API error: ${bodyString}`;
 };
+
+export const isCryptocomAuthenticationErrorCode = (code: unknown): boolean =>
+  String(code) === CRYPTOCOM_AUTHENTICATION_ERROR_CODE;
+
+export const isCryptocomAuthenticationFailureMessage = (message: unknown): boolean =>
+  typeof message === 'string' && message.includes(`Crypto.com API Error ${CRYPTOCOM_AUTHENTICATION_ERROR_CODE}`);
+
+const shouldSuppressValidationAuthErrorEmission = (exchange: BaseExchange, code: unknown): boolean =>
+  isCryptocomAuthenticationErrorCode(code) &&
+  (exchange as { suppressCryptocomValidationErrorEmission?: boolean }).suppressCryptocomValidationErrorEmission === true;
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
@@ -157,7 +169,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // Check for API errors (code !== 0)
       if (data.code !== 0) {
         const msg = `Crypto.com API Error ${data.code}: ${data.message || 'Unknown error'}`;
-        exchange.emitAndLogError(msg);
+        if (!shouldSuppressValidationAuthErrorEmission(exchange, data.code)) {
+          exchange.emitAndLogError(msg);
+        }
         throw new Error(msg);
       }
 
@@ -172,7 +186,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // Handle axios errors
       const msg = formatCryptocomApiError(error);
       if (msg) {
-        exchange.emitAndLogError(msg);
+        if (!shouldSuppressValidationAuthErrorEmission(exchange, error?.response?.data?.code)) {
+          exchange.emitAndLogError(msg);
+        }
         throw new Error(msg);
       }
 
