@@ -163,6 +163,50 @@ describe('venueRestDiagnostics', () => {
     expect(statsFor('bybit').requests).toBe(51);
   });
 
+  // The shape 408 bybit failures arrived in: no response, no code, no config,
+  // no url. Every field this module was built around is empty, so the message
+  // is the only thing that identifies the cause.
+  it('names a bare thrown error that carries no response or code', () => {
+    const error = Object.assign(new Error('Remote signing failed: signer timed out after 15000ms'), {
+      name: 'Error',
+    });
+
+    noteRestFailure('bybit', error);
+
+    const [sample] = drainVenueRestFailureSamples();
+    expect(sample.errorMessage).toContain('Remote signing failed');
+    expect(statsFor('bybit').errorCounts).toEqual({
+      'Remote signing failed: signer timed out after #ms': 1,
+    });
+  });
+
+  // One cause must be one key, or a per-request id turns the map into a log.
+  it('collapses digits so one cause is one key', () => {
+    noteRestFailure('bybit', new Error('Remote signing failed: request 8471 timed out after 15000ms'));
+    noteRestFailure('bybit', new Error('Remote signing failed: request 9302 timed out after 15000ms'));
+
+    expect(Object.values(statsFor('bybit').errorCounts)).toEqual([2]);
+  });
+
+  it('bounds the error key map', () => {
+    for (let i = 0; i < 40; i++) noteRestFailure('bybit', new Error(`distinct failure kind ${String.fromCharCode(65 + i)}`));
+
+    expect(Object.keys(statsFor('bybit').errorCounts).length).toBeLessThanOrEqual(21);
+    expect(statsFor('bybit').errorCounts.other).toBeGreaterThan(0);
+  });
+
+  // A venue error that DID answer already has a status and a body; counting its
+  // text too would put venue prose into a public payload for no added signal.
+  it('does not key an error that carries a response', () => {
+    noteRestFailure('bybit', {
+      config: {},
+      message: 'Request failed with status code 403',
+      response: { status: 403, headers: {}, data: '' },
+    });
+
+    expect(statsFor('bybit').errorCounts).toEqual({});
+  });
+
   it('drains so one burst is not reported on every tick', () => {
     noteRestFailure('bybit', { config: {}, response: { status: 403, headers: {}, data: '' } });
 

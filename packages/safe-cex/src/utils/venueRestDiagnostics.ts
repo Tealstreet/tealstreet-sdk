@@ -24,6 +24,8 @@ const SIG_AGE_MS = 'safeCexRestDiagSignatureAgeMs';
 const WINDOW_MS = 5 * 60_000;
 const MAX_SAMPLES = 25;
 const MAX_LATENCIES = 200;
+/** Bounds `errorCounts`, whose keys come from error text rather than a closed set. */
+const MAX_ERROR_KEYS = 20;
 const SNIPPET_CHARS = 200;
 
 /**
@@ -54,6 +56,8 @@ export interface VenueRestFailureSample {
   signatureAgeMs?: number;
   bodyKind: string;
   bodySnippet?: string;
+  errorName?: string;
+  errorMessage?: string;
   headers: Record<string, string>;
 }
 
@@ -69,6 +73,7 @@ interface ExchangeDiagnostics {
   lastQuota?: Record<string, string>;
   statusCounts: Record<string, number>;
   codeCounts: Record<string, number>;
+  errorCounts: Record<string, number>;
   maxSignatureAgeMs?: number;
 }
 
@@ -84,6 +89,7 @@ const emptyDiagnostics = (): ExchangeDiagnostics => ({
   signMs: [],
   statusCounts: {},
   codeCounts: {},
+  errorCounts: {},
 });
 
 const forExchange = (exchange: string): ExchangeDiagnostics => {
@@ -184,6 +190,26 @@ const classifyBody = (data: unknown): { bodyKind: string; bodySnippet?: string }
   return { bodyKind: 'text', bodySnippet: scrub(text) };
 };
 
+/**
+ * Collapse an error message to a bounded, indexable shape.
+ *
+ * Needed because the dominant failure class here is NOT an axios error: a bare
+ * `throw` inside the adapter chain arrives with no response, no code, no config
+ * and no url, so every field this module was built around is empty and the
+ * message is the only thing that identifies it. Digits go to `#` so one cause
+ * is one key rather than one key per id, timestamp or duration.
+ */
+const normalizeErrorKey = (message: string): string =>
+  scrub(message).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 60) || 'unknown';
+
+const bumpBounded = (counts: Record<string, number>, key: string) => {
+  if (counts[key] === undefined && Object.keys(counts).length >= MAX_ERROR_KEYS) {
+    counts.other = (counts.other ?? 0) + 1;
+    return;
+  }
+  counts[key] = (counts[key] ?? 0) + 1;
+};
+
 export const markRestRequestStart = <T>(config: T, now = Date.now()): T => {
   try {
     (config as Record<string, unknown>)[T0] = now;
@@ -277,6 +303,16 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
     bump(diagnostics.statusCounts, status === undefined ? 'none' : String(status));
     if (code) bump(diagnostics.codeCounts, code);
 
+    // No response AND no code means nothing axios produced — a bare `throw`
+    // from inside the adapter chain, where the message is the only identifier
+    // there is. 408 bybit failures in the first 11 hours landed in exactly this
+    // shape and the record named none of them.
+    const rawMessage = (typed as { message?: unknown } | undefined)?.message;
+    const message = typeof rawMessage === 'string' ? rawMessage : undefined;
+    const errorName = (typed as { name?: unknown } | undefined)?.name;
+    const isUnshapedFailure = !typed?.response && !code;
+    if (isUnshapedFailure && message) bumpBounded(diagnostics.errorCounts, normalizeErrorKey(message));
+
     const { bodyKind, bodySnippet } = classifyBody(typed?.response?.data);
     failureSamples.push({
       at: now,
@@ -289,6 +325,8 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
       signatureAgeMs,
       bodyKind,
       bodySnippet,
+      errorName: typeof errorName === 'string' ? errorName : undefined,
+      errorMessage: message ? scrub(message) : undefined,
       headers: {
         ...readHeaders(typed?.response?.headers, ORIGIN_HEADERS),
         ...readHeaders(typed?.response?.headers, QUOTA_HEADERS),
@@ -335,6 +373,10 @@ export const getVenueRestStats = (now = Date.now()): Record<string, unknown> => 
       maxSignatureAgeMs: diagnostics.maxSignatureAgeMs,
       statusCounts: diagnostics.statusCounts,
       codeCounts: diagnostics.codeCounts,
+      // Keys are scrubbed, digit-masked and capped at 60 chars. This is the
+      // only field here derived from error TEXT, so it is normalised hard
+      // before it reaches a public payload.
+      errorCounts: diagnostics.errorCounts,
     };
   }
   return out;

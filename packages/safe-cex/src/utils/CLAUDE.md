@@ -253,7 +253,13 @@ drift measurement.
   and a client timeout are indistinguishable from outside the container, and
   everything that separates them was being discarded at request time. Note the
   quota headers are observable on SUCCESS, so how close a poll runs to a venue's
-  limit never needs a failure to sample.
+  limit never needs a failure to sample. **`errorCounts` is the field that earns
+  its keep**: the dominant failure class on the hosted path is not an axios
+  error at all but a bare `throw` from inside the adapter chain, which arrives
+  with no response, no code, no config and no url — every other field empty. The
+  key is digit-masked so one cause is one key, scrubbed, capped at 60 chars, and
+  the map is bounded; errors that DID get a response are excluded, since those
+  already carry a status and a body.
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals
