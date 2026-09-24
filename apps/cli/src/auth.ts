@@ -5,6 +5,12 @@ import chalk from 'chalk';
 import { setProxyToken } from '@tealstreet/safe-cex/src/accessToken';
 import { loadConfig, saveConfig } from './config';
 
+/** Set by whichever path warns first; see `checkAndRefreshToken`. */
+export let warnedTokenExpiryThisProcess = false;
+export const markTokenExpiryWarned = (): void => {
+  warnedTokenExpiryThisProcess = true;
+};
+
 // Tealstreet web app handles OAuth with Auth0
 // Default to localhost:3000 for local development
 // Release builds set TEALSTREET_API to preview.tealstreet.io
@@ -298,8 +304,11 @@ export async function checkAndRefreshToken(): Promise<boolean> {
     return false;
   }
 
-  // Token expiring soon - offer to refresh
-  if (tokenNeedsRefresh()) {
+  // Token expiring soon - offer to refresh. Once per process: the REPL and the
+  // one-shot path both warn at startup, and this fires again per exchange
+  // created, so a single `balance` printed the same notice twice.
+  if (tokenNeedsRefresh() && !warnedTokenExpiryThisProcess) {
+    warnedTokenExpiryThisProcess = true;
     const daysLeft = getTokenExpiryDays();
     console.log(chalk.yellow(`Your authentication token expires in ${daysLeft} days.`));
     console.log(chalk.gray('Run "login" to refresh your token.'));

@@ -68,6 +68,25 @@ with an empty file.
 
 ---
 
+## "The exchange rejected this API key"
+
+The venue answered a credentialed request with an auth error, so the command
+stops there instead of running against a half-dead session and printing a table
+of zeros. Exit code is `1`.
+
+Almost always the key was minted in a different environment from the account it
+was added to. **Demo and live are separate key pages on the same venue** — a
+Bybit mainnet key will not work on a `bybitdemo` account, and vice versa. Check
+you created the key in the same place the account points at, then:
+
+```bash
+tealstreet account remove <name>
+tealstreet account add -n <name> -e <exchange> -k <key> -s <secret> --default
+```
+
+Commands that do not need the venue — `alias`, `simulation`, `fatfinger`,
+`whitelist`, `symbol` — still run normally with a rejected key.
+
 ## "Why is Bybit returning a 403 geo-block?"
 
 That error means the CLI reached Bybit directly from a restricted

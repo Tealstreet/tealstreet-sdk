@@ -39,14 +39,14 @@ export function formatSpotTable(exchange: ExchangeLike): string {
   for (const coin of spotCoins) {
     const asset = pad(coin.base, 8);
     const amount = pad(formatPrice(coin.amount, 4), 12);
-    const value = pad('$' + formatPrice(coin.notional), 14);
+    const value = pad(formatPrice(coin.notional), 14);
 
     table += `│ ${CYAN}${asset}${RESET} │ ${amount} │ ${GREEN}${value}${RESET} │\n`;
   }
 
   // Footer with total
   table += '├──────────┴──────────────┼────────────────┤\n';
-  table += `│ ${DIM}Total${RESET}                   │ ${YELLOW}${pad('$' + formatPrice(totalSpot), 14)}${RESET} │\n`;
+  table += `│ ${DIM}Total${RESET}                   │ ${YELLOW}${pad(formatPrice(totalSpot), 14)}${RESET} │\n`;
   table += '└────────────────────────┴────────────────┘\n';
 
   return table;
@@ -96,7 +96,7 @@ export function formatMultiAccountSpotTable(accounts: AccountExchange[]): string
     // Add separator between accounts
     if (currentAccount !== '' && currentAccount !== accountName) {
       // Add account subtotal before separator
-      table += `│ ${DIM}${pad('Subtotal', 12)}${RESET} │          │              │ ${YELLOW}${pad('$' + formatPrice(accountTotal), 14)}${RESET} │\n`;
+      table += `│ ${DIM}${pad('Subtotal', 12)}${RESET} │          │              │ ${YELLOW}${pad(formatPrice(accountTotal), 14)}${RESET} │\n`;
       table += '├──────────────┼──────────┼──────────────┼────────────────┤\n';
       accountTotal = 0;
     }
@@ -106,17 +106,17 @@ export function formatMultiAccountSpotTable(accounts: AccountExchange[]): string
 
     const asset = pad(coin.base, 8);
     const amount = pad(formatPrice(coin.amount, 4), 12);
-    const value = pad('$' + formatPrice(coin.notional), 14);
+    const value = pad(formatPrice(coin.notional), 14);
 
     table += `│ ${pad(accountName, 12)} │ ${CYAN}${asset}${RESET} │ ${amount} │ ${GREEN}${value}${RESET} │\n`;
   }
 
   // Add final account subtotal
-  table += `│ ${DIM}${pad('Subtotal', 12)}${RESET} │          │              │ ${YELLOW}${pad('$' + formatPrice(accountTotal), 14)}${RESET} │\n`;
+  table += `│ ${DIM}${pad('Subtotal', 12)}${RESET} │          │              │ ${YELLOW}${pad(formatPrice(accountTotal), 14)}${RESET} │\n`;
 
   // Grand total footer
   table += '├──────────────┴──────────┴──────────────┼────────────────┤\n';
-  table += `│ ${CYAN}${pad('TOTAL', 37)}${RESET} │ ${YELLOW}${pad('$' + formatPrice(grandTotal), 14)}${RESET} │\n`;
+  table += `│ ${CYAN}${pad('TOTAL', 37)}${RESET} │ ${YELLOW}${pad(formatPrice(grandTotal), 14)}${RESET} │\n`;
   table += '└──────────────────────────────────────────┴────────────────┘\n';
 
   return table;

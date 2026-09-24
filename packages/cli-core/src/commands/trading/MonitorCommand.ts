@@ -189,23 +189,23 @@ export function formatMarginTable(exchange: ExchangeLike): string {
 
   // Total balance
   tableData.rows.push({
-    cells: [cell('Total Balance'), cell('$' + formatPrice(balance.total), 'cyan')],
+    cells: [cell('Total Balance'), cell(formatPrice(balance.total), 'cyan')],
   });
 
   // Free margin
   const freeStyle: TextStyle = freeMargin > balance.total * 0.3 ? 'green' : 'yellow';
   tableData.rows.push({
-    cells: [cell('Free Margin'), cell('$' + formatPrice(freeMargin), freeStyle)],
+    cells: [cell('Free Margin'), cell(formatPrice(freeMargin), freeStyle)],
   });
 
   // Used margin
   tableData.rows.push({
-    cells: [cell('Used Margin'), cell('$' + formatPrice(usedMargin))],
+    cells: [cell('Used Margin'), cell(formatPrice(usedMargin))],
   });
 
   // Total notional
   tableData.rows.push({
-    cells: [cell('Position Size'), cell('$' + formatPrice(totalNotional))],
+    cells: [cell('Position Size'), cell(formatPrice(totalNotional))],
   });
 
   // Account leverage (total notional / balance)
@@ -225,7 +225,7 @@ export function formatMarginTable(exchange: ExchangeLike): string {
   const pnlStyle: TextStyle = totalUnrealizedPnl >= 0 ? 'green' : 'red';
   const pnlSign = totalUnrealizedPnl >= 0 ? '+' : '';
   tableData.rows.push({
-    cells: [cell('Unrealized PnL'), cell(pnlSign + '$' + formatPrice(totalUnrealizedPnl), pnlStyle)],
+    cells: [cell('Unrealized PnL'), cell(pnlSign + formatPrice(totalUnrealizedPnl), pnlStyle)],
   });
 
   return renderTable(tableData);
@@ -453,11 +453,11 @@ export function formatMultiAccountMarginTable(accounts: AccountExchange[]): stri
     tableData.rows.push({
       cells: [
         cell(accountName),
-        cell('$' + formatPrice(balance?.total ?? 0), 'cyan'),
-        cell('$' + formatPrice(freeMargin)),
-        cell('$' + formatPrice(totalNotional)),
+        cell(formatPrice(balance?.total ?? 0), 'cyan'),
+        cell(formatPrice(freeMargin)),
+        cell(formatPrice(totalNotional)),
         cell(accountLev.toFixed(2) + 'x', levStyle),
-        cell(pnlSign + '$' + formatPrice(totalUnrealizedPnl), pnlStyle),
+        cell(pnlSign + formatPrice(totalUnrealizedPnl), pnlStyle),
       ],
     });
   }
@@ -474,11 +474,11 @@ export function formatMultiAccountMarginTable(accounts: AccountExchange[]): stri
   tableData.rows.push({
     cells: [
       cell('TOTAL', 'cyan'),
-      cell('$' + formatPrice(grandTotalBalance), 'cyan'),
+      cell(formatPrice(grandTotalBalance), 'cyan'),
       cell('-'),
-      cell('$' + formatPrice(grandTotalNotional)),
+      cell(formatPrice(grandTotalNotional)),
       cell(grandLev.toFixed(2) + 'x', grandLevStyle),
-      cell(grandPnlSign + '$' + formatPrice(grandTotalPnl), grandPnlStyle),
+      cell(grandPnlSign + formatPrice(grandTotalPnl), grandPnlStyle),
     ],
   });
 

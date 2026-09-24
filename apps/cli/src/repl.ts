@@ -75,6 +75,12 @@ import {
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
 // TWAP support for taskAction handling
+import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
+import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
+import { markTokenExpiryWarned } from './auth';
+import { flushCliSentry } from './sentry';
+import { virtualClock } from '../../../packages/safe-cex/src/utils/virtualClock';
+import { disposeHOWWebSockets } from '../../../packages/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { twapManager } from '../../../packages/safe-cex/src/webworker/twap/TwapManager';
 import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/TwapInstance';
 import { createStandalonePlatformAdapter } from './platform-adapter';
@@ -2309,6 +2315,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
   if (isLoggedIn() && tokenNeedsRefresh()) {
     const daysLeft = getTokenExpiryDays();
     adapter.printWarning(`Your authentication token expires in ${daysLeft} days. Run "login" to refresh.`);
+    markTokenExpiryWarned();
   }
 
   // Set symbol from config or default
@@ -2633,6 +2640,7 @@ export async function runSingleCommand(commandString: string, accountName?: stri
   if (isLoggedIn() && tokenNeedsRefresh()) {
     const daysLeft = getTokenExpiryDays();
     adapter.printWarning(`Your authentication token expires in ${daysLeft} days. Run "login" to refresh.`);
+    markTokenExpiryWarned();
   }
 
   if (config.accounts.length === 0) {
@@ -2673,10 +2681,35 @@ export async function runSingleCommand(commandString: string, accountName?: stri
   // Setup event listeners
   setupExchangeListeners(session.currentExchange, session.currentAccountName);
 
+  // A rejected key is terminal for anything that needs the venue — running it
+  // anyway is what printed a zeroed balance table that read as an empty
+  // account. Local commands (alias, simulation, …) still work with a bad key.
+  ensureCommandsRegistered(); // registration is lazy; the lookup below is empty without it
+  const requestedCommand = commandRegistry.find(commandString.trim().split(/\s+/)[0]?.toLowerCase() ?? '');
+  if ((session.currentExchange.authFailureStreak ?? 0) > 0 && requestedCommand?.requiresConnection !== false) {
+    // `connectToAccount` already said the key was rejected; add the actionable half.
+    adapter.printInfo('Check the key and secret, and that they were created on the same environment as the account.');
+    await teardownOneShot(session.currentExchange, 1);
+  }
+
   const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
   await processCommand(commandString, { drainFinalInFlight: true });
   await waitForTwapsStartedByCommand(twapsBeforeCommand);
-  await adapter.stopExchange(session.currentExchange);
+  await teardownOneShot(session.currentExchange);
+}
+
+/**
+ * One-shot teardown. `stopExchange` alone leaves the process alive: the
+ * virtual clock re-arms a 5-minute sync forever and the HoW tunnel sockets hold
+ * a ping timer, so `tealstreet balance` ran until the user pressed Ctrl-C. The
+ * REPL never hit this because every one of its exits calls `process.exit`.
+ */
+async function teardownOneShot(exchange: NonNullable<typeof session.currentExchange>, exitCode = 0): Promise<void> {
+  await adapter.stopExchange(exchange);
+  virtualClock.stop();
+  disposeHOWWebSockets();
+  await flushCliSentry();
+  process.exit(exitCode);
 }
 
 async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Promise<void> {

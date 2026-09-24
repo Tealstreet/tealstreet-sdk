@@ -22,7 +22,14 @@ export async function connectToAccount(
     const exchange = await adapter.createExchange(account);
     await adapter.startExchange(exchange);
 
-    adapter.printSuccess(`Connected to ${account.exchange}`);
+    // A venue that rejected the key still "starts" — `start()` has no auth gate
+    // — so claiming success here is how a 401 ended up reading as a connected
+    // account with an empty balance.
+    if ((exchange.authFailureStreak ?? 0) > 0) {
+      adapter.printError(`${account.exchange}: connected, but the exchange rejected this API key.`);
+    } else {
+      adapter.printSuccess(`Connected to ${account.exchange}`);
+    }
 
     return {
       ...session,

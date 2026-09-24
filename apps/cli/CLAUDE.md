@@ -129,6 +129,29 @@ src/
 
 ## Operating Modes
 
+### One-shot commands must tear down explicitly
+
+`runSingleCommand` ends at `teardownOneShot`, and that function calls
+`process.exit`. **This is load-bearing, not belt-and-braces.** `stopExchange`
+alone leaves the process alive: `virtualClock` re-arms a 5-minute sync timer
+that nothing else clears, and the HoW tunnel sockets hold a ping timer —
+`disposeHOWWebSockets` exists and had zero callers. The REPL never showed this
+because every REPL exit path already calls `process.exit`. Shipped 0.10.5 hung
+on every `tealstreet <command>` that touched an exchange; a user had to Ctrl-C
+out of `balance`. `src/one-shot-teardown.test.ts` pins the wiring.
+
+A rejected API key is TERMINAL on this path (exit 1) for any command whose
+`requiresConnection` is not `false` — `start()` has no auth gate, so a venue
+that rejected the key still "starts", and running the command anyway is what
+printed a zeroed balance table that read as an empty account. Registration is
+lazy, so the gate calls `ensureCommandsRegistered()` before asking the registry.
+
+`yarn workspace @tealstreet/cli torture` exercises the whole one-shot surface
+against real accounts from the keys sheet, in an isolated `$HOME`, and fails on
+anything that hangs or leaks a stack trace. Nobody had tested non-REPL mode
+before it.
+
+
 **REPL mode** (default): Interactive terminal with readline. Watch modes (`wa`/`wp`/`wo`/`wm`) use alt screen + raw mode.
 
 **Listener mode** (passive, always-on by default): The loopback `Bun.serve` on `127.0.0.1:53219` is bound during REPL startup and torn down on REPL exit. Gated by `config.listener.enabled`. See [`operations/listener.md`](../documentation/cli/operations/listener.md).

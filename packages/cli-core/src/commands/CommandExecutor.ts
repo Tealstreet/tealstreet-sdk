@@ -68,7 +68,10 @@ import type { PromptConfig } from '../utils/PromptFormatter';
 // Register all built-in commands
 let commandsRegistered = false;
 
-function ensureCommandsRegistered(): void {
+/** Exported so a caller can ask the registry about a command BEFORE running
+ *  one — the CLI's one-shot path needs `requiresConnection` to decide whether a
+ *  rejected API key should be terminal, and registration is lazy. */
+export function ensureCommandsRegistered(): void {
   if (commandsRegistered) return;
 
   commandRegistry.registerAll([

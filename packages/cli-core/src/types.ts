@@ -65,6 +65,10 @@ export interface ExchangeLike {
       privateLastMessage?: number;
     };
   };
+  /** Non-zero once the venue has rejected the credentials. The one-shot path
+   *  reads it to make a rejected key terminal instead of printing a zeroed
+   *  table that reads as an empty account. */
+  authFailureStreak?: number;
   emitter: {
     on: (event: string, handler: (...args: unknown[]) => void) => void;
     off: (event: string, handler: (...args: unknown[]) => void) => void;

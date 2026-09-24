@@ -40,7 +40,8 @@
     "logs": "tail -f ~/.tealstreet/cli.log",
     "test": "vitest",
     "test-ci": "vitest run",
-    "postinstall": "node scripts/install-binary.cjs --optional"
+    "postinstall": "node scripts/install-binary.cjs --optional",
+    "torture": "bun scripts/torture-one-shot.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

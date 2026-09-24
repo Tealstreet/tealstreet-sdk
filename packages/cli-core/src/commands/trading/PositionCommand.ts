@@ -1,7 +1,7 @@
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
-import { formatPriceCompact } from '@tealstreet/utils/src/formatting';
+import { formatPriceCompact, formatSizeCompact } from '@tealstreet/utils/src/formatting';
 
 /**
  * Position command - shows current position for a symbol.
@@ -79,9 +79,9 @@ export class PositionCommand extends BaseCommand {
     lines.push('─'.repeat(40));
     lines.push(`${targetSymbol}  ${sideStr}`);
     lines.push('─'.repeat(40));
-    lines.push(`Size:   ${formatPriceCompact(Math.abs(position.contracts), amountPrecision)} ($${formatPriceCompact(Math.abs(position.notional))})`);
+    lines.push(`Size:   ${formatSizeCompact(Math.abs(position.contracts), amountPrecision)} (${formatPriceCompact(Math.abs(position.notional))})`);
     lines.push(`Entry:  ${formatPriceCompact(position.entryPrice, pricePrecision)} → ${formatPriceCompact(markPrice, pricePrecision)}`);
-    lines.push(`uPnL:   ${pnlSign}$${formatPriceCompact(position.unrealizedPnl)} (${pnlSign}${pnlPercent}%)`);
+    lines.push(`uPnL:   ${pnlSign}${formatPriceCompact(position.unrealizedPnl)} (${pnlSign}${pnlPercent}%)`);
     lines.push(`Liq:    ${position.liquidationPrice > 0 ? formatPriceCompact(position.liquidationPrice, pricePrecision) : 'N/A'}`);
     lines.push(`Lev:    ${accountLev.toFixed(2)}x / ${position.leverage}x`);
     lines.push('─'.repeat(40));

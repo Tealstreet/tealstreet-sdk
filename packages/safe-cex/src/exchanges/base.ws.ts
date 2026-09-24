@@ -581,6 +581,12 @@ export class BaseWebSocket<T extends BaseExchange> {
     event.stopPropagation?.();
     event.stopImmediatePropagation?.();
 
+    // A socket WE closed is not a failure. Tearing the exchange down while a
+    // handshake is still in flight makes the runtime fire `error` with
+    // "closed before the connection is established", which a user reads as a
+    // broken connection right after a command printed its result.
+    if (this.parent.isDisposed) return;
+
     // Extract error message if available
     const errorMessage = (event as any)?.message || (event as any)?.error?.message || (event as any)?.type;
 
