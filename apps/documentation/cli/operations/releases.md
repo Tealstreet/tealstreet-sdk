@@ -23,10 +23,10 @@ GitHub. Every release ships the same set of artifacts:
 | `tealstreet-linux-x64`    | Linux x86_64       |
 | `tealstreet-linux-arm64`  | Linux arm64        |
 
-Windows users: a `.exe` may be attached to the release — check the
-[releases page](https://github.com/Tealstreet/cli/releases) for the
-current build. WSL users can install through the macOS/Linux one-liner
-inside WSL.
+**No Windows build is produced.** `apps/cli/scripts/build.sh` and
+`.github/workflows/cli-release.yml` both target exactly those four
+platforms, and `scripts/install-binary.cjs` maps `darwin` and `linux`
+only. Windows users install inside WSL with the macOS/Linux one-liner.
 
 ---
 

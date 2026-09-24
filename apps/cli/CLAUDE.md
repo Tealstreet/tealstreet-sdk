@@ -41,7 +41,13 @@ See [`apps/documentation/cli/CLAUDE.md`](../documentation/cli/CLAUDE.md) if one 
 
 ## Runtime
 
-**Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64.
+**Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64. **There is no Windows target** — `scripts/install-binary.cjs` maps `darwin`/`linux` only, and the docs claimed a `.exe` for months that no build ever produced.
+
+### The npm package has NO `dependencies`, and that is deliberate
+
+`files` ships three things: `bin/tealstreet.cjs`, `scripts/install-binary.cjs` and the README. The launcher downloads the platform binary and `spawnSync`s it, and between them those two files require **node builtins only**. Nothing in the tarball imports a package.
+
+Everything the CLI actually uses is compiled INTO the binary by `bun build --compile`, so it is build-time, and it lives in `devDependencies`. **Do not move it back.** Ten of those entries are `@tealstreet/*` workspace packages at `"*"` which are not published to npm, so listing them as runtime deps made `npm install -g @tealstreet/cli` fail with `E404 @tealstreet/cli-core` for every user — resolution dies before `postinstall` ever runs, so the `--optional` flag on it saves nothing. Reported from Discord on 2026-09-24, broken since the package was first published.
 
 ## Tradetunnel / HoW WebSocket Runtime
 

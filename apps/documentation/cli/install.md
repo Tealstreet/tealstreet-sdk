@@ -33,10 +33,9 @@ The Homebrew formula lives in
 
 ## Windows
 
-Download the latest `.exe` from the
-[releases page](https://github.com/Tealstreet/cli/releases) and drop it on
-your `PATH`. WSL users — install through the macOS/Linux one-liner inside
-WSL.
+**There is no native Windows build yet** — every release ships the four
+assets in the table below and nothing else. Install inside WSL with the
+macOS/Linux one-liner above; the `linux-x64` binary runs there.
 
 ## Available builds
 
