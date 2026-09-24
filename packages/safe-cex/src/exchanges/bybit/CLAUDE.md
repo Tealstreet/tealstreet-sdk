@@ -918,14 +918,14 @@ already-gone branch, and from `cancelSymbolOrders`.
   would race it.
 - **Do not "fix" this with a periodic order refetch instead.** Bybit ticks at
   500ms and `fetchOrders` is cursor-paginated per settle coin.
-- `cancelSymbolOrders` snapshots the symbol's ids *before* the cancel, because it
+- `cancelSymbolOrders` snapshots the symbol's ids _before_ the cancel, because it
   re-places TP/SL afterwards and those new rows must survive.
 - The sibling `bybitinverse` and `bybitspot` adapters do not subclass
   `BybitExchange`; keep their recently placed preservation, WS `markOrderSeen`,
   and Brazil local REST lifecycle fallback in sync with regular Bybit.
 - A genuine cancel failure must leave the row in place — never hide real state.
 
-Still open by design: a manual (non-chaser) demo limit order that *fills* leaves
+Still open by design: a manual (non-chaser) demo limit order that _fills_ leaves
 its row behind, since nothing attempts a cancel on it. Chaser orders are covered
 because `cleanupInstance` and the reprice path both cancel by id.
 
@@ -1310,6 +1310,12 @@ Realized PnL comes from `/v5/position/closed-pnl` instead, and **that figure is 
 fees**, whereas `Execution.realizedPnl` is documented gross. Converting is required
 before the two can be summed; skipping it produces a residual exactly the size of the
 fee term, which reads as a mapper bug rather than a convention mismatch.
+
+Linear and inverse are separate `BaseExchange` subclasses, so keep
+`fetchHistoricalFills` parser aliases and fallback behavior mirrored. The chart
+fill-arrow path reads stored `Execution` rows; if inverse discards a valid primary
+execution shape or throws before order-history fallback, the inverse chart gets an
+empty fill list while linear Bybit still draws arrows.
 
 ## Closed-PnL rows carry no real open time
 

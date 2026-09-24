@@ -170,6 +170,108 @@ const assertOrderHistoryFallback = async (exchange: TestExchange, get: ReturnTyp
   expect(get.mock.calls.some((call) => call[0] === '/v5/order/history')).toBe(true);
 };
 
+const assertAlternatePrimaryExecutionShape = async (
+  exchange: TestExchange,
+  get: ReturnType<typeof vi.fn>,
+  symbol: string,
+) => {
+  get.mockResolvedValueOnce({
+    data: {
+      retMsg: 'OK',
+      result: {
+        list: [
+          {
+            execId: 'exec-alt',
+            tradeTime: '1700000200000',
+            symbol,
+            orderId: 'oid-alt',
+            avgPrice: '50025',
+            qty: '0.5',
+            orderSide: 'Sell',
+            fee: '-0.07',
+            feeCoin: 'USD',
+            isMaker: true,
+          },
+        ],
+      },
+    },
+  });
+
+  const executions = await exchange.fetchHistoricalFills({ symbol, limit: 50 });
+
+  expect(executions).toEqual([
+    {
+      id: 'exec-alt',
+      timestamp: 1700000200,
+      symbol,
+      orderId: 'oid-alt',
+      price: 50025,
+      qty: 0.5,
+      side: OrderSide.Sell,
+      commission: 0.07,
+      commissionAsset: 'USD',
+      maker: true,
+    },
+  ]);
+};
+
+const assertOrderHistoryFallbackAfterPrimaryError = async (
+  exchange: TestExchange,
+  get: ReturnType<typeof vi.fn>,
+  symbol: string,
+) => {
+  get.mockImplementation((url: string) => {
+    if (url === '/v5/execution/list') {
+      return Promise.reject(new Error('execution endpoint unavailable'));
+    }
+
+    if (url === '/v5/order/history') {
+      return Promise.resolve({
+        data: {
+          retMsg: 'OK',
+          result: {
+            list: [
+              {
+                symbol,
+                orderId: 'oid-history-after-error',
+                orderStatus: 'Filled',
+                side: 'Buy',
+                avgPrice: '49950',
+                cumExecQty: '0.3',
+                updatedTime: '1700000300000',
+                cumExecFee: '0.02',
+                feeCurrency: 'USD',
+              },
+            ],
+          },
+        },
+      });
+    }
+
+    return Promise.reject(new Error(`Unexpected URL ${url}`));
+  });
+
+  const executions = await exchange.fetchHistoricalFills({
+    symbol,
+    from: 1700000000000,
+    to: 1700000600000,
+    limit: 50,
+  });
+
+  expect(executions).toEqual([
+    {
+      timestamp: 1700000300,
+      symbol,
+      orderId: 'oid-history-after-error',
+      price: 49950,
+      qty: 0.3,
+      side: OrderSide.Buy,
+      commission: 0.02,
+      commissionAsset: 'USD',
+    },
+  ]);
+};
+
 const assertChunkedRangeRequests = async (exchange: TestExchange, get: ReturnType<typeof vi.fn>, symbol: string) => {
   const to = 1_800_000_000_000;
   const from = to - 30 * 24 * 60 * 60 * 1000;
@@ -248,6 +350,21 @@ describe('Bybit execution history mapping', () => {
   it('falls back to order history for inverse bybit when execution list is empty', async () => {
     const { exchange, get } = createInverseExchange();
     await assertOrderHistoryFallback(exchange, get, 'BTCUSDT');
+  });
+
+  it('maps alternate primary execution fields for linear bybit', async () => {
+    const { exchange, get } = createLinearExchange();
+    await assertAlternatePrimaryExecutionShape(exchange, get, 'BTCUSDT');
+  });
+
+  it('maps alternate primary execution fields for inverse bybit', async () => {
+    const { exchange, get } = createInverseExchange();
+    await assertAlternatePrimaryExecutionShape(exchange, get, 'BTCUSD');
+  });
+
+  it('falls back to order history for inverse bybit when execution list errors', async () => {
+    const { exchange, get } = createInverseExchange();
+    await assertOrderHistoryFallbackAfterPrimaryError(exchange, get, 'BTCUSD');
   });
 
   it('splits linear bybit execution/history range requests into <=7 day windows', async () => {
