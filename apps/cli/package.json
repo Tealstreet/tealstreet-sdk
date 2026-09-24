@@ -1,6 +1,6 @@
 {
   "name": "@tealstreet/cli",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Tealstreet CLI - Trade crypto from your terminal",
   "main": "bin/tealstreet.cjs",
   "type": "module",
