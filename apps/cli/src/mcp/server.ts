@@ -90,9 +90,9 @@ type ToolResult = { content: { type: 'text'; text: string }[] };
 
 const text = (body: string): ToolResult => ({ content: [{ type: 'text', text: body }] });
 
-/** Mirrors the helper in services/discord-support/src/mcp.ts: the cast through
- *  `unknown` breaks the SDK's recursive zod inference, which otherwise trips a
- *  deep-instantiation error in `.tool()`. Runtime behavior is unchanged. */
+/** The cast through `unknown` breaks the SDK's recursive zod inference, which
+ *  otherwise trips a deep-instantiation error in `.tool()`. Runtime behavior is
+ *  unchanged. */
 function defineTool<S extends ZodRawShape>(
   name: string,
   description: string,
