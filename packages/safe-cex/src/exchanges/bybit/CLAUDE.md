@@ -228,6 +228,21 @@ they still use their separate `tpTriggerType` / `slTriggerType` behavior.
 
 ## WebSocket Implementation
 
+### Direct-path fallback through athena (`WsDirectFallback`)
+
+All six non-demo socket classes (`bybit`/`bybitinverse`/`bybitspot` × public/private)
+hold a `WsDirectFallback` (`utils/wsDirectFallback.ts`). A connection that produced
+zero messages is a silent failure; after two consecutive silent connects the class
+dials `route.fallback` — the athena Caddy passthrough `bybit-proxy-ja.tealstreet.io`
+declared in `routing/routingTable.ts` — for the rest of the socket's lifetime and
+emits `grafana-info` `Using tealstreet bybit … proxy`. Any message at all (a pong,
+an auth error) resets the streak, so a bad key never trips it. The resolver attaches
+`fallback` only to a DIRECT resolution: a Brazil (`BRA_BTL`) account is tunnelled
+through the header-injecting `bybitbra` path and gets no fallback, because the
+passthrough would drop `x-site-id`. Demo and hyrotrader terminate elsewhere and
+declare none. It must stay a fallback, never the default: everyone on it shares
+athena's single egress IP against Bybit's per-IP connection cap.
+
 ### Public WebSocket Topics
 
 | Topic Pattern               | Description                                                                   | Used By         |

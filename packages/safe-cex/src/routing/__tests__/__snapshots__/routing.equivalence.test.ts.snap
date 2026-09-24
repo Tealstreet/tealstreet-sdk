@@ -2634,9 +2634,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2647,9 +2649,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2660,9 +2664,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2673,9 +2679,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2686,9 +2694,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2699,9 +2709,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2712,9 +2724,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2725,9 +2739,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2738,9 +2754,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2751,9 +2769,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2764,9 +2784,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2777,9 +2799,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear",
         "tunnelled": false,
       },
     },
@@ -2950,9 +2974,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -2963,9 +2989,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -2976,9 +3004,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -2989,9 +3019,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3002,9 +3034,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3015,9 +3049,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3028,9 +3064,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3041,9 +3079,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3054,9 +3094,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3067,9 +3109,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3080,9 +3124,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3093,9 +3139,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse",
         "tunnelled": false,
       },
     },
@@ -3108,9 +3156,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3121,9 +3171,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3134,9 +3186,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3147,9 +3201,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3160,9 +3216,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3173,9 +3231,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3186,9 +3246,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3199,9 +3261,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3212,9 +3276,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3225,9 +3291,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3238,9 +3306,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -3251,9 +3321,11 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot",
         "tunnelled": false,
       },
     },
@@ -5839,12 +5911,15 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5852,12 +5927,15 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5865,12 +5943,15 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5878,12 +5959,15 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5891,12 +5975,15 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5904,12 +5991,15 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
         "tunnelled": false,
       },
       "wsPrivate": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
         "tunnelled": false,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5925,6 +6015,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": true,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5940,6 +6031,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": true,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5955,6 +6047,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": true,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5970,6 +6063,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": true,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -5985,6 +6079,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": true,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },
@@ -6000,6 +6095,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": true,
       },
       "wsPublic": {
+        "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public",
         "tunnelled": false,
       },
     },

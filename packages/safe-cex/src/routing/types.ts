@@ -31,7 +31,7 @@ export type WsHost = string;
 // How a WS channel chooses its host. The data lives in the spec; `resolveExchangeRouting`
 // interprets these against the resolved transport options. Each kind names the CURRENT
 // observed behavior faithfully so the golden master can prove the cutover is a no-op.
-export type WsStrategy =
+export type WsStrategy = (
   // Always the exchange's own WS — never tunnelled (the default strategy).
   | { kind: 'direct' }
   // Always the tunnel host regardless of options (grvt).
@@ -49,7 +49,16 @@ export type WsStrategy =
   // Gated by the separate `tealstreetWsRoute` flag (NOT tealstreetProxy). The class
   // chooses between `proxy`, direct, and an optional `readonly` direct variant at
   // runtime (lighter). The candidate HOSTS are owned here; the fallback state is not.
-  | { kind: 'wsRouteCandidates'; proxy: WsHost; readonly?: WsHost };
+  | { kind: 'wsRouteCandidates'; proxy: WsHost; readonly?: WsHost }
+) & {
+  // Optional Tokyo passthrough host (athena Caddy, Cloudflare-fronted) that the
+  // class's WsDirectFallback dials after consecutive SILENT direct connects
+  // (bybit, okx). The resolver attaches it only when the channel resolved DIRECT:
+  // a tunnelled route (Bybit Brazil's header-injecting path, OKX's tealstreetProxy
+  // path) must not degrade to a plain passthrough that drops what the tunnel adds.
+  // For `fallbackOnly` this is the same field the kind already requires.
+  fallback?: WsHost;
+};
 
 export interface ExchangeWsRouting {
   public?: WsStrategy;

@@ -7,6 +7,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { OrderStatus, Position, Writable } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -15,6 +16,8 @@ import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybitspot.types';
 
 export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
+  private directFallback = new WsDirectFallback();
+
   private authRetries = 0;
 
   connectAndSubscribe = () => {
@@ -23,7 +26,12 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
       const directUrl = (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[
         this.parent.options.testnet ? 'testnet' : 'livenet'
       ];
-      const baseUrl = route.tunnelled && route.host ? route.host : directUrl;
+      const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);
+      if (baseUrl === route.fallback) {
+        try {
+          this.parent.emitter.emit('grafana-info', 'Using tealstreet bybit private spot proxy');
+        } catch (_e) {}
+      }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
       this.ws = this.createWebsocket(
         baseUrl + '?requestId=' + nanoid(),
@@ -57,6 +65,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
+      this.directFallback.onMessage();
       this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse(data);

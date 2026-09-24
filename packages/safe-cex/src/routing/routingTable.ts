@@ -18,6 +18,10 @@ import { exchangeMetadata } from '../exchangeMetadata';
 const T = 'wss://fsjnpy143pbz'; // tunnel host prefix
 const JP = `${T}.jp.tealstreet.io`;
 const ASIA = `${T}.asia.tealstreet.io`;
+// Tokyo passthrough tunnels on athena (Caddy behind Cloudflare) — the DIRECT-path
+// fallback hosts for bybit/okx. Stanzas: infra/athena/caddy/; box: docs/oncall/athena.md.
+const BYBIT_JA = 'wss://bybit-proxy-ja.tealstreet.io';
+const OKX_JA = 'wss://okx-proxy-ja.tealstreet.io';
 
 const WS = {
   grvt: `${JP}/grvt`,
@@ -39,6 +43,13 @@ const WS = {
   bybitBraPublicLinear: `${ASIA}/bybitbra/v5/public/linear`,
   bybitBraPublicInverse: `${ASIA}/bybitbra/v5/public/inverse`,
   bybitBraPublicSpot: `${ASIA}/bybitbra/v5/public/spot`,
+  bybitJaPublicLinear: `${BYBIT_JA}/v5/public/linear`,
+  bybitJaPublicInverse: `${BYBIT_JA}/v5/public/inverse`,
+  bybitJaPublicSpot: `${BYBIT_JA}/v5/public/spot`,
+  bybitJaPrivate: `${BYBIT_JA}/v5/private`,
+  okxJaPublic: `${OKX_JA}/ws/v5/public`,
+  okxJaPrivate: `${OKX_JA}/ws/v5/private`,
+  okxJaBusiness: `${OKX_JA}/ws/v5/business`,
 } as const;
 
 // Exchanges whose REST CORS pool is the Tokyo (jp) box — getPrivateProxy's
@@ -61,9 +72,12 @@ const REST_JP: ExchangeName[] = [
 // therefore reuse the same ws-* classes (and thus the same hosts). Declared once
 // and assigned to both parent and variants so they can't drift.
 type WsGroup = RoutingTable[ExchangeName]['ws'];
+// okx (global entity only — okxeu/okxdemo terminate elsewhere) also carries the
+// athena passthrough as a direct-path fallback on every channel.
 const okxWs: WsGroup = {
-  private: { kind: 'proxyConditional', host: WS.okxPrivate },
-  business: { kind: 'proxyConditional', host: WS.okxBusiness },
+  public: { kind: 'direct', fallback: WS.okxJaPublic },
+  private: { kind: 'proxyConditional', host: WS.okxPrivate, fallback: WS.okxJaPrivate },
+  business: { kind: 'proxyConditional', host: WS.okxBusiness, fallback: WS.okxJaBusiness },
 };
 // okxeu shares the OKX ws classes but must terminate on the EEA entity's hosts
 // (wseea.okx.com) — EEA credentials do not authenticate on the global ws host.
@@ -80,7 +94,11 @@ const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coin
 const bitmexWs: WsGroup = {
   private: { kind: 'regionConditional', ja: WS.bitmexJa, other: WS.bitmexOther },
 };
-const bybitBrazilPrivateWs = { kind: 'bybitBrazilConditional', host: WS.bybitBraPrivate } as const;
+const bybitBrazilPrivateWs = {
+  kind: 'bybitBrazilConditional',
+  host: WS.bybitBraPrivate,
+  fallback: WS.bybitJaPrivate,
+} as const;
 
 // Per-exchange WS overrides (everything not listed defaults to all-direct).
 const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
@@ -107,15 +125,15 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
     private: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
   },
   bybit: {
-    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicLinear },
+    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicLinear, fallback: WS.bybitJaPublicLinear },
     private: bybitBrazilPrivateWs,
   },
   bybitinverse: {
-    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicInverse },
+    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicInverse, fallback: WS.bybitJaPublicInverse },
     private: bybitBrazilPrivateWs,
   },
   bybitspot: {
-    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicSpot },
+    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicSpot, fallback: WS.bybitJaPublicSpot },
     private: bybitBrazilPrivateWs,
   },
 };

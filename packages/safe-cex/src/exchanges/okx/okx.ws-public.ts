@@ -11,6 +11,8 @@ import { multiply } from '../../utils/safe-math';
 import { updateOrderBook } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URLS } from './okx.types';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -25,6 +27,8 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
 
   private recoveringOrderBooks = new Set<string>();
 
+  private directFallback = new WsDirectFallback();
+
   topics: SubscribedTopics = {};
   messageHandlers: MessageHandlers = {
     tickers: [(d: Data) => this.handleTickerEvents(d)],
@@ -36,9 +40,15 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
-      this.ws = this.createWebsocket(
-        BASE_WS_URLS[this.parent.region].public[this.parent.options.testnet ? 'testnet' : 'livenet'],
-      );
+      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic;
+      const directUrl = BASE_WS_URLS[this.parent.region].public[this.parent.options.testnet ? 'testnet' : 'livenet'];
+      const baseUrl = this.directFallback.resolveUrl(directUrl, route.fallback);
+      if (baseUrl === route.fallback) {
+        try {
+          this.parent.emitter.emit('grafana-info', 'Using tealstreet okx public proxy');
+        } catch (_e) {}
+      }
+      this.ws = this.createWebsocket(baseUrl);
 
       this.topics.tickers = this.store.markets.map((m) => ({
         channel: 'tickers',
@@ -143,6 +153,7 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
+      this.directFallback.onMessage();
       if (data === 'pong') {
         this.handlePongEvent();
         return;
