@@ -51,7 +51,7 @@
     "jest": "^30.5.2",
     "jest-ts-webcompat-resolver": "^1.0.0",
     "lint-staged": "^17.5.1",
-    "prettier": "3.9.6",
+    "prettier": "3.9.8",
     "ts-jest": "^29.4.12",
     "typescript": "~6.0.3"
   }

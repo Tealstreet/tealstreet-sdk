@@ -52,7 +52,7 @@
     "eslint": "^9.28.0",
     "happy-dom": "^20.14.5",
     "npm-run-all2": "^9.0.3",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "rimraf": "^6.1.3",
