@@ -424,6 +424,38 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     expect(executeBalanceFetch).not.toHaveBeenCalled();
   });
 
+  it('cancels stale sized Classic stops without recomputing plan type from flat positions', async () => {
+    const exchange = createExchange();
+    (exchange as any)._accountTypeDetected = true;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    const post = vi.fn().mockResolvedValue({ data: { code: '00000', msg: 'success', data: null } });
+    exchange.unlimitedXHR = { post } as any;
+
+    await exchange.cancelAlgoOrders([
+      {
+        id: 'sl-1',
+        symbol: 'NEARUSDT',
+        type: OrderType.StopLoss,
+        side: OrderSide.Buy,
+        amount: 41,
+        info: {},
+      } as any,
+    ]);
+
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.CANCEL_ALGO_ORDER,
+      expect.objectContaining({
+        orderId: 'sl-1',
+        symbol: 'NEARUSDT',
+        planType: 'loss_plan',
+      }),
+    );
+    expect(emitAndLogError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Sized NEARUSDT stop became a full-position stop'),
+    );
+    exchange.dispose();
+  });
+
   it('does not double-count realized PnL for non-UTA REST positions with UTA-only fee fields present', () => {
     // Bitget V2 non-UTA `POSITIONS_V2` reports realized PnL as
     // `achievedProfits + totalFee - deductedFee`. `mapPosition` must not
