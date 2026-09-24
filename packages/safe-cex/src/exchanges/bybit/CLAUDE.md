@@ -1183,6 +1183,23 @@ The 401/403 strings are load-bearing beyond this file:
 `/HTTP 403 Forbidden[\s\S]*API key rejected/i`. Changing the wording silently
 breaks that grouping.
 
+**Bybit live/demo environment mismatch detection is an auth-failure add-on, not
+a separate startup path.** Bybit documents `10003` as "API key is invalid" and
+explicitly says to check whether the key and domain match across `mainnet`,
+`testnet`, `mainnet-demo`, and `testnet-demo`. For livenet `bybit` /
+`bybitdemo` only, the response interceptor probes the opposite REST host once
+with signed `GET /v5/user/query-api`: `bybit` probes `api-demo.bybit.com`, and
+`bybitdemo` probes `api.bybit.com`. A successful opposite-host probe prepends
+`Bybit API key environment mismatch: ...` to the original `retMsg`; it never
+replaces the original text, because `health/errorPatterns.ts` and the Sentry
+fingerprint above rely on `unauthorized` / `forbidden` / `API key rejected` or
+`API key is invalid` still being present. Probe requests are tagged out of
+`recordAuthFailure()` / `recordAuthSuccess()` and interceptor error logging, so
+a positive opposite-env probe cannot reset the backoff for the actually rejected
+primary environment. The probe is scoped out for `options.testnet`,
+`bybitSiteId: 'BRA_BTL'`, custom Bybit-compatible origins such as HyroTrader,
+`bybitinverse`, `bybitspot`, and remote-signer/no-secret paths.
+
 **Known limitation, deliberately not "fixed":** a bodyless 403 from the egress
 proxy is indistinguishable here from a venue credential rejection, so it is
 blamed on the user's key and counts toward the auth backoff. Bybit's real
