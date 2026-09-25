@@ -69,3 +69,38 @@ describe('Hyperliquid REST weighted rate limiter', () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * These two numbers are what make the HIP-3 startup budget arithmetic work, and
+ * nothing pinned them: `metaAndAssetCtxs` at weight 20 against a 50ms-per-unit
+ * serial pacer means EACH HIP-3 dex reserves ~1s of startup. That is why a flat 8s
+ * budget stopped fitting once mainnet passed ~6 dexes and every HIP-3 market
+ * disappeared. If either number moves, `HIP3_PER_DEX_LOAD_BUDGET_MS` must move too.
+ */
+describe('the per-dex cost behind the HIP-3 startup budget', () => {
+  it('charges a HIP-3 market metadata call 20 weight', () => {
+    expect(
+      getHyperliquidRestRequestWeight({
+        url: ENDPOINTS.INFO,
+        data: { type: INFO_TYPES.PERPS_META_AND_ASSET_CTXS, dex: 'xyz' },
+      }),
+    ).toBe(20);
+  });
+
+  it('paces those calls serially at ~1s each, so ten dexes span ~9s of waiting', async () => {
+    vi.useFakeTimers();
+    const limiter = new RateLimiter();
+
+    const done: number[] = [];
+    const calls = Array.from({ length: 10 }, (_, i) => limiter.waitForToken(20).then(() => done.push(i)));
+
+    // The first token is granted immediately, so the Nth is released at (N-1) seconds:
+    // eight seconds in, the tenth dex still has not been allowed to start.
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(done.length).toBe(9);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all(calls);
+    expect(done.length).toBe(10);
+  });
+});

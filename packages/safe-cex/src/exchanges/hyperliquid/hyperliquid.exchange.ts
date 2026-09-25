@@ -176,7 +176,23 @@ export class HyperliquidExchange extends BaseExchange {
   private lastNonce: number = 0;
   private static readonly BUILDER_FEE_APPROVAL_TIMEOUT_MS = 8_000;
   private static readonly HIP3_DEX_DISCOVERY_TIMEOUT_MS = 6_000;
+  /**
+   * A FIXED budget here is a time bomb. `hyperliquidRestRateLimiter` paces by weight
+   * at 50ms/unit and `metaAndAssetCtxs` is weight 20, so every dex reserves ~1s of a
+   * strictly serial timeline — 10 live dexes need ~10s against the old flat 8s, and
+   * the list grows as builders deploy. Derived from the count, floored so small
+   * deployments are no slower and capped so a pathological list cannot stall startup.
+   */
   private static readonly HIP3_MARKETS_LOAD_TIMEOUT_MS = 8_000;
+  private static readonly HIP3_PER_DEX_LOAD_BUDGET_MS = 2_000;
+  /**
+   * Hard ceiling, and the number is not arbitrary: `ExchangeWorker.start()` races the
+   * WHOLE of `start()` against 30s, so HIP-3 must never be able to eat that budget —
+   * core perps, spot, fees, builder fee and the sockets all come out of the same 30s.
+   * Past this many dexes the load goes partial, which is now graceful rather than an
+   * outage; an unbounded budget would instead turn it into a startup failure.
+   */
+  private static readonly HIP3_MARKETS_LOAD_TIMEOUT_CAP_MS = 15_000;
   private static readonly SPOT_MARKETS_LOAD_TIMEOUT_MS = 6_000;
   private static readonly USER_ROLE_RESOLVE_TIMEOUT_MS = 6_000;
   private static readonly USER_ABSTRACTION_RESOLVE_TIMEOUT_MS = 6_000;
@@ -1550,14 +1566,17 @@ export class HyperliquidExchange extends BaseExchange {
     dexName: string,
     dexPosition: number,
     fees: { takerFee: number; makerFee: number } | null,
-  ): Promise<{ markets: Market[]; tickers: Ticker[] }> => {
+    // `null` means THIS DEX FAILED, which an empty market list cannot express: a dex
+    // that answered with nothing and a dex whose fetch died both used to return `[]`,
+    // so a broken dex counted as successfully loaded and contributed silence.
+  ): Promise<{ markets: Market[]; tickers: Ticker[] } | null> => {
     const parsedResponse = await fetchHip3MetaAndAssetCtxsWithRetry({
       xhr: this.xhr,
       dexName,
       log: (message, severity = LogSeverity.Info) => this.log(message, severity),
     });
     if (!parsedResponse) {
-      return { markets: [], tickers: [] };
+      return null;
     }
 
     try {
@@ -1654,7 +1673,10 @@ export class HyperliquidExchange extends BaseExchange {
       return { markets, tickers };
     } catch (error) {
       this.log(`Failed to fetch HIP-3 markets for ${dexName}: ${error}`, LogSeverity.Warning);
-      return { markets: [], tickers: [] };
+      // `null`, not an empty list, for the same reason as the fetch failure above: a
+      // throw while building markets is a FAILED dex, and reporting it as loaded-with-
+      // nothing is indistinguishable from a dex whose universe is legitimately empty.
+      return null;
     }
   };
 
@@ -1696,9 +1718,17 @@ export class HyperliquidExchange extends BaseExchange {
     // Avoid spawning a large parallel burst that keeps the shared rate-limited queue busy
     // long after timeout fallback has already chosen to continue with core perps only.
     if (hip3Dexs.length > 0) {
-      const discoveredHip3DexNames = hip3Dexs.map((d) => d.name);
+      const hip3BudgetMs = Math.min(
+        HyperliquidExchange.HIP3_MARKETS_LOAD_TIMEOUT_CAP_MS,
+        Math.max(
+          HyperliquidExchange.HIP3_MARKETS_LOAD_TIMEOUT_MS,
+          hip3Dexs.length * HyperliquidExchange.HIP3_PER_DEX_LOAD_BUDGET_MS,
+        ),
+      );
+      const loadedDexNames: string[] = [];
+      const failedDexNames: string[] = [];
       const hip3Results: Array<{ markets: Market[]; tickers: Ticker[] }> = [];
-      const hip3Deadline = Date.now() + HyperliquidExchange.HIP3_MARKETS_LOAD_TIMEOUT_MS;
+      const hip3Deadline = Date.now() + hip3BudgetMs;
       let hip3TimedOut = false;
 
       for (const dex of hip3Dexs) {
@@ -1708,36 +1738,57 @@ export class HyperliquidExchange extends BaseExchange {
           break;
         }
 
-        const result = await this.withStartupTimeout<{ markets: Market[]; tickers: Ticker[] } | null>(
+        const result = await this.withStartupTimeout<{ markets: Market[]; tickers: Ticker[] } | null | 'timed-out'>(
           this.fetchHip3Markets(dex.name, dex.dexPosition, fees),
           remainingBudgetMs,
           `HIP-3 markets loading (${dex.name})`,
-          null,
+          'timed-out',
         );
 
-        if (!result) {
+        if (result === 'timed-out') {
           hip3TimedOut = true;
           break;
         }
 
-        hip3Results.push(result);
-      }
-
-      // If startup timed out before HIP-3 market metadata completed, continue with core perps only.
-      if (!hip3TimedOut && hip3Results.length === hip3Dexs.length) {
-        this.hip3DexNames = discoveredHip3DexNames;
-        this.log(`Found ${hip3Dexs.length} HIP-3 DEXes: ${this.hip3DexNames.join(', ')}`, LogSeverity.Info);
-
-        for (const result of hip3Results) {
-          markets.push(...result.markets);
-          tickers.push(...result.tickers);
+        // One dex's own failure is not the others' problem — keep going.
+        if (result === null) {
+          failedDexNames.push(dex.name);
+          continue;
         }
 
-        this.log(`Loaded ${markets.length} total markets (including HIP-3)`, LogSeverity.Info);
-      } else {
-        this.hip3DexNames = [];
+        hip3Results.push(result);
+        loadedDexNames.push(dex.name);
+      }
+
+      // KEEP whatever loaded. Discarding complete dexes because a LATER one ran out of
+      // budget is what turned a slow load into no HIP-3 markets at all: with 10 dexes
+      // against the old flat 8s, seven finished and all seven were thrown away.
+      // `hip3DexNames` must list exactly those, since it drives the HIP-3 WS
+      // subscriptions and the order/position refresh.
+      this.hip3DexNames = loadedDexNames;
+
+      for (const result of hip3Results) {
+        markets.push(...result.markets);
+        tickers.push(...result.tickers);
+      }
+
+      if (loadedDexNames.length > 0) {
         this.log(
-          `HIP-3 market metadata did not finish within startup budget (${hip3Results.length}/${hip3Dexs.length} dexes loaded); continuing with core perps only`,
+          `Loaded ${loadedDexNames.length}/${hip3Dexs.length} HIP-3 DEXes (${loadedDexNames.join(', ')}); ${markets.length} total markets`,
+          LogSeverity.Info,
+        );
+      }
+
+      if (failedDexNames.length > 0) {
+        this.log(`HIP-3 DEXes that failed to load: ${failedDexNames.join(', ')}`, LogSeverity.Warning);
+      }
+
+      if (hip3TimedOut) {
+        const unreached = hip3Dexs
+          .map((d) => d.name)
+          .filter((name) => !loadedDexNames.includes(name) && !failedDexNames.includes(name));
+        this.log(
+          `HIP-3 market loading ran out of its ${Math.round(hip3BudgetMs / 1000)}s budget; not loaded: ${unreached.join(', ')}`,
           LogSeverity.Warning,
         );
       }

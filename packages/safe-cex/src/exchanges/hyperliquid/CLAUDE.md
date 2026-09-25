@@ -241,7 +241,7 @@ Phase 1: Parallel initial data fetch
 │   ├── POST /info { type: "metaAndAssetCtxs" }         — core perp markets + tickers
 │   ├── fetchFee() → POST /info { type: "userFees" }    — user fee rates
 │   └── fetchHip3Dexs() → POST /info { type: "perpDexs" }  — HIP-3 DEX list
-│       └── For each DEX (strictly sequential, 8s total budget): POST /info { type: "metaAndAssetCtxs", dex: name }
+│       └── For each DEX (strictly sequential, budget = dexCount x 2s, floor 8s, cap 15s): POST /info { type: "metaAndAssetCtxs", dex: name }
 ├── fetchBuilderFeeApproval() → POST /info { type: "maxBuilderFee" }
 └── fetchCorePerpsState() → POST /info { type: "clearinghouseState" }; authoritative core-position + balance bootstrap
 
@@ -840,7 +840,37 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 
 **Order fetch per-DEX**: Sequential (`fetchOrdersInternal` iterates HIP-3 dexes in a `for` loop).
 
-**HIP-3 market metadata**: Sequential per DEX with an 8-second total startup budget. Official `/info` weights are 20 for `metaAndAssetCtxs`, 60 for `userRole`, and 1200 total per IP per minute. Live discovery on 2026-07-15 returned one core plus nine HIP-3 entries on mainnet; testnet's much larger catalog remains restricted to the four-DEX whitelist. Do not turn this loop back into `Promise.all`: multiple browser accounts can share one proxy egress budget.
+**HIP-3 market metadata**: Sequential per DEX. Official `/info` weights are 20 for `metaAndAssetCtxs`, 60 for `userRole`, and 1200 total per IP per minute. Live discovery on 2026-07-15 returned one core plus nine HIP-3 entries on mainnet; testnet's much larger catalog remains restricted to the four-DEX whitelist. Do not turn this loop back into `Promise.all`: multiple browser accounts can share one proxy egress budget.
+
+**The budget is DERIVED from the dex count, and a fixed one is a time bomb.** The
+flat 8 seconds it used to carry stopped fitting the moment mainnet passed ~6 dexes:
+`hyperliquidRestRateLimiter` paces by weight at 50ms per unit and `metaAndAssetCtxs`
+is weight 20, so **each dex reserves a full second of a strictly serial timeline** —
+and core perps, `perpDexs` and spot metadata have already spent ~2s of it before the
+loop starts. With the ten dexes `perpDexs` returned on 2026-09-25 (`xyz flx vntl hyna km abcd
+cash para mkts io` — note mainnet's is `vntl`, while `TESTNET_HIP3_WHITELIST` carries
+`vntls`; 292 markets in total) the loop needs ~10s and got 8, so it always timed out.
+Raw network for all ten is 1.4s; the pacer is the entire cost.
+
+**Partial results are KEPT, and that is the difference between degraded and absent.**
+The loop used to discard every completed dex when a later one ran out of budget —
+seven of ten finished and all seven were thrown away, so no HIP-3 market appeared at
+all. `hip3DexNames` is now set to exactly the dexes that loaded, which matters beyond
+the market list: it drives the HIP-3 WS subscriptions and the order/position refresh,
+so listing a dex whose markets are absent (or clearing it while markets are present)
+desynchronises both.
+
+**The cap is tied to `ExchangeWorker.start()`'s 30s race.** That race covers the
+whole of `start()`, so HIP-3 cannot be allowed to spend it — core perps, spot, fees,
+builder fee and the sockets share the same 30s. 15s is the ceiling for that reason,
+not a round number. Beyond ~13 dexes the load goes partial, which is now graceful;
+an unbounded budget would convert a partial market list into a startup failure.
+
+**A dex that FAILED is not a dex that returned nothing.** `fetchHip3Markets` returns
+`null` when its own fetch dies after retry, rather than `{markets: [], tickers: []}`
+— which used to make a broken dex count as successfully loaded and contribute
+silence. One dex's failure no longer stops the others, and each outcome (loaded,
+failed, never reached) is named in its own log line.
 
 ## State Reconciliation
 
