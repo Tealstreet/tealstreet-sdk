@@ -71,6 +71,55 @@ describe('audit regression: Crypto.com order writes', () => {
     ).toBe('Crypto.com API Error 40101: Bad API key, API secret or incorrect IP whitelist.');
   });
 
+  it('returns validation-owned auth errors without emitting exchange errors', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
+    api.defaults.adapter = vi.fn(async (config) =>
+      Promise.reject(
+        Object.assign(new Error('Request failed with status code 401'), {
+          response: {
+            status: 401,
+            statusText: 'Unauthorized',
+            data: { code: 40101, message: 'Synthetic auth failure' },
+          },
+          config,
+          isAxiosError: true,
+        }),
+      ),
+    );
+    exchange.xhr = api;
+
+    await expect(exchange.validateAccount()).resolves.toEqual({
+      error: 'Crypto.com API Error 40101: Synthetic auth failure',
+    });
+    expect(emitAndLogError).not.toHaveBeenCalled();
+  });
+
+  it('still emits auth API errors outside account validation', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
+    api.defaults.adapter = vi.fn(async (config) =>
+      Promise.reject(
+        Object.assign(new Error('Request failed with status code 401'), {
+          response: {
+            status: 401,
+            statusText: 'Unauthorized',
+            data: { code: 40101, message: 'Synthetic auth failure' },
+          },
+          config,
+          isAxiosError: true,
+        }),
+      ),
+    );
+
+    await expect(api.post(ENDPOINTS.BALANCE, {})).rejects.toThrow(
+      'Crypto.com API Error 40101: Synthetic auth failure',
+    );
+    expect(emitAndLogError).toHaveBeenCalledWith('Crypto.com API Error 40101: Synthetic auth failure');
+  });
+
   it('does not re-sign a serialized private envelope when axios retries a request', async () => {
     const exchange = createExchange();
     const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);

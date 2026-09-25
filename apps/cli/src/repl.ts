@@ -946,7 +946,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     const acctName = accountName || session.currentAccountName || 'unknown';
     const monitor = exchangeManager.getHealthMonitor(acctName);
     const category = monitor ? monitor.processMessage(error, true) : null;
-    const action = classifyForCLI(category, 'error');
+    const action = classifyForCLI(category, 'error', error);
 
     switch (action.action) {
       case 'suppress':
@@ -999,7 +999,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     const acctName = accountName || session.currentAccountName || 'unknown';
     const monitor = exchangeManager.getHealthMonitor(acctName);
     const category = monitor ? monitor.processMessage(warning, false) : null;
-    const action = classifyForCLI(category, 'warning');
+    const action = classifyForCLI(category, 'warning', warning);
 
     if (action.action === 'suppress') return;
 

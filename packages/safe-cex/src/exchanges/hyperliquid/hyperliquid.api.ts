@@ -15,6 +15,7 @@ import {
   extractHyperliquidResponseError,
   isOnlyHyperliquidTerminalCancelError,
 } from './hyperliquid.order-response';
+import { getHyperliquidRestRequestWeight, hyperliquidRestRateLimiter } from './hyperliquid.rateLimiter';
 import { signL1Action } from './hyperliquid.signing';
 import { BASE_URLS, ENDPOINTS } from './hyperliquid.types';
 
@@ -165,6 +166,14 @@ const addSigningInterceptor = (
   });
 };
 
+const addRateLimitInterceptor = (xhr: ReturnType<typeof safeCexAxiosCreate>) => {
+  xhr.interceptors.request.use(async (config) => {
+    if (isSigningCaptureRequest(config)) return config;
+    await hyperliquidRestRateLimiter.waitForToken(getHyperliquidRestRequestWeight(config));
+    return config;
+  });
+};
+
 // Create axios instance for /exchange endpoint (trading operations)
 export const createExchangeAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
@@ -189,6 +198,7 @@ export const createExchangeAPI = (options: ExchangeOptions, exchange: BaseExchan
     addSigningInterceptor(xhr, options, exchange);
     setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
+  addRateLimitInterceptor(xhr);
   addResponseInterceptor(xhr, exchange);
 
   return xhr;
@@ -231,6 +241,7 @@ export const createInfoAPI = (options: ExchangeOptions, exchange: BaseExchange) 
   if (!options.publicDataOnly) {
     setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
+  addRateLimitInterceptor(xhr);
   addResponseInterceptor(xhr, exchange);
 
   return xhr;

@@ -3035,9 +3035,17 @@ export class BitgetExchange extends BaseExchange {
       };
       if (planTypeMap[rawPlanType]) return planTypeMap[rawPlanType];
     }
-    // Fallback to computed planType. Stays synchronous on purpose: the position
-    // is often already closed by cancel time, so a REST refetch would report
-    // flat and produce pos_loss for an order that was placed as loss_plan.
+
+    // If the raw venue planType is missing, infer from immutable order fields
+    // instead of live position state. A TP/SL can remain locally visible after
+    // the protected position was closed by another trigger; recomputing against
+    // flat positions downgrades a sized stop to pos_loss/pos_profit and emits a
+    // misleading error before the user can clear the stale row.
+    if (order.type === OrderType.TrailingStopLoss) return 'track_plan';
+    const hasSizedAmount = this.planTypeComparableAmount(order) > 0;
+    if (order.type === OrderType.StopLoss) return hasSizedAmount ? 'loss_plan' : 'pos_loss';
+    if (order.type === OrderType.TakeProfit) return hasSizedAmount ? 'profit_plan' : 'pos_profit';
+
     const [planType] = this.selectPlanTypeAndAmount(order, this.store.positions);
     return planType;
   };

@@ -228,14 +228,25 @@ post-connect `login` frame, so browser-native WebSocket connections to
 `routingTable.ts` intentionally leaves demo variants out of the OKX
 private/business WS override groups.
 
-Private and business WebSockets support Tealstreet proxy routing. Both
+Private and business WebSockets support Tealstreet proxy routing. All three
 `connectAndSubscribe` methods resolve their host from the shared routing
 resolver instead of hardcoding a URL:
 
 ```ts
-const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate; // or .wsBusiness
-this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
+const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate; // or .wsBusiness / .wsPublic
+const baseUrl = this.directFallback.resolveUrl(route.tunnelled ? route.host! : this.endpoint, route.fallback);
+this.ws = this.createWebsocket(baseUrl);
 ```
+
+`directFallback` is a `WsDirectFallback` (`utils/wsDirectFallback.ts`; `protected`
+on the private class because the business class extends it). After two consecutive
+connects that produced zero messages it dials `route.fallback` — the athena Caddy
+passthrough `okx-proxy-ja.tealstreet.io`, which presents OKX's port 8443 on 443 —
+for the rest of the socket's lifetime and emits `grafana-info`. The resolver attaches
+`fallback` only to a DIRECT resolution, so with `tealstreetProxy` on the private and
+business sockets keep the chosen EKS tunnel and never degrade to the passthrough.
+Only global `okx` declares it: `okxeu` credentials do not authenticate on
+`ws.okx.com`, and the demo variants terminate on `wspap`/`wseeapap`.
 
 The actual tunnelled host (the `wss://fsjnpy143pbz.*` family) and the
 `tealstreetProxy` gating live in `routing/routingTable.ts` + the

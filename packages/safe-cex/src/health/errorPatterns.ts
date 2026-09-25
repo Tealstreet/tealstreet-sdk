@@ -57,6 +57,7 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
       'error sign',
       'signature mismatch',
       'api-key format invalid',
+      'api key rejected',
       'invalid key',
       'authentication failed',
       'auth failed',

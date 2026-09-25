@@ -8,6 +8,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import {
   Candle,
   OHLCVOptions,
@@ -44,6 +45,8 @@ type SubscribedTopics = {
 };
 
 export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
+  private directFallback = new WsDirectFallback();
+
   topics: SubscribedTopics = {};
   messageHandlers: MessageHandlers = {
     tickers: [(d: Data) => this.handleTickersEvent(d)],
@@ -91,7 +94,12 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
     if (!this.isDisposed) {
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic;
       const directUrl = BASE_WS_URL.public['spot'][this.parent.options.testnet ? 'testnet' : 'livenet'];
-      const baseUrl = route.tunnelled && route.host ? route.host : directUrl;
+      const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);
+      if (baseUrl === route.fallback) {
+        try {
+          this.parent.emitter.emit('grafana-info', 'Using tealstreet bybit public spot proxy');
+        } catch (_e) {}
+      }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
       this.ws = this.createWebsocket(
         baseUrl + '?requestId=' + nanoid(),
@@ -160,6 +168,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (this.isDisposed) return;
     this.trackLastReceived();
+    this.directFallback.onMessage();
 
     // Extract the "topic" field once via targeted indexOf instead of
     // O(N) substring scans per registered handler. Bybit V5 frames always

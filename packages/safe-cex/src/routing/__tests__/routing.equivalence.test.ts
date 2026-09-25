@@ -116,7 +116,10 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('okx', proxy).wsBusiness.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/okx/business',
     );
-    expect(resolveExchangeRouting('okx', offProxy).wsPrivate).toEqual({ tunnelled: false });
+    expect(resolveExchangeRouting('okx', offProxy).wsPrivate).toEqual({
+      tunnelled: false,
+      fallback: 'wss://okx-proxy-ja.tealstreet.io/ws/v5/private',
+    });
     expect(resolveExchangeRouting('blofin', proxy).wsPrivate.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/blofin/private',
     );
@@ -176,7 +179,8 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('bybitspot', bybitBrazil).wsPublic.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot',
     );
-    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate).toEqual({ tunnelled: false });
+    // Without the site id the route is direct (plus the athena fallback, asserted below).
+    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate.tunnelled).toBe(false);
     expect(resolveExchangeRouting('bybitdemo', bybitBrazil).wsPrivate).toEqual({ tunnelled: false });
   });
 
@@ -233,6 +237,52 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('coinbasespot', proxy).wsPrivate.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private',
     );
+  });
+
+  it('athena passthrough fallbacks (bybit/okx) attach only to DIRECT resolutions', () => {
+    // Direct path -> the Tokyo passthrough rides along as `fallback` for the class's
+    // WsDirectFallback. One hostname per venue; the path selects the channel.
+    expect(resolveExchangeRouting('bybit', offProxy).wsPublic).toEqual({
+      tunnelled: false,
+      fallback: 'wss://bybit-proxy-ja.tealstreet.io/v5/public/linear',
+    });
+    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate).toEqual({
+      tunnelled: false,
+      fallback: 'wss://bybit-proxy-ja.tealstreet.io/v5/private',
+    });
+    expect(resolveExchangeRouting('bybitinverse', offProxy).wsPublic.fallback).toBe(
+      'wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse',
+    );
+    expect(resolveExchangeRouting('bybitspot', offProxy).wsPublic.fallback).toBe(
+      'wss://bybit-proxy-ja.tealstreet.io/v5/public/spot',
+    );
+    expect(resolveExchangeRouting('okx', offProxy).wsPublic).toEqual({
+      tunnelled: false,
+      fallback: 'wss://okx-proxy-ja.tealstreet.io/ws/v5/public',
+    });
+    expect(resolveExchangeRouting('okx', offProxy).wsBusiness.fallback).toBe(
+      'wss://okx-proxy-ja.tealstreet.io/ws/v5/business',
+    );
+
+    // Tunnelled resolutions carry NO fallback: the Brazil path injects a header and
+    // the tealstreetProxy path is a deliberate choice; neither may degrade to a
+    // plain passthrough.
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPrivate).toEqual({
+      tunnelled: true,
+      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private',
+    });
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPublic.fallback).toBeUndefined();
+    expect(resolveExchangeRouting('okx', proxy).wsPrivate).toEqual({
+      tunnelled: true,
+      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/okx/private',
+    });
+
+    // Variants whose direct host is NOT stream.bybit.com / ws.okx.com get none:
+    // demo and EEA terminate elsewhere, hyrotrader is a first-party simulator.
+    for (const ex of ['bybitdemo', 'hyrotrader', 'okxeu', 'okxdemo', 'okxeudemo'] as ExchangeName[]) {
+      expect(resolveExchangeRouting(ex, offProxy).wsPublic.fallback, ex).toBeUndefined();
+      expect(resolveExchangeRouting(ex, offProxy).wsPrivate.fallback, ex).toBeUndefined();
+    }
   });
 
   it('howEgress is region-conditional for the region-pinned exchanges', () => {

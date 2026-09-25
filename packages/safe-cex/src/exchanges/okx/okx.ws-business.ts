@@ -36,7 +36,13 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsBusiness;
-      this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
+      const baseUrl = this.directFallback.resolveUrl(route.tunnelled ? route.host! : this.endpoint, route.fallback);
+      if (baseUrl === route.fallback) {
+        try {
+          this.parent.emitter.emit('grafana-info', 'Using tealstreet okx business proxy');
+        } catch (_e) {}
+      }
+      this.ws = this.createWebsocket(baseUrl);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
@@ -140,6 +146,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
+      this.directFallback.onMessage();
       this.emitWsDiagnosticReceive(data);
 
       if (data === 'pong') {

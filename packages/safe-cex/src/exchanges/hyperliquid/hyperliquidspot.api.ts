@@ -6,7 +6,9 @@ import qs from 'qs';
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { isSigningCaptureRequest } from '../../utils/signingCapture';
 import { BaseExchange } from '../base';
+import { getHyperliquidRestRequestWeight, hyperliquidRestRateLimiter } from './hyperliquid.rateLimiter';
 import { BASE_URLS, ENDPOINTS } from './hyperliquidspot.types';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
@@ -53,6 +55,12 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     // Binance API takes data as query params
     //return omit(nextConfig, 'data');
     return nextConfig;
+  });
+
+  xhr.interceptors.request.use(async (config) => {
+    if (isSigningCaptureRequest(config)) return config;
+    await hyperliquidRestRateLimiter.waitForToken(getHyperliquidRestRequestWeight(config));
+    return config;
   });
 
   xhr.interceptors.response.use(async (response) => {

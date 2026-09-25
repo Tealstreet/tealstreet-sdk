@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
-import { createAPI } from '../../exchanges/bybit/bybit.api';
+import {
+  BYBIT_ENV_MISMATCH_MESSAGE_PREFIX,
+  BYBIT_ENV_PROBE_CONFIG_KEY,
+  createAPI,
+} from '../../exchanges/bybit/bybit.api';
+import { BASE_URL, DEMO_URL, ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { virtualClock } from '../../utils/virtualClock';
 
 /**
@@ -81,20 +86,48 @@ describe('auth failure tick backoff', () => {
  * Callers then emitted `undefined` -> 'Unknown Exchange Error'.
  */
 describe('bybit response interceptor auth handling', () => {
-  const makeApi = () => {
+  const makeApi = (
+    {
+      exchangeName = 'bybit',
+      isDemo = false,
+      options = {},
+      getBybitRestBaseUrl,
+      probeResponseData = { retCode: 10003, retMsg: 'API key is invalid' },
+      probeImplementation,
+    }: {
+      exchangeName?: string;
+      isDemo?: boolean;
+      options?: Record<string, unknown>;
+      getBybitRestBaseUrl?: (network: 'livenet' | 'testnet') => string;
+      probeResponseData?: unknown;
+      probeImplementation?: (config: any) => Promise<any>;
+    } = {},
+  ) => {
     const exchange = {
-      name: 'bybit',
+      name: exchangeName,
+      isDemo,
+      getBybitRestBaseUrl,
       recordAuthFailure: vi.fn(),
       recordAuthSuccess: vi.fn(),
       emitAndLogError: vi.fn(),
     } as unknown as BaseExchange;
 
-    const xhr = createAPI({ key: 'k', secret: 's' } as any, exchange);
+    const xhr = createAPI({ key: 'k', secret: 's', ...options } as any, exchange);
+    const requestSpy = vi.spyOn(xhr, 'request').mockImplementation(
+      probeImplementation ??
+        (async (config) => ({
+          config,
+          data: probeResponseData,
+          headers: {},
+          status: 200,
+          statusText: 'OK',
+        })),
+    );
     // safeCexAxiosCreate registers its own response interceptor first; ours is
     // appended, so take the last registered handler rather than index 0.
     const handlers = (xhr.interceptors.response as any).handlers.filter(Boolean);
     const handler = handlers[handlers.length - 1].fulfilled;
-    return { exchange, handler };
+    return { exchange, handler, requestSpy };
   };
 
   const signed = { headers: { 'X-BAPI-SIGN': 'abc' } };
@@ -115,6 +148,124 @@ describe('bybit response interceptor auth handling', () => {
     expect(res.data.retMsg).toMatch(/unauthorized/i);
     expect(res.data.retMsg).toMatch(/api.?key/i);
     expect(exchange.recordAuthFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('detects a demo key used against live Bybit and preserves the auth marker', async () => {
+    const { exchange, handler, requestSpy } = makeApi({ probeResponseData: { retCode: 0, retMsg: 'OK' } });
+
+    const res = await handler({ status: 403, statusText: '', data: { raw_response: '' }, config: signed });
+
+    expect(res.data.retMsg).toMatch(new RegExp(`^${BYBIT_ENV_MISMATCH_MESSAGE_PREFIX}`));
+    expect(res.data.retMsg).toContain('this key is valid for Bybit Demo Trading');
+    expect(res.data.retMsg).toContain('this account is configured for live Bybit');
+    expect(res.data.retMsg).toContain('HTTP 403 Forbidden — API key rejected');
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        [BYBIT_ENV_PROBE_CONFIG_KEY]: true,
+        baseURL: DEMO_URL.livenet,
+        method: 'get',
+        url: ENDPOINTS.ACCOUNT,
+      }),
+    );
+    expect(exchange.recordAuthFailure).toHaveBeenCalledTimes(1);
+    expect(exchange.recordAuthSuccess).not.toHaveBeenCalled();
+  });
+
+  it('detects a live key used against Bybit Demo', async () => {
+    const { handler, requestSpy } = makeApi({
+      exchangeName: 'bybitdemo',
+      isDemo: true,
+      probeResponseData: { retCode: 0, retMsg: 'OK' },
+    });
+
+    const res = await handler({ status: 200, data: { retCode: 10003, retMsg: 'API key is invalid' }, config: signed });
+
+    expect(res.data.retMsg).toMatch(new RegExp(`^${BYBIT_ENV_MISMATCH_MESSAGE_PREFIX}`));
+    expect(res.data.retMsg).toContain('this key is valid for live Bybit');
+    expect(res.data.retMsg).toContain('this account is configured for Bybit Demo Trading');
+    expect(res.data.retMsg).toContain('API key is invalid');
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        [BYBIT_ENV_PROBE_CONFIG_KEY]: true,
+        baseURL: BASE_URL.livenet,
+        method: 'get',
+        url: ENDPOINTS.ACCOUNT,
+      }),
+    );
+  });
+
+  it('keeps the original auth message when the opposite environment rejects the key too', async () => {
+    const { handler } = makeApi();
+
+    const res = await handler({ status: 200, data: { retCode: 10003, retMsg: 'API key is invalid' }, config: signed });
+
+    expect(res.data.retMsg).toBe('API key is invalid');
+  });
+
+  it('does not let an environment probe affect auth-streak accounting', async () => {
+    const { exchange, handler } = makeApi();
+
+    await handler({
+      status: 200,
+      data: { retCode: 0, retMsg: 'OK' },
+      config: { ...signed, [BYBIT_ENV_PROBE_CONFIG_KEY]: true },
+    });
+
+    expect(exchange.recordAuthFailure).not.toHaveBeenCalled();
+    expect(exchange.recordAuthSuccess).not.toHaveBeenCalled();
+  });
+
+  it('dedupes concurrent auth failures through one in-flight environment probe', async () => {
+    let resolveProbe!: (value: any) => void;
+    const probeResponse = new Promise((resolve) => {
+      resolveProbe = resolve;
+    });
+    const { handler, requestSpy } = makeApi({
+      probeImplementation: async (config) => {
+        await probeResponse;
+        return {
+          config,
+          data: { retCode: 0, retMsg: 'OK' },
+          headers: {},
+          status: 200,
+          statusText: 'OK',
+        };
+      },
+    });
+
+    const first = handler({ status: 403, statusText: '', data: { raw_response: '' }, config: signed });
+    const second = handler({ status: 403, statusText: '', data: { raw_response: '' }, config: signed });
+    await Promise.resolve();
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+
+    resolveProbe(undefined);
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+    expect(firstResponse.data.retMsg).toContain(BYBIT_ENV_MISMATCH_MESSAGE_PREFIX);
+    expect(secondResponse.data.retMsg).toContain(BYBIT_ENV_MISMATCH_MESSAGE_PREFIX);
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(
+    [
+      ['bybitinverse', {}, undefined],
+      ['bybitspot', {}, undefined],
+      ['bybit', { bybitSiteId: 'BRA_BTL' }, undefined],
+      ['bybit', { testnet: true }, undefined],
+      ['bybit', {}, () => 'https://example.com'],
+    ] as Array<[string, Record<string, unknown>, ((network: 'livenet' | 'testnet') => string) | undefined]>,
+  )('skips environment probing for scoped-out account shape %#', async (exchangeName, options, getBybitRestBaseUrl) => {
+    const { handler, requestSpy } = makeApi({
+      exchangeName,
+      options,
+      getBybitRestBaseUrl,
+      probeResponseData: { retCode: 0, retMsg: 'OK' },
+    });
+
+    const res = await handler({ status: 403, statusText: '', data: { raw_response: '' }, config: signed });
+
+    expect(res.data.retMsg).toBe('HTTP 403 Forbidden — API key rejected');
+    expect(requestSpy).not.toHaveBeenCalled();
   });
 
   it('preserves other body fields when synthesizing', async () => {

@@ -228,6 +228,21 @@ they still use their separate `tpTriggerType` / `slTriggerType` behavior.
 
 ## WebSocket Implementation
 
+### Direct-path fallback through athena (`WsDirectFallback`)
+
+All six non-demo socket classes (`bybit`/`bybitinverse`/`bybitspot` × public/private)
+hold a `WsDirectFallback` (`utils/wsDirectFallback.ts`). A connection that produced
+zero messages is a silent failure; after two consecutive silent connects the class
+dials `route.fallback` — the athena Caddy passthrough `bybit-proxy-ja.tealstreet.io`
+declared in `routing/routingTable.ts` — for the rest of the socket's lifetime and
+emits `grafana-info` `Using tealstreet bybit … proxy`. Any message at all (a pong,
+an auth error) resets the streak, so a bad key never trips it. The resolver attaches
+`fallback` only to a DIRECT resolution: a Brazil (`BRA_BTL`) account is tunnelled
+through the header-injecting `bybitbra` path and gets no fallback, because the
+passthrough would drop `x-site-id`. Demo and hyrotrader terminate elsewhere and
+declare none. It must stay a fallback, never the default: everyone on it shares
+athena's single egress IP against Bybit's per-IP connection cap.
+
 ### Public WebSocket Topics
 
 | Topic Pattern               | Description                                                                   | Used By         |
@@ -903,14 +918,14 @@ already-gone branch, and from `cancelSymbolOrders`.
   would race it.
 - **Do not "fix" this with a periodic order refetch instead.** Bybit ticks at
   500ms and `fetchOrders` is cursor-paginated per settle coin.
-- `cancelSymbolOrders` snapshots the symbol's ids *before* the cancel, because it
+- `cancelSymbolOrders` snapshots the symbol's ids _before_ the cancel, because it
   re-places TP/SL afterwards and those new rows must survive.
 - The sibling `bybitinverse` and `bybitspot` adapters do not subclass
   `BybitExchange`; keep their recently placed preservation, WS `markOrderSeen`,
   and Brazil local REST lifecycle fallback in sync with regular Bybit.
 - A genuine cancel failure must leave the row in place — never hide real state.
 
-Still open by design: a manual (non-chaser) demo limit order that *fills* leaves
+Still open by design: a manual (non-chaser) demo limit order that _fills_ leaves
 its row behind, since nothing attempts a cancel on it. Chaser orders are covered
 because `cleanupInstance` and the reprice path both cancel by id.
 
@@ -1183,6 +1198,23 @@ The 401/403 strings are load-bearing beyond this file:
 `/HTTP 403 Forbidden[\s\S]*API key rejected/i`. Changing the wording silently
 breaks that grouping.
 
+**Bybit live/demo environment mismatch detection is an auth-failure add-on, not
+a separate startup path.** Bybit documents `10003` as "API key is invalid" and
+explicitly says to check whether the key and domain match across `mainnet`,
+`testnet`, `mainnet-demo`, and `testnet-demo`. For livenet `bybit` /
+`bybitdemo` only, the response interceptor probes the opposite REST host once
+with signed `GET /v5/user/query-api`: `bybit` probes `api-demo.bybit.com`, and
+`bybitdemo` probes `api.bybit.com`. A successful opposite-host probe prepends
+`Bybit API key environment mismatch: ...` to the original `retMsg`; it never
+replaces the original text, because `health/errorPatterns.ts` and the Sentry
+fingerprint above rely on `unauthorized` / `forbidden` / `API key rejected` or
+`API key is invalid` still being present. Probe requests are tagged out of
+`recordAuthFailure()` / `recordAuthSuccess()` and interceptor error logging, so
+a positive opposite-env probe cannot reset the backoff for the actually rejected
+primary environment. The probe is scoped out for `options.testnet`,
+`bybitSiteId: 'BRA_BTL'`, custom Bybit-compatible origins such as HyroTrader,
+`bybitinverse`, `bybitspot`, and remote-signer/no-secret paths.
+
 **Known limitation, deliberately not "fixed":** a bodyless 403 from the egress
 proxy is indistinguishable here from a venue credential rejection, so it is
 blamed on the user's key and counts toward the auth backoff. Bybit's real
@@ -1278,6 +1310,12 @@ Realized PnL comes from `/v5/position/closed-pnl` instead, and **that figure is 
 fees**, whereas `Execution.realizedPnl` is documented gross. Converting is required
 before the two can be summed; skipping it produces a residual exactly the size of the
 fee term, which reads as a mapper bug rather than a convention mismatch.
+
+Linear and inverse are separate `BaseExchange` subclasses, so keep
+`fetchHistoricalFills` parser aliases and fallback behavior mirrored. The chart
+fill-arrow path reads stored `Execution` rows; if inverse discards a valid primary
+execution shape or throws before order-history fallback, the inverse chart gets an
+empty fill list while linear Bybit still draws arrows.
 
 ## Closed-PnL rows carry no real open time
 
