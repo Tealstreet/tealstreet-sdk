@@ -714,6 +714,14 @@ Fetched per category via `fetchFees()` before market loading (`bybit.exchange.ts
   `bybit.types.ts`) is a DIFFERENT guard: it splits the inner per-call window for direct callers.
   So a full-7d chunk re-splits into two requests, the second covering a single millisecond.
 - Paginated with cursor, max 10 pages safety limit
+- **`category: 'inverse'` is VALIDATED against a live UNIFIED account** (2026-09-25, sheet row 6,
+  `yarn history-audit --ledger-probe --targets "bybitinverse:6:30" --proxy`). A real 5-contract
+  BTCUSD round trip produced two `TRADE` rows carrying `symbol: 'BTCUSD'`, which
+  `fetchIncomeHistoryRange` mapped to two `COMMISSION` records, which enumerated to `['BTCUSD']`,
+  which `fetchHistoricalFills` then answered with both fills. That whole chain is the fill-arrow
+  path, so it is proven rather than inferred. An account that has never traded inverse answers
+  `retCode 0` with an empty list — accepted and idle, NOT refused; the probe now prints which of
+  the two it saw, because they are the same value to the mapper.
 
 **`accountType` is hardcoded UNIFIED on BOTH variants, and that is not an oversight.** The
 transaction log serves UNIFIED accounts only. `BybitInverseExchange` has an `accountType` getter
