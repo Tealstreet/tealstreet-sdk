@@ -1238,12 +1238,41 @@ with signed `GET /v5/user/query-api`: `bybit` probes `api-demo.bybit.com`, and
 `Bybit API key environment mismatch: ...` to the original `retMsg`; it never
 replaces the original text, because `health/errorPatterns.ts` and the Sentry
 fingerprint above rely on `unauthorized` / `forbidden` / `API key rejected` or
-`API key is invalid` still being present. Probe requests are tagged out of
+`API key is invalid` still being present. **That reliance was only made true on
+2026-09-25** — the bybit entry's literal was `Api key invalid`, which the live
+`API key is invalid.` does not contain, so the commonest rejection of all
+classified as `unknown` and raised no auth badge. The entry now carries a regex
+for the live wording AND the bare ret codes, which cannot drift with bybit's
+copy. Probe requests are tagged out of
 `recordAuthFailure()` / `recordAuthSuccess()` and interceptor error logging, so
 a positive opposite-env probe cannot reset the backoff for the actually rejected
 primary environment. The probe is scoped out for `options.testnet`,
 `bybitSiteId: 'BRA_BTL'`, custom Bybit-compatible origins such as HyroTrader,
 `bybitinverse`, `bybitspot`, and remote-signer/no-secret paths.
+
+**`start()` does not claim the account is ready when the key was rejected.** All
+three bybit variants end startup with a readiness line, and they used to log
+`Ready to trade on Bybit` unconditionally — beside the auth error, for an account
+that could not trade. `fetchMarginAccountInfos` now THROWS the venue's `retMsg`
+instead of returning after `emitAndLogError`, and `start()` catches it into
+`privateProbeFailure`, which the readiness line reads. The message quotes that
+reason verbatim rather than classifying it, so it cannot blame the key for a
+transport failure.
+
+**Do NOT gate that line on `authFailureStreak`.** It reads correctly and is a
+no-op in production: `bybit.api.ts` signs markets and tickers too, so their
+successful 200s call `recordAuthSuccess()` and zero the streak — and in the
+`!useExternalPublicData` branch they settle AFTER the probe has already failed.
+The probe's own result is the only signal a later request cannot reset. The
+`externalPublicData=false` case in `__tests__/bybit.startup-auth-log.test.ts`
+exists to catch exactly this: a streak-based gate passes the other case and
+fails that one.
+
+**Startup still SUCCEEDS on a rejected key, deliberately.** Markets, tickers and
+the public socket are all up before that point, so throwing out of `start()`
+would dispose the exchange and strand public market data that works. The
+readiness line degrades to a warning naming what is unavailable; the red badge,
+the toast and the tick backoff are separate mechanisms that already fire.
 
 **Known limitation, deliberately not "fixed":** a bodyless 403 from the egress
 proxy is indistinguishable here from a venue credential rejection, so it is

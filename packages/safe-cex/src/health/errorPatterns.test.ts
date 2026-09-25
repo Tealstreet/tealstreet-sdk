@@ -257,3 +257,43 @@ describe('errorPatterns', () => {
     });
   });
 });
+
+describe('bybit auth rejections the venue actually sends', () => {
+  const match = (message: string) => {
+    const patterns = mergePatterns(DEFAULT_ERROR_PATTERNS, EXCHANGE_SPECIFIC_PATTERNS.bybit);
+    for (const pattern of patterns) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  // Verbatim retMsg strings. 10003 classified as `unknown` until 2026-09-25,
+  // so the commonest rejection of all never raised the auth badge.
+  it('classifies the live 10003 text, which the older literal missed', () => {
+    expect(match('API key is invalid.')).toBe('auth_invalid');
+  });
+
+  it('classifies a LABELLED ret code, and keeps each code in its real category', () => {
+    expect(match('Bybit request failed with code 10003')).toBe('auth_invalid');
+    expect(match('retCode: 10010 Unmatched IP')).toBe('auth_permissions');
+    expect(match('retCode=33004')).toBe('auth_expired');
+  });
+
+  it('does not read a price, balance or id that happens to contain a ret code', () => {
+    expect(match('order price 10005.5 out of range')).not.toBe('auth_permissions');
+    expect(match('Balance 33004.21 USDT insufficient')).not.toBe('auth_expired');
+    expect(match('orderId 33004-abc was not found')).not.toBe('auth_expired');
+  });
+
+  it('keeps an expired key distinct from an invalid one', () => {
+    expect(match('api key has expired')).toBe('auth_expired');
+  });
+
+  it('does not read a rate limit or a clock skew as an auth failure', () => {
+    expect(match('Too many visits!')).not.toBe('auth_invalid');
+    expect(match('invalid request, please check your server timestamp or recv_window param')).toBe('time_sync');
+  });
+});

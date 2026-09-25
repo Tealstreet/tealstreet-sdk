@@ -18,6 +18,7 @@ import {
   Candle,
   CoinBalance,
   ExchangeOptions,
+  LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
@@ -287,9 +288,21 @@ export class BybitSpotExchange extends BaseExchange {
 
     // Awaited here rather than inside the branch above: it must run on both
     // public-data paths, and it is what stamps margin mode onto positions.
-    if (marginAccountInfos) await marginAccountInfos.catch(() => undefined);
+    const privateProbeFailure = marginAccountInfos
+      ? await marginAccountInfos.then(() => undefined).catch((err: any) => String(err?.message || err) || 'request failed')
+      : undefined;
 
-    this.log(`Ready to trade on Bybit`);
+    // A rejected key comes back as HTTP 200 with a non-OK retMsg, so the probe is the
+    // only thing that knows. `authFailureStreak` cannot be used: markets and tickers
+    // are signed too, and their success calls recordAuthSuccess() after the probe.
+    if (privateProbeFailure) {
+      this.log(
+        `Bybit market data is ready, but the private API was rejected (${privateProbeFailure}) — trading is unavailable`,
+        LogSeverity.Warning,
+      );
+    } else {
+      this.log(`Ready to trade on Bybit`);
+    }
 
     // start ticking live data
     // balance, tickers, positions
@@ -386,8 +399,11 @@ export class BybitSpotExchange extends BaseExchange {
     const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT_MARGIN);
 
     if (data.retMsg !== 'OK') {
+      // Thrown, not returned: this is the only signal for the readiness log below
+      // that cannot be reset by a later request. Emitting first is required —
+      // see exchanges/CLAUDE.md, "Pre-flight validation throws must emit first".
       this.emitAndLogError(data.retMsg);
-      return;
+      throw new Error(data.retMsg);
     }
 
     this.unifiedMarginStatus = data?.result?.unifiedMarginStatus;

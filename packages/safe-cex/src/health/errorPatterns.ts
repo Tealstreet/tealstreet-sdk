@@ -193,7 +193,34 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
     {
       category: 'auth_invalid',
       severity: 'critical',
-      patterns: ['apiKey is missing', 'error sign!', 'invalid api_key', 'Api key invalid'],
+      // The live retMsg for 10003 is "API key is invalid." — with an "is" the
+      // older literal lacks, so the commonest bybit rejection classified as
+      // `unknown` and never raised the auth badge.
+      patterns: [
+        'apiKey is missing',
+        'error sign!',
+        'invalid api_key',
+        'Api key invalid',
+        /api\s*key\s+is\s+invalid/i,
+        // Codes must be anchored to a `code`/`retCode` label. A bare /\b10005\b/
+        // also matches "order price 10005.5 out of range" and a balance of
+        // 33004.21, and a false auth_invalid is latched critical: red badge plus
+        // five minutes of suppressed reloads on a perfectly good key.
+        /\b(?:ret)?code[=:\s]+(?:10003|10004)\b/i,
+      ],
+    },
+    {
+      // Split by what the code MEANS: 10005/10010 are permission and IP-allowlist
+      // failures, not a bad key, and 33004 is expiry. Folding all five into
+      // auth_invalid mislabels a working key whose IP moved.
+      category: 'auth_permissions',
+      severity: 'critical',
+      patterns: [/\b(?:ret)?code[=:\s]+(?:10005|10010)\b/i],
+    },
+    {
+      category: 'auth_expired',
+      severity: 'critical',
+      patterns: [/api\s*key\s+has\s+expired/i, /\b(?:ret)?code[=:\s]+33004\b/i],
     },
     {
       category: 'time_sync',
