@@ -842,20 +842,29 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 
 **HIP-3 market metadata**: Sequential per DEX. Official `/info` weights are 20 for `metaAndAssetCtxs`, 60 for `userRole`, and 1200 total per IP per minute. Live discovery on 2026-07-15 returned one core plus nine HIP-3 entries on mainnet; testnet's much larger catalog remains restricted to the four-DEX whitelist. Do not turn this loop back into `Promise.all`: multiple browser accounts can share one proxy egress budget.
 
-**The budget is DERIVED from the dex count, and a fixed one is a time bomb.** The
-flat 8 seconds it used to carry stopped fitting the moment mainnet passed ~6 dexes:
+**The budget is DERIVED from the dex count, because a fixed one is a hazard.**
 `hyperliquidRestRateLimiter` paces by weight at 50ms per unit and `metaAndAssetCtxs`
-is weight 20, so **each dex reserves a full second of a strictly serial timeline** —
-and core perps, `perpDexs` and spot metadata have already spent ~2s of it before the
-loop starts. With the ten dexes `perpDexs` returned on 2026-09-25 (`xyz flx vntl hyna km abcd
-cash para mkts io` — note mainnet's is `vntl`, while `TESTNET_HIP3_WHITELIST` carries
-`vntls`; 292 markets in total) the loop needs ~10s and got 8, so it always timed out.
-Raw network for all ten is 1.4s; the pacer is the entire cost.
+is weight 20, so each dex reserves up to a second of a strictly serial timeline.
+Against the flat 8 seconds this used to carry, a long enough dex list runs out
+mid-loop. On 2026-09-25 `perpDexs` returned ten (`xyz flx vntl hyna km abcd cash para
+mkts io`; note mainnet's is `vntl` while `TESTNET_HIP3_WHITELIST` carries `vntls`).
+
+**This was NOT observed failing in production, and the record should say so.** It was
+investigated as the cause of "HIP-3 markets not showing" and was not: a client on the
+pre-change build was confirmed holding markets from dex position 9 AND position 10, so
+the loop was reaching the end of the list. The reported symptom was six `*500` markets
+where only two appeared, and those four are simply `isDelisted` with no `midPx` —
+correctly skipped. Six of the ten dexes are entirely delisted; only xyz (109 live),
+para (29), mkts (4) and io (8) carry anything. The arithmetic that predicted a timeout
+came from simulating the pacer under assumed contention; real startup leaves idle gaps
+that let `nextAvailableAt` drain, so the loop is far cheaper than the worst case.
+Treat the budget and the partial-keep below as hazard removal, not as a shipped fix
+for a live outage.
 
 **Partial results are KEPT, and that is the difference between degraded and absent.**
-The loop used to discard every completed dex when a later one ran out of budget —
-seven of ten finished and all seven were thrown away, so no HIP-3 market appeared at
-all. `hip3DexNames` is now set to exactly the dexes that loaded, which matters beyond
+The loop used to discard every completed dex when a later one ran out of budget, so
+one slow dex at the end of the list could remove every HIP-3 market from the app.
+`hip3DexNames` is now set to exactly the dexes that loaded, which matters beyond
 the market list: it drives the HIP-3 WS subscriptions and the order/position refresh,
 so listing a dex whose markets are absent (or clearing it while markets are present)
 desynchronises both.
