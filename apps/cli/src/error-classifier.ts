@@ -15,17 +15,11 @@ export type CLIAction =
   | { action: 'error'; message?: string }
   | { action: 'passthrough' };
 
-const BYBIT_ENV_MISMATCH_MESSAGE_PREFIX = 'Bybit API key environment mismatch';
-
 /**
  * Classify an error category into a CLI action.
  * Exhaustive switch ensures compile-time safety when new categories are added.
  */
-export function classifyForCLI(
-  category: ErrorCategory | null,
-  _msgType: 'error' | 'warning' = 'error',
-  rawMessage?: string,
-): CLIAction {
+export function classifyForCLI(category: ErrorCategory | null, msgType: 'error' | 'warning' = 'error'): CLIAction {
   switch (category) {
     // Suppressed — don't print at all
     case 'suppressed':
@@ -33,9 +27,6 @@ export function classifyForCLI(
 
     // Auth errors — critical, show once prominently
     case 'auth_invalid':
-      if (rawMessage?.includes(BYBIT_ENV_MISMATCH_MESSAGE_PREFIX)) {
-        return { action: 'critical' };
-      }
       return { action: 'critical', message: 'Invalid API key or secret' };
     case 'auth_expired':
       return { action: 'critical', message: 'API key has expired' };

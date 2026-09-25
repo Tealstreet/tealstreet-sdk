@@ -45,13 +45,6 @@ const resolveRestPool = (declared: RestPool, proxyRegion?: string): RestPool =>
 
 const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions): ResolvedWs => {
   if (!strategy) return { tunnelled: false };
-  const resolved = resolveWsKind(strategy, o);
-  // A declared fallback rides along only on a DIRECT resolution (see WsStrategy).
-  if (resolved.tunnelled || resolved.fallback || !strategy.fallback) return resolved;
-  return { ...resolved, fallback: strategy.fallback };
-};
-
-const resolveWsKind = (strategy: WsStrategy, o: RoutingOptions): ResolvedWs => {
   switch (strategy.kind) {
     case 'direct':
       return { tunnelled: false };

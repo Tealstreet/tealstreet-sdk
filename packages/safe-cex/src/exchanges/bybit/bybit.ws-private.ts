@@ -7,7 +7,6 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { OrderStatus, Position, Writable } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -16,8 +15,6 @@ import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybit.types';
 
 export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
-  private directFallback = new WsDirectFallback();
-
   private authRetries = 0;
 
   connectAndSubscribe = () => {
@@ -26,12 +23,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
       const directUrl =
         this.parent.getBybitPrivateWsUrl?.(network) ?? (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network];
-      const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);
-      if (baseUrl === route.fallback) {
-        try {
-          this.parent.emitter.emit('grafana-info', 'Using tealstreet bybit private proxy');
-        } catch (_e) {}
-      }
+      const baseUrl = route.tunnelled && route.host ? route.host : directUrl;
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
       this.ws = this.createWebsocket(
         baseUrl + '?requestId=' + nanoid(),
@@ -65,7 +57,6 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      this.directFallback.onMessage();
       this.emitWsDiagnosticReceive(data);
 
       const json = jsonParse(data);

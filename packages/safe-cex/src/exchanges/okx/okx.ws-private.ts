@@ -7,7 +7,6 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { OrderStatus } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
 import { subtract } from '../../utils/safe-math';
@@ -17,8 +16,6 @@ import { BASE_WS_URLS } from './okx.types';
 
 export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   private recentFillKeys = new Map<string, number>();
-
-  protected directFallback = new WsDirectFallback();
 
   private readonly fillDedupeWindowMs = 60_000;
 
@@ -38,13 +35,7 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
-      const baseUrl = this.directFallback.resolveUrl(route.tunnelled ? route.host! : this.endpoint, route.fallback);
-      if (baseUrl === route.fallback) {
-        try {
-          this.parent.emitter.emit('grafana-info', 'Using tealstreet okx private proxy');
-        } catch (_e) {}
-      }
-      this.ws = this.createWebsocket(baseUrl);
+      this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
@@ -141,7 +132,6 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      this.directFallback.onMessage();
       this.emitWsDiagnosticReceive(data);
 
       if (data.includes('event":"subscribe"')) {

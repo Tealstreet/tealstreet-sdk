@@ -44,7 +44,7 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { createAPI, isCryptocomAuthenticationErrorCode, isCryptocomAuthenticationFailureMessage } from './cryptocom.api';
+import { createAPI } from './cryptocom.api';
 import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, mapCandlestickInterval } from './cryptocom.types';
 import { CryptocomPrivateWebSocket } from './cryptocom.ws-private';
 import { CryptocomPublicWebSocket } from './cryptocom.ws-public';
@@ -55,14 +55,8 @@ export class CryptocomExchange extends BaseExchange {
   declare publicWebsocket: CryptocomPublicWebSocket;
   declare privateWebsocket: CryptocomPrivateWebSocket;
 
-  private _suppressCryptocomValidationErrorEmission = false;
-
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
-
-  get suppressCryptocomValidationErrorEmission(): boolean {
-    return this._suppressCryptocomValidationErrorEmission;
-  }
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -94,24 +88,12 @@ export class CryptocomExchange extends BaseExchange {
   };
 
   validateAccount = async () => {
-    const previousSuppressValidationErrorEmission = this._suppressCryptocomValidationErrorEmission;
-    this._suppressCryptocomValidationErrorEmission = true;
     try {
       await this.xhr.post(ENDPOINTS.BALANCE, {});
       return { error: '', balance: await this.fetchBalance().catch(() => undefined) };
     } catch (err: any) {
-      const errorMessage = err?.response?.data?.message || err?.message || 'Invalid API key or secret';
-      const isValidationAuthError =
-        isCryptocomAuthenticationErrorCode(err?.response?.data?.code) ||
-        isCryptocomAuthenticationFailureMessage(errorMessage);
-
-      if (!isValidationAuthError) {
-        this.emitAndLogError(errorMessage);
-      }
-
-      return { error: errorMessage };
-    } finally {
-      this._suppressCryptocomValidationErrorEmission = previousSuppressValidationErrorEmission;
+      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      return { error: err?.response?.data?.message || err?.message || 'Invalid API key or secret' };
     }
   };
 

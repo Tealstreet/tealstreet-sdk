@@ -304,7 +304,9 @@ export class BybitInverseExchange extends BaseExchange {
     const nextOrder: Order = {
       ...order,
       ...update,
-      ...(typeof update.amount === 'number' ? { remaining: Math.max(0, update.amount - (order.filled || 0)) } : {}),
+      ...(typeof update.amount === 'number'
+        ? { remaining: Math.max(0, update.amount - (order.filled || 0)) }
+        : {}),
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 
@@ -1217,7 +1219,6 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     const executions: Execution[] = [];
-    let primaryRowsCount = 0;
     const MAX_RECURSION_DEPTH = 5;
     const queryWindows = this.getExecutionQueryWindows(from, to);
     const recursiveFetch = async (
@@ -1259,7 +1260,6 @@ export class BybitInverseExchange extends BaseExchange {
         }
 
         const executionsList = Array.isArray(data?.result?.list) ? data.result.list : [];
-        primaryRowsCount += executionsList.length;
 
         for (const exec of executionsList) {
           // Bybit USER_TRADES can include non-fill rows (Funding/Settle/Delivery).
@@ -1277,28 +1277,25 @@ export class BybitInverseExchange extends BaseExchange {
             continue;
           }
 
-          const qty = parseFloat(exec.execQty ?? exec.closedSize ?? exec.qty ?? '0');
-          let price = parseFloat(exec.execPrice ?? exec.avgPrice ?? exec.price ?? '0');
-          if (!Number.isFinite(price) || price <= 0) {
-            const execValue = parseFloat(exec.execValue ?? exec.closedPnl ?? '0');
-            if (Number.isFinite(execValue) && execValue > 0 && Number.isFinite(qty) && qty > 0) {
-              price = execValue / qty;
-            }
-          }
-          const side = `${exec.side ?? exec.orderSide ?? ''}`.trim().toLowerCase();
+          const qty = parseFloat(exec.execQty ?? '0');
+          const price = parseFloat(exec.execPrice ?? '0');
+          const side = `${exec.side ?? ''}`.trim().toLowerCase();
           const isBuy = side === 'buy';
           const isSell = side === 'sell';
           if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0 || price <= 0 || (!isBuy && !isSell)) {
             continue;
           }
 
-          const rawExecTime = Number(exec.execTime ?? exec.tradeTime ?? exec.updatedTime ?? exec.createdTime);
+          const rawExecTime = Number(exec.execTime);
           if (!Number.isFinite(rawExecTime) || rawExecTime <= 0) {
             continue;
           }
           const timestamp = rawExecTime > 100_000_000_000 ? Math.floor(rawExecTime / 1000) : Math.floor(rawExecTime);
 
           executions.push({
+            // bybit.exchange.ts sets this on its own copy of this loop; inverse is a
+            // standalone BaseExchange subclass, so it was silently dropping the only
+            // per-fill dedupe key.
             id: exec.execId ? String(exec.execId) : undefined,
             timestamp,
             symbol: exec.symbol || symbol,
@@ -1306,9 +1303,8 @@ export class BybitInverseExchange extends BaseExchange {
             price,
             qty,
             side: isBuy ? OrderSide.Buy : OrderSide.Sell,
-            commission: Math.abs(parseFloat(exec.execFee ?? exec.fee ?? '0')),
-            commissionAsset: exec.feeCurrency || exec.feeCoin || exec.quoteCoin,
-            maker: typeof exec.isMaker === 'boolean' ? exec.isMaker : undefined,
+            commission: parseFloat(exec.execFee || '0'),
+            commissionAsset: exec.feeCurrency,
           });
         }
 
@@ -1317,8 +1313,8 @@ export class BybitInverseExchange extends BaseExchange {
           await recursiveFetch(queryWindow, data.result.nextPageCursor, depth + 1);
         }
       } catch (error: any) {
-        this.log(`Error fetching executions: ${error.message}`, LogSeverity.Warning);
-        return;
+        this.log(`Error fetching executions: ${error.message}`, LogSeverity.Error);
+        throw error;
       }
     };
 
@@ -1333,16 +1329,7 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     try {
-      const fallbackWarning = `fetchHistoricalFills primary path produced no valid fills for ${symbol}; falling back to ${ENDPOINTS.USER_ORDERS} (rawRows=${primaryRowsCount}, windows=${queryWindows.length}, limit=${limit}, hasOrderId=${Boolean(orderId)})`;
-      this.log(fallbackWarning, LogSeverity.Warning);
-      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-        console.warn(`[${this.name}] ${fallbackWarning}`);
-      }
-      const fallbackExecutions = await this.fetchExecutionsFallbackFromOrderHistory(opts);
-      if (fallbackExecutions.length === 0) {
-        this.log(`fetchHistoricalFills fallback returned no rows for ${symbol}`, LogSeverity.Warning);
-      }
-      return fallbackExecutions;
+      return await this.fetchExecutionsFallbackFromOrderHistory(opts);
     } catch (fallbackErr: any) {
       this.log(
         `Failed order-history fallback fetch executions: ${fallbackErr?.message || fallbackErr}`,

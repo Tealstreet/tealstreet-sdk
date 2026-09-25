@@ -34,7 +34,7 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                               |
 | `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                |
 | `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                   |
-| `hyperliquid.rateLimiter.ts` | Shared weighted REST limiter (1200 weight/minute) plus request-weight classification for `/info` and `/exchange`.                                                                                                                                                                                            |
+| `hyperliquid.rateLimiter.ts` | Token bucket rate limiter (1200 tokens/minute capacity).                                                                                                                                                                                                                                                      |
 | `hyperliquid.agent.ts`       | Agent wallet (API wallet) creation and approval via browser wallet (MetaMask). Handles EIP-712 `ApproveAgent` signing, network switching (Arbitrum One / Sepolia).                                                                                                                                            |
 | `hyperliquid.builderFee.ts`  | Builder fee approval and checking. EIP-712 `ApproveBuilderFee` signing, `checkBuilderFeeApproved()` REST check, `approveBuilderFeeWithBrowserWallet()` full browser flow.                                                                                                                                     |
 | `hyperliquid.cross-cache.ts` | Cross-context singleton cache for HIP-3 order type tracking and fill deduplication. Uses `sessionStorage` + `BroadcastChannel` for cross-worker/iframe synchronization. Manages pre-placement cache, pending orders cache, and seen fills set.                                                                |
@@ -282,12 +282,10 @@ Phase 5: Start tick loop
 
 Hyperliquid uses only two REST endpoints. All operations are differentiated by the `type` field in the POST body.
 
-| Endpoint         | Purpose                                                                               | Rate Limit                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `POST /info`     | Read operations (markets, positions, orders, balances, candles, fills)                | Shared 1200 weight/minute REST budget via `hyperliquidRestRateLimiter`; weighted by `type` |
-| `POST /exchange` | Write operations (place/cancel/modify orders, update leverage, approve agent/builder) | Shared 1200 weight/minute REST budget plus the legacy 3 RPS write-client guard             |
-
-The official Hyperliquid limit is a shared per-IP weighted REST budget, not separate per-client request-count buckets. Most `/info` calls cost 20, `userRole` costs 60, selected low-cost reads such as `clearinghouseState` cost 2, and unbatched `/exchange` actions cost 1. Keep `createExchangeAPI` and `createInfoAPI` on the shared weighted limiter so multiple Hyperliquid accounts in one session cannot each spend the full budget during startup or reconnect.
+| Endpoint         | Purpose                                                                               | Rate Limit                     |
+| ---------------- | ------------------------------------------------------------------------------------- | ------------------------------ |
+| `POST /info`     | Read operations (markets, positions, orders, balances, candles, fills)                | 3 RPS (via `axios-rate-limit`) |
+| `POST /exchange` | Write operations (place/cancel/modify orders, update leverage, approve agent/builder) | 3 RPS (via `axios-rate-limit`) |
 
 ### Info Types (POST /info, `type` field)
 

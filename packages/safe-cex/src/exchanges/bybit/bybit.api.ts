@@ -21,19 +21,17 @@ import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.t
 // which is usually clock drift and is already retried.
 const BYBIT_AUTH_RET_CODES = new Set([
   10003, // API key is invalid
+  // A wrong SECRET fails here, not at 10003 — the key is recognised and the
+  // signature it produced is not. Without this the streak never moves, so the
+  // CLI rendered a table of zeros and exited 0 on a mistyped secret. Measured
+  // against api-demo.bybit.com with a truncated secret: retCode 10004.
+  10004, // error sign / signature mismatch
   10005, // permission denied for current apikey
   10010, // unmatched IP
   33004, // api key has expired
 ]);
 
 const CLOCK_SYNC_RETRY_CONFIG_KEY = 'safeCexBybitClockSyncRetry';
-export const BYBIT_ENV_PROBE_CONFIG_KEY = 'safeCexBybitEnvProbe';
-export const BYBIT_ENV_MISMATCH_MESSAGE_PREFIX = 'Bybit API key environment mismatch';
-
-type BybitEnvProbeResult =
-  | { kind: 'mismatch'; diagnostic: string }
-  | { kind: 'no-mismatch' }
-  | { kind: 'probe-failed' };
 
 // KLINE is fetched unsigned (headers are stripped below) and shares this
 // client, so header presence is what distinguishes a credential-proving call.
@@ -49,9 +47,6 @@ const isBybitClockSyncRetMsg = (retMsg: string) => retMsg.toLowerCase().includes
 
 const hasRetriedClockSync = (config: unknown) =>
   Boolean((config as Record<string, unknown> | undefined)?.[CLOCK_SYNC_RETRY_CONFIG_KEY]);
-
-const isBybitEnvProbeRequest = (config: unknown) =>
-  Boolean((config as Record<string, unknown> | undefined)?.[BYBIT_ENV_PROBE_CONFIG_KEY]);
 
 export const shouldRetryBybitRequest = (error: any) => {
   const isNetwork = isNetworkError(error);
@@ -73,15 +68,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const usesBybitSiteHeaders =
     exchange.name === 'bybit' || exchange.name === 'bybitinverse' || exchange.name === 'bybitspot';
   const bybitSiteHeaders = usesBybitSiteHeaders ? getBybitSiteHeaders(options) : {};
-  const isConfiguredForDemo = exchange.name === 'bybitdemo' || exchange.isDemo;
-  const expectedBybitBaseURL = isConfiguredForDemo ? DEMO_URL[network] : BASE_URL[network];
-  const canProbeBybitEnvironment =
-    network === 'livenet' &&
-    (exchange.name === 'bybit' || exchange.name === 'bybitdemo') &&
-    baseURL === expectedBybitBaseURL &&
-    !(options as { bybitSiteId?: unknown }).bybitSiteId &&
-    !options.remoteSigner &&
-    Boolean(options.key && options.secret);
   const xhr = safeCexAxiosCreate(
     {
       baseURL,
@@ -99,72 +85,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     options,
     exchange,
   );
-  let envProbePromise: Promise<BybitEnvProbeResult> | undefined;
-  let envProbeResult: BybitEnvProbeResult | undefined;
-
-  const getOppositeBybitEnvironmentProbe = () => {
-    if (!canProbeBybitEnvironment) return undefined;
-
-    if (isConfiguredForDemo) {
-      return {
-        baseURL: BASE_URL[network],
-        keyEnvironment: 'live Bybit',
-        configuredEnvironment: 'Bybit Demo Trading',
-        remediation: 'Create a Demo Trading API key or switch the account to live Bybit.',
-      };
-    }
-
-    return {
-      baseURL: DEMO_URL[network],
-      keyEnvironment: 'Bybit Demo Trading',
-      configuredEnvironment: 'live Bybit',
-      remediation: 'Create a live Bybit API key or switch the account to Bybit Demo Trading.',
-    };
-  };
-
-  const probeOppositeBybitEnvironment = async (): Promise<BybitEnvProbeResult> => {
-    const probe = getOppositeBybitEnvironmentProbe();
-    if (!probe) return { kind: 'no-mismatch' };
-
-    try {
-      const { data } = await xhr.request({
-        baseURL: probe.baseURL,
-        url: ENDPOINTS.ACCOUNT,
-        method: 'get',
-        params: {},
-        [BYBIT_ENV_PROBE_CONFIG_KEY]: true,
-      } as any);
-      const probeMeta = getBybitResponseMeta(data);
-
-      if (!probeMeta.isSuccess) {
-        return { kind: 'no-mismatch' };
-      }
-
-      return {
-        kind: 'mismatch',
-        diagnostic: `${BYBIT_ENV_MISMATCH_MESSAGE_PREFIX}: this key is valid for ${probe.keyEnvironment}, but this account is configured for ${probe.configuredEnvironment}. ${probe.remediation}`,
-      };
-    } catch {
-      return { kind: 'probe-failed' };
-    }
-  };
-
-  const getBybitEnvProbeResult = async () => {
-    if (envProbeResult) return envProbeResult;
-    envProbePromise ??= probeOppositeBybitEnvironment();
-    envProbeResult = await envProbePromise;
-    return envProbeResult;
-  };
-
-  const maybePrependBybitEnvMismatch = async (retCode: number | undefined, retMsg: string | undefined) => {
-    if (retCode !== 10003 && retCode !== 401 && retCode !== 403) return retMsg;
-    if (!retMsg || retMsg.includes(BYBIT_ENV_MISMATCH_MESSAGE_PREFIX)) return retMsg;
-
-    const result = await getBybitEnvProbeResult();
-    if (result.kind !== 'mismatch') return retMsg;
-
-    return `${result.diagnostic} [${retMsg}]`;
-  };
 
   // retry requests on network errors instead of throwing
   // and some signature errors
@@ -231,7 +151,6 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   xhr.interceptors.response.use(async (response) => {
     const responseMeta = getBybitResponseMeta(response.data);
-    const isEnvProbeResponse = isBybitEnvProbeRequest(response.config);
 
     // The HOW adapter resolves non-2xx without axios' settle(), so an auth
     // failure arrives here as a *success* carrying `{"raw_response":""}` — no
@@ -254,15 +173,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         retCode: response.status,
         retMsg: `HTTP ${response.status}${reason ? ` ${reason}` : ''}`,
       };
-      if (isEnvProbeResponse) return response;
-      if (isAuthStatus) {
-        exchange.recordAuthFailure();
-        response.data.retMsg = await maybePrependBybitEnvMismatch(response.status, response.data.retMsg);
-      }
+      if (isAuthStatus) exchange.recordAuthFailure();
       return response;
     }
-
-    if (isEnvProbeResponse) return response;
 
     // Bybit also returns credential failures inside a normal envelope, both on
     // 4xx and on HTTP 200, so status alone under-counts the streak.
@@ -275,13 +188,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       exchange.recordAuthSuccess();
     }
 
-    if (responseMeta.retCode === 10003) {
-      response.data.retMsg = await maybePrependBybitEnvMismatch(responseMeta.retCode, responseMeta.retMsg);
-    }
-
-    const finalResponseMeta = getBybitResponseMeta(response.data);
-    if (response.data && finalResponseMeta.hasExplicitStatus && !finalResponseMeta.isSuccess) {
-      const retMsg = finalResponseMeta.retMsg || '';
+    if (response.data && responseMeta.hasExplicitStatus && !responseMeta.isSuccess) {
+      const retMsg = responseMeta.retMsg || '';
       if (isBybitClockSyncRetMsg(retMsg)) {
         if (!hasRetriedClockSync(response.config)) {
           await virtualClock.syncBybitClientServerTime(); // This method name stays the same as it's a common sync
@@ -291,7 +199,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
           } as typeof response.config);
         }
         exchange.emitAndLogError('Local time is out of sync after retry');
-      } else if (finalResponseMeta.retCode !== undefined ? finalResponseMeta.retCode !== 0 : true) {
+      } else if (responseMeta.retCode !== undefined ? responseMeta.retCode !== 0 : true) {
         if (response.data?.raw_response?.includes?.('There might be too much traffic or a configuration error')) {
           exchange.emitAndLogError('Server was unavailable for a request, retrying...');
         }
