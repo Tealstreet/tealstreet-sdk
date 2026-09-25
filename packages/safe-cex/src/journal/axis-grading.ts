@@ -135,6 +135,11 @@ const AVAILABLE_AXES: Partial<Record<ExchangeName, readonly HistoryAxis[]>> = {
   // silently ship it with collection switched off. The other four inherit
   // `enabled: true` through their metadata spread and are live.
   kucoinspot: ['fills'],
+  // bybitinverse gained a real transaction-log route on 2026-09-25, so by this
+  // table's own criterion — axes a venue CAN SERVE, graded or not — it now
+  // qualifies for 'income' too. It is deliberately not listed: the route has
+  // never been run against a live inverse account, so claiming the axis would
+  // assert something unmeasured. Add it once a probe returns rows.
   bybitinverse: ['fills'],
   bitgetusdc: ['positions', 'fills', 'income'],
   bitgetinverse: ['positions', 'fills', 'income'],

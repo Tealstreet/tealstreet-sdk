@@ -26,15 +26,16 @@ When working with Bybit exchange integration, consult the official API documenta
 
 ### Core (Linear USDT/USDC Perpetual) - `BybitExchange`
 
-| File                    | Description                                                                                                                                                                                                                                                                |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bybit.exchange.ts`     | Main exchange class extending `BaseExchange`. Handles linear perpetual futures (USDT and USDC settled). Contains order placement, position management, balance calculation, and all trading operations.                                                                    |
-| `bybit.api.ts`          | REST API client factory. Creates Axios instance with HMAC-SHA256 signing, retry logic, recv_window handling, and virtual clock time synchronization.                                                                                                                       |
-| `bybit.order-params.ts` | Validates and serializes shared `maxSlippagePct` plus adapter-only typed BBO and TickSize execution controls.                                                                                                                                                              |
-| `bybit.types.ts`        | Type definitions, endpoint constants, type mapping objects (`ORDER_TYPE`, `ORDER_SIDE`, `ORDER_STATUS`, `ORDER_TIME_IN_FORCE`, `ORDER_TRIGGER_TYPE`, `POSITION_SIDE`), WebSocket URL constants, interval mappings, `BybitApiKeyInfo` interface, and transaction log types. |
-| `bybit.rateLimits.ts`   | VIP-level rate limit table. Defines `BybitVipLevel` (No VIP through PRO-6), `BybitProductType` (Futures/Option/Spot), and `BybitAccountType` (Classic+UTA / UTA Pro). Used to dynamically adjust batch order limits.                                                       |
-| `bybit.ws-public.ts`    | Public WebSocket (`BybitPublicWebsocket`). Handles ticker updates, kline/OHLCV streaming, orderbook snapshot+delta, and public trade data for linear markets.                                                                                                              |
-| `bybit.ws-private.ts`   | Private WebSocket (`BybitPrivateWebsocket`). Handles order updates, position updates, authentication, and time sync. Subscribes to `order` and `position` topics.                                                                                                          |
+| File                    | Description                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bybit.exchange.ts`     | Main exchange class extending `BaseExchange`. Handles linear perpetual futures (USDT and USDC settled). Contains order placement, position management, balance calculation, and all trading operations.                                                                                                                                                                                    |
+| `bybit.api.ts`          | REST API client factory. Creates Axios instance with HMAC-SHA256 signing, retry logic, recv_window handling, and virtual clock time synchronization.                                                                                                                                                                                                                                       |
+| `bybit.order-params.ts` | Validates and serializes shared `maxSlippagePct` plus adapter-only typed BBO and TickSize execution controls.                                                                                                                                                                                                                                                                              |
+| `bybit.income.ts`       | Transaction-log route AND the row mapper, shared by linear and inverse. `fetchBybitIncomeHistory` / `fetchBybitIncomeHistoryRange` take a `BybitIncomeContext` of `{ xhr, log, category, accountType }`; `mapBybitTransactionToIncomeRecords` decomposes one row into several `IncomeRecord`s.                                                                                             |
+| `bybit.types.ts`        | Type definitions, endpoint constants, type mapping objects (`ORDER_TYPE`, `ORDER_SIDE`, `ORDER_STATUS`, `ORDER_TIME_IN_FORCE`, `ORDER_TRIGGER_TYPE`, `POSITION_SIDE`), WebSocket URL constants, interval mappings, `BybitApiKeyInfo` interface, transaction log types, and `ORDER_HISTORY_MAX_WINDOW_MS` (moved here so `bybit.income.ts` can use it without importing the exchange back). |
+| `bybit.rateLimits.ts`   | VIP-level rate limit table. Defines `BybitVipLevel` (No VIP through PRO-6), `BybitProductType` (Futures/Option/Spot), and `BybitAccountType` (Classic+UTA / UTA Pro). Used to dynamically adjust batch order limits.                                                                                                                                                                       |
+| `bybit.ws-public.ts`    | Public WebSocket (`BybitPublicWebsocket`). Handles ticker updates, kline/OHLCV streaming, orderbook snapshot+delta, and public trade data for linear markets.                                                                                                                                                                                                                              |
+| `bybit.ws-private.ts`   | Private WebSocket (`BybitPrivateWebsocket`). Handles order updates, position updates, authentication, and time sync. Subscribes to `order` and `position` topics.                                                                                                                                                                                                                          |
 
 ### Demo Trading - `BybitDemoExchange`
 
@@ -44,11 +45,11 @@ When working with Bybit exchange integration, consult the official API documenta
 
 ### Inverse Perpetual - `BybitInverseExchange`
 
-| File                         | Description                                                                                                                                                                                                                                                              |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bybitinverse.exchange.ts`   | Standalone exchange class (extends `BaseExchange` directly, NOT `BybitExchange`). Handles inverse perpetual contracts (USD-quoted, coin-settled like BTCUSD). Contains specialized amount handling (integer USD contracts) and position mapping (USD-to-BTC conversion). |
-| `bybitinverse.ws-public.ts`  | Public WebSocket for inverse markets (`BybitInversePublicWebsocket`). Connects to `v5/public/inverse` endpoint. Supports dynamic ticker topic subscription via `activeTickerSymbols:changed` event.                                                                      |
-| `bybitinverse.ws-private.ts` | Private WebSocket for inverse markets (`BybitInversePrivateWebsocket`). Identical auth flow to linear private WS. Subscribes to `order` and `position` topics.                                                                                                           |
+| File                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bybitinverse.exchange.ts`   | Standalone exchange class (extends `BaseExchange` directly, NOT `BybitExchange`). Handles inverse perpetual contracts (USD-quoted, coin-settled like BTCUSD). Contains specialized amount handling (integer USD contracts) and position mapping (USD-to-BTC conversion). Carries its own income route delegating to `bybit.income.ts` with `category: 'inverse'` — see the UNIFIED-only note below, and do NOT wire it to this class's `accountType` getter. |
+| `bybitinverse.ws-public.ts`  | Public WebSocket for inverse markets (`BybitInversePublicWebsocket`). Connects to `v5/public/inverse` endpoint. Supports dynamic ticker topic subscription via `activeTickerSymbols:changed` event.                                                                                                                                                                                                                                                          |
+| `bybitinverse.ws-private.ts` | Private WebSocket for inverse markets (`BybitInversePrivateWebsocket`). Identical auth flow to linear private WS. Subscribes to `order` and `position` topics.                                                                                                                                                                                                                                                                                               |
 
 ### Spot Trading - `BybitSpotExchange`
 
@@ -625,7 +626,7 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
   default leverage. Deduplicate mapped positions by internal position id and
   prefer rows with real update metadata before writing to the store.
 - Executions: 100 per page, max 5 recursion depth (`bybit.exchange.ts:826-829`)
-- Income history: 50 per page default, max 10 pages safety limit (`bybit.exchange.ts:923`)
+- Income history: 50 per page (the venue's own cap, clamped), max 10 pages safety limit, 1000-record cap (`fetchBybitIncomeHistory` in `bybit.income.ts`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
 
 ## State Reconciliation
@@ -705,14 +706,35 @@ Fetched per category via `fetchFees()` before market loading (`bybit.exchange.ts
 
 - Uses `/v5/account/transaction-log` endpoint
 - Only supports `accountType: 'UNIFIED'`
-- Bybit limits queries to **7-day windows**; `fetchIncomeHistoryRange` chunks ranges accordingly with 100ms delay between chunks (`bybit.exchange.ts:983-1012`)
+- Bybit limits queries to **7-day windows**. `fetchBybitIncomeHistoryRange` (`bybit.income.ts`)
+  chunks on its own `SEVEN_DAYS_MS`, a FULL seven days, with a 100ms delay between chunks, and
+  advances `currentStart = currentEnd + 1` because the venue treats both bounds as inclusive — a
+  shared endpoint returns the boundary row twice and it cannot be deduped afterwards, since bybit
+  tranIds are not unique. `ORDER_HISTORY_MAX_WINDOW_MS` (7 days minus a millisecond, in
+  `bybit.types.ts`) is a DIFFERENT guard: it splits the inner per-call window for direct callers.
+  So a full-7d chunk re-splits into two requests, the second covering a single millisecond.
 - Paginated with cursor, max 10 pages safety limit
+
+**`accountType` is hardcoded UNIFIED on BOTH variants, and that is not an oversight.** The
+transaction log serves UNIFIED accounts only. `BybitInverseExchange` has an `accountType` getter
+returning `CONTRACT` when `unifiedMarginStatus === 1`, and wiring it into the income context looks
+correct right up until the venue answers a non-zero retCode — which this path swallows into an
+empty list, indistinguishable from "this account traded nothing". **A classic (CONTRACT) account
+therefore collects no inverse fills, silently.** Linear swallows identically, so this predates the
+inverse route; the honest fix is to throw, which `enumerateTradedSymbols` already documents it
+expects ("a failed income read THROWS rather than returning an empty set"), or to route classic
+accounts at `/v5/account/contract-transaction-log`. Not done. Note the context type still ADMITS
+`'CONTRACT'`, so the type will not stop you.
 
 **One transaction row becomes several `IncomeRecord`s.** Bybit reports `cashFlow`,
 `funding` and `fee` as three independent terms on the same row, so mapping a row to a
 single record merges terms of the reconciliation identity. The mapper is the pure,
 exported `mapBybitTransactionToIncomeRecords` in `bybit.income.ts` — kept out of the
-exchange class because an instance-field parser cannot be unit tested.
+exchange class because an instance-field parser cannot be unit tested. That file now owns the
+HTTP route as well: `fetchBybitIncomeHistory` / `fetchBybitIncomeHistoryRange` take a
+`BybitIncomeContext` of `{ xhr, log, category, accountType }`, so linear and inverse share one
+implementation. Inverse cannot inherit it — `BybitInverseExchange` extends `BaseExchange`, not
+`BybitExchange` — and a second copy would drift.
 
 Two things that must not be re-simplified:
 
@@ -1270,7 +1292,7 @@ Two rules for calling them:
 | Amount handling       | Precision-adjusted float       | Integer USD contracts               | Precision-adjusted float            | Precision-adjusted float     |
 | Fee rates fetched     | Yes                            | Yes                                 | No                                  | Yes                          |
 | Dynamic ticker topics | No (subscribes all on connect) | Yes (`activeTickerSymbols:changed`) | Yes (`activeTickerSymbols:changed`) | No                           |
-| Income history        | Yes (UNIFIED only)             | No                                  | No                                  | Yes (inherited)              |
+| Income history        | Yes (UNIFIED only)             | Yes (UNIFIED only)                  | No                                  | Yes (inherited)              |
 | Execution queries     | Yes                            | Yes                                 | No                                  | Yes (inherited)              |
 | Market fetch parallel | Yes (PreLaunch in parallel)    | No (sequential)                     | No (single request, no PreLaunch)   | Yes (inherited)              |
 
