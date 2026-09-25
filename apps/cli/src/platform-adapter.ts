@@ -237,15 +237,23 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     async startExchange(exchange: ExchangeLike): Promise<void> {
       if (exchange.start) {
-        // Add timeout to prevent hanging on network issues
+        // Add timeout to prevent hanging on network issues. The timer is
+        // cleared once the race settles — left armed it keeps the event loop
+        // alive for its full duration after the work is done, which is the
+        // class of leak that made one-shot commands hang.
         const startPromise = exchange.start();
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
+          timeoutId = setTimeout(() => {
             reject(new Error(`Exchange connection timed out after ${EXCHANGE_OPERATION_TIMEOUT / 1000} seconds`));
           }, EXCHANGE_OPERATION_TIMEOUT);
         });
 
-        await Promise.race([startPromise, timeoutPromise]);
+        try {
+          await Promise.race([startPromise, timeoutPromise]);
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
       }
     },
 

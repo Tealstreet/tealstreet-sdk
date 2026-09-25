@@ -45,6 +45,11 @@ export function getCurrentVersion(): string {
   return process.env.TEALSTREET_CLI_VERSION || packageJson.version;
 }
 
+/** Is `version` actually ahead of the binary we are running? */
+export function isNewerThanCurrent(version: string, current: string = getCurrentVersion()): boolean {
+  return compareVersions(version, current) > 0;
+}
+
 function compareVersions(a: string, b: string): number {
   const aParts = a.replace(/^v/, '').split('.').map(Number);
   const bParts = b.replace(/^v/, '').split('.').map(Number);
@@ -130,8 +135,13 @@ export function checkForUpdatesBackground(): void {
 
       // Skip if we checked recently
       if (now - state.lastCheck < CHECK_INTERVAL_MS) {
-        // But still show notification if we found an update previously
-        if (state.latestVersion && state.notifiedVersion !== state.latestVersion) {
+        // But still show notification if we found an update previously.
+        // `notifiedVersion !== latestVersion` is NOT enough on its own: after
+        // the user updates, the cached `latestVersion` is the version they are
+        // now running while `notifiedVersion` still holds the older one, so the
+        // banner offered an update from 0.10.6 to 0.10.6 until the cache
+        // expired. Compare against what is actually running.
+        if (state.latestVersion && state.notifiedVersion !== state.latestVersion && isNewerThanCurrent(state.latestVersion)) {
           showUpdateNotification(state.latestVersion, state.releaseNotes);
           state.notifiedVersion = state.latestVersion;
           saveUpdateState(state);

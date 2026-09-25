@@ -203,7 +203,14 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         if (response.data?.raw_response?.includes?.('There might be too much traffic or a configuration error')) {
           exchange.emitAndLogError('Server was unavailable for a request, retrying...');
         }
-        console.error(`${exchange.name} error`, response.data);
+        // An auth retCode is already surfaced by the credential path (the
+        // streak, and the CLI's terminal message), so printing the body here
+        // too gave the user the same sentence twice — "bybitdemo error API key
+        // is invalid." followed by "API key is invalid.". Anything we do NOT
+        // classify still gets dumped, because that is its only visibility.
+        if (!BYBIT_AUTH_RET_CODES.has(responseMeta.retCode as number)) {
+          console.error(`${exchange.name} error`, response.data);
+        }
       }
     }
     return response;
