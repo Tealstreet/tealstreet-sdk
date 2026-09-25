@@ -22,6 +22,8 @@ import {
   Execution,
   ExecutionsOptions,
   HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
@@ -52,6 +54,7 @@ import { adjust, divide, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
+import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange, type BybitIncomeContext } from './bybit.income';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import {
@@ -1351,6 +1354,32 @@ export class BybitInverseExchange extends BaseExchange {
       return executions;
     }
   };
+
+  /**
+   * The transaction log, which is what fill-symbol ENUMERATION reads.
+   *
+   * Without these two methods this class inherited `BaseExchange`'s branded stub,
+   * which is a function returning `[]`. `canEnumerateFillSymbols` duck-types on
+   * `typeof === 'function'`, so inverse accounts were reported as enumerable,
+   * the enumerator asked the stub, got no symbols, and collection completed in
+   * apparent health having fetched nothing — no stored fills, and so no fill
+   * arrows on an inverse chart while the USDT pair worked fine.
+   *
+   * `accountType` is hardcoded UNIFIED, deliberately, and must NOT be wired to this
+   * class's `accountType` getter. The transaction log only serves UNIFIED accounts,
+   * so sending the CONTRACT that getter returns for a classic account earns a
+   * non-zero retCode, which this path turns into an empty list — indistinguishable
+   * from "you traded nothing". Linear hardcodes it for the same reason.
+   */
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> =>
+    fetchBybitIncomeHistory(this.incomeContext, opts);
+
+  fetchIncomeHistoryRange = async (startTime: number, endTime: number, incomeType?: string): Promise<IncomeRecord[]> =>
+    fetchBybitIncomeHistoryRange(this.incomeContext, startTime, endTime, incomeType);
+
+  private get incomeContext(): BybitIncomeContext {
+    return { xhr: this.xhr, log: this.log, category: 'inverse', accountType: 'UNIFIED' };
+  }
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     // BybitInverse only supports inverse futures

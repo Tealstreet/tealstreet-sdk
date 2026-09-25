@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../exchanges/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../exchanges/bybit/bybitspot.exchange';
+import { canEnumerateFillSymbols } from '../journal/symbolScopedFills';
 
 /**
  * Characterization test for the LINEAR income path, written before that code was
@@ -170,5 +173,76 @@ describe('bybit linear income history range', () => {
 
     expect(get).toHaveBeenCalledTimes(2);
     expect(records.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+const createInverseExchange = () => {
+  const exchange = new BybitInverseExchange(
+    'bybitinverse' as any,
+    { key: 'key', secret: 'secret', testnet: false } as any,
+    createStore(),
+  );
+  const get = vi.fn();
+  exchange.xhr = { get } as any;
+  exchange.log = vi.fn();
+  return { exchange, get };
+};
+
+describe('bybit inverse income history', () => {
+  it('asks the transaction log for the INVERSE category', async () => {
+    const { exchange, get } = createInverseExchange();
+    get.mockResolvedValueOnce(okPage([]));
+
+    await exchange.fetchIncomeHistory({});
+
+    expect(get.mock.calls[0][0]).toBe('/v5/account/transaction-log');
+    expect(get.mock.calls[0][1].params.category).toBe('inverse');
+  });
+
+  // The transaction log serves UNIFIED accounts only. The class's own
+  // `accountType` getter returns CONTRACT for a classic account, and sending that
+  // earns a non-zero retCode which this path turns into an empty list — which
+  // reads as "you traded nothing". So it is hardcoded, exactly as linear does.
+  it('always asks as UNIFIED, even when the account reports CONTRACT', async () => {
+    const { exchange, get } = createInverseExchange();
+    (exchange as any).unifiedMarginStatus = 1;
+    expect(exchange.accountType).toBe('CONTRACT');
+    get.mockResolvedValueOnce(okPage([]));
+
+    await exchange.fetchIncomeHistory({});
+
+    expect(get.mock.calls[0][1].params.accountType).toBe('UNIFIED');
+  });
+
+  it('carries inverse symbols through, which is the whole point', async () => {
+    const { exchange, get } = createInverseExchange();
+    get.mockResolvedValueOnce(okPage([row('BTCUSD', '1700000000000')]));
+
+    const records = await exchange.fetchIncomeHistory({});
+
+    expect(records[0]?.symbol).toBe('BTCUSD');
+  });
+});
+
+describe('fill-symbol enumeration capability', () => {
+  // Before the inverse route existed this answered TRUE anyway, because
+  // BaseExchange defines fetchIncomeHistoryRange as a branded stub returning [].
+  // Collection then asked, got no symbols, and closed the window reporting
+  // perfect health having stored nothing — no rows, so no chart fill arrows.
+  it('is true for the inverse class now that it has a real route', () => {
+    const { exchange } = createInverseExchange();
+    expect(canEnumerateFillSymbols(exchange as any)).toBe(true);
+  });
+
+  // Spot overrides neither income method, so it carries BaseExchange's stub —
+  // a real venue standing in for "has the field, has no route".
+  it('is false for a venue carrying only the inherited stub', () => {
+    const spot = new BybitSpotExchange(
+      'bybitspot' as any,
+      { key: 'k', secret: 's', testnet: false } as any,
+      createStore(),
+    );
+    expect(typeof (spot as any).fetchIncomeHistoryRange).toBe('function');
+    expect(canEnumerateFillSymbols(spot as any)).toBe(false);
   });
 });

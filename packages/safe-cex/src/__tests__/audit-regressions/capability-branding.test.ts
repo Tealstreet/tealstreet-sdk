@@ -88,7 +88,7 @@ describe('base capability stubs are branded', () => {
     expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchHistoricalOrders')).toBe(false);
   });
 
-  it.each(['binance', 'bybit', 'okx', 'weex', 'hyperliquid', 'paradex', 'blofin', 'bitunix'])(
+  it.each(['binance', 'bybit', 'bybitinverse', 'okx', 'weex', 'hyperliquid', 'paradex', 'blofin', 'bitunix'])(
     '%s implements the ledger, so it is not reported as the fallback',
     async (name) => {
       const exchange = await construct(name as ExchangeName);

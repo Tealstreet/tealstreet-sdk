@@ -1,3 +1,5 @@
+import { isBaseCapabilityFallback } from '../exchanges/base';
+
 import type { ExchangeName } from '../types';
 
 /**
@@ -50,9 +52,22 @@ export const isSymbolScopedFills = (exchange: ExchangeName): boolean => SYMBOL_S
  * A symbol-scoped venue with no income ledger cannot be collected account-wide
  * NOR symbol by symbol, because there is nothing to enumerate from. The correct
  * report for those is `unsupported` — "we have no way to ask" — and never an
- * empty result. Seven venues sit here today (apexomni, asterdex, bingx,
- * bybitinverse, kucoinspot, lighter, phemex); each needs either an income route
- * or a venue-specific symbol source before its fills can be held.
+ * empty result. EIGHT venues sit here today — apexomni, asterdex, bingx,
+ * kucoinspot, lighter, lighter-robinhood, mexc, phemex — each needing either an
+ * income route or a venue-specific symbol source before its fills can be held.
+ * `bybitinverse` left that list when it got a real transaction-log route. The
+ * count was wrong in both directions before that: it said seven, named
+ * bybitinverse, and omitted mexc and lighter-robinhood. Derive it rather than
+ * trusting it — a venue class with no `fetchIncomeHistoryRange =` of its own
+ * carries the base stub.
+ *
+ * **A branded stub is not a route.** `BaseExchange.fetchIncomeHistoryRange` is a
+ * function returning `[]` on EVERY venue, so a bare `typeof === 'function'` check
+ * answered `true` for all of them — the exact duck-typing `base.ts` warns about
+ * where it defines the stub. The enumerator then asked, received no symbols, and
+ * collection closed the window in perfect health having fetched nothing. That is
+ * the silent-empty this module exists to prevent, so the brand is checked.
  */
 export const canEnumerateFillSymbols = (exchange: { fetchIncomeHistoryRange?: unknown }): boolean =>
-  typeof exchange.fetchIncomeHistoryRange === 'function';
+  typeof exchange.fetchIncomeHistoryRange === 'function' &&
+  !isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange');
