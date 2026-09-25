@@ -316,3 +316,13 @@ export interface BybitTransactionHistoryOptions {
   limit?: number;
   cursor?: string;
 }
+
+/**
+ * Bybit REJECTS a >7-day range on `/v5/order/history` and `/v5/account/transaction-log`
+ * (retCode 10001) instead of clamping it, and both call sites swallow the error into an
+ * empty list — so an unchunked ask reads as "this account has no orders / no ledger".
+ * One millisecond under seven days, because the venue treats both bounds as INCLUSIVE.
+ * Mirrors `EXECUTION_QUERY_MAX_RANGE_MS`. Lives here rather than in bybit.exchange.ts so
+ * bybit.income.ts can use it without importing the exchange back — that would be a cycle.
+ */
+export const ORDER_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1;

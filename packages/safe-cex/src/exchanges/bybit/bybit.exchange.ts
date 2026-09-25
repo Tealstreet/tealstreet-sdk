@@ -2,6 +2,7 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { BybitIncomeContext } from './bybit.income';
 import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
 import rateLimit from 'axios-rate-limit';
@@ -61,7 +62,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
-import { mapBybitTransactionToIncomeRecords } from './bybit.income';
+import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
 import { mapBybitHistoricalOrder } from './bybit.order-history';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
@@ -71,14 +72,13 @@ import {
   BASE_URL,
   BASE_WS_URL,
   BybitApiKeyInfo,
-  BybitTransactionHistoryOptions,
-  BybitTransactionRecord,
   DEMO_URL,
   DEMO_WS_URL,
   ENDPOINTS,
   GRAFANA_ENDPOINTS_EVERY,
   GRAFANA_ENDPOINTS_PERIODIC,
   INTERVAL,
+  ORDER_HISTORY_MAX_WINDOW_MS,
   ORDER_SIDE,
   ORDER_STATUS,
   ORDER_TIME_IN_FORCE,
@@ -121,7 +121,8 @@ export const describeBybitMarketsFailure = (cause: unknown): string => {
   return getBybitMarketsFailureTelemetry(cause).reason;
 };
 
-const stringOrUndefined = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined);
+const stringOrUndefined = (value: unknown): string | undefined =>
+  typeof value === 'string' && value ? value : undefined;
 
 const numberOrUndefined = (value: unknown): number | undefined => {
   const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
@@ -131,7 +132,10 @@ const numberOrUndefined = (value: unknown): number | undefined => {
 export const getBybitMarketsFailureTelemetry = (cause: unknown) => {
   const err = cause as
     | {
-        response?: { status?: number; data?: { retMsg?: unknown; ret_msg?: unknown; retCode?: unknown; ret_code?: unknown } };
+        response?: {
+          status?: number;
+          data?: { retMsg?: unknown; ret_msg?: unknown; retCode?: unknown; ret_code?: unknown };
+        };
         config?: { url?: unknown; method?: unknown };
         code?: unknown;
         message?: unknown;
@@ -150,7 +154,8 @@ export const getBybitMarketsFailureTelemetry = (cause: unknown) => {
   let reason = 'unknown';
   if (retMsg.includes('too many') || retMsg.includes('rate limit') || httpStatus === 429) reason = 'rate-limited';
   else if (retMsg.includes('banned') || httpStatus === 403) reason = 'blocked';
-  else if (message.includes('timeout') || message.includes('timed out') || errorCode === 'ECONNABORTED') reason = 'timeout';
+  else if (message.includes('timeout') || message.includes('timed out') || errorCode === 'ECONNABORTED')
+    reason = 'timeout';
   else if (typeof httpStatus === 'number') reason = `HTTP ${httpStatus}`;
   else if (message.includes('network')) reason = 'network';
 
@@ -313,15 +318,6 @@ const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => 
   }
   return ticker.last;
 };
-
-/**
- * Bybit REJECTS a >7-day range on `/v5/order/history` and `/v5/account/transaction-log`
- * (retCode 10001) instead of clamping it, and both call sites swallow the error into an
- * empty list — so an unchunked ask reads as "this account has no orders / no ledger".
- * Mirrors `EXECUTION_QUERY_MAX_RANGE_MS`; kept module-level so it is usable from a class
- * field without making inference circular.
- */
-const ORDER_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1;
 
 export class BybitExchange extends BaseExchange {
   xhr: Axios;
@@ -511,7 +507,9 @@ export class BybitExchange extends BaseExchange {
   };
 
   private shouldReconcileLocalReduceOnlyLimitOrder = (order: Order) => {
-    return this.shouldUseLocalRestOrderLifecycleFallback() && order.type === OrderType.Limit && order.reduceOnly === true;
+    return (
+      this.shouldUseLocalRestOrderLifecycleFallback() && order.type === OrderType.Limit && order.reduceOnly === true
+    );
   };
 
   private scheduleLocalReduceOnlyLimitOrderReconciliation = (order: Order) => {
@@ -563,7 +561,10 @@ export class BybitExchange extends BaseExchange {
         loaded: { ...this.store.loaded, orders: true },
       });
     } catch (error: any) {
-      this.log(`Failed to reconcile local Bybit reduce-only limit order ${orderId}: ${error?.message || error}`, LogSeverity.Warning);
+      this.log(
+        `Failed to reconcile local Bybit reduce-only limit order ${orderId}: ${error?.message || error}`,
+        LogSeverity.Warning,
+      );
     }
   };
 
@@ -651,9 +652,7 @@ export class BybitExchange extends BaseExchange {
     const nextOrder: Order = {
       ...order,
       ...update,
-      ...(typeof update.amount === 'number'
-        ? { remaining: Math.max(0, update.amount - (order.filled || 0)) }
-        : {}),
+      ...(typeof update.amount === 'number' ? { remaining: Math.max(0, update.amount - (order.filled || 0)) } : {}),
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 
@@ -1060,7 +1059,10 @@ export class BybitExchange extends BaseExchange {
       ),
       coins: coins.reduce(
         (prev: { [coin: string]: CoinBalance }, coin: any) => {
-          const amount = firstFiniteNumber(parseBybitFiniteNumber(coin.equity), parseBybitFiniteNumber(coin.walletBalance));
+          const amount = firstFiniteNumber(
+            parseBybitFiniteNumber(coin.equity),
+            parseBybitFiniteNumber(coin.walletBalance),
+          );
           prev[coin.coin] = {
             base: coin.coin,
             amount,
@@ -2206,128 +2208,23 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
-  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
-    try {
-      const params: BybitTransactionHistoryOptions = {
-        // Transaction log endpoint only supports UNIFIED account type
-        accountType: 'UNIFIED',
-        category: 'linear',
-        // V5 transaction-log caps `limit` at 50. Sending more is rejected outright, and
-        // the non-zero retCode path below breaks out with an EMPTY list — so an oversized
-        // limit reads downstream as "this account has no ledger", not as an error.
-        limit: Math.min(opts?.limit || 50, 50),
-      };
-
-      if (opts?.incomeType) {
-        // Map generic income types to Bybit transaction types
-        const typeMap: Record<string, string> = {
-          REALIZED_PNL: 'TRADE',
-          FUNDING_FEE: 'SETTLEMENT',
-          COMMISSION: 'TRADE',
-        };
-        params.type = (typeMap[opts.incomeType] || opts.incomeType) as any;
-      }
-
-      const allRecords: IncomeRecord[] = [];
-      const maxPages = 10; // Safety limit
-      const recordCap = opts?.limit || 1000;
-
-      // Bybit rejects a >7-day range on the transaction log too, and the `break` below
-      // turns that into an empty list — "this account has no ledger" rather than an error.
-      // `fetchIncomeHistoryRange` already chunked before calling; this makes the method
-      // safe for DIRECT callers, who previously had no protection at all. Chunks already
-      // inside the cap come back as a single window, so that path is unchanged.
-      const windows =
-        opts?.startTime !== undefined && opts?.endTime !== undefined
-          ? splitTimeRange(opts.startTime, opts.endTime, ORDER_HISTORY_MAX_WINDOW_MS)
-          : [{ startTime: opts?.startTime, endTime: opts?.endTime }];
-
-      for (const window of windows) {
-        let cursor: string | undefined;
-        let page = 0;
-
-        do {
-          const requestParams = omitUndefined({
-            ...params,
-            startTime: window.startTime,
-            endTime: window.endTime,
-            cursor,
-          });
-
-          const { data } = await this.xhr.get(ENDPOINTS.TRANSACTION_LOG, { params: requestParams });
-
-          if (data.retMsg !== 'OK' && +data.retCode !== 0) {
-            this.log(`Failed to fetch transaction log: ${data.retMsg}`, LogSeverity.Error);
-            break;
-          }
-
-          const records = data.result?.list as BybitTransactionRecord[] | undefined;
-          if (!records || records.length === 0) break;
-
-          for (const record of records) {
-            // One transaction row carries cashFlow, funding AND fee independently, so it
-            // maps to several records. Reading only cashFlow silently dropped every fee.
-            allRecords.push(...mapBybitTransactionToIncomeRecords(record));
-          }
-
-          cursor = data.result?.nextPageCursor;
-          page++;
-        } while (cursor && page < maxPages && allRecords.length < recordCap);
-
-        if (allRecords.length >= recordCap) break;
-      }
-
-      return allRecords;
-    } catch (error: any) {
-      this.log(`Error fetching income history: ${error.message}`, LogSeverity.Error);
-      return [];
-    }
-  };
+  // Both income methods live in bybit.income.ts so the inverse class, which extends
+  // BaseExchange rather than this one, can reuse them with its own category. Kept as
+  // instance arrow properties: capability detection reads the subclass property
+  // shadowing the branded base stub, and a prototype method would not shadow it.
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> =>
+    fetchBybitIncomeHistory(this.incomeContext, opts);
 
   /**
    * Fetch income history for a date range.
    * Bybit limits queries to 7 days per request, so we chunk the range.
-   *
-   * @param startTime - Start timestamp in ms
-   * @param endTime - End timestamp in ms
-   * @param incomeType - Optional filter by income type
-   * @returns Array of all income records in the range
    */
-  fetchIncomeHistoryRange = async (
-    startTime: number,
-    endTime: number,
-    incomeType?: string,
-  ): Promise<IncomeRecord[]> => {
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000; // 7 days per chunk (Bybit limit)
-    // Chunk bounds are inclusive at both ends, so consecutive chunks must not share an
-    // endpoint or the boundary row is returned twice. Advancing past it is the fix —
-    // deduping on tranId is NOT, because bybit tranIds are not unique (hedge-mode
-    // settlement rows share every identity component, and transfers have no id at all),
-    // so a Map keyed on them silently deletes real value.
-    const allRecords: IncomeRecord[] = [];
+  fetchIncomeHistoryRange = async (startTime: number, endTime: number, incomeType?: string): Promise<IncomeRecord[]> =>
+    fetchBybitIncomeHistoryRange(this.incomeContext, startTime, endTime, incomeType);
 
-    let currentStart = startTime;
-
-    while (currentStart < endTime) {
-      const currentEnd = Math.min(currentStart + SEVEN_DAYS_MS, endTime);
-
-      const records = await this.fetchIncomeHistory({
-        startTime: currentStart,
-        endTime: currentEnd,
-        incomeType,
-        limit: 1000,
-      });
-
-      allRecords.push(...records);
-
-      currentStart = currentEnd + 1;
-
-      // Add a small delay to respect rate limits
-      await sleep(100);
-    }
-
-    return allRecords.sort((a, b) => b.timestamp - a.timestamp);
-  };
+  private get incomeContext(): BybitIncomeContext {
+    return { xhr: this.xhr, log: this.log, category: 'linear', accountType: 'UNIFIED' };
+  }
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     return this.publicWebsocket.listenOHLCV(opts, callback);
