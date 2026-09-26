@@ -22,6 +22,13 @@ const ASIA = `${T}.asia.tealstreet.io`;
 // fallback hosts for bybit/okx. Stanzas: infra/athena/caddy/; box: docs/oncall/athena.md.
 const BYBIT_JA = 'wss://bybit-proxy-ja.tealstreet.io';
 const OKX_JA = 'wss://okx-proxy-ja.tealstreet.io';
+// PRIVATE venue sockets the tradetunnel's rpc.relay may carry (its allowlist is
+// host+path-prefix; these must match `RELAY_ALLOWED_UPSTREAMS` on the tunnel).
+const RELAY_UPSTREAM = {
+  bybitPrivate: 'wss://stream.bybit.com/v5/private',
+  okxPrivate: 'wss://ws.okx.com:8443/ws/v5/private',
+  okxBusiness: 'wss://ws.okx.com:8443/ws/v5/business',
+} as const;
 
 const WS = {
   grvt: `${JP}/grvt`,
@@ -76,8 +83,18 @@ type WsGroup = RoutingTable[ExchangeName]['ws'];
 // athena passthrough as a direct-path fallback on every channel.
 const okxWs: WsGroup = {
   public: { kind: 'direct', fallback: WS.okxJaPublic },
-  private: { kind: 'proxyConditional', host: WS.okxPrivate, fallback: WS.okxJaPrivate },
-  business: { kind: 'proxyConditional', host: WS.okxBusiness, fallback: WS.okxJaBusiness },
+  private: {
+    kind: 'proxyConditional',
+    host: WS.okxPrivate,
+    fallback: WS.okxJaPrivate,
+    relayUpstream: RELAY_UPSTREAM.okxPrivate,
+  },
+  business: {
+    kind: 'proxyConditional',
+    host: WS.okxBusiness,
+    fallback: WS.okxJaBusiness,
+    relayUpstream: RELAY_UPSTREAM.okxBusiness,
+  },
 };
 // okxeu shares the OKX ws classes but must terminate on the EEA entity's hosts
 // (wseea.okx.com) — EEA credentials do not authenticate on the global ws host.
@@ -98,6 +115,7 @@ const bybitBrazilPrivateWs = {
   kind: 'bybitBrazilConditional',
   host: WS.bybitBraPrivate,
   fallback: WS.bybitJaPrivate,
+  relayUpstream: RELAY_UPSTREAM.bybitPrivate,
 } as const;
 
 // Per-exchange WS overrides (everything not listed defaults to all-direct).

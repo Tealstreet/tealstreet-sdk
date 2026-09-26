@@ -116,7 +116,7 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('okx', proxy).wsBusiness.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/okx/business',
     );
-    expect(resolveExchangeRouting('okx', offProxy).wsPrivate).toEqual({
+    expect(resolveExchangeRouting('okx', offProxy).wsPrivate).toMatchObject({
       tunnelled: false,
       fallback: 'wss://okx-proxy-ja.tealstreet.io/ws/v5/private',
     });
@@ -246,7 +246,7 @@ describe('routing table / resolver (Epic 1 net)', () => {
       tunnelled: false,
       fallback: 'wss://bybit-proxy-ja.tealstreet.io/v5/public/linear',
     });
-    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate).toEqual({
+    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate).toMatchObject({
       tunnelled: false,
       fallback: 'wss://bybit-proxy-ja.tealstreet.io/v5/private',
     });
@@ -282,6 +282,38 @@ describe('routing table / resolver (Epic 1 net)', () => {
     for (const ex of ['bybitdemo', 'hyrotrader', 'okxeu', 'okxdemo', 'okxeudemo'] as ExchangeName[]) {
       expect(resolveExchangeRouting(ex, offProxy).wsPublic.fallback, ex).toBeUndefined();
       expect(resolveExchangeRouting(ex, offProxy).wsPrivate.fallback, ex).toBeUndefined();
+    }
+  });
+
+  it('tunnel relay candidates attach to bybit/okx PRIVATE direct resolutions only', () => {
+    // Relay url = the egress region's tunnel host + ?ts-relay=<private upstream>.
+    // bybit is region-conditional: JA -> jp tunnel, else sg.
+    expect(resolveExchangeRouting('bybit', offProxy).wsPrivate.relay).toBe(
+      'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+    );
+    expect(resolveExchangeRouting('bybit', { proxyRegion: 'JA' }).wsPrivate.relay).toBe(
+      'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+    );
+    expect(resolveExchangeRouting('bybitinverse', offProxy).wsPrivate.relay).toContain('stream.bybit.com%2Fv5%2Fprivate');
+    expect(resolveExchangeRouting('bybitspot', offProxy).wsPrivate.relay).toContain('stream.bybit.com%2Fv5%2Fprivate');
+    // okx's HOW egress is whatever egressRegion.ts says; the relay follows it.
+    const okxTunnelHost = resolveExchangeRouting('okx', offProxy).howEgress === 'jp' ? 'jp' : 'asia';
+    expect(resolveExchangeRouting('okx', offProxy).wsPrivate.relay).toBe(
+      `wss://fsjnpy143pbz.${okxTunnelHost}.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate`,
+    );
+    expect(resolveExchangeRouting('okx', offProxy).wsBusiness.relay).toContain('ws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness');
+
+    // Public channels never relay (the tunnel refuses public streams anyway).
+    expect(resolveExchangeRouting('bybit', offProxy).wsPublic.relay).toBeUndefined();
+    expect(resolveExchangeRouting('okx', offProxy).wsPublic.relay).toBeUndefined();
+
+    // Tunnelled resolutions carry neither fallback nor relay.
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPrivate.relay).toBeUndefined();
+    expect(resolveExchangeRouting('okx', proxy).wsPrivate.relay).toBeUndefined();
+
+    // Variants whose direct host differs get nothing.
+    for (const ex of ['bybitdemo', 'hyrotrader', 'okxeu', 'okxdemo', 'okxeudemo'] as ExchangeName[]) {
+      expect(resolveExchangeRouting(ex, offProxy).wsPrivate.relay, ex).toBeUndefined();
     }
   });
 

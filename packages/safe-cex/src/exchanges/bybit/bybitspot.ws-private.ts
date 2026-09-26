@@ -8,6 +8,8 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
+import { isWsRelayEnabled } from '../../utils/wsRelay';
+import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { OrderStatus, Position, Writable } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -26,15 +28,20 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
       const directUrl = (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[
         this.parent.options.testnet ? 'testnet' : 'livenet'
       ];
-      const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);
-      if (baseUrl === route.fallback) {
+      const baseUrl = this.directFallback.resolveUrl(
+        route.tunnelled && route.host ? route.host : directUrl,
+        isWsRelayEnabled() ? route.relay : undefined,
+        route.fallback,
+      );
+      if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', 'Using tealstreet bybit private spot proxy');
+          this.parent.emitter.emit('grafana-info', `Using tealstreet bybit private spot ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
         } catch (_e) {}
       }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
       this.ws = this.createWebsocket(
-        baseUrl + '?requestId=' + nanoid(),
+        // The relay url already carries its query; Bybit's requestId is only cosmetic.
+        isRelayUrl(baseUrl) ? baseUrl : baseUrl + '?requestId=' + nanoid(),
         undefined,
         webSocketOptions,
       );

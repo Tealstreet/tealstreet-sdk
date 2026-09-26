@@ -129,6 +129,11 @@ export interface WorkerConfig {
    * mirrored through the public SDK surface and should stay narrow.
    */
   wsDiagnosticsEnabled?: boolean;
+  /**
+   * Runtime gate for the tradetunnel rpc.relay as a PRIVATE-socket fallback
+   * candidate (bybit/okx). See `utils/wsRelay`.
+   */
+  wsRelayEnabled?: boolean;
 }
 
 /** One captured outbound worker message, stamped relative to recording start. */

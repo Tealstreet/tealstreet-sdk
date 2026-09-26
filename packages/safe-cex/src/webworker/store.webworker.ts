@@ -2,6 +2,7 @@ import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../utils/wsDiagnostics';
+import { setWsRelayEnabled } from '../utils/wsRelay';
 import { ExchangeWorker } from './ExchangeWorker';
 import {
   configurePerfFixture,
@@ -314,6 +315,7 @@ const start = (ctx: Worker, shared = false) => {
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       if ('wsDiagnosticsEnabled' in cfg) setWsDiagnosticsEnabled(cfg.wsDiagnosticsEnabled === true);
+      if ('wsRelayEnabled' in cfg) setWsRelayEnabled(cfg.wsRelayEnabled === true);
       if ('perfFixture' in cfg) {
         configurePerfFixture(cfg.perfFixture);
         // Replay drives the main thread by itself — see `perfFixture.ts`. It is

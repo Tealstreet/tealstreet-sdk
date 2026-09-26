@@ -1,6 +1,7 @@
 import type { ExchangeName } from '../types';
 import type { RestPool, WsStrategy } from './types';
 
+import { buildRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { PRIVATE_PROXY_ASIA, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from '../utils/transportResolution';
 import { routingTable } from './routingTable';
 
@@ -24,6 +25,8 @@ export interface ResolvedWs {
   tunnelled: boolean;
   host?: string;
   fallback?: string;
+  // Tunnel rpc.relay url for a PRIVATE channel (direct resolutions only).
+  relay?: string;
   readonly?: string;
 }
 
@@ -43,12 +46,15 @@ const poolHost = (pool: RestPool): string =>
 const resolveRestPool = (declared: RestPool, proxyRegion?: string): RestPool =>
   declared === 'tiny' ? 'tiny' : proxyRegion === 'JA' ? 'jp' : declared;
 
-const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions): ResolvedWs => {
+const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions, egress: 'jp' | 'sg'): ResolvedWs => {
   if (!strategy) return { tunnelled: false };
   const resolved = resolveWsKind(strategy, o);
-  // A declared fallback rides along only on a DIRECT resolution (see WsStrategy).
-  if (resolved.tunnelled || resolved.fallback || !strategy.fallback) return resolved;
-  return { ...resolved, fallback: strategy.fallback };
+  // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy).
+  if (resolved.tunnelled) return resolved;
+  const out = { ...resolved };
+  if (strategy.fallback && !out.fallback) out.fallback = strategy.fallback;
+  if (strategy.relayUpstream) out.relay = buildRelayUrl(egress, strategy.relayUpstream);
+  return out;
 };
 
 const resolveWsKind = (strategy: WsStrategy, o: RoutingOptions): ResolvedWs => {
@@ -81,8 +87,8 @@ export const resolveExchangeRouting = (exchange: ExchangeName, o: RoutingOptions
   return {
     restProxyHost: o.tealstreetProxy ? poolHost(resolveRestPool(spec.restPool, o.proxyRegion)) : '',
     howEgress,
-    wsPublic: resolveWs(spec.ws?.public, o),
-    wsPrivate: resolveWs(spec.ws?.private, o),
-    wsBusiness: resolveWs(spec.ws?.business, o),
+    wsPublic: resolveWs(spec.ws?.public, o, howEgress),
+    wsPrivate: resolveWs(spec.ws?.private, o, howEgress),
+    wsBusiness: resolveWs(spec.ws?.business, o, howEgress),
   };
 };

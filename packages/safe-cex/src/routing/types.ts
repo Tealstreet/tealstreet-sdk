@@ -58,6 +58,12 @@ export type WsStrategy = (
   // path) must not degrade to a plain passthrough that drops what the tunnel adds.
   // For `fallbackOnly` this is the same field the kind already requires.
   fallback?: WsHost;
+  // Optional PRIVATE venue socket to reach THROUGH the tradetunnel's rpc.relay
+  // (bybit/okx private+business). The resolver turns it into a relay url on the
+  // egress region's tunnel host, again only for a DIRECT resolution, and the
+  // class offers it ahead of `fallback` when the host app has enabled the relay
+  // (`utils/wsRelay`). Never a public stream: the tunnel refuses those.
+  relayUpstream?: WsHost;
 };
 
 export interface ExchangeWsRouting {

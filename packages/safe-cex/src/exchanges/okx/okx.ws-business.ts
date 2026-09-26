@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { virtualClock } from '../../utils/virtualClock';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
 import { OKXPrivateWebsocket } from './okx.ws-private';
@@ -36,10 +37,14 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsBusiness;
-      const baseUrl = this.directFallback.resolveUrl(route.tunnelled ? route.host! : this.endpoint, route.fallback);
-      if (baseUrl === route.fallback) {
+      const baseUrl = this.directFallback.resolveUrl(
+        route.tunnelled ? route.host! : this.endpoint,
+        isWsRelayEnabled() ? route.relay : undefined,
+        route.fallback,
+      );
+      if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', 'Using tealstreet okx business proxy');
+          this.parent.emitter.emit('grafana-info', `Using tealstreet okx business ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
         } catch (_e) {}
       }
       this.ws = this.createWebsocket(baseUrl);

@@ -9,6 +9,8 @@ src/
 ├── HOWWebSocket.ts                       # Core WebSocket protocol (reconnecting, auth, message routing)
 ├── axiosHttpOverWebsocketAdapter.ts      # Axios adapter for transparently tunneling HTTP via WS
 ├── egressRegion.ts                       # Single source: Tokyo-vs-Singapore egress list + isTokyoEgress()
+├── tunnelEndpoints.ts                    # PURE: tunnel wss endpoints per region + rpc.relay url helpers
+├── RelayWebSocket.ts                     # WebSocket-shaped client for the tunnel's rpc.relay (private exchange WS via the fleet)
 ├── tradeTunnelBinaryFrame.ts             # Validates and decodes TSB1 binary gzip envelopes
 ├── tradeTunnelBinaryFrame.test.ts        # Binary-envelope compatibility and validation regressions
 ├── types.ts                              # HOWConfig, HOWWebSocketAuthState, LatencyEntry
@@ -34,6 +36,18 @@ behavior changes, update or delete that snapshot in the same PR.
   it back into the adapter would drag websocket construction / `configureHOW` into
   every pure consumer (safe-cex's routing table) and break their test mocks.
   `routing.equivalence.test.ts` locks name-based and baseURL-based agreement per exchange.
+- **`RelayWebSocket` is the client half of the tunnel's `rpc.relay`** (server:
+  `infra/tradetunnel/src/relay.rs`; plan: `docs/plans/TRADETUNNEL_WS_RELAY_v1.md`).
+  It dials the regional tunnel, sends `rpc.auth` + `rpc.relay <upstream>`, and only
+  then reports `open`; sends before that are queued, tunnel chatter is swallowed,
+  and every pre-open failure is `error`+`close` with NO `message` — safe-cex's
+  `WsDirectFallback` reads that as a silent connect and moves on. It is constructed
+  by the vendored `ReconnectingWebSocket` via its `WebSocket` option from a
+  `wss://<tunnel>/tunnel?ts-relay=<upstream>` url (`buildRelayUrl`), so exchange
+  classes see just another host. The url helpers live in **`tunnelEndpoints.ts`,
+  which must stay pure** for the same reason as `egressRegion.ts`: safe-cex's
+  routing resolver imports `buildRelayUrl` from it. `RelayWebSocket.ts` itself
+  `require`s `ws` at load in Node — never import it from a pure consumer.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)

@@ -6,6 +6,7 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
 import { getProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
+import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
@@ -237,20 +238,13 @@ function logTradeTunnelResponse(
   logTradeTunnelVerbose('[TradeTunnel] RESPONSE:', logData);
 }
 
-const TUNNEL_PATH =
-  typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_TRADETUNNEL_STAGING === '1'
-    ? '/tunnel-staging'
-    : '/tunnel';
-
-const SIGNAPORE_HOW_EGRESS = `wss://fsjnpy143pbz.asia.tealstreet.io${TUNNEL_PATH}`;
-const TOKYO_HOW_EGRESS = `wss://fsjnpy143pbz.jp.tealstreet.io${TUNNEL_PATH}`;
 
 // Exchanges that should bypass the proxy and connect directly
 const BYPASS_PROXY_EXCHANGES = ['grvt'];
 
 const BYPASS_PROXY_PATTERN = new RegExp(BYPASS_PROXY_EXCHANGES.join('|'), 'i');
 
-export let howWebSocketSG = new HOWWebSocket(SIGNAPORE_HOW_EGRESS);
+export let howWebSocketSG = new HOWWebSocket(SINGAPORE_HOW_EGRESS);
 export let howWebSocketJA = new HOWWebSocket(TOKYO_HOW_EGRESS);
 
 // A Bad auth response is connection-scoped, but many HTTP requests can observe

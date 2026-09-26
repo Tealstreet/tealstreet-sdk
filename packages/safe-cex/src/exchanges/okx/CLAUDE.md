@@ -248,6 +248,13 @@ business sockets keep the chosen EKS tunnel and never degrade to the passthrough
 Only global `okx` declares it: `okxeu` credentials do not authenticate on
 `ws.okx.com`, and the demo variants terminate on `wspap`/`wseeapap`.
 
+Private and business also carry `route.relay` — the tradetunnel's `rpc.relay`
+through the private proxy fleet (`RelayWebSocket`) — walked BEFORE the athena
+passthrough and only while `utils/wsRelay` is on (`WS_RELAY_PRIVATE` flag). The
+fleet's `ws.okx.com` route exists since 2026-09-25; before that a relay attempt
+failed silently and the chain moved on to athena, which is also what happens
+on a tunnel without `RELAY_ENABLED`.
+
 The actual tunnelled host (the `wss://fsjnpy143pbz.*` family) and the
 `tealstreetProxy` gating live in `routing/routingTable.ts` + the
 `resolveExchangeRouting` resolver — not in the OKX ws classes. To change

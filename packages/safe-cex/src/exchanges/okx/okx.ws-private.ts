@@ -8,6 +8,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
+import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { OrderStatus } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
 import { subtract } from '../../utils/safe-math';
@@ -38,10 +39,14 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
-      const baseUrl = this.directFallback.resolveUrl(route.tunnelled ? route.host! : this.endpoint, route.fallback);
-      if (baseUrl === route.fallback) {
+      const baseUrl = this.directFallback.resolveUrl(
+        route.tunnelled ? route.host! : this.endpoint,
+        isWsRelayEnabled() ? route.relay : undefined,
+        route.fallback,
+      );
+      if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', 'Using tealstreet okx private proxy');
+          this.parent.emitter.emit('grafana-info', `Using tealstreet okx private ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
         } catch (_e) {}
       }
       this.ws = this.createWebsocket(baseUrl);

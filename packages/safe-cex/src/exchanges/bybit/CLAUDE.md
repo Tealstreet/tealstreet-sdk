@@ -244,6 +244,13 @@ passthrough would drop `x-site-id`. Demo and hyrotrader terminate elsewhere and
 declare none. It must stay a fallback, never the default: everyone on it shares
 athena's single egress IP against Bybit's per-IP connection cap.
 
+The three PRIVATE classes walk a chain instead of a single fallback: direct →
+`route.relay` (the tradetunnel's `rpc.relay`, dialled via `RelayWebSocket` through
+the private proxy fleet so an IP-restricted key still authenticates) → `route.fallback`.
+The relay is only offered while `utils/wsRelay` is on (`WS_RELAY_PRIVATE` flag via
+`__workerConfig`), and Bybit's cosmetic `?requestId=` is NOT appended to a relay url
+because that url already carries the `ts-relay` query.
+
 ### Public WebSocket Topics
 
 | Topic Pattern               | Description                                                                   | Used By         |

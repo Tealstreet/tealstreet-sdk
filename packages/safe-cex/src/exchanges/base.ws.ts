@@ -1,6 +1,8 @@
 import type { BaseExchange } from './base';
 
 import { RingBuffer } from '@tealstreet/data-structures/src/RingBuffer';
+import { RelayWebSocket } from '@tealstreet/http-over-websocket/src/RelayWebSocket';
+import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { Options, ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
@@ -533,7 +535,21 @@ export class BaseWebSocket<T extends BaseExchange> {
       // not silently open a socket that cannot carry required authentication.
       throw new HeaderCapableWebSocketUnavailableError();
     }
-    if (isTealstreetWebSocketUrl(url)) {
+    if (isRelayUrl(url)) {
+      // Tunnel rpc.relay: RelayWebSocket owns the rpc.auth/rpc.relay preface and
+      // the inner transport (`ws` in Node with the tunnel's Origin/UA headers,
+      // native WebSocket in browsers). Checked before the generic tealstreet.io
+      // branch because the relay url IS a tealstreet.io host.
+      const headers = reconnectingOptions.headers;
+      ws = new ReconnectingWebSocket(url, protocols, {
+        ...reconnectingOptions,
+        WebSocket: RelayWebSocket,
+        headers:
+          typeof headers === 'function'
+            ? () => ({ ...headers(), ...TEALSTREET_WS_HEADERS })
+            : { ...headers, ...TEALSTREET_WS_HEADERS },
+      } as Options);
+    } else if (isTealstreetWebSocketUrl(url)) {
       const headers = reconnectingOptions.headers;
       ws = new ReconnectingWebSocket(url, protocols, {
         ...reconnectingOptions,
