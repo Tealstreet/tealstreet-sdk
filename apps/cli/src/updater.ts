@@ -300,15 +300,20 @@ export async function performUpdate(): Promise<boolean> {
 }
 
 function detectInstallMethod(): 'npm' | 'homebrew' | 'binary' | 'unknown' {
+  // `2>/dev/null` is a POSIX shell redirect. execSync runs through cmd.exe on
+  // Windows, which reads it as a path under a non-existent `/dev`, so BOTH
+  // probes threw and detection fell through to 'binary' — sending an
+  // npm-installed Windows user down the self-replace path that cannot work
+  // there. `stdio: 'pipe'` suppresses the output cross-platform instead.
   try {
     // Check if installed via Homebrew
-    const brewList = execSync('brew list tealstreet 2>/dev/null', { encoding: 'utf-8' });
+    const brewList = execSync('brew list tealstreet', { encoding: 'utf-8', stdio: 'pipe' });
     if (brewList) return 'homebrew';
   } catch {}
 
   try {
     // Check if installed via npm
-    const npmList = execSync(`npm list -g ${PACKAGE_NAME} 2>/dev/null`, { encoding: 'utf-8' });
+    const npmList = execSync(`npm list -g ${PACKAGE_NAME}`, { encoding: 'utf-8', stdio: 'pipe' });
     if (npmList.includes(PACKAGE_NAME)) return 'npm';
   } catch {}
 
@@ -336,8 +341,9 @@ async function downloadLatestBinary(version: string): Promise<void> {
     // POSIX path below does not model. Until then, say so instead of throwing
     // "Unsupported platform" at someone who is already on a Windows build.
     throw new Error(
-      'Self-update is not supported on Windows yet. Re-run `npm install -g @tealstreet/cli` ' +
-        'to upgrade, or download the latest tealstreet-windows-x64.exe from the releases page.',
+      'Self-update is not supported for a directly-downloaded Windows binary. ' +
+        'Install with `npm install -g @tealstreet/cli` and `tealstreet update` will work, ' +
+        'or download the latest tealstreet-windows-x64.exe from the releases page.',
     );
   } else {
     throw new Error(`Unsupported platform: ${platform}`);

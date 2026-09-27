@@ -30,10 +30,12 @@ suffix is part of the asset name, the `SHA256SUMS` entry and the cached
 filename — `assetName()` in `scripts/install-binary.cjs` is the single place
 that derives it.
 
-**Windows has no self-update.** `tealstreet update` refuses on `win32`,
-because Windows locks a running `.exe` and the binary cannot overwrite
-itself in place. Upgrade with `npm install -g @tealstreet/cli`. There is
-also no Homebrew or one-liner channel for Windows.
+**Windows self-update goes through npm, not the binary.** Windows locks a
+running `.exe`, so the replace-in-place path cannot work there.
+`detectInstallMethod()` resolves an npm install and shells out to
+`npm update -g`, which does work; a directly-downloaded `.exe` gets an
+explicit refusal telling the user to install via npm or re-download.
+There is no Homebrew or one-liner channel for Windows.
 
 ---
 
