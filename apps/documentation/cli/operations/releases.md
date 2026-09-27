@@ -30,6 +30,14 @@ suffix is part of the asset name, the `SHA256SUMS` entry and the cached
 filename — `assetName()` in `scripts/install-binary.cjs` is the single place
 that derives it.
 
+**Every release is smoke-tested on real Windows.** `.github/workflows/cli-windows-smoke.yml`
+runs on a GitHub-hosted `windows-latest` runner after the release workflow
+finishes: it installs from npm, checks `--version`, `--help` and
+`account list`, and separately downloads the `.exe` and runs it. It is a
+separate workflow so a hosted-runner outage cannot fail a release that has
+already published. It does NOT cover the REPL's rendering — that needs an
+interactive terminal and stays a human check.
+
 **Windows self-update goes through npm, not the binary.** Windows locks a
 running `.exe`, so the replace-in-place path cannot work there.
 `detectInstallMethod()` resolves an npm install and shells out to
