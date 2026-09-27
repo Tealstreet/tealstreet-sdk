@@ -43,6 +43,10 @@ Backpack uses **ED25519 signature authentication** for all state-mutating reques
 Both REST and private-WebSocket signatures source their timestamp from the
 shared `virtualClock`, not `Date.now()`. This keeps the signed timestamp inside
 Backpack's narrow request window when the local system clock is skewed.
+REST signatures default safe-cex's `X-Window` to Backpack's documented maximum
+of 60000ms, unless `extra.recvWindow` explicitly supplies a smaller value. This
+keeps hosted/proxied requests from expiring while the browser remote signer and
+proxy path finish dispatching the signed request.
 
 ### Signature Generation Process (`backpack.signing.ts`)
 
@@ -525,7 +529,7 @@ Account-level leverage limits rather than per-symbol:
 
 6. **CORS required**: `requiresCors: true` -- browser requests need CORS proxy.
 
-7. **HTTP-over-WebSocket**: When `tealstreetTunnel` is enabled, the API factory installs the selected adapter through `setInnerAdapterForRemoteSigning()` so hosted remote signing remains the outer layer.
+7. **HTTP-over-WebSocket / hosted signing**: When `tealstreetTunnel` is enabled, the API factory installs the selected adapter through `setInnerAdapterForRemoteSigning()` so hosted remote signing remains the outer layer. Public REST endpoints are tagged with `markSkipRemoteSigning()` so exchange-server does not round-trip to the browser for requests Backpack never signs.
 
 8. **Market subscription delay**: 2-second `setTimeout` before subscribing to market data streams to allow the WebSocket connection to establish.
 

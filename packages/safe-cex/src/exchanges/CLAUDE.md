@@ -585,14 +585,15 @@ endpoint is public but locally signed, that it is tagged _and_ still carries its
 signature header.
 
 Tagged today: kraken futures, okx, bybit (+spot/inverse, shared `createAPI`),
-hyperliquid perps (both instances) and hyperliquidspot. Untagged exchanges keep
-today's behaviour — absence means "sign it" — so this is incremental. The free
-wins remaining are the ones whose interceptor already decides not to sign a
-public URL, and so pay the hop for a guaranteed no-op: binance (+pm/spot),
-apexomni, asterdex, backpack, bitunix, blofin, coinbase, cryptocom, krakenspot,
-kucoinspot, orderly, paradex, polymarket, weex, woo. Some early-return; backpack,
-cryptocom and polymarket instead compute a URL-derived `requiresAuth`/`isPublic`
-and fall past the signing block. Either shape is fine to tag.
+hyperliquid perps (both instances), hyperliquidspot, and backpack. Untagged
+exchanges keep today's behaviour — absence means "sign it" — so this is
+incremental. The free wins remaining are the ones whose interceptor already
+decides not to sign a public URL, and so pay the hop for a guaranteed no-op:
+binance (+pm/spot), apexomni, asterdex, bitunix, blofin, coinbase, cryptocom,
+krakenspot, kucoinspot, orderly, paradex, polymarket, weex, woo. Some
+early-return; cryptocom and polymarket instead compute a URL-derived
+`requiresAuth`/`isPublic` and fall past the signing block. Either shape is fine
+to tag.
 
 An exchange with no per-URL **market-data** test (bitget, bitmex, phemex, bingx,
 bitrue, kucoin futures, grvt, breakoutprop) needs that distinction established
