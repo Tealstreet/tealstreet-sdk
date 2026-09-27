@@ -259,7 +259,12 @@ drift measurement.
   with no response, no code, no config and no url — every other field empty. The
   key is digit-masked so one cause is one key, scrubbed, capped at 60 chars, and
   the map is bounded; errors that DID get a response are excluded, since those
-  already carry a status and a body.
+  already carry a status and a body. **The scrub requires a letter/digit MIX**
+  rather than a bare length: at a flat 12 characters it redacted `disconnected`,
+  `wallet-balance` and `Content-Type`, and `disconnected` is precisely the word
+  that tells two signer failures apart. Keys are capped at 120, not 60 — the
+  real messages carry an exchange prefix, so the discriminating clause starts
+  past character 60 and a shorter cap collapsed three distinct causes into one.
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals

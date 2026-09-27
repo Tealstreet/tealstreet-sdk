@@ -26,6 +26,12 @@ const MAX_SAMPLES = 25;
 const MAX_LATENCIES = 200;
 /** Bounds `errorCounts`, whose keys come from error text rather than a closed set. */
 const MAX_ERROR_KEYS = 20;
+/**
+ * Long enough to keep what distinguishes one cause from another. At 60 all
+ * three remote-signer failures truncated to the same prefix and collapsed into
+ * one meaningless bucket.
+ */
+const ERROR_KEY_CHARS = 120;
 const SNIPPET_CHARS = 200;
 
 /**
@@ -143,10 +149,23 @@ const pathOf = (url: string | undefined): string | undefined => {
   return path ? path.slice(0, 80) : undefined;
 };
 
-/** Mask anything long enough to be a key, signature or token before it is stored. */
+/**
+ * Mask runs that look like a key, signature or token — and only those.
+ *
+ * A bare length threshold does not work. At 12 characters it ate `disconnected`
+ * out of `WebSocket disconnected — signing aborted`, which is the word that
+ * distinguishes one signer failure from another, plus `wallet-balance`,
+ * `Transitional` and `Content-Type`. Real secrets here are api keys, HMAC
+ * signatures and nanoids, all of which mix letters and digits; English words do
+ * not. So require that mix, and keep a pure-length rule only for runs far
+ * longer than any word.
+ */
+const looksLikeSecret = (run: string): boolean =>
+  run.length >= 32 || (/\d/.test(run) && /[A-Za-z]/.test(run));
+
 const scrub = (text: string): string =>
   text
-    .replace(/[A-Za-z0-9_-]{12,}/g, '<redacted>')
+    .replace(/[A-Za-z0-9_-]{12,}/g, (run) => (looksLikeSecret(run) ? '<redacted>' : run))
     .slice(0, SNIPPET_CHARS)
     .trim();
 
@@ -202,7 +221,7 @@ const classifyBody = (data: unknown): { bodyKind: string; bodySnippet?: string }
  * is one key rather than one key per id, timestamp or duration.
  */
 const normalizeErrorKey = (message: string): string =>
-  scrub(message).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 60) || 'unknown';
+  scrub(message).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, ERROR_KEY_CHARS) || 'unknown';
 
 const bumpBounded = (counts: Record<string, number>, key: string) => {
   if (counts[key] === undefined && Object.keys(counts).length >= MAX_ERROR_KEYS) {

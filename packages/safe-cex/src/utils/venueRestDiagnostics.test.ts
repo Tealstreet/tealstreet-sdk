@@ -82,6 +82,43 @@ describe('venueRestDiagnostics', () => {
     expect(sample.bodySnippet).not.toContain('ABCDEFGH1234567890');
   });
 
+  // The three remote-signer failures differ only in wording, and a 12-char
+  // length rule ate the words that tell them apart.
+  it('keeps ordinary long words that are not secrets', () => {
+    noteRestFailure('bybit', new Error('WebSocket disconnected — signing aborted'));
+    noteRestFailure('bybit', new Error('Remote signer unavailable — WebSocket disconnected'));
+
+    const samples = drainVenueRestFailureSamples();
+    expect(samples[0].errorMessage).toBe('WebSocket disconnected — signing aborted');
+    expect(Object.keys(statsFor('bybit').errorCounts).sort()).toEqual([
+      'Remote signer unavailable — WebSocket disconnected',
+      'WebSocket disconnected — signing aborted',
+    ]);
+  });
+
+  // The real messages carry an exchange prefix, so the part that distinguishes
+  // them starts past character 60 — where the key used to be cut.
+  it('keeps the discriminator when it falls late in a prefixed message', () => {
+    noteRestFailure(
+      'bybit',
+      new Error('[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone <5s)'),
+    );
+    noteRestFailure(
+      'bybit',
+      new Error('[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone >10m)'),
+    );
+
+    expect(Object.keys(statsFor('bybit').errorCounts)).toHaveLength(2);
+  });
+
+  it('still redacts a mixed letter-and-digit token', () => {
+    noteRestFailure('bybit', new Error('Signing request V1StGXR8Z5jdHi6BmyT timed out'));
+
+    const [sample] = drainVenueRestFailureSamples();
+    expect(sample.errorMessage).toContain('<redacted>');
+    expect(sample.errorMessage).not.toContain('V1StGXR8Z5jdHi6BmyT');
+  });
+
   it('redacts key-shaped runs out of a body snippet', () => {
     noteRestFailure('bybit', {
       config: {},
