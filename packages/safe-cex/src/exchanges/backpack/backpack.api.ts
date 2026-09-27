@@ -5,26 +5,14 @@ import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
 import { appendHttpFailure } from '../../utils/httpFailure';
 import { BaseExchange } from '../base';
 import { generateAuthHeaders } from './backpack.signing';
 import { BASE_URLS, INSTRUCTIONS } from './backpack.types';
 
-const BACKPACK_MAX_AUTH_WINDOW_MS = 60_000;
-
-export const resolveBackpackAuthWindow = (recvWindow?: number): number => {
-  if (recvWindow === undefined || !Number.isFinite(recvWindow) || recvWindow <= 0) {
-    return BACKPACK_MAX_AUTH_WINDOW_MS;
-  }
-
-  return Math.min(Math.floor(recvWindow), BACKPACK_MAX_AUTH_WINDOW_MS);
-};
-
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
-  const authWindow = resolveBackpackAuthWindow(options?.extra?.recvWindow);
 
   const xhr = safeCexAxiosCreate(
     {
@@ -55,9 +43,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     const nextConfig = { ...config };
 
     // Check if this endpoint requires authentication
-    const isPublic = isPublicEndpoint(config.url || '');
-    if (isPublic) markSkipRemoteSigning(nextConfig);
-    const requiresAuth = !isPublic;
+    const requiresAuth = !isPublicEndpoint(config.url || '');
 
     if (requiresAuth && options.key && options.secret) {
       try {
@@ -75,7 +61,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
           params,
           options.key,
           options.secret,
-          authWindow,
+          options?.extra?.recvWindow || 5000,
         );
 
         // Merge auth headers with existing headers

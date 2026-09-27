@@ -141,7 +141,11 @@ export function checkForUpdatesBackground(): void {
         // now running while `notifiedVersion` still holds the older one, so the
         // banner offered an update from 0.10.6 to 0.10.6 until the cache
         // expired. Compare against what is actually running.
-        if (state.latestVersion && state.notifiedVersion !== state.latestVersion && isNewerThanCurrent(state.latestVersion)) {
+        if (
+          state.latestVersion &&
+          state.notifiedVersion !== state.latestVersion &&
+          isNewerThanCurrent(state.latestVersion)
+        ) {
           showUpdateNotification(state.latestVersion, state.releaseNotes);
           state.notifiedVersion = state.latestVersion;
           saveUpdateState(state);
@@ -326,6 +330,15 @@ async function downloadLatestBinary(version: string): Promise<void> {
     binaryName = arch === 'arm64' ? 'tealstreet-darwin-arm64' : 'tealstreet-darwin-x64';
   } else if (platform === 'linux') {
     binaryName = arch === 'arm64' ? 'tealstreet-linux-arm64' : 'tealstreet-linux-x64';
+  } else if (platform === 'win32') {
+    // Windows locks a running .exe, so replacing it in place fails. Doing this
+    // properly needs a rename-aside + swap + cleanup-on-next-launch, which the
+    // POSIX path below does not model. Until then, say so instead of throwing
+    // "Unsupported platform" at someone who is already on a Windows build.
+    throw new Error(
+      'Self-update is not supported on Windows yet. Re-run `npm install -g @tealstreet/cli` ' +
+        'to upgrade, or download the latest tealstreet-windows-x64.exe from the releases page.',
+    );
   } else {
     throw new Error(`Unsupported platform: ${platform}`);
   }

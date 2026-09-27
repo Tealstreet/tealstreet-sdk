@@ -40,17 +40,22 @@ PLATFORMS=(
   "darwin-x64"
   "linux-x64"
   "linux-arm64"
+  "windows-x64"
 )
 
 for PLATFORM in "${PLATFORMS[@]}"; do
   echo "Building for ${PLATFORM}..."
 
   TARGET=""
+  # `bun build --compile` appends .exe itself on a Windows target, so EXT is
+  # what the produced file is actually called — not what we pass to --outfile.
+  EXT=""
   case $PLATFORM in
     darwin-arm64) TARGET="bun-darwin-arm64" ;;
     darwin-x64) TARGET="bun-darwin-x64" ;;
     linux-x64) TARGET="bun-linux-x64" ;;
     linux-arm64) TARGET="bun-linux-arm64" ;;
+    windows-x64) TARGET="bun-windows-x64"; EXT=".exe" ;;
   esac
 
   OUTPUT="${DIST_DIR}/tealstreet-${PLATFORM}"
@@ -74,7 +79,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     --define "process.env.TEALSTREET_EXCHANGE_RELAY_WS='${PROD_RELAY_WS}'"
 
   # Make executable
-  chmod +x "$OUTPUT"
+  chmod +x "${OUTPUT}${EXT}"
 done
 
 # Bun compile can leave intermediate JS output next to the compiled binaries.

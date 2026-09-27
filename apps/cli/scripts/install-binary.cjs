@@ -16,6 +16,7 @@ function resolvePlatform() {
   const platformMap = {
     darwin: 'darwin',
     linux: 'linux',
+    win32: 'windows',
   };
   const archMap = {
     arm64: 'arm64',
@@ -40,9 +41,15 @@ function getCacheDir() {
   return path.join(root, 'tealstreet-cli', packageJson.version);
 }
 
+// `bun build --compile` appends `.exe` to a Windows target, so the release asset
+// carries it. The cached copy must too, or Windows refuses to execute it.
+function assetName(target) {
+  return target.startsWith('windows') ? `tealstreet-${target}.exe` : `tealstreet-${target}`;
+}
+
 function getBinaryPath() {
   const target = resolvePlatform();
-  return path.join(getCacheDir(), `tealstreet-${target}`);
+  return path.join(getCacheDir(), assetName(target));
 }
 
 function sha256File(file) {
@@ -181,13 +188,14 @@ function download(url, destination, { expectedSha256 } = {}) {
 async function fetchExpectedSha256(target) {
   const sumsUrl = `https://github.com/Tealstreet/cli/releases/download/v${packageJson.version}/SHA256SUMS`;
   const sums = await fetchText(sumsUrl);
+  const wanted = assetName(target);
   for (const line of sums.split(/\r?\n/)) {
     const [hash, file] = line.trim().split(/\s+/);
-    if (file === `tealstreet-${target}` && /^[a-f0-9]{64}$/i.test(hash)) {
+    if (file === wanted && /^[a-f0-9]{64}$/i.test(hash)) {
       return hash;
     }
   }
-  throw new Error(`Missing checksum for tealstreet-${target}`);
+  throw new Error(`Missing checksum for ${wanted}`);
 }
 
 function ensureBinary({ optional = false } = {}) {
@@ -198,7 +206,7 @@ function ensureBinary({ optional = false } = {}) {
     return binary;
   }
 
-  const url = `https://github.com/Tealstreet/cli/releases/download/v${packageJson.version}/tealstreet-${target}`;
+  const url = `https://github.com/Tealstreet/cli/releases/download/v${packageJson.version}/${assetName(target)}`;
 
   try {
     const childProcess = require('node:child_process');
@@ -270,6 +278,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assetName,
   ensureBinary,
   getBinaryPath,
   resolvePlatform,

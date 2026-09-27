@@ -41,7 +41,14 @@ See [`apps/documentation/cli/CLAUDE.md`](../documentation/cli/CLAUDE.md) if one 
 
 ## Runtime
 
-**Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64. **There is no Windows target** — `scripts/install-binary.cjs` maps `darwin`/`linux` only, and the docs claimed a `.exe` for months that no build ever produced.
+**Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.
+
+**Windows shipped 2026-09-27 and is deliberately partial.** `bun build --compile --target=bun-windows-x64` works off an unmodified tree, so the build was never the obstacle — the POSIX assumptions around it were. Two of them survive:
+
+- **`bun build --compile` appends `.exe` itself** on a Windows target. The asset name, the `SHA256SUMS` line and the cached filename must all carry it or the npm launcher `spawnSync`s a path Windows will not execute. `assetName()` in `scripts/install-binary.cjs` is the single derivation; `src/install-binary.test.ts` pins it. Don't re-derive the suffix from `process.platform` at a second call site.
+- **`tealstreet update` throws on `win32` on purpose.** Windows locks a running `.exe`, so `mv`-over-self cannot work; a correct implementation needs rename-aside + swap + cleanup-on-next-launch, which is a different code path from the POSIX one, not a tweak to it. The throw carries the npm upgrade instruction rather than the old opaque `Unsupported platform`.
+
+**The REPL is untested on Windows.** It drives DECSTBM scroll regions, a top alert bar and a bottom footer over Node `readline`. That should be fine under Windows Terminal / PowerShell 7 (ConPTY) and is expected to render badly in legacy `cmd.exe`. Nobody has run it — there is no Windows machine on the team and CI has no Windows job, so a `--version` smoke test is the most that can be automated. Treat a Windows REPL bug report as plausible rather than surprising.
 
 ### The npm package has NO `dependencies`, and that is deliberate
 
@@ -150,7 +157,6 @@ lazy, so the gate calls `ensureCommandsRegistered()` before asking the registry.
 against real accounts from the keys sheet, in an isolated `$HOME`, and fails on
 anything that hangs or leaks a stack trace. Nobody had tested non-REPL mode
 before it.
-
 
 **REPL mode** (default): Interactive terminal with readline. Watch modes (`wa`/`wp`/`wo`/`wm`) use alt screen + raw mode.
 

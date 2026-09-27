@@ -33,18 +33,35 @@ The Homebrew formula lives in
 
 ## Windows
 
-**There is no native Windows build yet** — every release ships the four
-assets in the table below and nothing else. Install inside WSL with the
-macOS/Linux one-liner above; the `linux-x64` binary runs there.
+```powershell
+npm install -g @tealstreet/cli
+```
+
+That fetches `tealstreet-windows-x64.exe` and puts a `tealstreet` command on
+your PATH. For a direct download, grab the `.exe` from the releases page and
+put it somewhere on your PATH yourself.
+
+Two things to know:
+
+- **Run it from Windows Terminal or PowerShell 7.** The REPL draws a pinned
+  top bar and bottom footer using ANSI escape sequences. Legacy `cmd.exe`
+  does not render those correctly.
+- **`tealstreet update` does not work on Windows yet.** Windows locks a
+  running `.exe`, so the binary cannot replace itself in place. Re-run
+  `npm install -g @tealstreet/cli` to upgrade.
+
+WSL remains a fine alternative — the `linux-x64` binary runs there with the
+macOS/Linux one-liner above.
 
 ## Available builds
 
-| Asset                     | Platform           |
-| ------------------------- | ------------------ |
-| `tealstreet-darwin-arm64` | Apple Silicon Macs |
-| `tealstreet-darwin-x64`   | Intel Macs         |
-| `tealstreet-linux-x64`    | Linux x86_64       |
-| `tealstreet-linux-arm64`  | Linux arm64        |
+| Asset                        | Platform           |
+| ---------------------------- | ------------------ |
+| `tealstreet-darwin-arm64`    | Apple Silicon Macs |
+| `tealstreet-darwin-x64`      | Intel Macs         |
+| `tealstreet-linux-x64`       | Linux x86_64       |
+| `tealstreet-linux-arm64`     | Linux arm64        |
+| `tealstreet-windows-x64.exe` | Windows x64        |
 
 ---
 

@@ -16,17 +16,24 @@ Standalone binaries are published to
 [`Tealstreet/cli`](https://github.com/Tealstreet/cli/releases) on
 GitHub. Every release ships the same set of artifacts:
 
-| Asset                     | Platform           |
-| ------------------------- | ------------------ |
-| `tealstreet-darwin-arm64` | Apple Silicon Macs |
-| `tealstreet-darwin-x64`   | Intel Macs         |
-| `tealstreet-linux-x64`    | Linux x86_64       |
-| `tealstreet-linux-arm64`  | Linux arm64        |
+| Asset                        | Platform           |
+| ---------------------------- | ------------------ |
+| `tealstreet-darwin-arm64`    | Apple Silicon Macs |
+| `tealstreet-darwin-x64`      | Intel Macs         |
+| `tealstreet-linux-x64`       | Linux x86_64       |
+| `tealstreet-linux-arm64`     | Linux arm64        |
+| `tealstreet-windows-x64.exe` | Windows x64        |
 
-**No Windows build is produced.** `apps/cli/scripts/build.sh` and
-`.github/workflows/cli-release.yml` both target exactly those four
-platforms, and `scripts/install-binary.cjs` maps `darwin` and `linux`
-only. Windows users install inside WSL with the macOS/Linux one-liner.
+A fifth asset, `tealstreet-windows-x64.exe`, covers Windows x64.
+`bun build --compile` appends the `.exe` itself on a Windows target, so the
+suffix is part of the asset name, the `SHA256SUMS` entry and the cached
+filename — `assetName()` in `scripts/install-binary.cjs` is the single place
+that derives it.
+
+**Windows has no self-update.** `tealstreet update` refuses on `win32`,
+because Windows locks a running `.exe` and the binary cannot overwrite
+itself in place. Upgrade with `npm install -g @tealstreet/cli`. There is
+also no Homebrew or one-liner channel for Windows.
 
 ---
 
