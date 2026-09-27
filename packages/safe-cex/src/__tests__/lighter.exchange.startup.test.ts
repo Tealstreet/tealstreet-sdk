@@ -188,6 +188,38 @@ describe('LighterExchange startup sequencing', () => {
     });
   });
 
+  it('downgrades transient private snapshot transport failures to warnings', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
+    const log = vi.spyOn(exchange, 'log');
+    vi.spyOn(exchange, 'fetchPositions').mockRejectedValue(
+      Object.assign(new Error('No response received from server'), {
+        code: 'NO_RESPONSE',
+      }),
+    );
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+
+    await (exchange as any).fetchAndSetPrivateSnapshotHelper();
+
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('Private snapshot fetch skipped after transient REST transport failure'),
+      expect.anything(),
+    );
+  });
+
+  it('keeps unexpected private snapshot failures on the exchange error path', async () => {
+    const exchange = createExchange();
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
+    const error = new Error('unexpected payload shape');
+    vi.spyOn(exchange, 'fetchPositions').mockRejectedValue(error);
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+
+    await (exchange as any).fetchAndSetPrivateSnapshotHelper();
+
+    expect(emitAndLogError).toHaveBeenCalledWith(error);
+  });
+
   it('does not treat account position initial margin as the market max leverage cap', async () => {
     const exchange = createExchange();
     exchange.store.update({ markets: coreMarkets });

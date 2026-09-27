@@ -627,6 +627,7 @@ Two error interceptors handle API responses:
 - **WASM not ready**: signer initialization retries once after explicit runtime warmup, then cooldown-gates further retries when needed
 - **Stale browser WASM artifact**: If runtime throws `globalThis.poseidon2HashFp5 is not a function`, `/wasm/poseidon_crypto.wasm` is outdated versus SDK code. Ensure the updated binary exists at `apps/web/public/wasm/poseidon_crypto.wasm`.
 - **Rate-limit ambiguity**: 429/405, WS rate-limit errors, and volume-quota messages are not enough to prove IP vs L1/account bucket. Keep user-facing copy neutral.
+- **Transient REST transport misses**: public candle retries and periodic private snapshot `NO_RESPONSE` / timeout / network failures are expected during mobile sleep-wake and degraded Robinhood/direct routes. Suppress exchange-level Sentry emission for those paths and keep them as cooldown-gated warnings; payload-shape and venue validation errors should still emit normally.
 - **Invalid margin mode on create-order**: Treat as stale or mismatched account risk state. Refresh positions/account snapshot, move flat placeholder display away from the stale market-config value when safe, and tell the user to explicitly re-apply the intended mode. Do not auto-switch or auto-retry the order.
 - **Fill false-positive detection**: Skips FILLED events where both price and amount are <= 0 (replacement artifacts)
 
