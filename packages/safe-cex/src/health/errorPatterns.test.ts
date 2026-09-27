@@ -147,11 +147,13 @@ describe('errorPatterns', () => {
       expect(pattern).toBeDefined();
     });
 
-    it('bitunix should have order_warning ONLY for "nothing to reduce" (user-action)', () => {
+    it('bitunix should have order_warning for user-action order placement rejections', () => {
       const pattern = EXCHANGE_SPECIFIC_PATTERNS.bitunix.find((p) => p.category === 'order_warning');
       expect(pattern).toBeDefined();
       expect(pattern?.severity).toBe('warning');
       expect(pattern?.patterns).toContain('nothing to reduce');
+      expect(pattern?.patterns).toContain('This trading pair does not currently support trading via OpenAPI');
+      expect(pattern?.patterns).toContain('Stock Perpetual trading permissions not activated');
       // Do NOT bundle internal-recovery messages (Missing positionId) into
       // the warning category — that would toast on every retry-then-succeed.
       expect(pattern?.patterns).not.toContain('missing positionid');

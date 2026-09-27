@@ -407,7 +407,8 @@ Complex logic handling four order categories:
 - API format: `BTCUSDT` (base + quote concatenated)
 - Internal format: Same -- no transformation needed
 - Market ID format: `BTC/USDT` (with slash)
-- Markets are filtered to `quote === 'USDT'`, `symbolStatus === 'OPEN'`, and `isApiSupported !== false`. The official schema defines `false` as API trading disabled, so these symbols fail closed and are not surfaced as tradable.
+- Markets are filtered to `quote === 'USDT'`, `symbolStatus === 'OPEN'`, and API-trading support. The official schema defines `isApiSupported: false` as API trading disabled, so these symbols fail closed and are not surfaced as tradable.
+- Parse `isApiSupported` defensively, not as strict boolean-only data. Bitunix has drifted response shapes elsewhere, so string/number false values (`"false"`, `"0"`, `0`, etc.) must fail closed too. Missing values stay allowed for older payloads.
 
 ## Data Precision & Conversion
 
@@ -606,6 +607,15 @@ Every pre-flight rejection in `formatTPSLOrder` follows the same emit-before-thr
 - `'missing positionid'` → `suppressed` → **no toast at all**. Internal recovery: `placeOrder` catches the throw, refreshes positions, and retries. Showing a toast on the happy retry-then-succeed path would be noise. Still emitted so console / Sentry / `requestsLogAtom` capture it; if it ever persists after refresh you'll see it in DevTools and the dev Requests Log drawer.
 
 **If you reword either emitted message in `formatCreateOrder`, update the matching pattern in `errorPatterns.ts`** or the classifier will fall through to `unknown` → generic red error toast (defeats both the user-friendly warning and the suppression).
+
+Bitunix may reject an otherwise `OPEN`, API-supported crypto market with
+`This trading pair does not currently support trading via OpenAPI.` or
+`Stock Perpetual trading permissions not activated. Please update App or use Web to sign.`
+Live `ZECUSDT` metadata was verified as `isApiSupported: true`, so do not treat
+the "Stock Perpetual" wording as proof that Tealstreet sent a stock payload.
+Classify these as per-symbol/product-agreement order warnings and keep them in
+the web Sentry blacklist; they are actionable venue/account state, not app
+defects or terminal API-key auth failures.
 
 ### REST Error Handling
 

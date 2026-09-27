@@ -320,7 +320,11 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
       // — keep in sync if you reword it.
       category: 'order_warning',
       severity: 'warning',
-      patterns: ['nothing to reduce'],
+      patterns: [
+        'nothing to reduce',
+        'This trading pair does not currently support trading via OpenAPI',
+        'Stock Perpetual trading permissions not activated',
+      ],
     },
   ],
 };
