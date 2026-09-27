@@ -43,24 +43,43 @@ const checks = [
   },
   {
     label: 'secret assignment',
-    pattern: /\b[A-Z0-9_]*(?:SECRET|PASSWORD|PRIVATE_KEY|ACCESS_TOKEN)[A-Z0-9_]*\s*[:=]\s*['"]?[A-Za-z0-9_./+=-]{16,}/,
+    pattern: /\b[A-Z0-9_]*(?:SECRET|PASSWORD|PRIVATE_KEY|ACCESS_TOKEN)[A-Z0-9_]*\s*[:=]\s*['"]?([A-Za-z0-9_./+=-]{16,})/,
+    // A CONSTANT assigned a dotted lowercase attribute key is a semantic
+    // convention, not a credential — OpenTelemetry (bundled via @sentry/bun)
+    // ships hundreds, e.g. AWS_SECRETSMANAGER_SECRET_ARN =
+    // "aws.secretsmanager.secret.arn". Requiring a dot-separated all-lowercase
+    // identifier keeps this narrow: a real token has mixed case or no dots.
+    ignoreValue: /^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$/,
   },
 ];
 
+// Scan EVERY occurrence in a string, not just the first. These strings are
+// whole minified chunks — one benign hit used to `break` the check loop and
+// hide every later match in the same 233KB blob, including a real secret.
 const matches = [];
-for (const value of strings) {
+outer: for (const value of strings) {
   for (const check of checks) {
-    if (check.pattern.test(value)) {
-      matches.push({ label: check.label, value });
-      break;
+    const scanner = new RegExp(check.pattern.source, `${check.pattern.flags.replace('g', '')}g`);
+    let found;
+    while ((found = scanner.exec(value)) !== null) {
+      if (found[0] === '') {
+        scanner.lastIndex += 1;
+        continue;
+      }
+      if (check.ignoreValue && check.ignoreValue.test(found[1] ?? '')) {
+        continue;
+      }
+      matches.push({ label: check.label, value: found[0] });
+      if (matches.length >= 50) {
+        break outer;
+      }
     }
-  }
-
-  if (matches.length >= 50) {
-    break;
   }
 }
 
+// Report the MATCH, not the enclosing chunk. Redacting a whole minified blob
+// printed `at ...ent. (233360 chars)`, which named neither the offender nor
+// the reason.
 function redact(value) {
   if (value.length <= 12) {
     return '[redacted]';
