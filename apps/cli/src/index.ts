@@ -23,6 +23,7 @@ import {
 } from './config';
 import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
+import { cleanupStaleUpdate } from './windows-update';
 import { fireCheckin } from './checkin';
 import { login, logout, showAuthStatus } from './auth';
 import { installStdoutGuard, isMcpInvocation } from './mcp/stdoutGuard';
@@ -35,6 +36,11 @@ const RUNNING_AS_MCP = isMcpInvocation();
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+// A Windows self-update parks the previous binary as `.old` beside the new one
+// — it cannot be deleted while it is the running image. This is the next
+// launch, so clear it. No-op everywhere else, and never throws.
+cleanupStaleUpdate();
 
 // Released binaries only, and opt-out via TEALSTREET_TELEMETRY=0. Must precede
 // the process-level handlers below so an early crash still has a client.
@@ -398,10 +404,10 @@ tasksCmd
         task.status === 'running'
           ? chalk.green
           : task.status === 'paused'
-          ? chalk.yellow
-          : task.status === 'completed'
-          ? chalk.blue
-          : chalk.red;
+            ? chalk.yellow
+            : task.status === 'completed'
+              ? chalk.blue
+              : chalk.red;
 
       console.log(`  ${chalk.bold(task.id.slice(0, 12))}...`);
       console.log(`    Type: ${task.type}`);
@@ -442,10 +448,10 @@ tasksCmd.action(async () => {
       task.status === 'running'
         ? chalk.green
         : task.status === 'paused'
-        ? chalk.yellow
-        : task.status === 'completed'
-        ? chalk.blue
-        : chalk.red;
+          ? chalk.yellow
+          : task.status === 'completed'
+            ? chalk.blue
+            : chalk.red;
 
     console.log(`  ${chalk.bold(task.id.slice(0, 12))}...  ${task.type}  ${statusColor(task.status)}`);
   }

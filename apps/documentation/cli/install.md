@@ -46,10 +46,11 @@ Two things to know:
 - **Run it from Windows Terminal or PowerShell 7.** The REPL draws a pinned
   top bar and bottom footer using ANSI escape sequences. Legacy `cmd.exe`
   does not render those correctly.
-- **`tealstreet update` works only for the npm install.** It upgrades by
-  calling `npm update -g` rather than replacing the running file, because
-  Windows locks a running `.exe`. If you downloaded the `.exe` directly,
-  download the new one to upgrade.
+- **`tealstreet update` works either way.** An npm install upgrades through
+  `npm update -g`. A directly-downloaded `.exe` is replaced by renaming the
+  running binary aside and moving the new one into place — Windows will not
+  let a running `.exe` be overwritten, only renamed. Restart the CLI
+  afterwards; the leftover `.old` file is removed on the next launch.
 
 WSL remains a fine alternative — the `linux-x64` binary runs there with the
 macOS/Linux one-liner above.

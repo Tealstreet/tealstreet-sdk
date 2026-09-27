@@ -38,12 +38,15 @@ separate workflow so a hosted-runner outage cannot fail a release that has
 already published. It does NOT cover the REPL's rendering — that needs an
 interactive terminal and stays a human check.
 
-**Windows self-update goes through npm, not the binary.** Windows locks a
-running `.exe`, so the replace-in-place path cannot work there.
-`detectInstallMethod()` resolves an npm install and shells out to
-`npm update -g`, which does work; a directly-downloaded `.exe` gets an
-explicit refusal telling the user to install via npm or re-download.
-There is no Homebrew or one-liner channel for Windows.
+**Windows self-update replaces the binary by rename, not by overwrite.**
+Windows locks a running `.exe`: it cannot be deleted or written over, but it
+CAN be renamed, and the open handle follows. So the update stages the
+download beside the current binary, renames the running one to `.old`,
+renames the download into its place, and deletes the `.old` on the next
+launch. If the second rename fails the first is rolled back, because a
+half-applied update would leave the user with no `tealstreet.exe` at all.
+npm installs take the `npm update -g` path instead. There is no Homebrew or
+one-liner channel for Windows.
 
 ---
 

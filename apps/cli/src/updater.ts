@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { getConfigDir } from './config';
+import { swapInPlace, updatePaths } from './windows-update';
 import packageJson from '../package.json';
 
 const PACKAGE_NAME = '@tealstreet/cli';
@@ -326,6 +327,36 @@ function detectInstallMethod(): 'npm' | 'homebrew' | 'binary' | 'unknown' {
   return 'unknown';
 }
 
+/**
+ * Windows cannot overwrite a running .exe, so the new binary is staged beside
+ * the current one and swapped in by rename. See src/windows-update.ts for why
+ * the ordering matters. Uses fetch rather than shelling out to curl: curl.exe
+ * exists on Windows 10+, but going through cmd.exe is what broke the update
+ * probes already.
+ */
+async function downloadAndSwapWindows(version: string, binaryName: string): Promise<void> {
+  const currentBinary = process.execPath;
+  const { next } = updatePaths(currentBinary);
+  const downloadUrl = `${GITHUB_RELEASES_URL}/v${version}/${binaryName}`;
+
+  console.log(chalk.gray(`Downloading ${binaryName}...`));
+
+  const response = await fetch(downloadUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download from ${downloadUrl} (HTTP ${response.status})`);
+  }
+  writeFileSync(next, Buffer.from(await response.arrayBuffer()));
+
+  try {
+    swapInPlace(currentBinary, next);
+  } catch (error) {
+    rmSync(next, { force: true });
+    throw error;
+  }
+
+  console.log(chalk.gray('Replaced the binary. Restart tealstreet to run the new version.'));
+}
+
 async function downloadLatestBinary(version: string): Promise<void> {
   const platform = process.platform;
   const arch = process.arch;
@@ -336,17 +367,14 @@ async function downloadLatestBinary(version: string): Promise<void> {
   } else if (platform === 'linux') {
     binaryName = arch === 'arm64' ? 'tealstreet-linux-arm64' : 'tealstreet-linux-x64';
   } else if (platform === 'win32') {
-    // Windows locks a running .exe, so replacing it in place fails. Doing this
-    // properly needs a rename-aside + swap + cleanup-on-next-launch, which the
-    // POSIX path below does not model. Until then, say so instead of throwing
-    // "Unsupported platform" at someone who is already on a Windows build.
-    throw new Error(
-      'Self-update is not supported for a directly-downloaded Windows binary. ' +
-        'Install with `npm install -g @tealstreet/cli` and `tealstreet update` will work, ' +
-        'or download the latest tealstreet-windows-x64.exe from the releases page.',
-    );
+    binaryName = 'tealstreet-windows-x64.exe';
   } else {
     throw new Error(`Unsupported platform: ${platform}`);
+  }
+
+  if (platform === 'win32') {
+    await downloadAndSwapWindows(version, binaryName);
+    return;
   }
 
   const downloadUrl = `${GITHUB_RELEASES_URL}/v${version}/${binaryName}`;
