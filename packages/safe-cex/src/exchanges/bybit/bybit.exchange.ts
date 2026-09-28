@@ -102,6 +102,7 @@ const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
 const BYBIT_PRELAUNCH_MARKETS_STARTUP_GRACE_MS = 1_500;
 const BYBIT_TRADING_MARKETS_RETRY_DELAY_MS = 1_000;
 export const BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS = 5 * 60_000;
+const BYBIT_TRADING_AGREEMENT_RET_CODES = new Set([110123, 110125]);
 // How long a just-placed order is shielded from wholesale REST order-snapshot
 // replacement while no REST/WS sighting has confirmed it. Covers api-demo's
 // order-indexing lag with margin; short enough that a phantom row for an order
@@ -127,6 +128,50 @@ const stringOrUndefined = (value: unknown): string | undefined =>
 const numberOrUndefined = (value: unknown): number | undefined => {
   const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   return Number.isFinite(numeric) ? numeric : undefined;
+};
+
+const stringFromUnknown = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+const getBybitErrorField = (payload: unknown, ...keys: string[]): unknown => {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const record = payload as Record<string, unknown>;
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return record[key];
+    }
+  }
+  return undefined;
+};
+
+export const formatBybitTradingAgreementError = (
+  payload: unknown,
+  exchangeName?: ExchangeName,
+): string | undefined => {
+  const retCode = numberOrUndefined(getBybitErrorField(payload, 'retCode', 'ret_code', 'code'));
+  const retMsg =
+    stringFromUnknown(payload) ?? stringFromUnknown(getBybitErrorField(payload, 'retMsg', 'ret_msg', 'message', 'msg'));
+  const normalized = retMsg?.toLowerCase() ?? '';
+  const isAgreementError =
+    (retCode !== undefined && BYBIT_TRADING_AGREEMENT_RET_CODES.has(retCode)) ||
+    (normalized.includes('trading terms') && (normalized.includes('must agree') || normalized.includes('must sign'))) ||
+    (normalized.includes('agreement') && normalized.includes('trading this contract'));
+
+  if (!isAgreementError) return undefined;
+
+  const action =
+    exchangeName === 'hyrotrader'
+      ? 'For HyroTrader, wait briefly and retry; if it persists, HyroTrader must sign the agreement on the master Bybit account.'
+      : 'Sign the agreement from the Bybit master account before retrying.';
+  const original = retMsg
+    ? `${retMsg.replace(/[.\s]+$/, '')}${retCode !== undefined ? ` (retCode ${retCode})` : ''}`
+    : retCode !== undefined
+      ? `retCode ${retCode}`
+      : undefined;
+
+  return `Bybit Trading Terms not accepted for this contract. ${action}${
+    original ? ` Original Bybit error: ${original}.` : ''
+  }`;
 };
 
 export const getBybitMarketsFailureTelemetry = (cause: unknown) => {
@@ -233,6 +278,9 @@ const isBybitLeverageNotModified = (data: Record<string, any>) => {
     retCode === BYBIT_LEVERAGE_NOT_MODIFIED_CODE || (retMsg.includes('leverage') && retMsg.includes('not modified'))
   );
 };
+
+const getBybitPayloadMessage = (payload: unknown): string | undefined =>
+  stringFromUnknown(payload) ?? stringFromUnknown(getBybitErrorField(payload, 'retMsg', 'ret_msg', 'message', 'msg'));
 
 const parseBybitFiniteNumber = (value: unknown): number | undefined => {
   const number = typeof value === 'number' ? value : parseFloat(`${value ?? ''}`);
@@ -396,6 +444,15 @@ export class BybitExchange extends BaseExchange {
 
   get cachedApiKeyInfo() {
     return this.apiKeyInfo;
+  }
+
+  private formatBybitVenueError(payload: unknown, fallback?: unknown): string {
+    return (
+      formatBybitTradingAgreementError(payload, this.name) ??
+      getBybitPayloadMessage(payload) ??
+      getBybitPayloadMessage(fallback) ??
+      'Unknown Bybit error'
+    );
   }
 
   private usesBybitDemoEnvironment() {
@@ -2388,7 +2445,7 @@ export class BybitExchange extends BaseExchange {
         const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, p);
         return { data, payload: p };
       } catch (err: any) {
-        this.emitAndLogError(err?.response?.data?.retMsg || err.message);
+        this.emitAndLogError(this.formatBybitVenueError(err?.response?.data, err?.message));
         return undefined;
       }
     });
@@ -2398,8 +2455,9 @@ export class BybitExchange extends BaseExchange {
     let errMsg = '';
     fullfilled.forEach((resp) => {
       if (v(resp.data, 'retMsg') !== 'OK') {
-        this.emitAndLogError(v(resp.data, 'retMsg'));
-        errMsg = v(resp.data, 'retMsg');
+        const formattedError = this.formatBybitVenueError(resp.data);
+        this.emitAndLogError(formattedError);
+        errMsg = formattedError;
       }
     });
 
@@ -2461,8 +2519,9 @@ export class BybitExchange extends BaseExchange {
     }
 
     if (data.retMsg !== 'OK') {
-      this.emitAndLogError(data.retMsg);
-      throw new Error(data.retMsg);
+      const formattedError = this.formatBybitVenueError(data);
+      this.emitAndLogError(formattedError);
+      throw new Error(formattedError);
     }
 
     // SET_TRADING_STOP returns no orderId. Force an order snapshot so partial
@@ -2500,8 +2559,9 @@ export class BybitExchange extends BaseExchange {
     }
 
     if (data.retMsg !== 'OK') {
-      this.emitAndLogError(data.retMsg);
-      throw new Error(data.retMsg);
+      const formattedError = this.formatBybitVenueError(data);
+      this.emitAndLogError(formattedError);
+      throw new Error(formattedError);
     }
 
     // SET_TRADING_STOP returns no orderId; see placeStopLossOrTakeProfit.
@@ -2644,8 +2704,9 @@ export class BybitExchange extends BaseExchange {
     const { data } = await this.xhr.post(ENDPOINTS.CREATE_BATCH_ORDER, payload);
 
     if (data.retMsg !== 'OK') {
-      this.emitAndLogError(data.retMsg);
-      throw new Error(data.retMsg);
+      const formattedError = this.formatBybitVenueError(data);
+      this.emitAndLogError(formattedError);
+      throw new Error(formattedError);
     }
 
     // Check for individual order errors
@@ -2655,7 +2716,7 @@ export class BybitExchange extends BaseExchange {
     if (data.retExtInfo?.list) {
       data.retExtInfo.list.forEach((extInfo: any, index: number) => {
         if (extInfo.code !== 0) {
-          errors.push(`Order ${index + 1}: ${extInfo.msg}`);
+          errors.push(`Order ${index + 1}: ${this.formatBybitVenueError(extInfo)}`);
         }
       });
     }

@@ -2,7 +2,7 @@ import type { BybitBboOrderOpts, BybitTickSizeMarketOrderOpts } from '../../inde
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange, formatBybitTradingAgreementError } from '../../exchanges/bybit/bybit.exchange';
 import { getBybitOrderExecutionParams } from '../../exchanges/bybit/bybit.order-params';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
@@ -224,6 +224,40 @@ describe('Bybit adapter-only advanced order parameters', () => {
         expect(payload.orderLinkId).toBeUndefined();
       }
     }
+  });
+
+  it('surfaces Bybit trading-agreement rejects with HyroTrader recovery guidance', async () => {
+    const exchange = new BybitOrderLinkIdExchange(
+      'hyrotrader',
+      { key: 'key', secret: 'secret' },
+      createStore('XAUUSDT', 'USDT'),
+    );
+    mockPositionMode(exchange);
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        retCode: 110125,
+        retMsg: 'You must agree to the Trading Terms before trading this contract',
+      },
+    });
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    exchange.xhr = { post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'XAUUSDT',
+        type: OrderType.Market,
+        side: OrderSide.Buy,
+        amount: 0.5,
+      }),
+    ).rejects.toThrow('HyroTrader must sign the agreement on the master Bybit account');
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('Bybit Trading Terms not accepted'));
+    expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('wait briefly and retry'));
+  });
+
+  it('normalizes required-agreement copy even when Bybit omits the ret code', () => {
+    expect(
+      formatBybitTradingAgreementError('You must sign the required agreement before trading this contract', 'bybit'),
+    ).toContain('Sign the agreement from the Bybit master account before retrying');
   });
 
   it('sends price-less BBO orders through linear, inverse, and demo single-order endpoints', async () => {

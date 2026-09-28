@@ -1187,6 +1187,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
 | `"order not modified"`                        | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
 | `110043` / `"leverage not modified"`          | Treated as success (desired leverage is already active); refresh positions afterward   | `setLeverage`                      |
+| `110123` / `110125` Trading Terms agreement   | Reword as actionable order warning; never auto-sign from order placement               | order write paths                  |
 | `"Partial symbols switched successfully..."`  | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
 | `"All symbols switched successfully."`        | Silent success                                                                         | `bybit.exchange.ts:1786`           |
 | Network errors                                | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:49-52`               |
@@ -1316,6 +1317,13 @@ Two rules for calling them:
   with the already-active leverage. Treat as a successful no-op and refresh the
   symbol's positions instead of surfacing an error toast. This applies to demo
   accounts too because `BybitDemoExchange` inherits `BybitExchange.setLeverage`.
+- **Trading Terms agreement (`110123` / `110125`)**: Returned when the Bybit
+  master account has not accepted the required contract agreement. Surface this
+  as a user-action order warning, not an auth failure. For HyroTrader, the user
+  normally cannot sign because HyroTrader controls the Bybit account; tell them
+  to wait briefly/retry or contact HyroTrader. Do not auto-call
+  `/v5/user/agreement` from an order failure: it signs legal terms, only works
+  from a master account, and requires transfer/withdraw-class permissions.
 - **Empty cancel results**: Individual cancel errors within a batch cancel are collected but the overall operation may still partially succeed.
 
 ## Exchange Variant Differences
