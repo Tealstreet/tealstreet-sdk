@@ -49,10 +49,13 @@ Source: `packages/cli-core/src/commands/trading/BuyCommand.ts`, `SellCommand.ts`
 
 Reduce-only stop loss or take-profit. Decided by trigger price vs mark.
 
+`at` is optional — `stop 18500` and `stop at 18500` do the same thing.
+
 | Form                             | Result                                       |
 | -------------------------------- | -------------------------------------------- |
-| `stop at 18500`                  | Market stop for full focused position        |
-| `stop at -1%`                    | Same, relative to entry                      |
+| `stop 18500`                     | Market stop for full focused position        |
+| `stop at 18500`                  | Same, with the optional `at`                 |
+| `stop -1%`                       | Relative to entry                            |
 | `stop buy at +100`               | Explicit side (when hedge-mode is ambiguous) |
 | `stop $500 at 1%`                | Partial-size stop                            |
 | `stop sell 0.01 at -100 ETHUSDT` | Symbol override                              |

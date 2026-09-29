@@ -125,11 +125,87 @@ describe('StopCommand — preconditions', () => {
     expect(r.error).toMatch(/Current price is not available/);
   });
 
-  it('returns "Not implemented" on a malformed command', async () => {
+  /**
+   * The message used to be the bare string "Not implemented", which reads as
+   * "this command does not exist yet" rather than "I could not find a price in
+   * what you typed" -- so it must name the expected form. Reported from Discord
+   * 2026-09-29 by a user who could not set a stop at all.
+   */
+  it('names the expected form when there is no price in the command', async () => {
     const ex = makeExchange([pos()]);
     const r = await cmd.execute(ctx(['stop', 'forty', 'nine'], ex));
     expect(r.success).toBe(false);
-    expect(r.error).toBe('Not implemented');
+    expect(r.error).not.toBe('Not implemented');
+    expect(r.error).toMatch(/could not find a trigger price/);
+    // Echoes what they typed and shows a form that works.
+    expect(r.error).toContain('stop forty nine');
+    expect(r.error).toContain('stop 18500');
+  });
+});
+
+/**
+ * `at` is optional. Every documented example carried it, so a bare trigger
+ * price -- the obvious thing to type -- fell through to the catch-all error.
+ * A bare number can never be a size, because `looksLikeSize` requires a `$`,
+ * so there is no ambiguity to resolve.
+ */
+describe('StopCommand — `at` is optional', () => {
+  let cmd: StopCommand;
+  beforeEach(() => {
+    cmd = new StopCommand();
+  });
+
+  const placed = (ex: ExchangeLike) => (ex.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+  it('accepts a bare trigger price', async () => {
+    const ex = makeExchange([pos()]);
+    const r = await cmd.execute(ctx(['stop', '49000'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      triggerPrice: 49_000,
+      reduceOnly: true,
+    });
+  });
+
+  it('places the identical order with or without `at`', async () => {
+    const bare = makeExchange([pos()]);
+    await cmd.execute(ctx(['stop', '49000'], bare));
+    const withAt = makeExchange([pos()]);
+    await cmd.execute(ctx(['stop', 'at', '49000'], withAt));
+    expect(placed(bare)).toEqual(placed(withAt));
+  });
+
+  it('accepts a bare price after an explicit side', async () => {
+    const ex = makeExchange([pos()]);
+    const r = await cmd.execute(ctx(['stop', 'sell', '49000'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({ side: OrderSide.Sell, triggerPrice: 49_000 });
+  });
+
+  it('accepts a bare price after a size, without mistaking the size for it', async () => {
+    const ex = makeExchange([pos()]);
+    const r = await cmd.execute(ctx(['stop', '$500', '49000'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({ triggerPrice: 49_000 });
+    expect(placed(ex).amount).toBeGreaterThan(0);
+  });
+
+  it('still reads a relative price and a symbol override without `at`', async () => {
+    const ex = makeExchange([pos({ symbol: 'ETHUSDT' })]);
+    const r = await cmd.execute(ctx(['stop', '-1%', 'ETHUSDT'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({ symbol: 'ETHUSDT', triggerPrice: 2_970 });
+  });
+
+  // The trigger keyword still separates trigger from limit with no `at`.
+  it('supports a limit stop without `at`', async () => {
+    const ex = makeExchange([pos()]);
+    const r = await cmd.execute(ctx(['stop', '49000', 'trigger', '49100'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({ price: 49_000, triggerPrice: 49_100 });
   });
 });
 

@@ -12,6 +12,10 @@ export class StopCommand extends TradingBaseCommand {
   readonly category = CommandCategory.Trading;
   readonly aliases = [];
   readonly examples = [
+    // `at` is optional; the bare form is listed first because it is what
+    // people type before reading anything.
+    'stop 18500',
+    'stop -1%',
     'stop at 0.1%',
     'stop at 0.1% ETHUSDT',
     'stop at -100',
@@ -46,7 +50,20 @@ export class StopCommand extends TradingBaseCommand {
     const isBuySellFirstArg = ['buy', 'sell'].includes(String(args[1]));
     const sizePosition = this.looksLikeSize(args[1]) ? 1 : isBuySellFirstArg && this.looksLikeSize(args[2]) ? 2 : -1;
 
-    if (args[1] === 'at' || (isBuySellFirstArg && args[2] === 'at') || sizePosition > 0) {
+    // `at` is OPTIONAL. The price is whatever follows it, or -- when it is
+    // absent -- the first price-shaped argument after the side and the size. A
+    // bare number can never be a size (`looksLikeSize` requires a `$`), so
+    // `stop 18500` is unambiguous. Reported from Discord 2026-09-29: `stop
+    // 0.049570` is the natural thing to type, and it fell through to the
+    // catch-all at the bottom of this method, which named neither the problem
+    // nor the expected form.
+    const atIdx = this.findArgIndex(args, 'at');
+    const pricePosition =
+      atIdx !== -1
+        ? atIdx + 1
+        : args.findIndex((arg, index) => index > 0 && index !== sizePosition && this.looksLikePrice(arg));
+
+    if (pricePosition > 0 && args[pricePosition] !== undefined) {
       const ticker = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol);
       const currentPrice = ticker?.last;
       if (!currentPrice) {
@@ -54,7 +71,6 @@ export class StopCommand extends TradingBaseCommand {
       }
 
       const side = this.hasArgValue(args, 'buy') ? OrderSide.Buy : this.hasArgValue(args, 'sell') ? OrderSide.Sell : undefined;
-      const pricePosition = sizePosition !== -1 ? (side ? 4 : 3) : side ? 3 : 2;
       const limitPrice = parseFloat(this.processPrice(args[pricePosition], currentPrice));
 
       // Optional `trigger <abs>` keyword turns this into a true limit
@@ -125,7 +141,11 @@ export class StopCommand extends TradingBaseCommand {
       return this.success();
     }
 
-    this.printError(ctx, 'Not implemented');
-    return this.error('Not implemented');
+    // Naming the expected form matters more than it looks: the previous message
+    // here was the bare string "Not implemented", which a user reasonably read
+    // as "this command does not exist yet" and gave up on.
+    const usage = `stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`, \`stop at -1%\`, \`stop sell $500 at 1%\`.`;
+    this.printError(ctx, usage);
+    return this.error(usage);
   }
 }
