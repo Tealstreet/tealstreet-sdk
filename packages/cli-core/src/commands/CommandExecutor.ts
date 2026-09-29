@@ -159,6 +159,17 @@ export interface ExecuteResult {
   success?: boolean;
   /** Error message from a handled command failure. */
   error?: string;
+  /**
+   * The executor already printed this error to the user.
+   *
+   * A host is contractually required to treat `success === false` as a failure
+   * (see cli-core/CLAUDE.md, "Runner failure contract") and apps/cli converts
+   * it to a throw so `retry` / `set ec` work — which then printed it a SECOND
+   * time from its own catch. One failed order announced itself as
+   * "Command failed: X" followed by "Error in command: X". Hosts should skip
+   * their own reporting when this is set.
+   */
+  errorReported?: boolean;
   /** Whether session state changed */
   sessionChanged?: boolean;
   /** New session values if changed */
@@ -294,7 +305,7 @@ export async function executeCommand(
   if (command.requiresConnection && !exchange) {
     const error = 'Not connected to any exchange. Use "account <name>" to connect.';
     adapter.printError(error);
-    return { handled: true, success: false, error };
+    return { handled: true, success: false, error, errorReported: true };
   }
 
   // Execute the command
@@ -304,7 +315,7 @@ export async function executeCommand(
   } catch (error) {
     const message = (error as Error).message;
     adapter.printError(`Command failed: ${message}`);
-    return { handled: true, success: false, error: message };
+    return { handled: true, success: false, error: message, errorReported: true };
   }
 }
 

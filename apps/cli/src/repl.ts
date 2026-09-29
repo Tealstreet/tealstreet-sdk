@@ -1766,7 +1766,13 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
   recordWriteOp(command, effectiveAccount ?? 'unknown', result);
 
   if (result.handled && result.success === false) {
-    throw new Error(result.error ?? 'Command failed');
+    // The failure has to become a throw so `retry` / `set ec` / blocking
+    // waits see it (cli-core/CLAUDE.md, "Runner failure contract"). Carry
+    // whether the executor already showed it to the user, or reportStepError
+    // prints the same sentence a second time under a different prefix.
+    const err = new Error(result.error ?? 'Command failed') as Error & { alreadyReported?: boolean };
+    if (result.errorReported) err.alreadyReported = true;
+    throw err;
   }
 
   // `<var> = <body>` capture (preprocess sets step.captureTo; runner
@@ -2140,7 +2146,7 @@ async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): P
 function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, err: Error): void {
   if (step.errorMode === 'continue') {
     adapter.printWarning(`(continue-on-error) ${err.message}`);
-  } else {
+  } else if (!(err as Error & { alreadyReported?: boolean }).alreadyReported) {
     adapter.printError(`Error in command: ${err.message}`);
   }
 }
