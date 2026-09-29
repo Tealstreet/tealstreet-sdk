@@ -146,39 +146,6 @@ Once you have linked your chart windows to their respective API Keys you will be
 
 ---
 
-## Pine Script Editing
-
-When your chart is running on Tealchart, Tealstreet shows a live Pine editor below the chart. This editor lets you write simple chart studies directly in the terminal and see them applied to the current chart after a short pause.
-
-You can use the editor to:
-
-- Create overlays with `indicator("Name", overlay=true)`.
-- Create separate-pane indicators with `overlay=false`.
-- Add editable settings with inputs such as `input.int`, `input.float`, and `input.color`.
-- Read chart series such as `open`, `high`, `low`, `close`, and `volume`.
-- Use common helpers from namespaces such as `ta`, `math`, `color`, `str`, `syminfo`, and `timeframe`.
-- Draw output with `plot`, `plotshape`, `plotchar`, and `plotcandle`.
-
-For example:
-
-```pine
-//@version=6
-indicator("Live EMA", shorttitle="EMA", overlay=true)
-
-length = input.int(20, "Length", minval=1)
-lineColor = input.color(color.teal, "Line")
-
-plot(ta.ema(close, length), title="EMA", color=lineColor, linewidth=2)
-```
-
-The editor toolbar shows whether the script is waiting for the chart, running, applied, or failing with an error. You can collapse the editor with the chevron button or drag the top handle to resize it. Your draft is saved locally, and the live study is stored as a local chart study so it can appear in the chart's **MY SCRIPTS** indicator category.
-
-:::note
-The live Pine editor is available on Tealchart. If your chart is using the TradingView engine, this bottom editor will not be shown.
-:::
-
----
-
 ## Draggable TakeProfit & Stoploss
 
 A very powerful feature while using Chart Trading in the Tealstreet Terminal is the ability to drag your TP & SL lines on the chart from your open positions.

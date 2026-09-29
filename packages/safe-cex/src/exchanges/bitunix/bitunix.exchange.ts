@@ -173,23 +173,6 @@ export class BitunixExchange extends BaseExchange {
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
-  private isApiTradingSupported = (value: unknown) => {
-    if (value === undefined || value === null || value === '') {
-      return true;
-    }
-    if (typeof value === 'boolean') {
-      return value;
-    }
-    if (typeof value === 'number') {
-      return value !== 0;
-    }
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      return !['false', '0', 'no', 'n', 'disabled', 'unsupported'].includes(normalized);
-    }
-    return true;
-  };
-
   private hasFiniteTriggerPrice = (value: unknown) => {
     if (value === undefined || value === null || value === '') {
       return false;
@@ -559,12 +542,7 @@ export class BitunixExchange extends BaseExchange {
       } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.MARKETS);
 
       const markets: Market[] = symbols
-        .filter(
-          (m) =>
-            v(m, 'symbolStatus') === 'OPEN' &&
-            v(m, 'quote') === 'USDT' &&
-            this.isApiTradingSupported(v(m, 'isApiSupported')),
-        )
+        .filter((m) => v(m, 'symbolStatus') === 'OPEN' && v(m, 'quote') === 'USDT' && v(m, 'isApiSupported') !== false)
         .map((m) => {
           const baseAsset = v(m, 'base');
           const quoteAsset = v(m, 'quote');
@@ -2363,6 +2341,7 @@ export class BitunixExchange extends BaseExchange {
         // Bitunix returns HTTP 200 even for errors; check the code field
         if (data?.code !== 0) {
           const msg = data?.msg || 'Unknown error';
+          this.emitAndLogError(msg);
           throw new Error(msg);
         }
 
@@ -2386,6 +2365,7 @@ export class BitunixExchange extends BaseExchange {
         // Bitunix returns HTTP 200 even for errors; check the code field
         if (data?.code !== 0) {
           const msg = data?.msg || 'Unknown error';
+          this.emitAndLogError(msg);
           throw new Error(msg);
         }
 

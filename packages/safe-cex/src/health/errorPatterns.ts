@@ -27,13 +27,6 @@ export interface ErrorPattern {
   severity: ErrorSeverity;
 }
 
-const BYBIT_TRADING_AGREEMENT_PATTERNS: (string | RegExp)[] = [
-  'Bybit Trading Terms not accepted',
-  'You must agree to the Trading Terms',
-  'You must sign the required agreement before trading this contract',
-  /\b(?:ret)?code[=:\s]+(?:110123|110125)\b/i,
-];
-
 /**
  * Default error patterns that apply to all exchanges
  */
@@ -188,7 +181,7 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
     {
       category: 'order_warning',
       severity: 'warning',
-      patterns: ['EC_PostOnlyWillTakeLiquidity', ...BYBIT_TRADING_AGREEMENT_PATTERNS],
+      patterns: ['EC_PostOnlyWillTakeLiquidity'],
     },
     {
       category: 'order_rejected',
@@ -233,34 +226,6 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
       category: 'time_sync',
       severity: 'warning',
       patterns: ['recv_window', 'Timestamp for this request'],
-    },
-  ],
-  bybitdemo: [
-    {
-      category: 'order_warning',
-      severity: 'warning',
-      patterns: BYBIT_TRADING_AGREEMENT_PATTERNS,
-    },
-  ],
-  bybitinverse: [
-    {
-      category: 'order_warning',
-      severity: 'warning',
-      patterns: BYBIT_TRADING_AGREEMENT_PATTERNS,
-    },
-  ],
-  bybitspot: [
-    {
-      category: 'order_warning',
-      severity: 'warning',
-      patterns: BYBIT_TRADING_AGREEMENT_PATTERNS,
-    },
-  ],
-  hyrotrader: [
-    {
-      category: 'order_warning',
-      severity: 'warning',
-      patterns: BYBIT_TRADING_AGREEMENT_PATTERNS,
     },
   ],
   binance: [
@@ -355,11 +320,7 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
       // — keep in sync if you reword it.
       category: 'order_warning',
       severity: 'warning',
-      patterns: [
-        'nothing to reduce',
-        'This trading pair does not currently support trading via OpenAPI',
-        'Stock Perpetual trading permissions not activated',
-      ],
+      patterns: ['nothing to reduce'],
     },
   ],
 };

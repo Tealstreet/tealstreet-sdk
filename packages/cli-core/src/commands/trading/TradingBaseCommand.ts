@@ -5,6 +5,7 @@ import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
+import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 
 /**
@@ -222,36 +223,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * Transform a symbol to the exchange's format
    */
   protected transformSymbol(exchange: ExchangeLike, symbol: string): string {
-    let finalSymbol = symbol.trim().toUpperCase();
-    const foundMarket = exchange.store?.markets?.find((market) => market.symbol.toUpperCase() === finalSymbol);
-    if (foundMarket) {
-      return foundMarket.symbol;
-    }
-    let settle = 'USDT';
-    if (finalSymbol.endsWith('USD')) {
-      settle = 'USD';
-    }
-    if (finalSymbol.endsWith('USDC')) {
-      settle = 'USDC';
-    }
-    const baseMatches = (exchange.store?.markets ?? [])
-      .filter((market) => finalSymbol.startsWith(market.base))
-      .map((market) => market.base)
-      .sort((a, b) => b.length - a.length);
-    let base: string | undefined;
-    if (baseMatches.length > 0) {
-      base = baseMatches[0];
-    }
-    if (base) {
-      const mostProbablySymbol = exchange.store?.markets?.find(
-        (market) => market.base === base && market.quote === settle,
-      );
-      if (mostProbablySymbol) {
-        return mostProbablySymbol.symbol;
-      }
-      return finalSymbol;
-    }
-    return finalSymbol;
+    return resolveMarketSymbol(exchange.store?.markets, symbol);
   }
 
   /**

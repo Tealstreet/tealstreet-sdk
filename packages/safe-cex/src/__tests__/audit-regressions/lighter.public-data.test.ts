@@ -269,22 +269,4 @@ describe('Lighter public-data audit regressions', () => {
     expect(get).not.toHaveBeenCalled();
     websocket.dispose();
   });
-
-  it('does not emit exchange-level Sentry errors for public candle transport retries', async () => {
-    const { exchange, websocket } = createExchange();
-    const get = vi.fn().mockResolvedValue({
-      candles: [{ timestamp: 1_700_000_000_000, open: '10', high: '12', low: '9', close: '11', volume: '3' }],
-    });
-    exchange.lighterApiClient.get = get;
-
-    await expect(exchange.fetchOHLCV({ symbol: market.symbol, interval: '1m' } as any)).resolves.toHaveLength(1);
-
-    expect(get).toHaveBeenCalledWith(
-      ENDPOINTS.CANDLES,
-      expect.objectContaining({
-        __suppressExchangeError: true,
-      }),
-    );
-    websocket.dispose();
-  });
 });

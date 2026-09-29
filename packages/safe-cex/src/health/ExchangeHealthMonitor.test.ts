@@ -46,38 +46,6 @@ describe('ExchangeHealthMonitor', () => {
       expect(category).toBe('auth_invalid');
       binanceMonitor.dispose();
     });
-
-    it('classifies Bitunix per-symbol OpenAPI and agreement rejections as order warnings', () => {
-      const bitunixMonitor = new ExchangeHealthMonitor('bitunix');
-
-      expect(
-        bitunixMonitor.processMessage('This trading pair does not currently support trading via OpenAPI.', true),
-      ).toBe('order_warning');
-      expect(
-        bitunixMonitor.processMessage(
-          'Stock Perpetual trading permissions not activated. Please update App or use Web to sign.',
-          true,
-        ),
-      ).toBe('order_warning');
-      expect(bitunixMonitor.hasAuthError()).toBe(false);
-      bitunixMonitor.dispose();
-    });
-
-    it('classifies Bybit agreement rejections as order warnings for HyroTrader', () => {
-      const hyrotraderMonitor = new ExchangeHealthMonitor('hyrotrader');
-
-      expect(
-        hyrotraderMonitor.processMessage(
-          'Bybit Trading Terms not accepted for this contract. For HyroTrader, wait briefly and retry.',
-          true,
-        ),
-      ).toBe('order_warning');
-      expect(
-        hyrotraderMonitor.processMessage('retCode: 110125 You must agree to the Trading Terms before trading', true),
-      ).toBe('order_warning');
-      expect(hyrotraderMonitor.hasAuthError()).toBe(false);
-      hyrotraderMonitor.dispose();
-    });
   });
 
   describe('processMessage', () => {

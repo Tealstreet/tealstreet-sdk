@@ -356,7 +356,14 @@ Source: `ChartCommand.ts`.
 ### `symbol` &nbsp; _(aliases `sym`, `switch`)_
 
 Change the focused symbol: `switch BTCUSDT`. Bare instrument typed at the
-prompt (`BTCUSDT<enter>`) is shorthand for this. Source: `SymbolCommand.ts`.
+prompt (`BTCUSDT<enter>`) is shorthand for this.
+
+A bare ticker is resolved for you — `sym btc` focuses `BTCUSDT`. The suffix
+picks the settlement currency, so `sym btcusd` focuses the inverse contract
+and `sym btcusdc` the USDC one. A symbol the exchange doesn't list is
+rejected here rather than accepted and failing on your next order.
+
+Source: `SymbolCommand.ts`.
 
 ### `markets` &nbsp; _(aliases `mkt`, `m`)_
 
@@ -737,34 +744,34 @@ reports the server as failed, check your login first — tokens expire.
 
 ### Tools
 
-| Tool                                                                                                        | Purpose                                                                                |
-| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `list_scripts`                                                                                              | Every script on disk, including ones that currently fail to load                       |
-| `read_script`                                                                                               | One script's source — works even when the script is broken                             |
-| `get_api_types`                                                                                             | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `mobile` / `all`)     |
-| `validate_script`                                                                                           | Typecheck + capability check without writing. Fast, local, free                        |
-| `write_script`                                                                                              | Create or replace a script. **Validates first and refuses to write invalid source**    |
-| `delete_script`                                                                                             | Delete a script                                                                        |
-| `export_scripts`                                                                                            | Export your own scripts as a portable JSON bundle (backup / moving machines)           |
-| `list_accounts`                                                                                             | Configured accounts — names and exchanges only, never credentials                      |
-| `get_positions` / `get_orders` / `get_balance` / `get_ticker`                                               | Live reads for an account                                                              |
-| `run_script`                                                                                                | **Dry run only** — see below                                                           |
-| `list_market_data_sources`                                                                                  | Public Tealstreet data sources and publicdata exchange health                          |
-| `get_public_tickers` / `get_public_ticker`                                                                  | Public ticker snapshots from Tealstreet publicdata                                     |
-| `get_top_movers` / `get_top_volume` / `get_top_funding`                                                     | Public market top lists from Tealstreet publicdata                                     |
-| `get_exchange_proxy_candles`                                                                                | Historical candles through data.tealstreet.io's public candle service                  |
-| `get_recent_news`                                                                                           | Public normalized TealNews items through news.tealstreet.io's recent-news endpoint     |
-| `get_safe_cex_markets` / `get_safe_cex_market`                                                              | Safe-cex market metadata through data.tealstreet.io's public candle service            |
-| `get_mcp_context_dsl_reference`                                                                             | Self-contained `mcp-context/v1` DSL, scope, refresh, callback and dashboard reference  |
-| `list_mcp_context_planes` / `plan_mcp_context_query`                                                        | Plan composable `mcp-context/v1` dashboard queries into bounded MCP tool steps         |
-| `get_polymarket_events` / `search_polymarket_events`                                                        | Public Polymarket prediction-market events and search                                  |
-| `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                   | Public Polymarket CLOB data, with bounded book depth                                   |
-| `screen_prediction_markets` / `get_prediction_event`                                                        | Prediction markets filtered by implied probability, window and liquidity; one event with normalized probabilities |
-| `find_prediction_arbitrage` / `get_prediction_resolution_calendar`                                          | Mutually exclusive sets buyable below 1.00 at the ask; where settlements cluster       |
-| `get_prediction_liquidity_profile`                                                                          | Spread, resting depth and exitable size for one outcome token                          |
-| `get_hyperliquid_leaderboard`                                                                               | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured        |
-| `get_onchain_address_portfolio`                                                                            | Public positions held by one address at one venue, in a venue-neutral shape with a bounded max-loss summary |
-| `get_prediction_address_exposure`                                                                          | One public Polymarket address as exposure: holdings, worst case, same-market offsets and a resolution calendar |
+| Tool                                                                                                          | Purpose                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `list_scripts`                                                                                                | Every script on disk, including ones that currently fail to load                                                  |
+| `read_script`                                                                                                 | One script's source — works even when the script is broken                                                        |
+| `get_api_types`                                                                                               | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `mobile` / `all`)                     |
+| `validate_script`                                                                                             | Typecheck + capability check without writing. Fast, local, free                                                   |
+| `write_script`                                                                                                | Create or replace a script. **Validates first and refuses to write invalid source**                               |
+| `delete_script`                                                                                               | Delete a script                                                                                                   |
+| `export_scripts`                                                                                              | Export your own scripts as a portable JSON bundle (backup / moving machines)                                      |
+| `list_accounts`                                                                                               | Configured accounts — names and exchanges only, never credentials                                                 |
+| `get_positions` / `get_orders` / `get_balance` / `get_ticker`                                                 | Live reads for an account                                                                                         |
+| `run_script`                                                                                                  | **Dry run only** — see below                                                                                      |
+| `list_market_data_sources`                                                                                    | Public Tealstreet data sources and publicdata exchange health                                                     |
+| `get_public_tickers` / `get_public_ticker`                                                                    | Public ticker snapshots from Tealstreet publicdata                                                                |
+| `get_top_movers` / `get_top_volume` / `get_top_funding`                                                       | Public market top lists from Tealstreet publicdata                                                                |
+| `get_exchange_proxy_candles`                                                                                  | Historical candles through data.tealstreet.io's public candle service                                             |
+| `get_recent_news`                                                                                             | Public normalized TealNews items through news.tealstreet.io's recent-news endpoint                                |
+| `get_safe_cex_markets` / `get_safe_cex_market`                                                                | Safe-cex market metadata through data.tealstreet.io's public candle service                                       |
+| `get_mcp_context_dsl_reference`                                                                               | Self-contained `mcp-context/v1` DSL, scope, refresh, callback and dashboard reference                             |
+| `list_mcp_context_planes` / `plan_mcp_context_query`                                                          | Plan composable `mcp-context/v1` dashboard queries into bounded MCP tool steps                                    |
+| `get_polymarket_events` / `search_polymarket_events`                                                          | Public Polymarket prediction-market events and search                                                             |
+| `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                     | Public Polymarket CLOB data, with bounded book depth                                                              |
+| `screen_prediction_markets` / `get_prediction_event`                                                          | Prediction markets filtered by implied probability, window and liquidity; one event with normalized probabilities |
+| `find_prediction_arbitrage` / `get_prediction_resolution_calendar`                                            | Mutually exclusive sets buyable below 1.00 at the ask; where settlements cluster                                  |
+| `get_prediction_liquidity_profile`                                                                            | Spread, resting depth and exitable size for one outcome token                                                     |
+| `get_hyperliquid_leaderboard`                                                                                 | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured                                   |
+| `get_onchain_address_portfolio`                                                                               | Public positions held by one address at one venue, in a venue-neutral shape with a bounded max-loss summary       |
+| `get_prediction_address_exposure`                                                                             | One public Polymarket address as exposure: holdings, worst case, same-market offsets and a resolution calendar    |
 | `get_hyperliquid_address_positions` / `get_hyperliquid_address_fills` / `get_hyperliquid_address_value_curve` | Crawled public Hyperliquid address analytics (take a public `address`), when analytics DB env vars are configured |
 
 ### What it will refuse
