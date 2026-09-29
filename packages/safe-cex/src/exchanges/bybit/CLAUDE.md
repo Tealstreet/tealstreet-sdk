@@ -652,7 +652,17 @@ The `fetchAndSetPrivateSnapshotHelper` method handles merging REST-fetched posit
 The private WS `handleOrderTopic` processes order lifecycle events:
 
 1. **PartiallyFilled guard** (`bybit.ws-private.ts:105-109`): Filters out false-positive partial fill events where both price and amount are <= 0 (occurs during order replacement)
-2. **Fill events**: Emitted on `Filled` or `PartiallyFilled` via `emitter.emit('fill', ...)`
+2. **Fill events**: Emitted on `Filled` or `PartiallyFilled` via `emitter.emit('fill', ...)`.
+   **The payload comes from `resolveBybitExecution` (`bybit.fill-event.ts`), NOT from
+   the order's `price`/`qty`** — those are the order's LIMIT and SIZE. On a market
+   order bybit fills `price` with a slippage-protected bound, so fills were reported
+   ~10% adverse in both directions (a buy at $0.057 against a $0.0519 market, sells at
+   $0.047), and `qty` announced a partial fill as the whole order. Read `avgPrice` and
+   `cumExecQty`, exactly as `mapOrder`, the fills mapper and `bybit.order-history.ts`
+   already do — this event was the one place that disagreed. `avgPrice` is `""` until
+   something fills, so parse fallibly: `parseFloat('')` is `NaN` and renders as a fill
+   at no price at all. The PartiallyFilled guard above deliberately still reads the raw
+   fields, so its behaviour is unchanged.
 3. **Terminal states** (`Cancelled`, `Filled`, `Deactivated`, `Rejected`): Orders (including virtual SL/TP) are updated with `Closed` or `Canceled` status
 4. **Reject reason filtering**: `EC_PerCancelRequest` (user cancel) and `EC_NoError` are excluded from error logging
 5. **Active states** (`New`, `Untriggered`, `PartiallyFilled`): Orders are added or updated in the store via `addOrUpdateOrders()`

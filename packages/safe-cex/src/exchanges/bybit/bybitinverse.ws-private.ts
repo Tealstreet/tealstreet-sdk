@@ -11,6 +11,7 @@ import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { OrderStatus, Position, Writable } from '../../types';
+import { resolveBybitExecution } from './bybit.fill-event';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -135,12 +136,16 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
       }
 
       if (order.orderStatus === 'Filled' || order.orderStatus === 'PartiallyFilled') {
+        // Deliberately NOT the `price`/`amount` above, which are the ORDER's
+        // limit and size. See bybit.fill-event.ts. The replace guard keeps
+        // reading the raw fields so its behaviour is unchanged.
+        const executed = resolveBybitExecution(order);
         this.emitter.emit('fill', {
           id: orders[0].id,
           side: orders[0].side,
           symbol: orders[0].symbol,
-          price,
-          amount,
+          price: executed.price,
+          amount: executed.amount,
         });
       }
 

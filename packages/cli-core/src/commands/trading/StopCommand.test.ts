@@ -144,6 +144,45 @@ describe('StopCommand — preconditions', () => {
 });
 
 /**
+ * `looksLikePrice` accepted `1%` but not `0.1%`, because the percent branch was
+ * a separate `\d+%` alternative with no decimal part. `stop at 0.1%` is this
+ * command's own first documented example, and it threw
+ * "Price 0.1% does not look like a price". A fractional percent is the normal
+ * case for a tight stop.
+ */
+describe('StopCommand — fractional percentages', () => {
+  let cmd: StopCommand;
+  beforeEach(() => {
+    cmd = new StopCommand();
+  });
+
+  const placed = (ex: ExchangeLike) => (ex.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+  it('accepts the command\'s own first documented example', async () => {
+    const ex = makeExchange([pos()]);
+    const r = await cmd.execute(ctx(['stop', 'at', '0.1%'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({ triggerPrice: 50_050 });
+  });
+
+  it('accepts a fractional percent below the mark, as a real stop loss', async () => {
+    const ex = makeExchange([pos()]);
+    const r = await cmd.execute(ctx(['stop', '-0.25%'], ex));
+    expect(r.success).toBe(true);
+    expect(placed(ex)).toMatchObject({ type: OrderType.StopLoss, triggerPrice: 49_875 });
+  });
+
+  // Widening the regex must not make it accept words. `processPrice` throws
+  // here rather than returning a failed result; the executor catches it and
+  // shows the message, so the user still learns what was wrong.
+  it('still rejects something that is not a price', async () => {
+    const ex = makeExchange([pos()]);
+    await expect(cmd.execute(ctx(['stop', 'at', 'forty'], ex))).rejects.toThrow(/does not look like a price/);
+    expect(ex.placeOrder).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * `at` is optional. Every documented example carried it, so a bare trigger
  * price -- the obvious thing to type -- fell through to the catch-all error.
  * A bare number can never be a size, because `looksLikeSize` requires a `$`,

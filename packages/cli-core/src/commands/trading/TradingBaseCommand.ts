@@ -16,8 +16,14 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * Check if a string looks like a price (e.g., "100", "100.5", "+100", "-50", "5%", "$100")
    */
   protected looksLikePrice(str: string | number): boolean {
-    // Allow optional $ prefix, optional +/- prefix, and numbers with optional decimal or %
-    return /^\$?[+-]?(\d+(\.\d+)?|\d+%)$/.test(String(str));
+    // Optional `$` prefix, optional +/- prefix, a number with an optional
+    // decimal part, and an optional trailing `%`.
+    //
+    // The percent used to be a separate `\d+%` alternative, which accepted `1%`
+    // and rejected `0.1%` — and `stop at 0.1%` is StopCommand's own first
+    // documented example, so it threw "Price 0.1% does not look like a price".
+    // Fractional percentages are the normal case for a tight stop.
+    return /^\$?[+-]?\d+(\.\d+)?%?$/.test(String(str));
   }
 
   /**
