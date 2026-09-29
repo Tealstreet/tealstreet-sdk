@@ -92,6 +92,7 @@ const LIGHTER_ACCOUNT_LIMITS_RETRY_MS = 60_000;
 const LIGHTER_ACCOUNT_SNAPSHOT_REUSE_MS = 1_000;
 const LIGHTER_ORDER_RECONCILIATION_COOLDOWN_MS = 3_000;
 const LIGHTER_INITIAL_TICK_MAX_DELAY_MS = 2_000;
+const LIGHTER_TRANSIENT_SNAPSHOT_WARNING_COOLDOWN_MS = 60_000;
 const LIGHTER_DEFAULT_QUOTE = 'USDC';
 const LIGHTER_KNOWN_QUOTES = ['USDT', 'USDC', 'USDG'];
 const LIGHTER_MARGIN_FRACTION_TICK = 10_000;
@@ -227,6 +228,7 @@ export class LighterExchange extends BaseExchange {
   private accountLimits?: Record<string, any>;
   private accountLimitsFetchPromise?: Promise<Record<string, any> | undefined>;
   private accountLimitsNextFetchAt = 0;
+  private lastTransientSnapshotWarningAt = 0;
   private hasWarnedAccountLimitsLookup = false;
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
@@ -1032,7 +1034,7 @@ export class LighterExchange extends BaseExchange {
         loaded: { ...this.store.loaded, balance: true },
       });
     } catch (err: any) {
-      this.emitAndLogError(err);
+      this.handlePrivateSnapshotFetchError(err);
     }
     void loop(() => this.tick(), this.getInitialTickDelay());
   };
@@ -1080,7 +1082,7 @@ export class LighterExchange extends BaseExchange {
         loaded: { ...this.store.loaded, balance: true },
       });
     } catch (err: any) {
-      this.emitAndLogError(err);
+      this.handlePrivateSnapshotFetchError(err);
     }
   };
 
@@ -1872,7 +1874,8 @@ export class LighterExchange extends BaseExchange {
         end_timestamp: end.valueOf(),
         count_back: limit,
       },
-    });
+      __suppressExchangeError: true,
+    } as any);
 
     const rawCandles = data?.c || data?.candles || data?.candlesticks || [];
     if (!Array.isArray(rawCandles) || rawCandles.length === 0) {
@@ -2072,6 +2075,46 @@ export class LighterExchange extends BaseExchange {
   private buildNoPositionReduceOnlyMessage = (symbol: string, orderSide: OrderSide): string => {
     const closingSideLabel = orderSide === OrderSide.Buy ? 'short' : 'long';
     return `Lighter rejected reduce-only limit order for ${symbol}: no open ${closingSideLabel} position to reduce.`;
+  };
+
+  private isTransientLighterRestTransportError = (error: unknown): boolean => {
+    const record = error as Record<string, any> | undefined;
+    const code = String(record?.code ?? record?.response?.data?.code ?? '').toUpperCase();
+    const message = this.extractOrderErrorMessage(error).toLowerCase();
+
+    return (
+      code === 'NO_RESPONSE' ||
+      code === 'ECONNABORTED' ||
+      code === 'ERR_NETWORK' ||
+      message === 'no response received from server' ||
+      message === 'network error' ||
+      /timeout of \d+ms exceeded/i.test(message)
+    );
+  };
+
+  private handlePrivateSnapshotFetchError = (error: unknown): void => {
+    if (!this.isTransientLighterRestTransportError(error)) {
+      this.emitAndLogError(
+        error instanceof Error || typeof error === 'string' ? error : this.extractOrderErrorMessage(error),
+      );
+      return;
+    }
+
+    const now = virtualClock.getCurrentTimeMs();
+    if (
+      this.lastTransientSnapshotWarningAt > 0 &&
+      now - this.lastTransientSnapshotWarningAt < LIGHTER_TRANSIENT_SNAPSHOT_WARNING_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    this.lastTransientSnapshotWarningAt = now;
+    this.log(
+      `[Lighter] Private snapshot fetch skipped after transient REST transport failure: ${this.extractOrderErrorMessage(
+        error,
+      )}`,
+      LogSeverity.Warning,
+    );
   };
 
   private extractOrderErrorMessage = (error: unknown): string => {

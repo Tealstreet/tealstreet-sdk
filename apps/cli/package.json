@@ -44,7 +44,7 @@
     "torture": "bun scripts/torture-one-shot.ts"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "@sentry/bun": "^10.73.0",
     "@tealstreet/cli-core": "*",
     "@tealstreet/mcp-data": "*",

@@ -62,6 +62,15 @@ describe('Bitunix remaining July audit regressions', () => {
               isApiSupported: false,
             },
             {
+              symbol: 'ZECUSDT',
+              base: 'ZEC',
+              quote: 'USDT',
+              basePrecision: 3,
+              quotePrecision: 2,
+              symbolStatus: 'OPEN',
+              isApiSupported: 'false',
+            },
+            {
               symbol: 'OLDUSDT',
               base: 'OLD',
               quote: 'USDT',

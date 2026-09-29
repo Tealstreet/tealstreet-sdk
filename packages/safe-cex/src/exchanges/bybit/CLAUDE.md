@@ -703,6 +703,84 @@ Normal Trading markets are required. PreLaunch markets are optional during start
 
 **Note**: Inverse variant fetches markets sequentially, not in parallel (`bybitinverse.exchange.ts:754-759`).
 
+### Open feature: contract tradeability probes
+
+There is no CLI command today that answers "is this contract tradeable?" beyond
+`markets`, which only prints the loaded symbols. The adapter already has enough
+public metadata for a first pass, because `fetchMarketsHelper` preserves the
+raw `/v5/market/instruments-info` object as `Market.info`.
+
+Think of future support as two separate probes:
+
+1. **Public instrument status** from cached market metadata. No new REST request
+   is required after startup. A CLI command such as `market XAUUSDT` or
+   `markets --info XAUUSDT` could find the symbol in `ctx.exchange.store.markets`
+   and print:
+   - `info.status` (`Trading`, `PreLaunch`, etc.) and our `market.active`
+   - `info.symbolType`, `info.displayName`, `info.fullName`
+   - TradFi fields: `info.marketRegion`, `info.underlyingTicker`
+   - pre-listing fields: `info.isPreListing`,
+     `info.preListingInfo?.curAuctionPhase`
+   - limits: `lotSizeFilter.minOrderQty`, `maxOrderQty`,
+     `maxMktOrderQty`, `minNotionalValue`, plus `priceFilter.tickSize`
+   - risk metadata: `riskParameters`, `unifiedMarginTrade`
+
+   If the CLI needs a live refresh rather than the startup cache, add an
+   optional `fetchMarkets?` method to `cli-core`'s `ExchangeLike` or bridge a
+   worker command. Do not assume `marketsBySymbol` exists in the CLI type;
+   today it exposes only `store.markets`.
+
+2. **Account/order eligibility** through Bybit's signed pre-check endpoint.
+   Bybit documents `POST /v5/order/pre-check`, with request parameters matching
+   create-order. This is not wired in `ENDPOINTS` today. A future
+   `preCheckOrder` / `checkTradeability` method should reuse the exact order
+   serialization path used by `placeOrder` / `formatOrderForBatch`: category,
+   precision adjustment, `positionIdx`, trigger/TP/SL restrictions, BBO/slippage
+   validation, and HyroTrader's required `orderLinkId`. It must not call
+   `recordRecentlyPlacedOrder`.
+
+   Minimal linear probe shape:
+
+   ```json
+   {
+     "category": "linear",
+     "symbol": "XAUUSDT",
+     "side": "Buy",
+     "orderType": "Limit",
+     "qty": "0.01",
+     "price": "2500",
+     "timeInForce": "GTC",
+     "positionIdx": 0,
+     "reduceOnly": false,
+     "orderLinkId": "<generated only where required>"
+   }
+   ```
+
+   Response interpretation:
+   - `retCode: 0` means the hypothetical order passed the check.
+   - `retCode: 110007` is still a structured margin result; Bybit says
+     `retExtInfo` may include post-check IM/MM fields even when balance is
+     insufficient.
+   - Other non-zero `retCode` values should be surfaced through the same Bybit
+     venue-error normalization as real order placement. This should catch
+     agreement rejections (`110123` / `110125`) without placing an order.
+
+   Limits and caveats from Bybit docs:
+   - Signed/private endpoint; do not run it from public-only sessions.
+   - Supports `linear`, `inverse`, and `option`; conditional orders are not
+     supported.
+   - Only Cross Margin and Portfolio Margin modes are documented; isolated
+     margin is not supported. `inverse` is not supported in Cross Margin mode.
+   - Demo and HyroTrader support is unproven. HyroTrader may not proxy this
+     endpoint even if order placement works.
+   - The Web UI warnings for TradFi products may combine public metadata,
+     trading-session calendars, and account/order eligibility. Do not claim the
+     public instrument status alone proves an account can open exposure.
+
+`/v5/user/agreement` is not a status endpoint. It signs legal terms, requires a
+master account with transfer/withdraw-class permissions, and should remain
+outside any passive CLI "can I trade this?" query.
+
 ### Fee Rates
 
 Fetched per category via `fetchFees()` before market loading (`bybit.exchange.ts:681-698`). Fee rates are matched by symbol and attached to the market object as `takerFee` and `makerFee`. Silently returns empty array on failure (non-blocking).
@@ -1187,6 +1265,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 | Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
 | `"order not modified"`                        | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
 | `110043` / `"leverage not modified"`          | Treated as success (desired leverage is already active); refresh positions afterward   | `setLeverage`                      |
+| `110123` / `110125` Trading Terms agreement   | Reword as actionable order warning; never auto-sign from order placement               | order write paths                  |
 | `"Partial symbols switched successfully..."`  | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
 | `"All symbols switched successfully."`        | Silent success                                                                         | `bybit.exchange.ts:1786`           |
 | Network errors                                | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:49-52`               |
@@ -1316,6 +1395,13 @@ Two rules for calling them:
   with the already-active leverage. Treat as a successful no-op and refresh the
   symbol's positions instead of surfacing an error toast. This applies to demo
   accounts too because `BybitDemoExchange` inherits `BybitExchange.setLeverage`.
+- **Trading Terms agreement (`110123` / `110125`)**: Returned when the Bybit
+  master account has not accepted the required contract agreement. Surface this
+  as a user-action order warning, not an auth failure. For HyroTrader, the user
+  normally cannot sign because HyroTrader controls the Bybit account; tell them
+  to wait briefly/retry or contact HyroTrader. Do not auto-call
+  `/v5/user/agreement` from an order failure: it signs legal terms, only works
+  from a master account, and requires transfer/withdraw-class permissions.
 - **Empty cancel results**: Individual cancel errors within a batch cancel are collected but the overall operation may still partially succeed.
 
 ## Exchange Variant Differences
