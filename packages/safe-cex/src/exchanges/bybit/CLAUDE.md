@@ -703,7 +703,41 @@ Normal Trading markets are required. PreLaunch markets are optional during start
 
 **Note**: Inverse variant fetches markets sequentially, not in parallel (`bybitinverse.exchange.ts:754-759`).
 
+### `symbolType` is the asset-class field, and `innovation` is CRYPTO
+
+`/v5/market/instruments-info` publishes `symbolType`, and `fetchMarketsHelper`
+preserves the whole instrument as `Market.info`, so classifying an instrument
+costs no request. `instrument-class/bybit.instrumentClass.ts` maps it; measured
+live 2026-09-29 across 886 linear instruments:
+
+| `symbolType` | count | asset class | examples |
+| --- | --- | --- | --- |
+| `''` | 502 | crypto | BTCUSDT, SOLUSDT |
+| `stock` | 196 | equity | AAPLUSDT, SHOPUSDT |
+| `innovation` | 127 | **crypto** | AEONUSDT, 1000TAGUSDT |
+| `ETF` | 54 | etf | ARKKUSDT, EWJUSDT |
+| `commodity` | 4 | commodity | XAUUSDT, XAGUSDT, CLUSDT, BZUSDT |
+| `forex` | 3 | fx | EURUSDUSDT, GBPUSDUSDT, USDJPYUSDT |
+
+All 26 inverse instruments are `''`.
+
+**Two rules that look right and are wrong.** "A non-empty `symbolType` means
+TradFi" mislabels the 127 `innovation` markets — Bybit's innovation zone is new
+or higher-risk TOKENS — so anything warning off that cries wolf on one linear
+market in seven. And `marketRegion` cannot stand in: it is populated on exactly
+the stock and ETF rows (219 US + 21 HK + 8 KR + 2 CN = 250 = 196 + 54) and is
+empty on commodity and forex, so keying off it misses gold and FX entirely.
+
+An unrecognised value is reported verbatim as `unknown`, never assumed crypto —
+a new TradFi type guessed as a perp is the failure the module exists to prevent.
+
 ### Open feature: contract tradeability probes
+
+**Probe 1 below is now implemented** as `instrument-class/` — what an instrument
+IS. Probe 2, whether the ACCOUNT may trade it, is still open and is the harder
+half; nothing in the classifier may be read as answering it.
+
+
 
 There is no CLI command today that answers "is this contract tradeable?" beyond
 `markets`, which only prints the loaded symbols. The adapter already has enough

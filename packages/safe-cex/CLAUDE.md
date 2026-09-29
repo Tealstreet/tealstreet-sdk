@@ -111,6 +111,37 @@ nothing to warn them the append exists. The bare number costs nothing: `'429'`,
 answers for a transport failure, so the number classifies exactly what is worth
 classifying and is inert everywhere else.
 
+## `instrument-class/` — what a contract is a claim on
+
+Venues list tokenized equities, ETFs, metals and FX beside crypto perps, on the
+same endpoints, with the same symbol shape: `SHOPUSDT` looks exactly like
+`SOLUSDT` and does not trade like it. `classifyMarket(exchange, market)` answers
+what an instrument IS, derived from `Market.info` alone so no venue needs a
+request of its own.
+
+Three properties are load-bearing, and each is the mirror of a rule in
+`revenue/`, which this registry is modelled on:
+
+- **`unknown` is not `crypto`.** A venue with no classifier must be loudly
+  unclassified; defaulting it to crypto says "safe to trade like a perp", which
+  is indistinguishable from an instrument we actually checked. Hyperliquid is
+  the live case — its `meta` universe carries `name`, `szDecimals`,
+  `maxLeverage` and `marginTableId` and nothing about asset class, so "HL lists
+  only crypto" is a claim about their roadmap, not their API.
+- **It never answers "can I trade this".** Eligibility is the venue's product of
+  instrument metadata, session calendars and per-account agreement state, and
+  only the first is public. The honest sentence is "this is a tokenized equity,
+  which may require an agreement you have not signed". Bybit's
+  `/v5/user/agreement` SIGNS legal terms and must not be called from a passive
+  check.
+- **An unrecognised venue value is reported verbatim, not mapped to crypto.**
+
+Bybit is implemented (see `exchanges/bybit/CLAUDE.md` for its `symbolType`
+table and the `innovation`-is-crypto trap). Binance
+(`contractType: 'TRADIFI_PERPETUAL'`, with Binance's own typo) and bingx (which
+already has `isLikelyTradfiMarket` as a boolean heuristic) are the next two, and
+their absence means unwritten, not "all crypto".
+
 ## Metadata capability non-fallback baseline
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
