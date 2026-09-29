@@ -438,7 +438,10 @@ count moves. See the root CLAUDE.md rule on `setInterval`.
 yarn dev           # Run with bun
 yarn build         # Build cross-platform binaries (scripts/build.sh)
 yarn release       # Bump + tag + push; tag fires .github/workflows/cli-release.yml (binaries, npm, homebrew).
-                   # Variants: yarn release:patch | :minor | :major. No-arg = patch.
+                   # Variants: yarn release:patch | :minor | :major.
+                   # NO-ARG DOES NOT BUMP — release.sh only runs `yarn version` when
+                   # given an argument, so a bare `yarn release` re-tags the current
+                   # version and dies on "Tag already exists". Use :patch.
                    # Recovery if package.json was bumped without tagging:
                    #   git tag cli-v$(node -p "require('./package.json').version") master && git push origin --tags
 yarn test          # Vitest
