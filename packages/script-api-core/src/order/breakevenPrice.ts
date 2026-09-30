@@ -65,10 +65,13 @@ export const breakevenPrice = ({ entryPrice, size, side, bankedPnl, fees }: Brea
 
   // Nothing banked and nothing paid: break-even is EXACTLY the entry, and
   // saying so beats computing it. `subtract(x, 0)` is not the identity —
-  // safe-math rounds through `10 ** afterDecimal(x)`, which moves the last bit
-  // on roughly one price in eleven. Harmless once a caller rounds to the
-  // market's tick, but a needless round trip on the commonest input there is:
-  // a position that has taken no partial profit.
+  // safe-math rounds through `10 ** afterDecimal(x)`. Measured over 200k
+  // values: no difference at all up to 15 significant digits, so every price
+  // `parseFloat`-ed from a venue string is safe; it only bites at 16-17
+  // digits, and `subtract(5e-324, 0)` is NaN outright because the factor
+  // overflows. The fallback below catches that, but not computing it at all is
+  // better on what is far and away the commonest input: a position that has
+  // taken no partial profit.
   if (!bankedPnl && !fees) return entryPrice;
 
   const perContract = subtract(bankedPnl || 0, fees || 0) / magnitude;

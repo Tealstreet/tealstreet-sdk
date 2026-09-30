@@ -60,12 +60,13 @@ export class BreakevenCommand extends TradingBaseCommand {
      *     REST refresh deliberately preserves it.
      *   - lighter — survives the position closing; per-market cumulative.
      *   - bitget — funding and open/close fees are baked into the figure.
-     *   - every INVERSE contract — bybitinverse and bitgetinverse pass
-     *     `curRealisedPnl` through raw while routing the unrealized twin
-     *     through `extra.unrealizedPnlNative`, so it is BASE-denominated
-     *     against a quote `entryPrice`. The "contracts is base, never branch
-     *     on inverse" rule fixes the `size x price` leg and does nothing for a
-     *     base-denominated numerator.
+     *   - every INVERSE contract — bybitinverse passes `curRealisedPnl`
+     *     through raw and bitgetinverse computes its own, but both route the
+     *     UNREALIZED twin through `extra.unrealizedPnlNative` and leave the
+     *     realised one BASE-denominated against a quote `entryPrice`. The
+     *     "contracts is base, never branch on inverse" rule fixes the
+     *     `size x price` leg and does nothing for a base-denominated
+     *     numerator.
      *   - binance, okx, blofin, kraken, woo, coinbase — never set it at all.
      *
      * Clean and position-scoped on bybit, paradex, bitunix and (after a warm
