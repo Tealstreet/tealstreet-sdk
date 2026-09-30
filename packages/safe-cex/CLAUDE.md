@@ -197,9 +197,17 @@ both thin wrappers over it. Its own comment records that the copies HAD drifted
 before they were merged. One function in the shared layer, adapters either
 side.
 
-### 4. Break-even — no engine at all
+### 4. Break-even — consolidated 2026-09-30
 
-See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
+`script-api-core/src/order/breakevenPrice.ts` is the arithmetic; web and the
+skins adapt onto it. It was FIVE implementations giving four different prices,
+and one of them — the chart's B/E line — was the SHORT formula applied to longs
+for as long as it existed. Two callers still state their own for stated
+reasons: the CLI cannot reach the history pipeline, and the hotkey template is
+sandboxed user code that cannot import a package.
+
+Follows the same shape as native sizing above: one function here, thin adapters
+either side. See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
 
 ## Metadata capability non-fallback baseline
 
