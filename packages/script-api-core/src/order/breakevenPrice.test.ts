@@ -60,8 +60,27 @@ describe('breakevenPrice', () => {
    * No `isInverse` input exists, on purpose: `contracts` is normalised to base
    * so `size x price-distance` holds for both, and the rest of the price layer
    * (`utils/risk.ts`, `calculateReturns`) contains no inverse branch either.
+   * Passing one must therefore change NOTHING — an earlier version of this test
+   * asserted on the literal it had just built and never called the function,
+   * so it passed no matter what the implementation did.
    */
-  it('exposes no inverse switch to get wrong', () => {
-    expect(Object.keys(input({ bankedPnl: 1 }))).not.toContain('isInverse');
+  it('ignores an isInverse flag a caller invents, rather than branching on it', () => {
+    const withFlag = breakevenPrice({ ...input({ bankedPnl: 50 }), isInverse: true } as never);
+    expect(withFlag).toBe(breakevenPrice(input({ bankedPnl: 50 })));
+    expect(withFlag).toBe(95);
+  });
+
+  /**
+   * A finite net can still divide into a non-finite per-contract figure, and
+   * -Infinity reaching a stop order is worse than NaN because it looks like a
+   * price. The guard is on the RESULT for that reason.
+   */
+  it('falls back to entry when the arithmetic goes non-finite, not just the inputs', () => {
+    expect(breakevenPrice(input({ size: 5e-324, bankedPnl: 1 }))).toBe(100);
+    expect(breakevenPrice(input({ size: Number.MIN_VALUE, bankedPnl: -1 }))).toBe(100);
+  });
+
+  it('returns a non-finite entry price untouched rather than doing maths on it', () => {
+    expect(breakevenPrice(input({ entryPrice: NaN, bankedPnl: 50 }))).toBeNaN();
   });
 });

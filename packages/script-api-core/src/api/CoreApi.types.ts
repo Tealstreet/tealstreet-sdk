@@ -137,7 +137,13 @@ export interface RiskResult {
   readonly riskAmount: number;
   /** Risk as a fraction of position notional. */
   readonly riskPercent: number;
-  /** Computed breakeven price for the order set vs. the open position. */
+  /**
+   * Computed breakeven price for the order set vs. the open position.
+   * DECLARED, NOT IMPLEMENTED — nothing computes this today, and
+   * `calculateOrdersRisk` is deliberately absent from `CORE_UTILS`. The
+   * single-position answer is `order/breakevenPrice.ts`; whoever implements
+   * this should build on it rather than state the arithmetic a sixth time.
+   */
   readonly breakeven: number;
   /** Absolute price distance from current to breakeven. */
   readonly distance: number;

@@ -52,13 +52,19 @@ export interface BreakevenInputs {
 }
 
 export const breakevenPrice = ({ entryPrice, size, side, bankedPnl, fees }: BreakevenInputs): number => {
+  // Guarded on the RESULT rather than on the inputs, because a finite net can
+  // still divide into a non-finite per-contract figure — a denormal size and a
+  // net of 1 gives Infinity, and the subtraction then returns -Infinity. The
+  // whole point of this function is that its output reaches a stop order, and
+  // -Infinity there is worse than a NaN because it looks like a price.
+  if (!Number.isFinite(entryPrice)) return entryPrice;
+
   const magnitude = Math.abs(size || 0);
   // Nothing left to close: break-even IS the entry.
   if (!magnitude) return entryPrice;
 
-  const net = subtract(bankedPnl || 0, fees || 0);
-  if (!Number.isFinite(net)) return entryPrice;
+  const perContract = subtract(bankedPnl || 0, fees || 0) / magnitude;
+  const result = side === PositionSide.Long ? subtract(entryPrice, perContract) : add(entryPrice, perContract);
 
-  const perContract = net / magnitude;
-  return side === PositionSide.Long ? subtract(entryPrice, perContract) : add(entryPrice, perContract);
+  return Number.isFinite(result) ? result : entryPrice;
 };
