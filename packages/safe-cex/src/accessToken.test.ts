@@ -5,6 +5,8 @@ import {
   currentProxyToken,
   getProxyToken,
   isTokenExpired,
+  ProxyTokenUnavailableError,
+  refreshProxyToken,
   setContextualProxyTokenProvider,
   setProxyToken,
   setTokenRefreshFunction,
@@ -136,43 +138,66 @@ describe('accessToken', () => {
       expect(globalRefresh).not.toHaveBeenCalled();
     });
 
-    it('falls back to global refresh when the contextual provider returns an empty token', async () => {
-      const globalToken = createFutureToken('global-token');
-      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+    // The three cases below used to fall back to the module-global token. That
+    // is what shipped EXCHANGE-SERVER-27: on a multi-tenant host the global is
+    // empty, so the fallback meant sending a signed request with no
+    // Authorization header and letting the venue answer 401. An installed
+    // provider owns the credential; if it cannot produce one, nothing else may.
+
+    it('throws rather than falling back when the contextual provider returns an empty token', async () => {
+      const globalRefresh = vi.fn().mockResolvedValue(createFutureToken('global-token'));
       const contextProvider = vi.fn().mockResolvedValue('');
 
       setTokenRefreshFunction(globalRefresh);
       setContextualProxyTokenProvider(() => contextProvider);
 
-      await expect(getProxyToken()).resolves.toBe(globalToken);
+      await expect(getProxyToken()).rejects.toBeInstanceOf(ProxyTokenUnavailableError);
       expect(contextProvider).toHaveBeenCalledTimes(1);
-      expect(globalRefresh).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).not.toHaveBeenCalled();
     });
 
-    it('falls back to global refresh when the contextual provider returns an expired token', async () => {
-      const globalToken = createFutureToken('global-token');
-      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+    it('throws rather than falling back when the contextual provider returns an expired token', async () => {
+      const globalRefresh = vi.fn().mockResolvedValue(createFutureToken('global-token'));
       const contextProvider = vi.fn().mockResolvedValue(jwt.sign({ exp: 1 }, 'test-secret'));
 
       setTokenRefreshFunction(globalRefresh);
       setContextualProxyTokenProvider(() => contextProvider);
 
-      await expect(getProxyToken()).resolves.toBe(globalToken);
+      await expect(getProxyToken()).rejects.toBeInstanceOf(ProxyTokenUnavailableError);
       expect(contextProvider).toHaveBeenCalledTimes(1);
-      expect(globalRefresh).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).not.toHaveBeenCalled();
     });
 
-    it('falls back to global refresh when the contextual provider throws', async () => {
-      const globalToken = createFutureToken('global-token');
-      const globalRefresh = vi.fn().mockResolvedValue(globalToken);
+    it('throws rather than falling back when the contextual provider throws', async () => {
+      const globalRefresh = vi.fn().mockResolvedValue(createFutureToken('global-token'));
       const contextProvider = vi.fn().mockRejectedValue(new Error('provider failed'));
 
       setTokenRefreshFunction(globalRefresh);
       setContextualProxyTokenProvider(() => contextProvider);
 
-      await expect(getProxyToken()).resolves.toBe(globalToken);
+      await expect(getProxyToken()).rejects.toBeInstanceOf(ProxyTokenUnavailableError);
       expect(contextProvider).toHaveBeenCalledTimes(1);
-      expect(globalRefresh).toHaveBeenCalledTimes(1);
+      expect(globalRefresh).not.toHaveBeenCalled();
+    });
+
+    it('does not leak the provider failure into the thrown message', async () => {
+      const contextProvider = vi.fn().mockRejectedValue(new Error('token=eyJhbGciOi.secret.value'));
+
+      setContextualProxyTokenProvider(() => contextProvider);
+
+      await expect(getProxyToken()).rejects.toThrow('proxy token provider failed');
+      await expect(getProxyToken()).rejects.not.toThrow(/secret\.value/);
+    });
+
+    it('applies the same rule to refreshProxyToken', async () => {
+      const globalRefresh = vi.fn().mockResolvedValue(createFutureToken('global-token'));
+      const contextProvider = vi.fn().mockResolvedValue('');
+
+      setTokenRefreshFunction(globalRefresh);
+      setContextualProxyTokenProvider(() => contextProvider);
+
+      await expect(refreshProxyToken()).rejects.toBeInstanceOf(ProxyTokenUnavailableError);
+      expect(globalRefresh).not.toHaveBeenCalled();
     });
 
     it('uses global refresh after clearing the contextual provider', async () => {

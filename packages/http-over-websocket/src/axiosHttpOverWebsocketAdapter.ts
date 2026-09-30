@@ -407,7 +407,23 @@ const createAxiosHttpOverWebsocketAdapter = (
       } else {
         const MAX_TOKEN_RETRIES = 120; // Max retries for getting a valid token (120 * 500ms = 60s max)
 
-        // Helper to get a valid (non-empty, non-expired) token with retries
+        // Helper to get a valid (non-empty, non-expired) token with retries.
+        //
+        // The retry window is for hosts where "no token yet" is transient and
+        // resolves itself — the browser SharedWorker's cold start, and the CLI
+        // before its refresh function has produced one. Both return `''` while
+        // warming, which is what the loop waits out.
+        //
+        // A host that supplies a token per async context (exchange-server) is
+        // different in kind: its provider THROWS rather than returning `''`,
+        // and it will keep throwing for the whole window, so waiting buys a
+        // minute of latency before the identical failure. There is no branch
+        // for that here — the throw simply propagates out of the loop, which is
+        // the behaviour we want. Do not wrap this in a catch to "handle" it.
+        //
+        // Propagating also skips the post-loop `getProxyToken()` below. That
+        // call is a last-chance re-read for the warming hosts, not a cache, and
+        // for a throwing provider it would only throw again.
         const getValidToken = async (): Promise<string> => {
           for (let i = 0; i < MAX_TOKEN_RETRIES; i++) {
             const token = await awaitWithinDeadline(getProxyToken());

@@ -21,6 +21,25 @@ import { isTokenExpired } from './proxyTokenExpiry';
 
 export { isTokenExpired } from './proxyTokenExpiry';
 
+/**
+ * A contextual proxy-token provider was installed but could not produce a
+ * usable token.
+ *
+ * This must never degrade to an empty string. A request sent with no
+ * `Authorization` header reaches the venue as a bare 401, which reads to
+ * everyone downstream — support, Sentry, the account-health badge — as a bad
+ * API key rather than as our own auth having failed. That is what made
+ * EXCHANGE-SERVER-27 look like an OKX problem for six days.
+ */
+const PROXY_TOKEN_ERROR_NAME = 'ProxyTokenUnavailableError';
+
+export class ProxyTokenUnavailableError extends Error {
+  constructor(message = 'Tealstreet proxy token unavailable') {
+    super(message);
+    this.name = PROXY_TOKEN_ERROR_NAME;
+  }
+}
+
 // Optional custom refresh function (for CLI environments)
 let customRefreshFn: (() => Promise<string>) | null = null;
 let contextualTokenProviderFn: (() => (() => Promise<string> | string) | null) | null = null;
@@ -45,11 +64,25 @@ async function getContextualProxyToken(): Promise<string | null> {
     if (token && !isTokenExpired(token)) {
       return token;
     }
+    // A provider is installed, so it OWNS this call's credential and there is
+    // no safe fallback: the module global belongs to whoever set it last, which
+    // on a multi-tenant host is somebody else's session.
+    throw new ProxyTokenUnavailableError('proxy token missing or expired for this request context');
   } catch (err) {
-    console.error('[accessToken] Contextual token provider failed:', err);
+    // `.name` as well as `instanceof`: today safe-cex resolves to a single
+    // module in every bundle we ship, so the identity check holds — but if that
+    // ever stops being true the failure mode is silent, and the symptom is this
+    // error's reason being replaced by a generic one. One extra comparison
+    // retires that whole class of bug.
+    // The literal, not `ProxyTokenUnavailableError.name`: a minifier renames the
+    // class binding but not the string the constructor assigns.
+    if (err instanceof ProxyTokenUnavailableError || (err as { name?: unknown })?.name === PROXY_TOKEN_ERROR_NAME) {
+      throw err;
+    }
+    // `err` is deliberately not logged or attached: a provider failure can
+    // carry the token it failed to mint, and this path has no scrubber.
+    throw new ProxyTokenUnavailableError('proxy token provider failed');
   }
-
-  return null;
 }
 
 export async function refreshProxyToken(): Promise<string> {

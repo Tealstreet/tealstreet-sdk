@@ -459,10 +459,13 @@ export const checkGrvtBuilderAuthorized = async (
 ): Promise<GrvtBuilderCheckResult> => {
   const builder = builderAddress ?? getGrvtBuilderAddress(testnet);
 
-  try {
-    // Get proxy token for Tealstreet-Authorization header
-    const proxyToken = await getProxyToken();
+  // Deliberately OUTSIDE the try. A missing proxy token is our own auth
+  // failing, not GRVT declining the builder, and the catch below collapses
+  // everything to `{ authorized: false }` — which is exactly how an auth
+  // failure disguises itself as a venue answer.
+  const proxyToken = await getProxyToken();
 
+  try {
     // Authenticate with GRVT via proxy
     const authResult = await authenticateGrvt(apiKey, testnet, proxyToken);
     if (!authResult.success) {
@@ -667,10 +670,12 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     return { success: false, message: 'API key is required for GRVT authentication' };
   }
 
-  try {
-    // Get proxy token for Tealstreet-Authorization header
-    const proxyToken = await getProxyToken();
+  // Outside the try, for the same reason as `checkGrvtBuilderAuthorized`: the
+  // catch turns everything into `{ success: false }`, so a token failure caught
+  // there is indistinguishable from GRVT saying no.
+  const proxyToken = await getProxyToken();
 
+  try {
     // Step 1: Authenticate with GRVT via proxy to get session
     const authResult = await authenticateGrvt(apiKey, testnet, proxyToken);
     if (!authResult.success) {
