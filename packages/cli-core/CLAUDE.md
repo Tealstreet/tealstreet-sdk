@@ -454,3 +454,33 @@ An order at `0.001` on a `0.001` tick bumped by `-0.0008` is a valid `0.0002`,
 and `roundOrderPrice(0.0002, 0.001)` is `0` — so the amend reached the venue as
 `price: 0`. `prepareOrder` and `createCoreAdapter.updateOrder` both re-check;
 this was the one copy that did not.
+
+## `be` places the stop at ENTRY, and ignores `realizedPnl` on purpose
+
+`BreakevenCommand` calls the shared arithmetic in
+`script-api-core/src/order/breakevenPrice.ts` — the one implementation web and
+the CLI both use — but supplies **no `bankedPnl`**, so the answer is the entry
+price. That is a DATA limit, not a missing formula, and the tempting fix is the
+wrong one.
+
+`Position.realizedPnl` is the field that looks like the missing input. It means
+something different on every venue: a per-symbol **lifetime** figure on asterdex
+(the REST refresh deliberately preserves it), a value that **survives the
+position closing** on lighter, funding and fees **folded in** on bitget, and on
+inverse contracts a **base-denominated** number sitting against a quote
+`entryPrice` — the "`contracts` is base, so never branch on `isInverse`" rule
+fixes the `size * price` leg and does nothing for a base-denominated numerator.
+Six venues (binance, okx, blofin, kraken, woo, coinbase) do not report it at
+all. It is clean and position-scoped only on bybit, paradex, bitunix and, after
+a warm start, hyperliquid.
+
+So wiring it in needs a **per-venue capability flag**, not a `|| 0`. Two tests
+pin the current behaviour — a `realizedPnl` of 1,000 and one of 500,000 both
+leave the stop at entry — and they exist so that a future change has to be
+deliberate. The web adapter gets its banked figure from the history pipeline
+instead, which is why `apps/web` can draw a fee-aware B/E line the CLI cannot
+compute. Map: `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
+
+**It cancels stop losses only.** Writing it by hand as `cancel stops; stop
+$entry` is not the same thing: `cancel stops` means "not a limit, not a market",
+which takes out every rung of a TP ladder with it.
