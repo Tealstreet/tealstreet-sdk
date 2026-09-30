@@ -85,6 +85,35 @@ describe('createRemoteSigningAdapter', () => {
     expect(inner.mock.calls[0][0].headers.get('X-Signed')).toBe('1');
   });
 
+  // The production case. An older browser bundle sends `Bearer ${token}` with no
+  // token; axios trims it to "Bearer"; the edge answers 401 "Authorization
+  // header is missing". A merge that accepts any non-empty string keeps it.
+  it('replaces a trimmed empty bearer from the signer with ours', async () => {
+    sign.mockResolvedValueOnce({
+      id: 'x',
+      config: { headers: { Authorization: 'Bearer' }, params: undefined, data: undefined },
+    });
+    const config = configFor('/api/v5/account/config');
+    config.headers.set('Authorization', 'Bearer our-proxy-token');
+
+    await build()(config);
+
+    expect(inner.mock.calls[0][0].headers.get('Authorization')).toBe('Bearer our-proxy-token');
+  });
+
+  // Better to send nothing than a credential the edge will read as absent: the
+  // 401 is then honest about what happened instead of blaming the venue.
+  it('drops an unusable credential when we have no good one either', async () => {
+    sign.mockResolvedValueOnce({
+      id: 'x',
+      config: { headers: { Authorization: 'Bearer' }, params: undefined, data: undefined },
+    });
+
+    await build()(configFor('/api/v5/account/config'));
+
+    expect(inner.mock.calls[0][0].headers.get('Authorization')).toBeUndefined();
+  });
+
   it('prefers the credential the signer returns over ours', async () => {
     sign.mockResolvedValueOnce({
       id: 'x',

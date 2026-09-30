@@ -179,10 +179,25 @@ export const createRemoteSigningAdapter = (
     // So: re-apply ours if the browser did not return one. Never overwrite a
     // header it DID return — if the signing exchange has a fresher token, that
     // one is at least as good as ours.
+    // "Usable", not merely "present". A browser running an older bundle builds
+    // the header unconditionally as `Bearer ${token}`, and when it has no token
+    // that is the string "Bearer " — which AXIOS THEN TRIMS to "Bearer". The
+    // edge's viewer-request tests `startsWith('Bearer ')`, so a trimmed empty
+    // credential fails that test and is reported as "Authorization header is
+    // missing" — a 401, indistinguishable from sending nothing, where a bad
+    // token inside a well-formed value would have been a 403.
+    //
+    // That is EXCHANGE-SERVER-27: `restProxyHeaderSent: malformed` in
+    // production, from browsers that have not taken the empty-bearer guard yet.
+    // Treating any non-empty string as usable is what let it through.
+    const usable = (value: unknown): value is string =>
+      typeof value === 'string' && value.startsWith('Bearer ') && value.length > 'Bearer '.length;
+
     for (const name of ['Authorization', 'Tealstreet-Authorization']) {
-      if (signedHeaders.get(name)) continue;
+      if (usable(signedHeaders.get(name))) continue;
       const ours = new AxiosHeaders(config.headers as never).get(name);
-      if (ours) signedHeaders.set(name, ours as string);
+      if (usable(ours)) signedHeaders.set(name, ours);
+      else signedHeaders.delete(name);
     }
 
     const signedConfig: InternalAxiosRequestConfig = {
