@@ -17,6 +17,7 @@ export { CloseCommand } from './CloseCommand';
 export { NukeCommand } from './NukeCommand';
 export { ScaleCommand } from './ScaleCommand';
 export { StopCommand } from './StopCommand';
+export { BreakevenCommand } from './BreakevenCommand';
 export { LeverageCommand } from './LeverageCommand';
 export { MaxCommand } from './MaxCommand';
 export { SwarmCommand } from './SwarmCommand';
