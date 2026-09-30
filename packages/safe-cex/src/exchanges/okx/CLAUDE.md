@@ -41,6 +41,15 @@ When working with OKX exchange integration, consult the official API documentati
 
 ## Authentication
 
+> **A 401 on a proxied OKX request is usually NOT OKX.** `EXCHANGE-SERVER-27`
+> looked like OKX rejecting an API key for six days and was our own proxy
+> credential arriving malformed — an empty token becomes `Bearer `, axios trims
+> it to `Bearer`, and the edge reports that as a MISSING header. A bad token
+> would be a 403, not a 401. Check `restProxyHeaderSent` on the failure sample
+> before touching anything here; see `services/exchange-server/CLAUDE.md` →
+> "A venue 401 through the proxy is often OUR credential, not the venue's".
+
+
 OKX requires three credentials: **API key**, **API secret**, and **passphrase**. The passphrase is mandatory and validated at API client creation time; `createAPI` throws `'OKX requires a passphrase'` if missing.
 
 ### REST API Signing
