@@ -60,7 +60,7 @@ position_ and there is no position yet while the limit is resting.
 
 ### `when (price >= 0.051533) (be +3%)`
 
-Move the stop to break-even once TP1 is reached, with a 3% buffer for slippage.
+Move the stop to your entry once TP1 is reached, with a 3% buffer for slippage.
 [`be`](../reference/commands.md#be) cancels stop losses only — the rest of the
 ladder stays where it is.
 
@@ -94,9 +94,8 @@ and let it ride. See [Trailing stop](./trailing-stop.md).
 - **Triggers do not survive the CLI closing.** They live in the session that
   armed them. `tasks` shows what is armed, `kill <id>` drops one.
 - **A trigger expires after 12 hours** without firing.
-- **`be` counts banked profit on some venues only** — Bybit (including demo
-  and HyroTrader), Paradex and BitUnix. Everywhere else it places the stop at
-  your entry price. See [`be`](../reference/commands.md#be).
+- **`be` places the stop at entry**, not at a fee- and profit-adjusted
+  break-even. See [`be`](../reference/commands.md#be).
 - **Not every venue has trailing stops.** `trail` refuses by name rather than
   sending an order the venue will reject.
 

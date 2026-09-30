@@ -2,9 +2,8 @@ import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { breakevenPrice } from '@tealstreet/script-api-core/src/order/breakevenPrice';
-import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
-import type { ExchangeName, Order } from '@tealstreet/safe-cex/src/types';
+import type { Order } from '@tealstreet/safe-cex/src/types';
 
 /**
  * Move the protective stop to break-even.
@@ -51,42 +50,40 @@ export class BreakevenCommand extends TradingBaseCommand {
     if (!mark) return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
 
     /**
-     * Shares the arithmetic with the web. The banked figure is supplied only
-     * where `Position.realizedPnl` is worth placing a stop on, which is a
-     * per-venue question answered by `reportsPositionRealizedPnl` — the same
-     * metadata `trail` reads `supportsTrailingStopLoss` from. The evidence for
-     * each venue lives on that field; it is not restated here.
+     * Supplies NO `bankedPnl`, so the answer is the ENTRY price.
      *
-     * Read off the map rather than through `getExchangeMetadata`, which THROWS
-     * on a name it does not know. An unrecognised venue must degrade to the
-     * entry price, not crash the command that is trying to protect a position.
+     * `Position.realizedPnl` is the field that looks like the missing input.
+     * It briefly was wired in here behind a per-venue capability flag; that
+     * was reverted because three of the five entries were assertions and one
+     * was contradicted by our own measurements:
      *
-     * The inverse guard is belt-and-braces. Inverse venues are flagged `false`
-     * individually, but they inherit their linear sibling's metadata by spread,
-     * so a future venue added the same way would arrive here flagged `true`
-     * with a BASE-denominated numerator. Refusing on the market is the check
-     * that cannot be forgotten in a metadata entry.
+     *   - bitunix — `docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md` measures
+     *     `realizedPNL` over a funding-bearing 90-day window and concludes it
+     *     is net of fees AND funding. Captured `position` frames in
+     *     `bitunix.ws-private.ts` show it equal to `fee` on a fresh open.
+     *   - bybit — `curRealisedPnl` appears in three mapper lines and nowhere
+     *     else: no fixture, test, comment or doc says what it means. What
+     *     evidence exists points the other way, since `bybit/CLAUDE.md` and
+     *     the journal adapter both treat bybit's position-level realised
+     *     figure as net of fees and funding.
+     *   - paradex — inferred from the field's NAME, which is not evidence.
      *
-     * **This number excludes FEES**, because a live position does not carry
-     * them. The chart's B/E line reads the positions-history pipeline, which
-     * does, so the two can differ by the round trip's fees. That difference
-     * predates this command and is stated in the user docs.
+     * And on the venues that do report something: lifetime per symbol on
+     * asterdex, surviving the close on lighter, funding and fees folded in on
+     * bitget, base-denominated against a quote entry on every inverse
+     * contract, absent entirely on binance, okx, blofin, kraken, woo and
+     * coinbase among others.
+     *
+     * The web app does not read this field either. It derives banked PnL and
+     * fees from the user's own FILLS (`processTrades`), reconstructing each
+     * position lifecycle itself. That is the only sound route, and the CLI
+     * cannot take it yet — it never calls `fetchHistoricalFills`. Until it
+     * does, entry is the honest answer and the user docs say so.
      */
-    const venue = exchange.name as ExchangeName | undefined;
-    const trustsRealizedPnl = venue ? exchangeMetadata[venue]?.reportsPositionRealizedPnl === true : false;
-    const market = exchange.store?.markets?.find((m) => m.symbol === targetSymbol);
-    // A MISSING market is not a linear one. `!market?.isInverse` reads as the
-    // same check and is the opposite failure: an absent market makes it true,
-    // so a lookup that missed would trust a figure it could not verify.
-    const isLinearMarket = market ? market.isInverse !== true : false;
-    const banked =
-      trustsRealizedPnl && isLinearMarket && Number.isFinite(position.realizedPnl) ? position.realizedPnl : undefined;
-
     const base = breakevenPrice({
       entryPrice: position.entryPrice,
       size: position.contracts,
       side: position.side,
-      bankedPnl: banked,
     });
     // An offset is relative to BREAK-EVEN, not to the mark, and it is a plain
     // direction rather than a side-aware one: `+` is up the price axis for

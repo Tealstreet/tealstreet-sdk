@@ -409,46 +409,6 @@ describe('exchangeMetadata', () => {
       expect(isExchangeSupportedOnMobile('unknown-exchange')).toBe(false);
     });
 
-    /**
-     * The EXACT set of venues whose `Position.realizedPnl` may move a real stop
-     * order. Pinned as a whole set, not per venue, because the metadata objects
-     * are built by SPREAD — `bybitdemo`, `hyrotrader`, `bybitspot`,
-     * `bybitinverse` and the unified variant all spread `BybitMetadata`, so
-     * flagging a venue silently flags its relatives. That inheritance is wanted
-     * for the demo and prop-firm variants (same mapper, same field) and is a
-     * unit error for the inverse one.
-     *
-     * A venue arriving in this list without someone reading its position mapper
-     * is the failure this test exists to make loud.
-     */
-    it('pins exactly which venues report a position-scoped realizedPnl', () => {
-      const flagged = (Object.keys(exchangeMetadata) as ExchangeName[])
-        .filter((name) => exchangeMetadata[name].reportsPositionRealizedPnl === true)
-        .sort();
-
-      expect(flagged).toEqual(['bitunix', 'bybit', 'bybitdemo', 'hyrotrader', 'paradex']);
-    });
-
-    /**
-     * `BybitUnifiedMetadata` is reachable only through
-     * `getExchangeMetadata('bybit', { isUnified: true })` — it is not a key in
-     * the map, so the set above cannot see it. It spreads `BybitMetadata` and
-     * inherits the flag, which is correct (same venue, same mapper), but the
-     * pin has to say so or "pinned exactly" is not true.
-     */
-    it('pins the unified bybit variant, which the map does not expose', () => {
-      expect(getExchangeMetadata('bybit', { isUnified: true }).reportsPositionRealizedPnl).toBe(true);
-    });
-
-    it('never trusts a realizedPnl that is denominated in the base currency', () => {
-      (['bybitinverse', 'bitgetinverse'] as ExchangeName[]).forEach((name) => {
-        expect(
-          exchangeMetadata[name].reportsPositionRealizedPnl,
-          `${name}: an inverse venue's realised figure is base-denominated`,
-        ).not.toBe(true);
-      });
-    });
-
     it('exchanges not verified for public-only should have supportsPublicOnly: false', () => {
       const expectedFalse: ExchangeName[] = ['backpack', 'bitgetinverse', 'bitgetusdc', 'coinbasespot'];
       expectedFalse.forEach((name) => {

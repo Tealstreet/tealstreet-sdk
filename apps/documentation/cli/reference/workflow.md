@@ -110,14 +110,14 @@ Arm a command to run **once, later** — without holding the prompt.
 when (<condition>) (<command>)
 ```
 
-`wait` blocks the line it is typed on and gives up after ten minutes, so it
-cannot sit there waiting for a take-profit that fills in two hours. `when` arms
+`wait` blocks the line it is typed on and gives up after 30 seconds by default
+— and cannot be told to wait longer than ten minutes — so it cannot sit there
+waiting for a take-profit that fills in two hours. `when` arms
 and returns immediately; you keep trading.
 
 ```text
 when (price >= 0.051533) (be +3%)
 when (price >= 0.053169) (trail 20%)
-when (fill) (be)
 when (both (price > 50000) and (pnl > 0)) (close 50%)
 ```
 

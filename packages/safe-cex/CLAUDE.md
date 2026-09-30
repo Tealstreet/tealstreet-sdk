@@ -148,22 +148,45 @@ Four related calculations, at different stages of convergence. **Read this
 before writing a new one**, because nothing else in the repo maps them and the
 last person to need a break-even added a fifth without tripping over anything.
 
-### The rule that governs all of them
+### Before you write anything here, read the measured evidence
 
-**Inverse belongs in SIZING, never in price/PnL.** `Position.contracts` is
-normalised to whole units of base (`types.ts` says so, and says it is "for easy
-math elsewhere"), which is exactly what makes `size x price-distance` correct
-on an inverse contract as well as a linear one. So:
+**[`docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md`](../../docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md)**
+measures what venues actually report — that the same trade is GROSS on the
+fills axis and NET on the closed-positions axis, that bitunix's `realizedPNL`
+is net of fees *and* funding, that fee SIGNS differ between venues added
+back to back. `docs/CLAUDE.md` says to read it "before designing anything that
+folds fills into positions". That instruction was ignored on 2026-09-30 and
+three venue claims were committed on the strength of a field's NAME; one was
+already contradicted in that file.
 
-- `order/positionSizing.ts:nativePositionSize` DOES branch on `isInverse` —
-  "an inverse contract is a fixed QUOTE amount, so its count comes from the
-  notional and the price never enters".
-- `utils/risk.ts` and `utils/roeRoi/calculateReturns.ts` do NOT branch, and
-  must not start. Neither file contains `isInverse` or `contractSize`.
+**A claim about what a venue field MEANS needs a measurement or a citation.**
+Not an inference from its name, and not "it is probably scoped to the
+position". If neither exists, the honest code path is a refusal.
 
-A price-layer inverse branch is a bug, not a fix.
+### The inverse rule — and what is NOT true about it
 
-### 1. Risk / PnL-at-price — one engine, six bypasses
+Inverse handling belongs in SIZING. `order/positionSizing.ts:nativePositionSize`
+branches on `isInverse` because an inverse contract is a fixed QUOTE amount, so
+its count comes from the notional.
+
+**What does NOT follow, and was wrongly asserted here:** that
+`Position.contracts` being expressed in base makes `entryPrice * contracts` a
+valid notional, and therefore that price/PnL code never needs an inverse
+branch. Every inverse mapper derives `contracts` from the **MARK**, not the
+entry — `bybitinverse.exchange.ts`, `bitgetinverse`, `bitmex` and `okx` all
+compute `notionalUSD / (mark || last)` — so that product equals
+`notional * entry / mark` and drifts with the market. It is only the notional
+at `mark == entry`.
+
+On top of that, **bybitinverse and bitgetinverse leave `unrealizedPnl`
+base-denominated** (bitmex and okx convert; these two do not), so on those
+venues the numerator of any return calculation is in the wrong currency.
+
+That false rule was used to DELETE a correct refusal from the CLI's `$roe` on
+2026-09-30. The refusal is back. Treat inverse as unsolved in the price/PnL
+layer, and refuse rather than answer until someone measures it.
+
+### 1. Risk / PnL-at-price — one engine, five bypasses
 
 `utils/risk.ts` (`calculateOrdersRisk`, `calculateRiskAtPrice`,
 `buildOrdersRiskMaps`) is the engine. `OrdersRiskProfilePostprocessor` writes
@@ -171,19 +194,39 @@ its output to `store.ordersRisk`, and the chart's `OrderLineManager`,
 `RiskIndicator` and the module API read it.
 
 Six other places compute PnL-at-price independently:
-`riskProfiler/riskProfiler.calculations.ts` (flagged as a known blur in
-`webworker/postProcessors/CLAUDE.md`), `openPositions`' worst-case-loss column,
-`chart/broker/lineManagers/bracketUtils.ts`, `order/createStopLossOrder.ts`,
-the `clickStopLoss` hotkey templates, and tealchart's mobile bracket preview.
+`apps/web/src/components/riskProfiler/riskProfiler.calculations.ts` (flagged as
+a known blur in `packages/safe-cex/src/webworker/postProcessors/CLAUDE.md`),
+`openPositions`' worst-case-loss column,
+`apps/web/src/components/chart/broker/lineManagers/bracketUtils.ts`,
+`order/createStopLossOrder.ts`, and tealchart's mobile bracket preview. The
+`clickStopLoss` hotkey templates were listed here and contain no PnL
+arithmetic at all.
 
-The worst-case-loss column is the one to be careful with: it carries a
-reciprocal `isInverse` branch, against the rule above.
+**The worst-case-loss column is measurably wrong on inverse**
+(`useOpenPositionsColumns.tsx`). Its generic line — `notional * pct` — is
+already correct, because `notional` is USD for inverse; the `isInverse` branch
+then OVERWRITES it with a formula expecting a USD contract count and is handed
+base units. A $100k BTCUSD position stopped 10% out reports about $0.11
+instead of $10,000, so the max-drawdown tag can never fire for an inverse
+user. `order/createStopLossOrder.ts` carries the same reciprocal branch.
 
 ### 2. ROE / ROI — one definition, correctly shared
 
 `utils/roeRoi/calculateReturns.ts` is it.
 `script-api-core/src/utils/calculateReturns.ts` is a **re-export, not a copy** —
 this is the pattern the rest of this section should converge on.
+
+**There are TWO return functions and they are not interchangeable.**
+`calculateReturns` uses the venue's `unrealizedPnl` over `entryPrice *
+contracts`; `calculateRelativeReturns` uses `(exit - entry) / entry`. The OPEN
+positions table renders the first, Closed and Recent render the second, and the
+CLI's `$roe<N>` inverts the second while its docstring claimed the first. They
+agree only where `unrealizedPnl == (mark - entry) * contracts`.
+
+`calculateReturns` also has a truthiness bug: `overrideUPNL ? overrideUPNL :
+position.unrealizedPnl` means an override of exactly `0` — which the 1m/5m PnL
+columns produce whenever the baseline is absent — silently reports the whole
+position's ROE instead of zero.
 
 `roe = (upnl / (entryPrice * contracts)) * leverage * 100`. Note the divisor is
 a LINEAR notional, which is why inverting it for an ROE-denominated price is
@@ -197,23 +240,37 @@ both thin wrappers over it. Its own comment records that the copies HAD drifted
 before they were merged. One function in the shared layer, adapters either
 side.
 
-### 4. Break-even — consolidated 2026-09-30
+### 4. Break-even — NOT trustworthy, and the order paths are off it
 
-`script-api-core/src/order/breakevenPrice.ts` is the arithmetic; web, the skins
-and the CLI all adapt onto it. It was FIVE implementations giving four different
-prices, and one of them — the chart's B/E line — was the SHORT formula applied
-to longs for as long as it existed.
+`script-api-core/src/order/breakevenPrice.ts` is the arithmetic, and the
+arithmetic is the only part that is right. **Its input is wrong.**
 
-**What each adapter can supply differs, and that is a DATA question, not a
-formula one.** Web reads the positions-history pipeline, so it has fees. The CLI
-has only a live `Position`, so it has no fees and can use `realizedPnl` as the
-banked figure only where that field is position-scoped and quote-denominated —
-gated by `reportsPositionRealizedPnl` in `exchangeMetadata.ts`, whose doc
-comment carries the per-venue evidence. The two therefore differ by the round
-trip's fees, which is stated in the user docs rather than hidden.
+`processTrades` emits `contracts` as `Math.max(totalBuy, totalSell)` — GROSS
+traded volume, not the size still open — and `getBreakevenPrice` feeds that in
+as the divisor for banked PnL. Buy 10 @ 100, sell 5 @ 110 banking $50: the true
+break-even is 90, the emitted row gives 95. It is wrong on exactly the
+scaled-out positions the number exists for.
 
-Follows the same shape as native sizing above: one function here, thin adapters
-either side. See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
+Nothing consults `historical_coverage`, so a position whose open falls outside
+the ingested window yields a confidently PARTIAL number rather than none. The
+30-day backfill depth and the 500-row read cap both make that ordinary.
+
+**So no order path uses it.** `breakevenAllPositions` places at `entryPrice`;
+the CLI's `be` answers `entryPrice`. The chart's B/E line, the hidden column
+and the hotkey template still read it — a wrong display is a bug, a wrong
+order is worse — and the column now renders an em dash rather than `0.00` when
+there is no row.
+
+**`api.orders.setBreakeven` does not compute break-even.** It places a stop at
+a price the caller supplies. `api.utils.getBreakevenPrice` is the calculation.
+
+Known defects in `processTrades`, unfixed: hedge-mode shorts are seeded with
+`abs()` where the reverse walk needs a negative, so no row is ever emitted for
+them; a long/short flip leaves the CLOSED leg carrying `isOpen: true`, which
+`getHistoricalPosition` then matches on; there is no fill dedupe, and ingestion
+re-walks windows.
+
+See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
 
 ## Metadata capability non-fallback baseline
 

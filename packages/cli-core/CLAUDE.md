@@ -455,50 +455,51 @@ and `roundOrderPrice(0.0002, 0.001)` is `0` — so the amend reached the venue a
 `price: 0`. `prepareOrder` and `createCoreAdapter.updateOrder` both re-check;
 this was the one copy that did not.
 
-## `be` uses banked PnL only where the venue's `realizedPnl` is trustworthy
+## `be` answers the ENTRY price, and that is a data limit
 
 `BreakevenCommand` calls the shared arithmetic in
-`script-api-core/src/order/breakevenPrice.ts` — the one implementation web and
-the CLI both use — and supplies `Position.realizedPnl` as the banked figure
-**only when `reportsPositionRealizedPnl` is set on the venue's metadata**. It is
-today: bybit (and its `bybitdemo` / `hyrotrader` variants, which spread the same
-metadata and run the same mapper), paradex and bitunix. Everywhere else the
-answer is the entry price.
+`script-api-core/src/order/breakevenPrice.ts` and supplies **no `bankedPnl`**.
 
-**This was a `|| 0` waiting to happen, and the flag is what stops it.**
-`realizedPnl` means something different on every venue: a per-symbol LIFETIME
-figure on asterdex (the REST refresh deliberately preserves it), a value that
-SURVIVES the position closing on lighter, funding and fees FOLDED IN on bitget,
-and on inverse contracts a BASE-denominated number sitting against a quote
-`entryPrice` — the "`contracts` is base, so never branch on `isInverse`" rule
-fixes the `size * price` leg and does nothing for a base-denominated numerator.
-Six venues (binance, okx, blofin, kraken, woo, coinbase) never set it. Hyperliquid
-is deliberately NOT flagged: it accumulates the figure into a local Map from the
-`userFills` snapshot, reset only on an `open` fill with `startPosition === 0`, so
-a position entered by a flip or one whose opening fill fell outside the snapshot
-window carries a previous lifecycle's closes.
+It was briefly wired to `Position.realizedPnl` behind a per-venue capability
+flag. That was reverted, because three of the five entries were assertions and
+one was contradicted by measurement already in the repo:
 
-**Two things guard it, and they are not redundant.** The metadata flag is the
-venue answer; the `market.isInverse` check in the command is what survives a
-future inverse venue being added by spreading its linear sibling's metadata, which
-is exactly how `bybitinverse` would otherwise inherit a `true`. Both are pinned:
-`exchangeMetadata.test.ts` asserts the flagged set EXACTLY (a new venue joining it
-fails the test rather than shipping), and `BreakevenCommand.test.ts` covers
-flagged/unflagged, long/short, and an inverse market on a flagged venue.
+- **bitunix** — `docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md` measures
+  `realizedPNL` over a deliberately funding-bearing 90-day window and concludes
+  it is net of fees AND funding. Captured `position` frames in
+  `bitunix.ws-private.ts` show it equal to `fee` on a fresh open.
+- **bybit** — `curRealisedPnl` appears in three mapper lines and nowhere else:
+  no fixture, test, comment or doc says what it means. What evidence exists
+  points the other way, since `bybit/CLAUDE.md` and the journal adapter both
+  treat bybit's position-level realised figure as net of fees and funding.
+- **paradex** — inferred from the field's NAME. That is not evidence.
 
-**The number excludes FEES**, because a live position does not carry them. The
-web's B/E line reads the positions-history pipeline, which has them, so the two
-can differ by the round trip. That divergence predates the consolidation and is
-stated in the user docs rather than papered over.
+And on venues that do report something: lifetime per symbol on asterdex,
+surviving the close on lighter, funding and fees folded in on bitget,
+base-denominated on every inverse contract, absent entirely on binance, okx,
+blofin, kraken, woo, coinbase and most others.
 
-Read the map directly with `?.`, never `getExchangeMetadata` — that throws on an
-unknown name, and a command whose job is protecting a position must not be the
-thing that crashes. (`prepareOrder` still throws further down for an unregistered
-venue; that is pre-existing and shared by every order-placing command.)
+**The web app does not read that field either.** It derives banked PnL and fees
+from the user's own FILLS (`processTrades`), reconstructing each position
+lifecycle itself. That is the only sound route. The CLI cannot take it yet — it
+never calls `fetchHistoricalFills` — so entry is the honest answer and the user
+docs say so.
 
-**It cancels stop losses only.** Writing it by hand as `cancel stops; stop
-$entry` is not the same thing: `cancel stops` means "not a limit, not a market",
-which takes out every rung of a TP ladder with it.
+**A claim about what a venue field MEANS needs a measurement or a citation.**
+`exchangeMetadata.ts` briefly carried the comment "the name says the scope".
+That sentence should have been impossible to commit.
+
+**The offset is not side-aware.** `+` is up the price axis for both sides, so
+`be +3%` locks a little in on a long and WIDENS a short's stop; the short
+equivalent is `be -3%`.
+
+**It warns when break-even lands beyond the mark.** The order then becomes a
+take-profit and the stop this command just cancelled has no replacement, so
+reporting only "Stop moved" would claim protection the position does not have.
+
+**It cancels stop losses only.** `cancel stops; stop $entry` is not the same
+thing — `cancel stops` means "not a limit, not a market", which takes out every
+rung of a TP ladder.
 
 ## `when` — the only primitive that outlives the prompt
 

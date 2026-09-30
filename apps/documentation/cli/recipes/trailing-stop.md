@@ -35,8 +35,8 @@ the moment the CLI does.
 
 ```text
 track max @hi $last
-sets @stop @hi -1%
-wait @last < @stop
+sets @stop @hi-1
+wait price < @stop
 close
 ```
 
@@ -44,18 +44,21 @@ Three reactive pieces plus one terminator:
 
 1. `track max @hi $last` — ratchets `@hi` upward as `$last` ticks higher,
    never down.
-2. `sets @stop @hi -1%` — **reactive** definition: every time `@stop` is
-   read, it re-evaluates as `@hi - 1%`.
-3. `wait @last < @stop` — blocks at 100 ms polling until last price drops
-   under the trailing stop.
+2. `sets @stop @hi-1` — **reactive** definition: every time `@stop` is read,
+   it re-evaluates against the current `@hi`. Write it as a single math token:
+   a live-var source must resolve to ONE value, so `@hi -1%` is rejected with
+   "expected single value, got 2 tokens".
+3. `wait price < @stop` — blocks at 100 ms polling until last price drops
+   under the trailing stop. (`@last` is not a bound variable; the condition
+   keyword is `price`.)
 4. `close` — flat the position.
 
 ## Variations
 
 ```text
 track min @lo $last
-sets @stop @lo +1%
-wait @last > @stop
+sets @stop @lo+1
+wait price > @stop
 close
 ```
 
@@ -64,8 +67,8 @@ the running low.
 
 ```text
 track max @hi $last
-sets @stop @hi -1%
-wait @last < @stop for=3s
+sets @stop @hi-1
+wait price < @stop for=3s
 close
 ```
 
@@ -74,8 +77,8 @@ for 3 seconds before `wait` releases. Filters single-tick wicks.
 
 ```text
 track max @hi $pnl
-sets @stop @hi -50
-wait @pnl < @stop
+sets @stop @hi-50
+wait pnl < @stop
 close
 ```
 
@@ -84,8 +87,8 @@ under the high-water mark. Useful for `close at + green` workflows.
 
 ```text
 track max @hi $last
-sets @stop @hi -1%
-wait either (@last < @stop) or (price > 60000)
+sets @stop @hi-1
+wait either (price < @stop) or (price > 60000)
 close
 ```
 
@@ -93,7 +96,7 @@ Combinator — exit on either the trail OR a hard take-profit ceiling. See
 [Workflow → combinators](../reference/workflow.md#combinators).
 
 ```text
-alias trail "track max @hi $last; sets @stop @hi -1%; wait @last < @stop; close"
+alias mytrail "track max @hi $last; sets @stop @hi-1; wait price < @stop; close"
 trail
 ```
 
@@ -104,9 +107,9 @@ Once you settle on a flavor, alias it so you can fire with one keystroke.
 - **`track` ratchets only on read.** A `wait @stop > 0` resolves it through
   the tracker and updates `@hi` at poll time, which is fine. But if nothing
   reads `@hi` between sessions, the high-water mark doesn't advance. The
-  pattern above is self-driving because `wait @last < @stop` reads `@stop`
+  pattern above is self-driving because `wait price < @stop` reads `@stop`
   → reads `@hi` → ratchets, every 100 ms.
-- **`sets` (not `set`) is required for the stop.** `set @stop @hi -1%`
+- **`sets` (not `set`) is required for the stop.** `set @stop @hi-1`
   snapshots a single number at definition time and never updates. `sets`
   keeps the source literal and re-evaluates on every read.
 - **`echo @hi` ratchets a tracker on read; `print @hi` does not.** When you

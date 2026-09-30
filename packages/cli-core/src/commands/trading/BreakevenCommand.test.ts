@@ -95,14 +95,17 @@ describe('BreakevenCommand', () => {
   });
 
   /**
-   * `Position.realizedPnl` must NOT move this price on a venue that has not
-   * been audited. It means different things per venue — lifetime on asterdex,
-   * survives the close on lighter, funding and fees baked in on bitget, and
-   * base-denominated against a quote price on every inverse contract. The
-   * `reportsPositionRealizedPnl` metadata flag is what separates them, and
-   * absence of the flag is the safe default these two tests pin.
+   * `Position.realizedPnl` must NOT move this price, on ANY venue.
+   *
+   * It was briefly wired in behind a per-venue capability flag. That was
+   * reverted: bitunix's is measured net of fees and funding in
+   * `docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md`, bybit's `curRealisedPnl` has
+   * no evidence in this repo at all, and paradex's was inferred from the
+   * field's name. Web does not read this field either — it derives banked PnL
+   * from the user's own fills. Until the CLI can do the same, a present value
+   * is ignored rather than trusted, and these two tests are what say so.
    */
-  it('ignores realizedPnl on a venue that does not report it position-scoped', async () => {
+  it('ignores realizedPnl, which is not trustworthy enough to place a stop on', async () => {
     const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })]);
     await cmd.execute(ctx(['be'], ex));
     expect(placed(ex).triggerPrice).toBe(50_000);
@@ -151,7 +154,7 @@ describe('BreakevenCommand', () => {
     expect(cancelled.map((o) => o.id)).not.toContain('tp2');
   });
 
-  it('buys to close a short, at its entry on an unflagged venue', async () => {
+  it('buys to close a short, at its entry', async () => {
     const ex = makeExchange([pos({ side: PositionSide.Short, realizedPnl: 1_000, contracts: 1 })]);
     await cmd.execute(ctx(['be'], ex));
     expect(placed(ex)).toMatchObject({ side: OrderSide.Buy, triggerPrice: 50_000 });
@@ -169,95 +172,6 @@ describe('BreakevenCommand', () => {
     const r = await cmd.execute(ctx(['be'], makeExchange()));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/No position/);
-  });
-
-  /**
-   * The other half of the flag. Bybit reports `curRealisedPnl` off the position
-   * payload, per position cycle, in the quote — so banking $1,000 on a
-   * 1-contract long from 50,000 means you can now exit at 49,000 and still be
-   * flat overall. This is the behaviour jrnats was told `be` had.
-   */
-  it('moves a long DOWN by the banked amount on a venue that reports it', async () => {
-    const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })], [], 'bybit');
-    await cmd.execute(ctx(['be'], ex));
-    expect(placed(ex).triggerPrice).toBe(49_000);
-  });
-
-  it('moves a short UP by the banked amount, the same profit in the other direction', async () => {
-    const ex = makeExchange(
-      [pos({ side: PositionSide.Short, realizedPnl: 1_000, contracts: 1 })],
-      [],
-      'bybit',
-    );
-    await cmd.execute(ctx(['be'], ex));
-    expect(placed(ex).triggerPrice).toBe(51_000);
-  });
-
-  it('divides the banked amount across the contracts still open', async () => {
-    const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 4 })], [], 'bybit');
-    await cmd.execute(ctx(['be'], ex));
-    expect(placed(ex).triggerPrice).toBe(49_750);
-  });
-
-  /**
-   * bybitdemo and hyrotrader spread bybit's metadata and run the same mapper.
-   * hyrotrader is the prop-firm venue the reporter actually trades on, so this
-   * is the fixture that matches the report rather than a proxy for it.
-   */
-  it('trusts the bybit variants that inherit the flag', async () => {
-    for (const venue of ['bybitdemo', 'hyrotrader']) {
-      const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })], [], venue);
-      await cmd.execute(ctx(['be'], ex));
-      expect(placed(ex).triggerPrice).toBe(49_000);
-    }
-  });
-
-  /**
-   * An inverse contract's realised figure is denominated in the BASE while the
-   * entry price is in the quote, so subtracting one from the other is a unit
-   * error that would place a real stop at a nonsense price. The venues are
-   * flagged false individually; this guard is what survives someone adding a
-   * new inverse venue by spreading its linear sibling's metadata.
-   */
-  it('refuses the banked figure on an inverse market even if the venue is flagged', async () => {
-    const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })], [], 'bybit', { isInverse: true });
-    await cmd.execute(ctx(['be'], ex));
-    expect(placed(ex).triggerPrice).toBe(50_000);
-  });
-
-  /**
-   * `getExchangeMetadata` THROWS on a name it does not know, which is why the
-   * capability lookup reads the map directly with `?.` instead. That choice is
-   * what this pins: an unrecognised venue must not fail in the BREAK-EVEN
-   * calculation.
-   *
-   * It still cannot place an order — `prepareOrder` calls
-   * `venueSupportsInfinityStops`, which goes through `getExchangeMetadata` and
-   * throws first. That is pre-existing and shared by every order-placing
-   * command, so the assertion is on WHERE it fails, not that it succeeds.
-   */
-  it('does not fail in the break-even lookup on an unregistered venue', async () => {
-    const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })], [], 'not-a-real-venue');
-    await expect(cmd.execute(ctx(['be'], ex))).rejects.toThrow(/Unknown exchange metadata/);
-    expect(ex.placeOrder).not.toHaveBeenCalled();
-  });
-
-  /**
-   * A market the store has not loaded is not evidence of a LINEAR market, so
-   * the guard is written `market ? market.isInverse !== true : false` rather
-   * than the natural-looking `!market?.isInverse`, which reads the same and
-   * fails the other way — an absent market makes it TRUE and the banked figure
-   * would be used unverified.
-   *
-   * The guard is defence in depth rather than a live path: `prepareCliOrder`
-   * refuses a symbol with no market before any order is built, so this asserts
-   * that no order is placed at all.
-   */
-  it('places nothing at all when the market is not in the store', async () => {
-    const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })], [], 'bybit');
-    (ex.store as { markets: unknown[] }).markets = [];
-    await expect(cmd.execute(ctx(['be'], ex))).rejects.toThrow(/Market not found/);
-    expect(ex.placeOrder).not.toHaveBeenCalled();
   });
 
   /**

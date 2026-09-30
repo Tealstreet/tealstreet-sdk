@@ -1157,17 +1157,24 @@ describe('$roe', () => {
   });
 
   /**
-   * Does NOT branch on `isInverse`, deliberately. `Position.contracts` is
-   * normalised to base, which is what makes `size * price-distance` hold on
-   * both — so `utils/risk.ts` and `calculateReturns` contain no `isInverse`
-   * and neither does this. A price-layer inverse branch is a bug, not a fix.
+   * REFUSES on inverse. This test previously asserted the opposite, on the
+   * grounds that `Position.contracts` is normalised to base so
+   * `entryPrice * contracts` is a valid notional either way.
+   *
+   * That premise is false. Every inverse mapper derives `contracts` from the
+   * MARK rather than the entry — `bybitinverse.exchange.ts`, `bitgetinverse`,
+   * `bitmex` and `okx` all compute `notionalUSD / (mark || last)` — so the
+   * divisor drifts with the market and the identity holds only at
+   * `mark == entry`. bybitinverse and bitgetinverse additionally leave
+   * `unrealizedPnl` base-denominated, putting the numerator in the wrong
+   * currency too. A wrong price on a trading command is worse than a refusal.
    */
-  it('answers the same way on an inverse market, like the rest of the price layer', () => {
+  it('refuses on an inverse market rather than answering with a drifting divisor', () => {
     const ctx = makeCtx([long()]);
     (ctx.exchange as unknown as { store: { markets: unknown[] } }).store.markets = [
       { symbol: 'BTCUSDT', base: 'BTC', quote: 'USD', isInverse: true },
     ];
-    expect(preprocessSegment('sell $roe25', ctx)).toBe('sell 51250');
+    expect(() => preprocessSegment('sell $roe25', ctx)).toThrow(/not supported on inverse/);
   });
 
   it('is not confused with a plain word starting the same way', () => {

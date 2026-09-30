@@ -569,6 +569,24 @@ function resolveRoePrice(tok: string, ctx: PreprocessContext): number {
   }
 
   const position = positions[0];
+
+  // REFUSED on inverse, restored after being wrongly removed.
+  //
+  // It was removed on the grounds that `Position.contracts` is normalised to
+  // base, so `entryPrice * contracts` is a valid notional either way. That is
+  // false: every inverse mapper derives `contracts` from the MARK, not the
+  // entry (`bybitinverse.exchange.ts`, `bitgetinverse`, `bitmex`, `okx` all
+  // compute `notionalUSD / (mark || last)`), so the divisor drifts with the
+  // market and the identity only holds at `mark == entry`. On top of that,
+  // bybitinverse and bitgetinverse leave `unrealizedPnl` BASE-denominated,
+  // so the numerator is in the wrong currency as well.
+  //
+  // A wrong price on a trading command is worse than a refusal.
+  const market = ctx.exchange.store?.markets?.find((m) => m.symbol === ctx.symbol);
+  if (market?.isInverse) {
+    throw new Error(`${tok}: ROE targets are not supported on inverse markets — use a price.`);
+  }
+
   const leverage = position.leverage;
   if (!leverage || !Number.isFinite(leverage)) {
     throw new Error(`${tok}: leverage not available on ${ctx.symbol}, cannot convert ROE to a price`);

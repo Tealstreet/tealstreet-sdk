@@ -55,9 +55,11 @@ Two rules follow from the venue rather than from your input:
 - **Hyperliquid spot sizes round DOWN**, not to nearest, so a buy can never ask
   for more base than the wallet holds. Perps on the same connection still round
   to nearest.
-- **On Hyperliquid and WOO a `reduce`-only order is shrunk** against the
-  reduce-only orders already resting ahead of it, which those venues would
-  otherwise reject.
+- **On nine venues a `reduce`-only order is shrunk** against the reduce-only
+  orders already resting ahead of it, which they would otherwise reject:
+  bitunix, weex, mexc, bitget, bitrue, woo, hyperliquid, grvt and coinbase.
+  The flag is `autoDownSizeReduceOrders` in `exchangeMetadata.ts` — read it
+  there rather than trusting this list.
 
 This is the same rounding the web app and the mobile app apply — one
 implementation, so the three cannot disagree about a number.
@@ -68,7 +70,7 @@ implementation, so the three cannot disagree about a number.
 buy 100        # ❌ "USD or % required"
 buy $100       # ✅
 buy 100$       # ✅
-buy 0.01 BTC   # ✅ — 0.01 is interpreted as raw contracts when no other size shape matches
+buy 0.01 BTC   # ✅ — bare number in the SIZE slot is raw contracts, when no other size shape matches
 ```
 
 A bare number where a PRICE was meant is rejected at any magnitude — `buy $100
@@ -152,7 +154,7 @@ distribution names are not implemented; they are rejected with
 A few full sentences to anchor the grammar:
 
 ```text
-buy $100 at $bid +0.1% post-only reduce
+buy $100 at $bid +0.1% po reduce
 chase sell %all% 20% reduce to 1%
 scale buy $1000 into 10 from -0.25% to -1% reduce
 twap chase buy $500 into 5 over 30 reduce timeout 30% next fail next

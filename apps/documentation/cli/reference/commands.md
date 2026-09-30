@@ -78,30 +78,30 @@ banked. Take $1,000 of profit on a 1-contract long from $50,000 and break-even
 is $49,000: you can exit that much lower and still come out even. The same
 $1,000 moves a short's break-even UP.
 
-**Banked profit is only counted on some venues.** It is counted on **Bybit**
-(including the demo and HyroTrader accounts), **Paradex** and **BitUnix**. On
-every other venue `be` places the stop at your entry price, because the venue
-does not report a realised figure that can be trusted to move it.
+**This places the stop at your ENTRY price.** It does not account for profit
+already banked, so on a position you have taken partial profit on it is not the
+same number as the chart's B/E line.
 
-That is a data problem rather than a missing feature, and the venues disagree in
-ways that would place a stop at a wrong price: some report a lifetime figure for
-the symbol, some keep reporting it after the position has closed, some fold
-funding and fees into it, and on inverse contracts it is denominated in the base
-currency rather than the quote. An unverified venue is left at entry on purpose.
+That is a data problem rather than a missing feature. The venues that report a
+per-position realised figure disagree about what it means — some report a
+lifetime total for the symbol, some keep reporting it after the position has
+closed, some fold funding and fees in, and on inverse contracts it is
+denominated in the base currency. Placing a stop on any of those would be worse
+than placing it at entry.
 
 | Form         | Result                                      |
 | ------------ | ------------------------------------------- |
-| `be`         | Stop at break-even for the focused position |
-| `be +3%`     | 3% **above** break-even                     |
-| `be -0.5%`   | 0.5% **below** break-even                   |
+| `be`         | Stop at your entry price                    |
+| `be +3%`     | 3% **above** entry                          |
+| `be -0.5%`   | 0.5% **below** entry                        |
 | `be +100`    | Absolute offset, same directions            |
 | `be ETHUSDT` | Symbol override                             |
 
-An offset is relative to **break-even**, not to the mark, and it is a plain
+An offset is relative to **entry**, not to the mark, and it is a plain
 direction rather than a side-aware one: `+` is always up the price axis. On a
-LONG, `be +3%` is the one you want — it puts the stop above break-even and
-locks a little in. On a SHORT the profitable side is DOWN, so the same buffer
-is `be -3%`; `be +3%` there widens the stop instead of tightening it.
+LONG, `be +3%` is the one you want — it puts the stop above entry and locks a
+little in. On a SHORT the profitable side is DOWN, so the same buffer is
+`be -3%`; `be +3%` there widens the stop instead of tightening it.
 
 **It cancels stop losses only — your take-profits are left alone.** Writing this
 by hand as `cancel stops; stop $entry` does not do the same thing: `cancel
