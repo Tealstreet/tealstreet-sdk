@@ -33,8 +33,9 @@ describe('venueRestDiagnostics', () => {
   });
 
   // A CloudFront 401 reads the same whether we sent no credential or sent one
-  // the edge rejected — and `bodySnippet` is scrubbed to `[Filtered]`, so the
-  // body cannot settle it either. This field is the only thing that can.
+  // the edge rejected, and the body that would have named the difference
+  // arrives in Sentry as `[Filtered]`. This field is the only thing that can
+  // settle it.
   it('records that the request carried proxy auth', () => {
     noteRestFailure('okx', {
       config: markRestProxyAuth({ url: '/api/v5/account/config' }, 'present'),
@@ -53,8 +54,9 @@ describe('venueRestDiagnostics', () => {
     expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBe('empty');
   });
 
-  // Undefined rather than a third value: the request never targeted the proxy,
-  // so "did we send auth" is not a question it has an answer to.
+  // Undefined rather than a third value: the REST proxy was not in play. Note
+  // that is NOT the same as unauthenticated — a tunnelled venue resolves no
+  // proxy URL and still carries our credential on the HOW socket.
   it('leaves proxy auth unset for a request that never went through the proxy', () => {
     noteRestFailure('okx', {
       config: { url: '/api/v5/account/config' },

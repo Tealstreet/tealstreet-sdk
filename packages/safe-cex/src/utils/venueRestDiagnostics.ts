@@ -67,11 +67,18 @@ export interface VenueRestFailureSample {
    * Whether WE attached proxy auth to the request that failed — the shape only,
    * never the value.
    *
-   * `undefined` means the request did not target the Tealstreet proxy at all,
-   * so the question does not apply. Otherwise this is what separates "our auth
-   * failed" from "the edge rejected a real token", which `bodySnippet` cannot:
-   * the scrubber reduces a CloudFront 401 body to `[Filtered]`, and that is
-   * exactly the string that would have said which one it was.
+   * This is what separates "our auth failed" from "the edge rejected a real
+   * token". Neither the status nor the body can: the proxy's viewer-request
+   * Lambda answers the same 401 for an absent header as for a malformed one,
+   * and by the time the body reaches Sentry it reads `[Filtered]` (observed on
+   * EXCHANGE-SERVER-27, whose `bodySnippet` is exactly that) — so the one
+   * string that would have named the cause is gone before anyone sees it.
+   *
+   * `undefined` means the REST proxy was not in play, which is not the same as
+   * "unauthenticated": a `tealstreetTunnel` venue resolves no proxy URL and so
+   * is never stamped, yet its request does carry our credential on the HOW
+   * socket. Read `undefined` as "this field has nothing to say", not as a
+   * finding.
    */
   sentProxyAuth?: 'present' | 'empty';
   errorName?: string;
