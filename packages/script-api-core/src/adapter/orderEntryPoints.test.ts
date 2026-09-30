@@ -90,6 +90,8 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
   'packages/cli-core/src/commands/trading/CloseCommand.ts': 'close',
   'packages/cli-core/src/commands/trading/ScaleCommand.ts': 'scale',
   'packages/cli-core/src/commands/trading/StopCommand.ts': 'stop',
+  'packages/cli-core/src/commands/trading/BreakevenCommand.ts': 'be — a reduce-only stop at the break-even price',
+  'packages/cli-core/src/commands/trading/TrailCommand.ts': 'trail — a trailing stop on the open position',
   'packages/cli-core/src/commands/trading/SwarmCommand.ts': 'swarm',
 
   // Lower-level managers and first-party callers.
