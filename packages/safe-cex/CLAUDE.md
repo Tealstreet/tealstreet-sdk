@@ -142,6 +142,65 @@ table and the `innovation`-is-crypto trap). Binance
 already has `isLikelyTradfiMarket` as a boolean heuristic) are the next two, and
 their absence means unwritten, not "all crypto".
 
+## Risk, PnL-at-price, ROE and break-even — where each one actually lives
+
+Four related calculations, at different stages of convergence. **Read this
+before writing a new one**, because nothing else in the repo maps them and the
+last person to need a break-even added a fifth without tripping over anything.
+
+### The rule that governs all of them
+
+**Inverse belongs in SIZING, never in price/PnL.** `Position.contracts` is
+normalised to whole units of base (`types.ts` says so, and says it is "for easy
+math elsewhere"), which is exactly what makes `size x price-distance` correct
+on an inverse contract as well as a linear one. So:
+
+- `order/positionSizing.ts:nativePositionSize` DOES branch on `isInverse` —
+  "an inverse contract is a fixed QUOTE amount, so its count comes from the
+  notional and the price never enters".
+- `utils/risk.ts` and `utils/roeRoi/calculateReturns.ts` do NOT branch, and
+  must not start. Neither file contains `isInverse` or `contractSize`.
+
+A price-layer inverse branch is a bug, not a fix.
+
+### 1. Risk / PnL-at-price — one engine, six bypasses
+
+`utils/risk.ts` (`calculateOrdersRisk`, `calculateRiskAtPrice`,
+`buildOrdersRiskMaps`) is the engine. `OrdersRiskProfilePostprocessor` writes
+its output to `store.ordersRisk`, and the chart's `OrderLineManager`,
+`RiskIndicator` and the module API read it.
+
+Six other places compute PnL-at-price independently:
+`riskProfiler/riskProfiler.calculations.ts` (flagged as a known blur in
+`webworker/postProcessors/CLAUDE.md`), `openPositions`' worst-case-loss column,
+`chart/broker/lineManagers/bracketUtils.ts`, `order/createStopLossOrder.ts`,
+the `clickStopLoss` hotkey templates, and tealchart's mobile bracket preview.
+
+The worst-case-loss column is the one to be careful with: it carries a
+reciprocal `isInverse` branch, against the rule above.
+
+### 2. ROE / ROI — one definition, correctly shared
+
+`utils/roeRoi/calculateReturns.ts` is it.
+`script-api-core/src/utils/calculateReturns.ts` is a **re-export, not a copy** —
+this is the pattern the rest of this section should converge on.
+
+`roe = (upnl / (entryPrice * contracts)) * leverage * 100`. Note the divisor is
+a LINEAR notional, which is why inverting it for an ROE-denominated price is
+only defined on linear markets.
+
+### 3. Native position sizing — converged, and the proof it works
+
+`script-api-core/src/order/positionSizing.ts:nativePositionSize` is the single
+definition; web's `getPositionNativeSize` and the CLI's `nativeCloseSize` are
+both thin wrappers over it. Its own comment records that the copies HAD drifted
+before they were merged. One function in the shared layer, adapters either
+side.
+
+### 4. Break-even — no engine at all
+
+See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
+
 ## Metadata capability non-fallback baseline
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
