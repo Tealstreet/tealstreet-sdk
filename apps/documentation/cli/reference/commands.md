@@ -69,30 +69,26 @@ Source: `StopCommand.ts`.
 
 Move the protective stop to break-even. Alias: `breakeven`.
 
-Break-even is the price at which closing what is LEFT of the position leaves
-total PnL at zero — the entry price, adjusted by any profit or loss already
-banked on that position. Bank $1,000 on a 1-contract long from $50,000 and
-break-even is $49,000: you can exit that much lower and still be flat. The same
-$1,000 moves a short's break-even UP.
+**This places the stop at your ENTRY price.** It does not account for profit
+already banked on the position, and it is not the same number as the chart's
+B/E line, which includes fees. Those differ on purpose for now — the web and
+the CLI compute break-even from different data, and the CLI has no access to
+the fee history the chart uses.
 
 | Form           | Result                                       |
 | -------------- | -------------------------------------------- |
-| `be`           | Stop at break-even for the focused position  |
-| `be +3%`       | 3% the good side of break-even               |
+| `be`           | Stop at your entry price                     |
+| `be +3%`       | 3% the good side of entry                    |
 | `be -0.5%`     | Slightly inside it                           |
 | `be +100`      | Absolute offset                              |
 | `be ETHUSDT`   | Symbol override                              |
 
-An offset is relative to **break-even**, not to the mark.
+An offset is relative to **entry**, not to the mark.
 
 **It cancels stop losses only — your take-profits are left alone.** Writing this
 by hand as `cancel stops; stop $entry` does not do the same thing: `cancel
 stops` means "everything that is not a limit or a market", which includes every
 rung of a TP ladder.
-
-Fees are not included, because a live position does not carry them — so this is
-break-even on price, and a round trip still costs the taker fee. The chart's
-B/E line uses accumulated fee data the CLI cannot see, so the two can differ.
 
 Source: `BreakevenCommand.ts`.
 

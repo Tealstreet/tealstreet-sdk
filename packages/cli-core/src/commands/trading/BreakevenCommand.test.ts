@@ -78,10 +78,17 @@ describe('BreakevenCommand', () => {
     });
   });
 
-  it('uses break-even, not entry, once profit has been banked', async () => {
+  /**
+   * Entry, NOT a break-even of this command's own. There are already three
+   * break-even formulas in the app and no engine, and the fee-aware one the
+   * chart draws needs the positions-history pipeline the CLI cannot reach.
+   * Banked PnL must therefore NOT move this price — see
+   * `positionsHistory/helpers/CLAUDE.md`.
+   */
+  it('stays at entry even once profit has been banked', async () => {
     const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })]);
     await cmd.execute(ctx(['be'], ex));
-    expect(placed(ex).triggerPrice).toBe(49_000);
+    expect(placed(ex).triggerPrice).toBe(50_000);
   });
 
   it('applies an offset relative to break-even', async () => {
@@ -110,16 +117,16 @@ describe('BreakevenCommand', () => {
     expect(cancelled.map((o) => o.id)).not.toContain('tp2');
   });
 
-  it('moves a short the other way and buys to close', async () => {
+  it('buys to close a short, at its entry', async () => {
     const ex = makeExchange([pos({ side: PositionSide.Short, realizedPnl: 1_000, contracts: 1 })]);
     await cmd.execute(ctx(['be'], ex));
-    expect(placed(ex)).toMatchObject({ side: OrderSide.Buy, triggerPrice: 51_000 });
+    expect(placed(ex)).toMatchObject({ side: OrderSide.Buy, triggerPrice: 50_000 });
   });
 
   // Same rule as `stop`: what the order IS depends on which side of the mark it
   // sits, because that is when it fires. Mark is 51,000 here.
-  it('is a take-profit when break-even sits beyond the mark', async () => {
-    const ex = makeExchange([pos({ realizedPnl: -2_000, contracts: 1 })]);
+  it('is a take-profit when the price sits beyond the mark', async () => {
+    const ex = makeExchange([pos({ entryPrice: 52_000, contracts: 1 })]);
     await cmd.execute(ctx(['be'], ex));
     expect(placed(ex)).toMatchObject({ triggerPrice: 52_000, type: OrderType.TakeProfit });
   });

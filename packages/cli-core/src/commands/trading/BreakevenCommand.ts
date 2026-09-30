@@ -1,7 +1,6 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { prepareCliOrder } from '../../order/prepareCliOrder';
-import { breakevenPrice } from '../../position/breakevenPrice';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 import type { Order } from '@tealstreet/safe-cex/src/types';
 
@@ -49,10 +48,18 @@ export class BreakevenCommand extends TradingBaseCommand {
     const mark = ticker?.mark ?? ticker?.last;
     if (!mark) return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
 
-    // Inverse contracts settle in the base currency and their PnL is
-    // reciprocal in price, so breakeven is not the linear formula.
-    const market = exchange.store?.markets?.find((m) => m.symbol === targetSymbol);
-    const base = breakevenPrice(position, { isInverse: Boolean(market?.isInverse) });
+    /**
+     * The ENTRY price, deliberately — not a break-even of this command's own.
+     *
+     * There are already three of those in the app and no engine
+     * (`positionsHistory/helpers/CLAUDE.md` counts them), and the fee-aware one
+     * the chart draws its B/E line from needs the positions-history pipeline,
+     * which the CLI has no access to. A fourth formula here would have been a
+     * fifth in the repo. So this matches what the web's "breakeven all" action
+     * did, the behaviour is stated plainly in the docs, and when break-even is
+     * consolidated into `script-api-core` this becomes a one-line change.
+     */
+    const base = position.entryPrice;
     // An offset is relative to BREAK-EVEN, not to the mark -- `be +3%` means
     // "3% the good side of flat". `processPrice` gives the same `+N` / `+N%` /
     // absolute grammar the rest of the CLI uses.

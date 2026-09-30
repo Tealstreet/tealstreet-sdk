@@ -1075,17 +1075,17 @@ describe('$roe', () => {
   });
 
   /**
-   * `calculateReturns` divides by `entryPrice * contracts` — the notional of a
-   * LINEAR position. Inverting it on an inverse contract, whose PnL is
-   * reciprocal in price, produces a number with no defensible meaning, and a
-   * wrong price on a trading command is worse than a refusal.
+   * Does NOT branch on `isInverse`, deliberately. `Position.contracts` is
+   * normalised to base, which is what makes `size * price-distance` hold on
+   * both — so `utils/risk.ts` and `calculateReturns` contain no `isInverse`
+   * and neither does this. A price-layer inverse branch is a bug, not a fix.
    */
-  it('refuses on an inverse market rather than emitting an indefensible price', () => {
+  it('answers the same way on an inverse market, like the rest of the price layer', () => {
     const ctx = makeCtx([long()]);
     (ctx.exchange as unknown as { store: { markets: unknown[] } }).store.markets = [
       { symbol: 'BTCUSDT', base: 'BTC', quote: 'USD', isInverse: true },
     ];
-    expect(() => preprocessSegment('sell $roe25', ctx)).toThrow(/not supported on inverse/);
+    expect(preprocessSegment('sell $roe25', ctx)).toBe('sell 51250');
   });
 
   it('is not confused with a plain word starting the same way', () => {

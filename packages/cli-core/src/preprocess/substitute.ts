@@ -556,18 +556,6 @@ function resolveRoePrice(tok: string, ctx: PreprocessContext): number {
     throw new Error(`${tok}: leverage not available on ${ctx.symbol}, cannot convert ROE to a price`);
   }
 
-  /**
-   * Refused on inverse markets rather than answered. `calculateReturns` divides
-   * by `entryPrice * contracts`, which is the notional of a LINEAR position; an
-   * inverse contract settles in the base currency and its PnL is reciprocal in
-   * price, so inverting that formula there produces a number with no defensible
-   * meaning. A wrong price on a trading command is worse than a refusal.
-   */
-  const market = (ctx.exchange.store?.markets ?? []).find((m) => m.symbol === ctx.symbol);
-  if (market?.isInverse) {
-    throw new Error(`${tok}: ROE targets are not supported on inverse markets yet — use a price.`);
-  }
-
   const roe = parseFloat(tok.slice('$roe'.length));
   if (!Number.isFinite(roe)) {
     throw new Error(`${tok}: not a usable ROE percentage`);
