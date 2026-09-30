@@ -98,6 +98,32 @@ Source: `BreakevenCommand.ts`.
 
 ---
 
+### `trail`
+
+A trailing stop on the open position — the "runner" leg. The stop follows the
+market and never moves against you.
+
+| Form                            | Result                                  |
+| ------------------------------- | --------------------------------------- |
+| `trail 20%`                     | Stop 20% behind the current price       |
+| `trail 500`                     | Absolute distance                       |
+| `trail 20% ETHUSDT`             | Symbol override                         |
+| `wait $last >= 0.0716; trail 20%` | Arm it once price gets there          |
+
+**Distance is measured from the CURRENT price, not from your entry** — that is
+what a trailing stop means to the venue.
+
+**The whole position trails.** Bybit implements this through its position-level
+trading-stop endpoint, which takes no amount, so a partial-size runner is not
+expressible. Size the runner by taking profit on the rest first.
+
+Not every venue has trailing stops. On one that does not, this refuses by name
+rather than sending an order the venue will reject.
+
+Source: `TrailCommand.ts`.
+
+---
+
 ### `close` &nbsp; _(alias `c`)_ {#close}
 
 | Form                       | Result                               |
