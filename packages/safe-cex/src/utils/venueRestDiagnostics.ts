@@ -18,7 +18,7 @@
 /** Config keys, string-named to match the existing `safeCex*` config-tag convention. */
 const T0 = 'safeCexRestDiagStartedAt';
 const SIGN_MS = 'safeCexRestDiagSignMs';
-const PROXY_AUTH = 'safeCexRestDiagProxyAuth';
+const PROXY_HEADER = 'safeCexRestDiagProxyHeader';
 const SIGNED_AT = 'safeCexRestDiagSignedAt';
 const SIG_AGE_MS = 'safeCexRestDiagSignatureAgeMs';
 
@@ -64,23 +64,28 @@ export interface VenueRestFailureSample {
   bodyKind: string;
   bodySnippet?: string;
   /**
-   * Whether WE attached proxy auth to the request that failed — the shape only,
-   * never the value.
+   * Whether we attached the proxy credential to the request that failed — the
+   * shape only, never the value.
    *
-   * This is what separates "our auth failed" from "the edge rejected a real
-   * token". Neither the status nor the body can: the proxy's viewer-request
-   * Lambda answers the same 401 for an absent header as for a malformed one,
-   * and by the time the body reaches Sentry it reads `[Filtered]` (observed on
+   * This is what separates "ours failed" from "the edge rejected a real token".
+   * Neither the status nor the body can: the proxy's viewer-request Lambda
+   * answers the same 401 for an absent header as for a malformed one, and by
+   * the time the body reaches Sentry it reads `[Filtered]` (observed on
    * EXCHANGE-SERVER-27, whose `bodySnippet` is exactly that) — so the one
    * string that would have named the cause is gone before anyone sees it.
    *
+   * DO NOT put `auth`, `token`, `credential`, `secret` or `key` back in this
+   * field name. It shipped once as `sentProxyAuth` and arrived in production as
+   * `[Filtered]`: Sentry's own scrubber matches `auth` inside the name, so the
+   * field was recorded, redacted, and useless. The camelCase hump does not
+   * protect it — `sentproxyauth` contains `auth`.
+   *
    * `undefined` means the REST proxy was not in play, which is not the same as
-   * "unauthenticated": a `tealstreetTunnel` venue resolves no proxy URL and so
-   * is never stamped, yet its request does carry our credential on the HOW
-   * socket. Read `undefined` as "this field has nothing to say", not as a
-   * finding.
+   * unauthenticated: a `tealstreetTunnel` venue resolves no proxy URL and so is
+   * never stamped, yet its request does carry our credential on the HOW socket.
+   * Read `undefined` as "this field has nothing to say", not as a finding.
    */
-  sentProxyAuth?: 'present' | 'empty';
+  restProxyHeaderSent?: 'present' | 'empty';
   errorName?: string;
   errorMessage?: string;
   endpoint?: string;
@@ -277,17 +282,17 @@ const endpointOf = (config: unknown): string | undefined => {
  * to read — and "no auth header" would then be indistinguishable from "this
  * request never went through the proxy". The stamp says which.
  */
-export const markRestProxyAuth = <T>(config: T, shape: 'present' | 'empty'): T => {
+export const markRestProxyHeader = <T>(config: T, shape: 'present' | 'empty'): T => {
   try {
-    (config as Record<string, unknown>)[PROXY_AUTH] = shape;
+    (config as Record<string, unknown>)[PROXY_HEADER] = shape;
   } catch {
     /* a sealed config must not be able to fail the request */
   }
   return config;
 };
 
-const proxyAuthOf = (config: unknown): 'present' | 'empty' | undefined => {
-  const stamped = (config as Record<string, unknown> | undefined)?.[PROXY_AUTH];
+const proxyHeaderOf = (config: unknown): 'present' | 'empty' | undefined => {
+  const stamped = (config as Record<string, unknown> | undefined)?.[PROXY_HEADER];
   if (stamped === 'present' || stamped === 'empty') return stamped;
   return undefined;
 };
@@ -410,7 +415,7 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
       signatureAgeMs,
       bodyKind,
       bodySnippet,
-      sentProxyAuth: proxyAuthOf(typed?.config),
+      restProxyHeaderSent: proxyHeaderOf(typed?.config),
       endpoint: endpointOf(typed?.config),
       errorName: typeof errorName === 'string' ? errorName : undefined,
       errorMessage: message ? scrub(message) : undefined,

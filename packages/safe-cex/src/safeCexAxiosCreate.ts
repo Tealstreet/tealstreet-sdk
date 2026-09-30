@@ -10,7 +10,7 @@ import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
 import { isSigningCaptureRequest } from './utils/signingCapture';
 import {
-  markRestProxyAuth,
+  markRestProxyHeader,
   markRestRequestStart,
   noteRestFailure,
   noteRestSuccess,
@@ -342,7 +342,7 @@ export const safeCexAxiosCreate = (
       // venue rather than at us. A host can still hold '' here legitimately
       // (the browser SharedWorker and the CLI both return it while warming);
       // exchange-server cannot, since `getProxyToken` throws for it instead.
-      markRestProxyAuth(config, token ? 'present' : 'empty');
+      markRestProxyHeader(config, token ? 'present' : 'empty');
 
       if (token) {
         if (exchange.name === 'grvt' || exchange.name === 'mexc') {

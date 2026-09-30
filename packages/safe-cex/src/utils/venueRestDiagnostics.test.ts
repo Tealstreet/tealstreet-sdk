@@ -7,7 +7,7 @@ import {
   getVenueRestStats,
   markRestRequestStart,
   markRestSigned,
-  markRestProxyAuth,
+  markRestProxyHeader,
   noteRestFailure,
   noteRestSuccess,
   resetVenueRestDiagnostics,
@@ -38,20 +38,20 @@ describe('venueRestDiagnostics', () => {
   // settle it.
   it('records that the request carried proxy auth', () => {
     noteRestFailure('okx', {
-      config: markRestProxyAuth({ url: '/api/v5/account/config' }, 'present'),
+      config: markRestProxyHeader({ url: '/api/v5/account/config' }, 'present'),
       response: { status: 401, headers: {}, data: 'Authorization header is missing' },
     } as never);
 
-    expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBe('present');
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('present');
   });
 
   it('records that the request went out with no proxy credential', () => {
     noteRestFailure('okx', {
-      config: markRestProxyAuth({ url: '/api/v5/account/config' }, 'empty'),
+      config: markRestProxyHeader({ url: '/api/v5/account/config' }, 'empty'),
       response: { status: 401, headers: {}, data: 'Authorization header is missing' },
     } as never);
 
-    expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBe('empty');
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('empty');
   });
 
   // Undefined rather than a third value: the REST proxy was not in play. Note
@@ -63,7 +63,7 @@ describe('venueRestDiagnostics', () => {
       response: { status: 500, headers: {}, data: 'boom' },
     } as never);
 
-    expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBeUndefined();
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBeUndefined();
   });
 
   it('reads quota headers off an AxiosHeaders-style response', () => {

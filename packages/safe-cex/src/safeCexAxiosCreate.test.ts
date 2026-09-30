@@ -338,7 +338,7 @@ describe('safeCexAxiosCreate', () => {
 
       expect(requestConfig.headers.Authorization).toBeUndefined();
       expect(requestConfig.headers['Tealstreet-Authorization']).toBeUndefined();
-      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyAuth).toBe('empty');
+      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyHeader).toBe('empty');
     });
 
     it('stamps the request as carrying proxy auth when the token is present', async () => {
@@ -351,7 +351,7 @@ describe('safeCexAxiosCreate', () => {
       const requestConfig = await proxyAuthInterceptor!({ headers: {} } as any);
 
       expect(requestConfig.headers.Authorization).toBe('Bearer mock-token');
-      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyAuth).toBe('present');
+      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyHeader).toBe('present');
     });
 
     it('should add response interceptor', () => {
