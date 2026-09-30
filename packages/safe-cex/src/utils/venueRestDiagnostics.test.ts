@@ -37,21 +37,36 @@ describe('venueRestDiagnostics', () => {
   // arrives in Sentry as `[Filtered]`. This field is the only thing that can
   // settle it.
   it('records that the request carried proxy auth', () => {
-    noteRestFailure('okx', {
-      config: markRestProxyHeader({ url: '/api/v5/account/config' }, 'present'),
-      response: { status: 401, headers: {}, data: 'Authorization header is missing' },
-    } as never);
+    const config: Record<string, unknown> = markRestProxyHeader({ url: '/api/v5/account/config' }, 'present');
+    config.headers = { Authorization: 'Bearer a-real-looking-token' };
+    noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
 
-    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('present');
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('bearer');
   });
 
-  it('records that the request went out with no proxy credential', () => {
-    noteRestFailure('okx', {
-      config: markRestProxyHeader({ url: '/api/v5/account/config' }, 'empty'),
-      response: { status: 401, headers: {}, data: 'Authorization header is missing' },
-    } as never);
+  // The exact contradiction that cost half a day: the interceptor stamped its
+  // intent, the merge downstream dropped the header, and the sample reported
+  // the intent. It must report the wire.
+  it('reports absent when the stamp says we intended to send one but nothing survived', () => {
+    const config = markRestProxyHeader({ url: '/api/v5/account/config' }, 'present');
+    noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
 
-    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('empty');
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('absent');
+  });
+
+  it('records absent when the interceptor had no token to attach', () => {
+    const config = markRestProxyHeader({ url: '/api/v5/account/config' }, 'empty');
+    noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
+
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('absent');
+  });
+
+  it('flags a credential that is present but not a bearer', () => {
+    const config: Record<string, unknown> = markRestProxyHeader({ url: '/api/v5/account/config' }, 'present');
+    config.headers = { Authorization: 'notabearer' };
+    noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
+
+    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('malformed');
   });
 
   // Undefined rather than a third value: the REST proxy was not in play. Note

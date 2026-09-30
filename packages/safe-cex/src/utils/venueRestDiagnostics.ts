@@ -64,28 +64,27 @@ export interface VenueRestFailureSample {
   bodyKind: string;
   bodySnippet?: string;
   /**
-   * Whether we attached the proxy credential to the request that failed — the
-   * shape only, never the value.
+   * The shape of the proxy credential the request ACTUALLY went out with, read
+   * off the final config at failure time. The shape only, never the value.
    *
-   * This is what separates "ours failed" from "the edge rejected a real token".
-   * Neither the status nor the body can: the proxy's viewer-request Lambda
-   * answers the same 401 for an absent header as for a malformed one, and by
-   * the time the body reaches Sentry it reads `[Filtered]` (observed on
-   * EXCHANGE-SERVER-27, whose `bodySnippet` is exactly that) — so the one
-   * string that would have named the cause is gone before anyone sees it.
-   *
-   * DO NOT put `auth`, `token`, `credential`, `secret` or `key` back in this
-   * field name. It shipped once as `sentProxyAuth` and arrived in production as
-   * `[Filtered]`: Sentry's own scrubber matches `auth` inside the name, so the
-   * field was recorded, redacted, and useless. The camelCase hump does not
-   * protect it — `sentproxyauth` contains `auth`.
+   * `bearer` means we sent a well-formed credential, so a 401/403 from the edge
+   * is about the token or the edge, not about us omitting it. `absent` and
+   * `malformed` are both ours, and the edge cannot tell you which: its
+   * viewer-request answers the same 401 for a missing header as for a value
+   * that does not begin with `Bearer `. `bodySnippet` cannot tell you either —
+   * it reaches Sentry as `[Filtered]`.
    *
    * `undefined` means the REST proxy was not in play, which is not the same as
    * unauthenticated: a `tealstreetTunnel` venue resolves no proxy URL and so is
    * never stamped, yet its request does carry our credential on the HOW socket.
    * Read `undefined` as "this field has nothing to say", not as a finding.
+   *
+   * DO NOT put `auth`, `token`, `credential`, `secret` or `key` back in this
+   * field name. It shipped once as `sentProxyAuth` and arrived in production as
+   * `[Filtered]`: Sentry's scrubber matches `auth` inside the name, and the
+   * camelCase hump does not protect it — `sentproxyauth` contains `auth`.
    */
-  restProxyHeaderSent?: 'present' | 'empty';
+  restProxyHeaderSent?: 'bearer' | 'malformed' | 'absent';
   errorName?: string;
   errorMessage?: string;
   endpoint?: string;
@@ -291,10 +290,37 @@ export const markRestProxyHeader = <T>(config: T, shape: 'present' | 'empty'): T
   return config;
 };
 
-const proxyHeaderOf = (config: unknown): 'present' | 'empty' | undefined => {
+/**
+ * What the request ACTUALLY carried, read off the final config at failure time.
+ *
+ * The stamp alone was not enough, and the way it was not enough cost half a day.
+ * It is written by the interceptor, which runs long before the wire: remote
+ * signing then replaces the whole header set with the browser's, and the HOW
+ * adapter rebuilds it again. So the stamp records what we INTENDED to send.
+ * EXCHANGE-SERVER-27 reported `present` while the edge answered "Authorization
+ * header is missing", and those two are only contradictory if you believe the
+ * stamp describes the wire. It does not.
+ *
+ * The header is therefore read here, from `error.config` — the object axios
+ * actually dispatched — and the stamp is kept only to tell "the proxy was never
+ * in play" apart from "it was, and the header went missing on the way".
+ *
+ * `malformed` exists because the edge's viewer-request 401s on BOTH an absent
+ * header and a value that does not begin with `Bearer `, while a bad token
+ * inside a well-formed value is a 403. Those are three different bugs wearing
+ * two status codes, and only this can separate them.
+ */
+const proxyHeaderOf = (config: unknown): 'bearer' | 'malformed' | 'absent' | undefined => {
   const stamped = (config as Record<string, unknown> | undefined)?.[PROXY_HEADER];
-  if (stamped === 'present' || stamped === 'empty') return stamped;
-  return undefined;
+  if (stamped !== 'present' && stamped !== 'empty') return undefined;
+
+  const sent = readHeaders((config as { headers?: unknown } | undefined)?.headers, [
+    'authorization',
+    'tealstreet-authorization',
+  ]);
+  const value = sent['authorization'] || sent['tealstreet-authorization'];
+  if (!value) return 'absent';
+  return value.startsWith('Bearer ') ? 'bearer' : 'malformed';
 };
 
 export const markRestRequestStart = <T>(config: T, now = Date.now()): T => {
