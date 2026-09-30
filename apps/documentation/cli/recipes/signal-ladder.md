@@ -3,7 +3,7 @@ title: Signal ladder
 ---
 
 Execute a Telegram-style signal end to end: limit entry, protective stop, a
-take-profit ladder, stop to break-even once the first target hits, and a
+take-profit ladder, stop moved to your entry once the first target hits, and a
 trailing runner on what is left.
 
 The signal looks like this:
@@ -65,9 +65,9 @@ Move the stop to your entry once TP1 is reached, with a 3% buffer for slippage.
 ladder stays where it is.
 
 The offset is a plain direction, not a side-aware one: `+` is up the price
-axis. This signal is a LONG, so `+3%` puts the stop above break-even. **On a
-short it would be `be -3%`** — `+3%` there widens the stop rather than
-tightening it.
+axis. This signal is a LONG, so `+3%` puts the stop above entry. **On a short
+it would be `be -3%`** — `+3%` there widens the stop rather than tightening
+it.
 
 **`price >=` means the price TOUCHED your target, not that your rung filled.**
 The two are usually the same moment and occasionally are not: your own resting
