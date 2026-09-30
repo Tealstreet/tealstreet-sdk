@@ -18,6 +18,7 @@
 /** Config keys, string-named to match the existing `safeCex*` config-tag convention. */
 const T0 = 'safeCexRestDiagStartedAt';
 const SIGN_MS = 'safeCexRestDiagSignMs';
+const PROXY_AUTH = 'safeCexRestDiagProxyAuth';
 const SIGNED_AT = 'safeCexRestDiagSignedAt';
 const SIG_AGE_MS = 'safeCexRestDiagSignatureAgeMs';
 
@@ -62,6 +63,17 @@ export interface VenueRestFailureSample {
   signatureAgeMs?: number;
   bodyKind: string;
   bodySnippet?: string;
+  /**
+   * Whether WE attached proxy auth to the request that failed — the shape only,
+   * never the value.
+   *
+   * `undefined` means the request did not target the Tealstreet proxy at all,
+   * so the question does not apply. Otherwise this is what separates "our auth
+   * failed" from "the edge rejected a real token", which `bodySnippet` cannot:
+   * the scrubber reduces a CloudFront 401 body to `[Filtered]`, and that is
+   * exactly the string that would have said which one it was.
+   */
+  sentProxyAuth?: 'present' | 'empty';
   errorName?: string;
   errorMessage?: string;
   endpoint?: string;
@@ -250,6 +262,29 @@ const endpointOf = (config: unknown): string | undefined => {
   return absolute.split('?')[0].slice(0, 120);
 };
 
+/**
+ * Record whether the proxy-auth interceptor attached a credential.
+ *
+ * Stamped on the CONFIG rather than inferred from the headers, because after
+ * the interceptor declines to send an empty `Bearer ` there is no header left
+ * to read — and "no auth header" would then be indistinguishable from "this
+ * request never went through the proxy". The stamp says which.
+ */
+export const markRestProxyAuth = <T>(config: T, shape: 'present' | 'empty'): T => {
+  try {
+    (config as Record<string, unknown>)[PROXY_AUTH] = shape;
+  } catch {
+    /* a sealed config must not be able to fail the request */
+  }
+  return config;
+};
+
+const proxyAuthOf = (config: unknown): 'present' | 'empty' | undefined => {
+  const stamped = (config as Record<string, unknown> | undefined)?.[PROXY_AUTH];
+  if (stamped === 'present' || stamped === 'empty') return stamped;
+  return undefined;
+};
+
 export const markRestRequestStart = <T>(config: T, now = Date.now()): T => {
   try {
     (config as Record<string, unknown>)[T0] = now;
@@ -368,6 +403,7 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
       signatureAgeMs,
       bodyKind,
       bodySnippet,
+      sentProxyAuth: proxyAuthOf(typed?.config),
       endpoint: endpointOf(typed?.config),
       errorName: typeof errorName === 'string' ? errorName : undefined,
       errorMessage: message ? scrub(message) : undefined,

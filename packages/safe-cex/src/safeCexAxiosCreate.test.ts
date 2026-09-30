@@ -4,6 +4,8 @@ import type { ExchangeOptions } from './types';
 import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getProxyToken } from './accessToken';
+
 // Import after mocking
 import {
   getProxyForAxios,
@@ -316,6 +318,40 @@ describe('safeCexAxiosCreate', () => {
 
       expect(requestConfig.headers['Tealstreet-Authorization']).toBe('Bearer mock-token');
       expect(requestConfig.headers.Authorization).toBeUndefined();
+    });
+
+    // `Bearer ` with nothing after it is a malformed credential, not an absent
+    // one. The proxy's viewer-request Lambda 403s "Invalid JWT" for that shape
+    // where an absent header gets a 401 naming the real problem — so an empty
+    // token must send NO header, and the diagnostic stamp is what records that
+    // we tried.
+    it('sends no Authorization header at all when the proxy token is empty', async () => {
+      vi.mocked(getProxyToken).mockResolvedValueOnce('');
+
+      const bybitExchange = { ...mockExchange, name: 'bybit' } as unknown as BaseExchange;
+      const config = { baseURL: 'https://api.bybit.com' };
+      const options: ExchangeOptions = { key: 'k', secret: 's', tealstreetProxy: true };
+
+      const instance = safeCexAxiosCreate(config, options, bybitExchange);
+      const proxyAuthInterceptor = vi.mocked(instance.interceptors.request.use).mock.calls[1][0];
+      const requestConfig = await proxyAuthInterceptor!({ headers: {} } as any);
+
+      expect(requestConfig.headers.Authorization).toBeUndefined();
+      expect(requestConfig.headers['Tealstreet-Authorization']).toBeUndefined();
+      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyAuth).toBe('empty');
+    });
+
+    it('stamps the request as carrying proxy auth when the token is present', async () => {
+      const bybitExchange = { ...mockExchange, name: 'bybit' } as unknown as BaseExchange;
+      const config = { baseURL: 'https://api.bybit.com' };
+      const options: ExchangeOptions = { key: 'k', secret: 's', tealstreetProxy: true };
+
+      const instance = safeCexAxiosCreate(config, options, bybitExchange);
+      const proxyAuthInterceptor = vi.mocked(instance.interceptors.request.use).mock.calls[1][0];
+      const requestConfig = await proxyAuthInterceptor!({ headers: {} } as any);
+
+      expect(requestConfig.headers.Authorization).toBe('Bearer mock-token');
+      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyAuth).toBe('present');
     });
 
     it('should add response interceptor', () => {

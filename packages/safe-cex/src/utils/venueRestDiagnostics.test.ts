@@ -7,6 +7,7 @@ import {
   getVenueRestStats,
   markRestRequestStart,
   markRestSigned,
+  markRestProxyAuth,
   noteRestFailure,
   noteRestSuccess,
   resetVenueRestDiagnostics,
@@ -29,6 +30,38 @@ describe('venueRestDiagnostics', () => {
 
     expect(statsFor('bybit').minQuotaRemaining).toBe(2);
     expect(statsFor('bybit').lastQuota).toMatchObject({ 'x-bapi-limit-status': '6' });
+  });
+
+  // A CloudFront 401 reads the same whether we sent no credential or sent one
+  // the edge rejected — and `bodySnippet` is scrubbed to `[Filtered]`, so the
+  // body cannot settle it either. This field is the only thing that can.
+  it('records that the request carried proxy auth', () => {
+    noteRestFailure('okx', {
+      config: markRestProxyAuth({ url: '/api/v5/account/config' }, 'present'),
+      response: { status: 401, headers: {}, data: 'Authorization header is missing' },
+    } as never);
+
+    expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBe('present');
+  });
+
+  it('records that the request went out with no proxy credential', () => {
+    noteRestFailure('okx', {
+      config: markRestProxyAuth({ url: '/api/v5/account/config' }, 'empty'),
+      response: { status: 401, headers: {}, data: 'Authorization header is missing' },
+    } as never);
+
+    expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBe('empty');
+  });
+
+  // Undefined rather than a third value: the request never targeted the proxy,
+  // so "did we send auth" is not a question it has an answer to.
+  it('leaves proxy auth unset for a request that never went through the proxy', () => {
+    noteRestFailure('okx', {
+      config: { url: '/api/v5/account/config' },
+      response: { status: 500, headers: {}, data: 'boom' },
+    } as never);
+
+    expect(drainVenueRestFailureSamples()[0].sentProxyAuth).toBeUndefined();
   });
 
   it('reads quota headers off an AxiosHeaders-style response', () => {

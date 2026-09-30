@@ -9,7 +9,12 @@ import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
 import { isSigningCaptureRequest } from './utils/signingCapture';
-import { markRestRequestStart, noteRestFailure, noteRestSuccess } from './utils/venueRestDiagnostics';
+import {
+  markRestProxyAuth,
+  markRestRequestStart,
+  noteRestFailure,
+  noteRestSuccess,
+} from './utils/venueRestDiagnostics';
 import { getPublicCorsProxy } from './utils/transportResolution';
 
 /**
@@ -329,10 +334,22 @@ export const safeCexAxiosCreate = (
       // semantics. MEXC futures uses Authorization for WEB/APP sessions, while
       // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
       // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
-      if (exchange.name === 'grvt' || exchange.name === 'mexc') {
-        config.headers['Tealstreet-Authorization'] = `Bearer ${token}`;
-      } else {
-        config.headers.Authorization = `Bearer ${token}`;
+      //
+      // Only when there is something to send. `Bearer ` with nothing after it is
+      // a MALFORMED credential, not an absent one, and it is strictly worse:
+      // the edge reports it as "Authorization header is missing", which is then
+      // the only string anyone downstream has to go on — and it points at the
+      // venue rather than at us. A host can still hold '' here legitimately
+      // (the browser SharedWorker and the CLI both return it while warming);
+      // exchange-server cannot, since `getProxyToken` throws for it instead.
+      markRestProxyAuth(config, token ? 'present' : 'empty');
+
+      if (token) {
+        if (exchange.name === 'grvt' || exchange.name === 'mexc') {
+          config.headers['Tealstreet-Authorization'] = `Bearer ${token}`;
+        } else {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
       }
 
       // Add browser-like headers for CLI requests to proxy

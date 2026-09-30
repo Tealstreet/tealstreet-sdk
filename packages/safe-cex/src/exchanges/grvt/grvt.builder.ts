@@ -144,6 +144,17 @@ interface AuthorizeBuilderMessage {
   expiration: string;
 }
 
+/**
+ * `Bearer ` with nothing after it is a MALFORMED credential, not an absent one.
+ * The proxy's viewer-request Lambda answers 403 "Invalid JWT" for that, while an
+ * absent header gets a 401 that names the real problem — so sending empty is
+ * strictly worse than sending nothing. A browser host can legitimately hold ''
+ * while its SharedWorker warms; exchange-server cannot, since `getProxyToken`
+ * throws for it instead.
+ */
+const proxyAuthHeader = (proxyToken: string): Record<string, string> =>
+  proxyToken ? { 'Tealstreet-Authorization': `Bearer ${proxyToken}` } : {};
+
 // GRVT proxy — requires Tealstreet-Authorization header
 const GRVT_PROXY_URL = PRIVATE_PROXY_GRVT_TINY;
 
@@ -227,7 +238,7 @@ const authenticateGrvt = async (
   const url = `${edgeUrl}/auth/api_key/login`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Tealstreet-Authorization': `Bearer ${proxyToken}`,
+    ...proxyAuthHeader(proxyToken),
     'X-Grvt-Remember-Me': 'true',
   };
   const body = { api_key: apiKey };
@@ -294,7 +305,7 @@ const fetchGrvtMainAccountId = async (
   const apiUrl = getGrvtTradingApiUrl(testnet);
   const requestHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Tealstreet-Authorization': `Bearer ${proxyToken}`,
+    ...proxyAuthHeader(proxyToken),
   };
 
   if (authResult.accountId) {
@@ -479,7 +490,7 @@ export const checkGrvtBuilderAuthorized = async (
     // Build headers — pass session cookie via proxy header
     const requestHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Tealstreet-Authorization': `Bearer ${proxyToken}`,
+      ...proxyAuthHeader(proxyToken),
       'X-Grvt-Account-Id': authResult.accountId!,
     };
 
@@ -777,7 +788,7 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     // Build headers with session cookie if available
     const requestHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Tealstreet-Authorization': `Bearer ${proxyToken}`,
+      ...proxyAuthHeader(proxyToken),
       'X-Grvt-Account-Id': authResult.accountId!, // Include account ID from auth
     };
 
