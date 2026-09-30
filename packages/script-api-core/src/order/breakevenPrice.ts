@@ -63,6 +63,14 @@ export const breakevenPrice = ({ entryPrice, size, side, bankedPnl, fees }: Brea
   // Nothing left to close: break-even IS the entry.
   if (!magnitude) return entryPrice;
 
+  // Nothing banked and nothing paid: break-even is EXACTLY the entry, and
+  // saying so beats computing it. `subtract(x, 0)` is not the identity —
+  // safe-math rounds through `10 ** afterDecimal(x)`, which moves the last bit
+  // on roughly one price in eleven. Harmless once a caller rounds to the
+  // market's tick, but a needless round trip on the commonest input there is:
+  // a position that has taken no partial profit.
+  if (!bankedPnl && !fees) return entryPrice;
+
   const perContract = subtract(bankedPnl || 0, fees || 0) / magnitude;
   const result = side === PositionSide.Long ? subtract(entryPrice, perContract) : add(entryPrice, perContract);
 

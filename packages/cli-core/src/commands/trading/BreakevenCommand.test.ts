@@ -79,14 +79,20 @@ describe('BreakevenCommand', () => {
   });
 
   /**
-   * Entry, NOT a break-even of this command's own. There are already three
-   * break-even formulas in the app and no engine, and the fee-aware one the
-   * chart draws needs the positions-history pipeline the CLI cannot reach.
-   * Banked PnL must therefore NOT move this price — see
-   * `positionsHistory/helpers/CLAUDE.md`.
+   * `Position.realizedPnl` must NOT move this price. It means different things
+   * per venue — lifetime on asterdex, survives the close on lighter, funding
+   * and fees baked in on bitget, and base-denominated against a quote price on
+   * every inverse contract. Wiring it in needs a per-venue capability flag,
+   * and until then a present value must be ignored rather than trusted.
    */
-  it('stays at entry even once profit has been banked', async () => {
+  it('ignores realizedPnl, which is not trustworthy enough to place a stop on', async () => {
     const ex = makeExchange([pos({ realizedPnl: 1_000, contracts: 1 })]);
+    await cmd.execute(ctx(['be'], ex));
+    expect(placed(ex).triggerPrice).toBe(50_000);
+  });
+
+  it('is unmoved by a realizedPnl large enough to be a lifetime figure', async () => {
+    const ex = makeExchange([pos({ realizedPnl: 500_000, contracts: 1 })]);
     await cmd.execute(ctx(['be'], ex));
     expect(placed(ex).triggerPrice).toBe(50_000);
   });

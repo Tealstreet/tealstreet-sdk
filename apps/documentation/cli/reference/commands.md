@@ -69,11 +69,16 @@ Source: `StopCommand.ts`.
 
 Move the protective stop to break-even. Alias: `breakeven`.
 
-**This places the stop at your ENTRY price.** It does not account for profit
-already banked on the position, and it is not the same number as the chart's
-B/E line, which includes fees. Those differ on purpose for now — the web and
-the CLI compute break-even from different data, and the CLI has no access to
-the fee history the chart uses.
+**This places the stop at your ENTRY price**, and does not yet account for
+profit already banked on the position — so on a position you have taken partial
+profit on it is not the same number as the chart's B/E line.
+
+That is a data problem rather than a missing feature. The venues that report a
+per-position realised PnL disagree about what it means: some report a lifetime
+figure for the symbol, some keep reporting it after the position has closed,
+some fold funding and fees into it, and on inverse contracts it is denominated
+in the base currency rather than the quote. Placing a stop on any of those
+would be worse than placing it at entry.
 
 | Form           | Result                                       |
 | -------------- | -------------------------------------------- |

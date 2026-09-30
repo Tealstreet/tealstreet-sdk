@@ -13,6 +13,18 @@ describe('breakevenPrice', () => {
   });
 
   /**
+   * EXACTLY the entry, not a value that round-trips through safe-math.
+   * `subtract(x, 0)` rounds through `10 ** afterDecimal(x)` and moves the last
+   * bit on roughly one price in eleven — harmless after a tick round, but this
+   * is the commonest input there is and it should be an identity.
+   */
+  it('returns the entry bit-for-bit when there is nothing to apply', () => {
+    for (const price of [0.051124, 39.39863290307461, 4.273059217559405e-8, 83667.7, 1 / 3]) {
+      expect(Object.is(breakevenPrice(input({ entryPrice: price })), price)).toBe(true);
+    }
+  });
+
+  /**
    * Banked profit lets a LONG exit lower and still be flat overall:
    * 50 + (P - 100) * 10 = 0 at P = 95. The web copy returned 105 here, because
    * it had no side branch and was the short answer applied to both.

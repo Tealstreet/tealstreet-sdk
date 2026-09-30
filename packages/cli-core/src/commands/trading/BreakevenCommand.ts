@@ -1,6 +1,7 @@
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { prepareCliOrder } from '../../order/prepareCliOrder';
+import { breakevenPrice } from '@tealstreet/script-api-core/src/order/breakevenPrice';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 import type { Order } from '@tealstreet/safe-cex/src/types';
 
@@ -49,17 +50,33 @@ export class BreakevenCommand extends TradingBaseCommand {
     if (!mark) return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
 
     /**
-     * The ENTRY price, deliberately — not a break-even of this command's own.
+     * Shares the arithmetic with the web — but deliberately supplies NO
+     * `bankedPnl`, so the answer is still the entry price.
      *
-     * There are already three of those in the app and no engine
-     * (`positionsHistory/helpers/CLAUDE.md` counts them), and the fee-aware one
-     * the chart draws its B/E line from needs the positions-history pipeline,
-     * which the CLI has no access to. A fourth formula here would have been a
-     * fifth in the repo. So this matches what the web's "breakeven all" action
-     * did, the behaviour is stated plainly in the docs, and when break-even is
-     * consolidated into `script-api-core` this becomes a one-line change.
+     * `Position.realizedPnl` looks like the input this wants and is not
+     * trustworthy enough to place a stop on. Measured across venues:
+     *
+     *   - asterdex — binance's `cr`, per-symbol LIFETIME realised, and the
+     *     REST refresh deliberately preserves it.
+     *   - lighter — survives the position closing; per-market cumulative.
+     *   - bitget — funding and open/close fees are baked into the figure.
+     *   - every INVERSE contract — bybitinverse and bitgetinverse pass
+     *     `curRealisedPnl` through raw while routing the unrealized twin
+     *     through `extra.unrealizedPnlNative`, so it is BASE-denominated
+     *     against a quote `entryPrice`. The "contracts is base, never branch
+     *     on inverse" rule fixes the `size x price` leg and does nothing for a
+     *     base-denominated numerator.
+     *   - binance, okx, blofin, kraken, woo, coinbase — never set it at all.
+     *
+     * Clean and position-scoped on bybit, paradex, bitunix and (after a warm
+     * start) hyperliquid. Wiring it in needs a per-venue capability flag, not
+     * a `|| 0`. Until then this stays at entry and the user docs say so.
      */
-    const base = position.entryPrice;
+    const base = breakevenPrice({
+      entryPrice: position.entryPrice,
+      size: position.contracts,
+      side: position.side,
+    });
     // An offset is relative to BREAK-EVEN, not to the mark -- `be +3%` means
     // "3% the good side of flat". `processPrice` gives the same `+N` / `+N%` /
     // absolute grammar the rest of the CLI uses.
