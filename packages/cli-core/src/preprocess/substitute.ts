@@ -1,4 +1,5 @@
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
+import { add, divide, multiply, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { splitChain } from './tokenize';
 import { buildSubstituteOperandResolver, tryEvalMathToken } from './math';
 import { evaluateLiveVarSource } from './reactiveVars';
@@ -65,7 +66,29 @@ const TICKER_PRICE_CONSTANTS = new Set(['$bid', '$ask', '$last', '$mark', '$inde
 // offset on the next token. Position-anchored ($entry/$lentry/$sentry)
 // and ticker-anchored ($bid/$ask/$last/$mark/$index) use the same
 // combining rules — see substituteTokens.
-const PRICE_ANCHOR_CONSTANTS = new Set([...POSITION_PRICE_CONSTANTS, ...TICKER_PRICE_CONSTANTS]);
+/**
+ * `$roe<N>` — the price at which the focused position's ROE would be N%.
+ *
+ * It carries its number in the token (`$roe25`, `$roe-10`, `$roe101`), so
+ * unlike every other constant it cannot be a Set member. Rather than special-
+ * case it at each call site, the anchor set below overrides `has` — which also
+ * gets it into the math resolver, since that takes these as Sets and only ever
+ * calls `.has`.
+ */
+const ROE_TOKEN_RE = /^\$roe[+-]?\d+(\.\d+)?$/i;
+
+export const isRoeToken = (tok: string): boolean => ROE_TOKEN_RE.test(tok);
+
+class PriceAnchorConstants extends Set<string> {
+  override has(tok: string): boolean {
+    return super.has(tok) || isRoeToken(tok);
+  }
+}
+
+const PRICE_ANCHOR_CONSTANTS: Set<string> = new PriceAnchorConstants([
+  ...POSITION_PRICE_CONSTANTS,
+  ...TICKER_PRICE_CONSTANTS,
+]);
 // Numeric account / PnL constants. Plain numbers — no inline offset
 // combining, no math expressions (yet); they substitute as a single
 // number token and any further arithmetic is the user's problem.
@@ -492,10 +515,57 @@ function resolveSizeConstant(tok: string, ctx: PreprocessContext): number {
 }
 
 function resolvePriceAnchor(tok: string, ctx: PreprocessContext): number {
+  if (isRoeToken(tok)) {
+    return resolveRoePrice(tok, ctx);
+  }
   if (TICKER_PRICE_CONSTANTS.has(tok)) {
     return resolveTickerPriceConstant(tok, ctx);
   }
   return resolvePositionPriceConstant(tok, ctx);
+}
+
+/**
+ * Inverts safe-cex's own `calculateReturns`, so a target typed here and a
+ * figure read off the positions table mean the same thing:
+ *
+ *     roe = (upnl / (entry * contracts)) * leverage * 100
+ *
+ * and for a long, `upnl` at price P is `(P - entry) * contracts`, so the
+ * contracts cancel and P = entry * (1 + roe / (leverage * 100)). A short moves
+ * the other way.
+ *
+ * Leverage is refused rather than defaulted when absent: a 0 would report every
+ * target as the entry price, which is the same trap `withKnownReturns` documents
+ * for the positions table.
+ */
+function resolveRoePrice(tok: string, ctx: PreprocessContext): number {
+  if (!ctx.exchange) {
+    throw new Error(`${tok}: not connected to an exchange`);
+  }
+  const positions = (ctx.exchange.store?.positions ?? []).filter((p) => p.symbol === ctx.symbol && p.contracts !== 0);
+  if (positions.length === 0) {
+    throw new Error(`${tok}: no position for ${ctx.symbol}`);
+  }
+  if (positions.length > 1) {
+    throw new Error(`${tok}: multiple positions on ${ctx.symbol}, ambiguous`);
+  }
+
+  const position = positions[0];
+  const leverage = position.leverage;
+  if (!leverage || !Number.isFinite(leverage)) {
+    throw new Error(`${tok}: leverage not available on ${ctx.symbol}, cannot convert ROE to a price`);
+  }
+
+  const roe = parseFloat(tok.slice('$roe'.length));
+  if (!Number.isFinite(roe)) {
+    throw new Error(`${tok}: not a usable ROE percentage`);
+  }
+
+  // safe-math throughout: `50000 * (1 + 25/1000)` is 51249.99999999999 in
+  // plain floating point, and a price token is read by command parsers.
+  const move = divide(roe, multiply(leverage, 100));
+  const factor = position.side === PositionSide.Long ? add(1, move) : subtract(1, move);
+  return multiply(position.entryPrice, factor);
 }
 
 function resolvePositionPriceConstant(tok: string, ctx: PreprocessContext): number {

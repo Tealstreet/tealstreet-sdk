@@ -1020,3 +1020,61 @@ describe('preprocessSegment', () => {
     });
   });
 });
+
+/**
+ * `$roe<N>` — the price at which the focused position's ROE would be N%.
+ *
+ * Asked for as a TP ladder denominated in ROE rather than price (Discord,
+ * 2026-09-29): legs at 25% / 60% / 100% ROE and a runner armed at 101%.
+ * Inverts safe-cex's `calculateReturns`, so a target typed here and the figure
+ * in the positions table mean the same thing.
+ */
+describe('$roe', () => {
+  const long = (over: Partial<Position> = {}) => pos({ entryPrice: 50_000, leverage: 10, ...over });
+
+  // 25% ROE at 10x is a 2.5% price move.
+  it('converts an ROE target to a price on a long', () => {
+    expect(preprocessSegment('sell 30%pos $roe25 reduce', makeCtx([long()]))).toBe('sell 30%pos 51250 reduce');
+  });
+
+  it('moves the other way on a short', () => {
+    const ctx = makeCtx([long({ side: PositionSide.Short })]);
+    expect(preprocessSegment('buy 30%pos $roe25 reduce', ctx)).toBe('buy 30%pos 48750 reduce');
+  });
+
+  it('scales with leverage — the same ROE is a smaller move at higher leverage', () => {
+    expect(preprocessSegment('sell $roe100', makeCtx([long({ leverage: 10 })]))).toBe('sell 55000');
+    expect(preprocessSegment('sell $roe100', makeCtx([long({ leverage: 20 })]))).toBe('sell 52500');
+  });
+
+  it('takes a negative target, below entry on a long', () => {
+    expect(preprocessSegment('stop $roe-50', makeCtx([long()]))).toBe('stop 47500');
+  });
+
+  // The whole point: his ladder and his runner in one chain.
+  it('reads inside a wait condition, which is how the runner arms', () => {
+    const ctx = makeCtx([long()]);
+    (ctx.exchange as unknown as { store: { tickers: unknown[] } }).store.tickers = [
+      { symbol: 'BTCUSDT', last: 50_000, mark: 50_000, bid: 49_999, ask: 50_001, index: 50_000 },
+    ];
+    expect(preprocessSegment('wait $last >= $roe101', ctx)).toBe('wait 50000 >= 55050');
+  });
+
+  /**
+   * A 0 leverage would silently report every target as the entry price — the
+   * same trap `withKnownReturns` documents for the positions table.
+   */
+  it('refuses rather than defaulting when leverage is unavailable', () => {
+    expect(() => preprocessSegment('sell $roe25', makeCtx([long({ leverage: 0 })]))).toThrow(/leverage not available/);
+  });
+
+  it('refuses with no position, and when the side is ambiguous', () => {
+    expect(() => preprocessSegment('sell $roe25', makeCtx([]))).toThrow(/no position/);
+    const both = makeCtx([long({ id: 'l' }), long({ id: 's', side: PositionSide.Short })]);
+    expect(() => preprocessSegment('sell $roe25', both)).toThrow(/ambiguous/);
+  });
+
+  it('is not confused with a plain word starting the same way', () => {
+    expect(preprocessSegment('sell $roe', makeCtx([long()]))).toBe('sell $roe');
+  });
+});

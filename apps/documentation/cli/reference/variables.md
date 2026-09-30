@@ -25,8 +25,26 @@ The focused position is the one for the symbol you have set with `switch`.
 | `$lentry` | Long entry price (focused symbol, hedge-mode aware)  |
 | `$sentry` | Short entry price (focused symbol, hedge-mode aware) |
 | `$liq`    | Liquidation price — errors when ambiguous or zero    |
+| `$roe<N>` | The price at which this position's ROE would be N%   |
 
-All four accept an [inline offset](#inline-offsets).
+All five accept an [inline offset](#inline-offsets).
+
+`$roe` carries its number in the token — `$roe25`, `$roe101`, `$roe-50` — and is
+the same ROE the positions table shows, so a target you type and a figure you
+read mean the same thing. It scales with leverage: at 10x, `$roe100` is a 10%
+price move; at 20x it is 5%. It errors rather than guessing when leverage is
+unavailable, because a 0 would silently put every target at your entry.
+
+A take-profit ladder and a trailing runner, denominated in ROE:
+
+```
+sell 30%pos $roe25 reduce; sell 30%pos $roe60 reduce; sell 30%pos $roe100 reduce
+wait $last >= $roe101; trail 20%
+```
+
+Placing all three legs up front is what makes each one 30% of the ORIGINAL
+position — they size against the same unfilled position. Once they fill, what
+is left is the runner, and `trail` takes the whole remaining position.
 
 ---
 
@@ -130,7 +148,7 @@ stop at $entry -2%
 Anchors that accept inline offsets:
 
 ```text
-$entry  $lentry  $sentry  $liq  $bid  $ask  $last  $mark  $index
+$entry  $lentry  $sentry  $liq  $roe<N>  $bid  $ask  $last  $mark  $index
 ```
 
 Source: `packages/cli-core/src/preprocess/substitute.ts:322-339`.
