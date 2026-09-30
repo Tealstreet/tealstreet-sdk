@@ -37,8 +37,11 @@ optional reduce-only / post-only / bracket stop.
 | `buy $100 best`              | Limit at best bid (buy) / best ask (sell) |
 | `buy $100 stop 49500`        | Bracketed entry with attached stop loss   |
 
-**Safety**: Bare numbers ≥ 100 with no `at` are rejected — the parser asks
-"did you mean `at <price>`?" so a typo can't coerce to market silently.
+**`at` is required for a limit order.** `buy 100$ 50000` is not a limit — there
+is nothing for the price to attach to, so it would be a market order with a
+stray number. Any leftover bare number is rejected with "did you mean
+`at <price>`?" regardless of size. This used to apply only to numbers ≥ 100,
+which meant a coin quoted in cents silently market-filled instead.
 [fatfinger](./safety.md#fatfinger) checks fire per-order.
 
 Source: `packages/cli-core/src/commands/trading/BuyCommand.ts`, `SellCommand.ts`.
@@ -89,12 +92,16 @@ currency rather than the quote. An unverified venue is left at entry on purpose.
 | Form         | Result                                      |
 | ------------ | ------------------------------------------- |
 | `be`         | Stop at break-even for the focused position |
-| `be +3%`     | 3% the good side of break-even              |
-| `be -0.5%`   | Slightly inside it                          |
-| `be +100`    | Absolute offset                             |
+| `be +3%`     | 3% **above** break-even                     |
+| `be -0.5%`   | 0.5% **below** break-even                   |
+| `be +100`    | Absolute offset, same directions            |
 | `be ETHUSDT` | Symbol override                             |
 
-An offset is relative to **break-even**, not to the mark.
+An offset is relative to **break-even**, not to the mark, and it is a plain
+direction rather than a side-aware one: `+` is always up the price axis. On a
+LONG, `be +3%` is the one you want — it puts the stop above break-even and
+locks a little in. On a SHORT the profitable side is DOWN, so the same buffer
+is `be -3%`; `be +3%` there widens the stop instead of tightening it.
 
 **It cancels stop losses only — your take-profits are left alone.** Writing this
 by hand as `cancel stops; stop $entry` does not do the same thing: `cancel
@@ -126,7 +133,7 @@ market and never moves against you.
 | `trail 20%`                       | Stop 20% behind the current price |
 | `trail 500`                       | Absolute distance                 |
 | `trail 20% ETHUSDT`               | Symbol override                   |
-| `wait $last >= 0.0716; trail 20%` | Arm it once price gets there      |
+| `when (price >= 0.0716) (trail 20%)` | Arm it once price gets there   |
 
 **Distance is measured from the CURRENT price, not from your entry** — that is
 what a trailing stop means to the venue.

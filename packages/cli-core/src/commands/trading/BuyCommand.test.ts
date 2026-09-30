@@ -214,9 +214,119 @@ describe('BuyCommand', () => {
       expect(result.error).toBe('Invalid syntax');
       expect(ctx.adapter.printError).toHaveBeenCalledWith(expect.stringContaining('did you mean'));
     });
+
+    /**
+     * The guard used to fire only at `>= 100`, a threshold that assumed
+     * BTC-shaped prices. On a coin quoted in cents it never fired, so the
+     * price was DROPPED and the order went out at market — reported by a user
+     * as "my limit filled instantly at a terrible price". There is no reading
+     * of a leftover bare number that means anything, so any magnitude refuses.
+     */
+    it('refuses a forgotten price on a sub-dollar coin, not just a big one', async () => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(['buy', '100$', '0.051124'], exchange, 'WIFUSDT');
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid syntax');
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
+    });
+
+    /**
+     * When the symbol LEADS, args[2] is the SIZE slot, and the stray-number
+     * scan must not start there. A bare size is still refused — by
+     * `parseSizeAndConvertIfUsd`, which says why ("Use $1000, 1000$, or NN%")
+     * — and that is the message the user needs. Scanning from index 2 replaced
+     * it with "did you mean `at 1`?", which sends someone hunting for a limit
+     * price they never meant to type.
+     */
+    it('refuses a bare size after a leading symbol with the SIZE error, not the price one', async () => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(['buy', 'BTCUSDT', '1'], exchange, 'ETHUSDT');
+      await expect(command.execute(ctx)).rejects.toThrow(/Invalid size/);
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
+    });
+
+    it('places a sized order when the symbol comes first', async () => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(['buy', 'BTCUSDT', '$100'], exchange, 'ETHUSDT');
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      const placed = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(placed.length).toBeGreaterThan(0);
+      for (const order of placed) expect(order.symbol).toBe('BTCUSDT');
+    });
+
+    it('still places a plain market order when no stray number is present', async () => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(['buy', '100$', 'reduce'], exchange, 'WIFUSDT');
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalled();
+    });
   });
 
   describe('limit orders', () => {
+    /**
+     * The market and `best` paths skipped `stop` in their trailing-symbol scan
+     * and this one did not, so the walk back from the end hit the literal
+     * token `stop` and `resolveMarketSymbol` prefix-matched `STOP` against
+     * whatever base a venue happens to list — routing an entire bracket to a
+     * market the user never named.
+     */
+    it('does not read the `stop` keyword as a trailing symbol', async () => {
+      const exchange = createMockExchange();
+      // `resolveMarketSymbol` PREFIX-matches, so a venue listing anything
+      // whose base starts with S is enough for `STOP` to resolve. Bybit lists
+      // several; the default fixture happens to list none, which is why this
+      // bug survived.
+      (exchange.store as { markets: unknown[] }).markets.push({
+        symbol: 'SUSDT',
+        base: 'S',
+        quote: 'USDT',
+        precision: { amount: 1, price: 0.0001 },
+      });
+      // `validateSymbol` checks TICKERS, not markets, so a market alone is not
+      // enough to reproduce what a live account does.
+      (exchange.store as { tickers: unknown[] }).tickers.push({
+        symbol: 'SUSDT',
+        last: 0.5,
+        bid: 0.49,
+        ask: 0.51,
+        mark: 0.5,
+      });
+      const ctx = createMockContext(['buy', '100$', 'at', '49000', 'stop', '48000'], exchange, 'BTCUSDT');
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      const placed = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(placed.length).toBeGreaterThan(0);
+      for (const order of placed) expect(order.symbol).toBe('BTCUSDT');
+    });
+
+    /**
+     * The other side of the `stop` skip: a REAL trailing symbol must still be
+     * found. It is, because the scan walks from the end and reaches the symbol
+     * before it ever reaches `stop` — but that is a property worth pinning
+     * rather than re-deriving.
+     */
+    it('still finds a trailing symbol placed after an attached stop', async () => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(
+        ['buy', '$100', 'at', '3000', 'stop', '2900', 'ETHUSDT'],
+        exchange,
+        'BTCUSDT',
+      );
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      const placed = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(placed.length).toBeGreaterThan(0);
+      for (const order of placed) expect(order.symbol).toBe('ETHUSDT');
+    });
+
     it('places limit buy order with "at" keyword', async () => {
       const exchange = createMockExchange();
       const ctx = createMockContext(['buy', '$100', 'at', '49000'], exchange, 'BTCUSDT');

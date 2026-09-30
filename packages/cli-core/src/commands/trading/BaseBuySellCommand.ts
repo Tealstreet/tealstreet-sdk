@@ -123,19 +123,30 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     // Safety check: detect bare numbers that look like prices (forgot "at" keyword).
     // Skipped when `stop <p>` is present — the number after `stop` is the
     // intentional stop-loss price, not a forgotten limit.
+    // When the SYMBOL leads (`buy BTC 1`), args[2] is the SIZE slot, and a bare
+    // size there is legitimate — it means raw contracts. Scanning from index 2
+    // unconditionally turned `buy BTC 1` into a syntax error.
+    const symbolLeads = this.validateSymbols(exchange, args[1]?.split(',') || []).length > 0;
+    const firstUnconsumedIndex = symbolLeads ? 3 : 2;
+
     if (!hasAttachedStop) {
-      for (let i = 2; i < args.length; i++) {
+      for (let i = firstUnconsumedIndex; i < args.length; i++) {
         const arg = args[i];
         if (arg === 'reduce' || arg === 'po') continue;
         if (/^\d+(\.\d+)?$/.test(arg)) {
-          const num = parseFloat(arg);
-          if (num >= 100) {
-            this.printError(
-              ctx,
-              `Unexpected number "${arg}" - did you mean "${args[0]} ${args[1]} at ${arg}"? Use "at" keyword for limit orders.`,
-            );
-            return this.error('Invalid syntax');
-          }
+          // ANY unconsumed bare number, not just one >= 100.
+          //
+          // The threshold assumed BTC-shaped prices. On a coin quoted at
+          // $0.05 it never fired, so `sell 33$ 0.051533 reduce` dropped the
+          // price and MARKET-sold — which is what a user reported as "my
+          // limit filled instantly at a terrible price". There is no reading
+          // of a leftover number here that means anything, so refusing is
+          // always right and silently discarding it never was.
+          this.printError(
+            ctx,
+            `Unexpected number "${arg}" - did you mean "${args[0]} ${args[1]} at ${arg}"? Use "at" keyword for limit orders.`,
+          );
+          return this.error('Invalid syntax');
         }
       }
     }
@@ -270,9 +281,17 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       sizeArgIndex = 2;
     } else {
       // Check for symbol at end: "buy $100 at 50000 SYMBOL"
+      //
+      // `stop` and the price after it are skipped for the same reason the
+      // market and `best` paths skip them, and this path did not: without it
+      // `buy 100$ at 0.051124 stop 0.049570` walks back to the literal token
+      // `stop`, and `resolveMarketSymbol` prefix-matches `STOP` against any
+      // base a venue happens to list — so the whole bracket routes to a market
+      // the user never named.
       const atIndex = this.findArgIndex(args, 'at');
       for (let i = args.length - 1; i > atIndex + 1; i--) {
-        if (args[i] === 'reduce' || args[i] === 'po') continue;
+        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop') continue;
+        if (i > 0 && args[i - 1] === 'stop') continue;
         const trailingSymbols = this.validateSymbols(exchange, args[i].split(','));
         if (trailingSymbols.length > 0) {
           possibleSymbols.push(...trailingSymbols);

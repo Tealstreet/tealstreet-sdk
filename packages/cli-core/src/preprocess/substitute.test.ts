@@ -117,6 +117,19 @@ describe('preprocessSegment', () => {
       expect(preprocessSegment('when (@hi >= 100) (be)', ctx)).toBe('when (@hi >= 100) (be)');
     });
 
+    /**
+     * The recipe tells a trader to capture a take-profit rung and then arm on
+     * ITS fill rather than on the price touching the target. A captured order
+     * id is a STATIC var, so `keepLiveVarsLiteral` leaves it alone and it
+     * still resolves — but only the condition half, which is what makes the
+     * pattern work at all.
+     */
+    it('resolves a captured order id inside the condition', () => {
+      const ctx = makeCtx([]);
+      ctx.store.setVar('t1', 'order-abc-123');
+      expect(preprocessSegment('when (fill @t1) (be +3%)', ctx)).toBe('when (fill order-abc-123) (be +3%)');
+    });
+
     it('does not capture a command that merely starts with the same letters', () => {
       const ctx = makeCtx([pos({ entryPrice: 50_000 })]);
       expect(preprocessSegment('whenever (x) (y)', ctx)).toBe('whenever (x) (y)');

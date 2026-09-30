@@ -12,9 +12,10 @@ import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
  * with a screenshot of another platform's ladder whose last leg is a trailing
  * stop armed at a profit threshold (Discord, 2026-09-29).
  *
- * The arming half needs no new syntax: `wait` already gates a command on a
- * price, so `wait $last >= 0.0716; trail 20%` is the whole pattern. This
- * supplies the only missing piece.
+ * The arming half is `when`: `when (price >= 0.0716) (trail 20%)` arms and
+ * returns, so the runner waits without holding the prompt. `wait` was the
+ * original suggestion and cannot do it — it blocks its own line and is capped
+ * at ten minutes, while a take-profit sits unfilled for hours.
  *
  * **Distance is from the CURRENT price, not from entry**, matching how venues
  * define a trailing stop: it follows the market and never moves against you.
@@ -29,7 +30,7 @@ export class TrailCommand extends TradingBaseCommand {
   readonly description = 'Place a trailing stop on the open position';
   readonly category = CommandCategory.Trading;
   readonly aliases = [];
-  readonly examples = ['trail 20%', 'trail 500', 'trail 20% ETHUSDT', 'wait $last >= 0.0716; trail 20%'];
+  readonly examples = ['trail 20%', 'trail 500', 'trail 20% ETHUSDT', 'when (price >= 0.0716) (trail 20%)'];
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -39,7 +40,8 @@ export class TrailCommand extends TradingBaseCommand {
     if (!exchange.placeOrder) return this.error('Exchange does not support placing orders');
 
     // Fail by NAME rather than letting the venue reject an order it has no
-    // endpoint for: only bybit and woo implement placeTrailingStopLoss today.
+    // endpoint for. The metadata flag is the authority on which venues those
+    // are — do not restate the list here, it has already drifted once.
     const metadata = exchange.name ? getExchangeMetadata(exchange.name as ExchangeName) : undefined;
     if (metadata && !metadata.supportsTrailingStopLoss) {
       return this.error(`${exchange.name} does not support trailing stops.`);

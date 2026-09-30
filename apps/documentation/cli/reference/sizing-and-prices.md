@@ -71,9 +71,15 @@ buy 100$       # ✅
 buy 0.01 BTC   # ✅ — 0.01 is interpreted as raw contracts when no other size shape matches
 ```
 
-The rejection of bare integers ≥ 100 is deliberate — it stops a typo like
-`buy 100` from coercing to a market order with notional ambiguity.
-Source: `TradingBaseCommand.ts`.
+A bare number where a PRICE was meant is rejected at any magnitude — `buy $100
+50000` and `sell 33$ 0.051533 reduce` both ask "did you mean `at <price>`?"
+rather than dropping the number and going out at market. This used to apply
+only to numbers ≥ 100, a threshold that assumed BTC-shaped prices: on a coin
+quoted in cents the check never fired and the order silently market-filled.
+
+That check runs over the tokens AFTER the size, so a bare size in its own slot
+(`buy 0.01 BTC`, `buy BTCUSDT 0.01`) is untouched by it.
+Source: `TradingBaseCommand.ts`, `BaseBuySellCommand.ts`.
 
 ### `tokenLooksLikeNonSymbol` filter
 

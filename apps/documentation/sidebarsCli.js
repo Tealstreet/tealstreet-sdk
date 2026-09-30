@@ -12,6 +12,7 @@ const sidebars = {
       collapsed: false,
       items: [
         'recipes/bracket-order',
+        'recipes/signal-ladder',
         'recipes/chaser',
         'recipes/twap',
         'recipes/scale-ladder',

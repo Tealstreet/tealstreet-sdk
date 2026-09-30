@@ -16,6 +16,12 @@ buy $100 stop -1%
 Market buy $100 notional on the focused symbol. A reduce-only market stop
 is placed **1% below the fill price** as soon as the entry resolves.
 
+**On a LIMIT entry, how the stop is carried differs per venue.** Bybit makes it
+a field on the entry order, so cancelling an unfilled limit cancels the stop
+with it. Binance and Hyperliquid submit a separate conditional order
+immediately — cancel the limit there and the stop stays armed with no position
+behind it. Check open orders after cancelling an unfilled bracket.
+
 ## Variations
 
 ```text

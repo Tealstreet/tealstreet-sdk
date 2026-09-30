@@ -128,7 +128,7 @@ above, combinators included.
 
 A condition is variable-length and so is a command, so there is no separator a
 parser could find on its own: `when price >= 100 close 50%` has no unambiguous
-split. The parens are the same ones [`if`](#if) already uses, and they are
+split. The parens are the same ones [`if`](#if--else--end) already uses, and they are
 paren-aware, so a `;` **inside** the action belongs to the action:
 
 ```text
@@ -175,6 +175,8 @@ destroyed the moment the command returns.
 
 Whatever it fires goes through the same path a typed command does: preprocessing,
 your aliases, the safety guards, and the [audit log](./commands.md#audit).
+
+Worked end to end in [Recipe: Signal ladder](../recipes/signal-ladder.md).
 
 Source: `WhenCommand.ts`, `triggers/triggerRegistry.ts`.
 

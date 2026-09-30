@@ -2,11 +2,34 @@
 title: Trailing stop
 ---
 
-Roll your own trailing stop using `track`, a reactive `sets`, and a blocking
-`wait`. The CLI doesn't ship a one-shot `trail` verb because the right
-trailing behavior is too workflow-specific — this pattern is the canonical
-build. Use it for runners where you want the stop to ratchet up but never
-pull back.
+Two ways to trail, and the first one is almost always the one you want.
+
+## Use the venue's own trailing stop
+
+```text
+trail 20%
+```
+
+One command. The stop lives on the EXCHANGE, so it keeps trailing after you
+close the CLI, and it survives your laptop going to sleep. Distance is measured
+from the current price. See [`trail`](../reference/commands.md#trail).
+
+To arm it only once the trade is working — the classic "runner after TP3":
+
+```text
+when (price >= 0.053169) (trail 20%)
+```
+
+[`when`](../reference/workflow.md#when) arms and returns, so you keep trading
+while it waits. Not every venue offers trailing stops; `trail` refuses by name
+on one that does not, and that is when you reach for the pattern below.
+
+## Build one yourself
+
+Roll your own using `track`, a reactive `sets`, and a blocking `wait`. This
+runs in the CLI rather than on the exchange, which is the trade-off: it can
+trail on anything (PnL, a custom expression) and on any venue, but it stops
+the moment the CLI does.
 
 ## Minimum viable
 
@@ -90,10 +113,11 @@ Once you settle on a flavor, alias it so you can fire with one keystroke.
   debug a trail manually with `print`, you're guaranteed not to advance the
   state — `echo` will. See
   [Aliases & vars → `track`](../reference/aliases-and-vars.md#track).
-- `wait` polls at 100 ms and times out at 30 s default. For trails that may
-  run hours, set an explicit `timeout=8h` (cap is 10 m for `sleep`, but
-  `wait`'s ceiling is also 10 m — split into a `repeat` loop for longer
-  runs).
+- **`wait` gives up after 30 s by default and CANNOT be told to wait hours.**
+  `timeout=` is capped at 10 minutes and anything larger is rejected outright
+  (`wait: timeout must be in (0, 10m]`), so a trail built this way needs a
+  `repeat` loop around it to run for a session — or use `trail`, which has no
+  such limit because the venue holds the order.
 - Tracked + reactive vars are **session-scoped**. They don't persist across
   CLI restarts. Re-run the `track`/`sets` lines on startup, or alias the
   whole bundle.
@@ -110,3 +134,4 @@ Once you settle on a flavor, alias it so you can fire with one keystroke.
 - [Variables](../reference/variables.md) — `$last`, `$pnl`, `$entry`
 - [Recipe: Bracket order](./bracket-order.md) — static stop alternative
 - [Recipe: Chaser](./chaser.md) — for re-pegging entries, not exits
+- [Workflow → `when`](../reference/workflow.md#when) — arm the trail on a condition

@@ -88,9 +88,12 @@ export class BreakevenCommand extends TradingBaseCommand {
       side: position.side,
       bankedPnl: banked,
     });
-    // An offset is relative to BREAK-EVEN, not to the mark -- `be +3%` means
-    // "3% the good side of flat". `processPrice` gives the same `+N` / `+N%` /
-    // absolute grammar the rest of the CLI uses.
+    // An offset is relative to BREAK-EVEN, not to the mark, and it is a plain
+    // direction rather than a side-aware one: `+` is up the price axis for
+    // both sides. On a long `be +3%` locks a little in; on a short the
+    // profitable side is down, so the same buffer is `be -3%` and `+3%` there
+    // WIDENS the stop. `processPrice` gives the same `+N` / `+N%` / absolute
+    // grammar the rest of the CLI uses.
     const offsetArg = args.find((arg, index) => index > 0 && this.looksLikePrice(arg));
     const price = offsetArg ? parseFloat(this.processPrice(offsetArg, base)) : base;
     if (!Number.isFinite(price) || price <= 0) {

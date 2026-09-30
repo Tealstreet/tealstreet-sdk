@@ -213,6 +213,23 @@ describe('SellCommand', () => {
         expect.stringContaining('did you mean'),
       );
     });
+
+    /**
+     * The exact line a user typed, on a coin quoted in cents. The guard's old
+     * `>= 100` threshold never fired here, so the price was discarded and the
+     * rung MARKET-sold instantly — which he reported as his take-profits
+     * filling at a terrible price. Nothing about a leftover number is
+     * ambiguous, so any magnitude refuses now.
+     */
+    it('refuses a take-profit rung that forgot `at`, on a sub-dollar coin', async () => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(['sell', '33$', '0.051533', 'reduce'], exchange, 'WIFUSDT');
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid syntax');
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
+    });
   });
 
   describe('limit orders', () => {

@@ -587,3 +587,22 @@ would be a guess.
 The poller is a self-rescheduling `setTimeout` with `unref()`, never
 `setInterval` (root CLAUDE.md). The `unref` is not a nicety: a ref'd timer here
 reproduces the `logger.ts` bug users reported as "the CLI never exits".
+
+
+## `buy` / `sell`: two parser traps that both routed real orders wrong
+
+**Any leftover bare number refuses, not just one >= 100.** The forgotten-`at`
+guard in `BaseBuySellCommand` used to fire only above 100, a threshold that
+silently assumed BTC-shaped prices. On a coin quoted in cents it never fired,
+so `sell 33$ 0.051533 reduce` DROPPED the price and market-sold — reported by a
+user as take-profits filling instantly at a terrible price. No reading of an
+unconsumed number here means anything, so the magnitude test is gone.
+
+**The limit path skips `stop` in its trailing-symbol scan.** The market and
+`best` paths already did; this one skipped only `reduce` and `po`. So
+`buy 100$ at 0.051124 stop 0.049570` walked back from the end, hit the literal
+token `stop`, and `resolveMarketSymbol` prefix-matched `STOP` against any base
+a venue lists — reproduced in a test as an entire bracket placed on `SUSDT`
+instead of `BTCUSDT`. Note the reproduction needs a TICKER, not just a market:
+`validateSymbol` checks `store.tickers`, which is why the default fixture hid
+this.

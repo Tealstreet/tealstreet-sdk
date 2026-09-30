@@ -114,6 +114,17 @@ describe('BreakevenCommand', () => {
     expect(placed(ex).triggerPrice).toBe(50_000);
   });
 
+  /**
+   * The offset is NOT side-aware — `+` is up the price axis for both sides.
+   * Worth pinning because the docs used to call `+3%` "the good side", which
+   * is only true for a long: on a short the same offset widens the stop.
+   */
+  it('moves a short\'s stop UP on +3%, the same direction as a long', async () => {
+    const ex = makeExchange([pos({ side: PositionSide.Short, entryPrice: 52_000, contracts: 1 })]);
+    await cmd.execute(ctx(['be', '+3%'], ex));
+    expect(placed(ex).triggerPrice).toBeCloseTo(53_560, 0);
+  });
+
   it('applies an offset relative to break-even', async () => {
     const ex = makeExchange([pos()]);
     await cmd.execute(ctx(['be', '+1%'], ex));
