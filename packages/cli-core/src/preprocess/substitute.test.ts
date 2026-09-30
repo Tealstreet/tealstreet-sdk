@@ -1074,6 +1074,20 @@ describe('$roe', () => {
     expect(() => preprocessSegment('sell $roe25', both)).toThrow(/ambiguous/);
   });
 
+  /**
+   * `calculateReturns` divides by `entryPrice * contracts` — the notional of a
+   * LINEAR position. Inverting it on an inverse contract, whose PnL is
+   * reciprocal in price, produces a number with no defensible meaning, and a
+   * wrong price on a trading command is worse than a refusal.
+   */
+  it('refuses on an inverse market rather than emitting an indefensible price', () => {
+    const ctx = makeCtx([long()]);
+    (ctx.exchange as unknown as { store: { markets: unknown[] } }).store.markets = [
+      { symbol: 'BTCUSDT', base: 'BTC', quote: 'USD', isInverse: true },
+    ];
+    expect(() => preprocessSegment('sell $roe25', ctx)).toThrow(/not supported on inverse/);
+  });
+
   it('is not confused with a plain word starting the same way', () => {
     expect(preprocessSegment('sell $roe', makeCtx([long()]))).toBe('sell $roe');
   });

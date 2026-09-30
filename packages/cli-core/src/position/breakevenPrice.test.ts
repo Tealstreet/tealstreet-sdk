@@ -38,3 +38,37 @@ describe('breakevenPrice', () => {
     expect(breakevenPrice(position({ realizedPnl: Infinity }))).toBe(100);
   });
 });
+
+/**
+ * An inverse contract settles in the BASE currency and its PnL is reciprocal in
+ * price, so the linear formula adds a base-denominated quantity to a
+ * quote-denominated price. `useOpenPositionsColumns` branches the same way for
+ * its worst-case-loss column.
+ */
+describe('breakevenPrice on inverse contracts', () => {
+  const inverse = { isInverse: true };
+
+  // Long 10 @ 100 with 0.05 base banked: 1/P = 1/100 + 0.05/10 = 0.015, P = 66.67.
+  it('works in reciprocal space, not by adding to the price', () => {
+    const p = breakevenPrice(position({ realizedPnl: 0.05 }), inverse);
+    expect(p).toBeCloseTo(66.667, 3);
+    // The linear formula would have said 99.995 — close enough to entry to look
+    // plausible and be wrong by a third of the price.
+    expect(p).not.toBeCloseTo(99.995, 3);
+  });
+
+  // Direction must still match linear: banked profit lets a long exit LOWER.
+  it('moves a long DOWN and a short UP, the same directions as linear', () => {
+    expect(breakevenPrice(position({ realizedPnl: 0.05 }), inverse)).toBeLessThan(100);
+    expect(breakevenPrice(position({ side: PositionSide.Short, realizedPnl: 0.05 }), inverse)).toBeGreaterThan(100);
+  });
+
+  it('falls back to entry when a banked loss has no breakeven price', () => {
+    // 1/100 - 0.5/10 is negative: no price closes this flat.
+    expect(breakevenPrice(position({ side: PositionSide.Short, realizedPnl: 0.5 }), inverse)).toBe(100);
+  });
+
+  it('is unchanged from linear when the flag is absent', () => {
+    expect(breakevenPrice(position({ realizedPnl: 50 }))).toBe(95);
+  });
+});

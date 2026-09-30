@@ -1,5 +1,6 @@
 import type { Position } from '@tealstreet/safe-cex/src/types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
+import { add, divide, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 
 /**
  * The price at which closing the REMAINING position leaves total PnL at zero.
@@ -24,13 +25,41 @@ import { PositionSide } from '@tealstreet/safe-cex/src/types';
  * B/E line uses accumulated fee data the CLI has no access to, and the two can
  * differ for that reason.
  */
-export const breakevenPrice = (position: Pick<Position, 'entryPrice' | 'side' | 'contracts' | 'realizedPnl'>): number => {
+export const breakevenPrice = (
+  position: Pick<Position, 'entryPrice' | 'side' | 'contracts' | 'realizedPnl'>,
+  options: { readonly isInverse?: boolean } = {},
+): number => {
   const { entryPrice, side, contracts, realizedPnl } = position;
   const size = Math.abs(contracts);
+  const isLong = side === PositionSide.Long;
 
   // Nothing banked, or nothing left to close: breakeven IS the entry.
   if (!size || !realizedPnl || !Number.isFinite(realizedPnl)) return entryPrice;
 
   const perContract = realizedPnl / size;
-  return side === PositionSide.Long ? entryPrice - perContract : entryPrice + perContract;
+
+  /**
+   * **An inverse contract settles in the BASE currency and its PnL is
+   * reciprocal in price**, so the linear formula below is not merely
+   * imprecise there — it adds a base-denominated quantity to a quote-
+   * denominated price. `useOpenPositionsColumns` branches the same way for its
+   * worst-case-loss column (`contracts * (1/stop - 1/entry)`).
+   *
+   * Long: realized + contracts * (1/entry - 1/P) = 0
+   *   =>  1/P = 1/entry + realized/contracts
+   * and the sign flips for a short. Banked profit still moves a long's
+   * breakeven DOWN, the same direction as linear — worth checking, because
+   * working in reciprocal space makes that easy to get backwards.
+   */
+  if (options.isInverse) {
+    const inverseEntry = divide(1, entryPrice);
+    const target = isLong ? add(inverseEntry, perContract) : subtract(inverseEntry, perContract);
+    // A banked loss large enough to flip the reciprocal past zero has no
+    // breakeven price at all; say so by staying at entry rather than emitting
+    // a negative or infinite price into an order.
+    if (!Number.isFinite(target) || target <= 0) return entryPrice;
+    return divide(1, target);
+  }
+
+  return isLong ? subtract(entryPrice, perContract) : add(entryPrice, perContract);
 };
