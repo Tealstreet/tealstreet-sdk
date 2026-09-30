@@ -3,6 +3,7 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 import { chaserOrderManagerInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
 import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager';
 import { TwapStatus } from '@tealstreet/safe-cex/src/webworker/twap/TwapStatus';
+import { cancelTrigger } from '../../triggers/triggerRegistry';
 import { listTasks } from './TasksCommand';
 
 /**
@@ -76,7 +77,10 @@ export class KillCommand extends BaseCommand {
   }
 }
 
-function killOne(id: string, type: 'chase' | 'twap'): boolean {
+function killOne(id: string, type: 'chase' | 'twap' | 'when'): boolean {
+  if (type === 'when') {
+    return cancelTrigger(id);
+  }
   if (type === 'chase') {
     const inst = chaserOrderManagerInstance.instances.find((i) => i.id === id);
     if (!inst || inst.isStopped) return false;

@@ -54,6 +54,75 @@ describe('preprocessSegment', () => {
     });
   });
 
+  /**
+   * `when (<cond>) (<action>)` is split-brained on purpose: the CONDITION is
+   * resolved now, while the position giving `$entry` its meaning is the one
+   * the user is looking at, and the ACTION is kept literal because `be +3%`
+   * must read the position as it will be when it fires.
+   *
+   * Getting this backwards is silent and expensive. Substituting the action
+   * would freeze `be +3%` to a number computed before TP1 ever filled.
+   */
+  describe('when (<condition>) (<action>)', () => {
+    it('resolves the condition at arm time', () => {
+      const ctx = makeCtx([pos({ entryPrice: 50_000 })]);
+      expect(preprocessSegment('when ($entry) (be)', ctx)).toBe('when (50000) (be)');
+    });
+
+    it('leaves the action untouched', () => {
+      const ctx = makeCtx([pos({ entryPrice: 50_000 })]);
+      // `$entry ` with a trailing SPACE, so the token is one the substitute
+      // layer would definitely resolve. `(stop $entry)` is not a useful
+      // assertion: the token there is `$entry)` and survives by accident.
+      expect(preprocessSegment('when (price >= 100) (stop $entry -1%)', ctx)).toBe(
+        'when (price >= 100) (stop $entry -1%)',
+      );
+    });
+
+    it('keeps a chained action whole', () => {
+      const ctx = makeCtx([pos({})]);
+      expect(preprocessSegment('when (price >= 100) (be +3%; trail 20%)', ctx)).toBe(
+        'when (price >= 100) (be +3%; trail 20%)',
+      );
+    });
+
+    it('leaves a malformed form for the command to complain about', () => {
+      const ctx = makeCtx([pos({})]);
+      expect(preprocessSegment('when price >= 100 be', ctx)).toBe('when price >= 100 be');
+    });
+
+    /**
+     * Reached through an alias the head is the ALIAS, so the check has to run
+     * after expansion — exactly where `wait`'s `keepLiveVarsLiteral` check
+     * runs, and for the same reason. Before this it was checked first, and an
+     * aliased `when` had BOTH halves substituted: the action froze to a price
+     * computed before the trigger ever fired.
+     */
+    it('still splits the halves when reached through an alias', () => {
+      const ctx = makeCtx([pos({ entryPrice: 50_000 })]);
+      ctx.store.setAlias('be3', 'when ($entry) (stop $entry -1%)');
+      expect(preprocessSegment('be3', ctx)).toBe('when (50000) (stop $entry -1%)');
+    });
+
+    /**
+     * A live var re-evaluates per read; a condition is re-checked per poll.
+     * Freezing it here would compare against a snapshot taken when the trigger
+     * was armed, which is the opposite of what `sets` means — and `wait`, the
+     * other consumer of this condition vocabulary, keeps them literal for the
+     * same reason.
+     */
+    it('leaves a live var in the condition for the poller to re-read', () => {
+      const ctx = makeCtx([pos({ entryPrice: 50_000 })]);
+      ctx.store.setLiveVar('hi', '$entry');
+      expect(preprocessSegment('when (@hi >= 100) (be)', ctx)).toBe('when (@hi >= 100) (be)');
+    });
+
+    it('does not capture a command that merely starts with the same letters', () => {
+      const ctx = makeCtx([pos({ entryPrice: 50_000 })]);
+      expect(preprocessSegment('whenever (x) (y)', ctx)).toBe('whenever (x) (y)');
+    });
+  });
+
   describe('user variables (@x)', () => {
     it('substitutes @x with its stored value', () => {
       const ctx = makeCtx();

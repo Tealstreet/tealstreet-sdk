@@ -113,7 +113,7 @@ import { classifyForCLI, criticalErrorKey } from './error-classifier';
 import { startListener, stopListener } from './listener';
 import { cmdClientsList, cmdClientsRevoke } from './listener/clients';
 import { cmdHookList, cmdHookCreate, cmdHookRevoke, cmdHookRotate, cmdHookShow } from './listener/hook-repl';
-import { getAdapterContext } from './listener/adapter-context';
+import { getAdapterContext, runWithAdapterContext } from './listener/adapter-context';
 import type { Capabilities, CoreAdapter, RunScriptResult } from '@tealstreet/script-api-core';
 
 import { createStandaloneCoreAdapter } from './script-adapter';
@@ -2283,6 +2283,36 @@ interface StartReplOptions {
 export async function startRepl(accountName?: string, options: StartReplOptions = {}) {
   const { disableAll = false } = options;
   const config = loadConfig();
+
+  // `when` arms a command to run later, so it needs a way to run one the way
+  // the user typing it would. Assigned HERE rather than at module scope on
+  // purpose: `runSingleCommand` shares this adapter and exits as soon as its
+  // command returns, so a trigger armed there could never fire. `when` reads
+  // the absence of this hook and refuses to arm instead of pretending.
+  adapter.runChain = async (input: string, scope?: { symbol?: string; account?: string }): Promise<void> => {
+    const run = () =>
+      scope?.symbol || scope?.account
+        ? // Same per-call override the listener's `cmd:exec` uses, and for the
+          // same reason: run against a specific account/symbol WITHOUT mutating
+          // the long-lived REPL session the user is still typing into. No
+          // `printSink`, so output lands on the terminal as normal.
+          runWithAdapterContext({ accountOverride: scope.account, symbolOverride: scope.symbol }, () =>
+            processCommand(input),
+          )
+        : processCommand(input);
+
+    // Onto the SAME queue typed input uses. A trigger fires from a timer, so
+    // without this it would interleave with a chain the user is midway
+    // through — two order-placing chains reading the same store at once.
+    const queued = commandQueue.then(run);
+    // The queue must survive a failing trigger; the caller still sees the
+    // rejection so the trigger can record it.
+    commandQueue = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    await queued;
+  };
 
   // Pin the top status-line region BEFORE any banner/connect output so that
   // output flows into rows 2..N below it (no after-the-fact cursor fight).

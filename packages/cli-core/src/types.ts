@@ -177,6 +177,26 @@ export interface CLIPlatformAdapter {
   promptYesNo?(message: string, options?: { timeoutMs?: number }): Promise<boolean>;
 
   /**
+   * Run a command chain the way the user typing it would — preprocessing,
+   * alias expansion, `;` / `&` operators, the runner's failure contract and
+   * the host's write-op audit trail.
+   *
+   * `when` fires through this rather than through `executeCommand`, which does
+   * none of that: a trigger's order must be audited and substituted exactly
+   * like a typed one, and `taskAction` results (a fired `chase` or `twap`)
+   * only reach a task manager on the host's path.
+   *
+   * `scope` pins the run to the symbol and account the trigger was ARMED on.
+   * Without it a fired command reads the session's CURRENT symbol, so arming on
+   * BTCUSDT and then switching to ETHUSDT would move the wrong position's stop.
+   *
+   * OPTIONAL, and its absence is meaningful — `when` refuses to arm rather
+   * than arming something that can never fire. A one-shot invocation exits as
+   * soon as its command returns, so it must not supply this.
+   */
+  runChain?(input: string, scope?: { symbol?: string; account?: string }): Promise<void>;
+
+  /**
    * Get recent commands the user has typed, newest first. Used by
    * the `history` command. Sources differ per runtime:
    *   - standalone CLI: a small in-memory ring buffer maintained by

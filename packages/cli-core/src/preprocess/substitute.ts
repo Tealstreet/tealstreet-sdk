@@ -1,6 +1,7 @@
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, divide, multiply, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { splitChain } from './tokenize';
+import { peelParenBlock } from './parserUtils';
 import { buildSubstituteOperandResolver, tryEvalMathToken } from './math';
 import { evaluateLiveVarSource } from './reactiveVars';
 import { resolveTrackedVar } from './trackedVars';
@@ -37,6 +38,16 @@ export const FULL_PASSTHROUGH_COMMANDS = new Set([
   'untrack',
 ]);
 export const SET_COMMAND = 'set';
+
+/**
+ * `when (<condition>) (<action>)` is split-brained on purpose.
+ *
+ * The CONDITION is substituted now, while the position that gives `$entry` and
+ * `$roe101` their meaning is the one the user is looking at. The ACTION is kept
+ * literal and re-preprocessed when it fires, because `be +3%` has to read the
+ * position as it will be THEN — that is the whole point of arming it.
+ */
+export const WHEN_COMMAND = 'when';
 
 /** Hard cap on alias-expansion recursion (catches accidental cycles). */
 export const MAX_ALIAS_DEPTH = 8;
@@ -189,6 +200,13 @@ export function preprocessSegment(
   // (they're frozen anyway). Checked against the post-alias-expansion
   // head so `alias w "wait …"` then `w` works.
   const expandedHead = expandedTokens[0]?.toLowerCase();
+  // Checked AFTER alias expansion, same as `wait` below, so `alias be3 "when
+  // (price >= $entry) (be +3%)"` gets the split-brain treatment too. Checked
+  // before substitution, because substituting the action is the thing this
+  // exists to prevent.
+  if (expandedHead === WHEN_COMMAND) {
+    return preprocessWhenSegment(expanded, ctx);
+  }
   const keepLiveVarsLiteral = expandedHead === 'wait';
   const substituted = substituteTokens(
     expandedTokens,
@@ -795,4 +813,32 @@ export function resolveDeferredCaptures(
     result = result.replace(re, value);
   }
   return { command: result, emptyCaptures };
+}
+
+
+/**
+ * Substitute only the condition half of a `when` form. See `WHEN_COMMAND`.
+ *
+ * A malformed form is returned untouched rather than thrown on, so the error
+ * the user sees is `WhenCommand`'s — which can name both parens — instead of a
+ * preprocess-layer one that cannot.
+ */
+function preprocessWhenSegment(trimmed: string, ctx: PreprocessContext): string {
+  const afterHead = trimmed.slice(WHEN_COMMAND.length);
+  if (!/^\s/.test(afterHead) && afterHead.length > 0) return trimmed;
+  const rest = afterHead.trimStart();
+
+  const cond = peelParenBlock(rest);
+  if (!cond) return trimmed;
+  const afterCond = rest.slice(cond.consumed);
+  const action = peelParenBlock(afterCond.trimStart());
+  if (!action) return trimmed;
+
+  const condTokens = whitespaceTokenize(cond.body.trim());
+  // `keepLiveVarsLiteral`, same as `wait`. A condition is re-CHECKED on every
+  // poll, and `parseConditionText` resolves an `@x` LHS at check time, so
+  // freezing a live var here would make `when (@hi >= 100)` compare against a
+  // snapshot taken when it was armed. Static `@vars` are frozen anyway.
+  const substituted = substituteTokens(condTokens, ctx, new Set(), true);
+  return `${WHEN_COMMAND} (${substituted.join(' ')}) (${action.body})`;
 }

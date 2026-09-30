@@ -16,3 +16,4 @@ export { FatfingerCommand, UnfatfingerCommand } from './FatfingerCommand';
 export { BudgetCommand } from './BudgetCommand';
 export { SimulationCommand } from './SimulationCommand';
 export { WaitCommand } from './WaitCommand';
+export { WhenCommand } from './WhenCommand';

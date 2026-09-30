@@ -281,7 +281,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     // sink instead so output streams as WS frames.
     print(lines: string[]): void {
       const ctx = getAdapterContext();
-      if (ctx) {
+      if (ctx?.printSink) {
         for (const line of lines) ctx.printSink('print', line);
         return;
       }
@@ -290,7 +290,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     printError(message: string): void {
       const ctx = getAdapterContext();
-      if (ctx) return ctx.printSink('error', message);
+      if (ctx?.printSink) return ctx.printSink('error', message);
       outputError(chalk.red(message));
       // Mirror to the top status line (raw, uncolored message). No-op when the
       // status line is disabled/suspended/non-TTY.
@@ -299,20 +299,20 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     printSuccess(message: string): void {
       const ctx = getAdapterContext();
-      if (ctx) return ctx.printSink('success', message);
+      if (ctx?.printSink) return ctx.printSink('success', message);
       output(chalk.green(message));
     },
 
     printWarning(message: string): void {
       const ctx = getAdapterContext();
-      if (ctx) return ctx.printSink('warn', message);
+      if (ctx?.printSink) return ctx.printSink('warn', message);
       outputWarn(chalk.yellow(message));
       setStatus(message, classifyLog(message, 'warn'));
     },
 
     printInfo(message: string): void {
       const ctx = getAdapterContext();
-      if (ctx) return ctx.printSink('info', message);
+      if (ctx?.printSink) return ctx.printSink('info', message);
       output(chalk.gray(message));
     },
 

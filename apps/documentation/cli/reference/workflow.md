@@ -102,6 +102,84 @@ Combinators nest. Source: `preprocess/conditions.ts`.
 
 ---
 
+## `when`
+
+Arm a command to run **once, later** — without holding the prompt.
+
+```text
+when (<condition>) (<command>)
+```
+
+`wait` blocks the line it is typed on and gives up after ten minutes, so it
+cannot sit there waiting for a take-profit that fills in two hours. `when` arms
+and returns immediately; you keep trading.
+
+```text
+when (price >= 0.051533) (be +3%)
+when (price >= 0.053169) (trail 20%)
+when (fill) (be)
+when (both (price > 50000) and (pnl > 0)) (close 50%)
+```
+
+**The condition vocabulary is exactly `wait`'s** — everything in the table
+above, combinators included.
+
+### Why the parentheses
+
+A condition is variable-length and so is a command, so there is no separator a
+parser could find on its own: `when price >= 100 close 50%` has no unambiguous
+split. The parens are the same ones [`if`](#if) already uses, and they are
+paren-aware, so a `;` **inside** the action belongs to the action:
+
+```text
+when (price >= 100) (be +3%; trail 20%)     # both run when it fires
+when (price >= 100) (be +3%); buy $50       # the buy runs NOW
+```
+
+### What resolves when
+
+| Half          | Resolved     | Why                                                                            |
+| ------------- | ------------ | ------------------------------------------------------------------------------ |
+| the condition | **when armed** | `$entry` and `$roe101` mean the position you are looking at now              |
+| the command   | **when it fires** | `be +3%` has to read the position as it will be then — that is the point |
+
+So `when (price >= $roe100) (trail 20%)` pins the target price at the moment you
+arm it, and the `trail` is computed against whatever the market is doing when it
+triggers.
+
+### Managing armed triggers
+
+`tasks` lists them alongside chasers and TWAPs; `kill <id>` drops one. Bare
+`kill` still targets the most recent chaser or TWAP rather than a trigger.
+
+```text
+> when (price >= 51000) (be +3%)
+Armed [a3f9c1] price >= 51000 → be +3%
+> tasks
+[a3f9c1] when  BTCUSDT  price >= 51000 -> be +3%  armed
+> kill a3f9c1
+```
+
+### Limits
+
+| Limit                      | Value | Why                                                                      |
+| -------------------------- | ----- | ------------------------------------------------------------------------ |
+| Fires                      | once  | It disarms itself; arm another if you want it again                     |
+| Expiry                     | 12 h  | A forgotten trigger is one that fires a market order next week          |
+| Nesting                    | 5     | A trigger whose command arms a trigger is fine; one that arms itself is a loop |
+
+A trigger **is not persisted**. It lives in the session that armed it, so
+closing the CLI drops it. It also needs the interactive REPL — a one-shot
+`tealstreet "when (…) (…)"` refuses rather than arming something that would be
+destroyed the moment the command returns.
+
+Whatever it fires goes through the same path a typed command does: preprocessing,
+your aliases, the safety guards, and the [audit log](./commands.md#audit).
+
+Source: `WhenCommand.ts`, `triggers/triggerRegistry.ts`.
+
+---
+
 ## `loop`
 
 Fan out one step per matching position. Symbol is appended to the body.

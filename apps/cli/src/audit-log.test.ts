@@ -113,6 +113,49 @@ describe('recordWriteOp', () => {
     expect(tail[0]).toMatchObject({ command: 'buy $100 BTCUSDT', account: 'acct', ok: true, orderIds: ['o1'] });
   });
 
+  /**
+   * The drift guard this set did not have. `be` and `trail` both place real
+   * reduce-only orders and both shipped without an entry, so a user's stop
+   * moved with no record of what moved it. Every command that can send an
+   * order belongs here, under its primary name AND its aliases — the `mv`
+   * test below exists because that was got wrong once already.
+   *
+   * An armed `when` raises the stakes: it places the order while the user is
+   * not watching, so the log is the only account of what happened.
+   */
+  it('audits every command that can place an order, aliases included', () => {
+    const orderPlacingHeads = [
+      'buy',
+      'b',
+      'sell',
+      's',
+      'close',
+      'c',
+      'cancel',
+      'x',
+      'move',
+      'mv',
+      'scale',
+      'swarm',
+      'chase',
+      'twap',
+      'nuke',
+      'bump',
+      'stop',
+      'be',
+      'breakeven',
+      'trail',
+    ];
+    const missing = orderPlacingHeads.filter((head) => !mod.AUDIT_WRITE_HEADS.has(head));
+    expect(missing, `not audited: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('records a `be` that moves a stop', () => {
+    mod.setAuditEnabled(true);
+    mod.recordWriteOp('be +3%', 'acct', handled());
+    expect(mod.readAuditTail(10)[0]).toMatchObject({ command: 'be +3%', account: 'acct' });
+  });
+
   it('records the `mv` alias (alias parity with `move`)', () => {
     mod.setAuditEnabled(true);
     mod.recordWriteOp('mv 50000', 'acct', handled());

@@ -623,16 +623,24 @@ Source: `ExchangesCommand.ts`.
 
 ### `tasks`
 
-Unified list of in-process chasers + TWAPs, insertion order.
+Unified list of in-process chasers, TWAPs and armed
+[`when`](./workflow.md#when) triggers.
+
+Triggers are listed **first**, and deliberately: bare `kill` takes the most
+recent active task, which has always meant the chaser or TWAP you just started.
 
 ### `kill` &nbsp; _(aliases `fuck`, `terminate`)_ {#kill}
 
-| Form               | Result                  |
-| ------------------ | ----------------------- |
-| `kill`             | Most-recent active task |
-| `kill last`        | Same                    |
-| `kill <id-prefix>` | By id-prefix            |
-| `kill all`         | Every running task      |
+| Form               | Result                                        |
+| ------------------ | --------------------------------------------- |
+| `kill`             | Most-recent active task (see below)           |
+| `kill last`        | Same                                          |
+| `kill <id-prefix>` | By id-prefix — this is how you drop a trigger |
+| `kill all`         | Every running task, triggers included         |
+
+Because triggers are listed first, bare `kill` reaches a chaser or TWAP whenever
+one is running. It only ever targets a trigger when nothing else is active —
+name the id if you mean a specific one.
 
 Source: `KillCommand.ts`. `fuck` / `terminate` are ichibot-parity aliases.
 

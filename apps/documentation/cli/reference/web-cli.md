@@ -55,6 +55,7 @@ that exist only in the standalone binary.
 | `exit` / `quit`             | Terminates the standalone process                   |
 | `logs` / `clearlogs`        | Filesystem-backed log file                          |
 | `record *`                  | SQLite-backed market data recorder                  |
+| `when`                      | Needs a session that stays open to fire later       |
 
 Top-level binary subcommands (`tealstreet account add`, `tealstreet exec`,
 `tealstreet record`, `tealstreet tasks`, etc.) are by definition

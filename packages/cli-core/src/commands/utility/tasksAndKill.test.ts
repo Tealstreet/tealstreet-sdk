@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TasksCommand, listTasks } from './TasksCommand';
 import { KillCommand } from './KillCommand';
+import { armTrigger, clearTriggers, listTriggers } from '../../triggers/triggerRegistry';
 import { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
 import { chaserOrderManagerInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
 import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager';
@@ -132,7 +133,20 @@ function spawnTwap(symbol = 'BTCUSDT', side: OrderSide = OrderSide.Buy): TwapIns
   return inst;
 }
 
+function armWhen(symbol = 'BTCUSDT') {
+  return armTrigger({
+    describe: `price >= 99999 (${symbol})`,
+    action: 'be +3%',
+    symbol,
+    account: 'main',
+    resolveExchange: () => null,
+    condition: { check: () => false, describe: 'price >= 99999' },
+    run: async () => undefined,
+  });
+}
+
 function drainSingletons() {
+  clearTriggers();
   while (chaserOrderManagerInstance.instances.length > 0) {
     const inst = chaserOrderManagerInstance.instances[0];
     try {
@@ -157,6 +171,29 @@ describe('listTasks', () => {
 
   it('returns [] when nothing is registered', () => {
     expect(listTasks()).toEqual([]);
+  });
+
+  /**
+   * Triggers are emitted FIRST so that bare `kill` — which takes the LAST
+   * active row — keeps meaning "the chaser or TWAP I just started". Appending
+   * them would silently move that target onto an armed `when`, and killing the
+   * wrong thing here means either an unmanaged order or an unprotected
+   * position.
+   */
+  it('lists armed triggers before chasers, so bare `kill` still means the chaser', () => {
+    armWhen();
+    const chaser = spawnChaser();
+    const rows = listTasks();
+    expect(rows[0].type).toBe('when');
+    expect(rows[rows.length - 1].id).toBe(chaser.id);
+  });
+
+  it('carries a trigger with no side, rather than inventing one', () => {
+    armWhen();
+    const row = listTasks()[0];
+    expect(row.side).toBeUndefined();
+    expect(row.progress).toContain('be +3%');
+    expect(row.active).toBe(true);
   });
 
   it('returns chasers in registration order, with active=true while live', () => {

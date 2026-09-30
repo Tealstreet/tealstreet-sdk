@@ -64,6 +64,7 @@ import {
   BudgetCommand,
   SimulationCommand,
   WaitCommand,
+  WhenCommand,
 } from './utility';
 import type { PromptConfig } from '../utils/PromptFormatter';
 
@@ -147,6 +148,7 @@ export function ensureCommandsRegistered(): void {
     new BudgetCommand(),
     new SimulationCommand(),
     new WaitCommand(),
+    new WhenCommand(),
     new HistoryCommand(),
   ]);
 

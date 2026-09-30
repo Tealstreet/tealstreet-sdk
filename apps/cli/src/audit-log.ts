@@ -321,6 +321,13 @@ export const AUDIT_WRITE_HEADS = new Set([
   'nuke',
   'bump',
   'stop',
+  // `be` / `trail` place real reduce-only orders and both shipped without an
+  // entry here, so `audit tail` showed a user's stop moving with no record of
+  // what moved it. An armed `when` makes that worse — the order is placed by
+  // something the user is not watching.
+  'be',
+  'breakeven',
+  'trail',
 ]);
 
 /**

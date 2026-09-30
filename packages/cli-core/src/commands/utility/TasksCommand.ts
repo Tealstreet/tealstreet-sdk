@@ -4,13 +4,16 @@ import { OrderSide } from '@tealstreet/safe-cex/src/types';
 import { chaserOrderManagerInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
 import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager';
 import { TwapStatus } from '@tealstreet/safe-cex/src/webworker/twap/TwapStatus';
+import { listTriggers } from '../../triggers/triggerRegistry';
 
 export interface TaskRow {
   id: string;
-  type: 'chase' | 'twap';
+  type: 'chase' | 'twap' | 'when';
   status: string;
   symbol: string;
-  side: 'BUY' | 'SELL';
+  /** Absent on a trigger: a `when` has no side of its own, and reading one
+   *  out of arbitrary command text would be a guess. */
+  side?: 'BUY' | 'SELL';
   progress: string;
   active: boolean;
 }
@@ -23,6 +26,21 @@ export interface TaskRow {
  */
 export function listTasks(): TaskRow[] {
   const rows: TaskRow[] = [];
+
+  // Triggers come FIRST on purpose. Bare `kill` targets the LAST active row,
+  // and that has always meant "the chaser or TWAP I just started". Appending
+  // triggers would silently move that target onto an armed `when`, where
+  // killing the wrong one leaves a position unprotected.
+  for (const t of listTriggers()) {
+    rows.push({
+      id: t.id,
+      type: 'when',
+      status: t.status,
+      symbol: t.symbol,
+      progress: `${t.describe} -> ${t.action}`,
+      active: t.status === 'armed',
+    });
+  }
 
   for (const c of chaserOrderManagerInstance.instances) {
     const filled = c.options.size - c.remainingSize;
@@ -81,7 +99,8 @@ export class TasksCommand extends BaseCommand {
     const lines = rows.map((r) => {
       const shortId = r.id.slice(0, 8);
       const status = r.active ? r.status : `[${r.status}]`;
-      return `[${shortId}] ${r.type.padEnd(5)} ${r.symbol} ${r.side}  ${r.progress}  ${status}`;
+      const side = r.side ? ` ${r.side}` : '';
+      return `[${shortId}] ${r.type.padEnd(5)} ${r.symbol}${side}  ${r.progress}  ${status}`;
     });
     const active = rows.filter((r) => r.active).length;
     const completed = rows.length - active;

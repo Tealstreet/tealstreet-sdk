@@ -499,3 +499,91 @@ venue; that is pre-existing and shared by every order-placing command.)
 **It cancels stop losses only.** Writing it by hand as `cancel stops; stop
 $entry` is not the same thing: `cancel stops` means "not a limit, not a market",
 which takes out every rung of a TP ladder with it.
+
+## `when` — the only primitive that outlives the prompt
+
+`when (<condition>) (<command>)` arms a command to fire ONCE, later.
+`src/triggers/triggerRegistry.ts` owns the arming; `WhenCommand` owns the
+parsing. It exists because `wait` cannot do this job and cannot be made to:
+`wait` holds the line it is typed on and is capped at ten minutes
+(`MAX_TIMEOUT_MS`), while "move my stop when TP1 fills" is a wait of hours at a
+prompt the user wants to keep using.
+
+**The parens are the syntax, not decoration.** A condition is variable-length
+(`fill BTCUSDT`, `both (A) and (B)`, `@x >= 5`) and so is a command, so no
+heuristic can find the split. `if (<cond>) (<then>)` solved this first in the
+preprocess layer; `when` borrows its `peelParenBlock` and parses from
+**`ctx.raw`** — `parseArgs` splits on whitespace and loses the grouping.
+
+**The two halves resolve at different times, and getting it backwards is
+silent.** `preprocessSegment` has a `WHEN_COMMAND` branch modelled on
+`SET_COMMAND`'s "preserve the target, substitute the value": the CONDITION is
+substituted at arm time, while the position giving `$entry` and `$roe101` their
+meaning is the one the user is looking at; the ACTION is kept LITERAL and
+re-preprocessed when it fires, because `be +3%` must read the position as it
+will be then. Substituting the action would freeze it to a price computed
+before TP1 ever filled. `FULL_PASSTHROUGH_COMMANDS` is the wrong lever here —
+it would keep the condition literal too, and `parseConditionText` needs numbers.
+
+The condition is substituted with `keepLiveVarsLiteral`, same as `wait`: a
+condition is re-CHECKED every poll and `parseConditionText` resolves an `@x`
+LHS at check time, so freezing a live var would compare against a snapshot
+taken when the trigger was armed.
+
+Firing is SERIALIZED through a module-level promise chain, and the depth is
+restored rather than zeroed. Both are one bug: `firingDepth` is module state
+read by a nested `when`, and two triggers firing in the same tick interleaved
+across the `await` and reset each other to 0 — so a self-arming trigger could
+slip past the cap meant to stop it placing orders in a loop. The host puts a
+fired command on the REPL's own `commandQueue` for the related reason: a
+trigger fires from a timer, and without that it interleaves with a chain the
+user is midway through.
+
+The branch runs **after alias expansion**, at the same point `wait`'s
+`keepLiveVarsLiteral` check does and for the same reason: reached through an
+alias the head is the ALIAS, so a check placed earlier misses it entirely and
+an aliased `when` gets both halves substituted — freezing the action to a price
+computed before the trigger ever fired.
+
+**It fires through the HOST, not through `executeCommand`.**
+`CLIPlatformAdapter.runChain` is optional and its absence is load-bearing.
+`executeCommand` does no preprocessing — that lives in `repl.ts`'s
+`processCommand`, along with alias expansion, chain operators, the runner
+failure contract, `recordWriteOp` and `taskAction` dispatch. A trigger firing
+`chase` through the raw executor would return a `taskAction` nothing acts on,
+and its orders would never reach the audit log. `repl.ts` assigns `runChain`
+inside `startRepl` and NOT at module scope, because `runSingleCommand` shares
+the same adapter and `teardownOneShot` calls `process.exit` — a trigger armed
+one-shot could never fire, so `when` reads the missing hook and refuses.
+
+**A fired command is SCOPED to where it was armed.** `runChain` takes an
+optional `{ symbol, account }` and the REPL applies it through
+`runWithAdapterContext` — the same per-call override the listener's `cmd:exec`
+uses, which scopes a run without mutating the session the user is still typing
+into. Without it a trigger armed on BTCUSDT would fire `be +3%` against
+whatever symbol the session had drifted to, and move the wrong position's stop.
+That override's `printSink` is now optional for this: a context can exist purely
+to scope a run, and the fired command's output belongs on the terminal like any
+other, so consumers guard on `ctx?.printSink` rather than on `ctx`.
+
+**The exchange is re-resolved at fire time**, never closed over: switching
+account calls `stopExchange` on the old instance, so a captured reference would
+poll a dead store and send its order to an account the user has left. A null
+exchange keeps polling rather than settling — an account mid-reconnect is not a
+reason to stop protecting a position.
+
+Three limits, each with a reason: it fires **once** and disarms; it **expires
+after 12h**, because an invisible trigger that can live forever is one that
+fires a market order next week; and it refuses past **5 levels of nesting** — a
+trigger arming its next rung is a ladder, a trigger arming itself is a loop
+that places orders.
+
+**Triggers are listed FIRST by `listTasks`.** Bare `kill` takes the last active
+row, which has always meant the chaser or TWAP just started; appending would
+move that target onto an armed `when`. `TaskRow.side` is optional for the same
+honesty reason — a trigger has no side, and reading one out of command text
+would be a guess.
+
+The poller is a self-rescheduling `setTimeout` with `unref()`, never
+`setInterval` (root CLAUDE.md). The `unref` is not a nicety: a ref'd timer here
+reproduces the `logger.ts` bug users reported as "the CLI never exits".

@@ -13,7 +13,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export type PrintKind = 'print' | 'success' | 'warn' | 'error' | 'info';
 
 export interface AdapterContext {
-  printSink: (kind: PrintKind, text: string) => void;
+  /**
+   * OPTIONAL. A context may exist purely to scope a run to an account/symbol
+   * without redirecting output — `when`'s armed trigger does exactly that, and
+   * its fired command's output belongs on the terminal like any other.
+   * Consumers must therefore guard on `ctx?.printSink`, not on `ctx`.
+   */
+  printSink?: (kind: PrintKind, text: string) => void;
   // Per-call overrides for `cmd:exec`. When present, `processCommand`
   // uses these instead of the REPL's `session.currentAccountName` /
   // `currentSymbol` so a web tab's selected account/symbol scopes the
