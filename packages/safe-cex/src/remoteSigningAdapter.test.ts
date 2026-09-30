@@ -69,6 +69,44 @@ describe('createRemoteSigningAdapter', () => {
 
   // The point of the tag: a public endpoint costs a WebSocket hop to the device
   // and crypto on its JS thread to produce a signature nothing checks.
+  // EXCHANGE-SERVER-27. The Tealstreet proxy credential is transport auth, set
+  // by THIS process before the adapter runs. The browser owns the venue
+  // signature and nothing else, but the merge took its headers wholesale — so
+  // when the signing exchange there did not re-add ours, the request reached
+  // CloudFront with no credential and came back 401 "Authorization header is
+  // missing", indistinguishable from the venue rejecting the API key.
+  it('keeps our proxy credential when the signer does not return one', async () => {
+    const config = configFor('/api/v5/account/config');
+    config.headers.set('Authorization', 'Bearer our-proxy-token');
+
+    await build()(config);
+
+    expect(inner.mock.calls[0][0].headers.get('Authorization')).toBe('Bearer our-proxy-token');
+    expect(inner.mock.calls[0][0].headers.get('X-Signed')).toBe('1');
+  });
+
+  it('prefers the credential the signer returns over ours', async () => {
+    sign.mockResolvedValueOnce({
+      id: 'x',
+      config: { headers: { Authorization: 'Bearer fresher-token' }, params: undefined, data: undefined },
+    });
+    const config = configFor('/api/v5/account/config');
+    config.headers.set('Authorization', 'Bearer our-proxy-token');
+
+    await build()(config);
+
+    expect(inner.mock.calls[0][0].headers.get('Authorization')).toBe('Bearer fresher-token');
+  });
+
+  it('carries the Tealstreet-Authorization variant too', async () => {
+    const config = configFor('/full/v1/get_authorized_builders');
+    config.headers.set('Tealstreet-Authorization', 'Bearer grvt-proxy-token');
+
+    await build()(config);
+
+    expect(inner.mock.calls[0][0].headers.get('Tealstreet-Authorization')).toBe('Bearer grvt-proxy-token');
+  });
+
   it('skips the remote signer entirely for a tagged request', async () => {
     await build()(markSkipRemoteSigning(configFor('/v3/instruments')));
 

@@ -158,9 +158,36 @@ export const createRemoteSigningAdapter = (
     // IMPORTANT: Use the browser's response values directly — don't fall back to config originals.
     // The signing interceptor may have intentionally modified or deleted fields (e.g. baking params
     // into the URL then deleting config.params). Falling back would undo that and break the signature.
+    const signedHeaders = new AxiosHeaders(response.config!.headers);
+
+    // ...with ONE exception: the Tealstreet proxy credential.
+    //
+    // The browser owns the VENUE SIGNATURE. It does not own our transport auth.
+    // That header is attached by this process, before this adapter runs, and
+    // whether it comes back depends entirely on whether the signing exchange in
+    // the browser happened to re-add it — which depends on that exchange's own
+    // `isPrivateProxyEnabled`, computed from ITS options, not ours. When the two
+    // disagree, the wholesale merge above drops the header and the request
+    // reaches CloudFront with no credential at all.
+    //
+    // The edge then answers 401 "Authorization header is missing" — which is
+    // indistinguishable from a venue rejecting the API key, and is what made
+    // EXCHANGE-SERVER-27 read as an OKX problem for six days. (A malformed
+    // credential would have been a 403 "Invalid JWT"; verified against the
+    // deployed edge, both branches.)
+    //
+    // So: re-apply ours if the browser did not return one. Never overwrite a
+    // header it DID return — if the signing exchange has a fresher token, that
+    // one is at least as good as ours.
+    for (const name of ['Authorization', 'Tealstreet-Authorization']) {
+      if (signedHeaders.get(name)) continue;
+      const ours = new AxiosHeaders(config.headers as never).get(name);
+      if (ours) signedHeaders.set(name, ours as string);
+    }
+
     const signedConfig: InternalAxiosRequestConfig = {
       ...config,
-      headers: new AxiosHeaders(response.config!.headers),
+      headers: signedHeaders,
       ...(response.config!.url ? { url: response.config!.url } : {}),
       params: response.config!.params,
       data: response.config!.data,
