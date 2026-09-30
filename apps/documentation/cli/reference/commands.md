@@ -69,31 +69,48 @@ Source: `StopCommand.ts`.
 
 Move the protective stop to break-even. Alias: `breakeven`.
 
-**This places the stop at your ENTRY price**, and does not yet account for
-profit already banked on the position — so on a position you have taken partial
-profit on it is not the same number as the chart's B/E line.
+Break-even is the price at which closing what is LEFT of the position leaves
+you flat overall — your entry, moved by whatever the position has already
+banked. Take $1,000 of profit on a 1-contract long from $50,000 and break-even
+is $49,000: you can exit that much lower and still come out even. The same
+$1,000 moves a short's break-even UP.
 
-That is a data problem rather than a missing feature. The venues that report a
-per-position realised PnL disagree about what it means: some report a lifetime
-figure for the symbol, some keep reporting it after the position has closed,
-some fold funding and fees into it, and on inverse contracts it is denominated
-in the base currency rather than the quote. Placing a stop on any of those
-would be worse than placing it at entry.
+**Banked profit is only counted on some venues.** It is counted on **Bybit**
+(including the demo and HyroTrader accounts), **Paradex** and **BitUnix**. On
+every other venue `be` places the stop at your entry price, because the venue
+does not report a realised figure that can be trusted to move it.
 
-| Form           | Result                                       |
-| -------------- | -------------------------------------------- |
-| `be`           | Stop at your entry price                     |
-| `be +3%`       | 3% the good side of entry                    |
-| `be -0.5%`     | Slightly inside it                           |
-| `be +100`      | Absolute offset                              |
-| `be ETHUSDT`   | Symbol override                              |
+That is a data problem rather than a missing feature, and the venues disagree in
+ways that would place a stop at a wrong price: some report a lifetime figure for
+the symbol, some keep reporting it after the position has closed, some fold
+funding and fees into it, and on inverse contracts it is denominated in the base
+currency rather than the quote. An unverified venue is left at entry on purpose.
 
-An offset is relative to **entry**, not to the mark.
+| Form         | Result                                      |
+| ------------ | ------------------------------------------- |
+| `be`         | Stop at break-even for the focused position |
+| `be +3%`     | 3% the good side of break-even              |
+| `be -0.5%`   | Slightly inside it                          |
+| `be +100`    | Absolute offset                             |
+| `be ETHUSDT` | Symbol override                             |
+
+An offset is relative to **break-even**, not to the mark.
 
 **It cancels stop losses only — your take-profits are left alone.** Writing this
 by hand as `cancel stops; stop $entry` does not do the same thing: `cancel
 stops` means "everything that is not a limit or a market", which includes every
 rung of a TP ladder.
+
+**If you are underwater, `be` warns you.** Break-even on a losing position sits
+on the far side of the market, so the order becomes a reduce-only take-profit
+rather than a stop — and the stop it replaced has already been cancelled. The
+command says so plainly when that happens; it does not report "Stop moved" and
+leave you to find out.
+
+**Fees are not included**, because a live position does not carry them — so
+this is break-even on price, and the round trip still costs you the taker fee.
+The chart's B/E line in the web app reads accumulated fee data the CLI cannot
+see, so the two can differ slightly for that reason.
 
 Source: `BreakevenCommand.ts`.
 
@@ -104,12 +121,12 @@ Source: `BreakevenCommand.ts`.
 A trailing stop on the open position — the "runner" leg. The stop follows the
 market and never moves against you.
 
-| Form                            | Result                                  |
-| ------------------------------- | --------------------------------------- |
-| `trail 20%`                     | Stop 20% behind the current price       |
-| `trail 500`                     | Absolute distance                       |
-| `trail 20% ETHUSDT`             | Symbol override                         |
-| `wait $last >= 0.0716; trail 20%` | Arm it once price gets there          |
+| Form                              | Result                            |
+| --------------------------------- | --------------------------------- |
+| `trail 20%`                       | Stop 20% behind the current price |
+| `trail 500`                       | Absolute distance                 |
+| `trail 20% ETHUSDT`               | Symbol override                   |
+| `wait $last >= 0.0716; trail 20%` | Arm it once price gets there      |
 
 **Distance is measured from the CURRENT price, not from your entry** — that is
 what a trailing stop means to the venue.

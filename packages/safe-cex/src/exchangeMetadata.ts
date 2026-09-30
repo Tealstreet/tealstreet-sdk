@@ -134,6 +134,31 @@ export type ExchangeMetadata = {
   /** Whether the exchange supports trailing stop loss orders */
   supportsTrailingStopLoss: boolean;
   /**
+   * Whether `Position.realizedPnl` is POSITION-SCOPED and QUOTE-DENOMINATED,
+   * i.e. safe to use as the banked figure in a break-even price.
+   *
+   * Optional, and absence means NO. Every venue nobody has audited stays
+   * untrusted without being edited, which is the safe default for a field that
+   * moves a real stop order.
+   *
+   * It is not enough that a venue populates the field. Measured:
+   *   - asterdex reports binance's `cr` — per-symbol LIFETIME realised, and
+   *     the REST refresh deliberately preserves it across positions.
+   *   - lighter keeps reporting it after the position has closed.
+   *   - bitget folds funding and open/close fees into the number.
+   *   - every INVERSE contract leaves it BASE-denominated against a quote
+   *     `entryPrice`. `contracts` being normalised to base fixes the
+   *     `size x price` leg and does nothing for a base-denominated numerator,
+   *     so inverse venues are flagged `false` EXPLICITLY — they spread their
+   *     linear sibling's metadata and would otherwise inherit a `true`.
+   *   - hyperliquid accumulates it into a local Map from the `userFills`
+   *     snapshot, reset only on an `open` fill with `startPosition === 0`. A
+   *     position entered by a flip, or one whose opening fill fell outside the
+   *     snapshot window, carries a PREVIOUS lifecycle's closes. Left unflagged.
+   *   - binance, okx, blofin, kraken, woo and coinbase never set it.
+   */
+  reportsPositionRealizedPnl?: boolean;
+  /**
    * Whether the exchange supports non-reduce-only trigger entries, surfaced in
    * the UI as Conditional orders. This is intentionally narrower than generic
    * exchange "conditional order" support: TP/SL and trailing stops are covered
@@ -353,6 +378,11 @@ const BybitMetadata: ExchangeMetadata = {
   orderbookTickDelay: 60,
   prettyName: 'Bybit',
   supportsTrailingStopLoss: true,
+  // `curRealisedPnl` off the position payload, per position cycle, in the
+  // quote. `bybitdemo`, `hyrotrader` and the unified variant spread this
+  // object and inherit it deliberately — they run the same mapper. The SPOT
+  // and INVERSE variants spread it too and override to false below.
+  reportsPositionRealizedPnl: true,
   supportsOpeningTriggerOrders: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -423,6 +453,9 @@ const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitspot' as ExchangeName,
   prettyName: 'Bybit Spot',
+  // Spread from BybitMetadata, so this override is what stops the flag being
+  // inherited. Spot has no position cycle for a realised figure to scope to.
+  reportsPositionRealizedPnl: false,
   supportedOnMobile: false,
   supportsTestnet: false,
   supportsExecutionsHistory: false,
@@ -451,6 +484,11 @@ const BybitInverseMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitinverse' as ExchangeName,
   prettyName: 'Bybit Inverse',
+  // Spread from BybitMetadata, so this override is what stops the flag being
+  // inherited. `bybitinverse.exchange.ts` passes `curRealisedPnl` through raw
+  // while routing the unrealized twin via `extra.unrealizedPnlNative`, leaving
+  // this one BASE-denominated against a quote `entryPrice`.
+  reportsPositionRealizedPnl: false,
   supportedOnMobile: false,
   logo: '/static/exchanges/logos/BYBITINVERSE/logo.svg',
   lightLogo: '/static/exchanges/logos/BYBITINVERSE/light.png',
@@ -545,6 +583,8 @@ const BitunixMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'bitunix' as ExchangeName,
+  // `realizedPNL` off the position payload, position-scoped and quote-denominated.
+  reportsPositionRealizedPnl: true,
   logo: '/static/exchanges/logos/BITUNIX/logo.svg',
   lightLogo: '/static/exchanges/logos/BITUNIX/light.png',
   darkLogo: '/static/exchanges/logos/BITUNIX/dark.png',
@@ -2050,6 +2090,8 @@ const ParadexMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'paradex' as ExchangeName,
+  // `realized_positional_pnl` — the name says the scope. USDC-quoted.
+  reportsPositionRealizedPnl: true,
   logo: '/static/exchanges/logos/PARADEX/logo.svg',
   lightLogo: '/static/exchanges/logos/PARADEX/logo-white.svg',
   darkLogo: '/static/exchanges/logos/PARADEX/logo-dark.svg',

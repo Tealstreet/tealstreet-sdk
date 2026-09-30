@@ -455,31 +455,46 @@ and `roundOrderPrice(0.0002, 0.001)` is `0` — so the amend reached the venue a
 `price: 0`. `prepareOrder` and `createCoreAdapter.updateOrder` both re-check;
 this was the one copy that did not.
 
-## `be` places the stop at ENTRY, and ignores `realizedPnl` on purpose
+## `be` uses banked PnL only where the venue's `realizedPnl` is trustworthy
 
 `BreakevenCommand` calls the shared arithmetic in
 `script-api-core/src/order/breakevenPrice.ts` — the one implementation web and
-the CLI both use — but supplies **no `bankedPnl`**, so the answer is the entry
-price. That is a DATA limit, not a missing formula, and the tempting fix is the
-wrong one.
+the CLI both use — and supplies `Position.realizedPnl` as the banked figure
+**only when `reportsPositionRealizedPnl` is set on the venue's metadata**. It is
+today: bybit (and its `bybitdemo` / `hyrotrader` variants, which spread the same
+metadata and run the same mapper), paradex and bitunix. Everywhere else the
+answer is the entry price.
 
-`Position.realizedPnl` is the field that looks like the missing input. It means
-something different on every venue: a per-symbol **lifetime** figure on asterdex
-(the REST refresh deliberately preserves it), a value that **survives the
-position closing** on lighter, funding and fees **folded in** on bitget, and on
-inverse contracts a **base-denominated** number sitting against a quote
+**This was a `|| 0` waiting to happen, and the flag is what stops it.**
+`realizedPnl` means something different on every venue: a per-symbol LIFETIME
+figure on asterdex (the REST refresh deliberately preserves it), a value that
+SURVIVES the position closing on lighter, funding and fees FOLDED IN on bitget,
+and on inverse contracts a BASE-denominated number sitting against a quote
 `entryPrice` — the "`contracts` is base, so never branch on `isInverse`" rule
 fixes the `size * price` leg and does nothing for a base-denominated numerator.
-Six venues (binance, okx, blofin, kraken, woo, coinbase) do not report it at
-all. It is clean and position-scoped only on bybit, paradex, bitunix and, after
-a warm start, hyperliquid.
+Six venues (binance, okx, blofin, kraken, woo, coinbase) never set it. Hyperliquid
+is deliberately NOT flagged: it accumulates the figure into a local Map from the
+`userFills` snapshot, reset only on an `open` fill with `startPosition === 0`, so
+a position entered by a flip or one whose opening fill fell outside the snapshot
+window carries a previous lifecycle's closes.
 
-So wiring it in needs a **per-venue capability flag**, not a `|| 0`. Two tests
-pin the current behaviour — a `realizedPnl` of 1,000 and one of 500,000 both
-leave the stop at entry — and they exist so that a future change has to be
-deliberate. The web adapter gets its banked figure from the history pipeline
-instead, which is why `apps/web` can draw a fee-aware B/E line the CLI cannot
-compute. Map: `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
+**Two things guard it, and they are not redundant.** The metadata flag is the
+venue answer; the `market.isInverse` check in the command is what survives a
+future inverse venue being added by spreading its linear sibling's metadata, which
+is exactly how `bybitinverse` would otherwise inherit a `true`. Both are pinned:
+`exchangeMetadata.test.ts` asserts the flagged set EXACTLY (a new venue joining it
+fails the test rather than shipping), and `BreakevenCommand.test.ts` covers
+flagged/unflagged, long/short, and an inverse market on a flagged venue.
+
+**The number excludes FEES**, because a live position does not carry them. The
+web's B/E line reads the positions-history pipeline, which has them, so the two
+can differ by the round trip. That divergence predates the consolidation and is
+stated in the user docs rather than papered over.
+
+Read the map directly with `?.`, never `getExchangeMetadata` — that throws on an
+unknown name, and a command whose job is protecting a position must not be the
+thing that crashes. (`prepareOrder` still throws further down for an unregistered
+venue; that is pre-existing and shared by every order-placing command.)
 
 **It cancels stop losses only.** Writing it by hand as `cancel stops; stop
 $entry` is not the same thing: `cancel stops` means "not a limit, not a market",

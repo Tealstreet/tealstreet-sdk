@@ -199,12 +199,18 @@ side.
 
 ### 4. Break-even — consolidated 2026-09-30
 
-`script-api-core/src/order/breakevenPrice.ts` is the arithmetic; web and the
-skins adapt onto it. It was FIVE implementations giving four different prices,
-and one of them — the chart's B/E line — was the SHORT formula applied to longs
-for as long as it existed. Two callers still state their own for stated
-reasons: the CLI cannot reach the history pipeline, and the hotkey template is
-sandboxed user code that cannot import a package.
+`script-api-core/src/order/breakevenPrice.ts` is the arithmetic; web, the skins
+and the CLI all adapt onto it. It was FIVE implementations giving four different
+prices, and one of them — the chart's B/E line — was the SHORT formula applied
+to longs for as long as it existed.
+
+**What each adapter can supply differs, and that is a DATA question, not a
+formula one.** Web reads the positions-history pipeline, so it has fees. The CLI
+has only a live `Position`, so it has no fees and can use `realizedPnl` as the
+banked figure only where that field is position-scoped and quote-denominated —
+gated by `reportsPositionRealizedPnl` in `exchangeMetadata.ts`, whose doc
+comment carries the per-venue evidence. The two therefore differ by the round
+trip's fees, which is stated in the user docs rather than hidden.
 
 Follows the same shape as native sizing above: one function here, thin adapters
 either side. See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.

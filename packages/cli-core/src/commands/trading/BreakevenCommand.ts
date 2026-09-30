@@ -2,8 +2,9 @@ import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { breakevenPrice } from '@tealstreet/script-api-core/src/order/breakevenPrice';
+import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
-import type { Order } from '@tealstreet/safe-cex/src/types';
+import type { ExchangeName, Order } from '@tealstreet/safe-cex/src/types';
 
 /**
  * Move the protective stop to break-even.
@@ -50,33 +51,42 @@ export class BreakevenCommand extends TradingBaseCommand {
     if (!mark) return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
 
     /**
-     * Shares the arithmetic with the web — but deliberately supplies NO
-     * `bankedPnl`, so the answer is still the entry price.
+     * Shares the arithmetic with the web. The banked figure is supplied only
+     * where `Position.realizedPnl` is worth placing a stop on, which is a
+     * per-venue question answered by `reportsPositionRealizedPnl` — the same
+     * metadata `trail` reads `supportsTrailingStopLoss` from. The evidence for
+     * each venue lives on that field; it is not restated here.
      *
-     * `Position.realizedPnl` looks like the input this wants and is not
-     * trustworthy enough to place a stop on. Measured across venues:
+     * Read off the map rather than through `getExchangeMetadata`, which THROWS
+     * on a name it does not know. An unrecognised venue must degrade to the
+     * entry price, not crash the command that is trying to protect a position.
      *
-     *   - asterdex — binance's `cr`, per-symbol LIFETIME realised, and the
-     *     REST refresh deliberately preserves it.
-     *   - lighter — survives the position closing; per-market cumulative.
-     *   - bitget — funding and open/close fees are baked into the figure.
-     *   - every INVERSE contract — bybitinverse passes `curRealisedPnl`
-     *     through raw and bitgetinverse computes its own, but both route the
-     *     UNREALIZED twin through `extra.unrealizedPnlNative` and leave the
-     *     realised one BASE-denominated against a quote `entryPrice`. The
-     *     "contracts is base, never branch on inverse" rule fixes the
-     *     `size x price` leg and does nothing for a base-denominated
-     *     numerator.
-     *   - binance, okx, blofin, kraken, woo, coinbase — never set it at all.
+     * The inverse guard is belt-and-braces. Inverse venues are flagged `false`
+     * individually, but they inherit their linear sibling's metadata by spread,
+     * so a future venue added the same way would arrive here flagged `true`
+     * with a BASE-denominated numerator. Refusing on the market is the check
+     * that cannot be forgotten in a metadata entry.
      *
-     * Clean and position-scoped on bybit, paradex, bitunix and (after a warm
-     * start) hyperliquid. Wiring it in needs a per-venue capability flag, not
-     * a `|| 0`. Until then this stays at entry and the user docs say so.
+     * **This number excludes FEES**, because a live position does not carry
+     * them. The chart's B/E line reads the positions-history pipeline, which
+     * does, so the two can differ by the round trip's fees. That difference
+     * predates this command and is stated in the user docs.
      */
+    const venue = exchange.name as ExchangeName | undefined;
+    const trustsRealizedPnl = venue ? exchangeMetadata[venue]?.reportsPositionRealizedPnl === true : false;
+    const market = exchange.store?.markets?.find((m) => m.symbol === targetSymbol);
+    // A MISSING market is not a linear one. `!market?.isInverse` reads as the
+    // same check and is the opposite failure: an absent market makes it true,
+    // so a lookup that missed would trust a figure it could not verify.
+    const isLinearMarket = market ? market.isInverse !== true : false;
+    const banked =
+      trustsRealizedPnl && isLinearMarket && Number.isFinite(position.realizedPnl) ? position.realizedPnl : undefined;
+
     const base = breakevenPrice({
       entryPrice: position.entryPrice,
       size: position.contracts,
       side: position.side,
+      bankedPnl: banked,
     });
     // An offset is relative to BREAK-EVEN, not to the mark -- `be +3%` means
     // "3% the good side of flat". `processPrice` gives the same `+N` / `+N%` /
@@ -93,8 +103,7 @@ export class BreakevenCommand extends TradingBaseCommand {
     // Cancel the protective stop we are replacing. Take-profits are left alone
     // on purpose -- see the class comment.
     const existingStops = (exchange.store?.orders ?? []).filter(
-      (order: Order) =>
-        order.symbol === targetSymbol && order.type === OrderType.StopLoss && order.side === orderSide,
+      (order: Order) => order.symbol === targetSymbol && order.type === OrderType.StopLoss && order.side === orderSide,
     );
     if (existingStops.length > 0 && exchange.cancelOrders) {
       await exchange.cancelOrders(existingStops);
@@ -125,6 +134,17 @@ export class BreakevenCommand extends TradingBaseCommand {
 
     const moved = price === base ? '' : ` (break-even ${base}, offset ${offsetArg})`;
     this.printSuccess(ctx, `Stop moved to ${price}${moved}`);
+    // An UNDERWATER position has its break-even on the far side of the mark, so
+    // the order above is a take-profit and the protective stop this command
+    // just cancelled has not been replaced by one. Saying "Stop moved" and
+    // leaving it there would report protection the position does not have.
+    if (type === OrderType.TakeProfit) {
+      this.printWarning(
+        ctx,
+        `Break-even for ${targetSymbol} is on the far side of the market, so that is a reduce-only ` +
+          `take-profit at ${price}, not a stop — the position has no stop loss now.`,
+      );
+    }
     return this.success();
   }
 }
