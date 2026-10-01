@@ -67,7 +67,7 @@
     "tcp-websocket": "^1.0.0",
     "typescript": "^6.0.3",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^5.0.1",
+    "vitest": "^5.0.2",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   }
