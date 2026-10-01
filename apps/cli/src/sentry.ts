@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/bun';
 // One scrubber for every Tealstreet service that reports to Sentry. It used to
 // live here; two Bun services then needed the same one, and a second copy of a
 // redaction rule is worse than none because it still looks like protection.
+import { RESTRICTIVE_SENTRY_DATA_COLLECTION } from '@tealstreet/service-telemetry/src/dataCollection';
 import { scrub, scrubString } from '@tealstreet/service-telemetry/src/scrub';
 
 const DSN = 'https://dc80fdcd175badb5f3da861273c46f93@o815347.ingest.us.sentry.io/4511874153709568';
@@ -48,8 +49,9 @@ export function initCliSentry(): void {
     release: `tealstreet-cli@${process.env.TEALSTREET_CLI_VERSION ?? 'dev'}`,
 
     // This runs on a user's own machine against their own trading accounts.
-    // No PII, no hostname, no request bodies, errors only.
-    sendDefaultPii: false,
+    // Keep the restrictive v10 baseline explicit: Sentry v11 removed
+    // `sendDefaultPii` and collects richer request context by default.
+    dataCollection: RESTRICTIVE_SENTRY_DATA_COLLECTION,
     serverName: undefined,
     tracesSampleRate: 0,
     integrations: (defaults) =>

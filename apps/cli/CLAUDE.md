@@ -177,12 +177,13 @@ Load-bearing details:
 - **`uncaughtException` must flush before `process.exit`.** The handler in
   `index.ts` awaits `flushCliSentry()` (2 s cap) before exiting — a bare
   `process.exit(1)` drops the crash we most want to see.
-- **This binary runs on user machines against their own accounts**, so
-  `sendDefaultPii` is off, `server_name` is deleted, and the HTTP/fetch
-  integrations are filtered out (they would attach exchange request URLs).
-  `beforeSend`/`beforeBreadcrumb` redact key-shaped values (32+ chars of
-  unbroken base64/hex) and any sensitive-looking key name. Don't relax these
-  to "get better context" — the context is exchange API credentials.
+- **This binary runs on user machines against their own accounts**, so the
+  shared restrictive Sentry `dataCollection` baseline is used, `server_name` is
+  deleted, and the HTTP/fetch integrations are filtered out (they would attach
+  exchange request URLs). `beforeSend`/`beforeBreadcrumb` redact key-shaped
+  values (32+ chars of unbroken base64/hex) and any sensitive-looking key name.
+  Don't relax these to "get better context" — the context is exchange API
+  credentials.
 - Uses **`@sentry/bun`**, not `@sentry/node`. The runtime is Bun and the output
   is a `bun build --compile` binary; `@sentry/node`'s OpenTelemetry
   auto-instrumentation is not reliable there.
