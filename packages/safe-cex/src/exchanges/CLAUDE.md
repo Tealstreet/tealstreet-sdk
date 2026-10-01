@@ -566,13 +566,39 @@ Two related traps in the same area:
     never fires, and a socket holding ZERO topics reports healthy through
     `store.socketHealth` indefinitely. That is the original bug's failure mode,
     not a recovery from it.
-  - Sending nothing and calling `reconnect()` is what works: `isInitialized`
-    stays false so health is honest, and because nothing is received `wasZero`
-    never resets `reconnectCount`, so its `> 100` cap genuinely bounds the retries
-    at WS_MIN_RECONNECTION_DELAY (1-3s) pacing.
+  - Sending nothing and calling `reconnect()` is what works, and the reason is
+    BOUNDED AUTOMATIC RETRY — not honest health. Health is NOT honest here: a
+    private socket that never initialized is filtered out of `base.ts`'s
+    `initializedPrivateSockets`, and `privateHealthy` short-circuits true on an
+    empty list, so this still reads connected; `exchangeAccountController`'s
+    `privateBroken` also requires `privateInitialized`, so the automatic reload is
+    suppressed too. It is still strictly better than subscribing anyway, which had
+    no retry at all.
+  - **Do not describe the retry bound as the socket's `> 100` reconnect cap.**
+    `reconnect()` goes through `ws.close()` -> `processClose`, so
+    `registerCloseResult`/`getReconnectDelay` pace it 2 -> 4 -> 8 -> 16 -> 30s
+    (`WS_BACKOFF_MAX_DELAY`) with a 120s pause after
+    `WS_FAILURE_STREAK_PAUSE_THRESHOLD` (8) consecutive failures. And in hosted
+    mode the bound that actually fires first is the signer's own
+    `MAX_CONSECUTIVE_FAILURES = 10` (`services/exchange-server/src/remote-signer.ts`),
+    which force-disposes the account; the 100-cap is unreachable. A sleeping laptop
+    also closes the browser socket, which disposes every account server-side, and
+    the next init on wake is a fresh session — so recovery is automatic and needs
+    no reload.
+  - Tell the host chain the silence was OURS (`WsDirectFallback.disregardSilence()`).
+    A connect that exchanged no frames otherwise reads as a broken egress path, and
+    two of those advance onto the relay and then the athena passthrough for the
+    socket's LIFETIME — putting every signer-less user on one shared IP against the
+    venue's per-IP cap, which that class exists to avoid. A genuinely silent connect
+    still escalates, and a real inbound frame still resets the streak, so a wrong
+    API key still cannot trip it.
   Gated by `__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`,
   which covers the ordering, the exact subscribe args, the local-HMAC path, both
   signer failure modes, and that a disposed exchange never asks the signer.
+  `__tests__/audit-regressions/private-ws-auth-failure-consequences.test.ts` gates
+  the two consequences the socket file cannot show: the host chain does not
+  escalate when the silence was ours, and none of the strings these sockets emit
+  classifies into a terminal auth family (with the old wording as a live control).
   **This only applies where `subscribe()` is called straight after auth.**
   bitget, blofin, okx (private and business) and phemex all subscribe from their
   login/auth RESPONSE handler, so they are unaffected by the ORDERING bug — but

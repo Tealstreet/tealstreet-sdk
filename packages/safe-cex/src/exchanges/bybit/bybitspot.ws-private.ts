@@ -88,9 +88,11 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
         // the honest justification. It does NOT make health honest — a private
         // socket that never initialized is filtered out of `base.ts`'s
         // `initializedPrivateSockets`, and `privateHealthy` short-circuits true on
-        // an empty list, so this reads connected either way. Because nothing is
-        // received, `wasZero` never resets `reconnectCount`, so its `> 100` cap
-        // genuinely bounds the retries at WS_MIN_RECONNECTION_DELAY (1-3s) pacing.
+        // an empty list, so this reads connected either way. The retries are paced and
+        // bounded by `processClose`'s close-code backoff (2-30s, then a 120s pause
+        // after 8 consecutive failures), and in hosted mode the signer's own
+        // MAX_CONSECUTIVE_FAILURES (10) force-disposes the account before the
+        // socket's `> 100` reconnect cap is ever reached.
         //
         // Tell the host chain this silence was OURS. A connect that exchanged no
         // frames otherwise counts as a silent failure, and two of those advance

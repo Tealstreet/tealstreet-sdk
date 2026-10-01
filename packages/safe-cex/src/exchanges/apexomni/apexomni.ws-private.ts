@@ -231,8 +231,11 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
         // Send NOTHING on a failed login. A subscribe would be refused, and either
         // frame makes `trackLastReceived` set `isInitialized` and keep `lastReceived`
         // fresh — so the staleness threshold can never trip and a socket holding zero
-        // channels reports healthy forever. Reconnect instead: with nothing received
-        // `wasZero` never resets `reconnectCount`, so its `> 100` cap bounds it.
+        // channels reports healthy forever. Reconnect instead: a BOUNDED automatic
+        // retry, paced by `processClose`'s close-code backoff. It does NOT make
+        // health honest — a private socket that never initialized is filtered out of
+        // `base.ts`'s `initializedPrivateSockets` and `privateHealthy` short-circuits
+        // true on an empty list — but it is the only path that recovers on its own.
         void this.reconnect();
         return;
       }
