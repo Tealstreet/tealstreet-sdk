@@ -216,16 +216,27 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       // server ack for up to 5s. What it fixes is hosted mode, where the signature
       // is a round trip to the paired browser: un-awaited, `subscribe()` reached the
       // wire before the login and the private channels were never established.
+      let authed = false;
       try {
-        await this.auth();
+        authed = await this.auth();
       } catch (error) {
         // `remoteSigner.sign` THROWS (unavailable, sign timeout, failed send) rather
-        // than resolving `{ error }`. The sends below must still happen: skipping
-        // them leaves the socket OPEN having said nothing, and `base.ws.ts`
-        // `trackLastReceived` arms the staleness watchdog only on the FIRST inbound
-        // frame, so nothing would ever reconnect it.
-        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)), 'WS auth failed');
+        // than resolving `{ error }`. Pass the error ALONE: for an Error input a
+        // second argument REPLACES the message (`base.ts`), which would destroy the
+        // only description of the cause.
+        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)));
       }
+
+      if (!authed) {
+        // Send NOTHING on a failed login. A subscribe would be refused, and either
+        // frame makes `trackLastReceived` set `isInitialized` and keep `lastReceived`
+        // fresh — so the staleness threshold can never trip and a socket holding zero
+        // channels reports healthy forever. Reconnect instead: with nothing received
+        // `wasZero` never resets `reconnectCount`, so its `> 100` cap bounds it.
+        void this.reconnect();
+        return;
+      }
+
       this.lastConnectTime = virtualClock.getCurrentTimeMs();
       this.subscribe();
       this.ping();
@@ -476,7 +487,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
     this.throttleFetchPositions();
   };
 
-  private auth = async () => {
+  private auth = async (): Promise<boolean> => {
     // NOTE: keep the auth payload shape EXACTLY matching pre-PR Apex. We previously
     // added a `topics` field as a hint to the upstream proxy, which empirically
     // correlated with code-1005 server closes shortly after connect. Stripping it
@@ -498,8 +509,11 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       });
 
       if (result.error) {
-        this.emitAndLogError(`Remote WS auth failed: ${result.error}`);
-        return;
+        // NOT "auth failed" — `health/errorPatterns.ts` matches that literal as
+        // `auth_invalid`, which claims the user's key is rejected and suppresses
+        // automatic account reloads for five minutes.
+        this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
+        return false;
       }
 
       const payload = {
@@ -517,7 +531,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
         ],
       };
       this.sendWithLog(JSON.stringify(payload));
-      return;
+      return true;
     }
 
     const signature = createHmac('sha256', Buffer.from(this.parent.options.secret).toString('base64'))
@@ -538,6 +552,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       ],
     };
     this.sendWithLog(JSON.stringify(payload));
+    return true;
   };
 
   private subscribe = () => {

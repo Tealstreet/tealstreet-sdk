@@ -19,7 +19,6 @@ import {
   CoinBalance,
   ExchangeOptions,
   LogSeverity,
-  MarginType,
   Market,
   OHLCVOptions,
   Order,
@@ -30,17 +29,14 @@ import {
   OrderTimeInForce,
   OrderType,
   PlaceOrderOpts,
-  Position,
   PositionMode,
   PositionSide,
   Ticker,
   UpdateOrderOpts,
 } from '../../types';
-import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
-import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -59,13 +55,11 @@ import {
   ORDER_TIME_IN_FORCE_OUTBOUND,
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
-  POSITION_SIDE,
   POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
 } from './bybit.types';
 import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
 
-const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
 
 const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
@@ -92,8 +86,6 @@ export class BybitSpotExchange extends BaseExchange {
   private needsReinit = false;
 
   positionMode: PositionMode | null = null;
-
-  lastWebsocketPositionsUpdate: number | undefined;
 
   get accountType() {
     return this.unifiedMarginStatus === 1 ? 'CONTRACT' : 'UNIFIED';
@@ -369,14 +361,11 @@ export class BybitSpotExchange extends BaseExchange {
         });
       }
 
-      const fetchedPositions = await this.fetchPositions();
+      // Always `[]` — bybit spot reports no positions. Kept because it is what
+      // marks `loaded.positions`, and `addOrUpdatePositionsFull` is the documented
+      // account-wide shape even when the list is empty.
+      const positions = await this.fetchPositions();
       if (this.isDisposed) return;
-      const positions =
-        this.lastWebsocketPositionsUpdate !== undefined &&
-        virtualClock.getCurrentTimeMs() - this.lastWebsocketPositionsUpdate <
-          INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY
-          ? mergeUpdatesUsingLastUpdate(fetchedPositions, this.store.positions)
-          : fetchedPositions;
 
       this.store.addOrUpdatePositionsFull(positions);
       this.store.update({
@@ -459,8 +448,10 @@ export class BybitSpotExchange extends BaseExchange {
       return this.store.balance;
     }
     const [firstAccount] = rawBalance;
-    const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
-    const total = subtract(parseFloat(firstAccount.totalEquity), upnl);
+    // Spot holds no positions, so there is no unrealized PnL to carry and nothing
+    // to subtract out of equity. `Balance.upnl` is required, hence the literal.
+    const upnl = 0;
+    const total = parseFloat(firstAccount.totalEquity);
 
     const balance: Balance = {
       total,
@@ -1183,61 +1174,6 @@ export class BybitSpotExchange extends BaseExchange {
     this.retireCancelledOrders(cancelledRows);
   };
 
-  mapPosition(p: Record<string, any>) {
-    const entryPrice = parseFloat(v(p, 'avgPrice') || v(p, 'entryPrice') || 0);
-    let contracts = parseFloat(p.size ?? 0);
-    const side =
-      p.positionIdx === 1
-        ? PositionSide.Long
-        : p.positionIdx === 2
-          ? PositionSide.Short
-          : POSITION_SIDE[p.side] || PositionSide.Long;
-
-    let unrealizedPnl = parseFloat(v(p, 'unrealisedPnl') || 0);
-    const market = this.store.marketsBySymbol[p.symbol];
-    const contractsNative = contracts;
-    let notional = parseFloat(v(p, 'positionValue') || 0);
-    if (market?.isInverse) {
-      const ticker = this.store.tickersBySymbol[p.symbol];
-      const referencePrice = ticker?.last || ticker?.mark || entryPrice;
-      if (referencePrice) {
-        contracts = adjust(contracts / referencePrice, 0.0000001);
-      }
-      notional = contracts;
-    } else if (!p.symbol.endsWith('USDT')) {
-      const ticker = this.store.tickersBySymbol[p.symbol];
-      if (market && market.quote === 'USDC' && ticker) {
-        const direction = side === PositionSide.Long ? 1 : -1;
-        unrealizedPnl = direction * (ticker.mark * contracts - entryPrice * contracts);
-      }
-    }
-
-    const positionMode =
-      p.positionIdx === undefined ? undefined : p.positionIdx === 0 ? PositionMode.OneWay : PositionMode.Hedged;
-    const marginType =
-      p.tradeMode === undefined ? undefined : p.tradeMode === 1 ? MarginType.Isolated : MarginType.Cross;
-    const position: Position = {
-      id: createPositionId(p.symbol, side, positionMode),
-      symbol: p.symbol,
-      side,
-      entryPrice,
-      notional,
-      leverage: parseFloat(p.leverage),
-      unrealizedPnl,
-      realizedPnl: parseFloat(v(p, 'curRealisedPnl') || 0),
-      contracts,
-      liquidationPrice: parseFloat(v(p, 'liqPrice') || 0),
-      positionMode,
-      marginType,
-      extra: {
-        contractsNative,
-      },
-      info: p,
-      lastUpdate: virtualClock.getCurrentTimeMs(),
-    };
-
-    return position;
-  }
 
   mapOrder(o: Record<string, any>) {
     const stopOrderType = v(o, 'stopOrderType');

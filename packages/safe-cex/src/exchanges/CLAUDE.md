@@ -539,32 +539,49 @@ Two related traps in the same area:
   branch emits it — but nothing retries, because the auth-retry arm is gated on
   `json.op === 'auth'`. So the symptom is a stuck orders table plus a
   `[WS]subscribe:Request not authorized` line, which is the string to grep for.
-- **`subscribe()` and `ping()` must stay UNCONDITIONAL, outside the try.** This
-  is the half that is easy to get wrong in the other direction, and it was.
+- **On a FAILED auth, send nothing at all and `reconnect()` — do not subscribe.**
+  This is the half that is easy to get wrong in both directions, and both were.
   `RemoteSigner.sign` **throws** — signer unavailable, the 15s `SIGN_TIMEOUT_MS`,
   a failed send, `markUnavailable` rejecting everything pending — rather than
-  resolving `{ error }`, which is the only case `auth` itself handles. Skipping
-  the sends on a rejection leaves the socket `OPEN` with nothing sent and nothing
-  received, and **nothing recovers it**: the venue says nothing on an idle
-  unsubscribed socket, and `base.ws.ts trackLastReceived` arms the staleness
-  watchdog (and sets `isInitialized`) only inside its `wasZero` branch — on the
-  FIRST inbound frame. Sending the doomed subscribe anyway draws the refusal
-  above, and that frame is what arms the watchdog that reconnects. Catch, name
-  the error, and send: an escaping rejection is also unhandled, because the
-  `onOpen` caller does not await.
+  resolving `{ error }`, which is the only case `auth` itself handles. So the
+  await can reject, and whatever happens next is the whole design:
+  - Letting it escape is an unhandled rejection: the `onOpen` caller does not
+    await. Catch it, and pass the error ALONE — for an `Error` input a second
+    `emitAndLogError` argument REPLACES the message (`base.ts`), so naming it
+    there destroys the only description of the cause and collapses four distinct
+    failures into one line.
+  - **Never put the words "auth failed" in that message.**
+    `health/errorPatterns.ts` lists that literal under `auth_invalid`, so the
+    user is told their API key is rejected, and
+    `noteTerminalExchangeFailure` suppresses automatic account reloads for five
+    minutes — the very reload that would re-pair the browser signer. A backgrounded
+    tab must not look like a bad key. (`auth`'s own
+    `Remote WS signing unavailable:` string exists for this reason; several other
+    venues still emit `Remote WS auth failed:` and have the same latent problem.)
+  - **And do not "recover" by subscribing anyway.** That was tried, on the theory
+    that the venue's refusal frame would arm the staleness watchdog. It does the
+    opposite. `base.ws.ts trackLastReceived` sets `isInitialized` on the FIRST
+    inbound frame, and bybit answers a ping on an unauthenticated `/v5/private`
+    socket — measured 2026-10-01, 7 pings, 7 pongs — so `lastReceived` keeps
+    refreshing, `checkLastReceived`'s 20s threshold never trips, `reconnect()`
+    never fires, and a socket holding ZERO topics reports healthy through
+    `store.socketHealth` indefinitely. That is the original bug's failure mode,
+    not a recovery from it.
+  - Sending nothing and calling `reconnect()` is what works: `isInitialized`
+    stays false so health is honest, and because nothing is received `wasZero`
+    never resets `reconnectCount`, so its `> 100` cap genuinely bounds the retries
+    at WS_MIN_RECONNECTION_DELAY (1-3s) pacing.
   Gated by `__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`,
   which covers the ordering, the exact subscribe args, the local-HMAC path, both
   signer failure modes, and that a disposed exchange never asks the signer.
   **This only applies where `subscribe()` is called straight after auth.**
   bitget, blofin, okx (private and business) and phemex all subscribe from their
-  login/auth RESPONSE handler and are unaffected. **apexomni has the same shape
-  and is SUSPECTED broken in hosted mode** — its `onOpen` is not `async`, so the
-  fix is not a one-liner there, and `d1184f3d8e` records that the upstream proxy
-  closed the socket with code 1005 when subscribe was gated. That revert bundled
-  three changes and none of them was awaiting the signature, so it does not
-  actually cover this case — but Apex's own tolerance for a pre-login subscribe
-  is unmeasured and there is no funded Apex test key. Do not change it blind; a
-  hosted Apex session capturing the login/subscribe exchange settles it.
+  login/auth RESPONSE handler and are unaffected. **apexomni had the same shape and is FIXED**
+  (`598a9553f4`): its `onOpen` is now `async` and awaits the login. Read
+  `apexomni/CLAUDE.md` before touching it — `d1184f3d8e` reverted three bundled
+  things after code-1005 churn and awaiting the signature was none of them, but
+  Apex's own tolerance for a pre-login subscribe is still unmeasured because there
+  is no funded Apex test key.
 
 ### Public endpoints MUST be tagged so hosted mode skips the signing round trip
 

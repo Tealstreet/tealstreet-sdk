@@ -155,13 +155,19 @@ to the LINEAR socket only, so hosted bybit USDT worked and hosted BTCUSD did
 not — reported as "impossible to use Tealstreet on Bybit's inverse market"
 (2026-10-01) and fixed for inverse and spot the same day.
 
-**`subscribe()` and `ping()` stay OUTSIDE the try, deliberately** — see
-`../CLAUDE.md` → "Remote-signer WS auth" for why skipping them on a signer
-rejection is worse than sending a subscribe that will be refused. Gated by
-`../../__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`
-(ordering, exact subscribe args, the local-HMAC path, both signer failure modes,
-and that a disposed exchange never asks the signer). Note root `test:ci`
-EXCLUDES `@tealstreet/safe-cex`, so that gate runs in the 4-hourly
+**On a failed auth the socket sends NOTHING and reconnects** — it does not
+subscribe. Subscribing anyway was tried and is worse: bybit answers a ping on an
+unauthenticated `/v5/private` socket (measured 2026-10-01, 7 pings 7 pongs), so
+any frame sets `isInitialized` and keeps `lastReceived` fresh, the 20s staleness
+threshold never trips, and a socket with zero topics reports healthy forever.
+See `../CLAUDE.md` → "Remote-signer WS auth" for the full contract, including why
+the failure message must never contain the words "auth failed".
+
+Gated by `../../__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`
+(ordering, the signer REQUEST shape, exact subscribe args per variant, the
+local-HMAC path, both signer failure modes, `onOpen` wiring, and that a disposed
+exchange never asks the signer). Note root `test:ci` EXCLUDES
+`@tealstreet/safe-cex`, so that gate runs in the 4-hourly
 `scheduled-tests.yaml`, not on a PR.
 
 ## Startup Sequence
@@ -699,8 +705,10 @@ attempt that was reverted:
 - **Scope it on the frame's own `category`, not on `store.marketsBySymbol`.**
   Bybit's v5 private stream is ONE socket per account (all three variants share
   `/v5/private`) while `fetchPositions` here asks for `category: 'inverse'`, so
-  an unscoped add can put a USDT linear position in the inverse store — and
-  `mapPosition` has no `isInverse` branch for it. A market-list filter looks
+  an unscoped add can put a USDT linear position in the inverse store — where
+  `mapPosition`'s `market?.isInverse` branch is skipped, because the linear symbol
+  is absent from the inverse store's `marketsBySymbol`, so its size is read as
+  base units. A market-list filter looks
   equivalent and is not: `waitForExternalPublicDataLoaded` RESOLVES on a 30s
   timeout with markets empty, and `store.update({ markets })` clears and
   repopulates `marketsBySymbolMap`, so the filter can silently drop every real
@@ -711,8 +719,9 @@ attempt that was reverted:
   `positionIdx === 0` through `POSITION_SIDE[p.side] || PositionSide.Long`, and
   `POSITION_SIDE` maps only `Buy`/`Sell`, so a flat frame becomes a phantom
   `BTCUSD:long:oneway` row while the real short keeps stale contracts. Only
-  `addOrUpdatePositionsFull` zeroes unannounced rows, and `auditPositions()` runs
-  with `removeDupes` defaulting false — it warns and removes nothing. Linear has
+  `addOrUpdatePositionsFull` zeroes unannounced rows, and nothing dedupes the
+  phantom away — its id differs from the real row's, so `auditPositions()` would
+  not remove it even with `removeDupes` on. Linear has
   `dedupePositionsById` for its documented `seq: -1` placeholder rows; inverse
   has no equivalent.
 - **Do NOT also sync the balance here.** `syncBalanceUpnlFromPositions` is safe
@@ -726,17 +735,16 @@ attempt that was reverted:
   of snapping to an authoritative `totalEquity`. It is also a no-op on a CONTRACT
   (classic) account, which is where inverse users are most likely to be.
 
-**`bybitspot`'s handler is DEAD, not deliberate.** `bybitspot.exchange.ts`'s
-`fetchPositions` is `async () => []` unconditionally, and both
-`addOrUpdatePositionsFull` call sites are fed by it, so `store.positions` is
-permanently empty and `updatePositions` can only ever early-return. Nothing
-synthesises spot positions — this file says so twice already ("No position
-tracking", "`fetchPositions()` returns empty array"). The dead tail is the
-handler plus its `onMessage` dispatch and `position` subscription,
-`bybitspot.ws-public.ts`'s `store.positions` uPnL loop, and `formatBalance`'s
-`upnl` reduce. Note it cannot simply be switched to add-or-update either: the
-socket is the shared `/v5/private`, so that would start writing derivatives
-positions into a spot store.
+**`bybitspot` has no position handling at all, and that is correct.**
+`bybitspot.exchange.ts`'s `fetchPositions` is `async () => []` unconditionally and
+both `addOrUpdatePositionsFull` sites are fed by it, so `store.positions` is
+permanently empty. The handler that read it, its `onMessage` dispatch, the
+`position` subscribe arg, `mapPosition`, `lastWebsocketPositionsUpdate` and its
+merge branch, the per-ticker uPnL loop in `bybitspot.ws-public.ts` and
+`formatBalance`'s `upnl` reduce were all therefore dead and were deleted; spot's
+subscribe is now `['order']` alone and `Balance.upnl` is the literal `0`. Do not
+"restore" the position topic: the socket is the shared `/v5/private`, so it would
+deliver derivatives positions into a spot store.
 
 ### Order Updates from WebSocket (`bybit.ws-private.ts:98-158`)
 

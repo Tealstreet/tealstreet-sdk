@@ -25,16 +25,19 @@ import { virtualClock } from '../../utils/virtualClock';
  * `b7b6822f95` added the `await` to the LINEAR socket and missed inverse and
  * spot, which is why hosted bybit USDT worked and hosted BTCUSD did not.
  *
- * The failure paths matter as much as the ordering, and are the reason
- * `subscribe()`/`ping()` are UNCONDITIONAL. `RemoteSigner.sign` THROWS — signer
+ * The failure paths matter as much as the ordering, and the first attempt at them
+ * was wrong in the opposite direction. `RemoteSigner.sign` THROWS — signer
  * unavailable, the 15s sign timeout, a failed send, `markUnavailable` rejecting
  * pending — rather than resolving `{ error }`, which is the only case `auth`
- * itself handles. Skipping the sends on a rejection leaves the socket OPEN with
- * nothing sent and nothing received: bybit says nothing on an idle unsubscribed
- * socket, and `base.ws.ts trackLastReceived` arms the staleness watchdog only on
- * the FIRST inbound frame, so there is no reconnect and no recovery. Sending the
- * doomed subscribe anyway draws the refusal above, and that frame is what arms
- * it.
+ * itself handles. On that failure the socket must send NOTHING and reconnect:
+ * subscribing anyway looks like recovery and is not, because
+ * `base.ws.ts trackLastReceived` sets `isInitialized` on the FIRST inbound frame
+ * and bybit answers a ping on an unauthenticated `/v5/private` socket (measured
+ * 2026-10-01, 7 pings 7 pongs), so `lastReceived` keeps refreshing, the 20s
+ * staleness threshold never trips, and a socket holding zero topics reports
+ * healthy forever. The reported error must also never read "auth failed" —
+ * `health/errorPatterns.ts` matches that literal as `auth_invalid`, blaming the
+ * user's API key and suppressing account reloads for five minutes.
  *
  * Frames are asserted through the REAL `sendWithLog` -> `send()` path against a
  * socket at `readyState OPEN`, matching `private-websocket.auth-resubscribe.test.ts`
@@ -50,9 +53,11 @@ const EXPECTED_EXPIRES = '1750000010025';
 type Send = ReturnType<typeof vi.fn>;
 
 const SOCKETS = [
-  { label: 'bybit (linear)', Ctor: BybitPrivateWebsocket },
-  { label: 'bybitinverse', Ctor: BybitInversePrivateWebsocket },
-  { label: 'bybitspot', Ctor: BybitSpotPrivateWebsocket },
+  { label: 'bybit (linear)', Ctor: BybitPrivateWebsocket, topics: ['order', 'position'] },
+  { label: 'bybitinverse', Ctor: BybitInversePrivateWebsocket, topics: ['order', 'position'] },
+  // Spot asks for `order` only — it has no positions (`fetchPositions` returns `[]`
+  // and nothing writes the store), so the position topic fed a dead handler.
+  { label: 'bybitspot', Ctor: BybitSpotPrivateWebsocket, topics: ['order'] },
 ] as const;
 
 const makeParent = (overrides: Record<string, unknown> = {}) => ({
@@ -73,7 +78,7 @@ const makeParent = (overrides: Record<string, unknown> = {}) => ({
 const makeSigner = (mode: 'ok' | 'resolves-error' | 'throws') => ({
   accountName: 'fixture-account',
   sign: vi.fn(
-    () =>
+    (_request: Record<string, any>) =>
       new Promise<{ wsAuthSignature?: string; error?: string }>((resolve, reject) => {
         setTimeout(() => {
           if (mode === 'throws') reject(new Error('Remote signer unavailable — WebSocket disconnected (gone <5s)'));
@@ -113,7 +118,7 @@ describe('bybit private sockets authenticate before they subscribe', () => {
     vi.useRealTimers();
   });
 
-  describe.each(SOCKETS)('$label', ({ Ctor }) => {
+  describe.each(SOCKETS)('$label', ({ Ctor, topics }) => {
     test('sends auth before subscribe under a remote signer', async () => {
       const signer = makeSigner('ok');
       const socket = new Ctor(makeParent({ options: { key: 'test-key', secret: '', remoteSigner: signer } }) as any);
@@ -122,6 +127,12 @@ describe('bybit private sockets authenticate before they subscribe', () => {
       await run(socket);
 
       expect(signer.sign).toHaveBeenCalledTimes(1);
+      // Signing the wrong string, in the wrong format, or as the wrong request type
+      // reproduces the original symptom exactly — the venue refuses and orders stop.
+      expect(signer.sign.mock.calls[0][0]).toMatchObject({
+        type: 'ws-auth',
+        wsAuth: { toSign: `GET/realtime${EXPECTED_EXPIRES}`, outputFormat: 'hex' },
+      });
       const frames = sentJson(send);
       const authIndex = frames.findIndex((f) => f.op === 'auth');
       const subscribeIndex = frames.findIndex((f) => f.op === 'subscribe');
@@ -130,6 +141,7 @@ describe('bybit private sockets authenticate before they subscribe', () => {
       expect(subscribeIndex).toBeGreaterThan(-1);
       expect(authIndex).toBeLessThan(subscribeIndex);
       // A bare ordering assertion passes on an empty auth frame too.
+      expect(frames[authIndex].args[1]).toBe(EXPECTED_EXPIRES);
       expect(frames[authIndex].args[2]).toBe('deadbeef');
     });
 
@@ -151,48 +163,55 @@ describe('bybit private sockets authenticate before they subscribe', () => {
 
     // Dropping a topic from this list is the reported bug by another route, and
     // an ordering-only assertion cannot see it.
-    test('subscribes to exactly the order and position topics', async () => {
+    test('subscribes to exactly the topics this variant has data for', async () => {
       const socket = new Ctor(makeParent() as any);
       const send = attachOpenSocket(socket);
 
       await run(socket);
 
-      expect(sentJson(send).filter((f) => f.op === 'subscribe')).toEqual([
-        { op: 'subscribe', args: ['order', 'position'] },
-      ]);
+      expect(sentJson(send).filter((f) => f.op === 'subscribe')).toEqual([{ op: 'subscribe', args: [...topics] }]);
     });
 
-    test('still subscribes and pings when the signer RESOLVES an error', async () => {
-      const signer = makeSigner('resolves-error');
-      const parent = makeParent({ options: { key: 'test-key', secret: '', remoteSigner: signer } });
-      const socket = new Ctor(parent as any);
+    test.each(['resolves-error', 'throws'] as const)(
+      'sends NOTHING and reconnects when the signer %s',
+      async (mode) => {
+        const parent = makeParent({ options: { key: 'test-key', secret: '', remoteSigner: makeSigner(mode) } });
+        const socket = new Ctor(parent as any);
+        const send = attachOpenSocket(socket);
+        const reconnect = vi.fn();
+        (socket as any).reconnect = reconnect;
+
+        // An escaping rejection would be unhandled — `onOpen` does not await this.
+        await expect(run(socket)).resolves.toBeUndefined();
+
+        // Bybit refuses a private subscribe on an unauthenticated socket AND still
+        // pongs a ping on one (measured 7/7), so sending either would set
+        // `isInitialized` and keep `lastReceived` fresh — reporting a socket with
+        // zero topics as healthy forever, which is the original bug, not a recovery.
+        expect(send).not.toHaveBeenCalled();
+        expect(reconnect).toHaveBeenCalledTimes(1);
+        // Never silent, and the CAUSE must survive: `emitAndLogError`'s second
+        // argument REPLACES the message for an Error input, and the literal
+        // "auth failed" is matched by errorPatterns' `auth_invalid`, which would
+        // blame the user's API key and suppress reloads for five minutes.
+        expect(parent.emitAndLogError).toHaveBeenCalledTimes(1);
+        const reported = String((parent.emitAndLogError as any).mock.calls[0][0]);
+        expect((parent.emitAndLogError as any).mock.calls[0][1]).toBeUndefined();
+        expect(reported.toLowerCase()).not.toContain('auth failed');
+        expect(reported).toMatch(mode === 'throws' ? /Remote signer unavailable/ : /signing unavailable/);
+      },
+    );
+
+    // Nothing else proves the sequence is wired to the socket opening.
+    test('runs the sequence when the socket opens', async () => {
+      const socket = new Ctor(makeParent() as any);
       const send = attachOpenSocket(socket);
 
-      await run(socket);
+      socket.onOpen();
+      await vi.advanceTimersByTimeAsync(100);
 
       const frames = sentJson(send);
-      expect(frames.some((f) => f.op === 'auth')).toBe(false);
-      // The refusal this draws is what arms the staleness watchdog.
-      expect(frames.some((f) => f.op === 'subscribe')).toBe(true);
-      expect(frames.some((f) => f.op === 'ping')).toBe(true);
-      expect(parent.emitAndLogError).toHaveBeenCalled();
-    });
-
-    test('still subscribes and pings when the signer THROWS, without rejecting', async () => {
-      const signer = makeSigner('throws');
-      const parent = makeParent({ options: { key: 'test-key', secret: '', remoteSigner: signer } });
-      const socket = new Ctor(parent as any);
-      const send = attachOpenSocket(socket);
-
-      // An escaping rejection is unhandled — `onOpen` does not await this.
-      await expect(run(socket)).resolves.toBeUndefined();
-
-      const frames = sentJson(send);
-      expect(frames.some((f) => f.op === 'auth')).toBe(false);
-      expect(frames.some((f) => f.op === 'subscribe')).toBe(true);
-      expect(frames.some((f) => f.op === 'ping')).toBe(true);
-      // Never silent: the cause has to be nameable from the logs.
-      expect(parent.emitAndLogError).toHaveBeenCalled();
+      expect(frames.findIndex((f) => f.op === 'auth')).toBeLessThan(frames.findIndex((f) => f.op === 'subscribe'));
     });
 
     // Asserting only "no frames" is vacuous — `send()` has its own disposal

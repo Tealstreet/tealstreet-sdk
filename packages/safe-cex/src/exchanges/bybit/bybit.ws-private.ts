@@ -61,24 +61,37 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
     if (!this.isDisposed) {
       await virtualClock.syncBybitClientServerTime();
       await sleep(25);
+      let authed = false;
       try {
-        await this.auth();
+        authed = await this.auth();
       } catch (error) {
-        // `remoteSigner.sign` THROWS — signer unavailable, the 15s sign timeout,
-        // a failed send, or `markUnavailable` rejecting everything pending — it
-        // does NOT resolve `{ error }`, which is the only case `auth` handles.
-        // `onOpen` does not await us, so letting this escape is an unhandled
-        // rejection, and skipping the two sends below is worse still: bybit sends
-        // nothing on an idle unsubscribed socket, `trackLastReceived` arms the
-        // staleness watchdog only on the FIRST inbound frame, and the socket then
-        // sits OPEN and unwatched forever.
-        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)), 'WS auth failed');
+        // `remoteSigner.sign` THROWS — signer unavailable, the 15s sign timeout, a
+        // failed send, or `markUnavailable` rejecting everything pending — it does
+        // NOT resolve `{ error }`, which is the only case `auth` handles. Pass the
+        // error ALONE: for an Error input a second argument REPLACES the message
+        // (`base.ts`), so naming it here would destroy the only description of the
+        // cause and collapse four distinct failures into one line.
+        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)));
       }
-      // Unconditional, even when auth failed. Bybit answers an unauthenticated
-      // subscribe with `{"success":false,"ret_msg":"Request not authorized",
-      // "op":"subscribe"}` (captured live 2026-10-01), and that inbound frame is
-      // what arms the watchdog that eventually reconnects us. Sending nothing is
-      // the one outcome nothing recovers from.
+
+      if (!authed) {
+        // Send NOTHING. Bybit refuses a private subscribe on an unauthenticated
+        // socket, and — measured 2026-10-01, 7 pings 7 pongs — it still answers a
+        // ping on one. So either frame makes `trackLastReceived` set
+        // `isInitialized` and keep `lastReceived` fresh, which means
+        // `checkLastReceived`'s 20s staleness threshold can never trip,
+        // `reconnect()` never fires, and a socket holding ZERO topics reports
+        // healthy to `store.socketHealth` forever. That is the original bug's
+        // failure mode, not a recovery from it.
+        //
+        // Reconnect explicitly instead. Because nothing is received, `wasZero`
+        // never resets `reconnectCount`, so its `> 100` cap genuinely bounds the
+        // retries, paced by WS_MIN_RECONNECTION_DELAY (1-3s), and `isInitialized`
+        // stays false so the socket is correctly reported unhealthy meanwhile.
+        void this.reconnect();
+        return;
+      }
+
       this.subscribe();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -224,7 +237,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();
   };
 
-  private auth = async () => {
+  private auth = async (): Promise<boolean> => {
     const expires = virtualClock.getCurrentTimeMs() + 10_000;
 
     if (this.parent.options.remoteSigner) {
@@ -241,8 +254,12 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
       });
 
       if (result.error) {
-        this.emitAndLogError(`Remote WS auth failed: ${result.error}`);
-        return;
+        // NOT "auth failed": `health/errorPatterns.ts` lists that literal under
+        // `auth_invalid`, which red-toasts "API key rejected" and makes
+        // `noteTerminalExchangeFailure` suppress automatic account reloads for five
+        // minutes — the very reload that would re-pair the browser signer.
+        this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
+        return false;
       }
 
       this.sendWithLog(
@@ -251,7 +268,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
           args: [this.parent.options.key, expires.toFixed(0), result.wsAuthSignature],
         }),
       );
-      return;
+      return true;
     }
 
     const signature = createHmac('sha256', this.parent.options.secret).update(`GET/realtime${expires}`).digest('hex');
@@ -262,6 +279,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
     };
 
     this.sendWithLog(JSON.stringify(payload));
+    return true;
   };
 
   private subscribe = () => {

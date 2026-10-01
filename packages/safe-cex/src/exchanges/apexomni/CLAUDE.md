@@ -254,10 +254,13 @@ Execution-history behavior (`fetchHistoricalFills`):
 > while REST polling kept the UI looking healthy. Same defect class as bybit
 > inverse/spot — see `../CLAUDE.md` → "Remote-signer WS auth".
 >
-> `subscribe()` and `ping()` stay OUTSIDE the try: `remoteSigner.sign` throws
-> rather than resolving `{ error }`, and skipping the sends would leave the
-> socket OPEN having said nothing, which `base.ws.ts trackLastReceived` can never
-> recover because it arms the staleness watchdog only on the first inbound frame.
+> **On a failed login the socket sends NOTHING and reconnects.** `remoteSigner.sign`
+> throws rather than resolving `{ error }`, and subscribing anyway would be worse
+> than silence: `base.ws.ts trackLastReceived` sets `isInitialized` on the first
+> inbound frame, so any frame makes a socket holding zero channels report healthy
+> indefinitely. The failure message must also never contain the words "auth
+> failed" — `health/errorPatterns.ts` matches that literal as `auth_invalid` and
+> suppresses automatic account reloads for five minutes.
 >
 > Pinned by `../../__tests__/audit-regressions/apexomni.private-ws-auth-ordering.test.ts`,
 > which also fails if the three-channel list is trimmed or the `topics` field

@@ -14,7 +14,6 @@ import {
   OHLCVOptions,
   OHLCVSOptions,
   OrderBook,
-  PositionSide,
   Ticker,
   Timeframe,
   timeframeToSeconds,
@@ -264,24 +263,6 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
 
     this.parent.store.updateTicker(ticker, update);
 
-    // position pnl updates are slow. we can try and calculate it here.
-    // Hot path: avoid `positions.filter(...)` array allocation per ticker
-    // frame, and hoist the market lookup outside the loop (matching
-    // positions are all for `d.symbol`, so the market is invariant).
-    const referencePrice = update.mark || update.last;
-    if (!referencePrice) return;
-    const market = this.store.marketsBySymbol[d.symbol];
-    if (!market || market.isInverse) return;
-
-    const positions = this.store.positions;
-    for (let i = 0; i < positions.length; i++) {
-      const position = positions[i];
-      if (position.symbol !== d.symbol || position.contracts === 0) continue;
-      const directionMult = position.side === PositionSide.Long ? 1 : -1;
-      const unrealizedPnl =
-        directionMult * (position.contracts * referencePrice - position.contracts * position.entryPrice);
-      this.store.updatePosition(position, { unrealizedPnl });
-    }
   };
 
   listenOHLCVs = (

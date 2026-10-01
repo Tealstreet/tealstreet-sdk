@@ -21,10 +21,11 @@ import { virtualClock } from '../../utils/virtualClock';
  * case asserts login precedes subscribe with the full three-channel args list
  * intact, so restoring the ack-gating or trimming the channels both fail here.
  *
- * `subscribe()` and `ping()` are deliberately OUTSIDE the try. `RemoteSigner.sign`
- * throws rather than resolving `{ error }`, and skipping the sends would leave the
- * socket OPEN having said nothing — `base.ws.ts trackLastReceived` arms the
- * staleness watchdog only on the first inbound frame, so nothing would reconnect.
+ * On a failed login the socket sends NOTHING and reconnects. `RemoteSigner.sign`
+ * throws rather than resolving `{ error }`, and subscribing anyway is worse than
+ * silence: `base.ws.ts trackLastReceived` sets `isInitialized` on the first
+ * inbound frame, so any frame makes a socket holding zero channels report healthy
+ * indefinitely.
  */
 
 const NOW_MS = 1_750_000_000_000;
@@ -132,21 +133,30 @@ describe('apexomni private socket logs in before it subscribes', () => {
     expect(JSON.parse(login.args[0])).not.toHaveProperty('topics');
   });
 
-  test.each(['resolves-error', 'throws'] as const)('still subscribes and pings when the signer %s', async (mode) => {
+  test.each(['resolves-error', 'throws'] as const)('sends NOTHING and reconnects when the signer %s', async (mode) => {
     const parent = makeParent({
       options: { key: 'test-key', secret: '', passphrase: 'test-pass', remoteSigner: makeSigner(mode) },
     });
     const socket = new ApexOmniPrivateWebsocket(parent as any);
     const send = attachOpenSocket(socket);
+    const reconnect = vi.fn();
+    (socket as any).reconnect = reconnect;
 
     // An escaping rejection would be unhandled — nothing awaits `onOpen`.
     await expect(open(socket)).resolves.toBeUndefined();
 
-    const frames = sentJson(send);
-    expect(frames.some((f) => f.op === 'login')).toBe(false);
-    expect(frames.some((f) => f.op === 'subscribe')).toBe(true);
-    expect(frames.some((f) => f.op === 'ping')).toBe(true);
-    expect(parent.emitAndLogError).toHaveBeenCalled();
+    // A subscribe on an unlogged-in socket would be refused, and either frame makes
+    // `trackLastReceived` set `isInitialized` and keep `lastReceived` fresh — so a
+    // socket holding zero channels would report healthy forever.
+    expect(send).not.toHaveBeenCalled();
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    // Never silent, and the CAUSE must survive: a second `emitAndLogError` argument
+    // REPLACES the message for an Error input, and the literal "auth failed" is
+    // matched by errorPatterns' `auth_invalid`, which would blame the user's key.
+    expect(parent.emitAndLogError).toHaveBeenCalledTimes(1);
+    const reported = String((parent.emitAndLogError as any).mock.calls[0][0]);
+    expect((parent.emitAndLogError as any).mock.calls[0][1]).toBeUndefined();
+    expect(reported.toLowerCase()).not.toContain('auth failed');
   });
 
   test('never asks the signer once the exchange is disposed', async () => {
