@@ -391,7 +391,7 @@ const BybitDemoMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitdemo' as ExchangeName,
   prettyName: 'Bybit Demo',
-  supportedOnMobile: false,
+  supportedOnMobile: true,
   supportsTestnet: false,
   forbidCors: true,
   enforceWsTunnel: true,
@@ -403,6 +403,9 @@ const BybitDemoMetadata: ExchangeMetadata = {
 const HyrotraderMetadata: ExchangeMetadata = {
   ...BybitDemoMetadata,
   exchangeName: 'hyrotrader' as ExchangeName,
+  // Prop-firm white-label of Bybit, not certified on mobile yet: the spread
+  // above would otherwise inherit Bybit's `true`.
+  supportedOnMobile: false,
   prettyName: 'HyroTrader',
   logo: '/static/exchanges/logos/HYROTRADER/logo.svg',
   lightLogo: '/static/exchanges/logos/HYROTRADER/logo.svg',
@@ -423,7 +426,7 @@ const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitspot' as ExchangeName,
   prettyName: 'Bybit Spot',
-  supportedOnMobile: false,
+  supportedOnMobile: true,
   supportsTestnet: false,
   supportsExecutionsHistory: false,
   // Inherits `true` from BybitMetadata via the spread above. Spot has no position-based
@@ -451,7 +454,7 @@ const BybitInverseMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitinverse' as ExchangeName,
   prettyName: 'Bybit Inverse',
-  supportedOnMobile: false,
+  supportedOnMobile: true,
   logo: '/static/exchanges/logos/BYBITINVERSE/logo.svg',
   lightLogo: '/static/exchanges/logos/BYBITINVERSE/light.png',
   darkLogo: '/static/exchanges/logos/BYBITINVERSE/dark.png',
@@ -473,6 +476,7 @@ const BinanceMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: true,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
@@ -513,6 +517,7 @@ const BinancePMMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: true,
   // No fetchHistoricalFills/fetchHistoricalTrades implementation in the PM adapter.
   orderbookTickDelay: 60,
@@ -702,6 +707,7 @@ const BinanceSpotMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: true,
   // No fetchHistoricalFills/fetchHistoricalTrades implementation in the Spot adapter.
   orderbookTickDelay: 60,
@@ -799,6 +805,7 @@ const BitgetMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: false,
   supportsExecutionsHistory: true,
   supportsTrailingStopLoss: false,
@@ -841,6 +848,9 @@ const BitgetUSDCMetadata: ExchangeMetadata = {
   ...BitgetMetadata,
   supportsPublicOnly: false,
   exchangeName: 'bitgetusdc' as ExchangeName,
+  // Hidden from the picker and not certified on mobile; the Bitget spread
+  // above would otherwise inherit `true`.
+  supportedOnMobile: false,
   logo: '/static/exchanges/logos/BITGETUSDC/logo.svg',
   lightLogo: '/static/exchanges/logos/BITGETUSDC/light.png',
   darkLogo: '/static/exchanges/logos/BITGETUSDC/dark.png',
@@ -853,6 +863,9 @@ const BitgetInverseMetadata: ExchangeMetadata = {
   ...BitgetMetadata,
   supportsPublicOnly: false,
   exchangeName: 'bitgetinverse' as ExchangeName,
+  // Hidden from the picker and not certified on mobile; the Bitget spread
+  // above would otherwise inherit `true`.
+  supportedOnMobile: false,
   logo: '/static/exchanges/logos/BITGET/logo.svg',
   lightLogo: '/static/exchanges/logos/BITGET/light.png',
   darkLogo: '/static/exchanges/logos/BITGET/dark.png',
@@ -1099,6 +1112,7 @@ const BlofinMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   enabled: true,
   enabledInDev: true,
+  supportedOnMobile: true,
   supportsTestnet: false,
   supportsExecutionsHistory: true,
   orderbookTickDelay: 250,
