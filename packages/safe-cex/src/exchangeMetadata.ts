@@ -886,7 +886,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   refLink: 'https://teal.link/cryptocom',
   requiresPassphrase: false,
   requiresApplicationId: false,
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
