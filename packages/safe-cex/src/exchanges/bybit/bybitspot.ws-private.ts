@@ -61,7 +61,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
     if (!this.isDisposed) {
       await virtualClock.syncBybitClientServerTime();
       await sleep(25);
-      this.auth();
+      await this.auth();
       this.subscribe();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {

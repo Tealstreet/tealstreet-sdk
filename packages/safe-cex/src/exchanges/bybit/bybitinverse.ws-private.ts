@@ -3,18 +3,18 @@ import type { BybitInverseExchange } from './bybitinverse.exchange';
 import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 
+import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { WsDirectFallback } from '../../utils/wsDirectFallback';
-import { isWsRelayEnabled } from '../../utils/wsRelay';
-import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { OrderStatus, Position, Writable } from '../../types';
-import { resolveBybitExecution } from './bybit.fill-event';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
+import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { BaseWebSocket } from '../base.ws';
+import { resolveBybitExecution } from './bybit.fill-event';
 import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybit.types';
 
@@ -36,7 +36,10 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
       );
       if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', `Using tealstreet bybit private inverse ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
+          this.parent.emitter.emit(
+            'grafana-info',
+            `Using tealstreet bybit private inverse ${baseUrl === route.relay ? 'relay' : 'proxy'}`,
+          );
         } catch (_e) {}
       }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
@@ -61,7 +64,7 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
     if (!this.isDisposed) {
       await virtualClock.syncBybitClientServerTime();
       await sleep(25);
-      this.auth();
+      await this.auth();
       this.subscribe();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -187,11 +190,19 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
   };
 
   handlePositionTopic = (data: Array<Record<string, any>>) => {
-    // Arrow wrapper instead of `.bind(this.parent)` — bind allocates a
-    // fresh function object per call.
-    const positions: Position[] = data.map((p) => this.parent.mapPosition(p));
-    const updates: Array<[Position, Position]> = positions.map((p) => [p, p]);
-    this.store.updatePositions(updates);
+    // Bybit's v5 private stream is ONE socket per account and its `position`
+    // topic carries every category the account holds, while `fetchPositions`
+    // here is scoped to `category: 'inverse'`. So filter on this exchange's own
+    // market list, or a USDT linear position arrives in the inverse store.
+    const positions: Position[] = data
+      .filter((p) => this.parent.store.marketsBySymbol[p.symbol])
+      .map((p) => this.parent.mapPosition(p));
+    if (positions.length === 0) return;
+    // `updatePositions` only ever rewrites an entry that is already in the
+    // store and returns early when the store is empty, so a position opened
+    // while the tab was up never appeared until the next REST poll.
+    this.store.addOrUpdatePositions(positions);
+    this.parent.syncBalanceUpnlFromPositions();
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();
   };
 

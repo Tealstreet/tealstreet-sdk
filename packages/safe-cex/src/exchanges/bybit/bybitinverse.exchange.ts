@@ -2,6 +2,7 @@ import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
+import type { BybitIncomeContext } from './bybit.income';
 import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
 import rateLimit from 'axios-rate-limit';
@@ -54,8 +55,8 @@ import { adjust, divide, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './bybit.api';
-import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange, type BybitIncomeContext } from './bybit.income';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
+import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import {
   BYBIT_RATE_LIMIT_TABLE as BYBITINVERSE_RATE_LIMIT_TABLE,
@@ -81,6 +82,7 @@ import {
 } from './bybit.types';
 import { BybitInversePrivateWebsocket } from './bybitinverse.ws-private';
 import { BybitInversePublicWebsocket } from './bybitinverse.ws-public';
+import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
 
 const MAX_CLOSED_PNL_PAGES = 20;
 
@@ -424,7 +426,9 @@ export class BybitInverseExchange extends BaseExchange {
     // Awaited here rather than inside the branch above: it must run on both
     // public-data paths, and it is what stamps margin mode onto positions.
     const privateProbeFailure = marginAccountInfos
-      ? await marginAccountInfos.then(() => undefined).catch((err: any) => String(err?.message || err) || 'request failed')
+      ? await marginAccountInfos
+          .then(() => undefined)
+          .catch((err: any) => String(err?.message || err) || 'request failed')
       : undefined;
 
     // A rejected key comes back as HTTP 200 with a non-OK retMsg, so the probe is the
@@ -574,6 +578,15 @@ export class BybitInverseExchange extends BaseExchange {
     const rawBalance = await this.fetchRawBalance();
     if (this.isDisposed) return this.store.balance;
     return this.formatBalance(rawBalance);
+  };
+
+  syncBalanceUpnlFromPositions = () => {
+    const balance = syncUnifiedBalanceUpnlFromPositions(this.store.balance, this.store.positions, this.accountType);
+    if (!balance || balance === this.store.balance) {
+      return;
+    }
+
+    this.store.update({ balance });
   };
 
   // for UTA 2.0

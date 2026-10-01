@@ -521,6 +521,22 @@ Two related traps in the same area:
 - **This class of bug is hosted-mode-only**, so it does not reproduce in local
   web dev, where a real Worker holds the actual secret. Verify private-WS
   changes against exchange-server, not just `yarn dev`.
+- **`await` the auth call if `subscribe()` follows it in the same function.**
+  `auth` is `async`, and on the LOCAL path that is harmless: an async body runs
+  synchronously to its first suspension point, and the local path computes an
+  HMAC with no `await` before its send, so the auth frame goes out first. Under a
+  remote signer the FIRST statement is an await, so an un-awaited `this.auth()`
+  yields and `subscribe()` reaches the wire on an unauthenticated socket. The
+  venue silently refuses the private topics and the order/position feeds never
+  start — orders stop updating while REST polling keeps the UI looking alive.
+  `b7b6822f95` fixed bybit linear and missed `bybitinverse`/`bybitspot`, which
+  is why bybit USDT worked in hosted mode and BTCUSD did not.
+  Gated by `bybit/bybit.wsAuthBeforeSubscribe.test.ts`.
+  **This only applies where `subscribe()` is called straight after auth.**
+  bitget, blofin and okx subscribe from their login RESPONSE handler and are
+  unaffected. **apexomni looks affected and must stay as it is** — its `onOpen`
+  is not `async`, and its comment records that auth-watchdog/subscribe-after-ack
+  gating made the upstream proxy close the socket with code 1005.
 
 ### Public endpoints MUST be tagged so hosted mode skips the signing round trip
 

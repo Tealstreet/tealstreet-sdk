@@ -131,6 +131,25 @@ Beta validation checklist:
 5. Send auth: `{ op: 'auth', args: [apiKey, expires, signature] }`
 6. On auth failure (`json.success === false && json.op === 'auth'`), retry up to 3 times with time re-sync (`authRetries` counter at `bybit.ws-private.ts:82-86`)
 
+**`sendReconnectSequence` must `await this.auth()` before `this.subscribe()`, in
+all three variants.** Bybit refuses a private `subscribe` on a socket that has
+not authenticated. Locally the un-awaited form happens to work — `auth` reaches
+its `sendWithLog` with no intervening `await` — but under a remote signer the
+signature is a round trip to the paired browser, so an un-awaited call lets
+`subscribe` go out first and the `order`/`position` topics are never
+established. The orders table then stops updating entirely: a placed order
+vanishes when its optimistic row expires, a moved order vanishes the same way,
+and a cancelled one stays on screen because no removal event ever arrives. REST
+polling keeps tickers, positions and balance looking healthy throughout, which
+is what makes it read as "the app is fine, orders are broken".
+
+`b7b6822f95` ("remote signing ... WS auth for all exchanges") added the `await`
+to the LINEAR socket only, so hosted bybit USDT worked and hosted BTCUSD did
+not — reported as "impossible to use Tealstreet on Bybit's inverse market"
+(2026-10-01) and fixed for inverse and spot the same day. See the general rule
+in `../CLAUDE.md` → "Remote-signer WS auth"; gated by
+`bybit.wsAuthBeforeSubscribe.test.ts`.
+
 ## Startup Sequence
 
 ### Linear (`BybitExchange.start()` -- `bybit.exchange.ts:190-259`)
@@ -647,6 +666,28 @@ The `fetchAndSetPrivateSnapshotHelper` method handles merging REST-fetched posit
 3. **No recent WS update**: REST-fetched positions are used directly via `addOrUpdatePositionsFull()`
 4. The `lastWebsocketPositionsUpdate` timestamp is set by the private WS `handlePositionTopic` handler (`bybit.ws-private.ts:164`)
 
+### The position topic must ADD, and it must be scoped to the variant's markets
+
+Linear and inverse both call `addOrUpdatePositions`. The inverse socket used to
+call `updatePositions(positions.map((p) => [p, p]))` instead, which rewrites only
+entries the store already holds and returns early when the store is empty — so a
+position opened while the tab was up stayed invisible until the next REST poll,
+and `syncBalanceUpnlFromPositions` was never called at all (the method did not
+exist on `BybitInverseExchange`; it does now).
+
+**Adding makes scoping load-bearing.** Bybit's v5 private stream is ONE socket
+per account and its `position` topic carries every category the account holds,
+while `BybitInverseExchange.fetchPositions` asks for `category: 'inverse'`. So
+the inverse handler filters on `store.marketsBySymbol` first, or a USDT linear
+position lands in the inverse account's store (`mapPosition` maps any symbol
+it is handed). Do not drop that filter when touching the handler.
+
+**`bybitspot`'s handler is deliberately left on `updatePositions`.** Its
+positions are synthesised from balances rather than reported by the venue, so
+switching it to add-or-update would start injecting derivatives positions from
+that same shared stream into the spot store. Fixing spot means deciding what a
+spot "position" is first, which is a separate change.
+
 ### Order Updates from WebSocket (`bybit.ws-private.ts:98-158`)
 
 The private WS `handleOrderTopic` processes order lifecycle events:
@@ -720,14 +761,14 @@ preserves the whole instrument as `Market.info`, so classifying an instrument
 costs no request. `instrument-class/bybit.instrumentClass.ts` maps it; measured
 live 2026-09-29 across 886 linear instruments:
 
-| `symbolType` | count | asset class | examples |
-| --- | --- | --- | --- |
-| `''` | 502 | crypto | BTCUSDT, SOLUSDT |
-| `stock` | 196 | equity | AAPLUSDT, SHOPUSDT |
-| `innovation` | 127 | **crypto** | AEONUSDT, 1000TAGUSDT |
-| `ETF` | 54 | etf | ARKKUSDT, EWJUSDT |
-| `commodity` | 4 | commodity | XAUUSDT, XAGUSDT, CLUSDT, BZUSDT |
-| `forex` | 3 | fx | EURUSDUSDT, GBPUSDUSDT, USDJPYUSDT |
+| `symbolType` | count | asset class | examples                           |
+| ------------ | ----- | ----------- | ---------------------------------- |
+| `''`         | 502   | crypto      | BTCUSDT, SOLUSDT                   |
+| `stock`      | 196   | equity      | AAPLUSDT, SHOPUSDT                 |
+| `innovation` | 127   | **crypto**  | AEONUSDT, 1000TAGUSDT              |
+| `ETF`        | 54    | etf         | ARKKUSDT, EWJUSDT                  |
+| `commodity`  | 4     | commodity   | XAUUSDT, XAGUSDT, CLUSDT, BZUSDT   |
+| `forex`      | 3     | fx          | EURUSDUSDT, GBPUSDUSDT, USDJPYUSDT |
 
 All 26 inverse instruments are `''`.
 
@@ -746,8 +787,6 @@ a new TradFi type guessed as a perp is the failure the module exists to prevent.
 **Probe 1 below is now implemented** as `instrument-class/` — what an instrument
 IS. Probe 2, whether the ACCOUNT may trade it, is still open and is the harder
 half; nothing in the classifier may be read as answering it.
-
-
 
 There is no CLI command today that answers "is this contract tradeable?" beyond
 `markets`, which only prints the loaded symbols. The adapter already has enough
