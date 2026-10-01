@@ -57,8 +57,8 @@ When working with Bybit exchange integration, consult the official API documenta
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bybitspot.exchange.ts`   | Standalone exchange class for spot trading (extends `BaseExchange` directly). Sets `isSpot = true`. No position tracking (`fetchPositions` returns `[]`). All API calls use `category: 'spot'`. Leverage fixed at min:1, max:1.                                                                     |
 | `bybitspot.types.ts`      | Spot-specific type definitions. Contains separate `BASE_WS_URL` with `v5/public/spot` WebSocket endpoint. Shares the same `ENDPOINTS` and type mappings as linear, but lacks `CREATE_BATCH_ORDER`.                                                                                                  |
-| `bybitspot.ws-public.ts`  | Public WebSocket for spot markets (`BybitPublicWebsocket` - note: same class name as linear). Connects to `v5/public/spot`. Orderbook depth is 200 levels (vs 1000 for linear/inverse). Supports dynamic ticker topic subscription. Calculates unrealized PnL for spot positions on ticker updates. |
-| `bybitspot.ws-private.ts` | Private WebSocket for spot markets. Same structure as linear private WS.                                                                                                                                                                                                                            |
+| `bybitspot.ws-public.ts`  | Public WebSocket for spot markets (`BybitPublicWebsocket` - note: same class name as linear). Connects to `v5/public/spot`. Orderbook depth is 200 levels (vs 1000 for linear/inverse). Supports dynamic ticker topic subscription. |
+| `bybitspot.ws-private.ts` | Private WebSocket for spot markets. Same structure as linear, except it subscribes to `order` ALONE — spot has no positions.                                                                                                                                                                                                                            |
 
 ## Authentication
 
@@ -1317,15 +1317,21 @@ A 1-second delay (`INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY`) is applied when
 - If recv_window errors occur, auto-syncs via `virtualClock.syncBybitClientServerTime()` and retries once
 - WebSocket: Syncs time before auth on every connection/reconnection
 
-### Spot-Specific: PnL Calculation on Ticker Update
+### Spot-Specific: there is NO position PnL pass
 
-The spot public WebSocket calculates unrealized PnL for positions on each ticker update (`bybitspot.ws-public.ts:182-195`):
+`bybitspot.ws-public.ts` used to recompute unrealized PnL for matching positions on
+every ticker frame. It was deleted: `fetchPositions` is `async () => []` and both
+`addOrUpdatePositionsFull` sites are fed by it, so `store.positions` is permanently
+empty and the loop could never match anything. `Balance.upnl` is the literal `0`
+for the same reason — treat it as "spot has no unrealized PnL", not as a measured
+zero.
 
-```
-unrealizedPnl = directionMult * (currentValue - entryValue)
-```
-
-where `directionMult` is +1 for Long, -1 for Short.
+One dead reader survives on the ORDER path and was deliberately left for its own
+change: `bybitspot.exchange.ts`'s `_hasFullSizedPositionOppositeSide` reads
+`store.positions` and is therefore always `false`, so `placeOrder` can never route
+a spot SL/TP to `placeStopLossOrTakeProfit`. Removing it is a change to order
+placement rather than to this doc's subject, and it is the last user of that
+file's `PositionSide` import.
 
 ### Spot-Specific: No Batch Orders
 

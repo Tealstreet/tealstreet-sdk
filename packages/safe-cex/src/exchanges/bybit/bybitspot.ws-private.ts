@@ -84,10 +84,20 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
         // healthy to `store.socketHealth` forever. That is the original bug's
         // failure mode, not a recovery from it.
         //
-        // Reconnect explicitly instead. Because nothing is received, `wasZero`
-        // never resets `reconnectCount`, so its `> 100` cap genuinely bounds the
-        // retries, paced by WS_MIN_RECONNECTION_DELAY (1-3s), and `isInitialized`
-        // stays false so the socket is correctly reported unhealthy meanwhile.
+        // Reconnect explicitly instead: that is a BOUNDED automatic retry, which is
+        // the honest justification. It does NOT make health honest — a private
+        // socket that never initialized is filtered out of `base.ts`'s
+        // `initializedPrivateSockets`, and `privateHealthy` short-circuits true on
+        // an empty list, so this reads connected either way. Because nothing is
+        // received, `wasZero` never resets `reconnectCount`, so its `> 100` cap
+        // genuinely bounds the retries at WS_MIN_RECONNECTION_DELAY (1-3s) pacing.
+        //
+        // Tell the host chain this silence was OURS. A connect that exchanged no
+        // frames otherwise counts as a silent failure, and two of those advance
+        // `WsDirectFallback` onto the relay and then the athena passthrough for the
+        // socket's lifetime — putting every signer-less user on one shared egress
+        // IP against bybit's per-IP cap, which that class exists to avoid.
+        this.directFallback.disregardSilence();
         void this.reconnect();
         return;
       }

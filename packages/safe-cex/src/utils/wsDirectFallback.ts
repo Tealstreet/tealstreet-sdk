@@ -50,4 +50,21 @@ export class WsDirectFallback {
   onMessage = (): void => {
     this.messages++;
   };
+
+  /**
+   * Call when THIS connection produced no messages for a reason that is ours
+   * rather than the host's — the only case today is a private socket that never
+   * authenticated because the browser's remote signer was gone, and so
+   * deliberately sent nothing at all.
+   *
+   * Without this, that silence reads as "this egress path is broken": two such
+   * attempts advance the chain and a couple more stick the socket on the athena
+   * passthrough for its lifetime, putting every signer-less user on one shared
+   * IP against the venue's per-IP connection cap — the exact outcome the class
+   * comment says must never happen. The silence is evidence about our signer,
+   * not about the route.
+   */
+  disregardSilence = (): void => {
+    this.messages++;
+  };
 }

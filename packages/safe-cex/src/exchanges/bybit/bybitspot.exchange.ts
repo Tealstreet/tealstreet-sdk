@@ -1174,7 +1174,6 @@ export class BybitSpotExchange extends BaseExchange {
     this.retireCancelledOrders(cancelledRows);
   };
 
-
   mapOrder(o: Record<string, any>) {
     const stopOrderType = v(o, 'stopOrderType');
     const tpslMode = v(o, 'tpslMode');

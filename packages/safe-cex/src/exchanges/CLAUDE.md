@@ -521,8 +521,7 @@ Two related traps in the same area:
 - **This class of bug is hosted-mode-only**, so it does not reproduce in local
   web dev, where a real Worker holds the actual secret. Verify private-WS
   changes against exchange-server, not just `yarn dev`.
-- **`await` the auth call if `subscribe()` follows it in the same function —
-  and send the subscribe anyway if the auth failed.**
+- **`await` the auth call if `subscribe()` follows it in the same function.**
   `auth` is `async`, and on the LOCAL path that is harmless: an async body runs
   synchronously to its first suspension point, and the local path computes an
   HMAC with no `await` before its send, so the auth frame goes out first. Under a
@@ -576,7 +575,12 @@ Two related traps in the same area:
   signer failure modes, and that a disposed exchange never asks the signer.
   **This only applies where `subscribe()` is called straight after auth.**
   bitget, blofin, okx (private and business) and phemex all subscribe from their
-  login/auth RESPONSE handler and are unaffected. **apexomni had the same shape and is FIXED**
+  login/auth RESPONSE handler, so they are unaffected by the ORDERING bug — but
+  not by the rest of this entry: they still `ping()` from the open handler beside
+  an un-awaited `auth()`, so a pong sets `isInitialized` and a zero-topic socket
+  reports healthy there too, and ten sites across them still emit the
+  `Remote WS auth failed:` string that `auth_invalid` matches. Sweeping both is
+  worth doing and was deliberately left out of the bybit/apexomni change. **apexomni had the same shape and is FIXED**
   (`598a9553f4`): its `onOpen` is now `async` and awaits the login. Read
   `apexomni/CLAUDE.md` before touching it — `d1184f3d8e` reverted three bundled
   things after code-1005 churn and awaiting the signature was none of them, but
