@@ -222,6 +222,15 @@ describe('exchangeMetadata', () => {
       expect(bitmexTestnet.latencyDomain).toBe('testnet.bitmex.com');
     });
 
+    it('should keep BitMEX disabled after the exchange service closure', () => {
+      expect(exchangeMetadata.bitmex.enabled).toBe(false);
+      expect(exchangeMetadata.bitmex.enabledInDev).toBe(false);
+      expect(exchangeMetadata.bitmex.enableInPreview).toBe(false);
+      expect(exchangeMetadata.bitmextestnet.enabled).toBe(false);
+      expect(exchangeMetadata.bitmextestnet.enabledInDev).toBe(false);
+      expect(exchangeMetadata.bitmextestnet.enableInPreview).toBe(false);
+    });
+
     it('should keep lighter availability flags enabled', () => {
       const lighter = exchangeMetadata.lighter;
 

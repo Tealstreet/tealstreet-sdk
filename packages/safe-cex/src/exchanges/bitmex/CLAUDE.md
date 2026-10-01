@@ -28,6 +28,11 @@ Tealstreet encodes the official cutoff dates in `bitmex.exchange.ts`:
 - `BITMEX_REDUCE_ONLY_START_MS` = 2026-08-26 04:00 UTC. From this time until closure, `formatCreateOrder()` rejects non-`reduceOnly` order placement, and `updateOrder()` rejects amendments to non-reduce-only orders. Reduce-only close orders stay available so users can exit positions.
 - `BITMEX_EXCHANGE_CLOSURE_MS` = 2026-09-23 04:00 UTC. From this time, `start()` short-circuits into a loaded/empty closed state, `validateAccount()` returns a closure error, and trading write paths are blocked with an actionable message.
 
+`exchangeMetadata.ts` must keep both `bitmex` and `bitmextestnet` disabled
+(`enabled`, `enabledInDev`, and `enableInPreview` all `false`) so the closed
+venue is not offered in any add-account environment. Runtime closure guards stay
+in place for legacy or manually imported records that still reach the adapter.
+
 Do not remove these guards while the official shutdown schedule is still in effect. If BitMEX changes the dates or reopens service, update the constants, docs page (`apps/documentation/docs/connect/bitmex.mdx`), and the lifecycle regression tests together.
 
 ## API Documentation
