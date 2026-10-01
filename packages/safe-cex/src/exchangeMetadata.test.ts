@@ -386,16 +386,30 @@ describe('exchangeMetadata', () => {
     it('supports exactly the mobile-enabled exchange allow-list', () => {
       const mobileSupported = exchanges.filter((name) => exchangeMetadata[name].supportedOnMobile).sort();
 
-      expect(mobileSupported).toEqual(['bybit', 'hyperliquid', 'kraken', 'lighter', 'okx']);
+      expect(mobileSupported).toEqual([
+        'binance',
+        'binancepm',
+        'binancespot',
+        'bitget',
+        'blofin',
+        'bybit',
+        'bybitdemo',
+        'bybitinverse',
+        'bybitspot',
+        'hyperliquid',
+        'kraken',
+        'lighter',
+        'okx',
+      ]);
 
       mobileSupported.forEach((name) => {
         expect(isExchangeSupportedOnMobile(name), `${name}: helper should match metadata`).toBe(true);
       });
 
       [
-        'bybitdemo',
-        'bybitinverse',
-        'bybitspot',
+        'bitgetinverse',
+        'bitgetusdc',
+        'hyrotrader',
         'hyperliquidspot',
         'krakenspot',
         'lighter-robinhood',

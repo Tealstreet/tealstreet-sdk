@@ -465,6 +465,12 @@ the app should keep unsupported venues saved but inactive instead of constructin
 their exchange workers. Use `isExchangeSupportedOnMobile()` rather than direct
 truthiness checks so unknown legacy exchange names fail closed.
 
+The certified mobile set is locked by `exchangeMetadata.test.ts`: Binance
+(`binance`, `binancepm`, `binancespot`), Bitget, BloFin, Bybit (`bybit`,
+`bybitdemo`, `bybitspot`, `bybitinverse`), Hyperliquid, Kraken, Lighter, and
+OKX. Spread variants not in that list must pin `supportedOnMobile: false` so
+they do not inherit mobile availability accidentally.
+
 `supportsSpotToggle` drives `ExchangeAccountConfig.enableSpotMarkets` →
 `ExchangeOptions.enableSpotMarkets` (forwarded in `createExchangeFromAccount`
 only when the venue advertises the toggle). Default-off, and the exchange must
