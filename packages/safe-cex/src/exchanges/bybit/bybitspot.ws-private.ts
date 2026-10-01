@@ -54,7 +54,7 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
   };
 
   onOpen = () => {
-    this.sendReconnectSequence();
+    void 0;
   };
 
   sendReconnectSequence = async (_syncTime = false) => {

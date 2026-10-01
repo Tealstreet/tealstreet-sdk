@@ -198,16 +198,34 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
     }
   };
 
-  onOpen = () => {
+  onOpen = async () => {
     if (!this.isDisposed) {
-      // Restore pre-PR connection-setup order: auth → subscribe immediately → ping.
+      // Keep the pre-PR connection-setup order: auth → subscribe immediately → ping.
       // The PR's auth-watchdog + subscribe-after-ack gating caused the upstream proxy
       // to close the socket with code 1005 ("no status code received") shortly after
       // each connect. Pre-PR Apex called subscribe() unconditionally in onOpen and
       // worked reliably; whatever proxy expectation that satisfies is undocumented,
       // so we mirror the legacy sequence verbatim and rely on the WS heartbeat plus
       // periodic REST reconcile to catch missing live updates.
-      this.auth();
+      //
+      // `await` is NOT the ack-gating that `d1184f3d8e` reverted, and it does not
+      // reintroduce it. It waits on OUR signer, never on Apex. The local branch of
+      // `auth` computes an HMAC with no `await` before its send, so awaiting costs
+      // the direct path a single microtask and the login still precedes the
+      // subscribe in the same macrotask — whereas the reverted gating waited on a
+      // server ack for up to 5s. What it fixes is hosted mode, where the signature
+      // is a round trip to the paired browser: un-awaited, `subscribe()` reached the
+      // wire before the login and the private channels were never established.
+      try {
+        await this.auth();
+      } catch (error) {
+        // `remoteSigner.sign` THROWS (unavailable, sign timeout, failed send) rather
+        // than resolving `{ error }`. The sends below must still happen: skipping
+        // them leaves the socket OPEN having said nothing, and `base.ws.ts`
+        // `trackLastReceived` arms the staleness watchdog only on the FIRST inbound
+        // frame, so nothing would ever reconnect it.
+        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)), 'WS auth failed');
+      }
       this.lastConnectTime = virtualClock.getCurrentTimeMs();
       this.subscribe();
       this.ping();

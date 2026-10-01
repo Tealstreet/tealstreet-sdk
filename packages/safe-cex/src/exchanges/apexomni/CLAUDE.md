@@ -134,8 +134,8 @@ All endpoints are prefixed with the base URL (`https://omni.apex.exchange/api`):
 | `ACCOUNT`        | `/v3/account`                 | GET    | Fetch account data: positions, l2key, ethereumAddress, wallets                     |
 | `BALANCE`        | `/v3/account-balance`         | GET    | Fetch `totalEquityValue`, `availableBalance`, `initialMargin`, `maintenanceMargin` |
 | `OPEN_ORDERS`    | `/v3/open-orders`             | GET    | Fetch all open/untriggered orders                                                  |
-| `FILLS`          | `/v3/fills`                   | GET    | User fills history (primary for `fetchHistoricalFills`)                                 |
-| `HISTORY_ORDERS` | `/v3/history-orders`          | GET    | Filled-history fallback (`fetchHistoricalFills`)                                        |
+| `FILLS`          | `/v3/fills`                   | GET    | User fills history (primary for `fetchHistoricalFills`)                            |
+| `HISTORY_ORDERS` | `/v3/history-orders`          | GET    | Filled-history fallback (`fetchHistoricalFills`)                                   |
 | `CREATE_ORDER`   | `/v3/order`                   | POST   | Place a new order (form-urlencoded body with zkLink signature)                     |
 | `CANCEL_ORDER`   | `/v3/delete-order`            | POST   | Cancel a single order by ID (form-urlencoded)                                      |
 | `CANCEL_ORDERS`  | `/v3/delete-open-orders`      | POST   | Cancel all open orders for a symbol (form-urlencoded)                              |
@@ -233,12 +233,37 @@ Execution-history behavior (`fetchHistoricalFills`):
 **Connection flow**:
 
 1. Create WebSocket using direct Apex endpoint by default; use Tealstreet proxy only when `tealstreetProxy` is enabled. Note: `requiresCors: true` + `enforceWsTunnel: true` in `exchangeMetadata` forces `tealstreetProxy: true` for every Apex account via `createExchangeFromAccount.ts`, so production always hits the proxy URL.
-2. On open: `auth()` -> record `lastConnectTime` -> `subscribe()` -> `ping()`.
+2. On open: `await auth()` -> record `lastConnectTime` -> `subscribe()` -> `ping()`.
 3. If `ENABLE_RECONNECTING_WEBSOCKET`, call `fetchAndSetPrivateSnapshot()` on reconnect.
 
 **Subscribed channels**: `['ws_zk_accounts_v3', 'ws_user_v1', 'ws_notify_v1']`
 
 > **Caveat**: `ws_user_v1` and `ws_notify_v1` have no message handlers in our code, but they are kept in the subscribe args because dropping them empirically correlated with the upstream proxy closing the socket with code `1005` ("no status code received") shortly after each connect. Subscribing to channels we don't process is cheap and matches the production-tested legacy behavior. The auth payload's `topics` field was likewise removed for the same reason — our PR added it as a hint but the proxy did not tolerate it.
+
+> **`onOpen` is `async` and AWAITS `auth()` — this is not the ack-gating that
+> `d1184f3d8e` reverted, and it must not be "restored" to the un-awaited form.**
+> That revert undid three bundled things: the `topics` field, subscribe gated on
+> the server's login ACK behind a 5s watchdog, and the trimmed channel list.
+> Awaiting waits on OUR signer, never on Apex. The local HMAC branch of `auth`
+> reaches `sendWithLog` with no `await` in front of it, so on the direct path the
+> login still precedes the subscribe in the same macrotask, one microtask later —
+> whereas ack-gating waited on the wire for up to 5s. What it fixes is HOSTED
+> mode (exchange-server), where the signature is a round trip to the paired
+> browser: un-awaited, `subscribe()` reached the wire before the login and Apex
+> never established the private channels, so orders and fills stopped updating
+> while REST polling kept the UI looking healthy. Same defect class as bybit
+> inverse/spot — see `../CLAUDE.md` → "Remote-signer WS auth".
+>
+> `subscribe()` and `ping()` stay OUTSIDE the try: `remoteSigner.sign` throws
+> rather than resolving `{ error }`, and skipping the sends would leave the
+> socket OPEN having said nothing, which `base.ws.ts trackLastReceived` can never
+> recover because it arms the staleness watchdog only on the first inbound frame.
+>
+> Pinned by `../../__tests__/audit-regressions/apexomni.private-ws-auth-ordering.test.ts`,
+> which also fails if the three-channel list is trimmed or the `topics` field
+> comes back — so the 1005 fix is now gated rather than only documented.
+> **Unverified against a live Apex account** (no funded key on the sheet); a
+> hosted session capturing the login/subscribe exchange is what would confirm it.
 
 **Primary channel: `ws_zk_accounts_v3`** (`type: 'delta' | 'snapshot'`):
 
