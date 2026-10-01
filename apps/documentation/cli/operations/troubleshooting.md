@@ -87,6 +87,24 @@ tealstreet account add -n <name> -e <exchange> -k <key> -s <secret> --default
 Commands that do not need the venue — `alias`, `simulation`, `fatfinger`,
 `whitelist`, `symbol` — still run normally with a rejected key.
 
+## "HyroTrader simulator REST URL is not configured"
+
+This is not an API-key rejection. It means the standalone CLI does not
+know which HyroTrader simulator host to call yet.
+
+Set the Hyro simulator REST origin in the same shell that launches the
+CLI, then reconnect:
+
+```bash
+export NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL="https://<hyro-simulator-origin>"
+tealstreet interactive --account <hyro-account-name>
+```
+
+Use the origin only, not a `/v5/...` path. The CLI normally derives the
+public and private WebSocket URLs from that REST origin. If HyroTrader or
+Tealstreet gives you separate WebSocket hosts, set the optional overrides
+listed in [Config files → Exchange endpoint overrides](./config-files.md#exchange-endpoint-overrides).
+
 ## "Why is Bybit returning a 403 geo-block?"
 
 That error means the CLI reached Bybit directly from a restricted

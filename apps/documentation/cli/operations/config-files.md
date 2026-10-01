@@ -69,6 +69,32 @@ tealstreet`) or for keeping multiple identity configs on one machine.
 
 ---
 
+## Exchange endpoint overrides
+
+Most exchange URLs are built into the CLI through safe-cex. HyroTrader is
+different: its trial simulator endpoint is not stored in `config.json`, so
+the standalone CLI reads it from environment variables at process start:
+
+- `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL` — HyroTrader simulator
+  REST origin. Required for `hyrotrader` accounts.
+- `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL` — optional public
+  WebSocket URL. Defaults to REST origin + `/v5/public/linear`.
+- `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL` — optional private
+  WebSocket URL. Defaults to REST origin + `/v5/private`.
+
+Use the REST origin only, for example `https://example.hyrotrader.invalid`,
+not a `/v5/...` endpoint path. If the REST origin is missing, the CLI
+cannot connect and prints:
+
+```text
+HyroTrader simulator REST URL is not configured
+```
+
+These variables must be set in the shell that launches `tealstreet`, or
+persisted in your shell profile if you want them available every time.
+
+---
+
 ## Crash reporting
 
 Released binaries report crashes (uncaught exceptions and unhandled

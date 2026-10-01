@@ -92,6 +92,30 @@ exchange and the credential fields each one needs:
 tealstreet account exchanges
 ```
 
+### HyroTrader trial accounts
+
+HyroTrader trial accounts use Tealstreet's `hyrotrader` exchange adapter,
+but the standalone CLI needs the Hyro simulator REST origin in your shell
+environment before it can connect. Without it, connection fails with:
+
+```text
+HyroTrader simulator REST URL is not configured
+```
+
+Set the simulator origin, then add the account:
+
+```bash
+export NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL="https://<hyro-simulator-origin>"
+
+tealstreet account add -n hyro-trial -e hyrotrader -k <KEY> -s <SECRET> --default
+tealstreet interactive --account hyro-trial
+```
+
+Use the origin only, not a `/v5/...` path. Public and private WebSocket
+URLs are normally derived from that REST origin. See
+[Config files → Exchange endpoint overrides](./operations/config-files.md#exchange-endpoint-overrides)
+for the optional WebSocket overrides.
+
 ### Restricted regions and Bybit 403s
 
 If a direct Bybit connection returns a 403 geo-restriction error, the CLI
