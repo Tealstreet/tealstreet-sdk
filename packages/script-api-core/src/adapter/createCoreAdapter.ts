@@ -381,8 +381,11 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     },
     closePosition: async (opts: Omit<ClosePositionOpts, 'account'>, account) => {
       guardWrites();
-      const exchange = requireExchange(account);
-      const placeOrder = requireMethod(exchange, 'placeOrder', account);
+      // Fail fast on a disconnected account, but do NOT reuse this handle for
+      // the writes: `closePosition` awaits once per leg, and a reconnect in
+      // that window disposes the exchange and builds a new one under the same
+      // name, so a hedge-mode second leg would be sent to a dead object.
+      requireExchange(account);
       const summary = `closePosition ${opts.symbol}${opts.side ? ` ${opts.side}` : ''}`;
       const orderIds: string[] = [];
       try {
@@ -401,6 +404,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           if (!Number.isFinite(closeAmount) || closeAmount <= 0) {
             throw new ScriptValidationError(`closePosition: non-positive size for '${opts.symbol}'`);
           }
+          const placeOrder = requireMethod(requireExchange(account), 'placeOrder', account);
           const ids = await placeOrder({
             symbol: opts.symbol,
             side: position.side === 'long' ? 'sell' : 'buy',

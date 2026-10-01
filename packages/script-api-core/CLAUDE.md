@@ -72,6 +72,20 @@ carve-out and applies the reduce-only clamp. A CLI script that used to send an
 unrounded size below the lot step is now refused locally instead of by the
 venue.
 
+### `getExchange` is resolved per write, never captured
+
+`createCoreAdapter` calls `requireExchange(account)` inside each write rather
+than once per method, and `closePosition` re-resolves **per leg** because it
+awaits once per position. On web, `host.getExchange` returns the live
+`Exchange` from `exchangeAccountController`, which DISPOSES and REPLACES that
+object on every reconnect — so a hedge-mode close holding one handle sends its
+second leg to a dead exchange and the short side silently stays open. The
+pre-flight `requireExchange(account)` at the top of `closePosition` exists only
+to fail fast on a disconnected account; it is deliberately not the handle the
+writes use. `createCoreAdapter.test.ts` pins this by handing back a fresh
+`placeOrder` from every `getExchange` call and asserting the two legs used
+different ones.
+
 ### The policy is `order/prepareOrder.ts`, NOT the adapter closure
 
 `toSafeCexPlaceOrder` and `clampReduceOnly` used to live inside

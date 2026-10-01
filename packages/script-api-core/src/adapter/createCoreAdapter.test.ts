@@ -347,6 +347,41 @@ describe('createCoreAdapter', () => {
     expect(writes.at(-1)).toMatchObject({ method: 'closePosition', ok: false, orderIds: ['id-1'] });
   });
 
+  // A reconnect disposes the account's exchange and builds a new one under the
+  // same name. `closePosition` awaits once per leg, so a hedge-mode close must
+  // re-resolve: leg 2 sent to the object leg 1 was placed on is sent to a dead
+  // exchange, and the short side silently stays open.
+  it('resolves the exchange per leg, so a replacement mid-close reaches the new one', async () => {
+    // Every `getExchange` hands back a fresh object, the way the controller does
+    // after `fullyCleanupAccount` disposes one and `registerAccount` builds its
+    // replacement. Asserting on WHICH `placeOrder` each leg used — rather than
+    // on how many times `getExchange` was called — keeps this about the
+    // invariant and not about where the pre-flight check happens to sit.
+    const used: Array<ReturnType<typeof vi.fn>> = [];
+    const positions = [position({ side: 'long' }), position({ side: 'short', contracts: 1 })];
+    const { host } = fakeHost({
+      getExchange: () => {
+        const placeOrder = vi.fn(async () => [`id-${used.length + 1}`]);
+        return ({
+          name: 'binance',
+          placeOrder: (opts: never) => {
+            used.push(placeOrder);
+            return placeOrder(opts);
+          },
+          store: { positions },
+        }) as never;
+      },
+      getStore: () => ({ positions, markets: [market()] }) as never,
+    });
+
+    const result = await createCoreAdapter(host).closePosition({ symbol: 'BTCUSDT' } as never, 'main');
+
+    expect(used).toHaveLength(2);
+    // A captured handle would have sent both legs through one `placeOrder`.
+    expect(used[0]).not.toBe(used[1]);
+    expect(result.orderIds).toHaveLength(2);
+  });
+
   it('sizes a bare closePosition in NATIVE contracts, not base', async () => {
     // `position.contracts` is BASE. The fallback used to hand it straight to
     // `placeOrder`, whose `amount` is NATIVE — so on an OKX-shaped market with
