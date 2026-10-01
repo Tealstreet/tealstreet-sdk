@@ -94,7 +94,7 @@ Source: `TradingBaseCommand.ts:282-301`.
 
 ### Inverse contracts
 
-For inverse markets (BitMEX XBTUSD, Bybit inverse, Bitget inverse, …) sizing
+For inverse markets (Bybit inverse, Bitget inverse, …) sizing
 uses **notional ÷ contractSize** instead of notional ÷ price. `contractSize`
 defaults to 1 and should be populated by the exchange adapter for venues
 with non-1 contract sizes (Binance Coin-M, Deribit, …).
