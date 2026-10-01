@@ -33,9 +33,30 @@ const asWorker = <T>(fn: () => T): T => {
   }
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('BaseExchange swallowed-HTTP-failure correlation', () => {
+  test('suppresses console noise when requested but still emits the exchange error', () => {
+    const exchange = makeExchange();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const consoleTrace = vi.spyOn(console, 'trace').mockImplementation(() => undefined);
+    const emitted: any[] = [];
+    exchange.on('error', (message: string, meta: any) => emitted.push({ message, meta }));
+
+    exchange.emitAndLogError('Expected venue rejection', undefined, { suppressConsoleLog: true });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleTrace).not.toHaveBeenCalled();
+    expect(emitted[0]).toMatchObject({
+      message: 'Exchange Error: Expected venue rejection',
+      meta: { suppressConsoleLog: true },
+    });
+    exchange.dispose();
+  });
+
   test('spreads the correlation into the emitted Sentry tags', () => {
     const exchange = makeExchange();
     const tags: any[] = [];

@@ -1466,14 +1466,18 @@ export class BaseExchange implements Exchange {
       return;
     }
 
-    console.error('exchange error', err);
-    console.trace();
+    const structuredExtraData =
+      extraData && typeof extraData === 'object' && !Array.isArray(extraData) ? extraData : {};
+    const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
+
+    if (!suppressConsoleLog) {
+      console.error('exchange error', err);
+      console.trace();
+    }
 
     let formattedMsg;
     let errorObject: Error | undefined;
     let sentryContext: any = {};
-    const structuredExtraData =
-      extraData && typeof extraData === 'object' && !Array.isArray(extraData) ? extraData : {};
     const sentryTags =
       structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
         ? structuredExtraData.sentryTags
@@ -1483,7 +1487,9 @@ export class BaseExchange implements Exchange {
         ? structuredExtraData.sentryExtra
         : {};
     const legacyExtraData = Object.fromEntries(
-      Object.entries(structuredExtraData).filter(([key]) => key !== 'sentryTags' && key !== 'sentryExtra'),
+      Object.entries(structuredExtraData).filter(
+        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog',
+      ),
     );
 
     // Handle undefined, null, or other falsy values
@@ -1585,6 +1591,7 @@ export class BaseExchange implements Exchange {
         },
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
+        suppressConsoleLog,
       });
     } else {
       // In main thread: send directly to Sentry for better stack trace
@@ -1614,6 +1621,7 @@ export class BaseExchange implements Exchange {
       const enhancedError = typeof err === 'object' && err !== null ? (err as EnhancedAxiosError) : null;
       this.emitter.emit('error', formattedMsg, {
         enhancedContext: enhancedError?.context,
+        suppressConsoleLog,
       });
     }
   }

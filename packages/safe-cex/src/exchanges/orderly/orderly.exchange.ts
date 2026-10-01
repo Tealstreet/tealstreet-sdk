@@ -74,6 +74,18 @@ const isTransientOrderlyValidationError = (err: any): boolean => {
   return false; // 4xx (401/403/…) — credentials or request rejected
 };
 
+const EXPECTED_ORDERLY_ORDER_REJECTION_PATTERNS = [
+  /The order value should be greater or equal to [\d.]+/i,
+  /The margin will be insufficient after/i,
+  /The TP_SL side should be opposite to position side/i,
+];
+
+const isExpectedOrderlyOrderRejection = (message?: string): boolean =>
+  typeof message === 'string' && EXPECTED_ORDERLY_ORDER_REJECTION_PATTERNS.some((pattern) => pattern.test(message));
+
+const getOrderlyOrderErrorLogOptions = (message?: string): Record<string, boolean> | undefined =>
+  isExpectedOrderlyOrderRejection(message) ? { suppressConsoleLog: true } : undefined;
+
 export class OrderlyExchange extends BaseExchange {
   xhr: Axios;
 
@@ -1083,7 +1095,8 @@ export class OrderlyExchange extends BaseExchange {
 
       return orderIds;
     } catch (err: any) {
-      this.emitAndLogError(err, err?.response?.data?.message || err?.message);
+      const message = err?.response?.data?.message || err?.message;
+      this.emitAndLogError(err, message, getOrderlyOrderErrorLogOptions(message));
       throw err;
     }
   };
@@ -1210,7 +1223,8 @@ export class OrderlyExchange extends BaseExchange {
 
       return data.rows.map((r) => String(r.orderId));
     } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.message || err?.message);
+      const message = err?.response?.data?.message || err?.message;
+      this.emitAndLogError(message, undefined, getOrderlyOrderErrorLogOptions(message));
       return [];
     }
   };
