@@ -61,7 +61,24 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
     if (!this.isDisposed) {
       await virtualClock.syncBybitClientServerTime();
       await sleep(25);
-      await this.auth();
+      try {
+        await this.auth();
+      } catch (error) {
+        // `remoteSigner.sign` THROWS — signer unavailable, the 15s sign timeout,
+        // a failed send, or `markUnavailable` rejecting everything pending — it
+        // does NOT resolve `{ error }`, which is the only case `auth` handles.
+        // `onOpen` does not await us, so letting this escape is an unhandled
+        // rejection, and skipping the two sends below is worse still: bybit sends
+        // nothing on an idle unsubscribed socket, `trackLastReceived` arms the
+        // staleness watchdog only on the FIRST inbound frame, and the socket then
+        // sits OPEN and unwatched forever.
+        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)), 'WS auth failed');
+      }
+      // Unconditional, even when auth failed. Bybit answers an unauthenticated
+      // subscribe with `{"success":false,"ret_msg":"Request not authorized",
+      // "op":"subscribe"}` (captured live 2026-10-01), and that inbound frame is
+      // what arms the watchdog that eventually reconnects us. Sending nothing is
+      // the one outcome nothing recovers from.
       this.subscribe();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {

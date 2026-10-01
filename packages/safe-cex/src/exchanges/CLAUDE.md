@@ -521,22 +521,50 @@ Two related traps in the same area:
 - **This class of bug is hosted-mode-only**, so it does not reproduce in local
   web dev, where a real Worker holds the actual secret. Verify private-WS
   changes against exchange-server, not just `yarn dev`.
-- **`await` the auth call if `subscribe()` follows it in the same function.**
+- **`await` the auth call if `subscribe()` follows it in the same function —
+  and send the subscribe anyway if the auth failed.**
   `auth` is `async`, and on the LOCAL path that is harmless: an async body runs
   synchronously to its first suspension point, and the local path computes an
   HMAC with no `await` before its send, so the auth frame goes out first. Under a
   remote signer the FIRST statement is an await, so an un-awaited `this.auth()`
   yields and `subscribe()` reaches the wire on an unauthenticated socket. The
-  venue silently refuses the private topics and the order/position feeds never
-  start — orders stop updating while REST polling keeps the UI looking alive.
+  venue refuses the private topics and the order/position feeds never start —
+  orders stop updating while REST polling keeps the UI looking alive.
   `b7b6822f95` fixed bybit linear and missed `bybitinverse`/`bybitspot`, which
-  is why bybit USDT worked in hosted mode and BTCUSD did not.
-  Gated by `bybit/bybit.wsAuthBeforeSubscribe.test.ts`.
+  is why bybit USDT worked in hosted mode and BTCUSD did not. Measured on
+  bybit's own wire, 2026-10-01: a `subscribe` sent before any `auth` is answered
+  `{"success":false,"ret_msg":"Request not authorized","op":"subscribe"}`, and
+  the same subscribe after a successful auth is answered `success:true`.
+- **The refusal is LOGGED, not silent** — `onMessage`'s `json.success === false`
+  branch emits it — but nothing retries, because the auth-retry arm is gated on
+  `json.op === 'auth'`. So the symptom is a stuck orders table plus a
+  `[WS]subscribe:Request not authorized` line, which is the string to grep for.
+- **`subscribe()` and `ping()` must stay UNCONDITIONAL, outside the try.** This
+  is the half that is easy to get wrong in the other direction, and it was.
+  `RemoteSigner.sign` **throws** — signer unavailable, the 15s `SIGN_TIMEOUT_MS`,
+  a failed send, `markUnavailable` rejecting everything pending — rather than
+  resolving `{ error }`, which is the only case `auth` itself handles. Skipping
+  the sends on a rejection leaves the socket `OPEN` with nothing sent and nothing
+  received, and **nothing recovers it**: the venue says nothing on an idle
+  unsubscribed socket, and `base.ws.ts trackLastReceived` arms the staleness
+  watchdog (and sets `isInitialized`) only inside its `wasZero` branch — on the
+  FIRST inbound frame. Sending the doomed subscribe anyway draws the refusal
+  above, and that frame is what arms the watchdog that reconnects. Catch, name
+  the error, and send: an escaping rejection is also unhandled, because the
+  `onOpen` caller does not await.
+  Gated by `__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`,
+  which covers the ordering, the exact subscribe args, the local-HMAC path, both
+  signer failure modes, and that a disposed exchange never asks the signer.
   **This only applies where `subscribe()` is called straight after auth.**
-  bitget, blofin and okx subscribe from their login RESPONSE handler and are
-  unaffected. **apexomni looks affected and must stay as it is** — its `onOpen`
-  is not `async`, and its comment records that auth-watchdog/subscribe-after-ack
-  gating made the upstream proxy close the socket with code 1005.
+  bitget, blofin, okx (private and business) and phemex all subscribe from their
+  login/auth RESPONSE handler and are unaffected. **apexomni has the same shape
+  and is SUSPECTED broken in hosted mode** — its `onOpen` is not `async`, so the
+  fix is not a one-liner there, and `d1184f3d8e` records that the upstream proxy
+  closed the socket with code 1005 when subscribe was gated. That revert bundled
+  three changes and none of them was awaiting the signature, so it does not
+  actually cover this case — but Apex's own tolerance for a pre-login subscribe
+  is unmeasured and there is no funded Apex test key. Do not change it blind; a
+  hosted Apex session capturing the login/subscribe exchange settles it.
 
 ### Public endpoints MUST be tagged so hosted mode skips the signing round trip
 

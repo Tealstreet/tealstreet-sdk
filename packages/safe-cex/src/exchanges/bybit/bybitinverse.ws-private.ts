@@ -3,18 +3,18 @@ import type { BybitInverseExchange } from './bybitinverse.exchange';
 import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 
-import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { OrderStatus, Position, Writable } from '../../types';
-import { v } from '../../utils/get-key';
-import { virtualClock } from '../../utils/virtualClock';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { isWsRelayEnabled } from '../../utils/wsRelay';
-import { BaseWebSocket } from '../base.ws';
+import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { OrderStatus, Position, Writable } from '../../types';
 import { resolveBybitExecution } from './bybit.fill-event';
+import { v } from '../../utils/get-key';
+import { virtualClock } from '../../utils/virtualClock';
+import { BaseWebSocket } from '../base.ws';
 import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybit.types';
 
@@ -36,10 +36,7 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
       );
       if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit(
-            'grafana-info',
-            `Using tealstreet bybit private inverse ${baseUrl === route.relay ? 'relay' : 'proxy'}`,
-          );
+          this.parent.emitter.emit('grafana-info', `Using tealstreet bybit private inverse ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
         } catch (_e) {}
       }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
@@ -64,7 +61,24 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
     if (!this.isDisposed) {
       await virtualClock.syncBybitClientServerTime();
       await sleep(25);
-      await this.auth();
+      try {
+        await this.auth();
+      } catch (error) {
+        // `remoteSigner.sign` THROWS — signer unavailable, the 15s sign timeout,
+        // a failed send, or `markUnavailable` rejecting everything pending — it
+        // does NOT resolve `{ error }`, which is the only case `auth` handles.
+        // `onOpen` does not await us, so letting this escape is an unhandled
+        // rejection, and skipping the two sends below is worse still: bybit sends
+        // nothing on an idle unsubscribed socket, `trackLastReceived` arms the
+        // staleness watchdog only on the FIRST inbound frame, and the socket then
+        // sits OPEN and unwatched forever.
+        this.emitAndLogError(error instanceof Error ? error : new Error(String(error)), 'WS auth failed');
+      }
+      // Unconditional, even when auth failed. Bybit answers an unauthenticated
+      // subscribe with `{"success":false,"ret_msg":"Request not authorized",
+      // "op":"subscribe"}` (captured live 2026-10-01), and that inbound frame is
+      // what arms the watchdog that eventually reconnects us. Sending nothing is
+      // the one outcome nothing recovers from.
       this.subscribe();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -190,19 +204,11 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
   };
 
   handlePositionTopic = (data: Array<Record<string, any>>) => {
-    // Bybit's v5 private stream is ONE socket per account and its `position`
-    // topic carries every category the account holds, while `fetchPositions`
-    // here is scoped to `category: 'inverse'`. So filter on this exchange's own
-    // market list, or a USDT linear position arrives in the inverse store.
-    const positions: Position[] = data
-      .filter((p) => this.parent.store.marketsBySymbol[p.symbol])
-      .map((p) => this.parent.mapPosition(p));
-    if (positions.length === 0) return;
-    // `updatePositions` only ever rewrites an entry that is already in the
-    // store and returns early when the store is empty, so a position opened
-    // while the tab was up never appeared until the next REST poll.
-    this.store.addOrUpdatePositions(positions);
-    this.parent.syncBalanceUpnlFromPositions();
+    // Arrow wrapper instead of `.bind(this.parent)` — bind allocates a
+    // fresh function object per call.
+    const positions: Position[] = data.map((p) => this.parent.mapPosition(p));
+    const updates: Array<[Position, Position]> = positions.map((p) => [p, p]);
+    this.store.updatePositions(updates);
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();
   };
 
