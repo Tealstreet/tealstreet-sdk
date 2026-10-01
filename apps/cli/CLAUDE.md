@@ -179,11 +179,11 @@ Load-bearing details:
   `process.exit(1)` drops the crash we most want to see.
 - **This binary runs on user machines against their own accounts**, so the
   shared restrictive Sentry `dataCollection` baseline is used, `server_name` is
-  deleted, and the HTTP/fetch integrations are filtered out (they would attach
-  exchange request URLs). `beforeSend`/`beforeBreadcrumb` redact key-shaped
-  values (32+ chars of unbroken base64/hex) and any sensitive-looking key name.
-  Don't relax these to "get better context" — the context is exchange API
-  credentials.
+  deleted, and the HTTP/fetch integrations are filtered out (`Http` plus
+  `NodeFetch` in Sentry v10 / `Fetch` in v11; they would attach exchange request
+  URLs). `beforeSend`/`beforeBreadcrumb` redact key-shaped values (32+ chars of
+  unbroken base64/hex) and any sensitive-looking key name. Don't relax these to
+  "get better context" — the context is exchange API credentials.
 - Uses **`@sentry/bun`**, not `@sentry/node`. The runtime is Bun and the output
   is a `bun build --compile` binary; `@sentry/node`'s OpenTelemetry
   auto-instrumentation is not reliable there.

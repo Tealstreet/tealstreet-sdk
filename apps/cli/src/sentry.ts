@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/bun';
 // live here; two Bun services then needed the same one, and a second copy of a
 // redaction rule is worse than none because it still looks like protection.
 import { RESTRICTIVE_SENTRY_DATA_COLLECTION } from '@tealstreet/service-telemetry/src/dataCollection';
+import { OUTGOING_REQUEST_BREADCRUMB_INTEGRATIONS } from '@tealstreet/service-telemetry/src/integrations';
 import { scrub, scrubString } from '@tealstreet/service-telemetry/src/scrub';
 
 const DSN = 'https://dc80fdcd175badb5f3da861273c46f93@o815347.ingest.us.sentry.io/4511874153709568';
@@ -55,7 +56,7 @@ export function initCliSentry(): void {
     serverName: undefined,
     tracesSampleRate: 0,
     integrations: (defaults) =>
-      defaults.filter((integration) => integration.name !== 'Http' && integration.name !== 'NodeFetch'),
+      defaults.filter((integration) => !OUTGOING_REQUEST_BREADCRUMB_INTEGRATIONS.has(integration.name)),
 
     beforeSend(event) {
       if (!shouldSend(eventKey(event))) return null;
