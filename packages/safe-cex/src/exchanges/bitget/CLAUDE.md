@@ -126,6 +126,8 @@ signature = base64(HMAC-SHA256(secret, toSign))
 
 The `toJsonString()` helper (`bitget.api.ts:92-105`) strips leading underscores from JSON keys (keys starting with `_` have the underscore removed in the serialized output). The `$` character is also stripped from symbol parameters before signing and sending (`bitget.api.ts:47,56`).
 
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `auth` emits `Remote WS signing unavailable: …`, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
+
 ### WebSocket Authentication (`bitget.ws-private.ts:536-590`)
 
 ```
@@ -214,32 +216,32 @@ below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
 
 ### Order Management
 
-| Constant                    | Path                                      | Usage                                              |
-| --------------------------- | ----------------------------------------- | -------------------------------------------------- |
-| `PLACE_ORDER`               | `/api/v2/mix/order/place-order`           | Place single order (not used; batch is preferred)  |
-| `BATCH_ORDERS`              | `/api/v2/mix/order/batch-place-order`     | Place batch orders (up to 50 per symbol)           |
-| `UPDATE_ORDER`              | `/api/v2/mix/order/modify-order`          | Modify a normal order                              |
-| `ORDERS`                    | `/api/v2/mix/order/orders-pending`        | Fetch pending normal orders (paginated, limit 200) |
-| `ORDER_HISTORY`             | `/api/v2/mix/order/orders-history`        | Fetch historical filled orders                     |
-| `CANCEL_ORDERS`             | `/api/v2/mix/order/batch-cancel-orders`   | Batch cancel normal orders                         |
-| `CANCEL_ALL_ORDERS`         | `/api/v2/mix/order/cancel-all-orders`     | Cancel all orders                                  |
-| `UTA_PLACE_ORDER`           | `/api/v3/trade/place-order`               | UTA normal market/limit order placement            |
-| `UTA_PLACE_STRATEGY_ORDER`  | `/api/v3/trade/place-strategy-order`      | UTA standalone TP/SL strategy placement            |
-| `UTA_CANCEL_ORDER`          | `/api/v3/trade/cancel-order`              | UTA normal order cancellation                      |
-| `UTA_CANCEL_STRATEGY_ORDER` | `/api/v3/trade/cancel-strategy-order`     | UTA standalone strategy order cancellation         |
-| `UTA_CANCEL_BATCH`          | `/api/v3/trade/cancel-batch`              | UTA batch cancellation constant, not preferred yet |
-| `UTA_MODIFY_ORDER`          | `/api/v3/trade/modify-order`              | UTA modify-order constant, not preferred yet       |
+| Constant                    | Path                                    | Usage                                              |
+| --------------------------- | --------------------------------------- | -------------------------------------------------- |
+| `PLACE_ORDER`               | `/api/v2/mix/order/place-order`         | Place single order (not used; batch is preferred)  |
+| `BATCH_ORDERS`              | `/api/v2/mix/order/batch-place-order`   | Place batch orders (up to 50 per symbol)           |
+| `UPDATE_ORDER`              | `/api/v2/mix/order/modify-order`        | Modify a normal order                              |
+| `ORDERS`                    | `/api/v2/mix/order/orders-pending`      | Fetch pending normal orders (paginated, limit 200) |
+| `ORDER_HISTORY`             | `/api/v2/mix/order/orders-history`      | Fetch historical filled orders                     |
+| `CANCEL_ORDERS`             | `/api/v2/mix/order/batch-cancel-orders` | Batch cancel normal orders                         |
+| `CANCEL_ALL_ORDERS`         | `/api/v2/mix/order/cancel-all-orders`   | Cancel all orders                                  |
+| `UTA_PLACE_ORDER`           | `/api/v3/trade/place-order`             | UTA normal market/limit order placement            |
+| `UTA_PLACE_STRATEGY_ORDER`  | `/api/v3/trade/place-strategy-order`    | UTA standalone TP/SL strategy placement            |
+| `UTA_CANCEL_ORDER`          | `/api/v3/trade/cancel-order`            | UTA normal order cancellation                      |
+| `UTA_CANCEL_STRATEGY_ORDER` | `/api/v3/trade/cancel-strategy-order`   | UTA standalone strategy order cancellation         |
+| `UTA_CANCEL_BATCH`          | `/api/v3/trade/cancel-batch`            | UTA batch cancellation constant, not preferred yet |
+| `UTA_MODIFY_ORDER`          | `/api/v3/trade/modify-order`            | UTA modify-order constant, not preferred yet       |
 
 ### Algo/Stop Orders
 
-| Constant                    | Path                                       | Usage                      |
-| --------------------------- | ------------------------------------------ | -------------------------- |
-| `PLACE_ALGO_ORDER`          | `/api/v2/mix/order/place-tpsl-order`       | Place TP/SL algo order     |
-| `UPDATE_ALGO_ORDER`         | `/api/v2/mix/order/modify-tpsl-order`      | Modify TP/SL algo order    |
-| `ALGO_ORDERS`               | `/api/v2/mix/order/orders-plan-pending`    | Fetch pending algo orders  |
-| `UTA_STRATEGY_ORDERS`       | `/api/v3/trade/unfilled-strategy-orders`   | UTA standalone TP/SL fetch |
-| `CANCEL_ALGO_ORDER`         | `/api/v2/mix/order/cancel-plan-order`      | Cancel an algo order       |
-| `PLACE_TRAILING_STOP_ORDER` | `/api/v2/mix/order/place-plan-order`       | Place trailing stop order  |
+| Constant                    | Path                                     | Usage                      |
+| --------------------------- | ---------------------------------------- | -------------------------- |
+| `PLACE_ALGO_ORDER`          | `/api/v2/mix/order/place-tpsl-order`     | Place TP/SL algo order     |
+| `UPDATE_ALGO_ORDER`         | `/api/v2/mix/order/modify-tpsl-order`    | Modify TP/SL algo order    |
+| `ALGO_ORDERS`               | `/api/v2/mix/order/orders-plan-pending`  | Fetch pending algo orders  |
+| `UTA_STRATEGY_ORDERS`       | `/api/v3/trade/unfilled-strategy-orders` | UTA standalone TP/SL fetch |
+| `CANCEL_ALGO_ORDER`         | `/api/v2/mix/order/cancel-plan-order`    | Cancel an algo order       |
+| `PLACE_TRAILING_STOP_ORDER` | `/api/v2/mix/order/place-plan-order`     | Place trailing stop order  |
 
 ### Account Settings
 

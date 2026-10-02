@@ -7,8 +7,8 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { virtualClock } from '../../utils/virtualClock';
+import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
 import { OKXPrivateWebsocket } from './okx.ws-private';
 
@@ -44,7 +44,10 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
       );
       if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', `Using tealstreet okx business ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
+          this.parent.emitter.emit(
+            'grafana-info',
+            `Using tealstreet okx business ${baseUrl === route.relay ? 'relay' : 'proxy'}`,
+          );
         } catch (_e) {}
       }
       this.ws = this.createWebsocket(baseUrl);
@@ -88,7 +91,13 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
       });
 
       if (result.error) {
-        this.emitAndLogError(`Remote WS auth failed: ${result.error}`);
+        // NOT "auth failed": `health/errorPatterns.ts` matches that literal under
+        // `auth_invalid`, which red-toasts "API key rejected" and makes
+        // `noteTerminalExchangeFailure` suppress automatic account reloads for five
+        // minutes — the very reload that would re-pair the browser signer. A
+        // backgrounded tab or a 15s signer timeout must not look like a bad key.
+        // Mirrors the bybit fix in `bybit/bybit.ws-private.ts` → auth.
+        this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
         return;
       }
 

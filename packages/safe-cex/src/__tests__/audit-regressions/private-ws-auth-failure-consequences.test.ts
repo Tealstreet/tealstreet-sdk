@@ -72,8 +72,8 @@ describe('a failed private WS auth does not escalate the egress chain', () => {
 describe('a signer failure is not reported as a rejected API key', () => {
   // `processMessage` returns the ErrorCategory directly (or null), and the error
   // path is what the socket takes — `emitAndLogError`, not a plain log.
-  const classify = (message: string) => {
-    const monitor = new ExchangeHealthMonitor('bybit');
+  const classify = (exchangeName: string, message: string) => {
+    const monitor = new ExchangeHealthMonitor(exchangeName);
     try {
       return monitor.processMessage(message, true);
     } finally {
@@ -83,10 +83,17 @@ describe('a signer failure is not reported as a rejected API key', () => {
 
   const TERMINAL = ['auth_invalid', 'auth_expired', 'auth_permissions'];
 
+  // Every venue whose private WS asks a remote signer. bybit is the template;
+  // bitget/blofin/okx/phemex were swept to match, and `errorPatterns.ts`'s
+  // `EXCHANGE_SPECIFIC_PATTERNS` cannot shadow this default without being
+  // caught here.
+  const VENUES = ['bybit', 'bitget', 'blofin', 'okx', 'phemex'];
+
   // The control FIRST: this is the wording the fix removed, and it must still
-  // classify — otherwise every assertion below passes for the wrong reason.
-  it('classifies the old wording as a terminal auth failure', () => {
-    expect(TERMINAL).toContain(classify('WS auth failed'));
+  // classify under every venue — otherwise the assertions below pass for the
+  // wrong reason.
+  it.each(VENUES)('classifies the old wording as a terminal auth failure under %s', (exchange) => {
+    expect(TERMINAL).toContain(classify(exchange, 'WS auth failed'));
   });
 
   // The strings the sockets actually emit on the two signer failure modes.
@@ -98,7 +105,9 @@ describe('a signer failure is not reported as a rejected API key', () => {
     'Failed to send signing request',
   ];
 
-  it.each(EMITTED)('does not classify %s as a terminal auth failure', (message) => {
-    expect(TERMINAL).not.toContain(classify(message));
+  const CASES = VENUES.flatMap((exchange) => EMITTED.map((message) => ({ exchange, message })));
+
+  it.each(CASES)('does not classify "$message" as a terminal auth failure under $exchange', ({ exchange, message }) => {
+    expect(TERMINAL).not.toContain(classify(exchange, message));
   });
 });

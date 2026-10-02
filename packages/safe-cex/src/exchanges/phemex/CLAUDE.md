@@ -50,6 +50,8 @@ USDT `/g-accounts/accountPositions` response. A malformed success payload with
 no user ID fails with an explicit error instead of returning a fabricated ID or
 throwing from nested destructuring.
 
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `phemex.ws-private.ts auth` emits `Remote WS signing unavailable: …`, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`. The separate wrong-key emit (`'Phemex websocket error - wrong api key or secret'`, on `id === 999 && error`) is the real auth-failure path and is left as is.
+
 ### WebSocket Authentication (`phemex.ws-private.ts`)
 
 1. Compute expiry: same as REST (`(currentTime + 60000) / 1000`)
@@ -126,7 +128,7 @@ All endpoints are defined in `ENDPOINTS` constant in `phemex.types.ts`:
 | `SET_LEVERAGE`          | `/g-positions/leverage`             | **PUT** | Set leverage for a symbol                                                |
 | `SET_LEVERAGE_CONTRACT` | `/positions/leverage`               | **PUT** | Set leverage (contract endpoint, unused)                                 |
 | `SET_POSITION_MODE`     | `/g-positions/switch-pos-mode-sync` | **PUT** | Switch between Hedged/OneWay position mode                               |
-| `USER_TRADES`           | `/exchange/order/v2/tradingList`    | GET     | User execution history (primary for `fetchHistoricalFills`)                   |
+| `USER_TRADES`           | `/exchange/order/v2/tradingList`    | GET     | User execution history (primary for `fetchHistoricalFills`)              |
 | `USER_TRADES_LEGACY`    | `/exchange/order/trade`             | GET     | Legacy fallback execution history endpoint                               |
 | `KLINE`                 | `/exchange/public/md/v2/kline/list` | GET     | Fetch OHLCV candlestick data                                             |
 | `ORDERBOOK`             | `/md/v2/fullbook`                   | GET     | Fetch full orderbook snapshot (params: `symbol`, `limit`)                |

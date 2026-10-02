@@ -3,6 +3,18 @@
  *
  * Categories detect common exchange issues from error/log messages.
  * Exchanges can override defaults by providing exchange-specific patterns.
+ *
+ * `auth_invalid` is deliberately NARROW on the signer-failure dimension: it
+ * matches "auth failed" and friends because a venue-sent credential rejection
+ * reads that way, but transient browser-signer failures must NOT match it —
+ * the web controller treats `auth_invalid` as terminal and suppresses
+ * automatic account reloads for five minutes (`noteTerminalExchangeFailure`),
+ * which is the very reload a signer-less tab needs to re-pair. Every
+ * `<venue>.ws-private.ts` therefore emits `Remote WS signing unavailable:` on
+ * the `remoteSigner.sign` failure branch rather than `Remote WS auth failed:`
+ * (the former string is explicitly covered by the `private-ws-auth-failure-
+ * consequences.test.ts` guard). Do NOT widen `auth_invalid` here as a fix for
+ * a misclassified signer failure — fix the emit site instead.
  */
 
 export type ErrorCategory =

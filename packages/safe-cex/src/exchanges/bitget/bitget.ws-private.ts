@@ -1,18 +1,17 @@
 import type { Position } from '../../types';
 import type { BitgetExchange } from './bitget.exchange';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 
 import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { LogSeverity, OrderStatus, OrderType } from '../../types';
 import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_PRIVATE_UTA_URL, BASE_WS_PRIVATE_URL, ORDER_STATUS } from './bitget.types';
-
+import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, ORDER_STATUS } from './bitget.types';
 
 export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private messageCount = 0;
@@ -48,12 +47,18 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private wsPositionUpdatedAtById = new Map<string, number>();
   private readonly positionRestStaleGuardMs = 5_000;
 
-  private normalizeOrderStatus = (status: unknown): string => String(status ?? '').toLowerCase().replace(/-/g, '_');
+  private normalizeOrderStatus = (status: unknown): string =>
+    String(status ?? '')
+      .toLowerCase()
+      .replace(/-/g, '_');
 
   private getRawOrderStatus = (order: Record<string, any>): string =>
     this.normalizeOrderStatus(order.status ?? order.state ?? order.planStatus ?? order.orderStatus);
 
-  private normalizeChannel = (channel: unknown): string => String(channel ?? '').toLowerCase().replace(/[-_]/g, '');
+  private normalizeChannel = (channel: unknown): string =>
+    String(channel ?? '')
+      .toLowerCase()
+      .replace(/[-_]/g, '');
 
   /**
    * The shared `ORDER_STATUS` map treats several strings as `OrderStatus.Closed`,
@@ -308,9 +313,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     for (const rawOrder of rawOrders) {
       const normalizedStatus = this.getRawOrderStatus(rawOrder);
       const mappedStatus = ORDER_STATUS[normalizedStatus];
-      const isPartialFill =
-        normalizedStatus === 'partial_fill' ||
-        normalizedStatus === 'partially_filled';
+      const isPartialFill = normalizedStatus === 'partial_fill' || normalizedStatus === 'partially_filled';
       // Only explicit fill statuses count as fills for emission and reconciliation.
       // `success` / `executed` may map to Closed but are frequently non-fill acks.
       const isFullFill = this.isTerminalFillStatus(normalizedStatus);
@@ -797,7 +800,13 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       });
 
       if (result.error) {
-        this.emitAndLogError(`Remote WS auth failed: ${result.error}`);
+        // NOT "auth failed": `health/errorPatterns.ts` matches that literal under
+        // `auth_invalid`, which red-toasts "API key rejected" and makes
+        // `noteTerminalExchangeFailure` suppress automatic account reloads for five
+        // minutes — the very reload that would re-pair the browser signer. A
+        // backgrounded tab or a 15s signer timeout must not look like a bad key.
+        // Mirrors the bybit fix in `bybit/bybit.ws-private.ts` → auth.
+        this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
         return;
       }
 

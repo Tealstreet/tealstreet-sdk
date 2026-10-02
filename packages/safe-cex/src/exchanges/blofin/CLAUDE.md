@@ -69,6 +69,8 @@ All authenticated requests include these headers:
 
 Timestamps come from `virtualClock`, which is synchronized with the exchange's server time. The `+` unary operator is used to convert the dayjs time to a numeric millisecond timestamp (see `blofin.api.ts`).
 
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `blofin.ws-private.ts auth` emits `Remote WS signing unavailable: …`, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
+
 ### WebSocket Authentication
 
 Private WebSocket authenticates via a `login` operation after connection:

@@ -7,12 +7,12 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
-import { WsDirectFallback } from '../../utils/wsDirectFallback';
-import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { OrderStatus } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
 import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
+import { isWsRelayEnabled } from '../../utils/wsRelay';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URLS } from './okx.types';
 
@@ -46,7 +46,10 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
       );
       if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', `Using tealstreet okx private ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
+          this.parent.emitter.emit(
+            'grafana-info',
+            `Using tealstreet okx private ${baseUrl === route.relay ? 'relay' : 'proxy'}`,
+          );
         } catch (_e) {}
       }
       this.ws = this.createWebsocket(baseUrl);
@@ -90,7 +93,13 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
       });
 
       if (result.error) {
-        this.emitAndLogError(`Remote WS auth failed: ${result.error}`);
+        // NOT "auth failed": `health/errorPatterns.ts` matches that literal under
+        // `auth_invalid`, which red-toasts "API key rejected" and makes
+        // `noteTerminalExchangeFailure` suppress automatic account reloads for five
+        // minutes — the very reload that would re-pair the browser signer. A
+        // backgrounded tab or a 15s signer timeout must not look like a bad key.
+        // Mirrors the bybit fix in `bybit/bybit.ws-private.ts` → auth.
+        this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
         return;
       }
 

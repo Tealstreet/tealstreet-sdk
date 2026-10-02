@@ -28,16 +28,16 @@ When working with OKX exchange integration, consult the official API documentati
 
 ## File Structure
 
-| File                 | Class/Export           | Description                                                                                                  |
-| -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `okx.types.ts`       | Constants, mappings    | Endpoint paths, broker ID, order status/type/side/interval mappings, WebSocket URLs                          |
-| `okx.api.ts`         | `createAPI()`          | REST API client factory with HMAC-SHA256 signing via axios interceptors                                      |
-| `okx.exchange.ts`    | `OKXExchange`          | Main exchange class extending `BaseExchange`; all trading logic                                              |
-| `okxdemo.exchange.ts` | `OKXDemoExchange`      | Minimal subclass that forces `testnet: true` / `isDemo = true` while reusing global OKX trading logic        |
-| `okxeudemo.exchange.ts` | `OKXEUDemoExchange` | Minimal subclass that forces `testnet: true` / `isDemo = true` while reusing OKX EU trading logic            |
-| `okx.ws-public.ts`   | `OKXPublicWebsocket`   | Public WebSocket for market data (tickers, mark price, index, OI, funding, order book)                       |
-| `okx.ws-private.ts`  | `OKXPrivateWebsocket`  | Private WebSocket for account, positions, and regular order updates                                          |
-| `okx.ws-business.ts` | `OKXBusinessWebsocket` | Business WebSocket for candles (OHLCV), algo orders, and algo-advance updates; extends `OKXPrivateWebsocket` |
+| File                    | Class/Export           | Description                                                                                                  |
+| ----------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `okx.types.ts`          | Constants, mappings    | Endpoint paths, broker ID, order status/type/side/interval mappings, WebSocket URLs                          |
+| `okx.api.ts`            | `createAPI()`          | REST API client factory with HMAC-SHA256 signing via axios interceptors                                      |
+| `okx.exchange.ts`       | `OKXExchange`          | Main exchange class extending `BaseExchange`; all trading logic                                              |
+| `okxdemo.exchange.ts`   | `OKXDemoExchange`      | Minimal subclass that forces `testnet: true` / `isDemo = true` while reusing global OKX trading logic        |
+| `okxeudemo.exchange.ts` | `OKXEUDemoExchange`    | Minimal subclass that forces `testnet: true` / `isDemo = true` while reusing OKX EU trading logic            |
+| `okx.ws-public.ts`      | `OKXPublicWebsocket`   | Public WebSocket for market data (tickers, mark price, index, OI, funding, order book)                       |
+| `okx.ws-private.ts`     | `OKXPrivateWebsocket`  | Private WebSocket for account, positions, and regular order updates                                          |
+| `okx.ws-business.ts`    | `OKXBusinessWebsocket` | Business WebSocket for candles (OHLCV), algo orders, and algo-advance updates; extends `OKXPrivateWebsocket` |
 
 ## Authentication
 
@@ -48,7 +48,6 @@ When working with OKX exchange integration, consult the official API documentati
 > would be a 403, not a 401. Check `restProxyHeaderSent` on the failure sample
 > before touching anything here; see `services/exchange-server/CLAUDE.md` →
 > "A venue 401 through the proxy is often OUR credential, not the venue's".
-
 
 OKX requires three credentials: **API key**, **API secret**, and **passphrase**. The passphrase is mandatory and validated at API client creation time; `createAPI` throws `'OKX requires a passphrase'` if missing.
 
@@ -69,6 +68,8 @@ Signing is performed in an axios request interceptor:
    - `OK-ACCESS-TIMESTAMP`: ISO 8601 timestamp
    - `OK-ACCESS-PASSPHRASE`: Passphrase
 6. **Testnet header**: When `options.testnet` is true, adds `x-simulated-trading: 1`
+
+**Signer-failure branch does NOT say "auth failed", on either private or business.** Both `okx.ws-private.ts` and `okx.ws-business.ts` `auth` emit `Remote WS signing unavailable: …` on the `remoteSigner.sign` error branch, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
 
 ### WebSocket Authentication (Private + Business)
 
@@ -150,30 +151,30 @@ Between Phase 1 and Phase 2, `if (this.isDisposed) return;` prevents continuing 
 
 All endpoints are defined in `ENDPOINTS` in `okx.types.ts`:
 
-| Constant               | Path                                    | Method | Description                                                                   |
-| ---------------------- | --------------------------------------- | ------ | ----------------------------------------------------------------------------- |
-| `ACCOUNT`              | `/api/v5/account/config`                | GET    | Get account configuration (position mode, account level)                      |
-| `ACCOUNT_CONFIG`       | `/api/v5/account/config`                | GET    | Same path as ACCOUNT (used for position mode/account level fetch)             |
+| Constant               | Path                                    | Method | Description                                                                    |
+| ---------------------- | --------------------------------------- | ------ | ------------------------------------------------------------------------------ |
+| `ACCOUNT`              | `/api/v5/account/config`                | GET    | Get account configuration (position mode, account level)                       |
+| `ACCOUNT_CONFIG`       | `/api/v5/account/config`                | GET    | Same path as ACCOUNT (used for position mode/account level fetch)              |
 | `ACCOUNT_INSTRUMENTS`  | `/api/v5/account/instruments`           | GET    | Account-available instruments for signed OKX EU / OKX EU Demo market discovery |
-| `PARTNER`              | `/api/v5/users/partner/if-rebate`       | GET    | Check partner rebate status                                                   |
-| `MARKETS`              | `/api/v5/public/instruments`            | GET    | Fetch available instruments (`instType=SWAP`)                                 |
-| `TICKERS`              | `/api/v5/market/tickers`                | GET    | Fetch ticker data (`instType=SWAP`)                                           |
-| `BALANCE`              | `/api/v5/account/account-position-risk` | GET    | Account balance and position risk (`instType=SWAP`)                           |
-| `POSITIONS`            | `/api/v5/account/positions`             | GET    | Fetch open positions (`instType=SWAP`)                                        |
-| `KLINE`                | `/api/v5/market/candles`                | GET    | Fetch OHLCV candlestick data                                                  |
-| `KLINE_HISTORY`        | `/api/v5/market/history-candles`        | GET    | Fetch older OHLCV data when recent candles cannot cover the request           |
-| `UNFILLED_ORDERS`      | `/api/v5/trade/orders-pending`          | GET    | Fetch unfilled regular orders (paginated, 100 per page)                       |
-| `UNFILLED_ALGO_ORDERS` | `/api/v5/trade/orders-algo-pending`     | GET    | Fetch unfilled algo orders (paginated, 100 per page)                          |
-| `FILLS`                | `/api/v5/trade/fills`                   | GET    | Recent fills (primary for `fetchHistoricalFills`)                                  |
-| `FILLS_HISTORY`        | `/api/v5/trade/fills-history`           | GET    | Older fills fallback for `fetchHistoricalFills`                                    |
-| `PLACE_ORDERS`         | `/api/v5/trade/batch-orders`            | POST   | Place batch orders (up to 20 per batch)                                       |
-| `PLACE_ALGO_ORDER`     | `/api/v5/trade/order-algo`              | POST   | Place single algo order                                                       |
-| `UPDATE_ORDER`         | `/api/v5/trade/amend-order`             | POST   | Amend an existing order                                                       |
-| `CANCEL_ORDERS`        | `/api/v5/trade/cancel-batch-orders`     | POST   | Cancel batch orders (up to 20 per batch)                                      |
-| `CANCEL_ALGO_ORDERS`   | `/api/v5/trade/cancel-algos`            | POST   | Cancel algo orders (up to 10 per batch)                                       |
-| `SET_LEVERAGE`         | `/api/v5/account/set-leverage`          | POST   | Set leverage for an instrument                                                |
-| `LEVERAGE`             | `/api/v5/account/leverage-info`         | GET    | Get leverage info (supports comma-separated instIds, batched in groups of 20) |
-| `SET_POSITION_MODE`    | `/api/v5/account/set-position-mode`     | POST   | Switch position mode (`long_short_mode` or `net_mode`)                        |
+| `PARTNER`              | `/api/v5/users/partner/if-rebate`       | GET    | Check partner rebate status                                                    |
+| `MARKETS`              | `/api/v5/public/instruments`            | GET    | Fetch available instruments (`instType=SWAP`)                                  |
+| `TICKERS`              | `/api/v5/market/tickers`                | GET    | Fetch ticker data (`instType=SWAP`)                                            |
+| `BALANCE`              | `/api/v5/account/account-position-risk` | GET    | Account balance and position risk (`instType=SWAP`)                            |
+| `POSITIONS`            | `/api/v5/account/positions`             | GET    | Fetch open positions (`instType=SWAP`)                                         |
+| `KLINE`                | `/api/v5/market/candles`                | GET    | Fetch OHLCV candlestick data                                                   |
+| `KLINE_HISTORY`        | `/api/v5/market/history-candles`        | GET    | Fetch older OHLCV data when recent candles cannot cover the request            |
+| `UNFILLED_ORDERS`      | `/api/v5/trade/orders-pending`          | GET    | Fetch unfilled regular orders (paginated, 100 per page)                        |
+| `UNFILLED_ALGO_ORDERS` | `/api/v5/trade/orders-algo-pending`     | GET    | Fetch unfilled algo orders (paginated, 100 per page)                           |
+| `FILLS`                | `/api/v5/trade/fills`                   | GET    | Recent fills (primary for `fetchHistoricalFills`)                              |
+| `FILLS_HISTORY`        | `/api/v5/trade/fills-history`           | GET    | Older fills fallback for `fetchHistoricalFills`                                |
+| `PLACE_ORDERS`         | `/api/v5/trade/batch-orders`            | POST   | Place batch orders (up to 20 per batch)                                        |
+| `PLACE_ALGO_ORDER`     | `/api/v5/trade/order-algo`              | POST   | Place single algo order                                                        |
+| `UPDATE_ORDER`         | `/api/v5/trade/amend-order`             | POST   | Amend an existing order                                                        |
+| `CANCEL_ORDERS`        | `/api/v5/trade/cancel-batch-orders`     | POST   | Cancel batch orders (up to 20 per batch)                                       |
+| `CANCEL_ALGO_ORDERS`   | `/api/v5/trade/cancel-algos`            | POST   | Cancel algo orders (up to 10 per batch)                                        |
+| `SET_LEVERAGE`         | `/api/v5/account/set-leverage`          | POST   | Set leverage for an instrument                                                 |
+| `LEVERAGE`             | `/api/v5/account/leverage-info`         | GET    | Get leverage info (supports comma-separated instIds, batched in groups of 20)  |
+| `SET_POSITION_MODE`    | `/api/v5/account/set-position-mode`     | POST   | Switch position mode (`long_short_mode` or `net_mode`)                         |
 
 Execution-history behavior (`fetchHistoricalFills`):
 
@@ -188,11 +189,11 @@ OKX uses **three separate WebSocket connections**, all on port 8443.
 
 ### URLs
 
-| Type     | Production                             | OKX Demo                                      | OKX EU Demo                                      |
-| -------- | -------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
-| Public   | `wss://ws.okx.com:8443/ws/v5/public`   | `wss://wspap.okx.com:8443/ws/v5/public`       | `wss://wseeapap.okx.com:8443/ws/v5/public`       |
-| Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://wspap.okx.com:8443/ws/v5/private`      | `wss://wseeapap.okx.com:8443/ws/v5/private`      |
-| Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://wspap.okx.com:8443/ws/v5/business`     | `wss://wseeapap.okx.com:8443/ws/v5/business`     |
+| Type     | Production                             | OKX Demo                                  | OKX EU Demo                                  |
+| -------- | -------------------------------------- | ----------------------------------------- | -------------------------------------------- |
+| Public   | `wss://ws.okx.com:8443/ws/v5/public`   | `wss://wspap.okx.com:8443/ws/v5/public`   | `wss://wseeapap.okx.com:8443/ws/v5/public`   |
+| Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://wspap.okx.com:8443/ws/v5/private`  | `wss://wseeapap.okx.com:8443/ws/v5/private`  |
+| Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://wspap.okx.com:8443/ws/v5/business` | `wss://wseeapap.okx.com:8443/ws/v5/business` |
 
 `okxdemo` is a separate exchange variant because OKX Demo Trading uses separate
 demo API credentials. It forces `options.testnet = true`, which selects the
@@ -1048,11 +1049,11 @@ Endpoints are split into two monitoring groups:
 Measured live 2026-08-12 on row 13, against an e2e run whose actions were known
 independently (a deliberate position flip):
 
-| Axis | Field | Value |
-| --- | --- | --- |
-| `/trade/fills` | `fillPnl` | `-0.0014` — **gross** |
+| Axis                         | Field         | Value                  |
+| ---------------------------- | ------------- | ---------------------- |
+| `/trade/fills`               | `fillPnl`     | `-0.0014` — **gross**  |
 | `/account/positions-history` | `realizedPnl` | `-0.0112889` — **net** |
-| both | fee | `0.0098889` |
+| both                         | fee           | `0.0098889`            |
 
 `-0.0014 - 0.0098889 = -0.0112889` exactly. Two axes on ONE venue, both naming the
 quantity "realized PnL", differing by the fee. Anything that picks an axis per venue, or
