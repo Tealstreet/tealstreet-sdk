@@ -127,6 +127,109 @@ describe('prepareCliOrder', () => {
     });
     expect(out.amount).toBe(1);
   });
+
+  describe('tradfi preflight', () => {
+    // Bybit publishes `symbolType` on `/v5/market/instruments-info` and
+    // `fetchMarketsHelper` preserves it as `Market.info`; `classifyMarket`
+    // reads from there with no new REST call.
+    const bybitEquity = (over: Partial<ExchangeLike> = {}): ExchangeLike =>
+      ({
+        name: 'bybit',
+        store: {
+          markets: [
+            {
+              symbol: 'SHOPUSDT',
+              precision: { amount: 0.001, price: 0.01 },
+              isSpot: false,
+              info: { symbolType: 'stock', underlyingTicker: 'SHOP', marketRegion: 'US' },
+            },
+          ],
+          tickers: [{ symbol: 'SHOPUSDT', last: 100 }],
+          orders: [],
+          positions: [],
+        },
+        ...over,
+      }) as unknown as ExchangeLike;
+
+    const bybitCrypto = (): ExchangeLike =>
+      ({
+        name: 'bybit',
+        store: {
+          markets: [
+            {
+              symbol: 'BTCUSDT',
+              precision: { amount: 0.001, price: 0.5 },
+              isSpot: false,
+              info: { symbolType: '' },
+            },
+          ],
+          tickers: [{ symbol: 'BTCUSDT', last: 60_000 }],
+          orders: [],
+          positions: [],
+        },
+      }) as unknown as ExchangeLike;
+
+    it('refuses a buy on a tokenized equity with the "may require" phrasing', () => {
+      expect(() =>
+        prepareCliOrder(bybitEquity(), {
+          symbol: 'SHOPUSDT',
+          side: OrderSide.Buy,
+          type: OrderType.Market,
+          amount: 1,
+        }),
+      ).toThrow(/tokenized equity.*may require an agreement you have not signed/);
+    });
+
+    it('refuses even a reduce-only close — the venue may still reject it on a signed-out account', () => {
+      expect(() =>
+        prepareCliOrder(bybitEquity(), {
+          symbol: 'SHOPUSDT',
+          side: OrderSide.Sell,
+          type: OrderType.Market,
+          amount: 1,
+          reduceOnly: true,
+        }),
+      ).toThrow(/tokenized equity.*may require an agreement/);
+    });
+
+    it('lets a crypto perp through on the same venue', () => {
+      const out = prepareCliOrder(bybitCrypto(), {
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+      });
+      expect(out.amount).toBe(1);
+    });
+
+    it('never says "you can trade this" or "you cannot trade this"', () => {
+      try {
+        prepareCliOrder(bybitEquity(), {
+          symbol: 'SHOPUSDT',
+          side: OrderSide.Buy,
+          type: OrderType.Market,
+          amount: 1,
+        });
+        throw new Error('should have thrown');
+      } catch (e) {
+        const msg = (e as Error).message.toLowerCase();
+        expect(msg).not.toContain('you can trade');
+        expect(msg).not.toContain('you cannot trade');
+      }
+    });
+
+    it('lets an unknown classification through — a venue with no classifier is a normal state, not a reason to block', () => {
+      // binance has no classifier yet. Pass through, matching the existing
+      // default-fixture tests above.
+      const out = prepareCliOrder(exchange(), {
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+      });
+      expect(out.amount).toBe(1);
+    });
+  });
 });
 
 describe('prepareCliAmendPrice', () => {

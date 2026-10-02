@@ -1,6 +1,8 @@
 import type { ExchangeLike } from '../types';
 import type { ExchangeName, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 
+import { tradfiPreflightMessage } from '@tealstreet/safe-cex/src/instrument-class/describe';
+import { classifyMarket } from '@tealstreet/safe-cex/src/instrument-class/resolve';
 import { roundOrderPrice } from '@tealstreet/script-api-core/src/order/orderPricing';
 import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { clampReduceOnlyOrder, prepareOrder } from '@tealstreet/script-api-core/src/order/prepareOrder';
@@ -38,6 +40,17 @@ export const prepareCliOrder = <T extends { symbol: string; type: PlaceOrderOpts
   // `ExchangeLike.name` is a plain string; every venue check downstream treats
   // an unrecognised one as "not this venue" and fails closed.
   const exchangeName = exchange.name as ExchangeName;
+
+  // Tradfi preflight. `classifyMarket` reads from `Market.info` with no new
+  // REST call, and returns `unknown` on every venue whose classifier is not
+  // written yet — so an unrecognised venue silently passes through. Only a
+  // positively classified non-crypto instrument refuses. Binance's TradFi
+  // perps (`contractType: 'TRADIFY_PERPETUAL'`, with Binance's own typo) are
+  // the obvious next entry here, but their classifier is deliberately out of
+  // this pass — Bybit is where the user report came from.
+  const tradfiMsg = tradfiPreflightMessage(opts.symbol, exchangeName, classifyMarket(exchangeName, market));
+  if (tradfiMsg) throw new ScriptValidationError(tradfiMsg);
+
   const rounded = prepareOrder(opts, { market, exchangeName });
 
   return clampReduceOnlyOrder(rounded, {

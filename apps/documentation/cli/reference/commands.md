@@ -89,13 +89,13 @@ closed, some fold funding and fees in, and on inverse contracts it is
 denominated in the base currency. Placing a stop on any of those would be worse
 than placing it at entry.
 
-| Form         | Result                                      |
-| ------------ | ------------------------------------------- |
-| `be`         | Stop at your entry price                    |
-| `be +3%`     | 3% **above** entry                          |
-| `be -0.5%`   | 0.5% **below** entry                        |
-| `be +100`    | Absolute offset, same directions            |
-| `be ETHUSDT` | Symbol override                             |
+| Form         | Result                           |
+| ------------ | -------------------------------- |
+| `be`         | Stop at your entry price         |
+| `be +3%`     | 3% **above** entry               |
+| `be -0.5%`   | 0.5% **below** entry             |
+| `be +100`    | Absolute offset, same directions |
+| `be ETHUSDT` | Symbol override                  |
 
 An offset is relative to **entry**, not to the mark, and it is a plain
 direction rather than a side-aware one: `+` is always up the price axis. On a
@@ -128,12 +128,12 @@ Source: `BreakevenCommand.ts`.
 A trailing stop on the open position — the "runner" leg. The stop follows the
 market and never moves against you.
 
-| Form                              | Result                            |
-| --------------------------------- | --------------------------------- |
-| `trail 20%`                       | Stop 20% behind the current price |
-| `trail 500`                       | Absolute distance                 |
-| `trail 20% ETHUSDT`               | Symbol override                   |
-| `when (price >= 0.0716) (trail 20%)` | Arm it once price gets there   |
+| Form                                 | Result                            |
+| ------------------------------------ | --------------------------------- |
+| `trail 20%`                          | Stop 20% behind the current price |
+| `trail 500`                          | Absolute distance                 |
+| `trail 20% ETHUSDT`                  | Symbol override                   |
+| `when (price >= 0.0716) (trail 20%)` | Arm it once price gets there      |
 
 **Distance is measured from the CURRENT price, not from your entry** — that is
 what a trailing stop means to the venue.
@@ -455,6 +455,31 @@ Source: `SymbolCommand.ts`.
 ### `markets` &nbsp; _(aliases `mkt`, `m`)_
 
 List available markets in a 4-column grid. Source: `MarketsCommand.ts`.
+
+### `check` {#check}
+
+Say what a listed contract is a claim on. Venues like Bybit list tokenized
+equities, ETFs, metals, and FX pairs beside crypto perps on the same endpoints
+with the same symbol shape — `SHOPUSDT` looks exactly like `SOLUSDT` and does
+not trade like it.
+
+| Form             | Example output                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| `check BTCUSDT`  | `BTCUSDT on bybit: crypto perpetual`                                                   |
+| `check SHOPUSDT` | `SHOPUSDT on bybit: tokenized equity (SHOP) — may require signing a trading agreement` |
+| `check XAUUSDT`  | `XAUUSDT on bybit: tokenized commodity — may require signing a trading agreement`      |
+
+`check` is a READ, not an eligibility check. The venue decides whether a given
+account may open a position on a non-crypto contract based on calendars and
+agreements; only the instrument's class is public. If the symbol argument is
+omitted, the focused session symbol is used.
+
+Order writes (`buy`, `sell`, `stop`, `scale`, `close`, `be`) run the same
+preflight automatically and refuse before touching the venue when the symbol
+is non-crypto. Bybit's `symbolType` is read today; other venues report
+"classifier not implemented" and never refuse.
+
+Source: `CheckCommand.ts`.
 
 ### `status` &nbsp; _(alias `st`)_ {#status}
 

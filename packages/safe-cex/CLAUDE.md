@@ -142,6 +142,14 @@ table and the `innovation`-is-crypto trap). Binance
 already has `isLikelyTradfiMarket` as a boolean heuristic) are the next two, and
 their absence means unwritten, not "all crypto".
 
+**Three surfaces consume it, through one copy helper (`describe.ts`):** the CLI
+order preflight in `cli-core`'s `prepareCliOrder`, the CLI `check <symbol>`
+command, and the web preflight in `apps/web/src/order/tradfiPreflight.ts`. All
+three share `describeInstrument` for a one-line summary and
+`tradfiPreflightMessage` for the refusal body — the "may require an agreement"
+line is load-bearing and drift between terminal and browser is exactly how a
+user acts on one wording and sees another.
+
 ## Risk, PnL-at-price, ROE and break-even — where each one actually lives
 
 Four related calculations, at different stages of convergence. **Read this
@@ -153,7 +161,7 @@ last person to need a break-even added a fifth without tripping over anything.
 **[`docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md`](../../docs/POSITION_MODEL_VENUE_EVIDENCE_v1.md)**
 measures what venues actually report — that the same trade is GROSS on the
 fills axis and NET on the closed-positions axis, that bitunix's `realizedPNL`
-is net of fees *and* funding, that fee SIGNS differ between venues added
+is net of fees _and_ funding, that fee SIGNS differ between venues added
 back to back. `docs/CLAUDE.md` says to read it "before designing anything that
 folds fills into positions". That instruction was ignored on 2026-09-30 and
 three venue claims were committed on the strength of a field's NAME; one was

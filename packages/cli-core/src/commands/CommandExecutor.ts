@@ -11,6 +11,7 @@ import { SymbolCommand } from './session/SymbolCommand';
 import { MarketsCommand } from './session/MarketsCommand';
 import { ConnectionCommand } from './session/ConnectionCommand';
 import { PromptCommand } from './session/PromptCommand';
+import { CheckCommand } from './session/CheckCommand';
 import { AccountCommand } from './account/AccountCommand';
 import { AccountsCommand } from './account/AccountsCommand';
 import { ExchangesCommand } from './account/ExchangesCommand';
@@ -85,6 +86,7 @@ export function ensureCommandsRegistered(): void {
     new MarketsCommand(),
     new ConnectionCommand(),
     new PromptCommand(),
+    new CheckCommand(),
 
     // Account commands
     new AccountCommand(),
