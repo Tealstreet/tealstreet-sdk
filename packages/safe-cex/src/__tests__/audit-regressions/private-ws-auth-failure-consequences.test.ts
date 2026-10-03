@@ -84,10 +84,10 @@ describe('a signer failure is not reported as a rejected API key', () => {
   const TERMINAL = ['auth_invalid', 'auth_expired', 'auth_permissions'];
 
   // Every venue whose private WS asks a remote signer. bybit is the template;
-  // bitget/blofin/okx/phemex were swept to match, and `errorPatterns.ts`'s
-  // `EXCHANGE_SPECIFIC_PATTERNS` cannot shadow this default without being
-  // caught here.
-  const VENUES = ['bybit', 'bitget', 'blofin', 'okx', 'phemex'];
+  // bitget/blofin/okx/phemex/bitmex/woo/kraken were swept to match, and
+  // `errorPatterns.ts`'s `EXCHANGE_SPECIFIC_PATTERNS` cannot shadow this
+  // default without being caught here.
+  const VENUES = ['bybit', 'bitget', 'blofin', 'okx', 'phemex', 'bitmex', 'woo', 'kraken'];
 
   // The control FIRST: this is the wording the fix removed, and it must still
   // classify under every venue — otherwise the assertions below pass for the

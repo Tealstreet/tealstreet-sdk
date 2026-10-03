@@ -59,6 +59,8 @@ The encoded PostData string used to build `Authent` must be byte-for-byte identi
 
 **Public endpoints bypass**: Endpoints in `PUBLIC_ENDPOINTS` array (`/v3/instruments`, `/v3/tickers`, `/v3/orderbook`) skip authentication (`kraken.api.ts`).
 
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `kraken.ws-private.ts performAuth` emits `Remote WS signing unavailable: …`, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
+
 ### WebSocket Authentication (`kraken.ws-private.ts`)
 
 Challenge/response flow:

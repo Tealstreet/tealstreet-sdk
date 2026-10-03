@@ -44,16 +44,16 @@ Do not remove these guards while the official shutdown schedule is still in effe
 
 ## File Structure
 
-| File                             | Description                                                                                                                                                                                        |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bitmex.exchange.ts`             | Main exchange class (`BitmexExchange`) extending `BaseExchange`. Contains all REST trading operations, balance/position parsing, order formatting, and OHLCV fetching.                             |
-| `bitmex.api.ts`                  | Axios HTTP client factory with HMAC-SHA256 authentication interceptor, retry logic, and HTTP-over-WebSocket adapter.                                                                               |
-| `bitmex.types.ts`                | Constants (URLs, endpoints, recv window), status/side mappings, `Currency` type, and Grafana endpoint lists.                                                                                       |
-| `bitmex.ws-private.ts`           | Private WebSocket (`BitmexPrivateWebsocket`): handles authenticated execution, order, position, and margin/balance updates.                                                                        |
-| `bitmex.ws-public.ts`            | Public WebSocket (`BitmexPublicWebsocket`): handles instrument updates, an explicit Aggregated orderBookL2 view, and trade-driven OHLCV with a polling fallback.                                    |
-| `bitmex.ohlcv-helpers.ts`        | Shared OHLCV helpers used by `bitmex.exchange.ts` (timeframe/resolution mapping, UDF response validation, candle dedup).                                                                           |
-| `bitmextestnet.exchange.ts`      | Thin subclass (`BitmexTestnetExchange`) that overrides URLs/WS hosts to point at the BitMEX testnet. Registered separately in the exchange registry.                                               |
-| `types.ts`                       | Shared BitMEX-specific types: `BITMEX_ORDER`, `BITMEX_POSITION`, `BITMEX_MARKET`, WS update types (`ORDER_WS_UPDATE`, `POSITION_WS_UPDATE`, `TRADE_WS_UPDATE`), and `SupportedTimeframes` mapping. |
+| File                        | Description                                                                                                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bitmex.exchange.ts`        | Main exchange class (`BitmexExchange`) extending `BaseExchange`. Contains all REST trading operations, balance/position parsing, order formatting, and OHLCV fetching.                             |
+| `bitmex.api.ts`             | Axios HTTP client factory with HMAC-SHA256 authentication interceptor, retry logic, and HTTP-over-WebSocket adapter.                                                                               |
+| `bitmex.types.ts`           | Constants (URLs, endpoints, recv window), status/side mappings, `Currency` type, and Grafana endpoint lists.                                                                                       |
+| `bitmex.ws-private.ts`      | Private WebSocket (`BitmexPrivateWebsocket`): handles authenticated execution, order, position, and margin/balance updates.                                                                        |
+| `bitmex.ws-public.ts`       | Public WebSocket (`BitmexPublicWebsocket`): handles instrument updates, an explicit Aggregated orderBookL2 view, and trade-driven OHLCV with a polling fallback.                                   |
+| `bitmex.ohlcv-helpers.ts`   | Shared OHLCV helpers used by `bitmex.exchange.ts` (timeframe/resolution mapping, UDF response validation, candle dedup).                                                                           |
+| `bitmextestnet.exchange.ts` | Thin subclass (`BitmexTestnetExchange`) that overrides URLs/WS hosts to point at the BitMEX testnet. Registered separately in the exchange registry.                                               |
+| `types.ts`                  | Shared BitMEX-specific types: `BITMEX_ORDER`, `BITMEX_POSITION`, `BITMEX_MARKET`, WS update types (`ORDER_WS_UPDATE`, `POSITION_WS_UPDATE`, `TRADE_WS_UPDATE`), and `SupportedTimeframes` mapping. |
 
 ## Authentication
 
@@ -76,6 +76,8 @@ Uses HMAC-SHA256 signing. The interceptor computes signatures on every request:
   ```
 - **Module-level counter**: The `nonceCounter` is a module-level variable (not per-instance), so it persists across API client recreations. The `% 1000` modulo prevents overflow while still providing uniqueness within the same millisecond.
 - **Query string serialization**: the request interceptor uses `qs.stringify` with `arrayFormat: 'repeat'`.
+
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `bitmex.ws-private.ts sendAuth` emits `Remote WS signing unavailable: …`, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
 
 ### WebSocket Authentication (`bitmex.ws-private.ts`)
 
@@ -132,20 +134,20 @@ The `tick()` method runs on an interval:
 
 All endpoints are defined in `ENDPOINTS` constant in `bitmex.types.ts`:
 
-| Constant        | Path                           | Method              | Description                                                  |
-| --------------- | ------------------------------ | ------------------- | ------------------------------------------------------------ |
-| `ACCOUNT`       | `/user/margin`                 | GET                 | Validate account, fetch margin/balance data                  |
-| `BALANCE`       | `/user/margin`                 | GET                 | Fetch multi-currency balance snapshot (same path as ACCOUNT) |
-| `MARKETS`       | `/instrument/activeAndIndices` | GET                 | Fetch all active instruments and indices                     |
-| `POSITIONS`     | `/position`                    | GET                 | Fetch all open positions                                     |
-| `ORDER`         | `/order`                       | GET/POST/PUT/DELETE | Fetch, place, amend, or cancel orders                        |
-| `SET_LEVERAGE`  | `/position/leverage`           | POST                | Set leverage for a symbol                                    |
-| `SET_ISOLATE`   | `/position/isolate`            | POST                | Toggle isolated/cross margin                                 |
-| `WALLET_ASSETS` | `/wallet/assets`               | GET                 | Fetch currency metadata (scale, majorCurrency)               |
-| `ORDERBOOK`     | `/orderBook/L2`                | GET                 | Fetch L2 order book (defined but used via WS)                |
-| `KLINE`         | `/udf/history`                 | GET                 | OHLCV candle data (UDF format)                               |
-| `EXECUTIONS`    | `/execution/tradeHistory`      | GET                 | Primary execution/trade history source                       |
-| `USER_EXECUTION_HISTORY` | `/user/executionHistory` | GET              | One-shot fallback for compatible auth/not-found failures     |
+| Constant                 | Path                           | Method              | Description                                                  |
+| ------------------------ | ------------------------------ | ------------------- | ------------------------------------------------------------ |
+| `ACCOUNT`                | `/user/margin`                 | GET                 | Validate account, fetch margin/balance data                  |
+| `BALANCE`                | `/user/margin`                 | GET                 | Fetch multi-currency balance snapshot (same path as ACCOUNT) |
+| `MARKETS`                | `/instrument/activeAndIndices` | GET                 | Fetch all active instruments and indices                     |
+| `POSITIONS`              | `/position`                    | GET                 | Fetch all open positions                                     |
+| `ORDER`                  | `/order`                       | GET/POST/PUT/DELETE | Fetch, place, amend, or cancel orders                        |
+| `SET_LEVERAGE`           | `/position/leverage`           | POST                | Set leverage for a symbol                                    |
+| `SET_ISOLATE`            | `/position/isolate`            | POST                | Toggle isolated/cross margin                                 |
+| `WALLET_ASSETS`          | `/wallet/assets`               | GET                 | Fetch currency metadata (scale, majorCurrency)               |
+| `ORDERBOOK`              | `/orderBook/L2`                | GET                 | Fetch L2 order book (defined but used via WS)                |
+| `KLINE`                  | `/udf/history`                 | GET                 | OHLCV candle data (UDF format)                               |
+| `EXECUTIONS`             | `/execution/tradeHistory`      | GET                 | Primary execution/trade history source                       |
+| `USER_EXECUTION_HISTORY` | `/user/executionHistory`       | GET                 | One-shot fallback for compatible auth/not-found failures     |
 
 Note: `TICKERS` is defined as `/instrument/activeAndIndices` (same as `MARKETS`) but not used separately.
 
@@ -191,12 +193,12 @@ Both WebSockets inherit reconnection behavior from `BaseWebSocket`:
 
 ### Handled Tables (Private WS)
 
-| Table      | Handler               | Description                                                                 |
-| ---------- | --------------------- | --------------------------------------------------------------------------- |
+| Table       | Handler               | Description                                                                 |
+| ----------- | --------------------- | --------------------------------------------------------------------------- |
 | `execution` | Inline in `onMessage` | Tracks observed `maxSlippagePct` for future protected market orders         |
-| `margin`   | Inline in `onMessage` | Merges updates into existing balance snapshot, calls `parseBalanceSnapshot` |
-| `order`    | `handleOrder()`       | Merges partial order updates, detects fills and cancellation reasons        |
-| `position` | `handlePosition()`    | Merges partial position updates, filters by currency                        |
+| `margin`    | Inline in `onMessage` | Merges updates into existing balance snapshot, calls `parseBalanceSnapshot` |
+| `order`     | `handleOrder()`       | Merges partial order updates, detects fills and cancellation reasons        |
+| `position`  | `handlePosition()`    | Merges partial position updates, filters by currency                        |
 
 ## Order Types and Mappings
 
@@ -696,13 +698,13 @@ Positions include `extra.contractsNative` (pre-conversion quantity) and `extra.u
 
 ### Supported Timeframes
 
-| Interval | Source |
-| -------- | ------ |
-| `1m`, `5m`, `1h`, `1d` | Native UDF resolutions `1`, `5`, `60`, `1D` |
-| `3m` | Aggregated from `1m` |
-| `15m`, `30m` | Aggregated from `5m` |
-| `2h`, `4h`, `6h`, `12h` | Aggregated from `1h` |
-| `1w` | Aggregated from `1d` |
+| Interval                | Source                                      |
+| ----------------------- | ------------------------------------------- |
+| `1m`, `5m`, `1h`, `1d`  | Native UDF resolutions `1`, `5`, `60`, `1D` |
+| `3m`                    | Aggregated from `1m`                        |
+| `15m`, `30m`            | Aggregated from `5m`                        |
+| `2h`, `4h`, `6h`, `12h` | Aggregated from `1h`                        |
+| `1w`                    | Aggregated from `1d`                        |
 
 ### Fetching (`fetchOHLCV`)
 

@@ -326,6 +326,8 @@ WooX supports primary and secondary API keys via `createApiWithSecondaryKey`:
 - Testnet broker ID: `e708a644-9ce5-46c6-b50c-74b15f62d8ca`
 - Injection is wrapped in try/catch to avoid breaking retry logic
 
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `woo.ws-private.ts onOpen` emits `Remote WS signing unavailable: …`, not `Remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
+
 ### Private WebSocket Authentication (`WooPrivateWebscoket.onOpen`)
 
 On connection open, sends auth event with HMAC signature:

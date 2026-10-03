@@ -134,7 +134,13 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
         });
 
         if (result.error) {
-          this.emitAndLogError(`Remote WS auth failed: ${result.error}`);
+          // NOT "auth failed": `health/errorPatterns.ts` matches that literal under
+          // `auth_invalid`, which red-toasts "API key rejected" and makes
+          // `noteTerminalExchangeFailure` suppress automatic account reloads for five
+          // minutes — the very reload that would re-pair the browser signer. A
+          // backgrounded tab or a 15s signer timeout must not look like a bad key.
+          // Mirrors the bybit fix in `bybit/bybit.ws-private.ts` → auth.
+          this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
           this.authenticated = false;
           return;
         }
