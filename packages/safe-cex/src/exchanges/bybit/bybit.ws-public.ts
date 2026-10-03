@@ -11,6 +11,7 @@ import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import {
   Candle,
+  LogSeverity,
   OHLCVOptions,
   OHLCVSOptions,
   OrderBook,
@@ -34,6 +35,8 @@ const INTERVAL_INVERSE = inverseObj(INTERVAL) as Record<string, Timeframe>;
 // Length of the leading "kline." segment in topics like
 // "kline.{interval}.{symbol}". Used to slice without `topic.split('.')`.
 const KLINE_TOPIC_PREFIX_LEN = 6;
+const OHLCV_NO_DATA_TIMEOUT_MS = 25_000;
+const OHLCV_RECOVERY_COOLDOWN_MS = 10_000;
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -54,6 +57,8 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
   private category: 'linear' | 'inverse';
 
   private directFallback = new WsDirectFallback();
+  private ohlcvNoDataTimeouts: Record<string, NodeJS.Timeout | undefined> = {};
+  private lastOhlcvRecoveryAtByTopic: Record<string, number> = {};
 
   constructor(parent: BybitExchange, category: 'linear' | 'inverse' = 'linear') {
     super(parent);
@@ -100,6 +105,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
 
       this.subscribe();
       this.ping();
+      this.armExistingOhlcvNoDataTimeouts();
 
       // Subscribe to new markets dynamically when market list is refreshed
       this.parent.emitter.off('markets:changed', this.onMarketsChanged);
@@ -109,6 +115,69 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
         this.emitWsReconnected();
       }
     }
+  };
+
+  private clearOhlcvNoDataTimeout = (topic: string) => {
+    const timeoutId = this.ohlcvNoDataTimeouts[topic];
+    if (!timeoutId) return;
+    clearTimeout(timeoutId);
+    delete this.ohlcvNoDataTimeouts[topic];
+  };
+
+  private armOhlcvNoDataTimeout = (topic: string, secondaryTopic?: string) => {
+    this.clearOhlcvNoDataTimeout(topic);
+    if (!this.messageHandlers[topic]?.length) return;
+
+    this.ohlcvNoDataTimeouts[topic] = setTimeout(() => {
+      delete this.ohlcvNoDataTimeouts[topic];
+      if (this.isDisposed || !this.messageHandlers[topic]?.length) return;
+      this.maybeRecoverOhlcvStreamFromTopics(
+        topic,
+        secondaryTopic,
+        `no OHLCV messages after ${OHLCV_NO_DATA_TIMEOUT_MS}ms`,
+      );
+      this.armOhlcvNoDataTimeout(topic, secondaryTopic);
+    }, OHLCV_NO_DATA_TIMEOUT_MS);
+  };
+
+  private armExistingOhlcvNoDataTimeouts = () => {
+    for (const topic of Object.keys(this.messageHandlers)) {
+      if (!topic.startsWith('kline.') || !this.messageHandlers[topic]?.length) continue;
+      const symbol = topic.slice(topic.lastIndexOf('.') + 1);
+      this.armOhlcvNoDataTimeout(topic, `publicTrade.${symbol}`);
+    }
+  };
+
+  maybeRecoverOhlcvStream = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>, reason = 'stale OHLCV stream') => {
+    const topic = `kline.${INTERVAL[opts.interval]}.${opts.symbol}`;
+    this.maybeRecoverOhlcvStreamFromTopics(topic, `publicTrade.${opts.symbol}`, reason);
+  };
+
+  private maybeRecoverOhlcvStreamFromTopics = (topic: string, secondaryTopic: string | undefined, reason: string) => {
+    if (!this.messageHandlers[topic]?.length) return;
+
+    const now = Date.now();
+    const lastRecoveryAt = this.lastOhlcvRecoveryAtByTopic[topic] || 0;
+    if (now - lastRecoveryAt < OHLCV_RECOVERY_COOLDOWN_MS) return;
+    this.lastOhlcvRecoveryAtByTopic[topic] = now;
+
+    const activeTopics = [topic];
+    if (secondaryTopic && this.messageHandlers[secondaryTopic]?.length) {
+      activeTopics.push(secondaryTopic);
+    }
+    for (const activeTopic of activeTopics) {
+      this.topics[activeTopic] = activeTopic;
+    }
+
+    if (!this.isConnected) {
+      this.parent.log(`[Bybit] Public WS OHLCV recovery reconnecting ${topic} (${reason}).`, LogSeverity.Warning);
+      this.reconnect();
+      return;
+    }
+
+    this.parent.log(`[Bybit] Public WS OHLCV recovery re-subscribing ${topic} (${reason}).`, LogSeverity.Warning);
+    this.send(JSON.stringify({ op: 'unsubscribe', args: activeTopics }));
+    this.send(JSON.stringify({ op: 'subscribe', args: activeTopics }));
   };
 
   private onMarketsChanged = async ({ added }: { added: Array<{ symbol: string; quote: string }> }) => {
@@ -346,6 +415,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
           volume,
         };
       }
+      this.armOhlcvNoDataTimeout(topic, secondaryTopic);
       callback(lastCandle);
     };
 
@@ -406,10 +476,15 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
         volume: lastCandle.volume + v / price,
         lastSide: S === 'Sell' ? OrderSide.Sell : OrderSide.Buy,
       };
+      this.armOhlcvNoDataTimeout(topic, secondaryTopic);
       callback(lastCandle);
     };
 
+    let isActive = true;
+    let subscribeRetryTimeout: NodeJS.Timeout | undefined;
+
     const waitForConnectedAndSubscribe = () => {
+      if (!isActive || this.isDisposed) return;
       if (this.isConnected) {
         if (!this.isDisposed) {
           this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []), parser];
@@ -423,15 +498,21 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
           const secondaryPayload = { op: 'subscribe', args: [secondaryTopic] };
           this.send(JSON.stringify(secondaryPayload));
           this.topics[secondaryTopic] = secondaryTopic;
+          this.armOhlcvNoDataTimeout(topic, secondaryTopic);
         }
       } else {
-        setTimeout(() => waitForConnectedAndSubscribe(), 100);
+        subscribeRetryTimeout = setTimeout(() => waitForConnectedAndSubscribe(), 100);
       }
     };
 
     waitForConnectedAndSubscribe();
 
     return () => {
+      isActive = false;
+      if (subscribeRetryTimeout) {
+        clearTimeout(subscribeRetryTimeout);
+        subscribeRetryTimeout = undefined;
+      }
       this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
       this.messageHandlers[secondaryTopic] = [
         ...(this.messageHandlers[secondaryTopic] || []).filter((f) => f !== secondaryParser),
@@ -439,6 +520,11 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
 
       if (!this.messageHandlers[topic].length) {
         delete this.topics[topic];
+        this.clearOhlcvNoDataTimeout(topic);
+        delete this.lastOhlcvRecoveryAtByTopic[topic];
+      }
+
+      if (!this.messageHandlers[secondaryTopic].length) {
         delete this.topics[secondaryTopic];
       }
 

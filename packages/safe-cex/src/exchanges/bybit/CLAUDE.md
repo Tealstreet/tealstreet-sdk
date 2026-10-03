@@ -338,6 +338,7 @@ All WebSockets (public and private) send `{ op: 'ping' }` for keepalive. The `pi
 
 - Primary parser: Uses kline topic data. Prevents "bleeding candles backwards" by checking timestamps
 - Secondary parser: Uses `publicTrade` topic for sub-second candle construction. Calculates candle start time via `getCandleStartTime()`. Supports second-interval (`opts.interval.endsWith('s')`) candle creation from individual trades
+- Linear single-symbol OHLCV listeners arm a per-`kline.{interval}.{symbol}` no-data timer. If neither the kline topic nor its paired `publicTrade.{symbol}` handler sees data for 25s while the socket is otherwise alive, re-subscribe that kline/trade pair rather than waiting for whole-socket staleness. Keep `publicTrade` reconnect state ref-counted by active handlers so one interval teardown does not strand another interval after reconnect.
 
 ### Dynamic Ticker Subscriptions
 
