@@ -555,8 +555,9 @@ Two related traps in the same area:
     `noteTerminalExchangeFailure` suppresses automatic account reloads for five
     minutes — the very reload that would re-pair the browser signer. A backgrounded
     tab must not look like a bad key. (`auth`'s own
-    `Remote WS signing unavailable:` string exists for this reason; several other
-    venues still emit `Remote WS auth failed:` and have the same latent problem.)
+    `Remote WS signing unavailable:` string exists for this reason; every
+    remote-signer private-WS site now emits that wording, so a new venue must
+    not reintroduce `Remote WS auth failed:`.)
   - **And do not "recover" by subscribing anyway.** That was tried, on the theory
     that the venue's refusal frame would arm the staleness watchdog. It does the
     opposite. `base.ws.ts trackLastReceived` sets `isInitialized` on the FIRST
@@ -592,26 +593,26 @@ Two related traps in the same area:
     venue's per-IP cap, which that class exists to avoid. A genuinely silent connect
     still escalates, and a real inbound frame still resets the streak, so a wrong
     API key still cannot trip it.
-  Gated by `__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`,
-  which covers the ordering, the exact subscribe args, the local-HMAC path, both
-  signer failure modes, and that a disposed exchange never asks the signer.
-  `__tests__/audit-regressions/private-ws-auth-failure-consequences.test.ts` gates
-  the two consequences the socket file cannot show: the host chain does not
-  escalate when the silence was ours, and none of the strings these sockets emit
-  classifies into a terminal auth family (with the old wording as a live control).
-  **This only applies where `subscribe()` is called straight after auth.**
-  bitget, blofin, okx (private and business) and phemex all subscribe from their
-  login/auth RESPONSE handler, so they are unaffected by the ORDERING bug — but
-  not by the rest of this entry: they still `ping()` from the open handler beside
-  an un-awaited `auth()`, so a pong sets `isInitialized` and a zero-topic socket
-  reports healthy there too, and ten sites across them still emit the
-  `Remote WS auth failed:` string that `auth_invalid` matches. Sweeping both is
-  worth doing and was deliberately left out of the bybit/apexomni change. **apexomni had the same shape and is FIXED**
-  (`598a9553f4`): its `onOpen` is now `async` and awaits the login. Read
-  `apexomni/CLAUDE.md` before touching it — `d1184f3d8e` reverted three bundled
-  things after code-1005 churn and awaiting the signature was none of them, but
-  Apex's own tolerance for a pre-login subscribe is still unmeasured because there
-  is no funded Apex test key.
+    Gated by `__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`,
+    which covers the ordering, the exact subscribe args, the local-HMAC path, both
+    signer failure modes, and that a disposed exchange never asks the signer.
+    `__tests__/audit-regressions/private-ws-auth-failure-consequences.test.ts` gates
+    the two consequences the socket file cannot show: the host chain does not
+    escalate when the silence was ours, and none of the strings these sockets emit
+    classifies into a terminal auth family (with the old wording as a live control).
+    **This only applies where `subscribe()` is called straight after auth.**
+    bitget, blofin, okx (private and business) and phemex all subscribe from their
+    login/auth RESPONSE handler, so they are unaffected by the ORDERING bug — but
+    not by the rest of this entry: they still `ping()` from the open handler beside
+    an un-awaited `auth()`, so a pong sets `isInitialized` and a zero-topic socket
+    reports healthy there too. The `Remote WS auth failed:` wording that
+    `auth_invalid` matches has been swept out of every remote-signer private-WS
+    site in this tree; a new venue must not reintroduce it. **apexomni had the same shape and is FIXED**
+    (`598a9553f4`): its `onOpen` is now `async` and awaits the login. Read
+    `apexomni/CLAUDE.md` before touching it — `d1184f3d8e` reverted three bundled
+    things after code-1005 churn and awaiting the signature was none of them, but
+    Apex's own tolerance for a pre-login subscribe is still unmeasured because there
+    is no funded Apex test key.
 
 ### Public endpoints MUST be tagged so hosted mode skips the signing round trip
 

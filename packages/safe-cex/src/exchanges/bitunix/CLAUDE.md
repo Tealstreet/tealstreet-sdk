@@ -125,7 +125,7 @@ Defined by `BitunixExchange.tick()`:
 | `CANCEL_ORDER_TP_SL`   | `/api/v1/futures/tpsl/cancel_order`                | Cancel TP/SL orders                                                                                                                                                                                                                            |
 | `TP_SL_ORDER`          | `/api/v1/futures/tpsl/place_order`                 | Place partial TP/SL order                                                                                                                                                                                                                      |
 | `POSITION_TP_SL_ORDER` | `/api/v1/futures/tpsl/position/place_order`        | Place full-position TP/SL                                                                                                                                                                                                                      |
-| `HISTORY_TRADES`       | `/api/v1/futures/trade/get_history_trades`         | User fills history (primary for `fetchHistoricalFills`)                                                                                                                                                                                             |
+| `HISTORY_TRADES`       | `/api/v1/futures/trade/get_history_trades`         | User fills history (primary for `fetchHistoricalFills`)                                                                                                                                                                                        |
 | `KLINE`                | `/api/v1/futures/market/kline`                     | Kline/candlestick data (public)                                                                                                                                                                                                                |
 | `POSITIONS`            | `/api/v1/futures/position/get_pending_positions`   | Fetch open positions                                                                                                                                                                                                                           |
 
@@ -265,14 +265,14 @@ Each uses `clearTimeout` + `setTimeout(fn, 1000)` pattern to debounce rapid succ
 
 ### Trigger Type
 
-| Bitunix Value | Internal Type                    | Context   |
-| ------------- | -------------------------------- | --------- |
+| Bitunix Value | Internal Type                    | Context           |
+| ------------- | -------------------------------- | ----------------- |
 | `MARK`        | `OrderStopTriggerType.MarkPrice` | REST docs example |
-| `MARK_PRICE`  | `OrderStopTriggerType.MarkPrice` | REST API  |
-| `LAST`        | `OrderStopTriggerType.LastPrice` | REST alias |
-| `LAST_PRICE`  | `OrderStopTriggerType.LastPrice` | REST API  |
-| `Mark`        | `OrderStopTriggerType.MarkPrice` | WebSocket |
-| `Last`        | `OrderStopTriggerType.LastPrice` | WebSocket |
+| `MARK_PRICE`  | `OrderStopTriggerType.MarkPrice` | REST API          |
+| `LAST`        | `OrderStopTriggerType.LastPrice` | REST alias        |
+| `LAST_PRICE`  | `OrderStopTriggerType.LastPrice` | REST API          |
+| `Mark`        | `OrderStopTriggerType.MarkPrice` | WebSocket         |
+| `Last`        | `OrderStopTriggerType.LastPrice` | WebSocket         |
 
 **Default**: When trigger type is omitted (by Bitunix), code defaults to `OrderStopTriggerType.MarkPrice`.
 
@@ -659,6 +659,8 @@ The signer branch lives in `BaseExchange.signWsAuth` and is locked by a golden
 vector in `__tests__/base.ws-auth-signing.test.ts` generated with Node's
 built-in crypto. See `../CLAUDE.md` → "Remote-signer WS auth" for the general
 rule; bitunix is the fourth venue to hit it after kraken, blofin and apexomni.
+
+**Signer-failure branch does NOT say "auth failed".** The `remoteSigner.sign` error branch in `bitunix.ws-private.ts sendLogin` emits `Remote WS signing unavailable: …`, not `Bitunix remote WS auth failed: …`. The latter wording matches `health/errorPatterns.ts`'s `auth_invalid` (case-insensitive substring), which the web controller treats as a terminal API-key rejection and suppresses automatic account reloads for five minutes — the very reload a signer-less tab needs to re-pair. See `../CLAUDE.md` → "Remote-signer WS auth" and the bybit template in `bybit/bybit.ws-private.ts`.
 
 **Verified in e2e run 31351139247**: 18 successful `[bitunix login] success` frames
 against 11 failures, where every failure — and every REST `10003 Token invalid` —
