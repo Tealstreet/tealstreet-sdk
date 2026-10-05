@@ -1,24 +1,28 @@
 ---
 title: Command Bar
-description: Type a command in the activity panel to change symbol, open a module, place or close orders, or run a hotkey script.
+description: Type a command in the header to change symbol, open a module, place or close orders, or run a hotkey script.
 sidebar_position: 10
 hide_title: false
 draft: false
 hide_table_of_contents: false
 ---
 
-The command bar is a command line at the bottom of the **activity panel**, a
-column on the right of the screen. Type what you want, fill in its arguments,
-and press Enter. What each command did, and every notification, is listed in
-the panel above it, so you can scroll back through them.
+The command bar is a command line in the header. Type what you want, fill in
+its arguments, and press Enter. What each command did, and every notification,
+is listed in the **activity panel**, a column on the right of the screen, so
+you can scroll back through them. The panel does not have to be open: with it
+closed, the result shows under the bar until you click away, press Esc or run
+the next command.
 
 ### Turning it on
 
 Go to **Settings → General → Command Bar**. It is off by default. Once it is
-on, **Type a command** in the header opens the panel. Drag the panel's left
-edge to resize it, and use **×** to close it. **All**, **Commands**,
-**Agent**, **Notifications** and **Widgets** filter what it lists, and **Clear** empties
-it.
+on, the button at the right end of the bar shows or hides the activity panel,
+and so does the **&#96;** key (left of 1 on a US keyboard) — as long as no other hotkey uses it. You
+can bind a different key in **Settings → Hotkeys → Toggle Activity Panel**.
+Drag the panel's left edge to resize it, and use **»** at its top to collapse
+it. **All**, **Commands**, **Agent**, **Notifications** and **Widgets** filter
+what it lists, and **Clear** empties it.
 
 To jump to it from anywhere, press **/** — as long as no other hotkey uses /.
 You can bind a different key in **Settings → Hotkeys → Focus Command Bar**; it
@@ -26,7 +30,7 @@ works even when trading hotkeys are turned off.
 
 ### Finding a command
 
-Start typing and the matching commands appear above the bar. Use **↑ ↓** to
+Start typing and the matching commands appear under the bar. Use **↑ ↓** to
 move and **Enter** or **Tab** to choose.
 
 If you already know the command, type its name directly with a colon and skip
@@ -56,13 +60,13 @@ chip, and each argument becomes a slot.
 
 Arguments are checked as you type:
 
-| You type | Means |
-| --- | --- |
-| `0.5`, `.5`, `1k` | A size in base units, rounded to the market's lot size |
-| `$1000` | A size as a dollar amount |
-| `61k`, `61000` | A price, rounded to the market's tick size |
-| `+2%`, `-50`, `last` | A price relative to the last traded price |
-| `1h`, `5m`, `1D` | A chart interval |
+| You type             | Means                                                  |
+| -------------------- | ------------------------------------------------------ |
+| `0.5`, `.5`, `1k`    | A size in base units, rounded to the market's lot size |
+| `$1000`              | A size as a dollar amount                              |
+| `61k`, `61000`       | A price, rounded to the market's tick size             |
+| `+2%`, `-50`, `last` | A price relative to the last traded price              |
+| `1h`, `5m`, `1D`     | A chart interval                                       |
 
 If rounding changes your number, the slot says so. A value that is not valid is
 underlined in red with the reason — it is never changed for you.
@@ -80,16 +84,16 @@ unless you type `account=` to choose another.
 
 The order commands are:
 
-| Command | What it does |
-| --- | --- |
-| `orders:place` | Market order, or limit with a price |
-| `orders:stop` | Stop loss at a trigger price |
-| `orders:cancel` | Cancel orders on one symbol |
-| `orders:cancelAll` | Cancel every order, optionally one side (`cancel all sell`) or one account (`account=`) |
-| `orders:amendPrice`, `orders:amendSize` | Change an open order's price or size, picked by its id |
-| `positions:close`, `positions:reduce` | Close a position, or reduce it by a percentage |
-| `positions:closeAll` | Close every position, or every one on one account |
-| `leverage:set` | Set leverage |
+| Command                                 | What it does                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------- |
+| `orders:place`                          | Market order, or limit with a price                                                     |
+| `orders:stop`                           | Stop loss at a trigger price                                                            |
+| `orders:cancel`                         | Cancel orders on one symbol                                                             |
+| `orders:cancelAll`                      | Cancel every order, optionally one side (`cancel all sell`) or one account (`account=`) |
+| `orders:amendPrice`, `orders:amendSize` | Change an open order's price or size, picked by its id                                  |
+| `positions:close`, `positions:reduce`   | Close a position, or reduce it by a percentage                                          |
+| `positions:closeAll`                    | Close every position, or every one on one account                                       |
+| `leverage:set`                          | Set leverage                                                                            |
 
 "All" without an account means every account that is switched on. Any word
 the bar could not place, like a symbol after `cancel all`, is shown under the
@@ -100,18 +104,18 @@ bar as **Not used** so it is never quietly ignored.
 These change what you see. They run on Enter and bring the module forward if it
 is not open.
 
-| Area | Commands |
-| --- | --- |
-| Header toggles | `settings:hotkeys`, `settings:sound`, `settings:volume 40`, `settings:privacy`, `settings:macroPanel`, `settings:theme` — a toggle with no `on`/`off` flips it |
-| Markets | `market:favorite`, `screener:pin`, `market:back` (the last market in Last Markets) |
-| Price alerts | `alerts:new` opens the alert form for a symbol; `alerts:list` prints your active alerts |
-| Order form | `placeOrder:price`, `placeOrder:size`, `placeOrder:type limit` — these only fill the form; you still send from it |
-| Tables | `openOrders:view stops`, `openPositions:percent`, `openPositions:roe`, `openPositions:hideDust`, `openPositions:currency usd` |
-| News | `newsFeed:tab traders`, `newsFeed:tickersOnly`, `newsFeed:mute @handle` |
-| Other modules | `equityCurve:period 3m`, `equityCurve:mode balance`, `margin:account`, `riskProfiler:tab moves`, `polymarket:search`, `polymarket:view top` |
-| Chart | `chart:interval`, `chart:beLines`, `chart:fees`, `chart:fills`, `chart:indicator Relative Strength Index`, `chart:clearDrawings` (asks first) |
-| Orderbook and DOM | `orderbook:grouping`, `dom:grouping` — act on the orderbook or DOM you have focused, with its own market's choices |
-| Layouts | `layout:switch <name>`, `layout:list`, `layout:previous`, `layout:ai <description>` (see below) |
+| Area              | Commands                                                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Header toggles    | `settings:hotkeys`, `settings:sound`, `settings:volume 40`, `settings:privacy`, `settings:macroPanel`, `settings:theme` — a toggle with no `on`/`off` flips it |
+| Markets           | `market:favorite`, `screener:pin`, `market:back` (the last market in Last Markets)                                                                             |
+| Price alerts      | `alerts:new` opens the alert form for a symbol; `alerts:list` prints your active alerts                                                                        |
+| Order form        | `placeOrder:price`, `placeOrder:size`, `placeOrder:type limit` — these only fill the form; you still send from it                                              |
+| Tables            | `openOrders:view stops`, `openPositions:percent`, `openPositions:roe`, `openPositions:hideDust`, `openPositions:currency usd`                                  |
+| News              | `newsFeed:tab traders`, `newsFeed:tickersOnly`, `newsFeed:mute @handle`                                                                                        |
+| Other modules     | `equityCurve:period 3m`, `equityCurve:mode balance`, `margin:account`, `riskProfiler:tab moves`, `polymarket:search`, `polymarket:view top`                    |
+| Chart             | `chart:interval`, `chart:beLines`, `chart:fees`, `chart:fills`, `chart:indicator Relative Strength Index`, `chart:clearDrawings` (asks first)                  |
+| Orderbook and DOM | `orderbook:grouping`, `dom:grouping` — act on the orderbook or DOM you have focused, with its own market's choices                                             |
+| Layouts           | `layout:switch <name>`, `layout:list`, `layout:previous`, `layout:ai <description>` (see below)                                                                |
 
 `chart:clearDrawings` works on TradingView charts only; the other chart
 commands work on both chart types. Indicator names are the chart's own, like
@@ -149,9 +153,10 @@ the bar shows **Agent · Ask the Agent** with your sentence, and you press
 Enter again to send it. Shift+Enter starts a new line. With the bar empty,
 **Tab** fills in a suggested question.
 
-The conversation appears in the panel. While the Agent works, the panel says
+Asking opens the activity panel, where the conversation appears. While the Agent works, the panel says
 what it is doing, with a **Stop** button. When it proposes orders, they appear
-as a card above the bar, exactly like an order command's: you can change the
+as a card at the bottom of the panel, just like an order command's card under
+the bar: you can change the
 numbers, and nothing is sent until you press **Confirm**. `agent:clear`, or
 **Clear** at the top of the panel, starts a new conversation.
 
