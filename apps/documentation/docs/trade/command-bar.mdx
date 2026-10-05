@@ -1,18 +1,24 @@
 ---
 title: Command Bar
-description: Type a command in the header to change symbol, open a module, place or close orders, or run a hotkey script.
+description: Type a command in the activity panel to change symbol, open a module, place or close orders, or run a hotkey script.
 sidebar_position: 10
 hide_title: false
 draft: false
 hide_table_of_contents: false
 ---
 
-The command bar is a command line in the header. Type what you want, fill in its
-arguments, and press Enter.
+The command bar is a command line at the bottom of the **activity panel**, a
+column on the right of the screen. Type what you want, fill in its arguments,
+and press Enter. What each command did, and every notification, is listed in
+the panel above it, so you can scroll back through them.
 
 ### Turning it on
 
-Go to **Settings → General → Command Bar**. It is off by default.
+Go to **Settings → General → Command Bar**. It is off by default. Once it is
+on, **Type a command** in the header opens the panel. Drag the panel's left
+edge to resize it, and use **×** to close it. **All**, **Commands**,
+**Agent**, **Notifications** and **Widgets** filter what it lists, and **Clear** empties
+it.
 
 To jump to it from anywhere, press **/** — as long as no other hotkey uses /.
 You can bind a different key in **Settings → Hotkeys → Focus Command Bar**; it
@@ -20,7 +26,7 @@ works even when trading hotkeys are turned off.
 
 ### Finding a command
 
-Start typing and the matching commands appear below the bar. Use **↑ ↓** to
+Start typing and the matching commands appear above the bar. Use **↑ ↓** to
 move and **Enter** or **Tab** to choose.
 
 If you already know the command, type its name directly with a colon and skip
@@ -64,8 +70,9 @@ underlined in red with the reason — it is never changed for you.
 ### Orders always ask first
 
 Commands that place, cancel or close orders show a confirmation card listing
-exactly what will be sent. Nothing is sent until you press **Confirm**. When
-you confirm, the order is checked again against your book as it is right then;
+exactly what will be sent. Hover a size or price to change it before you send;
+**undo edits** puts the original numbers back. Nothing is sent until you press
+**Confirm**. When you confirm, the order is checked again against your book as it is right then;
 if anything changed, you get the new numbers to review instead of an order.
 
 The account is the one shown in the slot — your focused module's account
@@ -108,8 +115,7 @@ is not open.
 
 `chart:clearDrawings` works on TradingView charts only; the other chart
 commands work on both chart types. Indicator names are the chart's own, like
-`Relative Strength Index`. Focus mode is not a command: it hides the header, and
-the bar with it.
+`Relative Strength Index`. Focus mode is not a command.
 
 ### AI layouts
 
@@ -127,11 +133,34 @@ back to the layout it replaced, and running it again switches forward. Nothing
 changes until you click one. Modules you cannot add are left out, and the
 card says which.
 
+### The Agent
+
+If you have access to the Agent, you can ask it things in your own words
+instead of typing a command:
+
+```
+reduce all my positions by 25%
+cancel my open buy orders
+which position is my biggest risk right now?
+```
+
+When what you type does not match a command, the bar offers it to the Agent:
+the bar shows **Agent · Ask the Agent** with your sentence, and you press
+Enter again to send it. Shift+Enter starts a new line. With the bar empty,
+**Tab** fills in a suggested question.
+
+The conversation appears in the panel. While the Agent works, the panel says
+what it is doing, with a **Stop** button. When it proposes orders, they appear
+as a card above the bar, exactly like an order command's: you can change the
+numbers, and nothing is sent until you press **Confirm**. `agent:clear`, or
+**Clear** at the top of the panel, starts a new conversation.
+
 ### AI credits
 
-Commands that spend AI credits, like `layout:ai`, say so next to Enter before
-you run them. Each call is charged by what it actually cost, and you get a daily
-allowance that resets at midnight UTC. `ai:credits` shows what you have left.
+Commands that spend AI credits, like `layout:ai` and every question to the
+Agent, say so next to Enter before you run them. Each call is charged by what
+it actually cost, and you get a daily allowance that resets at midnight UTC.
+The panel's header shows what is left, and `ai:credits` reports it.
 
 ### Hotkey scripts
 

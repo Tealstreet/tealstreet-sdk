@@ -35,7 +35,7 @@ const buildPlatformAdapter = (): CLIPlatformAdapter =>
 
 describe('the OEMS slice is servable here', () => {
   // The web half of this lives in
-  // `apps/web/src/components/aiOrders/oemsSurface.test.ts`. This is the CLI
+  // `apps/web/src/components/agent/oemsSurface.test.ts`. This is the CLI
   // half, and it exists because the slice is only meaningful while every host
   // in the venn diagram actually serves it — see the venn table in
   // `packages/script-api-core/CLAUDE.md`. Mobile is the third host and cannot

@@ -96,7 +96,7 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
 
   // Lower-level managers and first-party callers.
   'packages/script-api-core/src/proxy/InProcessProxy.ts': 'the SDK’s own proxy seam',
-  'apps/web/src/components/aiOrders/executeOemsCommands.ts': 'the Agent, through createWebCoreAdapter',
+  'apps/web/src/components/agent/executeOemsCommands.ts': 'the Agent, through createWebCoreAdapter',
   'packages/safe-cex/src/crossTrade/runtime/crossTradePlaceOrder.ts': 'the cross-trade copier',
 
   /**
