@@ -170,5 +170,19 @@ describe('CommandHandler', () => {
         });
       });
     });
+
+    it('answers a reqId with a failed exec-result when the executor throws', async () => {
+      mockExecutor.mockRejectedValueOnce(new Error('boom'));
+      handler.handle({ op: 'exec', data: { symbol: 'BTCUSDT', command: 'buy 1', reqId: 'cb:9' } });
+      await vi.waitFor(() => {
+        expect(mockEmit).toHaveBeenCalledWith('exec-log', { message: expect.stringContaining('boom'), reqId: 'cb:9' });
+        expect(mockEmit).toHaveBeenCalledWith('exec-result', {
+          reqId: 'cb:9',
+          handled: true,
+          success: false,
+          error: expect.stringContaining('boom'),
+        });
+      });
+    });
   });
 });

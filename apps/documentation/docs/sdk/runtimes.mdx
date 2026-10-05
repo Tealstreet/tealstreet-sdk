@@ -1,0 +1,82 @@
+---
+title: Runtimes
+description: What the core, web, CLI and mobile runtimes each provide to a script, and how targeting works.
+sidebar_position: 2
+---
+
+# Runtimes
+
+The Core API is one contract, but it is not identical everywhere. Each runtime
+provides a **slice** of it, and a script declares which runtimes it targets.
+Calling something a declared target does not provide is a validation error at
+authoring time, not a crash at run time.
+
+## Targets
+
+`core` is a target in its own right: the portable subset every runtime
+provides. `['core', 'cli']` is the usual starting point for a script with no
+user interface.
+
+```ts
+import type { ScriptMeta } from '@tealstreet/script-api-core';
+
+export const meta: ScriptMeta = {
+    targets: ['core', 'cli'],
+    capabilities: { accounts: [], writes: [], idempotent: true },
+};
+```
+
+`capabilities` is not optional bookkeeping. The validator reads `meta` as a
+whole, statically — if `capabilities` is missing, or either field is built in a
+way it cannot read (a spread, or a reference to a variable declared elsewhere),
+it cannot describe your script and the checks are skipped rather than guessed.
+Write both as plain object and array literals.
+
+## What each runtime provides
+
+|                                                      | core | web | cli | mobile |
+| ---------------------------------------------------- | :--: | :-: | :-: | :----: |
+| Accounts, active account and symbol                  |  ✅  | ✅  | ✅  |   ✅   |
+| Markets, tickers                                     |  ✅  | ✅  | ✅  |   ✅   |
+| Positions, orders, balances                          |  ✅  | ✅  | ✅  |   ✅   |
+| Order book, candles                                  |  ✅  | ✅  | ✅  |   ✅   |
+| `getHistoricalPosition`                              |  —   | ✅  |  —  |   ✅   |
+| Utilities (`api.utils.*`), output (`api.io.*`)       |  ✅  | ✅  | ✅  |   ✅   |
+| React and components (`api.react`, `api.components`) |  —   | ✅  |  —  |   —    |
+| Click and size helpers (`api.ui.*`)                  |  —   | ✅  |  —  |   —    |
+| DOM hotkey registration (`api.domHotkey.*`)          |  —   | ✅  |  —  |   —    |
+
+The web extras are not favouritism — they are things that only mean something
+where there is a screen. `api.components` returns React elements; there is no
+React in a terminal.
+
+## Targeting more than one runtime
+
+The validator checks your calls against the **intersection** of your declared
+targets. A script targeting both `web` and `cli` may not call `api.react` — not
+because the CLI would crash, but because you said it should run in both, and it
+is held to that.
+
+When a call is unavailable on one of your targets, the error names the method,
+the targets that exclude it, and any alternative available everywhere.
+
+## The order surface is not part of a runtime slice
+
+`api.exchange.*` — the order-entry half of the Core API — is typed, but it is
+not currently offered by any runtime target. A script that calls it will fail
+validation whatever it targets.
+
+To automate order entry today, use a **custom hotkey** or a **custom module**,
+which run against the Module API in the browser and do have an order surface.
+
+## Narrower surfaces still
+
+Beyond runtimes, the API can be sliced by **capability** rather than by place.
+The order-entry slice behind AI-assisted order flow is the clearest example: a
+short list of reads and writes concerned only with working an order,
+deliberately excluding account reconfiguration and any general-purpose escape
+hatch.
+
+A capability slice is not a runtime. It does not say where code runs; it says
+what a particular caller may reach — the same API underneath, narrowed for a
+caller that should not have all of it.

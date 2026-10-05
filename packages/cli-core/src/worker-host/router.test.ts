@@ -253,9 +253,10 @@ describe('router', () => {
 
         await routeCommands(mockExchange, 'BTCUSDT', 'banana', 'req-2');
 
-        // Unknown-command warning still fires.
+        // Unknown-command warning still fires, tagged with the request it answers.
         expect(mockEmit).toHaveBeenCalledWith('exec-log', {
           message: 'Unknown command: banana',
+          reqId: 'req-2',
         });
         // AND the reply carries handled=false so the CLI knows the
         // capture didn't bind.

@@ -1,0 +1,131 @@
+---
+title: Command Bar
+description: Type a command in the header to change symbol, open a module, place or close orders, or run a hotkey script.
+sidebar_position: 10
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+The command bar is a command line in the header. Type what you want, fill in its
+arguments, and press Enter.
+
+### Turning it on
+
+Go to **Settings → General → Command Bar**. It is off by default.
+
+To jump to it from anywhere, press **/** — as long as no other hotkey uses /.
+You can bind a different key in **Settings → Hotkeys → Focus Command Bar**; it
+works even when trading hotkeys are turned off.
+
+### Finding a command
+
+Start typing and the matching commands appear below the bar. Use **↑ ↓** to
+move and **Enter** or **Tab** to choose.
+
+If you already know the command, type its name directly with a colon and skip
+the search:
+
+```
+orders:place btc sell 0.5 61k
+chart:interval 1h
+global:module orderbook
+```
+
+If what you typed does not clearly match one command, the bar asks a small AI
+model which one you meant. Only your text and the names of the commands are
+sent (including the names of your own hotkey scripts) — never your positions,
+balances or account names. The pick is filled in for you
+to check; it never runs on that same Enter.
+
+### Filling in arguments
+
+Once you choose a command, the bar turns into a form: the command becomes a
+chip, and each argument becomes a slot.
+
+- **Tab** moves to the next slot, **Shift+Tab** to the previous one.
+- A dimmed slot is a default from the module you have focused, like its symbol
+  or account. Type over it to change it.
+- **Backspace** in an empty first slot, or **Esc**, goes back to the search.
+
+Arguments are checked as you type:
+
+| You type | Means |
+| --- | --- |
+| `0.5`, `.5`, `1k` | A size in base units, rounded to the market's lot size |
+| `$1000` | A size as a dollar amount |
+| `61k`, `61000` | A price, rounded to the market's tick size |
+| `+2%`, `-50`, `last` | A price relative to the last traded price |
+| `1h`, `5m`, `1D` | A chart interval |
+
+If rounding changes your number, the slot says so. A value that is not valid is
+underlined in red with the reason — it is never changed for you.
+
+### Orders always ask first
+
+Commands that place, cancel or close orders show a confirmation card listing
+exactly what will be sent. Nothing is sent until you press **Confirm**. When
+you confirm, the order is checked again against your book as it is right then;
+if anything changed, you get the new numbers to review instead of an order.
+
+The account is the one shown in the slot — your focused module's account
+unless you type `account=` to choose another.
+
+The order commands are:
+
+| Command | What it does |
+| --- | --- |
+| `orders:place` | Market order, or limit with a price |
+| `orders:stop` | Stop loss at a trigger price |
+| `orders:cancel` | Cancel orders on one symbol |
+| `orders:cancelAll` | Cancel every order, optionally one side (`cancel all sell`) or one account (`account=`) |
+| `orders:amendPrice`, `orders:amendSize` | Change an open order's price or size, picked by its id |
+| `positions:close`, `positions:reduce` | Close a position, or reduce it by a percentage |
+| `positions:closeAll` | Close every position, or every one on one account |
+| `leverage:set` | Set leverage |
+
+"All" without an account means every account that is switched on. Any word
+the bar could not place, like a symbol after `cancel all`, is shown under the
+bar as **Not used** so it is never quietly ignored.
+
+### Module and settings commands
+
+These change what you see. They run on Enter and bring the module forward if it
+is not open.
+
+| Area | Commands |
+| --- | --- |
+| Header toggles | `settings:hotkeys`, `settings:sound`, `settings:volume 40`, `settings:privacy`, `settings:macroPanel`, `settings:theme` — a toggle with no `on`/`off` flips it |
+| Markets | `market:favorite`, `screener:pin`, `market:back` (the last market in Last Markets) |
+| Price alerts | `alerts:new` opens the alert form for a symbol; `alerts:list` prints your active alerts |
+| Order form | `placeOrder:price`, `placeOrder:size`, `placeOrder:type limit` — these only fill the form; you still send from it |
+| Tables | `openOrders:view stops`, `openPositions:percent`, `openPositions:roe`, `openPositions:hideDust`, `openPositions:currency usd` |
+| News | `newsFeed:tab traders`, `newsFeed:tickersOnly`, `newsFeed:mute @handle` |
+| Other modules | `equityCurve:period 3m`, `equityCurve:mode balance`, `margin:account`, `riskProfiler:tab moves`, `polymarket:search`, `polymarket:view top` |
+| Chart | `chart:interval`, `chart:beLines`, `chart:fees`, `chart:fills`, `chart:indicator Relative Strength Index`, `chart:clearDrawings` (asks first) |
+| Orderbook and DOM | `orderbook:grouping`, `dom:grouping` — act on the orderbook or DOM you have focused, with its own market's choices |
+| Layouts | `layout:switch <name>`, `layout:list` |
+
+`chart:clearDrawings` works on TradingView charts only; the other chart
+commands work on both chart types. Indicator names are the chart's own, like
+`Relative Strength Index`. Focus mode is not a command: it hides the header, and
+the bar with it.
+
+### Hotkey scripts
+
+Your custom hotkey scripts appear as commands too, once they are bound to a key
+or a DOM trigger. Because a script can place orders on its own, the bar always
+asks you to confirm the script by name before running it.
+
+### Terminal commands
+
+The web terminal's commands work in the bar too: type `positions`, `orders`,
+`last-price`, `status`, `markets` and the like, and their output appears under
+the bar. Commands that trade on their own — `chase`, `twap`, `scale`, `swarm`,
+`bump`, `move`, `nuke` and `chasers` — show you the exact command and ask before
+running it. The terminal's simulation mode and fat-finger limit do not apply
+to commands run this way. For buy, sell, close, cancel, stop and leverage, use the bar's own
+order commands, which show the confirmation card described above.
+
+Terminal commands run one at a time in the bar, so `;` and `@` are not
+accepted.

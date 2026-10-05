@@ -194,3 +194,22 @@ describe('WorkerPlatformAdapter', () => {
     });
   });
 });
+
+describe('reqId tagging', () => {
+  it('tags every line with the reqId it was built for', () => {
+    const emit = vi.fn();
+    const adapter = new WorkerPlatformAdapter({ emitter: { emit } } as never, 'cb:1');
+    adapter.print(['a']);
+    adapter.printError('b');
+    expect(emit.mock.calls).toEqual([
+      ['exec-log', { message: 'a', reqId: 'cb:1' }],
+      ['exec-log', { message: 'Error: b', reqId: 'cb:1' }],
+    ]);
+  });
+
+  it('leaves untagged lines untagged', () => {
+    const emit = vi.fn();
+    new WorkerPlatformAdapter({ emitter: { emit } } as never).print(['a']);
+    expect(emit).toHaveBeenCalledWith('exec-log', { message: 'a' });
+  });
+});

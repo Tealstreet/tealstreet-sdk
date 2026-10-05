@@ -39,10 +39,10 @@ one wrong assumption. Read both rows before concluding anything runs anywhere.
 
 ### Axis 1 — what a HOST implements (`CoreAdapter` / `AdapterContext`)
 
-| Host   | Bindings                                                        | Reads | Writes                              |
-| ------ | --------------------------------------------------------------- | ----- | ----------------------------------- |
-| web    | `apps/web/src/components/customScripts/scriptAdapter.ts`        | yes   | yes                                 |
-| cli    | `apps/cli/src/script-adapter.ts`                                | yes   | yes                                 |
+| Host   | Bindings                                                        | Reads | Writes                                   |
+| ------ | --------------------------------------------------------------- | ----- | ---------------------------------------- |
+| web    | `apps/web/src/components/customScripts/scriptAdapter.ts`        | yes   | yes                                      |
+| cli    | `apps/cli/src/script-adapter.ts`                                | yes   | yes                                      |
 | mobile | `src/mobile/scripts/runtime/mobileCoreAdapter.ts` (mobile repo) | yes   | opt-in only — `allowWrites`, default off |
 
 Those files are `HostBindings`, not adapters. The BODY is
@@ -125,8 +125,8 @@ people: **no runtime surface carries any `api.exchange.*` write path.**
 `getApiPathAvailability('api.exchange.placeOrder', ['web','mobile','cli'])`
 returns `allowed: false, excludedBy: ['web','mobile','cli']`, and
 `getAllowedApiPathsForTargets(['web','mobile','cli'])` resolves to reads and
-utilities only. That is deliberate — see the test literally named *"rejects
-writes for cross-target marketplace scripts"* in
+utilities only. That is deliberate — see the test literally named _"rejects
+writes for cross-target marketplace scripts"_ in
 `packages/script-authoring/src/validate/checkTargetSurface.test.ts`. A script
 published to the marketplace runs on someone else's account, so
 `checkTargetSurface` refuses a write regardless of target.
@@ -184,12 +184,12 @@ is about v3, and saying which is the point. Within that set, three narrower rule
 govern, because a guard in this repo cannot see the mobile repo and a guard in
 one package should not reach into another:
 
-| Rule                                                | Enforced by                                                            |
-| --------------------------------------------------- | ---------------------------------------------------------------------- |
-| one `CoreAdapter` body, hosts supply bindings       | `src/adapter/noHandRolledAdapters.test.ts`                             |
-| a chaser starts once, on web                        | `apps/web/src/order/chaseOrder.guard.test.ts`                          |
-| every CLI placement goes through the shared policy  | `packages/cli-core/src/order/cliOrdersGoThroughPolicy.test.ts`         |
-| the same two rules for mobile's hand-rolled screens | `src/mobile/components/orderPathGuards.test.ts` (**mobile repo**)      |
+| Rule                                                | Enforced by                                                       |
+| --------------------------------------------------- | ----------------------------------------------------------------- |
+| one `CoreAdapter` body, hosts supply bindings       | `src/adapter/noHandRolledAdapters.test.ts`                        |
+| a chaser starts once, on web                        | `apps/web/src/order/chaseOrder.guard.test.ts`                     |
+| every CLI placement goes through the shared policy  | `packages/cli-core/src/order/cliOrdersGoThroughPolicy.test.ts`    |
+| the same two rules for mobile's hand-rolled screens | `src/mobile/components/orderPathGuards.test.ts` (**mobile repo**) |
 
 **The web UI path and the headless path are two entry points on purpose, and
 that is not the duplication to remove.** `apps/web/src/order/*` adds toasts,
@@ -216,6 +216,99 @@ web files are not all in mobile's typecheck root set — a break there will not
 surface as a mobile typecheck failure. And `src/package.json` is generated from
 `apps/web/package.json`, so a dependency added there arrives on the next sync
 without anyone editing the mobile manifest.
+
+## The read surface is machine-describable — `readBindings.ts`
+
+`CoreAdapter` says what a read IS. `src/runtime/readBindings.ts` says what a
+read LOOKS LIKE to a caller that has to name it in JSON: a summary, an OpenAI
+strict-mode JSON Schema for its arguments, a cost class, a **result shape**,
+and an `invoke` that flattens that argument object onto the adapter's
+positional signature.
+
+`scripts/generate-manifest.ts` strips `invoke` and emits
+`src/runtime/read-manifest.ts` via `yarn generate:types`, drift-tested by
+`read-manifest.test.ts`. **The manifest deliberately cannot call anything** — a
+shell that only DESCRIBES the surface consumes it; a shell that EXECUTES
+imports the binding.
+
+**`resultShape` is here because the alternative was measured.**
+`oems-core`'s `boundReadResult` used to pick its cap by string-matching
+`'getOrderbook'` and `'getCandles'` against a parameter typed `string` — the
+last hand-written copy of this vocabulary, living inside the package that owns
+the bounding. Renaming a read updated the manifest, the agent tool list, the
+prompt block, the CLI registry and every drift test, and silently dropped the
+20-level book cap: a book fell to the array branch (it is an object, so that is
+false), skipped the halving loop, and rode into a prompt under the character
+backstop alone. A cap that differs per read is a property OF the read, so it
+belongs beside `costClass` rather than in whichever consumer needed it first.
+
+**Why this exists at all:** `docs/custom-scripts/SPEC.md` §10 specified this
+generator in Phase 6 and it shipped as a `throw`. The result was not that
+nothing consumed a manifest — four surfaces hand-wrote one each and drifted.
+See [`docs/plans/SDK_SURFACE_VISION_v1.md`](../../docs/plans/SDK_SURFACE_VISION_v1.md).
+
+Three rules that are load-bearing:
+
+- **Bindings target `CoreAdapter`, not `CoreApi`.** The callers are hosts (the
+  CLI's MCP server, the browser's agent executor) and both already hold one.
+  `CoreApi`'s optional-account sugar exists so a user's script can mean "the
+  active account"; a _tool argument_ that silently means that is a footgun in
+  an agent transcript, so `account` is required wherever it applies.
+- **`objectSchema` puts every key in `required` and sets
+  `additionalProperties: false`.** OpenAI strict mode has no optional property
+  — an optional field is a required one whose type includes `"null"`. Building
+  it into the helper means a binding cannot express a schema the provider
+  rejects at request time. Same rule `packages/oems-core/src/planSchema.ts`
+  documents at length.
+- **No zod.** This package's dependencies are `@tealstreet/math`,
+  `@tealstreet/safe-cex`, `@tealstreet/utils` and nothing else, and it is
+  consumed as SOURCE by V2 and V3 under the tealchart/tealscript carveout.
+  JSON Schema is what every consumer wants anyway.
+
+## `readPath` / `writePath` are generic, and that is the point
+
+They used to be annotated `(method: ReadMethodName): ApiPath`, which widened
+every slice to `api.${string}` — so nothing downstream could check slice
+membership at compile time, which is the one property the slice mechanism
+exists to provide. They are now generic and the slices carry literal types:
+
+```ts
+const readPath = <M extends ReadMethodName>(method: M): `api.${M}` => `api.${method}`;
+```
+
+`RUNTIME_SURFACES` is explicitly annotated `Readonly<Record<TargetName,
+RuntimeSurfaceDescriptor>>` so `apiPaths` widens back to `ApiPath[]` at that
+boundary. Don't remove the annotation to "let it infer" — `.includes(path)`
+against a literal-typed array stops accepting an `ApiPath`.
+
+## `api.exchange.*` is a KNOWN path that NO target allows
+
+Verified 2026-09-01: `isKnownApiPath('api.exchange')` is `true`, and
+`getApiPathAvailability('api.exchange', t)` returns `allowed: false` for every
+`t` — `['cli']`, `['web']`, `['core','cli']`, all of them. Because
+`checkTargetSurface` resolves a call to its nearest KNOWN path, a script
+calling `api.exchange.placeOrder` is flagged, and `validate()` composes that
+check — so `validate_script`, editor diagnostics and the AI repair loop all
+reject it.
+
+`CORE_SHARED_API_PATHS` is the constant that carries `CORE_WRITE_API_PATHS`,
+and **nothing in `RUNTIME_SURFACES` uses it**. Whether that is the intended
+state (the write impls are marked "Phase 2" in `CoreApi.types.ts`) or an
+oversight has NOT been established — do not "fix" it by adding
+`CORE_SHARED_API_PATHS` to a runtime surface without deciding that
+deliberately, and do not document the script write surface as usable until it
+is. Order automation in the browser goes through the MODULE api, which is a
+separate path set with its own surface table in
+`packages/module-api-runtime/src/moduleTargetSurface.ts`.
+
+## `RUNTIME_SURFACES` contains NO write paths
+
+Every entry is reads plus portable utilities, plus the web extension paths for
+`web`. Writes are governed by declared **capabilities**, not by runtime
+narrowing — a runtime slice says "this method does not exist here", a
+capability says "this script may not do that". Both apply, and they are
+answered in different places. Do not "fix" a runtime surface by adding
+`api.exchange.*` to it.
 
 ## `closePosition`'s fallback size is NATIVE
 

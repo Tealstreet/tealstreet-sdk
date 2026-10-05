@@ -108,6 +108,7 @@ export { validateTargets, type ScriptDescriptor, type RuntimeDescriptor } from '
 /** @internal Host-side — target API surface descriptors. */
 export {
   CLI_API_VERSION,
+  AGENT_READ_API_PATHS,
   CORE_READ_API_PATHS,
   CORE_SHARED_API_PATHS,
   CORE_WRITE_API_PATHS,

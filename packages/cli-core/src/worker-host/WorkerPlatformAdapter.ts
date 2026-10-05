@@ -8,8 +8,12 @@ import { setTableRenderMode } from '../table/Table';
  */
 export class WorkerPlatformAdapter implements CLIPlatformAdapter {
   private exchange: ExchangeLike;
+  /** Set when the browser asked with a reqId: every line it prints carries
+   *  it, so one caller (the command bar) can collect exactly its own output. */
+  private reqId?: string;
 
-  constructor(exchange: ExchangeLike) {
+  constructor(exchange: ExchangeLike, reqId?: string) {
+    this.reqId = reqId;
     this.exchange = exchange;
     // Set table render mode to 'web' when adapter is instantiated (output goes to web UI)
     // This is set in constructor rather than module level to avoid polluting CLI mode
@@ -68,24 +72,27 @@ export class WorkerPlatformAdapter implements CLIPlatformAdapter {
   }
 
   // Output methods - emit through exchange.emitter
+  private log(message: string): void {
+    this.exchange.emitter.emit('exec-log', this.reqId === undefined ? { message } : { message, reqId: this.reqId });
+  }
+
   print(lines: string[]): void {
-    const message = lines.join('\n');
-    this.exchange.emitter.emit('exec-log', { message });
+    this.log(lines.join('\n'));
   }
 
   printError(message: string): void {
-    this.exchange.emitter.emit('exec-log', { message: `Error: ${message}` });
+    this.log(`Error: ${message}`);
   }
 
   printSuccess(message: string): void {
-    this.exchange.emitter.emit('exec-log', { message });
+    this.log(message);
   }
 
   printWarning(message: string): void {
-    this.exchange.emitter.emit('exec-log', { message: `Warning: ${message}` });
+    this.log(`Warning: ${message}`);
   }
 
   printInfo(message: string): void {
-    this.exchange.emitter.emit('exec-log', { message });
+    this.log(message);
   }
 }

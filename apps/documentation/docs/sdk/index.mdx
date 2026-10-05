@@ -1,0 +1,74 @@
+---
+title: The programmable surface
+description: The APIs you write Tealstreet automations against, and how they relate.
+sidebar_position: 1
+---
+
+# The programmable surface
+
+Tealstreet is scriptable in two places, and they are not the same API.
+
+| You are writing                              | The API in scope     | Runs in         |
+| -------------------------------------------- | -------------------- | --------------- |
+| A **custom module** (a panel in your layout) | Module API           | Browser sandbox |
+| A **custom hotkey**                          | Module API           | Browser sandbox |
+| A **chart study**                            | Study API            | Browser sandbox |
+| A **CLI script**                             | Core API (`CoreApi`) | Your machine    |
+
+The browser surfaces and the CLI surface share a vocabulary — both talk about
+accounts, positions, orders, tickers and candles, with the same names — but
+they are deliberately separate contracts, kept in step by hand rather than
+merged. They differ in ways that are not cosmetic: one is built around React
+hooks that re-render, the other around promises you await.
+
+**Do not assume a snippet from one works in the other.** When you are writing a
+module, ask your editor (or `get_module_api_types` over MCP) for the _module_
+definitions; when you are writing a CLI script, the `CoreApi` type is what your
+script receives.
+
+## Reading your book
+
+Both surfaces let you read the same things: which accounts you have, what you
+hold, what is resting, current prices, order books and candles.
+
+In a CLI script, `api` arrives as a parameter on your default-exported
+function, alongside `args` — they are not ambient globals:
+
+```ts
+import type { CoreApi, ScriptArgs, ScriptMeta } from '@tealstreet/script-api-core';
+
+export const meta: ScriptMeta = {
+    targets: ['core', 'cli'],
+    capabilities: { accounts: [], writes: [], idempotent: true },
+};
+
+export default async function (args: ScriptArgs, api: CoreApi) {
+    const positions = await api.getPositions({ account: 'main' });
+    const btc = await api.getTicker('BTCUSDT', { account: 'main' });
+    api.io.print(`${positions.length} open, BTC at ${btc?.last}`);
+}
+```
+
+In a custom module the runtime evaluates your code with `api` already in
+scope, and you read through hooks that keep your panel live as data arrives.
+
+## Declaring what a script may do
+
+A CLI script's `meta.capabilities` is a contract the runtime holds you to. It
+is read statically, so write it as plain literals — a spread, or a reference to
+a variable declared elsewhere, makes it unreadable and the checks are skipped
+rather than guessed.
+
+`accounts: []` means "no account restriction"; listing accounts pins the script
+to them. `writes` is always explicit — nothing is implied.
+
+## Versioning
+
+Each surface carries a version constant, bumped whenever its runtime-visible
+contract changes, and guarded in CI so a surface cannot change without one. The
+type definitions your editor loads and the ones an AI assistant receives over
+MCP come from the same generated source, so they cannot drift apart.
+
+## Next
+
+- [Runtimes](./runtimes) — what web, CLI and mobile can each reach, and why they differ

@@ -8,12 +8,14 @@ export class CommandHandler extends BaseHandler {
       case 'exec': {
         const executor = getCommandExecutor();
         if (!executor) {
-          // No command executor registered for this host (e.g. the
-          // exchange-server signing relay never runs CLI commands). Log and
-          // no-op rather than crash — safe-cex doesn't own the CLI layer.
-          this._exchange.emitter.emit('exec-log', {
-            message: 'Command execution is not available in this environment.',
-          });
+          // No command executor registered for this host. Answer the reqId
+          // rather than crash — safe-cex doesn't own the CLI layer.
+          const message = 'Command execution is not available in this environment.';
+          const reqId = payload.data.reqId;
+          this._exchange.emitter.emit('exec-log', reqId === undefined ? { message } : { message, reqId });
+          if (reqId !== undefined) {
+            this._exchange.emitter.emit('exec-result', { reqId, handled: false, success: false, error: message });
+          }
           break;
         }
         // Supports semicolon-chained and @-prefixed parallel commands.
@@ -29,9 +31,13 @@ export class CommandHandler extends BaseHandler {
           try {
             await executor(this._exchange, payload.data.symbol, payload.data.command, payload.data.reqId);
           } catch (err: unknown) {
-            this._exchange.emitter.emit('exec-log', {
-              message: `Command failed: ${err instanceof Error ? err.message : String(err)}`,
-            });
+            const message = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+            const reqId = payload.data.reqId;
+            this._exchange.emitter.emit('exec-log', reqId === undefined ? { message } : { message, reqId });
+            // A caller awaiting this reqId would otherwise wait out its timeout.
+            if (reqId !== undefined) {
+              this._exchange.emitter.emit('exec-result', { reqId, handled: true, success: false, error: message });
+            }
           }
         })();
         break;

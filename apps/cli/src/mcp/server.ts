@@ -20,7 +20,9 @@ import {
   VALID_SCRIPT_NAME,
   writeScript,
 } from '../scripts-store';
+import { CORE_READ_BINDINGS } from '@tealstreet/script-api-core/src/runtime/readBindings';
 import { createDryRunAdapter } from './dryRunAdapter';
+import { CLI_READ_TOOLS, readToolShape, renderReadResult } from './readTools';
 import { cliDataTools } from './dataTools';
 import { disconnectAll, ensureConnected, getExchangeManager, listAccountSummaries } from './liveState';
 import { getProtocolStdout } from './stdoutGuard';
@@ -327,77 +329,50 @@ defineTool(
   },
 );
 
-const withAccount = async (account: string, read: () => string): Promise<ToolResult> => {
-  const connected = await ensureConnected(account);
-  if (!connected.ok) return text(connected.error);
-  return text(read());
-};
+/**
+ * Live account reads, GENERATED from the SDK read manifest.
+ *
+ * These used to reach into `getExchangeManager().getExchange(a)?.store` and
+ * hand-format a string — while `createDryRunAdapter`, in the file beside them,
+ * correctly wrapped `CoreAdapter`. The bypass and the sanctioned path shipped
+ * in the same directory, and the result was that this surface answered "what
+ * are my positions" from a different source, in a different shape, under a
+ * different name than the script API and the web agent did.
+ *
+ * Definitions now come from `readBindings.ts`; only the names and the
+ * rendering are ours. See `docs/plans/SDK_SURFACE_VISION_v1.md`.
+ *
+ * A fresh adapter per call is cheap: `createCoreAdapter` returns a plain object
+ * and registers nothing, and the orderbook cache is keyed on the exchange
+ * manager, so per-call adapters share subscriptions rather than duplicating
+ * them. No `platformAdapter` is passed — a read has no business printing, and
+ * without one a stray `print` throws loudly instead of corrupting the stdio
+ * transport.
+ */
+const sessionFor = (account: string): CLISession => ({
+  currentExchange: getExchangeManager().getExchange(account) ?? null,
+  currentAccountName: account,
+  currentSymbol: '',
+});
 
-/** Stores hydrate asynchronously after connect, so an empty result right after
- *  a cold connect is ambiguous. Say so rather than reporting "none". */
-const orEmptyNote = (body: string, what: string): string =>
-  body.trim() === ''
-    ? `No ${what} reported. If this account just connected, its data may still be loading — try again in a moment.`
-    : body;
+for (const [toolName, method] of Object.entries(CLI_READ_TOOLS)) {
+  const binding = CORE_READ_BINDINGS[method];
+  defineTool(toolName, binding.summary, readToolShape(method), async (args) => {
+    const account = String((args as { account?: unknown }).account ?? '');
+    // Still gated on `ensureConnected` first: an adapter over a disconnected
+    // account answers empty, which reads as "you hold nothing".
+    const connected = await ensureConnected(account);
+    if (!connected.ok) return text(connected.error);
 
-defineTool(
-  'get_positions',
-  'Open positions for an account.',
-  { account: z.string().describe('Account name.'), symbol: z.string().optional() },
-  async ({ account, symbol }) =>
-    withAccount(account, () => {
-      const store = getExchangeManager().getExchange(account)?.store;
-      const positions = (store?.positions ?? []).filter((p) => !symbol || p.symbol === symbol);
-      return orEmptyNote(
-        positions
-          .filter((p) => p.contracts !== 0)
-          .map((p) => `${p.symbol} ${p.side} ${p.contracts} @ ${p.entryPrice} (upnl ${p.unrealizedPnl})`)
-          .join('\n'),
-        'open positions',
-      );
-    }),
-);
-
-defineTool(
-  'get_orders',
-  'Open orders for an account.',
-  { account: z.string().describe('Account name.'), symbol: z.string().optional() },
-  async ({ account, symbol }) =>
-    withAccount(account, () => {
-      const store = getExchangeManager().getExchange(account)?.store;
-      const orders = (store?.orders ?? []).filter((o) => !symbol || o.symbol === symbol);
-      return orEmptyNote(
-        orders.map((o) => `${o.id} ${o.symbol} ${o.side} ${o.type} ${o.amount} @ ${o.price}`).join('\n'),
-        'open orders',
-      );
-    }),
-);
-
-defineTool(
-  'get_balance',
-  'Balance for an account.',
-  { account: z.string().describe('Account name.') },
-  async ({ account }) =>
-    withAccount(account, () => {
-      const balance = getExchangeManager().getExchange(account)?.store?.balance;
-      if (!balance) return 'No balance reported yet — the account may still be loading.';
-      return `total: ${balance.total}\nfree: ${balance.free}\nused: ${balance.used}\nupnl: ${balance.upnl}`;
-    }),
-);
-
-defineTool(
-  'get_ticker',
-  'Current ticker for a symbol.',
-  { account: z.string().describe('Account name.'), symbol: z.string().describe('e.g. BTCUSDT') },
-  async ({ account, symbol }) =>
-    withAccount(account, () => {
-      const ticker = getExchangeManager()
-        .getExchange(account)
-        ?.store?.tickers?.find((t) => t.symbol === symbol);
-      if (!ticker) return `No ticker for '${symbol}' on '${account}'.`;
-      return `${ticker.symbol}\n  last: ${ticker.last}\n  bid: ${ticker.bid}\n  ask: ${ticker.ask}\n  24h%: ${ticker.percentage}`;
-    }),
-);
+    const { createStandaloneCoreAdapter } = await import('../script-adapter');
+    const adapter = createStandaloneCoreAdapter(getExchangeManager(), sessionFor(account));
+    try {
+      return text(renderReadResult(method, await binding.invoke(adapter, args as Record<string, unknown>)));
+    } catch (error) {
+      return text(`${toolName} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+}
 
 defineTool(
   'run_script',

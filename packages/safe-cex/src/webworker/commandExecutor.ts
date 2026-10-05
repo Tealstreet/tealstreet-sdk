@@ -6,9 +6,9 @@ import type { Exchange } from '../exchanges/base';
  * safe-cex deliberately does NOT implement this — the CLI command layer
  * (cli-core) does. The composition root (the web app) injects the
  * cli-core-backed implementation via {@link registerCommandExecutor} at worker
- * startup, so safe-cex carries no dependency on the CLI layer. Hosts that never
- * run `exec` (e.g. the exchange-server signing relay) simply never register
- * one, and `exec` ops no-op.
+ * startup, so safe-cex carries no dependency on the CLI layer. Both the web
+ * worker and the exchange-server register one; a host that does not answers
+ * `exec` with a failed result.
  */
 export type CommandExecutor = (
   exchange: Exchange,

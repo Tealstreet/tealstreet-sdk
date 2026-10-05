@@ -16,8 +16,13 @@ export interface ApiPathAvailability {
   readonly alternatives: readonly ApiPath[];
 }
 
-const readPath = (method: ReadMethodName): ApiPath => `api.${method}`;
-const writePath = (method: WriteMethodName): ApiPath => `api.exchange.${method}`;
+/**
+ * Generic on purpose. Annotated `: ApiPath` these widened every slice to
+ * `api.${string}`, so nothing downstream could check slice membership at
+ * compile time — the property the whole slice mechanism exists to provide.
+ */
+const readPath = <M extends ReadMethodName>(method: M): `api.${M}` => `api.${method}`;
+const writePath = <M extends WriteMethodName>(method: M): `api.exchange.${M}` => `api.exchange.${method}`;
 
 export const CORE_READ_API_PATHS = Object.freeze([
   readPath('getActiveAccount'),
@@ -158,6 +163,23 @@ export const CORE_SHARED_API_PATHS = Object.freeze([
 ] as const satisfies readonly ApiPath[]);
 
 export const MOBILE_READ_API_PATHS = CORE_READ_API_PATHS;
+
+/**
+ * What an AGENT-DRIVEN caller may read while it is deciding what to propose.
+ *
+ * Equal to `CORE_READ_API_PATHS`, and that is the finding rather than an
+ * oversight. The agent is narrowed on WRITES — `OEMS_WRITE_API_PATHS`, plus a
+ * human confirming every order — and a read cannot move money. Narrowing reads
+ * as well would only remove the capability the chained-read work exists to
+ * add: the first user question that reached the agent was "change in btc price
+ * in last 4 hours", which it could not answer because it had no candles.
+ *
+ * Named anyway so a future exclusion has somewhere to go, exactly as
+ * `MOBILE_READ_API_PATHS` is named while equal to core. Do NOT assert
+ * narrowing against this one — `oems-core`'s surface drift test asserts
+ * EQUALITY here and strict narrowing for `OEMS_READ_API_PATHS`.
+ */
+export const AGENT_READ_API_PATHS = CORE_READ_API_PATHS;
 export const CLI_READ_API_PATHS = Object.freeze([
   readPath('getActiveAccount'),
   readPath('getActiveAccounts'),
@@ -227,7 +249,12 @@ const WEB_EXTENSION_API_PATHS = Object.freeze([
  */
 export const CLI_API_VERSION = '0.0.0';
 
-export const RUNTIME_SURFACES = Object.freeze({
+/**
+ * Annotated rather than inferred so `apiPaths` widens to `ApiPath[]` HERE. The
+ * slice constants keep their literal types for compile-time membership checks;
+ * this record is the boundary where that stops being useful.
+ */
+export const RUNTIME_SURFACES: Readonly<Record<TargetName, RuntimeSurfaceDescriptor>> = Object.freeze({
   core: Object.freeze({
     target: 'core',
     label: 'core',

@@ -455,6 +455,16 @@ and `roundOrderPrice(0.0002, 0.001)` is `0` — so the amend reached the venue a
 `price: 0`. `prepareOrder` and `createCoreAdapter.updateOrder` both re-check;
 this was the one copy that did not.
 
+## Worker output is tagged with the request's `reqId`
+
+`WorkerPlatformAdapter(exchange, reqId?)` and `commandRouter(…, reqId?)` stamp
+every `exec-log` line with the `reqId` the browser sent, and safe-cex's
+`CommandHandler` answers a THROWN command with a failed `exec-result` for that
+reqId. Before this, output was untagged — anything listening on an account
+(every CLI tab, the command bar) received everyone's lines — and a throw left
+an awaiting caller to its 30s timeout. The command bar uses `cb:`-prefixed
+reqIds and CLI tabs skip those lines; keep both halves if you change either.
+
 ## `be` answers the ENTRY price, and that is a data limit
 
 `BreakevenCommand` calls the shared arithmetic in
