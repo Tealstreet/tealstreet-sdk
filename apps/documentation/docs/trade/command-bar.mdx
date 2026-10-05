@@ -104,12 +104,34 @@ is not open.
 | Other modules | `equityCurve:period 3m`, `equityCurve:mode balance`, `margin:account`, `riskProfiler:tab moves`, `polymarket:search`, `polymarket:view top` |
 | Chart | `chart:interval`, `chart:beLines`, `chart:fees`, `chart:fills`, `chart:indicator Relative Strength Index`, `chart:clearDrawings` (asks first) |
 | Orderbook and DOM | `orderbook:grouping`, `dom:grouping` — act on the orderbook or DOM you have focused, with its own market's choices |
-| Layouts | `layout:switch <name>`, `layout:list` |
+| Layouts | `layout:switch <name>`, `layout:list`, `layout:previous`, `layout:ai <description>` (see below) |
 
 `chart:clearDrawings` works on TradingView charts only; the other chart
 commands work on both chart types. Indicator names are the chart's own, like
 `Relative Strength Index`. Focus mode is not a command: it hides the header, and
 the bar with it.
+
+### AI layouts
+
+`layout:ai` designs a layout from a sentence:
+
+```
+layout:ai a new layout focused on chart trading, with the orderbook on the right
+layout:ai make the chart bigger and drop the screener
+```
+
+The bar shows the proposed panels and two buttons. **Create layout** saves it
+as a new named layout and switches to it, keeping your other settings.
+**Apply to this layout** replaces the current one; `layout:previous` switches
+back to the layout it replaced, and running it again switches forward. Nothing
+changes until you click one. Modules you cannot add are left out, and the
+card says which.
+
+### AI credits
+
+Commands that spend AI credits, like `layout:ai`, say so next to Enter before
+you run them. Each call is charged by what it actually cost, and you get a daily
+allowance that resets at midnight UTC. `ai:credits` shows what you have left.
 
 ### Hotkey scripts
 

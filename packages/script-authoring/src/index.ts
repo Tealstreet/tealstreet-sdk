@@ -13,7 +13,7 @@ export { hasBlockingFinding, requiredTier, scanCircumvention } from './screen/ci
 export type { ModelConcern, ScreenModuleInput, ScreenModuleOptions, ScreenResult } from './screen/screenModule';
 export { screenModule } from './screen/screenModule';
 export { SCREEN_PROMPT_VERSION } from './screen/screenPrompt';
-export type { OpenAiClientConfig, OpenAiJsonRequest } from './openai';
+export type { OpenAiClientConfig, OpenAiJsonRequest, OpenAiUsage } from './openai';
 export { AiConfigurationError, AiProviderError, OpenAiJsonClient } from './openai';
 export type { ScreenEnvConfig } from './config';
 export { getScreenConfig, isScreenConfigured } from './config';

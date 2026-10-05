@@ -1,7 +1,7 @@
 # CLAUDE.md — @tealstreet/script-authoring
 
 Validation core for custom scripts, plus the OpenAI transport used by the
-save-time safety screen. Transport-agnostic on purpose: the MCP server and the
+save-time safety screen, the AI order planner and the AI commands. Transport-agnostic on purpose: the MCP server and the
 web editor are two frontends over this one package, so a script can never be
 "valid" in one surface and invalid in the other.
 
@@ -128,6 +128,13 @@ a debugging session to find:
   original drafting client had exactly this bug.
 - **`prompt_cache_key` must be versioned by the caller.** A prompt change that
   reuses the previous cache key serves the old instructions.
+- **`completeWithUsage` reports what a call cost** (`input`, `cached input`
+  — a SUBSET of input — and `output`, which already includes reasoning), and
+  `AiProviderError.usage` carries it for a call that was billed but still
+  failed. The AI credits ledger (`apps/web/src/app/api/ai/credits/`) charges
+  from it; `complete()` is unchanged for callers that do not care.
+- **`effort: 'none'` omits `reasoning`** — gpt-4.1 and gpt-4o reject the
+  parameter. Unset still means `'low'`, which every existing caller relies on.
 
 ## No caps here
 
