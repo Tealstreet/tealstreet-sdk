@@ -507,6 +507,14 @@ Without that fallback, the interim row can be mapped as a plain `Limit`, get
 snapped to near-touch price by chart/open-order formatting, and appear as a
 phantom order until the next snapshot corrects it.
 
+Bybit Demo can also surface position TP/SL rows with a blank/missing `side`,
+especially when private order WS is degraded (`1006`) and the UI is relying on
+REST snapshots. Keep this as a local mapping recovery, not a reason to proxy demo
+private WS: infer the protective closing side from `positionIdx`
+(`1 -> Sell`, `2 -> Buy`) or from the single open one-way position. Chart order
+PnL labels depend on that side matching the open position. Regression:
+`bybitdemo.order-risk.test.ts`.
+
 **Cancel path implication**: `cancelOrders` filters out virtual TP/SL IDs at
 its entry point in all three variants (`bybit`, `bybitspot`, `bybitinverse`).
 Synthetic IDs are not known to Bybit's cancel endpoint, and on UNIFIED

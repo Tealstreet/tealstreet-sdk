@@ -3232,6 +3232,22 @@ export class BybitExchange extends BaseExchange {
     return position;
   }
 
+  private inferProtectiveOrderSide(o: Record<string, any>): OrderSide | undefined {
+    const positionIdx = Number(v(o, 'positionIdx'));
+    if (positionIdx === 1) return OrderSide.Sell;
+    if (positionIdx === 2) return OrderSide.Buy;
+
+    const symbol = v(o, 'symbol');
+    if (!symbol) return undefined;
+
+    const openPositions = this.store.positions.filter(
+      (position) => position.symbol === symbol && Math.abs(position.contracts) > 0,
+    );
+    if (openPositions.length !== 1) return undefined;
+
+    return openPositions[0].side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy;
+  }
+
   mapOrder(o: Record<string, any>) {
     const stopOrderType = v(o, 'stopOrderType');
     const reduceOnly = v(o, 'reduceOnly') === true || v(o, 'reduceOnly') === 'true';
@@ -3253,6 +3269,15 @@ export class BybitExchange extends BaseExchange {
       !isPositionTpslMode &&
       (parseFloat(triggerPrice ?? '0') > 0 || v(o, 'createType') === 'CreateByStopOrder');
     const type = isOpeningTriggerOrder ? OrderType.Conditional : ORDER_TYPE[oType];
+    const isProtectiveOrder =
+      reduceOnly ||
+      closeOnTrigger ||
+      isPositionTpslMode ||
+      type === OrderType.StopLoss ||
+      type === OrderType.TakeProfit ||
+      type === OrderType.TrailingStopLoss;
+    const side =
+      ORDER_SIDE[o.side] ?? (isProtectiveOrder ? this.inferProtectiveOrderSide(o) : undefined);
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
 
     let remaining = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
@@ -3269,7 +3294,7 @@ export class BybitExchange extends BaseExchange {
         status: ORDER_STATUS[v(o, 'orderStatus')],
         symbol: o.symbol,
         type,
-        side: ORDER_SIDE[o.side],
+        side,
         remaining,
         extra: {
           remainingNative,
