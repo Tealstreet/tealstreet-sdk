@@ -84,6 +84,8 @@ const getRepl = async () => import('./repl');
 // JSON-RPC stream.
 if (!RUNNING_AS_MCP) checkForUpdatesBackground();
 
+const CLI_DOCS_URL = 'https://docs.tealstreet.io/cli';
+
 const program = new Command();
 
 program
@@ -92,7 +94,8 @@ program
   .version(getCurrentVersion(), '-v, --version', 'Display version number')
   .option('--update', 'Update CLI to the latest version')
   .option('--check-update', 'Check for updates without installing')
-  .option('--disable-all', 'Start with all exchanges disabled (skip auto-connecting)');
+  .option('--disable-all', 'Start with all exchanges disabled (skip auto-connecting)')
+  .addHelpText('after', `\nDocs: ${CLI_DOCS_URL}`);
 
 // ============ Auth Commands ============
 // Same names the REPL uses (repl.ts processSingleCommand), so the instruction
