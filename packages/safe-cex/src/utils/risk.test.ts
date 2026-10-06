@@ -469,6 +469,42 @@ describe('calculateRiskAtPrice', () => {
     });
   });
 
+  it('applies a partial take-profit when the crosshair is exactly on the order price', () => {
+    const positions: Position[] = [
+      createPosition({
+        side: PositionSide.Long,
+        contracts: 3,
+        entryPrice: 50000,
+      }),
+    ];
+    const takeProfit = createOrder({
+      id: 'tp-1',
+      side: OrderSide.Sell,
+      price: 51000,
+      remaining: 1,
+      reduceOnly: true,
+      type: OrderType.TakeProfit,
+    });
+    const ordersRisk = {
+      [takeProfit.id]: [
+        {
+          orderPnl: 1000,
+          totalRealizedPnl: 1000,
+          rollingUnrealizedPnl: 3000,
+          orderLinePosSide: PositionSide.Long,
+          positionSize: 2,
+        },
+      ],
+    };
+
+    expect(calculateRiskAtPrice(51000, 'BTCUSDT', ordersRisk, positions, [takeProfit])).toMatchObject({
+      positionSize: 2,
+      positionSide: PositionSide.Long,
+      realizedPnl: 1000,
+      unrealizedPnl: 2000,
+    });
+  });
+
   it('returns null in hedged mode when both sides are open', () => {
     const positions: Position[] = [
       createPosition({

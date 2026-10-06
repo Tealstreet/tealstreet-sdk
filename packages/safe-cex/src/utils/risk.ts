@@ -481,7 +481,7 @@ export const calculateRiskAtPrice = (
         // if we are above position we are in a profit long or loss short and only want orders below position, else opposite
         (price > entryPrice ? o.price > entryPrice : o.price < entryPrice) &&
         // if we are above position we are in a profit long or loss short and only want orders below us, else opposite
-        (price > entryPrice ? o.price < price : o.price > price) &&
+        (price > entryPrice ? o.price <= price : o.price >= price) &&
         // order risk needs to exist to pivot off of, otherwise could be stacked stops etc that are already 0
         ordersRisk?.[o.id]?.[0],
     )
