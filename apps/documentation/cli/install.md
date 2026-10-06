@@ -137,15 +137,15 @@ not live yet.
 The CLI uses Auth0 for update checks and identity — separate from any
 exchange API keys, which live only on your machine.
 
-Inside the REPL:
+From your shell, or as `login` inside the REPL:
 
-```text
-> login
+```bash
+tealstreet login
 ```
 
 Your browser opens, you sign in, the CLI prints `Logged in as <email>`,
-and writes the token to `~/.tealstreet/config.json`. `logout` clears it.
-`whoami` (alias `auth`) shows the current user.
+and writes the token to `~/.tealstreet/config.json`. `tealstreet logout` clears it, and
+`tealstreet whoami` (alias `auth`) shows the current user.
 
 The OAuth callback listens on **`localhost:9876`** during the flow.
 

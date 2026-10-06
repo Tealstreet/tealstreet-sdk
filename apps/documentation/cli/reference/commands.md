@@ -855,8 +855,7 @@ Register it with your MCP client — for Claude Code:
 claude mcp add tealstreet-scripts -- tealstreet mcp
 ```
 
-**You must be logged in.** Start the CLI (`tealstreet`) and run `login` at the
-prompt — `login` is a REPL command, there is no top-level `tealstreet login`.
+**You must be logged in.** Run `tealstreet login` (or `login` inside the REPL).
 The MCP server exits immediately with `not logged in` on stderr rather than
 starting and letting each tool fail separately, since an assistant would
 otherwise keep retrying instead of telling you to log in. If your MCP client
