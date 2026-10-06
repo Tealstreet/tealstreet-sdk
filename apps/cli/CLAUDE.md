@@ -18,7 +18,6 @@ Concrete pairings:
 | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd:exec` / `cmd:output` / `cmd:done` wire frames, `hello`/`welcome`, close codes, listener auth, `POST /hook/<id>` shape, kill-switch keys | [`cli/operations/listener.md`](../documentation/cli/operations/listener.md)                                                                                                                                                                    |
 | New / renamed / removed REPL command, new flag, new alias                                                                                    | [`cli/reference/commands.md`](../documentation/cli/reference/commands.md)                                                                                                                                                                      |
-| MCP server — tools, what `write_script` refuses, registration                                                                                | [`cli/reference/commands.md#mcp-server`](../documentation/cli/reference/commands.md#mcp-server)                                                                                                                                                |
 | Logging behaviour — `console.*` routing, operational-noise suppression, severity taxonomy (`log-classify.ts`), `print`-above-prompt          | [`cli/reference/output.md`](../documentation/cli/reference/output.md) + the [Logging](#logging) section below                                                                                                                                  |
 | Output surfaces — top alert bar (`status-line.ts`), bottom footer (`footer.ts` / `footer-segments.ts`), scroll region (`scroll-region.ts`)   | [`cli/reference/output.md`](../documentation/cli/reference/output.md), [`commands.md#footer`](../documentation/cli/reference/commands.md#footer), [`config-files.md`](../documentation/cli/operations/config-files.md)                         |
 | Write-op audit log / command tracing — `audit` command, `runId` grouping, `[fill]` attribution, rotation                                     | [`commands.md#audit`](../documentation/cli/reference/commands.md#audit) + [`config-files.md`](../documentation/cli/operations/config-files.md)                                                                                                 |
@@ -122,18 +121,6 @@ src/
 ├── scripts-store.ts         # ~/.tealstreet/scripts/*.ts file-based loader (SPEC §5.1) + initial-load promise for the dispatcher race-fix
 ├── script-dispatcher.ts     # parseScriptInvocation — pure helper for runStep's `script:<name>` arm (SPEC §6.1)
 ├── bun-transpile.ts         # Bun.Transpiler primitive for `runScriptFromHost` (fn-ref skips it; here for forward-compat)
-├── mcp/                     # `tealstreet mcp` — MCP server over stdio (script authoring tools)
-│   ├── server.ts            # Tool definitions; validates via @tealstreet/script-authoring
-│   ├── stdoutGuard.ts       # Redirects ALL stdout to stderr; hands the real stdout to the transport
-│   ├── dryRunAdapter.ts     # CoreAdapter that RECORDS writes instead of executing them (run_script)
-│   ├── liveState.ts         # Lazy connect with persistActive:false + credential-free account projection
-│   ├── dataTools.ts         # Read-only MCP registry: publicdata, exchange-services candles/market metadata, Polymarket, TealNews, crawled Hyperliquid analytics, and the mcp-context/v1 planner
-│   ├── publicdata.ts        # CLI-local publicdata REST fallback client
-│   ├── exchangeProxy.ts     # exchange-services candles/market-metadata client (plain HTTPS; honors TEALSTREET_CANDLE_SERVER_URL)
-│   ├── newsGateway.ts       # news-gateway REST client for TealNews reads
-│   ├── polymarket.ts        # Public Polymarket gamma/CLOB client, path-allowlisted
-│   │                        #   (also backs the prediction-market trader tools)
-│   └── hyperliquidAnalyticsDb.ts # Optional HYPERLIQUID_ANALYTICS_* Postgres adapter, read-only queries
 └── utils/
 ```
 
@@ -251,180 +238,14 @@ non-interactively but not _used_ through the proxy until the OAuth flow has run.
 3. Browser redirects back with JWT
 4. CLI stores token in config
 
-## MCP data tools
+## MCP: there is no CLI server
 
-**The live-account read tools are GENERATED from the SDK read surface.**
-`src/mcp/readTools.ts` projects `CORE_READ_BINDINGS` — the BINDINGS, not the
-generated `read-manifest.ts`, because this server also CALLS the reads and the
-manifest is the bindings with `invoke` stripped. `oems-core` takes the manifest
-instead; it only describes the surface to a model. Both project one
-definition — this is not two vocabularies. It projects them into tool
-definitions;
-`server.ts` registers them in a loop and supplies only naming, connection
-gating and rendering. They used to reach into
-`getExchangeManager().getExchange(a)?.store` and hand-format a string — while
-`createDryRunAdapter`, in the file beside them, correctly wrapped
-`CoreAdapter` — so this surface answered "what are my positions" from a
-different source, in a different shape, under a different name than the script
-API and the web agent did. Do not add a live read by hand; add a binding.
-See [`docs/plans/SDK_SURFACE_VISION_v1.md`](../../docs/plans/SDK_SURFACE_VISION_v1.md).
-
-Three things about that projection are deliberate and easy to undo by accident:
-
-- **The names stay snake_case.** The manifest's methods are camelCase. These
-  names are in users' saved prompts and in
-  `apps/documentation/cli/reference/commands.md`, and a shell owns its own
-  naming — that is the point of projecting rather than re-exporting.
-- **Five reads are excluded, for two different reasons.**
-  `getActiveAccount` / `getActiveSymbol` / `getActiveExchange` resolve from a
-  `CLISession`, and this server is a SECOND process with no REPL session, so it
-  would invent one per call and then answer "the active symbol is ''" with
-  total confidence. `getActiveAccounts` and `getCombinedBalance` take no
-  `account`, so `ensureConnected` cannot run for them and they would silently
-  report on whichever accounts happened to be connected. A tool that always
-  lies is worse than a missing tool. `getCandles` is out because
-  `get_exchange_proxy_candles` already serves candles here.
-- **`list_accounts` stays hand-written.** It reads account CONFIG including
-  `testnet`, which the SDK's `getAccounts` does not carry, and it never touched
-  the store — it was not part of the defect.
-
-`renderReadResult` carries three behaviours the hand-written prose encoded and
-a raw JSON dump would have silently lost. All three were found by diffing old
-output against new, not by reading the code:
-
-- **Zero-size positions are filtered.** `CoreAdapter.getPositions` does NOT
-  filter them — it returns the store's list as-is — and a flat position is not
-  a position. `buildOemsContext` on the web filters the same way (`isLive`), so
-  this is the shared expectation, not a CLI quirk.
-- **`info` is stripped and the result is bounded**, via the same
-  `boundReadResult` the web agent uses — which now picks its cap from the
-  manifest's `resultShape` rather than by matching a method name, so the caps
-  cannot drift away from a renamed read. `Position`, `Ticker`, `Market` and
-  `Order` all carry `info?: any`, the raw venue payload; the old prose picked
-  named fields and never saw it, and a JSON dump would push megabytes down a
-  stdio transport. The caps are sized for a PROMPT rather than for the pipe,
-  and that is correct here — an MCP client is a model, so this output lands in
-  a context window either way. `get_markets` returning a bounded subset with a
-  truncation note is the intended answer, not a bug. The note carries the
-  COUNTS ("showing 60 of 612") because `capArray` keeps a tail — right for
-  candles, arbitrary for a market list — and a client told only "truncated"
-  will reason over that tail as if it were the whole set. **The counts AND the
-  advice come from `oems-core`, not from a second derivation here.**
-  "Narrow the request to see the rest" used to be appended to every read
-  including `get_markets`, which takes an account and nothing else; the advice
-  is now derived per read from the manifest's own params
-  (`NARROWING_BY_METHOD`), with `get_orderbook` called out because it takes a
-  `depth` that looks narrowing and is not — the 20-level cap is applied after
-  the venue answers. This file used
-  to recompute them from its own copy of the input, which is how one truncation
-  came to be described two ways by the two shells that render it — and the web
-  side's description reached nobody at all. The zero-size filter still runs
-  first, so the total is what a reader can actually ask for.
-- **Empty is distinguished from still-loading.** Stores hydrate asynchronously
-  after connect, so `[]` right after a cold connect is ambiguous and "none"
-  would be a wrong answer.
-
-`z.fromJSONSchema` reads the manifest's dialect verbatim, so the conversion is
-a stdlib call rather than a schema layer of our own. The one adjustment: a
-nullable field arrives REQUIRED (that is what OpenAI strict mode needs, and
-what the manifest therefore encodes), and is relaxed so an MCP client may omit
-it instead of sending an explicit `null`.
-
-**Use `.optional()` there, not `.nullish()`.** The converted field is already a
-`string`-or-`null` union, so `.nullish()` wraps it a second time and the MCP
-SDK emits a NESTED `anyOf` with the description buried in the inner arm, where
-most clients will not show it. `.optional()` produces one `anyOf`, keeps the
-description on the property, and drops out of `required` just the same.
-`readTools.test.ts` asserts this through the SDK's own converter rather than on
-the zod shape, because the shape looked fine in both cases and only the
-client-facing JSON Schema differed.
-
-**This server is the closest existing relative of the web AI agent** — live
-reads plus `run_script` under a dry-run adapter that RECORDS write intents
-instead of executing them is the same shape as the agent's plan → confirm →
-execute. **But `DryRunIntent` and `OemsCommand` are NOT one type, and an
-earlier version of this paragraph said they were.**
-
-`createDryRunAdapter` records `setPositionMode`, `setMarginType` and
-`runCommand` — precisely the three write methods `OEMS_WRITE_API_PATHS`
-excludes and `executeOemsCommands` exists to reject. So `DryRunIntent.method`
-is `string` and must be, while `OemsCommand.method` is `OemsWriteMethod` and
-must be. A shared type would have to widen to `string` and destroy the
-narrowing the OEMS slice exists to provide.
-
-A dry run is deliberately WIDER than the agent's slice: it bounds an honest
-script across the full write surface, where the agent may only work an order.
-Both answer "what would this do before it does it"; they differ on which verbs
-they may name, and that difference is the point. See
-[`docs/plans/SDK_SURFACE_VISION_v1.md`](../../docs/plans/SDK_SURFACE_VISION_v1.md)
-§6a.
-
-`tealstreet mcp` now exposes the same read-only public data surfaces as the
-hosted MCP connector: publicdata ticker/top-list snapshots plus crawled
-Hyperliquid leaderboard, wallet fills, public wallet positions, account
-value curves, and public Polymarket DEX reads. The CLI registry in
-**Prediction-market tools compute rather than passthrough.** The five
-`*_prediction_*` tools map raw Polymarket bodies through
-`@tealstreet/prediction-core`, unlike the `get_polymarket_*` tools beside them
-which reshape wire fields only. Two consequences for this surface:
-`CliDataToolDefinition` has no `rateLimit` field, so the hosted per-tool limits
-(10-40/min) do NOT apply in stdio — accepted, because the CLI runs on the user's
-own machine against public endpoints. And the tool-name parity test asserts scopes as a
-PROPERTY instead of a positional list, because a column of identical strings
-said nothing about which tool carried which scope and every addition rewrote it.
-
-That property used to key on the `get_hyperliquid_` name prefix, which silently
-also asserted that anything NOT so prefixed is `market:read`. The rule broke as
-soon as an address-scoped tool arrived under a different name
-(`get_onchain_address_portfolio`), and it failed looking like a scope regression
-rather than the missing list entry it was. The `onchain:read` set is now named
-explicitly — add to it when you add an address-scoped tool.
-
-`src/mcp/dataTools.ts` is an explicit
-allowlist; do not import the hosted web MCP `tools.ts` registry into the CLI,
-because that file mixes public reads with module write/publish/delete tools and
-OAuth-scoped behavior the stdio runtime does not have.
-
-CLI MCP scopes are metadata for parity with the shared contract, not an OAuth
-authorization layer. The stdio server is still gated only by local login and the
-MCP client the user configured. Public market tools make outbound HTTPS calls
-to Tealstreet publicdata (`TEALSTREET_PUBLICDATA_REST_URL` may override the
-primary endpoint; the Singapore fallback remains). Hyperliquid analytics tools
-use only the dedicated `HYPERLIQUID_ANALYTICS_DATABASE_URL` or
-`HYPERLIQUID_ANALYTICS_POSTGRES_*` env vars and never fall back to the user's
-web Supabase config or exchange account config.
-Polymarket tools use the shared `/v1/*` route contract. If
-`TEALSTREET_POLYMARKET_API_ORIGIN` or `NEXT_PUBLIC_POLY_API_ORIGIN` is set, the
-CLI calls that Worker origin with `TEALSTREET_POLYMARKET_ORIGIN_HEADER`
-(default `https://v3.tealstreet.io`); otherwise it maps the same contract
-directly to public Gamma/CLOB upstreams. These tools are public-only and must
-not expose Polymarket account, key, or order data.
-`get_exchange_proxy_candles` is the CLI parity surface for the exchange-services
-candle route. It defaults to `https://data.tealstreet.io/candles` and may be
-overridden with `TEALSTREET_EXCHANGE_PROXY_ORIGIN`,
-`TEALSTREET_CANDLE_SERVER_URL`, or `NEXT_PUBLIC_CANDLE_SERVER_URL`. Keep it as a
-strict adapter for `/api/market-data/candles`; do not add a user-supplied path or
-host argument, and do not route it through the exchange-server `/account`
-WebSocket.
-`get_recent_news` is the public TealNews parity surface. It defaults to
-`https://news.tealstreet.io` and may be overridden with
-`TEALSTREET_NEWS_GATEWAY_ORIGIN` or `NEXT_PUBLIC_NEWS_GATEWAY_ORIGIN`. It calls
-only `/news/recent` in anonymous mode and must not expose the hosted-only
-`get_personal_recent_news` path, because stdio CLI MCP has no source-constrained
-third-party grant identity to mint a news-gateway proxy token from.
-`get_mcp_context_dsl_reference` is the first-stop self-documenting surface for
-the shared `mcp-context/v1` DSL in stdio. It returns the DSL grammar, structured
-query form, scope semantics, callback event contract, refresh metadata, dashboard
-piping instructions and examples. `list_mcp_context_planes` and
-`plan_mcp_context_query` then expose the planner surface for parity with hosted
-MCP. They are planning tools only: the planner compiles allowlisted planes into
-bounded MCP tool steps, server-derived `queryHash` / refresh / scope metadata,
-and a dashboard `kind: "context"` widget payload, but it does not execute the
-steps. `onchain:read` means public address-keyed analytics, not private wallet
-history. Private CEX balances, positions, orders, fills, ledger and
-reconciliation inputs stay under constrained hosted `account:read`; the CLI
-runtime rejects hosted-only private/third-party planes and must not treat MCP
-scope metadata as OAuth authorization.
+Tealstreet runs exactly ONE MCP server, the hosted connector at
+`apps/web/src/app/api/mcp/` (`https://preview.tealstreet.io/api/mcp`). The
+CLI's own stdio MCP command was removed as a direct cutover: two registries
+meant two tool vocabularies, two scope models and two renderers of the same
+reads, kept in step only by parity tests. Do not add an MCP server back to the
+CLI; extend the hosted connector instead.
 
 ## Startup checkin (web mount gate)
 

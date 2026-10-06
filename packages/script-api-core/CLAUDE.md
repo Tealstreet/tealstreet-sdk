@@ -249,8 +249,8 @@ See [`docs/plans/SDK_SURFACE_VISION_v1.md`](../../docs/plans/SDK_SURFACE_VISION_
 
 Three rules that are load-bearing:
 
-- **Bindings target `CoreAdapter`, not `CoreApi`.** The callers are hosts (the
-  CLI's MCP server, the browser's agent executor) and both already hold one.
+- **Bindings target `CoreAdapter`, not `CoreApi`.** The caller is a host (the
+  browser's agent executor) that already holds one.
   `CoreApi`'s optional-account sugar exists so a user's script can mean "the
   active account"; a _tool argument_ that silently means that is a footgun in
   an agent transcript, so `account` is required wherever it applies.

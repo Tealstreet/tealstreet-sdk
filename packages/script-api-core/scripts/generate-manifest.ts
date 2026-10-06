@@ -11,7 +11,7 @@
  * The manifest is `ReadBinding` with `invoke` removed, so it is for a caller
  * that only has to DESCRIBE the surface: `oems-core` builds the agent's tool
  * list, its structured-output schema and its prompt block from it, and never
- * calls anything. A shell that also EXECUTES — the CLI's stdio MCP server —
+ * calls anything. A shell that also EXECUTES — the browser's agent executor —
  * imports `CORE_READ_BINDINGS` directly, because it needs the `invoke` the
  * manifest deliberately drops. Both project the same definition; only one
  * projects this artifact.

@@ -29,6 +29,20 @@ There is nothing to generate and no key to copy. The first time your assistant
 calls it, you will be sent to a Tealstreet consent page listing exactly what it
 is asking for, and you approve or cancel there.
 
+This hosted connector is Tealstreet's only MCP server. The CLI does not run one.
+
+#### Adding it to your client
+
+| Client               | How                                                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Claude (web/desktop) | Settings → Connectors → **Add custom connector**, paste the URL                                                      |
+| Claude Code          | `claude mcp add --transport http tealstreet https://preview.tealstreet.io/api/mcp`                                   |
+| Cursor               | `~/.cursor/mcp.json`: `{ "mcpServers": { "tealstreet": { "url": "https://preview.tealstreet.io/api/mcp" } } }`       |
+| OpenCode             | `opencode.json`: `{ "mcp": { "tealstreet": { "type": "remote", "url": "https://preview.tealstreet.io/api/mcp" } } }` |
+
+Any client that speaks remote (streamable HTTP) MCP with OAuth works the same
+way: give it the URL, and it opens the consent page on first use.
+
 Whitelabel domains use their own host — connect to the site you actually log
 in to.
 
@@ -44,15 +58,15 @@ API keys.
 
 Available permissions are shown on the consent screen:
 
-| Permission        | What it allows                              |
-| ----------------- | ------------------------------------------- |
-| `modules:read`    | List and read your modules                  |
-| `modules:write`   | Create, change and delete your modules      |
-| `market:read`     | Read public market data                     |
-| `onchain:read`    | Read public onchain and address-keyed analytics |
+| Permission        | What it allows                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `modules:read`    | List and read your modules                                                                       |
+| `modules:write`   | Create, change and delete your modules                                                           |
+| `market:read`     | Read public market data                                                                          |
+| `onchain:read`    | Read public onchain and address-keyed analytics                                                  |
 | `account:read`    | Read your private balances, positions, orders, fills and ledger from connected exchange accounts |
-| `thirdparty:read` | Read private data from third-party sources you connect |
-| `dashboard:write` | Create MCP dashboard sessions and widgets   |
+| `thirdparty:read` | Read private data from third-party sources you connect                                           |
+| `dashboard:write` | Create MCP dashboard sessions and widgets                                                        |
 
 None of these scopes can place orders, move funds, or reveal exchange API
 keys. `onchain:read` is for public address-keyed analytics, not a user's
@@ -98,25 +112,25 @@ ingestion-private and is not exposed.
 
 Public market data tools currently include:
 
-| Tool                           | What it returns                                                           |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `list_market_data_sources`     | Publicdata source metadata and exchange health                            |
-| `get_public_tickers`           | A bounded ticker snapshot for one publicdata exchange                     |
-| `get_public_ticker`            | One symbol on one publicdata exchange                                     |
-| `get_top_movers`               | Top 24h percentage movers across publicdata exchanges                     |
-| `get_top_volume`               | Top 24h quote-volume markets across publicdata exchanges                  |
-| `get_top_funding`              | Top absolute funding-rate markets across publicdata                       |
-| `get_exchange_proxy_candles`   | Historical candles through data.tealstreet.io's public candle service     |
-| `get_safe_cex_markets`         | Safe-cex market metadata through data.tealstreet.io's candle service      |
-| `get_safe_cex_market`          | One safe-cex market by symbol or id through the candle service            |
-| `get_polymarket_events`        | Public Polymarket events with compact market rows                         |
-| `search_polymarket_events`     | Public Polymarket event and tag search                                    |
-| `get_polymarket_midpoints`     | Batched public Polymarket CLOB midpoint prices                            |
-| `get_polymarket_order_book`    | Depth-bounded public Polymarket CLOB book levels                          |
-| `get_polymarket_price_history` | Public Polymarket CLOB price-history points                               |
-| `list_market_data_sources`     | Which public market-data sources this runtime can reach                   |
-| `list_news_sources`            | Which news sources are available to you                                   |
-| `get_recent_news`              | Recent TealNews headlines, filterable by source, handle or symbol         |
+| Tool                           | What it returns                                                       |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `list_market_data_sources`     | Publicdata source metadata and exchange health                        |
+| `get_public_tickers`           | A bounded ticker snapshot for one publicdata exchange                 |
+| `get_public_ticker`            | One symbol on one publicdata exchange                                 |
+| `get_top_movers`               | Top 24h percentage movers across publicdata exchanges                 |
+| `get_top_volume`               | Top 24h quote-volume markets across publicdata exchanges              |
+| `get_top_funding`              | Top absolute funding-rate markets across publicdata                   |
+| `get_exchange_proxy_candles`   | Historical candles through data.tealstreet.io's public candle service |
+| `get_safe_cex_markets`         | Safe-cex market metadata through data.tealstreet.io's candle service  |
+| `get_safe_cex_market`          | One safe-cex market by symbol or id through the candle service        |
+| `get_polymarket_events`        | Public Polymarket events with compact market rows                     |
+| `search_polymarket_events`     | Public Polymarket event and tag search                                |
+| `get_polymarket_midpoints`     | Batched public Polymarket CLOB midpoint prices                        |
+| `get_polymarket_order_book`    | Depth-bounded public Polymarket CLOB book levels                      |
+| `get_polymarket_price_history` | Public Polymarket CLOB price-history points                           |
+| `list_market_data_sources`     | Which public market-data sources this runtime can reach               |
+| `list_news_sources`            | Which news sources are available to you                               |
+| `get_recent_news`              | Recent TealNews headlines, filterable by source, handle or symbol     |
 
 The safe-cex market tools use exchange-services'
 `/candles/api/market-data/markets` route and return warnings when a metadata
@@ -134,18 +148,52 @@ API keys, or order placement.
 Built on Tealstreet's prediction-market model rather than raw Polymarket
 fields, so they answer trader questions instead of returning wire data.
 
-| Tool                                  | Permission    | What it returns                                                  |
-| ------------------------------------- | ------------- | ---------------------------------------------------------------- |
-| `screen_prediction_markets`           | `market:read` | Markets filtered by implied probability, resolution window, liquidity |
-| `get_prediction_event`                | `market:read` | One event, its outcomes, and probabilities normalized across them |
-| `find_prediction_arbitrage`           | `market:read` | Mutually exclusive sets buyable below 1.00 at the best ask        |
-| `get_prediction_resolution_calendar`  | `market:read` | Where upcoming settlements cluster by date                        |
-| `get_prediction_liquidity_profile`    | `market:read` | Spread, resting depth, and how much of a position could exit      |
+| Tool                                 | Permission    | What it returns                                                       |
+| ------------------------------------ | ------------- | --------------------------------------------------------------------- |
+| `screen_prediction_markets`          | `market:read` | Markets filtered by implied probability, resolution window, liquidity |
+| `get_prediction_event`               | `market:read` | One event, its outcomes, and probabilities normalized across them     |
+| `find_prediction_arbitrage`          | `market:read` | Mutually exclusive sets buyable below 1.00 at the best ask            |
+| `get_prediction_resolution_calendar` | `market:read` | Where upcoming settlements cluster by date                            |
+| `get_prediction_liquidity_profile`   | `market:read` | Spread, resting depth, and how much of a position could exit          |
 
 An arbitrage result is deliberately conservative: it is only reported when the
 full candidate set is present, every market is still trading, and every leg has
 a real ask. Edge is quoted per complete set before fees, slippage, and the size
 actually resting on the book.
+
+### Your modules, hotkeys and studies
+
+Each kind is written to a **draft** first and goes live only when committed
+(see [Drafts and commits](#drafts-and-commits)). The `get_*_api_types` tools
+return the exact contract to write against; call them first.
+
+| Tool                                                                              | Permission      | What it does                                                               |
+| --------------------------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------- |
+| `get_module_api_types`                                                            | `modules:read`  | Custom-module type definitions and the runtime rules types cannot express  |
+| `list_modules` / `read_module`                                                    | `modules:read`  | Your modules, and one module's source                                      |
+| `validate_module` / `explain_module`                                              | `modules:read`  | Typecheck and pre-screen; summarise what it reads and whether it can trade |
+| `write_module` / `commit_module` / `delete_module`                                | `modules:write` | Draft, screen and store, delete                                            |
+| `publish_module`                                                                  | `modules:write` | Publish the committed module to the marketplace                            |
+| `get_hotkey_api_types`                                                            | `modules:read`  | The custom-hotkey script contract                                          |
+| `list_hotkey_scripts` / `list_hotkey_script_drafts` / `read_hotkey_script`        | `modules:read`  | Your synced hotkey scripts, drafts, and one script's source                |
+| `validate_hotkey_script` / `explain_hotkey_script`                                | `modules:read`  | Validate; summarise which order actions it can take                        |
+| `write_hotkey_script` / `commit_hotkey_script` / `delete_hotkey_script`           | `modules:write` | Draft, store, delete                                                       |
+| `share_hotkey_script` / `publish_hotkey_script` / `unpublish_hotkey_script`       | `modules:write` | Share link, marketplace listing, remove the listing                        |
+| `get_tealchart_study_api_types`                                                   | `modules:read`  | The Tealchart study (Tealscript) contract                                  |
+| `list_tealchart_studies` / `list_tealchart_study_drafts` / `read_tealchart_study` | `modules:read`  | Your synced studies, drafts, and one study's source                        |
+| `validate_tealchart_study` / `explain_tealchart_study`                            | `modules:read`  | Validate; summarise capabilities (studies are read-only)                   |
+| `write_tealchart_study` / `commit_tealchart_study` / `delete_tealchart_study`     | `modules:write` | Draft, store, delete                                                       |
+
+Hotkey scripts can place orders when you press them. Writing one through MCP
+stores the order actions it needs but does not approve them; sharing or
+publishing one requires the assistant to name those actions explicitly.
+
+### Public onchain tools
+
+| Tool                              | Permission     | What it returns                                                            |
+| --------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| `get_onchain_address_portfolio`   | `onchain:read` | Public positions one address holds at one venue, with a bounded max loss   |
+| `get_prediction_address_exposure` | `onchain:read` | One public Polymarket address as exposure, worst case and resolution dates |
 
 ### Tools that read your private data
 
@@ -153,34 +201,36 @@ These only appear when the grant carries the matching permission, and the
 private CEX tools additionally require the grant to name the specific accounts
 they may read.
 
-| Tool                                | Permission        | What it returns                                       |
-| ----------------------------------- | ----------------- | ----------------------------------------------------- |
-| `list_cex_accounts`                 | `account:read`    | The connected accounts this grant may read            |
-| `get_cex_account_equity_curve`      | `account:read`    | Hourly equity-curve points for one granted account    |
-| `summarize_cex_account_performance` | `account:read`    | Aggregate performance summary for granted accounts    |
-| `reconcile_cex_account_fills`       | `account:read`    | Hedge-match reconciliation across granted accounts    |
-| `get_personal_recent_news`          | `thirdparty:read` | Your personal news feed from sources you connected    |
-| `get_arkham_alerts`                 | `thirdparty:read` | Alerts delivered to your Arkham webhook               |
+| Tool                                | Permission        | What it returns                                    |
+| ----------------------------------- | ----------------- | -------------------------------------------------- |
+| `list_cex_accounts`                 | `account:read`    | The connected accounts this grant may read         |
+| `get_cex_account_equity_curve`      | `account:read`    | Hourly equity-curve points for one granted account |
+| `summarize_cex_account_performance` | `account:read`    | Aggregate performance summary for granted accounts |
+| `reconcile_cex_account_fills`       | `account:read`    | Hedge-match reconciliation across granted accounts |
+| `get_personal_recent_news`          | `thirdparty:read` | Your personal news feed from sources you connected |
+| `get_arkham_alerts`                 | `thirdparty:read` | Alerts delivered to your Arkham webhook            |
 
 ### Dashboard tools
 
 `dashboard:write` lets an assistant build a dashboard you can open in the
 browser: `create_mcp_dashboard_session`, `list_mcp_dashboard_sessions`,
 `get_mcp_dashboard_session`, `add_mcp_dashboard_widget`,
-`update_mcp_dashboard_widget` and `refresh_mcp_dashboard_widgets`. Widgets hold
-query results, not code. Turning one into a real custom module needs
+`update_mcp_dashboard_widget` and `refresh_mcp_dashboard_widgets`.
+`commit_mcp_dashboard` screens and stores it; editing afterwards returns it to
+draft until the next commit. Widgets hold query results, not code. Turning one
+into a real custom module (`promote_mcp_dashboard_module`) needs
 `modules:write` as well and goes through the normal module safety screen —
 and a widget built from private account data cannot be exported at all.
 
 Hyperliquid analytics tools currently include:
 
-| Tool                                  | Permission       | What it returns                                     |
-| ------------------------------------- | ---------------- | --------------------------------------------------- |
-| `get_hyperliquid_leaderboard`          | `onchain:read` | Crawled Hyperliquid leaderboard rows                    |
-| `get_hyperliquid_large_positions`      | `onchain:read` | Bounded scan for large public positions                 |
-| `get_hyperliquid_address_positions`    | `onchain:read` | Latest crawled clearinghouse positions for an address   |
-| `get_hyperliquid_address_fills`        | `onchain:read` | Recent crawled fills for an address                     |
-| `get_hyperliquid_address_value_curve`  | `onchain:read` | Crawled account-value curve points for an address       |
+| Tool                                  | Permission     | What it returns                                       |
+| ------------------------------------- | -------------- | ----------------------------------------------------- |
+| `get_hyperliquid_leaderboard`         | `onchain:read` | Crawled Hyperliquid leaderboard rows                  |
+| `get_hyperliquid_large_positions`     | `onchain:read` | Bounded scan for large public positions               |
+| `get_hyperliquid_address_positions`   | `onchain:read` | Latest crawled clearinghouse positions for an address |
+| `get_hyperliquid_address_fills`       | `onchain:read` | Recent crawled fills for an address                   |
+| `get_hyperliquid_address_value_curve` | `onchain:read` | Crawled account-value curve points for an address     |
 
 The three `get_hyperliquid_address_*` tools take a public `address`; none of these read a user's own wallet or any connected exchange account.
 

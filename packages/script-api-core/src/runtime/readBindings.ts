@@ -188,9 +188,8 @@ export interface ReadBinding {
   readonly costClass: ReadCostClass;
   readonly resultShape: ReadResultShape;
   /**
-   * Bound to `CoreAdapter`, not `CoreApi`, because the callers are HOSTS —
-   * the CLI's MCP server, the browser's agent executor — and both already hold
-   * one. `CoreApi`'s optional-account sugar exists for user-authored scripts,
+   * Bound to `CoreAdapter`, not `CoreApi`, because the caller is a HOST — the
+   * browser's agent executor — which already holds one. `CoreApi`'s optional-account sugar exists for user-authored scripts,
    * where an omitted account should resolve to the active one; a tool argument
    * that quietly means "whichever account was selected" is a footgun in an
    * agent transcript, so `account` is required wherever it applies.

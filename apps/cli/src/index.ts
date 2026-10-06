@@ -26,13 +26,7 @@ import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
 import { cleanupStaleUpdate } from './windows-update';
 import { fireCheckin } from './checkin';
 import { login, logout, showAuthStatus } from './auth';
-import { installStdoutGuard, isMcpInvocation } from './mcp/stdoutGuard';
 import { initCliSentry, captureCliError, flushCliSentry } from './sentry';
-
-// MCP stdio frames JSON-RPC over stdout, so nothing else may touch it. Detect
-// the mode from argv here — the noisy writers below run at module top level,
-// long before commander has parsed anything.
-const RUNNING_AS_MCP = isMcpInvocation();
 
 // Start console interception early to catch all logs
 interceptConsole();
@@ -45,8 +39,6 @@ cleanupStaleUpdate();
 // Released binaries only, and opt-out via TEALSTREET_TELEMETRY=0. Must precede
 // the process-level handlers below so an early crash still has a client.
 initCliSentry();
-
-if (RUNNING_AS_MCP) installStdoutGuard();
 
 // Announce this process to the web app so the web's CliListenerWorker
 // gate knows there's a CLI on this platform. Fire-and-forget — no
@@ -79,10 +71,7 @@ import { registerCrossTradeCommand } from './commands/cross-trade';
 const getRepl = async () => import('./repl');
 
 // Check for updates in background (non-blocking).
-// Skipped under MCP: it is setImmediate-based and prints a chalk box via
-// console.log, which would land on stdout mid-session and corrupt the
-// JSON-RPC stream.
-if (!RUNNING_AS_MCP) checkForUpdatesBackground();
+checkForUpdatesBackground();
 
 const CLI_DOCS_URL = 'https://docs.tealstreet.io/cli';
 
@@ -827,17 +816,6 @@ tradingCommands.forEach(({ name, desc }) => {
       await runSingleCommand(commandString, options.account, options.symbol);
     });
 });
-
-// ============ MCP Server ============
-program
-  .command('mcp')
-  .description('Run as an MCP server over stdio (for Claude Code and other MCP clients)')
-  .action(async () => {
-    // Lazy import: pulls in the TypeScript compiler via
-    // @tealstreet/script-authoring, which no other CLI path needs at runtime.
-    const { startMcpServer } = await import('./mcp/server');
-    await startMcpServer();
-  });
 
 // ============ Default Action ============
 // Handle top-level flags before parsing

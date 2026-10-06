@@ -51,20 +51,6 @@ export const looksLikeHandRolledAdapter = (source: string): boolean => {
 
 const isOwnPackage = (file: string): boolean => file.startsWith('packages/script-api-core/');
 
-/**
- * The only files outside this package allowed to enumerate the interface, each
- * for a reason that is not "a host wanted its own behaviour".
- *
- * `dryRunAdapter.ts` DECORATES a real adapter: it answers reads from live data
- * and records writes instead of executing them. It lists every member on
- * purpose — `{ ...real, placeOrder: stub }` would be deny-by-omission, so the
- * day a write is added to `CoreAdapter` it would pass straight through to live
- * trading inside what the user was told was a dry run. Its own header says not
- * to refactor it to a spread. Adding to this list needs the same standard of
- * reason.
- */
-const ALLOWED = new Set<string>(['apps/cli/src/mcp/dryRunAdapter.ts']);
-
 /** Test doubles are fine — a fake adapter in a test is not a second runtime. */
 const isTest = (file: string): boolean => /\.test\.tsx?$/.test(file);
 
@@ -91,7 +77,7 @@ describe('no hand-rolled CoreAdapters', () => {
 
   it('no host in this repo implements the interface', () => {
     const offenders = trackedFiles()
-      .filter((file) => !isOwnPackage(file) && !isTest(file) && !ALLOWED.has(file))
+      .filter((file) => !isOwnPackage(file) && !isTest(file))
       .filter((file) => looksLikeHandRolledAdapter(readFileSync(path.join(REPO_ROOT, file), 'utf8')));
 
     expect(
@@ -100,13 +86,6 @@ describe('no hand-rolled CoreAdapters', () => {
         'HostBindings; it does not implement the interface. If a host needs ' +
         'different behaviour, add a binding in HostBindings.ts.',
     ).toEqual([]);
-  });
-
-  it('every allowlisted exception still exists, so the list cannot rot', () => {
-    // An allowlist entry for a deleted file is a hole nobody notices.
-    for (const file of ALLOWED) {
-      expect(trackedFiles(), `${file} is allowlisted but no longer tracked`).toContain(file);
-    }
   });
 
   it('the two host spokes exist and go through the factory', () => {

@@ -1,5 +1,6 @@
 import { handleRoundingError } from '@tealstreet/math/src/handleRoundingError';
 import { roundToDefaultPrecision } from '@tealstreet/math/src/roundToDefaultPrecision';
+import { roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { Market } from '../types';
 import { adjust } from './safe-math';
 
@@ -128,4 +129,52 @@ export const getMarginCurrency = (market?: Market, fallback = ''): string => {
 
 export const getContractType = (market?: Market): 'Inverse' | 'Quanto' | 'Linear' => {
   return market?.isInverse ? 'Inverse' : market?.info?.isQuanto ? 'Quanto' : 'Linear';
+};
+
+// PnL, in margin currency, of `size` (native units) opened at entryPrice and closed at exitPrice.
+// Computed directly: differencing two rounded position values loses small inverse PnL entirely.
+export const calculatePnlInMarginCurrency = (
+  size: number,
+  entryPrice: number,
+  exitPrice: number,
+  isLong: boolean,
+  market: Market,
+  btcPrice?: number,
+): number => {
+  const units = size * (market.contractSize || 1);
+  let longPnl: number;
+  // BITMEX support code
+  if (market.info?.isQuanto) {
+    if (!btcPrice) {
+      console.error('btcPrice is required for quanto markets');
+      return 0;
+    }
+    longPnl = (units * (exitPrice - entryPrice)) / btcPrice;
+  } else if (market.isInverse) {
+    longPnl = units * (1 / entryPrice - 1 / exitPrice);
+  } else {
+    longPnl = units * (exitPrice - entryPrice);
+  }
+  return handleRoundingError(isLong ? longPnl : -longPnl);
+};
+
+// Native size whose loss between entryPrice and stopPrice is at most `risk` margin currency.
+// Floored to the lot step: rounding to nearest could size past the risk.
+export const convertMarginRiskToNativeSize = (
+  risk: number,
+  entryPrice: number,
+  stopPrice: number,
+  market: Market,
+  btcPrice?: number,
+): number => {
+  const contractSize = market.contractSize || 1;
+  let rawNative: number;
+  if (market.isInverse) {
+    const lossPerQuoteUnit = Math.abs(1 / entryPrice - 1 / stopPrice);
+    rawNative = risk / lossPerQuoteUnit / contractSize;
+  } else {
+    const riskInQuote = convertFromMarginToQuote(risk, market, entryPrice, btcPrice);
+    rawNative = riskInQuote / Math.abs(entryPrice - stopPrice) / contractSize;
+  }
+  return roundToNearestMultipleDown(rawNative, market.precision.amount);
 };

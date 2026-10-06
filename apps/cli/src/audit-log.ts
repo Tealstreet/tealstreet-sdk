@@ -445,38 +445,3 @@ export function __resetAuditCacheForTest(): void {
 export function __setMaxLogBytesForTest(n: number): void {
   maxLogBytes = n;
 }
-
-/**
- * Record an MCP-originated script action: a file operation (create/update/
- * delete) or a dry run, as opposed to a trading write.
- *
- * `recordScriptWrite` is the wrong shape for this: it prefixes `[script] `,
- * accepts `orderIds`, and feeds `rememberOrderLineage`, all of which are order
- * lineage for trades a script PLACED. Neither a file write nor a dry run — in
- * which every write is recorded as an intent and none executes — has any.
- *
- * Dry runs are logged because they connect to a live account and are the one
- * MCP path that executes agent-authored code at all; `detail` carries the
- * write-intent count, which is what makes a run worth reviewing after the fact.
- *
- * The `[mcp]` prefix matters: agent-authored scripts bypass human code review
- * entirely, so the log must make that distinguishable from REPL activity after
- * the fact.
- */
-export function recordMcpScriptAction(
-  name: string,
-  op: 'write' | 'delete' | 'dry-run',
-  extra: { ok?: boolean; error?: string; origin?: string; detail?: string } = {},
-): void {
-  // Deliberately NOT gated on isAuditEnabled() here: agent-authored scripts
-  // bypass human code review entirely, so the record of what an agent wrote is
-  // the one thing worth keeping even when a user has audit logging off.
-  // (appendAuditEntry has its own gate; see the note there.)
-  appendAuditEntry({
-    ts: new Date().toISOString(),
-    account: extra.origin ?? 'mcp',
-    command: `[mcp] script ${op} ${name}${extra.detail ? ` — ${extra.detail}` : ''}`,
-    ok: extra.ok !== false,
-    ...(extra.error ? { error: extra.error } : {}),
-  });
-}

@@ -10,6 +10,8 @@ import {
   getSizeCurrency,
   getMarginCurrency,
   getContractType,
+  calculatePnlInMarginCurrency,
+  convertMarginRiskToNativeSize,
 } from './sizing';
 import { Market } from '../types';
 
@@ -325,6 +327,56 @@ describe('sizing', () => {
 
     it('should return "Linear" for undefined market', () => {
       expect(getContractType(undefined)).toBe('Linear');
+    });
+  });
+
+  describe('convertMarginRiskToNativeSize + calculatePnlInMarginCurrency', () => {
+    it('linear: risk is quote (USDT) and the stop loses exactly that', () => {
+      const market = createLinearMarket();
+      const size = convertMarginRiskToNativeSize(100, 50000, 49000, market);
+      expect(size).toBe(0.1);
+      expect(calculatePnlInMarginCurrency(size, 50000, 49000, true, market)).toBe(-100);
+    });
+
+    it('inverse: risk is base (BTC), sized in USD contracts', () => {
+      const market = createInverseMarket();
+      const size = convertMarginRiskToNativeSize(0.01, 50000, 40000, market);
+      expect(size).toBe(2000);
+      expect(calculatePnlInMarginCurrency(size, 50000, 40000, true, market)).toBe(-0.01);
+    });
+
+    it('inverse short: stop above entry still loses the risk', () => {
+      const market = createInverseMarket();
+      const size = convertMarginRiskToNativeSize(0.01, 50000, 60000, market);
+      expect(size).toBe(3000);
+      expect(calculatePnlInMarginCurrency(size, 50000, 60000, false, market)).toBe(-0.01);
+    });
+
+    it('quanto: risk is BTC, converted through btcPrice', () => {
+      const market = createQuantoMarket();
+      const size = convertMarginRiskToNativeSize(0.01, 2000, 1900, market, 50000);
+      expect(size).toBe(5);
+      expect(calculatePnlInMarginCurrency(size, 2000, 1900, true, market, 50000)).toBe(-0.01);
+    });
+
+    it('inverse PnL keeps precision on small positions (no rounded intermediates)', () => {
+      const market = createInverseMarket();
+      // 10 USD contracts from 60000 to 59000: 10 * (1/60000 - 1/59000)
+      expect(calculatePnlInMarginCurrency(10, 60000, 59000, true, market)).toBeCloseTo(-2.8249e-6, 9);
+    });
+
+    it('floors risk-derived size to the lot so the stop never loses more than the risk', () => {
+      const market = createLinearMarket();
+      // 0.6 USDT over a 1000 stop is 0.0006 BTC, below one 0.001 lot
+      expect(convertMarginRiskToNativeSize(0.6, 50000, 49000, market)).toBe(0);
+      // 1.9 USDT is 0.0019 BTC: floors to 0.001, never rounds up to 0.002
+      expect(convertMarginRiskToNativeSize(1.9, 50000, 49000, market)).toBe(0.001);
+    });
+
+    it('take profit side reports a gain', () => {
+      const market = createLinearMarket();
+      expect(calculatePnlInMarginCurrency(0.1, 50000, 52000, true, market)).toBe(200);
+      expect(calculatePnlInMarginCurrency(0.1, 50000, 48000, false, market)).toBe(200);
     });
   });
 });

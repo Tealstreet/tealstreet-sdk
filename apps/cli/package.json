@@ -44,10 +44,8 @@
     "torture": "bun scripts/torture-one-shot.ts"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.1",
     "@sentry/bun": "^11.1.0",
     "@tealstreet/cli-core": "*",
-    "@tealstreet/mcp-data": "*",
     "@tealstreet/oems-core": "*",
     "@tealstreet/safe-cex": "*",
     "@tealstreet/script-api-core": "*",
@@ -63,12 +61,10 @@
     "fast-json-patch": "^3.1.1",
     "open": "^11.0.4",
     "ora": "^9.4.1",
-    "pg": "^8.23.0",
     "tcp-websocket": "^1.0.0",
     "typescript": "^6.0.3",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^5.0.2",
-    "ws": "^8.21.3",
-    "zod": "^4.6.5"
+    "ws": "^8.21.3"
   }
 }

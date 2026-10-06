@@ -183,6 +183,6 @@ Consequences to preserve:
 - **A package must not depend on an app.** If something here needs a value from
   `apps/cli`, that value is in the wrong place.
 - **`mirrors/copy.bara.sky` includes `packages/script-authoring/**`**, because
-  `apps/cli/src/scripts-store.ts` — an eagerly loaded core module, not the lazy
-  MCP path — imports `scripts-templates` from here. Without it the CLI does not
+  `apps/cli/src/scripts-store.ts` — an eagerly loaded core module — imports
+  `scripts-templates` from here. Without it the CLI does not
   build in the OSS mirror.

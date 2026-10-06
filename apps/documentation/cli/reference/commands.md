@@ -831,7 +831,6 @@ REPL. With a subcommand, it runs one-shot.
 | `record` (group)                                                                      | —                     | `start` / `stop` / `list` / `stats`                                                  |
 | `update`                                                                              | —                     | `-c` / `--check` for check-only                                                      |
 | `logs`                                                                                | `log`                 | `-c` / `--clear`, `-n <N>` lines                                                     |
-| `mcp`                                                                                 | —                     | Run as an MCP server over stdio — see [MCP server](#mcp-server) below                |
 
 > **`tealstreet tasks` is different from REPL `tasks`.** Top-level reads
 > persisted task records from `~/.tealstreet/tasks.json`. REPL `tasks` lists
@@ -844,136 +843,11 @@ Source: `apps/cli/src/index.ts`.
 
 ---
 
-## MCP server &nbsp; _(standalone-only)_ {#mcp-server}
+## MCP {#mcp}
 
-`tealstreet mcp` runs the CLI as an [MCP](https://modelcontextprotocol.io)
-server over stdio, so an AI assistant (Claude Code, Claude Desktop, …) can
-read, write, and validate your scripts, inspect local account state, and read
-Tealstreet data tools.
-
-Register it with your MCP client — for Claude Code:
-
-```bash
-claude mcp add tealstreet-scripts -- tealstreet mcp
-```
-
-**You must be logged in.** Run `tealstreet login` (or `login` inside the REPL).
-The MCP server exits immediately with `not logged in` on stderr rather than
-starting and letting each tool fail separately, since an assistant would
-otherwise keep retrying instead of telling you to log in. If your MCP client
-reports the server as failed, check your login first — tokens expire.
-
-### Tools
-
-| Tool                                                                                                            | Purpose                                                                                                           |
-| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `list_scripts`                                                                                                  | Every script on disk, including ones that currently fail to load                                                  |
-| `read_script`                                                                                                   | One script's source — works even when the script is broken                                                        |
-| `get_api_types`                                                                                                 | The exact TypeScript surface available to scripts (`core` / `cli` / `web` / `mobile` / `all`)                     |
-| `validate_script`                                                                                               | Typecheck + capability check without writing. Fast, local, free                                                   |
-| `write_script`                                                                                                  | Create or replace a script. **Validates first and refuses to write invalid source**                               |
-| `delete_script`                                                                                                 | Delete a script                                                                                                   |
-| `export_scripts`                                                                                                | Export your own scripts as a portable JSON bundle (backup / moving machines)                                      |
-| `list_accounts`                                                                                                 | Configured accounts — names and exchanges only, never credentials                                                 |
-| `get_positions` / `get_orders` / `get_balance` / `get_ticker` / `get_tickers` / `get_markets` / `get_orderbook` | Live reads for an account, returned as JSON                                                                       |
-| `run_script`                                                                                                    | **Dry run only** — see below                                                                                      |
-| `list_market_data_sources`                                                                                      | Public Tealstreet data sources and publicdata exchange health                                                     |
-| `get_public_tickers` / `get_public_ticker`                                                                      | Public ticker snapshots from Tealstreet publicdata                                                                |
-| `get_top_movers` / `get_top_volume` / `get_top_funding`                                                         | Public market top lists from Tealstreet publicdata                                                                |
-| `get_exchange_proxy_candles`                                                                                    | Historical candles through data.tealstreet.io's public candle service                                             |
-| `get_recent_news`                                                                                               | Public normalized TealNews items through news.tealstreet.io's recent-news endpoint                                |
-| `get_safe_cex_markets` / `get_safe_cex_market`                                                                  | Safe-cex market metadata through data.tealstreet.io's public candle service                                       |
-| `get_mcp_context_dsl_reference`                                                                                 | Self-contained `mcp-context/v1` DSL, scope, refresh, callback and dashboard reference                             |
-| `list_mcp_context_planes` / `plan_mcp_context_query`                                                            | Plan composable `mcp-context/v1` dashboard queries into bounded MCP tool steps                                    |
-| `get_polymarket_events` / `search_polymarket_events`                                                            | Public Polymarket prediction-market events and search                                                             |
-| `get_polymarket_midpoints` / `get_polymarket_order_book` / `get_polymarket_price_history`                       | Public Polymarket CLOB data, with bounded book depth                                                              |
-| `screen_prediction_markets` / `get_prediction_event`                                                            | Prediction markets filtered by implied probability, window and liquidity; one event with normalized probabilities |
-| `find_prediction_arbitrage` / `get_prediction_resolution_calendar`                                              | Mutually exclusive sets buyable below 1.00 at the ask; where settlements cluster                                  |
-| `get_prediction_liquidity_profile`                                                                              | Spread, resting depth and exitable size for one outcome token                                                     |
-| `get_hyperliquid_leaderboard`                                                                                   | Crawled Hyperliquid leaderboard rows, when analytics DB env vars are configured                                   |
-| `get_onchain_address_portfolio`                                                                                 | Public positions held by one address at one venue, in a venue-neutral shape with a bounded max-loss summary       |
-| `get_prediction_address_exposure`                                                                               | One public Polymarket address as exposure: holdings, worst case, same-market offsets and a resolution calendar    |
-| `get_hyperliquid_address_positions` / `get_hyperliquid_address_fills` / `get_hyperliquid_address_value_curve`   | Crawled public Hyperliquid address analytics (take a public `address`), when analytics DB env vars are configured |
-
-### What it will refuse
-
-`write_script` runs the same checks as `validate_script` and will not write a
-file that fails any of them:
-
-- **Value imports.** `import { OrderSide } from '@tealstreet/script-api-core'`
-  typechecks but fails at load, because scripts run from a directory with no
-  `node_modules`. Use `import type` for types and `api.constants.*` for values.
-- **Undeclared capabilities.** Every `api.exchange.*` method the body calls
-  must appear in `meta.capabilities.writes`. `closePosition` additionally
-  requires `placeOrder`.
-- **Top-level calls.** Code outside the default-exported function runs when the
-  CLI loads the scripts directory, not when the script is invoked. Declarations
-  (types, helper functions, `const` config) are fine.
-
-This is stricter than editing a file by hand on purpose: a script an assistant
-wrote is code you have not read.
-
-### `run_script` is dry-run only
-
-`run_script` executes a script against **live market data** but every write —
-`placeOrder`, `cancelOrder`, `runCommand`, everything — is _recorded and
-returned as an intent_ rather than executed. Nothing this server can do places a
-real order.
-
-You get back the full list of what the script would have done, which is the
-useful part; a mechanism that simply refused at the first write would tell you
-about one action and nothing else.
-
-To actually run a script, run `script:<name>` yourself in the REPL.
-
-Two caveats worth knowing:
-
-- Dry run bounds a script's `api.*` calls. It is **not a sandbox** — scripts
-  execute with full runtime globals, so a script that reaches outside the API
-  entirely is unaffected. `run_script` therefore refuses to run source that
-  doesn't validate.
-- The server connects accounts on demand and **never writes `active` back to
-  your config**, so it cannot disturb a REPL running alongside it.
-
-### There is no import tool, on purpose
-
-`export_scripts` exists; a matching import does not. Exporting your own scripts
-is a backup. **Installing scripts written by someone else is a different
-proposition entirely**: scripts currently run on the same boundary as code you
-wrote yourself, reaching `fetch`, `localStorage` and your session. Third-party
-scripts wait for the worker sandbox.
-
-If you want to move a bundle to another machine, paste each script through
-`write_script` — it validates first, and you see what it declares before it
-lands.
-
-### Notes
-
-- **Local only.** stdio transport, no network listener. It does not expose your
-  accounts to anything but the MCP client you launched it from.
-- **Data reads may call Tealstreet services.** Public market tools make outbound
-  HTTPS calls to Tealstreet publicdata. Hyperliquid analytics tools read a
-  Postgres analytics database only when you set `HYPERLIQUID_ANALYTICS_DATABASE_URL`
-  or `HYPERLIQUID_ANALYTICS_POSTGRES_*`; otherwise they return a configuration
-  error.
-- **Context-query tools plan, they do not execute.** Start with
-  `get_mcp_context_dsl_reference` when an MCP client needs the self-contained
-  DSL, scope semantics, callback contract, refresh metadata and dashboard
-  piping instructions. `plan_mcp_context_query`
-  compiles the allowlisted `mcp-context/v1` DSL into MCP tool steps plus
-  dashboard widget metadata (`queryHash`, refresh policy and required scopes)
-  so an agent can pipe results into an MCP dashboard or refresh it on a polling
-  interval. The stdio runtime rejects hosted-only private planes.
-- **Credentials are never exposed.** `list_accounts` returns an explicit
-  allowlist (name, exchange, testnet, connected) — never the stored keys.
-- Script writes, deletions, **and dry runs** are recorded in the audit log
-  tagged `[mcp]`, so agent activity is distinguishable from your own after the
-  fact. A dry-run entry carries the number of write intents the script
-  attempted — that count is what makes a run worth reviewing later.
-- Scripts are not executed by this server — write them here, run them from the
-  REPL with `script:<name>`.
-
-Source: `apps/cli/src/mcp/`.
+The CLI does not run an MCP server. To let an AI assistant (Claude, ChatGPT or
+any other MCP client) work with your Tealstreet account, connect it to the
+hosted [MCP connector](/docs/trade/modules/mcp-connector).
 
 ---
 
