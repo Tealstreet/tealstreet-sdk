@@ -335,6 +335,16 @@ request/response regressions; live startup and authentication additionally need
 network or credentialed probes. Do not replace that evidence with source-text
 grep, and do not add a second capability manifest that duplicates metadata.
 
+## `payloadSigner` (Bybit, Binance)
+
+`ExchangeOptions.payloadSigner` replaces `secret` for callers that hold no
+secret, such as a credential proxy that computes the HMAC itself. It receives the
+exact bytes the venue would HMAC and returns the value for the signature slot,
+plus headers to add to the same request. `utils/payloadSigner.ts` routes both
+modes through one function, so local signing and delegated signing share the
+same payload. It signs REST only: with it set, `start()` skips the private
+websocket. Tests: `src/__tests__/payload-signer.test.ts`.
+
 ## Proxy & Tunnel Architecture
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.

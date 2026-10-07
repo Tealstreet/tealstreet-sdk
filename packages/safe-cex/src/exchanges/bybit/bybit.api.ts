@@ -3,13 +3,13 @@ import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
-import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 import qs from 'qs';
 
 import { createAxiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { canSignPayload, signPayload } from '../../utils/payloadSigner';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { getBybitResponseMeta } from './bybit.response';
@@ -182,7 +182,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // Must be a SINGLE interceptor because axios runs request interceptors in
   // LIFO order — splitting into two would cause signing to run before requestId
   // is added, producing a signature mismatch.
-  xhr.interceptors.request.use((config) => {
+  xhr.interceptors.request.use(async (config) => {
     const nextConfig = {
       ...config,
       params: {
@@ -207,7 +207,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     }
 
     // Skip signing when no API key (public-only mode)
-    if (!options.key || !options.secret) {
+    if (!options.key || !canSignPayload(options)) {
       return nextConfig;
     }
 
@@ -215,11 +215,15 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     const data = nextConfig.method === 'get' ? qs.stringify(nextConfig.params) : JSON.stringify(nextConfig.data);
 
     const timestamp = virtualClock.getCurrentTimeMs();
-    const signature = createHmac('sha256', options.secret)
-      .update([timestamp, options.key, recvWindow, data].join(''))
-      .digest('hex');
+    const { signature, headers: signerHeaders } = await signPayload(
+      options,
+      exchange.name,
+      [timestamp, options.key, recvWindow, data].join(''),
+      'hex',
+    );
 
     const headers = new AxiosHeaders({
+      ...signerHeaders,
       ...nextConfig.headers,
       'X-BAPI-SIGN': signature,
       'X-BAPI-API-KEY': options.key,

@@ -17,6 +17,8 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private ordersThrottleTimeout?: NodeJS.Timeout;
 
   connectAndSubscribe = async () => {
+    // payloadSigner signs REST only; auth here needs the local secret.
+    if (this.parent.options.payloadSigner) return;
     if (!this.isDisposed) {
       const listenKey = await this.fetchListenKey();
 

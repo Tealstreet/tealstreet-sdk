@@ -196,7 +196,13 @@ export {
   type ExchangeAccountCredentialSchema,
 } from './accounts/buildExchangeAccountConfig';
 export { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
-export type { ExchangeAccountConfig, PublicExchangeOptions } from './types';
+export type {
+  ExchangeAccountConfig,
+  PayloadSigner,
+  PayloadSignerRequest,
+  PayloadSignerResult,
+  PublicExchangeOptions,
+} from './types';
 export type {
   BybitBboLevel,
   BybitBboOrderOpts,

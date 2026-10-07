@@ -167,6 +167,13 @@ export type ExchangeOptions = {
   readonly remoteSigner?: RemoteSigner;
 
   /**
+   * Stands in for `secret`: receives the exact bytes the exchange would HMAC and
+   * returns the signature value, plus any headers to add to the same request.
+   * REST only, so the private websocket is not connected. Supported on Bybit and Binance.
+   */
+  readonly payloadSigner?: PayloadSigner;
+
+  /**
    * When true, exchange-independent post-processors run client-side instead of server-side.
    * Only exchange-dependent post-processors (MessageHandlerStats, ChaserOrder) run on the server.
    */
@@ -1172,6 +1179,21 @@ export interface RemoteSignerResponse {
   wsAuthSignature?: string;
   error?: string;
 }
+
+export interface PayloadSignerRequest {
+  exchangeName: ExchangeName;
+  key: string;
+  scheme: 'hmac-sha256';
+  encoding: 'hex' | 'base64';
+  payload: string;
+}
+
+export interface PayloadSignerResult {
+  signature: string;
+  headers?: Record<string, string>;
+}
+
+export type PayloadSigner = (request: PayloadSignerRequest) => PayloadSignerResult | Promise<PayloadSignerResult>;
 
 export interface RemoteSigner {
   sign(request: RemoteSignerRequest): Promise<RemoteSignerResponse>;
