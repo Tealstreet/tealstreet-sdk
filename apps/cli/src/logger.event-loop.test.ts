@@ -9,6 +9,8 @@ describe('logger module', () => {
 
     const before = countTimers();
     await import('./logger');
-    expect(countTimers()).toBe(before);
+    // Runtime/test-runner upgrades can let unrelated timers settle during the import.
+    // The logger invariant is that importing it does not add a new ref'd timer.
+    expect(countTimers()).toBeLessThanOrEqual(before);
   });
 });
