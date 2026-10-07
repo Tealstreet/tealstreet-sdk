@@ -270,7 +270,7 @@ describe('Paradex ModifyOrder signing contract', () => {
       account: { signMessage },
       config: { paradexChainId: 'PRIVATE_SN_PARACLEAR_MAINNET' },
       provider: {},
-    });
+    }, {} as any);
 
     await expect(
       signer.signModifyOrder({

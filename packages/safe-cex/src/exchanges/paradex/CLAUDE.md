@@ -91,14 +91,12 @@ The SDK is lazy-loaded (`paradex.sdk.ts:16-21`) to avoid loading if not needed.
 
 ### Request Signing (`ParadexRequestSigner`, `paradex.sdk.ts:152-341`)
 
-**Note**: The `signRequest` method is **dead code** -- it is never called in production. All REST API authentication uses JWT Bearer tokens exclusively (via `authenticateRequest()` in `paradex.api.ts`). The `ParadexJWTManager.generateNewToken()` method performs its own signing directly using `sdkAccount.account.signMessage()` with a different TypedData structure (5-field `Request` type with method/path/body/timestamp/expiration); it does NOT call `signRequest`. The `signRequest` method remains in the codebase but is unused.
+All REST API authentication uses JWT Bearer tokens (via `authenticateRequest()` in `paradex.api.ts`). Every Stark signature, for JWT auth, orders and amendments, goes through `signParadexTypedData()`.
 
-The `signRequest` method's approach (for reference only -- not used at runtime):
+### `payloadSigner`
 
-1. Build message: `method + timestamp + path + body`
-2. If message > 31 characters, hash via `starknetKeccak()` (`paradex.sdk.ts:186`)
-3. Sign using StarkNet typed data with domain `{name: 'Paradex', version: '1', chainId: config.paradexChainId}`
-4. Headers: `PARADEX-STARKNET-ACCOUNT`, `PARADEX-STARKNET-SIGNATURE`, `PARADEX-TIMESTAMP` (seconds)
+With `options.payloadSigner` set, no Starknet private key enters the process. `key` carries the subkey PUBLIC key, and `initializeParadexSDK` returns an account stub holding only `paradexAddress`, before the 66-character private-key check. `signParadexTypedData()` passes the typed-data message hash (`starknet` `typedData.getMessageHash`, the same hash `Account.signMessage` signs) to the signer with `scheme: 'stark'`, and places its `signature` verbatim where the serialised `["r","s"]` goes. Any headers it returns go on the same request: the JWT auth fetch, the order POST, TP/SL POSTs and the amendment PUT. A batch of more than one order is refused, because a delegated signer produces one signature per request. Tests: `src/__tests__/paradex.payload-signer.test.ts`.
+
 
 **Order Signing** (`paradex.sdk.ts:242-340`):
 
@@ -107,7 +105,7 @@ The `signRequest` method's approach (for reference only -- not used at runtime):
 3. Scale size and price by `1e8` (quantum values) following Python SDK's `chain_size()`/`chain_price()`
 4. Convert `paradexChainId` string to hex via byte encoding (matches Python's `int_from_bytes`)
 5. Sign typed data with `Order` primary type containing: timestamp, market, side, orderType, size, price
-6. Return `{signature: JSON.stringify([r, s]), signature_timestamp}`
+6. Return `{signature: JSON.stringify([r, s]), signature_timestamp, headers?}`
 
 ### JWT Token Management (`ParadexJWTManager`, `paradex.sdk.ts:349-547`)
 

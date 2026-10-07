@@ -169,7 +169,8 @@ export type ExchangeOptions = {
   /**
    * Stands in for `secret`: receives the exact bytes the exchange would HMAC and
    * returns the signature value, plus any headers to add to the same request.
-   * REST only, so the private websocket is not connected. Supported on Bybit and Binance.
+   * Bybit and Binance: REST only, so the private websocket is not connected.
+   * Paradex: signs the auth and order typed data, and `key` is the subkey public key.
    */
   readonly payloadSigner?: PayloadSigner;
 
@@ -1180,13 +1181,16 @@ export interface RemoteSignerResponse {
   error?: string;
 }
 
-export interface PayloadSignerRequest {
+/**
+ * `hmac-sha256`: `payload` is the exact string the venue HMACs.
+ * `stark`: `payload` is the 0x-hex typed-data message hash, and `signature` must be
+ * the serialised `["<r>","<s>"]` the venue expects, or a stand-in for it.
+ */
+export type PayloadSignerRequest = {
   exchangeName: ExchangeName;
   key: string;
-  scheme: 'hmac-sha256';
-  encoding: 'hex' | 'base64';
   payload: string;
-}
+} & ({ scheme: 'hmac-sha256'; encoding: 'hex' | 'base64' } | { scheme: 'stark'; encoding: 'felt-pair' });
 
 export interface PayloadSignerResult {
   signature: string;

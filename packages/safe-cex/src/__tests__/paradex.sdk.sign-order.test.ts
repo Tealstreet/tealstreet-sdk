@@ -1,3 +1,5 @@
+import type { ExchangeOptions } from '../types';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ParadexRequestSigner, type ParadexSDKAccount } from '../exchanges/paradex/paradex.sdk';
@@ -17,7 +19,7 @@ const createSigner = (
     provider: {},
   } as unknown as ParadexSDKAccount;
 
-  return new ParadexRequestSigner(sdkAccount);
+  return new ParadexRequestSigner(sdkAccount, {} as ExchangeOptions);
 };
 
 describe('ParadexRequestSigner.signOrder', () => {
