@@ -18,7 +18,7 @@ const remote = () => {
     key: '0xpub',
     payloadSigner: (request: PayloadSignerRequest) => {
       calls.push(request);
-      return { signature: 'sign-paradex-placeholder', headers: { 'X-Dime-Sign-paradex': request.payload } };
+      return { signature: 'signature-from-signer', headers: { 'X-Signer-Header': request.payload } };
     },
   } as unknown as ExchangeOptions;
   const sdkAccount = { account: { address: ADDRESS }, config: CONFIG, provider: {} } as ParadexSDKAccount;
@@ -37,8 +37,8 @@ describe('Paradex with payloadSigner', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ exchangeName: 'paradex', key: '0xpub', scheme: 'stark', encoding: 'felt-pair' });
-    expect(signed.signature).toBe('sign-paradex-placeholder');
-    expect(signed.headers).toEqual({ 'X-Dime-Sign-paradex': calls[0].payload });
+    expect(signed.signature).toBe('signature-from-signer');
+    expect(signed.headers).toEqual({ 'X-Signer-Header': calls[0].payload });
 
     const privateKey = '0x' + Buffer.from(ec.starkCurve.utils.randomPrivateKey()).toString('hex');
     const local = {
@@ -63,12 +63,12 @@ describe('Paradex with payloadSigner', () => {
     await expect(new ParadexJWTManager(sdkAccount, true, '0xsubkey', options).getToken()).resolves.toBe('jwt');
 
     const headers = fetchMock.mock.calls[0][1]!.headers as Record<string, string>;
-    expect(headers['PARADEX-STARKNET-SIGNATURE']).toBe('sign-paradex-placeholder');
-    expect(headers['X-Dime-Sign-paradex']).toBe(calls[0].payload);
+    expect(headers['PARADEX-STARKNET-SIGNATURE']).toBe('signature-from-signer');
+    expect(headers['X-Signer-Header']).toBe(calls[0].payload);
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.testnet.paradex.trade/v1/auth/0xsubkey');
   });
 
-  // The signer's placeholder is only swapped by the proxy on the request's own wire.
+  // A payloadSigner caller controls the request's transport, so private requests go direct.
   it('sends private requests direct, not through the Tealstreet tunnel', () => {
     const { options } = remote();
     const xhr = createAPI({ ...options, paradexAddress: ADDRESS, subkeyAddress: '0xpub' }, {} as any);

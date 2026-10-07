@@ -35,7 +35,7 @@ const recordingSigner = () => {
   const calls: PayloadSignerRequest[] = [];
   const signer = (request: PayloadSignerRequest) => {
     calls.push(request);
-    return { signature: 'sign-placeholder', headers: { 'X-Dime-Sign-test': Buffer.from(request.payload).toString('base64') } };
+    return { signature: 'signature-from-signer', headers: { 'X-Signer-Header': Buffer.from(request.payload).toString('base64') } };
   };
   return { calls, signer };
 };
@@ -59,8 +59,8 @@ describe('payloadSigner on bybit', () => {
     const ts = config.headers['X-BAPI-TIMESTAMP'];
     expect(calls[0]).toMatchObject({ exchangeName: 'bybit', key: 'api-key', scheme: 'hmac-sha256', encoding: 'hex' });
     expect(calls[0].payload).toBe(`${ts}api-key${config.headers['X-BAPI-RECV-WINDOW']}${sentQuery(config)}`);
-    expect(config.headers['X-BAPI-SIGN']).toBe('sign-placeholder');
-    expect(config.headers['X-Dime-Sign-test']).toBe(Buffer.from(calls[0].payload).toString('base64'));
+    expect(config.headers['X-BAPI-SIGN']).toBe('signature-from-signer');
+    expect(config.headers['X-Signer-Header']).toBe(Buffer.from(calls[0].payload).toString('base64'));
   });
 
   it('signs the POST body exactly as sent', async () => {
@@ -105,8 +105,8 @@ describe('payloadSigner on binance', () => {
 
     expect(calls).toHaveLength(1);
     expect(config.data).toBeUndefined();
-    expect(sentQuery(config)).toBe(`${calls[0].payload}&signature=sign-placeholder`);
-    expect(config.headers['X-Dime-Sign-test']).toBe(Buffer.from(calls[0].payload).toString('base64'));
+    expect(sentQuery(config)).toBe(`${calls[0].payload}&signature=signature-from-signer`);
+    expect(config.headers['X-Signer-Header']).toBe(Buffer.from(calls[0].payload).toString('base64'));
   });
 
   it('drops a previous signature before signing again', async () => {

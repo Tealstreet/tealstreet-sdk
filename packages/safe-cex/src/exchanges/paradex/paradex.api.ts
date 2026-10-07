@@ -76,7 +76,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     retryDelay: (retryCount) => retryCount * 1000,
   });
 
-  // A payloadSigner caller's signer works on the wire it controls, so its requests go direct.
+  // A payloadSigner caller controls the request's transport, so private requests go direct.
   if (!options.publicDataOnly && !options.payloadSigner) {
     setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
