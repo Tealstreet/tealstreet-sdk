@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../../exchanges/mexc/mexc.api';
 import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
 import { ENDPOINTS } from '../../exchanges/mexc/mexc.types';
 import { virtualClock } from '../../utils/virtualClock';
+import { setWsDiagnosticsEnabled } from '../../utils/wsDiagnostics';
 import {
   isTradableMexcMarket,
   nativeVolumeToAmount,
@@ -52,6 +53,8 @@ const market = normalizeMarket({
 });
 
 describe('MEXC futures audit regressions', () => {
+  afterEach(() => setWsDiagnosticsEnabled(false));
+
   it('advertises partial TP/SL support for explicit-volume plan orders', () => {
     expect(getExchangeMetadata('mexc').supportsPartialStops).toBe(true);
   });
@@ -81,6 +84,7 @@ describe('MEXC futures audit regressions', () => {
   });
 
   it('emits public WebSocket diagnostics for request drawer subscriptions', () => {
+    setWsDiagnosticsEnabled(true);
     const exchange = createExchange();
     const send = vi.fn();
     const sendLogs: string[] = [];
@@ -98,6 +102,7 @@ describe('MEXC futures audit regressions', () => {
   });
 
   it('emits public WebSocket receive diagnostics without flooding ticker or depth pushes', () => {
+    setWsDiagnosticsEnabled(true);
     const exchange = createExchange();
     const recordStats = vi.spyOn(exchange.publicWebsocket as any, 'recordMessageHandlerStats');
     const receiveLogs: string[] = [];
@@ -132,6 +137,7 @@ describe('MEXC futures audit regressions', () => {
   });
 
   it('redacts private WebSocket auth diagnostics before forwarding to the request drawer', async () => {
+    setWsDiagnosticsEnabled(true);
     const exchange = createExchange();
     const send = vi.fn();
     const sendLogs: string[] = [];
