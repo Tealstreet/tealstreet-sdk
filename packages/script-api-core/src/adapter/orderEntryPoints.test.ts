@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -31,6 +31,8 @@ import { describe, expect, it } from 'vitest';
  */
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
+// The public SDK mirror ships no apps/web, so the host files these name are absent there.
+const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web'));
 
 /** A call, not a declaration. `placeOrder?: (…) => …` in an interface and
  *  `readonly placeOrder` on a type both lack the `(` straight after.
@@ -153,7 +155,7 @@ describe('the set of order entry points is closed', () => {
     ).toEqual([]);
   });
 
-  it('every listed entry point still exists and still places an order', () => {
+  it.skipIf(!HAS_WEB_APP)('every listed entry point still exists and still places an order', () => {
     // A stale entry is a hole: it lets a file be deleted and a different one
     // added under the same path without the guard noticing.
     const tracked = new Set(trackedFiles());
