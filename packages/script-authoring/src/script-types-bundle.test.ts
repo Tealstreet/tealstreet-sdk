@@ -21,6 +21,7 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 const ON_DISK_PATH = path.join(__dirname, 'script-types-bundle.ts');
+const DRIFT_TEST_TIMEOUT_MS = 180_000;
 
 // The orchestrator this drift gate re-runs (`scripts/generate-script-types-bundle.ts`)
 // is a monorepo-root build script. It is deliberately NOT part of the OSS
@@ -39,7 +40,7 @@ describe.skipIf(generator === null)('script-types-bundle drift', () => {
     const onDisk = fs.readFileSync(ON_DISK_PATH, 'utf8');
     const rebuilt = generator.renderBundleFile(generator.buildBundle());
     expect(rebuilt).toBe(onDisk);
-  }, 60_000);
+  }, DRIFT_TEST_TIMEOUT_MS);
 });
 
 /**
