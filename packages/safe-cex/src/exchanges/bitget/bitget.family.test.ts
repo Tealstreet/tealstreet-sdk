@@ -5,7 +5,7 @@ import {
   isBitgetLikeExchange,
   isBitgetVirtualAttachedTpSlOrder,
   isBitgetVirtualAttachedTpSlOrderId,
-} from '../exchanges/bitget/bitget.family';
+} from './bitget.family';
 
 describe('bitget.family helpers', () => {
   it('recognises every currently-registered Bitget variant', () => {

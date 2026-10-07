@@ -52,8 +52,7 @@ describe('transport remote-signing adapter invariant', () => {
         id: request.id,
         config: {
           data: request.config?.data,
-          // A venue signature header: `Authorization` is our proxy credential and is filtered.
-          headers: { 'X-Signature': 'signed' },
+          headers: { Authorization: 'signed' },
           params: request.config?.params,
           url: request.config?.url,
         },
@@ -72,7 +71,7 @@ describe('transport remote-signing adapter invariant', () => {
 
     expect(remoteSigner.sign).toHaveBeenCalledOnce();
     expect(innerAdapter).toHaveBeenCalledOnce();
-    expect((innerAdapter.mock.calls[0][0] as any).headers.get('X-Signature')).toBe('signed');
+    expect((innerAdapter.mock.calls[0][0] as any).headers.get('Authorization')).toBe('signed');
     expect(response.data).toEqual({ ok: true });
   });
 

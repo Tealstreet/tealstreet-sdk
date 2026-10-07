@@ -307,12 +307,12 @@ describe('bybit response interceptor auth handling', () => {
     expect(exchange.recordAuthSuccess).not.toHaveBeenCalled();
   });
 
-  it('counts 10004 error-sign, which is what a wrong secret returns', async () => {
+  it('does not back off on 10004 error-sign, which is usually clock drift', async () => {
     const { exchange, handler } = makeApi();
 
     await handler({ status: 200, data: { retCode: 10004, retMsg: 'error sign!' }, config: signed });
 
-    expect(exchange.recordAuthFailure).toHaveBeenCalledTimes(1);
+    expect(exchange.recordAuthFailure).not.toHaveBeenCalled();
   });
 
   it('only lets a SIGNED success clear the streak', async () => {

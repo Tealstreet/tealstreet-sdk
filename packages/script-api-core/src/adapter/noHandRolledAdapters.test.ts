@@ -25,7 +25,8 @@ import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 // The public SDK mirror ships no apps/web, so the host files these name are absent there.
-const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web'));
+// package.json, not the directory: the mirror's CI can leave a generated apps/web/ behind.
+const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web/package.json'));
 
 /** Five method names that only an implementation carries as object keys.
  *  A caller holding an adapter references them as `adapter.getPositions(...)`,

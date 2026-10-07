@@ -32,7 +32,8 @@ import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 // The public SDK mirror ships no apps/web, so the host files these name are absent there.
-const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web'));
+// package.json, not the directory: the mirror's CI can leave a generated apps/web/ behind.
+const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web/package.json'));
 
 /** A call, not a declaration. `placeOrder?: (…) => …` in an interface and
  *  `readonly placeOrder` on a type both lack the `(` straight after.
