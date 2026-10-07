@@ -1,0 +1,26 @@
+{
+  "name": "@tealstreet/service-telemetry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Observability plumbing shared by the Bun edge services: one scrubber, one Sentry init, one throttled capture, one alert-key normalizer.",
+  "main": "src/init.ts",
+  "types": "src/init.ts",
+  "scripts": {
+    "build": "echo \"Source-only via tsconfig path aliases \u2014 no build.\"",
+    "clean": "rimraf ./coverage ./tsconfig.tsbuildinfo",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/service-telemetry.eslintcache",
+    "test": "vitest run",
+    "test-ci": "vitest run",
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit",
+    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sentry/bun": "^11.1.0"
+  },
+  "devDependencies": {
+    "@tealstreet/prettierrc": "*",
+    "@types/node": "*",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.2"
+  }
+}

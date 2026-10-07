@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["esnext"],
+    "module": "ESNext",
+    "incremental": true,
+    "types": ["vitest/globals"],
+    "paths": {
+      "@tealstreet/script-api-core": ["../script-api-core/src/index.ts"],
+      "@tealstreet/script-api-core/src/*": ["../script-api-core/src/*"],
+      "@tealstreet/safe-cex/src/*": ["../safe-cex/src/*"],
+      "@tealstreet/math/src/*": ["../math/src/*"]
+    }
+  },
+  "exclude": ["**/node_modules", "**/.*/*", "dist"],
+  "include": [".eslintrc.*", "**/*.ts", "**/*.mts", "**/*.cjs", "**/*.mjs", "**/*.json"]
+}
