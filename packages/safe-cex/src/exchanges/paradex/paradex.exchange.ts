@@ -164,7 +164,7 @@ export class ParadexExchange extends BaseExchange {
     try {
       // Verify required credentials for subkey authentication
       if (!this.options.key) {
-        throw new Error('Missing subkey key (key field) for Paradex authentication');
+        throw new Error('Missing subkey private key (key field) for Paradex authentication');
       }
       if (!this.options.paradexAddress) {
         throw new Error('Missing Paradex address for Paradex authentication');
@@ -301,7 +301,7 @@ export class ParadexExchange extends BaseExchange {
           return { error: 'Missing subkey address - please enter your subkey public address' };
         }
         if (!this.options.key) {
-          return { error: 'Missing subkey key - please enter your subkey private key' };
+          return { error: 'Missing subkey private key - please enter your subkey private key' };
         }
         return { error: 'Authentication failed - SDK initialization error' };
       }

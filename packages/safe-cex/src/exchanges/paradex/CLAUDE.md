@@ -91,12 +91,18 @@ The SDK is lazy-loaded (`paradex.sdk.ts:16-21`) to avoid loading if not needed.
 
 ### Request Signing (`ParadexRequestSigner`, `paradex.sdk.ts:152-341`)
 
-All REST API authentication uses JWT Bearer tokens (via `authenticateRequest()` in `paradex.api.ts`). Every Stark signature, for JWT auth, orders and amendments, goes through `signParadexTypedData()`.
+**Note**: The `signRequest` method is **dead code** -- it is never called in production. All REST API authentication uses JWT Bearer tokens exclusively (via `authenticateRequest()` in `paradex.api.ts`). The `ParadexJWTManager.generateNewToken()` method performs its own signing through `signParadexTypedData()` with a different TypedData structure (5-field `Request` type with method/path/body/timestamp/expiration); it does NOT call `signRequest`. The `signRequest` method remains in the codebase but is unused.
+
+The `signRequest` method's approach (for reference only -- not used at runtime):
+
+1. Build message: `method + timestamp + path + body`
+2. If message > 31 characters, hash via `starknetKeccak()` (`paradex.sdk.ts:186`)
+3. Sign using StarkNet typed data with domain `{name: 'Paradex', version: '1', chainId: config.paradexChainId}`
+4. Headers: `PARADEX-STARKNET-ACCOUNT`, `PARADEX-STARKNET-SIGNATURE`, `PARADEX-TIMESTAMP` (seconds)
 
 ### `payloadSigner`
 
-With `options.payloadSigner` set, no Starknet private key enters the process. `key` carries the subkey PUBLIC key, and `initializeParadexSDK` returns an account stub holding only `paradexAddress`, before the 66-character private-key check. `signParadexTypedData()` passes the typed-data message hash (`starknet` `typedData.getMessageHash`, the same hash `Account.signMessage` signs) to the signer with `scheme: 'stark'`, and places its `signature` verbatim where the serialised `["r","s"]` goes. Any headers it returns go on the same request: the JWT auth fetch, the order POST, TP/SL POSTs and the amendment PUT. A batch of more than one order is refused, because a delegated signer produces one signature per request. Tests: `src/__tests__/paradex.payload-signer.test.ts`.
-
+With `options.payloadSigner` set, no Starknet private key enters the process. `key` carries the subkey PUBLIC key, and `initializeParadexSDK` returns an account stub holding only `paradexAddress`, before the 66-character private-key check. `signParadexTypedData()` passes the typed-data message hash (`starknet` `typedData.getMessageHash`, the same hash `Account.signMessage` signs) to the signer with `scheme: 'stark'`, and places its `signature` verbatim where the serialised `["r","s"]` goes. Any headers it returns go on the same request: the JWT auth fetch, the order POST, TP/SL POSTs and the amendment PUT. A batch of more than one order is refused, because a delegated signer produces one signature per request. `signRequest` signs only with a local key. Tests: `src/__tests__/paradex.payload-signer.test.ts`.
 
 **Order Signing** (`paradex.sdk.ts:242-340`):
 

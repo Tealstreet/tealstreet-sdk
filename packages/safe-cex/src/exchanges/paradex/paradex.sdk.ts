@@ -180,9 +180,74 @@ export class ParadexRequestSigner {
   private readonly sdkAccount: ParadexSDKAccount;
   private readonly options: ExchangeOptions;
 
-  constructor(sdkAccount: ParadexSDKAccount, options: ExchangeOptions) {
+  constructor(sdkAccount: ParadexSDKAccount, options: ExchangeOptions = {} as ExchangeOptions) {
     this.sdkAccount = sdkAccount;
     this.options = options;
+  }
+
+  /**
+   * Sign a request for Paradex API authentication
+   * @param method HTTP method (GET, POST, etc.)
+   * @param path API path (e.g., /v1/account)
+   * @param timestamp Request timestamp in milliseconds
+   * @param body Request body as string (empty string for GET requests)
+   * @returns Signature array
+   */
+  async signRequest(method: string, path: string, timestamp: number, body: string): Promise<string[]> {
+    try {
+      // Import hash utility from starknet
+      const { hash } = await import('starknet');
+
+      // Build the message to sign
+      // Format: method + timestamp + path + body
+      const fullMessage = `${method}${timestamp}${path}${body}`;
+
+      // Hash the message if it's too long for a felt (>31 characters typically)
+      // Starknet felts can only hold ~252 bits, so long strings need to be hashed
+      let messageToSign: string;
+      if (fullMessage.length > 31) {
+        // A Starknet felt only carries a 31-byte short string; hash longer request
+        // messages into a felt before placing them in the typed-data payload.
+        const messageHash = hash.starknetKeccak(fullMessage);
+        messageToSign = '0x' + messageHash.toString(16);
+      } else {
+        messageToSign = fullMessage;
+      }
+
+      // Sign the message with the Starknet account using typed data
+      const signature = await this.sdkAccount.account.signMessage({
+        domain: {
+          name: 'Paradex',
+          version: '1',
+          chainId: this.sdkAccount.config.paradexChainId,
+        },
+        types: {
+          StarkNetDomain: [
+            { name: 'name', type: 'felt' },
+            { name: 'version', type: 'felt' },
+            { name: 'chainId', type: 'felt' },
+          ],
+          Request: [{ name: 'message', type: 'felt' }],
+        },
+        primaryType: 'Request',
+        message: {
+          message: messageToSign,
+        },
+      });
+
+      // Convert signature to string array (handles BigInt conversion)
+      if (Array.isArray(signature)) {
+        const result = signature.map((s) => (typeof s === 'bigint' ? s.toString() : String(s)));
+        return result;
+      } else {
+        // Handle WeierstrassSignatureType
+        const result = [String(signature.r), String(signature.s)];
+        return result;
+      }
+    } catch (error) {
+      // Error will be logged by the API interceptor
+      throw error;
+    }
   }
 
   /**
@@ -401,7 +466,12 @@ export class ParadexJWTManager {
   // Token validity duration (5 minutes as per Paradex docs)
   private readonly TOKEN_VALIDITY_MS = 5 * 60 * 1000;
 
-  constructor(sdkAccount: ParadexSDKAccount, testnet: boolean, subkeyAddress: string, options: ExchangeOptions) {
+  constructor(
+    sdkAccount: ParadexSDKAccount,
+    testnet: boolean,
+    subkeyAddress: string,
+    options: ExchangeOptions = {} as ExchangeOptions,
+  ) {
     this.sdkAccount = sdkAccount;
     this.options = options;
     this.subkeyAddress = subkeyAddress;
