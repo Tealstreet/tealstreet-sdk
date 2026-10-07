@@ -80,6 +80,15 @@ class ParadexPrivateHistoryAuthNotReadyError extends Error {
 const isParadexPrivateHistoryAuthNotReadyError = (err: unknown): err is ParadexPrivateHistoryAuthNotReadyError =>
   err instanceof ParadexPrivateHistoryAuthNotReadyError;
 
+// The errors this file wraps can be circular, and a log line must never replace the error it describes.
+const describeError = (err: unknown): string => {
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+};
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isPositiveFinitePrice = (price: number | undefined): price is number =>
@@ -511,7 +520,7 @@ export class ParadexExchange extends BaseExchange {
       };
     } catch (err) {
       this.log(`Error fetching balance: ${err}`, LogSeverity.Error);
-      this.log(`Balance error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Balance error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -630,7 +639,7 @@ export class ParadexExchange extends BaseExchange {
       });
     } catch (err) {
       this.log(`Error fetching markets: ${err}`, LogSeverity.Error);
-      this.log(`Markets error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Markets error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -674,7 +683,7 @@ export class ParadexExchange extends BaseExchange {
       }));
     } catch (err) {
       this.log(`Error fetching tickers: ${err}`, LogSeverity.Error);
-      this.log(`Tickers error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Tickers error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -845,7 +854,7 @@ export class ParadexExchange extends BaseExchange {
       return openOrders.map(this.mapOrder);
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
-      this.log(`Orders error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Orders error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -1296,7 +1305,7 @@ export class ParadexExchange extends BaseExchange {
       return Array.from(positionMap.values());
     } catch (err) {
       this.log(`Error fetching positions: ${err}`, LogSeverity.Error);
-      this.log(`Positions error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Positions error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -1353,7 +1362,7 @@ export class ParadexExchange extends BaseExchange {
       return orderbook;
     } catch (err: any) {
       this.log(`Error fetching orderbook for ${symbol}: ${err.message || err}`, LogSeverity.Error);
-      this.log(`Orderbook error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Orderbook error details: ${describeError(err)}`, LogSeverity.Debug);
       if (err.response) {
         this.log(`Orderbook response status: ${err.response.status}`, LogSeverity.Debug);
         this.log(`Orderbook response data: ${JSON.stringify(err.response.data)}`, LogSeverity.Debug);
