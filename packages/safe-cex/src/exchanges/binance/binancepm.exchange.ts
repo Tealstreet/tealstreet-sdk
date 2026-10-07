@@ -158,7 +158,43 @@ export class BinancePMExchange extends BaseExchange {
     };
   };
 
+  /** Max leverage per symbol from this account's own leverage brackets; null until loaded. */
+  private accountMaxLeverage: Map<string, number> | null = null;
+
+  override adaptExternalMarkets(markets: Market[]): Market[] {
+    const maxBySymbol = this.accountMaxLeverage;
+    if (!maxBySymbol) return markets;
+    return markets.map((m) => {
+      const max = maxBySymbol.get(m.symbol);
+      return max ? { ...m, limits: { ...m.limits, leverage: { ...m.limits.leverage, max } } } : m;
+    });
+  }
+
+  // The shared public exchange has no keys, so its markets carry leverage.max = 1.
+  private loadAccountMaxLeverage = async () => {
+    try {
+      const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.LEVERAGE_BRACKET);
+      const brackets = requireBinancePMArrayResponse<Record<string, any>>(ENDPOINTS.LEVERAGE_BRACKET, data);
+      this.accountMaxLeverage = new Map(
+        brackets
+          .map((b): [string, number] => [b.symbol, Number(v(b.brackets?.[0], 'initialLeverage'))])
+          .filter(([, max]) => max > 0),
+      );
+      if (this.isDisposed) return;
+      this.store.update({ markets: this.adaptExternalMarkets(this.store.markets) });
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+    }
+  };
+
   start = async () => {
+    // Before the provider seeds markets: the hosted store delta ignores nested
+    // fields, so an overlay applied after the first snapshot never reaches the client.
+    if (this.options.externalPublicData && !this.isPublicDataOnly) {
+      await this.loadAccountMaxLeverage();
+      if (this.isDisposed) return;
+    }
+
     const useExternalPublicData = await this.initExternalPublicData();
 
     if (!useExternalPublicData) {

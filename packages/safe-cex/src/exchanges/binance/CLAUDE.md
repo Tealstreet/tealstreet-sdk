@@ -782,6 +782,15 @@ orderbookTickDelay: 60
 
 ## Known Quirks / Implementation Notes
 
+- **Max leverage is per-account, from the SIGNED `leverageBracket` endpoint.** A
+  keyless instance (`isPublicDataOnly`) builds every market with
+  `leverage.max = 1`. On exchange-server, private accounts read markets from the
+  shared `__pub_binance` / `__pub_binancepm` instance, so `start()` must call
+  `loadAccountMaxLeverage` and `adaptExternalMarkets` must overlay it (new
+  objects, never mutate — the shared markets are referenced by every account).
+  Without it the slider pins to 1x and `setLeverage` clamps every change to 1x
+  (reported 2026-10-07; latent since the shared-public-data change of 2026-08-15).
+
 ### Big Integer Order IDs
 
 Binance order IDs can exceed JavaScript's `Number.MAX_SAFE_INTEGER`. All responses use `bigIntAsStringJsonParse` to convert big integers to strings. When constructing `orderIdList` for batch cancellation, IDs are joined as raw strings (not parsed with `parseInt`) to avoid precision loss.

@@ -17,6 +17,7 @@ function createMockParent(): BaseExchange {
   return {
     store,
     name: 'bybit' as any,
+    adaptExternalMarkets: (markets: Market[]) => markets,
     emitter: {
       emit: vi.fn(),
     },

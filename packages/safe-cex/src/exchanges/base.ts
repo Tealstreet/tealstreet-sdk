@@ -574,6 +574,15 @@ export class BaseExchange implements Exchange {
   }
 
   /**
+   * Overlay this account's own limits on markets from a shared public exchange,
+   * which has no keys and so cannot know them. Must return new objects: the
+   * shared market objects are referenced by every other account on the venue.
+   */
+  adaptExternalMarkets(markets: Market[]): Market[] {
+    return markets;
+  }
+
+  /**
    * Initialize external public data provider if configured.
    * Call this in the exchange's start() method BEFORE connecting public websockets.
    * If external public data is configured, this method will:

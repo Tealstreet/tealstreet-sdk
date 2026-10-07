@@ -38,6 +38,7 @@ const makeParent = () =>
   ({
     name: 'bybit',
     emitter: { emit: vi.fn() },
+    adaptExternalMarkets: (markets: StoreData['markets']) => markets,
     store: {
       loaded: {},
       update: vi.fn(),
