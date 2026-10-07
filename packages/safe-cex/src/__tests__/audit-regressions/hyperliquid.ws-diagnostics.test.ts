@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HyperliquidPrivateWebSocket } from '../../exchanges/hyperliquid/hyperliquid.ws-private';
 import { HyperliquidPublicWebSocket } from '../../exchanges/hyperliquid/hyperliquid.ws-public';
+import { setWsDiagnosticsEnabled } from '../../utils/wsDiagnostics';
 
 const WALLET_ADDRESS = '0x1111111111111111111111111111111111111111';
 
@@ -73,7 +74,10 @@ const emittedMessages = (emitter: { emit: ReturnType<typeof vi.fn> }, eventName:
   emitter.emit.mock.calls.filter(([event]) => event === eventName).map(([, message]) => message);
 
 describe('Hyperliquid WebSocket diagnostics', () => {
+  afterEach(() => setWsDiagnosticsEnabled(false));
+
   it('emits public send and receive diagnostics without logging market-data floods', () => {
+    setWsDiagnosticsEnabled(true);
     const parent = createPublicParent();
     const websocket = new HyperliquidPublicWebSocket(parent);
     const send = vi.fn();
@@ -99,6 +103,7 @@ describe('Hyperliquid WebSocket diagnostics', () => {
   });
 
   it('emits private order diagnostics with wallet addresses redacted', () => {
+    setWsDiagnosticsEnabled(true);
     const parent = createPrivateParent();
     const websocket = new HyperliquidPrivateWebSocket(parent);
     const send = vi.fn();

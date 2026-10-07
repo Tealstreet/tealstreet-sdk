@@ -1,9 +1,9 @@
 import type { PublicDataSource, StoreData } from '../types';
-import type { BaseExchange } from './base';
+import type { BaseExchange } from '../exchanges/base';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { InProcessPublicDataProvider } from './in-process-public-data';
+import { InProcessPublicDataProvider } from '../exchanges/in-process-public-data';
 
 const THRESHOLD_MS = 20_000;
 
