@@ -52,7 +52,7 @@ import { add, adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
-import { BaseExchange, CallableMethodsInWorker } from '../base';
+import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../base';
 import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './okx.api';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
@@ -212,7 +212,17 @@ export class OKXExchange extends BaseExchange {
     this.businessWebsocket.dispose();
   };
 
+  /** Account-scoped market data the keyless shared exchange cannot fetch; none on global OKX. */
+  protected async fetchAccountMarketOverlay(): Promise<AccountMarketOverlay | null> {
+    return null;
+  }
+
   start = async () => {
+    if (this.needsAccountMarketOverlay) {
+      await this.loadAccountMarketOverlay(() => this.fetchAccountMarketOverlay());
+      if (this.isDisposed) return;
+    }
+
     const useExternalPublicData = await this.initExternalPublicData();
     const publicDataOnly = this.isPublicDataOnly;
 

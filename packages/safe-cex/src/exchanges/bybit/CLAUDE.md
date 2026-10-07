@@ -60,6 +60,13 @@ When working with Bybit exchange integration, consult the official API documenta
 | `bybitspot.ws-public.ts`  | Public WebSocket for spot markets (`BybitPublicWebsocket` - note: same class name as linear). Connects to `v5/public/spot`. Orderbook depth is 200 levels (vs 1000 for linear/inverse). Supports dynamic ticker topic subscription. |
 | `bybitspot.ws-private.ts` | Private WebSocket for spot markets. Same structure as linear, except it subscribes to `order` ALONE — spot has no positions.                                                                                                                                                                                                                            |
 
+## Per-account fees on exchange-server
+
+`takerFee`/`makerFee` come from the signed `FEE_RATE` endpoint, which the keyless
+shared exchange skips. `bybit` and `bybitinverse` load them in `start()` via
+`loadAccountMarketOverlay(bybitFeeOverlay(...))` — see safe-cex `CLAUDE.md` →
+"Account data on shared public markets". `bybitspot` never fetched fees.
+
 ## Authentication
 
 ### REST API Signing (`bybit.api.ts`)

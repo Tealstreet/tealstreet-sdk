@@ -349,6 +349,8 @@ export interface Exchange {
   signWsAuth: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
 }
 
+export type AccountMarketOverlay = (markets: Market[]) => Market[];
+
 export class BaseExchange implements Exchange {
   isDemo = false;
   isSpot = false;
@@ -573,14 +575,41 @@ export class BaseExchange implements Exchange {
     if (this.thirdTickersWebsocket) this.thirdTickersWebsocket.connectAndSubscribe = noop;
   }
 
+  /** Account-specific transform over shared public markets; null until loaded. */
+  private accountMarketOverlay: AccountMarketOverlay | null = null;
+
   /**
-   * Overlay this account's own limits on markets from a shared public exchange,
-   * which has no keys and so cannot know them. Must return new objects: the
-   * shared market objects are referenced by every other account on the venue.
+   * Applies this account's own market data over markets from a shared public
+   * exchange, which has no keys and so cannot know it. Called by both public
+   * data providers on every market delivery.
    */
   adaptExternalMarkets(markets: Market[]): Market[] {
-    return markets;
+    return this.accountMarketOverlay ? this.accountMarketOverlay(markets) : markets;
   }
+
+  /** True when markets come from a shared keyless exchange but this account can sign. */
+  protected get needsAccountMarketOverlay(): boolean {
+    return Boolean(this.options.externalPublicData) && !this.isPublicDataOnly;
+  }
+
+  /**
+   * Call from start() BEFORE initExternalPublicData: the hosted store delta
+   * ignores nested market fields, so an overlay applied after the first
+   * snapshot would not reach the client until the next full snapshot.
+   * The overlay must return new objects — shared markets are referenced by
+   * every other account on the venue.
+   */
+  protected loadAccountMarketOverlay = async (load: () => Promise<AccountMarketOverlay | null>) => {
+    try {
+      this.accountMarketOverlay = await load();
+      if (this.isDisposed || this.store.markets.length === 0) return;
+      this.store.update({ markets: this.adaptExternalMarkets(this.store.markets) });
+    } catch (err: any) {
+      const message = err?.response?.data?.msg || err?.message;
+      if (err instanceof Error) this.emitAndLogError(err, message ? `Exchange Error: ${message}` : undefined);
+      else this.emitAndLogError(message);
+    }
+  };
 
   /**
    * Initialize external public data provider if configured.

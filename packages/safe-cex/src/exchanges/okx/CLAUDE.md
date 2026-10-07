@@ -39,6 +39,14 @@ When working with OKX exchange integration, consult the official API documentati
 | `okx.ws-private.ts`     | `OKXPrivateWebsocket`  | Private WebSocket for account, positions, and regular order updates                                          |
 | `okx.ws-business.ts`    | `OKXBusinessWebsocket` | Business WebSocket for candles (OHLCV), algo orders, and algo-advance updates; extends `OKXPrivateWebsocket` |
 
+## OKX EU market list on exchange-server
+
+`okxeu` lists markets from the signed `ACCOUNT_INSTRUMENTS` (what this EEA
+account may trade). The keyless shared exchange can only use the public list, so
+`OKXEUExchange.fetchAccountMarketOverlay` narrows the shared markets to the
+account's instruments and takes their `limits`. See safe-cex `CLAUDE.md` →
+"Account data on shared public markets".
+
 ## Authentication
 
 > **A 401 on a proxied OKX request is usually NOT OKX.** `EXCHANGE-SERVER-27`

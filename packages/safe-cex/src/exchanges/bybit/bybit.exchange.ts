@@ -91,6 +91,7 @@ import {
 import { BybitPrivateWebsocket } from './bybit.ws-private';
 import { BybitPublicWebsocket } from './bybit.ws-public';
 import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
+import { bybitFeeOverlay } from './bybit.fee-overlay';
 
 const MAX_CLOSED_PNL_PAGES = 20;
 
@@ -823,6 +824,11 @@ export class BybitExchange extends BaseExchange {
     this.batchLimit = 10;
 
     const publicDataOnly = this.isPublicDataOnly;
+
+    if (this.needsAccountMarketOverlay) {
+      await this.loadAccountMarketOverlay(async () => bybitFeeOverlay(await this.fetchFees('linear')));
+      if (this.isDisposed) return;
+    }
 
     const useExternalPublicData = await this.initExternalPublicData();
 

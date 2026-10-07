@@ -335,6 +335,27 @@ request/response regressions; live startup and authentication additionally need
 network or credentialed probes. Do not replace that evidence with source-text
 grep, and do not add a second capability manifest that duplicates metadata.
 
+## Account data on shared public markets (`loadAccountMarketOverlay`)
+
+On exchange-server, a private account takes markets from a keyless shared
+public exchange (`externalPublicData: in-process`), which cannot fetch anything
+signed. Anything per-account that a venue's `fetchMarkets` folded in behind
+`isPublicDataOnly` is therefore missing: Binance/BinancePM leverage brackets
+(max was 1 everywhere), Bybit/BybitInverse fee rates, OKX EU's
+`ACCOUNT_INSTRUMENTS` list. The fix is one mechanism in `BaseExchange`:
+
+- `start()` calls `loadAccountMarketOverlay(load)` when
+  `needsAccountMarketOverlay`, **before** `initExternalPublicData`. The hosted
+  store delta compares only top-level primitives, so an overlay that lands after
+  the first snapshot never reaches the client.
+- Both public-data providers pass every market delivery through
+  `adaptExternalMarkets`, so the overlay survives shared-exchange restarts.
+- The overlay must return NEW objects: shared markets are referenced by every
+  account on the venue.
+
+**A new venue that puts signed data into `Market` must add an overlay**, or its
+exchange-server users silently get the keyless value.
+
 ## Proxy & Tunnel Architecture
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.
