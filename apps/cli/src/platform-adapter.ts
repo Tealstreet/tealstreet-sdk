@@ -13,7 +13,13 @@ import {
 } from './config';
 import { isLoggedIn, checkAndRefreshToken, getProxyTokenFromConfig } from './auth';
 // Import original console functions to bypass rate limiting for CLI command output
-import { originalConsoleLog, originalConsoleError, originalConsoleWarn, writeAbovePrompt } from './logger';
+import {
+  isStdoutReservedForJson,
+  originalConsoleLog,
+  originalConsoleError,
+  originalConsoleWarn,
+  writeAbovePrompt,
+} from './logger';
 import { classifyLog } from './log-classify';
 import { setStatus } from './status-line';
 import type { ExchangeManager } from './exchange-manager';
@@ -86,7 +92,8 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     if (captureBuffer !== null) {
       captureBuffer.push(text);
     } else {
-      writeAbovePrompt(() => originalConsoleLog(text));
+      // Under --json, stdout holds only the result document.
+      writeAbovePrompt(() => (isStdoutReservedForJson() ? originalConsoleError : originalConsoleLog)(text));
     }
   };
 

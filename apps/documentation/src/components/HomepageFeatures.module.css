@@ -40,9 +40,12 @@
   cursor: pointer;
 }
 
+/* Six cards: three per row on desktop, so none is left alone and stretched. */
 .featureCol {
-  flex: 1 1 0;
+  flex: 0 0 33.333%;
+  max-width: 33.333%;
   min-width: 200px;
+  margin-bottom: 2rem;
   padding: 0 var(--ifm-spacing-horizontal);
   display: flex;
 }
@@ -55,6 +58,7 @@
 @media (max-width: 996px) {
   .featureCol {
     flex: 1 1 45%;
+    max-width: none;
     min-width: 240px;
     margin-bottom: 1rem;
   }

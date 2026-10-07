@@ -831,6 +831,7 @@ REPL. With a subcommand, it runs one-shot.
 | `record` (group)                                                                      | —                     | `start` / `stop` / `list` / `stats`                                                  |
 | `update`                                                                              | —                     | `-c` / `--check` for check-only                                                      |
 | `logs`                                                                                | `log`                 | `-c` / `--clear`, `-n <N>` lines                                                     |
+| `commands`                                                                            | —                     | Every shell and trading command; `--json` for the full machine-readable catalog      |
 
 > **`tealstreet tasks` is different from REPL `tasks`.** Top-level reads
 > persisted task records from `~/.tealstreet/tasks.json`. REPL `tasks` lists
@@ -838,6 +839,43 @@ REPL. With a subcommand, it runs one-shot.
 
 One-shot `exec` commands that start TWAPs keep the process alive until those
 TWAPs finish, then disconnect the exchange session.
+
+### Machine-readable output (`--json`) {#json}
+
+For scripts and AI agents (CLI 0.10.18 or newer). With `--json`, stdout
+carries exactly one JSON document; anything else the CLI prints goes to stderr.
+
+| Command                          | Prints                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `tealstreet whoami --json`       | `{ state: "signed_in" \| "not_logged_in" \| "expired", userId?, expiresInDays? }`  |
+| `tealstreet account list --json` | `{ accounts: [{ name, exchange, default, testnet }], defaultSymbol }` — never keys |
+| `tealstreet commands --json`     | `{ version, shell: [...], repl: [...] }` — every command with its examples         |
+| `tealstreet exec --json '<cmd>'` | `{ ok, code, command, account?, symbol?, error?, output: [{ kind, text }] }`       |
+
+`exec` and the shorthand trading commands (`buy`, `sell`, `close`, …) take
+`--json`. Branch on `code`; `output` holds every line the command printed.
+`OK` means sent, not filled: `nuke` and `close` return while closes may still be
+in flight, so confirm with `ps` and `o`. Order ids are not in the result yet:
+list them with `tealstreet exec --json 'o'`. A venue that rejects an order and
+only logs it is reported `UNCONFIRMED`: its error line is in `output`, and the
+safe next step is to look, not to retry.
+A chain step marked continue-on-error reports its failure as a `warn` line, so
+the run can be `OK` with a warning inside `output`.
+
+| `code`               | Meaning and next step                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `OK`                 | The command ran                                                                                                      |
+| `COMMAND_FAILED`     | It ran and reported an error; see `error`                                                                            |
+| `UNCONFIRMED`        | The command reported success but the exchange logged an error: check positions and orders before doing anything else |
+| `NO_ACCOUNTS`        | Add an account, or sync from the web app                                                                             |
+| `ACCOUNT_NOT_FOUND`  | Check `-a` against `tealstreet account list`                                                                         |
+| `NOT_LOGGED_IN`      | Run `tealstreet login` (needed for proxy/tunnel routing)                                                             |
+| `AUTH_EXPIRED`       | Run `tealstreet login` again                                                                                         |
+| `KEY_REJECTED`       | The exchange refused the API key: check it, its permissions, its IP whitelist                                        |
+| `CONNECTION_TIMEOUT` | Network timeout; retry                                                                                               |
+| `CONNECTION_FAILED`  | Could not connect; see `error`                                                                                       |
+| `USAGE_ERROR`        | Unknown option or missing argument; see `error`                                                                      |
+| `INTERNAL_ERROR`     | The CLI failed unexpectedly; see `error`                                                                             |
 
 Source: `apps/cli/src/index.ts`.
 

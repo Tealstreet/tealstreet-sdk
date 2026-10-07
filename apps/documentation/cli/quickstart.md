@@ -5,6 +5,9 @@ sidebar_position: 2
 
 # Quickstart
 
+> **New to the CLI?** Start with [Get started](./getting-started.md): install,
+> sign in, sync your keys from the web app, and a first order.
+
 Seven runnable recipes plus the current webhook status. Pick the one
 closest to what you're doing and paste it. Every trading recipe assumes
 you already have a focused symbol and an account selected — run

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- Outer ring matches About / Connect / Terminal / CLI / Support style -->
+  <circle cx="500" cy="500" r="440" fill="none" stroke="#25c2a0" stroke-width="40"/>
+  <!-- Plug: two prongs, body, cord -->
+  <line x1="430" y1="270" x2="430" y2="370" stroke="#25c2a0" stroke-width="56" stroke-linecap="round"/>
+  <line x1="570" y1="270" x2="570" y2="370" stroke="#25c2a0" stroke-width="56" stroke-linecap="round"/>
+  <path d="M350 380 H650 V470 A150 150 0 0 1 350 470 Z" fill="none" stroke="#25c2a0" stroke-width="56" stroke-linejoin="round"/>
+  <line x1="500" y1="620" x2="500" y2="730" stroke="#25c2a0" stroke-width="56" stroke-linecap="round"/>
+</svg>

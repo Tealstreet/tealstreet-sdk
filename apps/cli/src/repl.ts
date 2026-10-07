@@ -77,14 +77,23 @@ import { loadConfig, saveConfig, getAccount } from './config';
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
-import { markTokenExpiryWarned } from './auth';
+import { getAuthState, markTokenExpiryWarned } from './auth';
+import { emitJson, emitJsonAndExit } from './jsonMode';
+import {
+  connectFailureCode,
+  findKeyRejection,
+  stripAnsi,
+  summarizeOneShot,
+  type OneShotCode,
+  type OneShotLine,
+} from './oneShotResult';
 import { flushCliSentry } from './sentry';
 import { virtualClock } from '../../../packages/safe-cex/src/utils/virtualClock';
 import { disposeHOWWebSockets } from '../../../packages/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { twapManager } from '../../../packages/safe-cex/src/webworker/twap/TwapManager';
 import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/TwapInstance';
 import { createStandalonePlatformAdapter } from './platform-adapter';
-import { logger, originalConsoleLog, setPromptController } from './logger';
+import { logger, originalConsoleLog, setConsoleTap, setPromptController } from './logger';
 import type { ExchangeLike, ExchangeAccountConfig } from '../../../packages/cli-core/src/types';
 import {
   login,
@@ -2669,7 +2678,13 @@ export function getSessionInfo(): {
   };
 }
 
-export async function runSingleCommand(commandString: string, accountName?: string, symbol?: string): Promise<void> {
+export async function runSingleCommand(
+  commandString: string,
+  accountName?: string,
+  symbol?: string,
+  options: { json?: boolean } = {},
+): Promise<void> {
+  if (options.json) return runSingleCommandJson(commandString, accountName, symbol);
   const config = loadConfig();
 
   // Check auth token on startup and warn if expiring soon
@@ -2735,16 +2750,110 @@ export async function runSingleCommand(commandString: string, accountName?: stri
 }
 
 /**
+ * `runSingleCommand` for agents: the same steps, but every outcome is one JSON
+ * document with a stable `code`, and every line the run prints is captured into
+ * it instead of reaching stdout. Keep the steps in step with the human path above.
+ */
+async function runSingleCommandJson(commandString: string, accountName?: string, symbol?: string): Promise<void> {
+  const output: OneShotLine[] = [];
+  let resolvedSymbol: string | undefined = symbol;
+  const result = (ok: boolean, code: OneShotCode, error?: string) => ({
+    ok,
+    code,
+    command: commandString.trim(),
+    account: session.currentAccountName ?? accountName,
+    ...(resolvedSymbol ? { symbol: resolvedSymbol } : {}),
+    ...(error ? { error } : {}),
+    output,
+  });
+  const fail = (code: OneShotCode, error: string) => emitJsonAndExit(result(false, code, error), 1);
+  // Exchange code reports through console, not the adapter: a venue that rejects
+  // an order logs it and returns no order, so these lines are part of the result.
+  const exchangeLines: OneShotLine[] = [];
+  setConsoleTap((kind, message) => {
+    if (kind !== 'info' || /warning|error/i.test(message)) exchangeLines.push({ kind, text: stripAnsi(message) });
+  });
+
+  try {
+    await runWithAdapterContext(
+      { printSink: (kind, text) => output.push({ kind, text: stripAnsi(text) }) },
+      async () => {
+        const config = loadConfig();
+        if (isLoggedIn() && tokenNeedsRefresh()) {
+          adapter.printWarning(
+            `Your authentication token expires in ${getTokenExpiryDays()} days. Run "login" to refresh.`,
+          );
+        }
+        if (!config.accounts?.length) {
+          return fail(
+            'NO_ACCOUNTS',
+            'No accounts configured. Add one with `tealstreet account add`, or sync from the web app.',
+          );
+        }
+        const account = getAccount(accountName);
+        if (!account) return fail('ACCOUNT_NOT_FOUND', `Account "${accountName || 'default'}" not found`);
+
+        resolvedSymbol = session.currentSymbol = symbol || config.defaultSymbol || 'BTCUSDT';
+        try {
+          session = await connectToAccount(account, session, adapter);
+        } catch (error) {
+          adapter.printError(`Failed to connect: ${(error as Error).message}`);
+        }
+        if (!session.currentExchange) {
+          const errorLine = [...output].reverse().find((line) => line.kind === 'error')?.text;
+          return fail(connectFailureCode(errorLine, getAuthState()), errorLine ?? 'Could not connect to the account.');
+        }
+
+        setupExchangeListeners(session.currentExchange, session.currentAccountName);
+        ensureCommandsRegistered();
+        const requestedCommand = commandRegistry.find(commandString.trim().split(/\s+/)[0]?.toLowerCase() ?? '');
+        const needsKey = requestedCommand?.requiresConnection !== false;
+        const rejection = findKeyRejection(exchangeLines.map((line) => line.text));
+        if (((session.currentExchange.authFailureStreak ?? 0) > 0 || rejection) && needsKey) {
+          await emitJson(result(false, 'KEY_REJECTED', rejection ?? 'The exchange rejected this API key.'));
+          return teardownOneShot(session.currentExchange, 1);
+        }
+
+        let threw: unknown;
+        // Connect-time lines (a key warning a local command does not need) are not the command's result.
+        const commandStart = output.length;
+        const exchangeStart = exchangeLines.length;
+        const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
+        try {
+          await processCommand(commandString, { drainFinalInFlight: true });
+          await waitForTwapsStartedByCommand(twapsBeforeCommand);
+        } catch (error) {
+          threw = error;
+        }
+        const exchangeDuring = exchangeLines.slice(exchangeStart);
+        const lateRejection = needsKey ? findKeyRejection(exchangeDuring.map((line) => line.text)) : undefined;
+        const summary = lateRejection
+          ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
+          : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
+        output.push(...exchangeDuring);
+        await emitJson(result(summary.ok, summary.code, summary.error));
+        await teardownOneShot(session.currentExchange, summary.ok ? 0 : 1);
+      },
+    );
+  } catch (error) {
+    await emitJsonAndExit(result(false, 'INTERNAL_ERROR', error instanceof Error ? error.message : String(error)), 1);
+  }
+}
+
+/**
  * One-shot teardown. `stopExchange` alone leaves the process alive: the
  * virtual clock re-arms a 5-minute sync forever and the HoW tunnel sockets hold
  * a ping timer, so `tealstreet balance` ran until the user pressed Ctrl-C. The
  * REPL never hit this because every one of its exits calls `process.exit`.
  */
 async function teardownOneShot(exchange: NonNullable<typeof session.currentExchange>, exitCode = 0): Promise<void> {
-  await adapter.stopExchange(exchange);
-  virtualClock.stop();
-  disposeHOWWebSockets();
-  await flushCliSentry();
+  try {
+    await adapter.stopExchange(exchange);
+  } finally {
+    virtualClock.stop();
+    disposeHOWWebSockets();
+    await flushCliSentry();
+  }
   process.exit(exitCode);
 }
 

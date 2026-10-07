@@ -71,6 +71,8 @@ const config = {
             from: '/docs/connect/okex',
             to: '/docs/connect/okx',
           },
+          // A docs link without the /docs prefix circulated from the Updates panel.
+          { from: '/trade/modules/mcp-connector', to: '/docs/trade/modules/mcp-connector' },
           // CLI section was promoted to its own /cli/ route in 2026.
           // Old /docs/cli/* URLs (linked from elsewhere on the web) keep
           // working via these redirects.
@@ -190,6 +192,11 @@ const config = {
             position: 'left',
             to: 'cli/',
           },
+          {
+            label: 'MCP',
+            position: 'left',
+            to: 'docs/trade/modules/mcp-connector',
+          },
           // {
           //   label: "Webhooks",
           //   position: "left",
@@ -281,6 +288,10 @@ const config = {
               {
                 label: 'CLI',
                 to: '/cli/',
+              },
+              {
+                label: 'MCP',
+                to: '/docs/trade/modules/mcp-connector',
               },
             ],
           },

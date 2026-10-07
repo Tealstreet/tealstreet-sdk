@@ -4,6 +4,7 @@
 const sidebars = {
   cliSidebar: [
     'intro',
+    'getting-started',
     'install',
     'quickstart',
     {

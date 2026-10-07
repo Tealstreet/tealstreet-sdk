@@ -1,6 +1,6 @@
 ---
 title: Connect an AI Assistant
-description: Let Claude, or any MCP client, write custom modules in your Tealstreet account.
+description: Connect Claude, Cursor, OpenCode or any MCP client to Tealstreet for market data, dashboards and your custom modules, hotkeys and studies.
 sidebar_position: 100
 hide_title: false
 draft: false
@@ -10,10 +10,10 @@ hide_table_of_contents: false
 ---
 
 Tealstreet hosts an **MCP connector**, so an AI assistant you already use can
-write [Custom Modules](./custom-module.mdx) directly into your account. The
-same connector is being expanded into Tealstreet's read-only data connector;
-available permissions are always shown on the consent screen before anything
-is granted.
+read market, onchain and prediction-market data, build dashboards, and write
+[Custom Modules](./custom-module.mdx), hotkey scripts and chart studies
+directly into your account. Available permissions are always shown on the
+consent screen before anything is granted.
 
 ---
 
@@ -53,6 +53,25 @@ API keys.
 ::::
 
 ---
+
+### Trade through your local CLI
+
+The connector itself never places orders. If you have the
+[Tealstreet CLI](/cli/getting-started) installed, an assistant that can run
+shell commands (Claude Code, Cursor, OpenCode and similar) can trade through it,
+on your machine, signing requests with keys stored there. It needs CLI 0.10.18
+or newer; the assistant checks and has you run `tealstreet update` if not.
+
+`get_cli_reference` tells the assistant how: check for the CLI with
+`tealstreet --version`, walk you through installing it, signing in and adding
+or syncing your keys when something is missing, then run orders as
+`tealstreet exec --json -a <account> -s <symbol> '<command>'` and read back a
+result code. It is told to confirm every order with you first and to offer
+simulated orders (`sim on`) for a first trade.
+
+| Tool                | Permission     | What it returns                                                            |
+| ------------------- | -------------- | -------------------------------------------------------------------------- |
+| `get_cli_reference` | `modules:read` | CLI detection, step-by-step setup, the `exec --json` pattern and its codes |
 
 ### What it can and cannot do
 

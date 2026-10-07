@@ -52,12 +52,12 @@ one-liner channel for Windows.
 
 ## Install channels
 
-| Channel             | Command                                            |
-| ------------------- | -------------------------------------------------- |
-| One-liner installer | `curl -fsSL https://get.tealstreet.io/cli \| bash` |
-| Homebrew            | `brew install tealstreet/tap/tealstreet`           |
-| Direct download     | Pick the matching asset from the releases page     |
-| List releases       | `gh release list --repo Tealstreet/cli`            |
+| Channel             | Command                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| One-liner installer | `curl -fsSL https://raw.githubusercontent.com/Tealstreet/cli/main/install.sh \| bash` |
+| Homebrew            | `brew install tealstreet/tap/tealstreet`                                              |
+| Direct download     | Pick the matching asset from the releases page                                        |
+| List releases       | `gh release list --repo Tealstreet/cli`                                               |
 
 The one-liner detects platform/arch, fetches the matching binary from
 the latest release, and drops it into `/usr/local/bin`. The Homebrew

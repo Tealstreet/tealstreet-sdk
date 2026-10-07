@@ -16,7 +16,7 @@ const FeatureList = [
   {
     title: 'Connect',
     Svg: require('../../static/img/connect.svg').default,
-    location: 'docs/connect/api-general',
+    location: '/docs/connect/api-general',
     description: <>Quickly connect your API keys and start trading on your favorite exchange.</>,
   },
   {
@@ -36,15 +36,26 @@ const FeatureList = [
     location: '/cli/',
     description: (
       <>
-        A keyboard-first command interface for trading. Place orders, build chains, run TWAPs, and route TradingView
-        webhooks through your own terminal.
+        A keyboard-first command interface for trading. Place orders, build chains and run TWAPs from your own terminal,
+        or let your AI agent drive it.
+      </>
+    ),
+  },
+  {
+    title: 'MCP',
+    Svg: require('../../static/img/mcp.svg').default,
+    location: '/docs/trade/modules/mcp-connector',
+    description: (
+      <>
+        Connect Claude, Cursor, OpenCode or any MCP client to read market data, build dashboards and write modules in
+        your account.
       </>
     ),
   },
   {
     title: 'Support',
     Svg: require('../../static/img/support.svg').default,
-    location: 'docs/support/discord',
+    location: '/docs/support/discord',
     description: <>Get 24/7 support on our community discord. Click here to learn how to join.</>,
   },
 ];

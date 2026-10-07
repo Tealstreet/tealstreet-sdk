@@ -65,6 +65,13 @@ the local REPL with a `[hook:<name>]` prefix in the matching chalk color.
 
 ---
 
+## JSON mode (`--json`) {#json-mode}
+
+Commands run with `--json` keep stdout for exactly one JSON document. Everything
+the CLI would otherwise print to stdout, including `console.log` from exchange
+code, goes to stderr instead, and the background update notice is skipped. See
+[Machine-readable output](./commands.md#json) for which commands support it.
+
 ## Status bar + footer {#status-bar--footer}
 
 Two pinned single-line surfaces frame the scrolling output, both reserved via

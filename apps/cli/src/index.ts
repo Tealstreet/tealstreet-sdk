@@ -25,11 +25,15 @@ import { interceptConsole, logger } from './logger';
 import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
 import { cleanupStaleUpdate } from './windows-update';
 import { fireCheckin } from './checkin';
-import { login, logout, showAuthStatus } from './auth';
+import { getAuthState, login, logout, showAuthStatus } from './auth';
+import { emitJsonAndExit, enterJsonMode, isJsonMode } from './jsonMode';
 import { initCliSentry, captureCliError, flushCliSentry } from './sentry';
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+const JSON_MODE = isJsonMode();
+if (JSON_MODE) enterJsonMode();
 
 // A Windows self-update parks the previous binary as `.old` beside the new one
 // — it cannot be deleted while it is the running image. This is the next
@@ -47,7 +51,33 @@ initCliSentry();
 fireCheckin();
 
 // Global error handlers to prevent crashes and verbose stack traces
+/** Builds and emits a --json document, answering INTERNAL_ERROR if building it throws. */
+const emitJsonOrCrash = async (build: () => unknown) => {
+  let value: unknown;
+  try {
+    value = build();
+  } catch (error) {
+    return emitJsonAndExit({ ok: false, code: 'INTERNAL_ERROR', error: (error as Error)?.message ?? String(error) }, 1);
+  }
+  return emitJsonAndExit(value);
+};
+
+// Under --json a crash must still answer with a document, once, and a non-zero exit.
+// Unhandled rejections keep their old non-fatal handling: exchange code leaves some
+// unhandled during ordinary runs, and failing the run on one would be a false failure.
+let jsonCrashReported = false;
+const reportJsonCrash = (reason: unknown) => {
+  if (!JSON_MODE || jsonCrashReported) return false;
+  jsonCrashReported = true;
+  void emitJsonAndExit(
+    { ok: false, code: 'INTERNAL_ERROR', error: reason instanceof Error ? reason.message : String(reason) },
+    1,
+  );
+  return true;
+};
+
 process.on('uncaughtException', (error: Error) => {
+  if (reportJsonCrash(error)) return;
   logger.error(`Uncaught exception: ${error.message}`, error.stack);
   console.error(error.message);
   captureCliError(error, { handler: 'uncaughtException' });
@@ -70,8 +100,8 @@ import { registerCrossTradeCommand } from './commands/cross-trade';
 // Dynamic import for repl to avoid circular dependency issues with safe-cex
 const getRepl = async () => import('./repl');
 
-// Check for updates in background (non-blocking).
-checkForUpdatesBackground();
+// Check for updates in background (non-blocking). Its banner would corrupt --json output.
+if (!JSON_MODE) checkForUpdatesBackground();
 
 const CLI_DOCS_URL = 'https://docs.tealstreet.io/cli';
 
@@ -108,7 +138,11 @@ program
   .command('auth')
   .alias('whoami')
   .description('Show authentication status')
-  .action(() => showAuthStatus());
+  .option('--json', 'Print { state, userId, expiresInDays } as JSON')
+  .action(async (options) => {
+    if (options.json) await emitJsonOrCrash(() => getAuthState());
+    showAuthStatus();
+  });
 
 // ============ Account Commands ============
 const accountCmd = program.command('account').alias('accounts').description('Manage accounts');
@@ -118,7 +152,24 @@ accountCmd
   .command('list')
   .alias('ls')
   .description('List all configured accounts')
-  .action(() => {
+  .option('--json', 'Print the accounts (never their keys) as JSON')
+  .action(async (options) => {
+    if (options.json) {
+      // An allowlist: account configs also hold secondary keys, passphrases and bot tokens.
+      await emitJsonOrCrash(() => {
+        const config = loadConfig();
+        return {
+          accounts: listAccounts().map((account) => ({
+            name: account.name,
+            exchange: account.exchange,
+            default: account.name === config.defaultAccount,
+            testnet: Boolean(account.testnet),
+          })),
+          defaultSymbol: config.defaultSymbol ?? null,
+        };
+      });
+    }
+
     const config = loadConfig();
     const accounts = listAccounts();
 
@@ -785,10 +836,11 @@ program
   .description('Execute a trading command')
   .option('-a, --account <account>', 'Account to use')
   .option('-s, --symbol <symbol>', 'Trading symbol')
+  .option('--json', 'Print one JSON result { ok, code, output } for scripts and agents')
   .action(async (cmdArgs, options) => {
     const { runSingleCommand } = await getRepl();
     const commandString = cmdArgs.join(' ');
-    await runSingleCommand(commandString, options.account, options.symbol);
+    await runSingleCommand(commandString, options.account, options.symbol, { json: options.json });
   });
 
 // ============ Shorthand Trading Commands ============
@@ -810,12 +862,44 @@ tradingCommands.forEach(({ name, desc }) => {
     .description(desc)
     .option('-a, --account <account>', 'Account to use')
     .option('-s, --symbol <symbol>', 'Trading symbol')
+    .option('--json', 'Print one JSON result { ok, code, output } for scripts and agents')
     .action(async (args, options) => {
       const { runSingleCommand } = await getRepl();
       const commandString = `${name} ${args.join(' ')}`;
-      await runSingleCommand(commandString, options.account, options.symbol);
+      await runSingleCommand(commandString, options.account, options.symbol, { json: options.json });
     });
 });
+
+// ============ Command Catalog ============
+program
+  .command('commands')
+  .description('List every command, for people and for AI agents (--json)')
+  .option('--json', 'Print the full catalog as JSON')
+  .action(async (options) => {
+    const { buildCommandCatalog } = await import('../../../packages/cli-core/src/commands/catalog');
+    type ShellEntry = {
+      name: string;
+      aliases: string[];
+      description: string;
+      options: { flags: string; description: string }[];
+      subcommands: ShellEntry[];
+    };
+    const describe = (command: Command): ShellEntry => ({
+      name: command.name(),
+      aliases: command.aliases(),
+      description: command.description(),
+      options: command.options.map((option) => ({ flags: option.flags, description: option.description })),
+      subcommands: command.commands.map(describe),
+    });
+    const shell = program.commands.map(describe);
+    const repl = buildCommandCatalog();
+    if (options.json) await emitJsonOrCrash(() => ({ version: getCurrentVersion(), shell, repl }));
+    console.log(chalk.cyan('\nShell commands (tealstreet <command>):\n'));
+    for (const command of shell) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
+    console.log(chalk.cyan("\nTrading commands (at the prompt, or tealstreet exec '<command>'):\n"));
+    for (const command of repl) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
+    console.log(chalk.gray('\nDetails: https://docs.tealstreet.io/cli/reference/commands'));
+  });
 
 // ============ Default Action ============
 // Handle top-level flags before parsing
@@ -835,6 +919,30 @@ if (args.includes('--update')) {
 } else if (process.argv.length === 2) {
   // If no command is provided, start interactive REPL mode
   getRepl().then(({ startRepl }) => startRepl());
+} else if (JSON_MODE) {
+  // Commander would print a usage error as text and exit; under --json the caller expects one document.
+  const quietOnError = (command: Command) => {
+    command.exitOverride();
+    command.configureOutput({ writeErr: () => {} });
+    command.commands.forEach(quietOnError);
+  };
+  quietOnError(program);
+  program.parseAsync().catch((error: { code?: string; message?: string; exitCode?: number }) => {
+    const askedForHelp = error?.code === 'commander.help' && error.exitCode === 0;
+    if (askedForHelp || error?.code === 'commander.helpDisplayed' || error?.code === 'commander.version')
+      process.exit(0);
+    if (error?.code === 'commander.help')
+      error = { ...error, message: 'missing subcommand; see `tealstreet commands --json`' };
+    const fromCommander = String(error?.code ?? '').startsWith('commander.');
+    void emitJsonAndExit(
+      {
+        ok: false,
+        code: fromCommander ? 'USAGE_ERROR' : 'INTERNAL_ERROR',
+        error: (error?.message ?? String(error)).replace(/^error: /, ''),
+      },
+      1,
+    );
+  });
 } else {
   program.parse();
 }

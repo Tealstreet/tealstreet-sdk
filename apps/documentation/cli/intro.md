@@ -65,6 +65,7 @@ public tunnel to the local listener.
 
 | You want to…                                    | Read                                                   |
 | ----------------------------------------------- | ------------------------------------------------------ |
+| Install, sign in, sync your keys, first order   | [Get started](./getting-started.md)                    |
 | Install the standalone CLI                      | [Install](./install.md)                                |
 | Run a few real recipes                          | [Quickstart](./quickstart.md)                          |
 | See every command in one page                   | [Commands reference](./reference/commands.md)          |

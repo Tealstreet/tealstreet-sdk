@@ -205,6 +205,23 @@ export const logger = {
 // Export originals so platform-adapter can use them directly (bypassing rate limiting)
 export const originalConsoleLog = console.log;
 export const originalConsoleError = console.error;
+
+// Under `--json`, stdout carries exactly one JSON document, so console output
+// goes to stderr instead. Bun's console bypasses a patched process.stdout.write,
+// which is why the switch lives here rather than on the stream.
+let stdoutReservedForJson = false;
+export const reserveStdoutForJson = () => {
+  stdoutReservedForJson = true;
+};
+export const isStdoutReservedForJson = () => stdoutReservedForJson;
+
+// Exchange code reports through console, not the adapter, so a `--json` run taps
+// it to notice what the result must not hide (a key the venue rejected).
+type ConsoleTap = (kind: 'info' | 'warn' | 'error', message: string) => void;
+let consoleTap: ConsoleTap | undefined;
+export const setConsoleTap = (tap: ConsoleTap | undefined) => {
+  consoleTap = tap;
+};
 export const originalConsoleWarn = console.warn;
 const originalConsoleTrace = console.trace;
 const originalConsoleInfo = console.info;
@@ -312,6 +329,7 @@ export function interceptConsole(): void {
     // `logger.debug` is gated by MIN_LOG_LEVEL and would be dropped unless
     // DEBUG=1, which would hide the very lines "Full logs → yarn logs" promises.
     logger.info(args.map(formatForLog).join(' '));
+    consoleTap?.('info', args.map(formatForLog).join(' '));
 
     if (shouldSuppressLog(args)) return;
 
@@ -319,7 +337,7 @@ export function interceptConsole(): void {
     if (isDuplicateMessage(message)) return;
     if (shouldRateLimit()) return;
 
-    writeAbovePrompt(() => originalConsoleLog(...args));
+    writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...args));
   };
   console.log = handleInfoLog;
   console.info = handleInfoLog;
@@ -338,6 +356,7 @@ export function interceptConsole(): void {
     // For terminal: extract just the error message, skip noise
     const cleanMessage = extractErrorMessage(args);
     if (!cleanMessage) return;
+    consoleTap?.('error', cleanMessage);
 
     // Apply deduplication (10 second window)
     if (isDuplicateMessage(cleanMessage)) return;
@@ -357,6 +376,7 @@ export function interceptConsole(): void {
     // Show clean message in terminal
     const cleanMessage = extractErrorMessage(args);
     if (!cleanMessage) return;
+    consoleTap?.('warn', cleanMessage);
 
     // Apply deduplication
     if (isDuplicateMessage(cleanMessage)) return;

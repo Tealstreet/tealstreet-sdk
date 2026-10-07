@@ -247,6 +247,30 @@ meant two tool vocabularies, two scope models and two renderers of the same
 reads, kept in step only by parity tests. Do not add an MCP server back to the
 CLI; extend the hosted connector instead.
 
+## `--json` mode: stdout is one document
+
+`--json` anywhere in argv (`jsonMode.ts`) is detected right after
+`interceptConsole()`, before the update check. It calls
+`reserveStdoutForJson()`, which makes the console interceptor send info output
+to **stderr**. Patching `process.stdout.write` does NOT work: Bun's native
+console bypasses it, which is why the switch lives in `logger.ts`. Results go out
+through `emitJsonAndExit`, never `console.log`, whose dedupe and rate limit would
+eat repeated documents. Exiting after the flush is deliberate: `fireCheckin`'s
+fetch has no timeout and would otherwise hold an agent's process open.
+`account list --json` uses an ALLOWLIST of fields; configs also hold secondary
+keys, passphrases, seeds and bot tokens. The REPL half of `tealstreet commands`
+comes from `cli-core`'s `buildCommandCatalog`, the same one the hosted MCP serves.
+
+**`exec --json` is `runSingleCommandJson` in `repl.ts`**, a sibling of
+`runSingleCommand` that must keep the same steps. Every adapter print is captured
+through an ADAPTER CONTEXT `printSink`, and exchange code (which reports through
+console, not the adapter) through `setConsoleTap`. That tap is load-bearing:
+Bybit answers a rejected key with HTTP 200 and only LOGS it, so without it the
+run printed a zeroed balance and reported `OK`. `connectToAccount` reports a
+failed connect by printing, never throwing, so its code comes from the captured
+line (`connectFailureCode`). Codes live in `oneShotResult.ts`; the docs table in
+`reference/commands.md#json` must list every one.
+
 ## Startup checkin (web mount gate)
 
 Every CLI process fires a single best-effort `POST /api/cli/checkin`

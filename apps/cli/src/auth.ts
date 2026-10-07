@@ -337,6 +337,31 @@ export function logout(): void {
   console.log(chalk.green('Logged out successfully.'));
 }
 
+export type AuthState = {
+  state: 'signed_in' | 'not_logged_in' | 'expired';
+  userId?: string;
+  /** Whole days left on the earlier of the stored and the token's own expiry. */
+  expiresInDays?: number;
+};
+
+/** Machine-readable sign-in state: expired once the EARLIER of the two expiry times has passed. */
+export function getAuthState(): AuthState {
+  const config = loadConfig();
+  if (!config.auth?.accessToken) return { state: 'not_logged_in' };
+  const tokenPayload = decodeJwt(config.auth.accessToken);
+  const expiries = [tokenPayload?.exp ? tokenPayload.exp * 1000 : undefined, config.auth.expiresAt].filter(
+    (value): value is number => typeof value === 'number',
+  );
+  const expiresAt = expiries.length ? Math.min(...expiries) : undefined;
+  const userId = config.auth.userId || tokenPayload?.sub;
+  if (expiresAt !== undefined && expiresAt <= Date.now()) return { state: 'expired', userId };
+  return {
+    state: 'signed_in',
+    userId,
+    expiresInDays: expiresAt === undefined ? undefined : Math.floor((expiresAt - Date.now()) / 86_400_000),
+  };
+}
+
 /**
  * Show current auth status
  */

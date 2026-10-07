@@ -12,8 +12,8 @@ channel below; both install the same artifact.
 ## macOS & Linux
 
 ```bash
-# One-liner — detects platform/arch, drops into /usr/local/bin
-curl -fsSL https://get.tealstreet.io/cli | bash
+# One-liner — detects platform/arch, drops into /usr/local/bin (asks for sudo if it is not writable)
+curl -fsSL https://raw.githubusercontent.com/Tealstreet/cli/main/install.sh | bash
 
 # Homebrew tap
 brew install tealstreet/tap/tealstreet
@@ -79,7 +79,11 @@ No args = start the REPL. The prompt looks like:
 :<account> [<symbol> $<last-price>] >
 ```
 
-If you have no accounts yet, add one:
+Keys already in the web app do not need re-entering: sign in, start the CLI
+and approve the web app once, and accounts sync both ways. See
+[Get started → Bring your exchange keys](./getting-started.md#3-bring-your-exchange-keys).
+
+Otherwise, add one:
 
 ```bash
 tealstreet account add -n mybybit -e bybit -k <KEY> -s <SECRET> --default
