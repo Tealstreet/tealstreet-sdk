@@ -4,6 +4,8 @@ import type { ExchangeOptions, PayloadSignerRequest } from '../types';
 import { Account, ec } from 'starknet';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { axiosHttpOverWebsocketAdapter } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { createAPI } from '../exchanges/paradex/paradex.api';
 import { ParadexJWTManager, ParadexRequestSigner } from '../exchanges/paradex/paradex.sdk';
 
 const ADDRESS = '0x4f3c1d2e5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2';
@@ -64,5 +66,16 @@ describe('Paradex with payloadSigner', () => {
     expect(headers['PARADEX-STARKNET-SIGNATURE']).toBe('sign-paradex-placeholder');
     expect(headers['X-Dime-Sign-paradex']).toBe(calls[0].payload);
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.testnet.paradex.trade/v1/auth/0xsubkey');
+  });
+
+  // The signer's placeholder is only swapped by the proxy on the request's own wire.
+  it('sends private requests direct, not through the Tealstreet tunnel', () => {
+    const { options } = remote();
+    const xhr = createAPI({ ...options, paradexAddress: ADDRESS, subkeyAddress: '0xpub' }, {} as any);
+
+    expect(xhr.defaults.adapter).not.toBe(axiosHttpOverWebsocketAdapter);
+    expect(createAPI({ key: '0xpriv', paradexAddress: ADDRESS } as ExchangeOptions, {} as any).defaults.adapter).toBe(
+      axiosHttpOverWebsocketAdapter,
+    );
   });
 });

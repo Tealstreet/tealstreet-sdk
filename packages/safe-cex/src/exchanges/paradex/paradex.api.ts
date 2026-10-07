@@ -76,7 +76,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     retryDelay: (retryCount) => retryCount * 1000,
   });
 
-  if (!options.publicDataOnly) {
+  // A payloadSigner caller's signer works on the wire it controls, so its requests go direct.
+  if (!options.publicDataOnly && !options.payloadSigner) {
     setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
   }
 
