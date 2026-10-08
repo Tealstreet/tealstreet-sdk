@@ -1,3 +1,5 @@
+import type { Market } from '../../types';
+import type { AccountMarketOverlay } from '../base';
 import type { OkxInstrumentType } from './okx.types';
 
 import { OKXExchange } from './okx.exchange';
@@ -10,6 +12,19 @@ export class OKXEUExchange extends OKXExchange {
 
   protected getMarketInstrumentsEndpoint(): string {
     return this.isPublicDataOnly ? ENDPOINTS.MARKETS : ENDPOINTS.ACCOUNT_INSTRUMENTS;
+  }
+
+  // ACCOUNT_INSTRUMENTS lists only what this EEA account may trade; the shared
+  // keyless exchange can only list the public set, so narrow it to this account's.
+  protected async fetchAccountMarketOverlay(): Promise<AccountMarketOverlay | null> {
+    const accountMarkets = await this.fetchMarkets();
+    if (accountMarkets.length === 0) return null;
+    const byId = new Map(accountMarkets.map((m) => [m.id, m]));
+    return (markets: Market[]) =>
+      markets.flatMap((m) => {
+        const own = byId.get(m.id);
+        return own ? [{ ...m, limits: own.limits }] : [];
+      });
   }
 
   isSupportedMarketInstrument(market: Record<string, any>): boolean {

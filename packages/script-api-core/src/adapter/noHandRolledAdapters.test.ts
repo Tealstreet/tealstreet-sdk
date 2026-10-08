@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -24,6 +24,9 @@ import { describe, expect, it } from 'vitest';
  */
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
+// The public SDK mirror ships no apps/web, so the host files these name are absent there.
+// package.json, not the directory: the mirror's CI can leave a generated apps/web/ behind.
+const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web/package.json'));
 
 /** Five method names that only an implementation carries as object keys.
  *  A caller holding an adapter references them as `adapter.getPositions(...)`,
@@ -88,7 +91,7 @@ describe('no hand-rolled CoreAdapters', () => {
     ).toEqual([]);
   });
 
-  it('the two host spokes exist and go through the factory', () => {
+  it.skipIf(!HAS_WEB_APP)('the two host spokes exist and go through the factory', () => {
     // Pins that the spokes are still spokes — if one is deleted or renamed the
     // guard above would pass for the wrong reason.
     for (const spoke of ['apps/web/src/components/customScripts/scriptAdapter.ts', 'apps/cli/src/script-adapter.ts']) {

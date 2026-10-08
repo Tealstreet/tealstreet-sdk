@@ -292,7 +292,7 @@ export class ExternalPublicDataProvider {
 
   private handleMarkets = (markets: Market[]) => {
     this.parent.store.update({
-      markets,
+      markets: this.parent.adaptExternalMarkets(markets),
       loaded: { ...this.parent.store.loaded, markets: true },
     });
   };

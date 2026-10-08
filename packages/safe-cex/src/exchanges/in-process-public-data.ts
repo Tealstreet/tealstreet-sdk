@@ -53,7 +53,7 @@ export class InProcessPublicDataProvider {
     if (loaded.markets && markets.length > 0) {
       this.noteDataObserved();
       this.parent.store.update({
-        markets,
+        markets: this.parent.adaptExternalMarkets(markets),
         loaded: { ...this.parent.store.loaded, markets: true },
       });
     }
@@ -102,7 +102,7 @@ export class InProcessPublicDataProvider {
 
       this.parent.store.update({
         ...(tickersChanged ? { tickers: sourceTickers } : {}),
-        ...(marketsChanged ? { markets: sourceMarkets } : {}),
+        ...(marketsChanged ? { markets: this.parent.adaptExternalMarkets(sourceMarkets) } : {}),
         loaded: {
           ...this.parent.store.loaded,
           ...(tickersChanged ? { tickers: true } : {}),

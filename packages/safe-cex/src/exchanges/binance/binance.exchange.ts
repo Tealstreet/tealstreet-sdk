@@ -301,7 +301,29 @@ export class BinanceExchange extends BaseExchange {
     return { error: '', balance };
   };
 
+  // The shared public exchange has no keys, so its markets carry leverage.max = 1.
+  private loadAccountMaxLeverage = () =>
+    this.loadAccountMarketOverlay(async () => {
+      const { data } = await this.xhr.get<unknown>(ENDPOINTS.LEVERAGE_BRACKET);
+      const brackets = requireBinanceArrayResponse<Record<string, any>>(ENDPOINTS.LEVERAGE_BRACKET, data);
+      const maxBySymbol = new Map(
+        brackets
+          .map((b): [string, number] => [b.symbol, Number(v(b.brackets?.[0], 'initialLeverage'))])
+          .filter(([, max]) => max > 0),
+      );
+      return (markets) =>
+        markets.map((m) => {
+          const max = maxBySymbol.get(m.symbol);
+          return max ? { ...m, limits: { ...m.limits, leverage: { ...m.limits.leverage, max } } } : m;
+        });
+    });
+
   start = async () => {
+    if (this.needsAccountMarketOverlay) {
+      await this.loadAccountMaxLeverage();
+      if (this.isDisposed) return;
+    }
+
     const useExternalPublicData = await this.initExternalPublicData();
 
     if (!useExternalPublicData) {

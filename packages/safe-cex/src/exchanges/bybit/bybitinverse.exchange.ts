@@ -81,6 +81,7 @@ import {
 } from './bybit.types';
 import { BybitInversePrivateWebsocket } from './bybitinverse.ws-private';
 import { BybitInversePublicWebsocket } from './bybitinverse.ws-public';
+import { bybitFeeOverlay } from './bybit.fee-overlay';
 
 const MAX_CLOSED_PNL_PAGES = 20;
 
@@ -377,6 +378,13 @@ export class BybitInverseExchange extends BaseExchange {
     this.batchLimit = 10;
 
     const publicDataOnly = this.isPublicDataOnly;
+
+    if (this.needsAccountMarketOverlay) {
+      await this.loadAccountMarketOverlay(async () =>
+        bybitFeeOverlay((await Promise.all(this.supportedCategories.map((c) => this.fetchFees(c)))).flat()),
+      );
+      if (this.isDisposed) return;
+    }
 
     const useExternalPublicData = await this.initExternalPublicData();
 

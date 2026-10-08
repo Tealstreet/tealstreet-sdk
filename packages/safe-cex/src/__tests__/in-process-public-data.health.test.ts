@@ -1,9 +1,9 @@
 import type { PublicDataSource, StoreData } from '../types';
-import type { BaseExchange } from './base';
+import type { BaseExchange } from '../exchanges/base';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { InProcessPublicDataProvider } from './in-process-public-data';
+import { InProcessPublicDataProvider } from '../exchanges/in-process-public-data';
 
 const THRESHOLD_MS = 20_000;
 
@@ -38,6 +38,7 @@ const makeParent = () =>
   ({
     name: 'bybit',
     emitter: { emit: vi.fn() },
+    adaptExternalMarkets: (markets: StoreData['markets']) => markets,
     store: {
       loaded: {},
       update: vi.fn(),

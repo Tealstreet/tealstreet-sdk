@@ -17,8 +17,7 @@ import { getBybitSiteHeaders } from './bybit.site';
 import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.types';
 
 // Credential failures that will not self-heal on retry, so the tick backoff
-// should treat them like a 401. Deliberately excludes 10004 ("error sign"),
-// which is usually clock drift and is already retried.
+// should treat them like a 401.
 const BYBIT_AUTH_RET_CODES = new Set([
   10003, // API key is invalid
   // A wrong SECRET fails here, not at 10003 — the key is recognised and the
