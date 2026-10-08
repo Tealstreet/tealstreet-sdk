@@ -927,7 +927,7 @@ export class BybitExchange extends BaseExchange {
 
     // Additional safety check to prevent private websocket connection for demo/empty credentials
     // (remoteSigner mode has empty secret but still needs private WS)
-    if (!this.options.key || (!this.options.secret && !this.options.remoteSigner)) {
+    if (!this.options.key || (!this.options.secret && !this.options.remoteSigner && !this.options.payloadSigner)) {
       this.log('Skipping private websocket connection - no API credentials', LogSeverity.Warning);
       return;
     }

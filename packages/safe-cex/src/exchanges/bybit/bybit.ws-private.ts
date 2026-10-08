@@ -24,6 +24,8 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
   private authRetries = 0;
 
   connectAndSubscribe = () => {
+    // payloadSigner signs REST only; auth here needs the local secret.
+    if (this.parent.options.payloadSigner) return;
     if (!this.isDisposed) {
       const network = this.parent.options.testnet ? 'testnet' : 'livenet';
       const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;

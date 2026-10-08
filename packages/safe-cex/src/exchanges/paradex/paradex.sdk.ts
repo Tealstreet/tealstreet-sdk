@@ -5,7 +5,7 @@
  * for Ethereum-based authentication and Paraclear contract operations.
  */
 
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeOptions, PayloadSignerResult } from '../../types';
 
 import BigNumber from 'bignumber.js';
 import { Wallet } from 'ethers';
@@ -55,6 +55,12 @@ export async function initializeParadexSDK(opts: ExchangeOptions): Promise<Parad
 
     // Create provider for Paraclear operations
     const provider = new SDK.ParaclearProvider.DefaultProvider(config);
+
+    // With a payloadSigner the private key never enters this process, and `key` is
+    // the subkey PUBLIC key, which is as long as a private one.
+    if (opts.payloadSigner) {
+      return { account: { address: opts.paradexAddress.toLowerCase() }, config, provider };
+    }
 
     let account: any;
 
@@ -140,14 +146,43 @@ export async function getSocializedLossFactor(sdkAccount: ParadexSDKAccount, _to
 }
 
 /**
+ * Signs Paradex typed data and returns the serialised `["<r>","<s>"]` the API expects,
+ * through `payloadSigner` when set.
+ */
+export async function signParadexTypedData(
+  sdkAccount: ParadexSDKAccount,
+  typedData: any,
+  options: ExchangeOptions,
+): Promise<PayloadSignerResult> {
+  if (options.payloadSigner) {
+    const { typedData: starknetTypedData } = await import('starknet');
+    return options.payloadSigner({
+      exchangeName: 'paradex',
+      key: options.key,
+      scheme: 'stark',
+      encoding: 'felt-pair',
+      payload: starknetTypedData.getMessageHash(typedData, sdkAccount.account.address),
+    });
+  }
+
+  const sig = await sdkAccount.account.signMessage(typedData);
+  const sigArray = Array.isArray(sig)
+    ? sig.map((value) => (typeof value === 'bigint' ? value.toString() : String(value)))
+    : [String(sig.r), String(sig.s)];
+  return { signature: JSON.stringify(sigArray) };
+}
+
+/**
  * Request Signer for Paradex API authentication
  * Signs each API request with the Starknet account
  */
 export class ParadexRequestSigner {
   private readonly sdkAccount: ParadexSDKAccount;
+  private readonly options: ExchangeOptions;
 
-  constructor(sdkAccount: ParadexSDKAccount) {
+  constructor(sdkAccount: ParadexSDKAccount, options: ExchangeOptions = {} as ExchangeOptions) {
     this.sdkAccount = sdkAccount;
+    this.options = options;
   }
 
   /**
@@ -278,7 +313,7 @@ export class ParadexRequestSigner {
     type: string; // LIMIT, MARKET, etc.
     size: string; // Decimal string like "0.01"
     price?: string; // Optional - Decimal string like "100.5" (omit for market orders)
-  }): Promise<{ signature: string; signature_timestamp: number }> {
+  }): Promise<{ signature: string; signature_timestamp: number; headers?: Record<string, string> }> {
     try {
       // Generate signature timestamp in milliseconds (acts as nonce)
       const signature_timestamp = Date.now();
@@ -328,20 +363,12 @@ export class ParadexRequestSigner {
         },
       };
 
-      // Sign the order message
-      const sig = await this.sdkAccount.account.signMessage(typedData);
-
-      // Convert signature to string array format "[r,s]"
-      const sigArray = Array.isArray(sig)
-        ? sig.map((s) => (typeof s === 'bigint' ? s.toString() : String(s)))
-        : [String(sig.r), String(sig.s)];
-
-      // Format as JSON string "[r,s]"
-      const signature = JSON.stringify(sigArray);
+      const { signature, headers } = await signParadexTypedData(this.sdkAccount, typedData, this.options);
 
       return {
         signature,
         signature_timestamp,
+        headers,
       };
     } catch (error) {
       console.error('[Paradex Order Signing] Failed to sign order:', error);
@@ -363,7 +390,7 @@ export class ParadexRequestSigner {
     type: string;
     size: string;
     price: string;
-  }): Promise<{ signature: string; signature_timestamp: number }> {
+  }): Promise<{ signature: string; signature_timestamp: number; headers?: Record<string, string> }> {
     if (!orderParams.id) {
       throw new Error('Cannot sign Paradex order amendment without an order id');
     }
@@ -408,14 +435,12 @@ export class ParadexRequestSigner {
       },
     };
 
-    const sig = await this.sdkAccount.account.signMessage(typedData);
-    const sigArray = Array.isArray(sig)
-      ? sig.map((value) => (typeof value === 'bigint' ? value.toString() : String(value)))
-      : [String(sig.r), String(sig.s)];
+    const { signature, headers } = await signParadexTypedData(this.sdkAccount, typedData, this.options);
 
     return {
-      signature: JSON.stringify(sigArray),
+      signature,
       signature_timestamp,
+      headers,
     };
   }
 }
@@ -434,14 +459,21 @@ export class ParadexJWTManager {
   private readonly apiBaseUrl: string;
   private readonly subkeyAddress: string;
   private readonly mainAccountAddress: string;
+  private readonly options: ExchangeOptions;
 
   // Refresh token 2 minutes before expiry (tokens last 5 minutes)
   private readonly REFRESH_BUFFER_MS = 2 * 60 * 1000;
   // Token validity duration (5 minutes as per Paradex docs)
   private readonly TOKEN_VALIDITY_MS = 5 * 60 * 1000;
 
-  constructor(sdkAccount: ParadexSDKAccount, testnet: boolean, subkeyAddress: string) {
+  constructor(
+    sdkAccount: ParadexSDKAccount,
+    testnet: boolean,
+    subkeyAddress: string,
+    options: ExchangeOptions = {} as ExchangeOptions,
+  ) {
     this.sdkAccount = sdkAccount;
+    this.options = options;
     this.subkeyAddress = subkeyAddress;
     this.mainAccountAddress = sdkAccount.account.address;
 
@@ -502,48 +534,48 @@ export class ParadexJWTManager {
 
       // Sign using the EXACT TypedData structure from paradex-py auth.py
       // Message has 5 fields: method, path, body, timestamp, expiration
-      const signature = await this.sdkAccount.account.signMessage({
-        domain: {
-          name: 'Paradex',
-          chainId: this.sdkAccount.config.paradexChainId, // e.g. 'PRIVATE_SN_PARACLEAR_MAINNET'
-          version: '1',
+      const { signature, headers: signerHeaders } = await signParadexTypedData(
+        this.sdkAccount,
+        {
+          domain: {
+            name: 'Paradex',
+            chainId: this.sdkAccount.config.paradexChainId, // e.g. 'PRIVATE_SN_PARACLEAR_MAINNET'
+            version: '1',
+          },
+          types: {
+            StarkNetDomain: [
+              { name: 'name', type: 'felt' },
+              { name: 'chainId', type: 'felt' },
+              { name: 'version', type: 'felt' },
+            ],
+            Request: [
+              { name: 'method', type: 'felt' },
+              { name: 'path', type: 'felt' },
+              { name: 'body', type: 'felt' },
+              { name: 'timestamp', type: 'felt' },
+              { name: 'expiration', type: 'felt' },
+            ],
+          },
+          primaryType: 'Request',
+          message: {
+            method: method,
+            path: path,
+            body: body,
+            timestamp: timestamp,
+            expiration: expiry,
+          },
         },
-        types: {
-          StarkNetDomain: [
-            { name: 'name', type: 'felt' },
-            { name: 'chainId', type: 'felt' },
-            { name: 'version', type: 'felt' },
-          ],
-          Request: [
-            { name: 'method', type: 'felt' },
-            { name: 'path', type: 'felt' },
-            { name: 'body', type: 'felt' },
-            { name: 'timestamp', type: 'felt' },
-            { name: 'expiration', type: 'felt' },
-          ],
-        },
-        primaryType: 'Request',
-        message: {
-          method: method,
-          path: path,
-          body: body,
-          timestamp: timestamp,
-          expiration: expiry,
-        },
-      });
-
-      // Convert signature to string array
-      const sigArray = Array.isArray(signature)
-        ? signature.map((s) => (typeof s === 'bigint' ? s.toString() : String(s)))
-        : [String(signature.r), String(signature.s)];
+        this.options,
+      );
 
       // Build headers for subkey authentication (matches Python SDK auth_headers)
       // PARADEX-STARKNET-ACCOUNT must be the main account address
       const headers: Record<string, string> = {
+        ...signerHeaders,
         'Content-Type': 'application/json',
         Accept: 'application/json',
         'PARADEX-STARKNET-ACCOUNT': this.mainAccountAddress,
-        'PARADEX-STARKNET-SIGNATURE': JSON.stringify(sigArray),
+        'PARADEX-STARKNET-SIGNATURE': signature,
         'PARADEX-TIMESTAMP': timestamp.toString(),
         'PARADEX-SIGNATURE-EXPIRATION': expiry.toString(), // Required header!
       };

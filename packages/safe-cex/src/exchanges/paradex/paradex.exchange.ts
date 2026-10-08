@@ -80,6 +80,15 @@ class ParadexPrivateHistoryAuthNotReadyError extends Error {
 const isParadexPrivateHistoryAuthNotReadyError = (err: unknown): err is ParadexPrivateHistoryAuthNotReadyError =>
   err instanceof ParadexPrivateHistoryAuthNotReadyError;
 
+// The errors this file wraps can be circular, and a log line must never replace the error it describes.
+const describeError = (err: unknown): string => {
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+};
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isPositiveFinitePrice = (price: number | undefined): price is number =>
@@ -94,10 +103,12 @@ const normalizePositiveFraction = (value: unknown): number | undefined => {
 const roundPriceToStep = (price: number, priceStep: number, direction: 'up' | 'down') => {
   const step = Number.isFinite(priceStep) && priceStep > 0 ? priceStep : 0.000001;
   const ratio = price / step;
-  const roundedRatio =
-    direction === 'up' ? Math.ceil(ratio - Number.EPSILON) : Math.floor(ratio + Number.EPSILON);
+  const roundedRatio = direction === 'up' ? Math.ceil(ratio - Number.EPSILON) : Math.floor(ratio + Number.EPSILON);
   return adjust(roundedRatio * step, step);
 };
+
+/** Request config carrying the payloadSigner's headers, or nothing when it returned none. */
+const signerHeaders = (headers?: Record<string, string>) => (headers ? [{ headers }] : []);
 
 export class ParadexExchange extends BaseExchange {
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
@@ -172,7 +183,7 @@ export class ParadexExchange extends BaseExchange {
         );
 
         // Initialize request signer for REST API authentication
-        this.requestSigner = new ParadexRequestSigner(this.sdkAccount);
+        this.requestSigner = new ParadexRequestSigner(this.sdkAccount, this.options);
         this.log(
           `Request signer initialized for account: ${this.requestSigner.getAccountAddress()}`,
           LogSeverity.Debug,
@@ -183,6 +194,7 @@ export class ParadexExchange extends BaseExchange {
           this.sdkAccount,
           this.options.testnet || false,
           this.options.subkeyAddress,
+          this.options,
         );
         this.log(`JWT manager initialized with subkey: ${this.options.subkeyAddress}`, LogSeverity.Debug);
       } else {
@@ -508,7 +520,7 @@ export class ParadexExchange extends BaseExchange {
       };
     } catch (err) {
       this.log(`Error fetching balance: ${err}`, LogSeverity.Error);
-      this.log(`Balance error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Balance error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -627,7 +639,7 @@ export class ParadexExchange extends BaseExchange {
       });
     } catch (err) {
       this.log(`Error fetching markets: ${err}`, LogSeverity.Error);
-      this.log(`Markets error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Markets error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -671,7 +683,7 @@ export class ParadexExchange extends BaseExchange {
       }));
     } catch (err) {
       this.log(`Error fetching tickers: ${err}`, LogSeverity.Error);
-      this.log(`Tickers error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Tickers error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -842,7 +854,7 @@ export class ParadexExchange extends BaseExchange {
       return openOrders.map(this.mapOrder);
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
-      this.log(`Orders error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Orders error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -1293,7 +1305,7 @@ export class ParadexExchange extends BaseExchange {
       return Array.from(positionMap.values());
     } catch (err) {
       this.log(`Error fetching positions: ${err}`, LogSeverity.Error);
-      this.log(`Positions error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Positions error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
   };
@@ -1350,7 +1362,7 @@ export class ParadexExchange extends BaseExchange {
       return orderbook;
     } catch (err: any) {
       this.log(`Error fetching orderbook for ${symbol}: ${err.message || err}`, LogSeverity.Error);
-      this.log(`Orderbook error details: ${JSON.stringify(err)}`, LogSeverity.Debug);
+      this.log(`Orderbook error details: ${describeError(err)}`, LogSeverity.Debug);
       if (err.response) {
         this.log(`Orderbook response status: ${err.response.status}`, LogSeverity.Debug);
         this.log(`Orderbook response data: ${JSON.stringify(err.response.data)}`, LogSeverity.Debug);
@@ -1421,7 +1433,11 @@ export class ParadexExchange extends BaseExchange {
   };
 
   private resolveMarketIocExecutionPrice = async (opts: PlaceOrderOpts): Promise<number | undefined> => {
-    if (opts.type !== OrderType.Market || typeof opts.maxSlippagePct !== 'number' || !Number.isFinite(opts.maxSlippagePct)) {
+    if (
+      opts.type !== OrderType.Market ||
+      typeof opts.maxSlippagePct !== 'number' ||
+      !Number.isFinite(opts.maxSlippagePct)
+    ) {
       return undefined;
     }
     const timeInForce = opts.timeInForce as string | undefined;
@@ -1432,18 +1448,23 @@ export class ParadexExchange extends BaseExchange {
     const orderBook = await this.fetchOrderBook(opts.symbol, 5);
     const touchPrice = opts.side === OrderSide.Buy ? orderBook.asks[0]?.price : orderBook.bids[0]?.price;
     if (!Number.isFinite(touchPrice) || !touchPrice || touchPrice <= 0) {
-      throw new Error(`Paradex ${opts.side} market IOC order requires a live ${opts.side === OrderSide.Buy ? 'ask' : 'bid'}`);
+      throw new Error(
+        `Paradex ${opts.side} market IOC order requires a live ${opts.side === OrderSide.Buy ? 'ask' : 'bid'}`,
+      );
     }
 
     const market = this.store.marketsBySymbol[opts.symbol];
     const ticker = this.store.tickers.find((t) => t.symbol === opts.symbol || t.id === opts.symbol);
     const bidAskMidpoint =
-      isPositiveFinitePrice(ticker?.bid) && isPositiveFinitePrice(ticker?.ask) ? (ticker.bid + ticker.ask) / 2 : undefined;
+      isPositiveFinitePrice(ticker?.bid) && isPositiveFinitePrice(ticker?.ask)
+        ? (ticker.bid + ticker.ask) / 2
+        : undefined;
     const fairPrice = [ticker?.mark, ticker?.index, ticker?.midPrice, ticker?.last, bidAskMidpoint, touchPrice].find(
       isPositiveFinitePrice,
     );
     const priceBandWidth =
-      normalizePositiveFraction(market?.info?.price_bands_width) ?? normalizePositiveFraction(market?.info?.max_slippage);
+      normalizePositiveFraction(market?.info?.price_bands_width) ??
+      normalizePositiveFraction(market?.info?.max_slippage);
     const slippageFactor = Math.max(0, opts.maxSlippagePct) / 100;
     const priceStep = Number(market?.precision?.price || 0.000001);
     const bandLimit =
@@ -1532,11 +1553,11 @@ export class ParadexExchange extends BaseExchange {
     if (hasLimitExecutionPrice && executionPrice) {
       signOrderParams.price = executionPrice.toString();
     }
-    const { signature, signature_timestamp } = await this.requestSigner.signOrder(signOrderParams);
+    const { signature, signature_timestamp, headers } = await this.requestSigner.signOrder(signOrderParams);
     const instruction = this.mapTimeInForce(timeInForce);
     const shouldBeReduceOnly = opts.reduceOnly || (isStopOrder && !isOpeningTrigger);
 
-    return omitUndefined({
+    const payload = omitUndefined({
       market: opts.symbol,
       side,
       type,
@@ -1550,6 +1571,7 @@ export class ParadexExchange extends BaseExchange {
       signature_timestamp,
       client_id: clientId,
     });
+    return { payload, headers };
   };
 
   private placeMainOrder = async (opts: PlaceOrderOpts): Promise<string> => {
@@ -1565,11 +1587,11 @@ export class ParadexExchange extends BaseExchange {
 
       this.log('Signing order...', LogSeverity.Debug);
       const clientId = this.generateClientId();
-      const payload = await this.buildMainOrderPayload(opts, clientId);
+      const { payload, headers } = await this.buildMainOrderPayload(opts, clientId);
 
       this.log(`Placing order: ${JSON.stringify(payload)}`, LogSeverity.Debug);
 
-      const { data } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, payload);
+      const { data } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, payload, ...signerHeaders(headers));
 
       if (!data || typeof data !== 'object' || Array.isArray(data)) {
         const message = 'Paradex order response malformed: expected an object';
@@ -1625,8 +1647,12 @@ export class ParadexExchange extends BaseExchange {
     }
 
     const expectedClientIds: string[] = [];
-    const payloads: Awaited<ReturnType<ParadexExchange['buildMainOrderPayload']>>[] = [];
+    const payloads: Awaited<ReturnType<ParadexExchange['buildMainOrderPayload']>>['payload'][] = [];
+    let batchHeaders: Record<string, string> | undefined;
     try {
+      if (this.options.payloadSigner && orders.length > 1) {
+        throw new Error('Paradex batch orders are not supported with payloadSigner, which signs one order per request');
+      }
       for (const order of orders) {
         if (!order.symbol || !Number.isFinite(order.amount) || order.amount <= 0) {
           throw new Error('Paradex batch LIMIT order requires a symbol and a finite positive amount');
@@ -1645,7 +1671,9 @@ export class ParadexExchange extends BaseExchange {
         expectedClientIds.push(clientId);
       }
       for (let index = 0; index < orders.length; index++) {
-        payloads.push(await this.buildMainOrderPayload(orders[index], expectedClientIds[index]));
+        const { payload, headers } = await this.buildMainOrderPayload(orders[index], expectedClientIds[index]);
+        payloads.push(payload);
+        batchHeaders = headers;
       }
     } catch (error: any) {
       const message = error?.message || String(error);
@@ -1655,7 +1683,7 @@ export class ParadexExchange extends BaseExchange {
 
     let data: BATCH_ORDER_RESPONSE;
     try {
-      ({ data } = await this.xhr.post<BATCH_ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDERS_BATCH, payloads));
+      ({ data } = await this.xhr.post<BATCH_ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDERS_BATCH, payloads, ...signerHeaders(batchHeaders)));
     } catch (error: any) {
       const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || String(error);
       this.emitAndLogError(message);
@@ -1763,7 +1791,11 @@ export class ParadexExchange extends BaseExchange {
       // Place Take Profit order if specified
       if (opts.takeProfit) {
         // Sign the TP order (price omitted for TAKE_PROFIT_MARKET)
-        const { signature: tpSignature, signature_timestamp: tpTimestamp } = await this.requestSigner.signOrder({
+        const {
+          signature: tpSignature,
+          signature_timestamp: tpTimestamp,
+          headers: tpHeaders,
+        } = await this.requestSigner.signOrder({
           market: opts.symbol,
           side: oppositeSide,
           type: 'TAKE_PROFIT_MARKET',
@@ -1782,7 +1814,7 @@ export class ParadexExchange extends BaseExchange {
           signature_timestamp: tpTimestamp,
         });
 
-        const { data: tpData } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, tpPayload);
+        const { data: tpData } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, tpPayload, ...signerHeaders(tpHeaders));
         orderIds.push(tpData.id);
         this.log(`Take profit order placed: ${tpData.id} @ ${opts.takeProfit}`, LogSeverity.Info);
       }
@@ -1790,7 +1822,11 @@ export class ParadexExchange extends BaseExchange {
       // Place Stop Loss order if specified
       if (opts.stopLoss) {
         // Sign the SL order (price omitted for STOP_LOSS_MARKET)
-        const { signature: slSignature, signature_timestamp: slTimestamp } = await this.requestSigner.signOrder({
+        const {
+          signature: slSignature,
+          signature_timestamp: slTimestamp,
+          headers: slHeaders,
+        } = await this.requestSigner.signOrder({
           market: opts.symbol,
           side: oppositeSide,
           type: 'STOP_LOSS_MARKET',
@@ -1809,7 +1845,7 @@ export class ParadexExchange extends BaseExchange {
           signature_timestamp: slTimestamp,
         });
 
-        const { data: slData } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, slPayload);
+        const { data: slData } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, slPayload, ...signerHeaders(slHeaders));
         orderIds.push(slData.id);
         this.log(`Stop loss order placed: ${slData.id} @ ${opts.stopLoss}`, LogSeverity.Info);
       }
@@ -2032,14 +2068,14 @@ export class ParadexExchange extends BaseExchange {
         size: String(amendedSize),
         price: String(amendedPrice),
       };
-      const { signature, signature_timestamp } = await this.requestSigner.signModifyOrder(signatureFields);
+      const { signature, signature_timestamp, headers } = await this.requestSigner.signModifyOrder(signatureFields);
       const payload = omitUndefined({
         ...signatureFields,
         trigger_price: amendedTriggerPrice === undefined ? undefined : String(amendedTriggerPrice),
         signature,
         signature_timestamp,
       });
-      const { data } = await this.xhr.put<ORDER_RESPONSE>(ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id), payload);
+      const { data } = await this.xhr.put<ORDER_RESPONSE>(ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id), payload, ...signerHeaders(headers));
       if (!data || String(data.id || '') !== order.id) {
         throw new Error(`Paradex modify response did not confirm stable order id ${order.id}`);
       }

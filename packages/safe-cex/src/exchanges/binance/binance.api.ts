@@ -2,8 +2,6 @@ import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
-import createHmac from 'create-hmac';
-import omit from 'lodash/omit';
 import qs from 'qs';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -13,8 +11,8 @@ import {
   safeCexAxiosCreateNoProxy,
   setInnerAdapterForRemoteSigning,
 } from '../../safeCexAxiosCreate';
-import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { signBinanceRequest } from './binance.signing';
 import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binance.types';
 
 export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
@@ -98,30 +96,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       };
     }
 
-    const nextConfig = { ...config };
-
-    if (options.remoteSigner) {
-      return nextConfig;
-    }
-
-    // Skip signing when no API key (public-only mode)
-    if (!options.key || !options.secret) {
-      return nextConfig;
-    }
-
-    const timestamp = virtualClock.getCurrentTimeMs();
-
-    const data = config.data || config.params || {};
-    data.timestamp = timestamp;
-    data.recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
-
-    const asString = qs.stringify(data, { arrayFormat: 'repeat' });
-    data.signature = createHmac('sha256', options.secret).update(asString).digest('hex');
-    nextConfig.params = data;
-
-    // remove data from POST/PUT/DELETE requests
-    // Binance API takes data as query params
-    return omit(nextConfig, 'data');
+    return signBinanceRequest(config, options, exchange.name, options?.extra?.recvWindow ?? RECV_WINDOW);
   });
 
   if (options.tealstreetTunnel) {

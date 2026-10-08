@@ -111,6 +111,8 @@ class VirtualClock {
       await this.syncClientServerTime();
       this.scheduleNextSync();
     }, TIME_SYNC_INTERVAL_MS);
+    // Lets a short-lived Node process exit; the browser's numeric id has no unref.
+    (this.timeoutId as { unref?: () => void } | undefined)?.unref?.();
   };
 
   getCurrentTime = () => {

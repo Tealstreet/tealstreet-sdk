@@ -20,6 +20,8 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
   private subscriptionAttempt = 0;
 
   connectAndSubscribe = async () => {
+    // payloadSigner signs REST only; auth here needs the local secret.
+    if (this.parent.options.payloadSigner) return;
     if (this.isDisposed) return;
 
     const { key: apiKey, secret, remoteSigner } = this.parent.options;

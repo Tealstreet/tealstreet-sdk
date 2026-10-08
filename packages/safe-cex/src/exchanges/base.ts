@@ -477,10 +477,10 @@ export class BaseExchange implements Exchange {
 
   /**
    * Returns true if this exchange can authenticate requests —
-   * either locally (key + secret) or via remote signing (key + remoteSigner).
+   * either locally (key + secret) or via remote signing (key + remoteSigner or payloadSigner).
    */
   protected get canSign(): boolean {
-    return !!this.options.key && (!!this.options.secret || !!this.options.remoteSigner);
+    return !!this.options.key && (!!this.options.secret || !!this.options.remoteSigner || !!this.options.payloadSigner);
   }
 
   private _authFailureStreak = 0;

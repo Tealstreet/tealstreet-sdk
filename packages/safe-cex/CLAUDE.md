@@ -335,6 +335,16 @@ request/response regressions; live startup and authentication additionally need
 network or credentialed probes. Do not replace that evidence with source-text
 grep, and do not add a second capability manifest that duplicates metadata.
 
+## `payloadSigner` (Bybit, Binance, Paradex)
+
+`ExchangeOptions.payloadSigner` replaces `secret` for callers that hold no
+secret and sign elsewhere. It receives the exact bytes the venue would HMAC
+and returns the value for the signature slot, plus headers to add to the same
+request. Paradex is covered in `exchanges/paradex/CLAUDE.md`.
+`utils/payloadSigner.ts` routes both modes through one function, so local
+signing and delegated signing share the same payload. It signs REST only: with it set, `start()` skips the private
+websocket. Tests: `src/__tests__/payload-signer.test.ts`.
+
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
 
 On exchange-server, a private account takes markets from a keyless shared
