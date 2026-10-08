@@ -402,6 +402,11 @@ const BybitDemoMetadata: ExchangeMetadata = {
 
 const HyrotraderMetadata: ExchangeMetadata = {
   ...BybitDemoMetadata,
+  supportsKlineSeconds: false,
+  positionModes: [PositionMode.OneWay],
+  hidePositionModeSelector: true,
+  supportsFeeRates: false,
+  supportsPositionMargin: false,
   exchangeName: 'hyrotrader' as ExchangeName,
   // Prop-firm white-label of Bybit, not certified on mobile yet: the spread
   // above would otherwise inherit Bybit's `true`.

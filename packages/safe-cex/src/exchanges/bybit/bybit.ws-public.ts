@@ -349,6 +349,9 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
     opts: OHLCVSOptions,
     callback: (candle: Candle & { symbol: string; interval: Timeframe }) => void,
   ) => {
+    if (this.parent.supportsTradeDerivedCandles === false) {
+      this.parent.validateCandleInterval(opts.interval);
+    }
     const topics: string[] = [];
 
     for (const symbol of opts.symbols) {
@@ -397,6 +400,8 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const topic = `kline.${INTERVAL[opts.interval]}.${opts.symbol}`;
     const secondaryTopic = `publicTrade.${opts.symbol}`;
+    const tradeDerived = this.parent.supportsTradeDerivedCandles !== false;
+    if (!tradeDerived) this.parent.validateCandleInterval(opts.interval);
 
     // Subscription-invariant: cache once instead of recomputing per trade.
     // `getCandleStartTime` looks this up + checks for ms-vs-s normalization
@@ -511,12 +516,12 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
           this.sendOhlcvDiagnosticPayload(payload);
           this.topics[topic] = topic;
 
-          // Subscribe to publicTrade secondary topic for tick-by-tick candle construction.
-          // Enabled for all modes including publicDataOnly (shared public exchanges need fast OHLCV).
-          this.messageHandlers[secondaryTopic] = [...(this.messageHandlers[secondaryTopic] || []), secondaryParser];
-          const secondaryPayload = { op: 'subscribe', args: [secondaryTopic] };
-          this.sendOhlcvDiagnosticPayload(secondaryPayload);
-          this.topics[secondaryTopic] = secondaryTopic;
+          if (tradeDerived) {
+            this.messageHandlers[secondaryTopic] = [...(this.messageHandlers[secondaryTopic] || []), secondaryParser];
+            const secondaryPayload = { op: 'subscribe', args: [secondaryTopic] };
+            this.sendOhlcvDiagnosticPayload(secondaryPayload);
+            this.topics[secondaryTopic] = secondaryTopic;
+          }
           this.armOhlcvNoDataTimeout(topic, secondaryTopic);
         }
       } else {
@@ -533,9 +538,11 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
         subscribeRetryTimeout = undefined;
       }
       this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
-      this.messageHandlers[secondaryTopic] = [
-        ...(this.messageHandlers[secondaryTopic] || []).filter((f) => f !== secondaryParser),
-      ];
+      if (tradeDerived) {
+        this.messageHandlers[secondaryTopic] = [
+          ...(this.messageHandlers[secondaryTopic] || []).filter((f) => f !== secondaryParser),
+        ];
+      }
 
       if (!this.messageHandlers[topic].length) {
         delete this.topics[topic];
@@ -543,7 +550,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
         delete this.lastOhlcvRecoveryAtByTopic[topic];
       }
 
-      if (!this.messageHandlers[secondaryTopic].length) {
+      if (tradeDerived && !this.messageHandlers[secondaryTopic].length) {
         delete this.topics[secondaryTopic];
       }
 
@@ -553,7 +560,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
         this.sendOhlcvDiagnosticPayload(payload);
       }
 
-      if (this.isConnected && !this.messageHandlers[secondaryTopic].length) {
+      if (tradeDerived && this.isConnected && !this.messageHandlers[secondaryTopic].length) {
         const payload = { op: 'unsubscribe', args: [secondaryTopic] };
         this.cleanupMessageHandlerStats(secondaryTopic);
         this.sendOhlcvDiagnosticPayload(payload);

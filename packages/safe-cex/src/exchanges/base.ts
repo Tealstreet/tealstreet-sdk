@@ -153,7 +153,7 @@ type BrandedCapabilityFallback = {
   [baseCapabilityFallback]?: BaseCapabilityMethod;
 };
 
-const markBaseCapabilityFallback = <T extends object>(method: BaseCapabilityMethod, fn: T): T => {
+export const markBaseCapabilityFallback = <T extends object>(method: BaseCapabilityMethod, fn: T): T => {
   Object.defineProperty(fn, baseCapabilityFallback, {
     value: method,
     configurable: false,
@@ -1846,7 +1846,9 @@ export class BaseExchange implements Exchange {
     const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
 
     const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
-    const privateHealthy = initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy);
+    const privateHealthy =
+      privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
+      (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
     const privateInitialized = initializedPrivateSockets.length > 0;
     const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
     const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;

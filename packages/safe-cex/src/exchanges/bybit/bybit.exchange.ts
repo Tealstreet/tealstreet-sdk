@@ -113,6 +113,16 @@ const REDUCE_ONLY_LIMIT_RECONCILE_DELAYS_MS = [1_000, 3_000, RECENTLY_PLACED_ORD
 const RETIRED_ORDER_SYMBOL_TTL_MS = 60_000;
 const FILL_RECONCILIATION_MAX_PAGES = 20;
 
+export type BybitCreateOrderResponse = {
+  data: any;
+  payload: Record<string, any>;
+  terminal?: boolean;
+  recorded?: boolean;
+  recoveredOrder?: Record<string, any>;
+  reconciled?: boolean;
+  authoritativeSeen?: boolean;
+};
+
 /**
  * Only the message survives structured-clone out of the exchange worker, so the
  * reason has to ride in it or Sentry sees nothing but a constant string. Kept to
@@ -372,6 +382,18 @@ export class BybitExchange extends BaseExchange {
   xhr: Axios;
   unlimitedXHR: Axios;
 
+  get supportsTradeDerivedCandles() {
+    return true;
+  }
+
+  validateCandleInterval(interval: string) {
+    if (!this.supportsTradeDerivedCandles && interval.endsWith('s')) {
+      const error = new Error('HyroTrader seconds candles require a supported trade stream');
+      this.emitAndLogError(error);
+      throw error;
+    }
+  }
+
   publicWebsocket: BybitPublicWebsocket;
   privateWebsocket: BybitPrivateWebsocket;
 
@@ -475,6 +497,8 @@ export class BybitExchange extends BaseExchange {
   protected requiresOrderLinkId() {
     return false;
   }
+
+  protected validateOrderCapabilities(_opts: BybitPlaceOrderOpts) {}
 
   getSettleCoinsForCategory(category: string) {
     if (category === 'linear') {
@@ -626,7 +650,7 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
-  private recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
+  protected recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
     const qty = parseFloat(payload.qty as string) || opts.amount || 0;
     const price = parseFloat((payload.price ?? payload.triggerPrice) as string) || opts.price || opts.triggerPrice || 0;
 
@@ -683,7 +707,7 @@ export class BybitExchange extends BaseExchange {
    *
    * Live Bybit keeps its WS-driven removal untouched.
    */
-  private retireCancelledOrders = (orders: Array<Pick<Order, 'id' | 'symbol'>>) => {
+  protected retireCancelledOrders = (orders: Array<Pick<Order, 'id' | 'symbol'>>) => {
     if (orders.length === 0) return;
 
     const retiredAt = virtualClock.getCurrentTimeMs();
@@ -1170,7 +1194,7 @@ export class BybitExchange extends BaseExchange {
     return data.result;
   };
 
-  private fetchAndCacheApiKeyInfo = async (): Promise<void> => {
+  protected fetchAndCacheApiKeyInfo = async (): Promise<void> => {
     try {
       await this.fetchApiKeyInfo();
       if (this.apiKeyInfo) {
@@ -1301,7 +1325,7 @@ export class BybitExchange extends BaseExchange {
     return score;
   };
 
-  private dedupePositionsById = (positions: Position[]): Position[] => {
+  protected dedupePositionsById = (positions: Position[]): Position[] => {
     if (positions.length < 2) {
       return positions;
     }
@@ -1731,6 +1755,7 @@ export class BybitExchange extends BaseExchange {
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
+    this.validateCandleInterval(opts.interval);
     const limit = Math.min(opts.limit || 500, 1000);
     const interval = INTERVAL[opts.interval];
     const [, amount, unit] = opts.interval.split(/(\d+)/);
@@ -2340,6 +2365,7 @@ export class BybitExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    this.validateOrderCapabilities(opts);
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -2446,17 +2472,7 @@ export class BybitExchange extends BaseExchange {
 
     if (rest) payloads.push({ ...req, qty: `${rest}`, orderLinkId: this.requiresOrderLinkId() ? nanoid() : undefined });
 
-    const responses = await mapSeries(payloads, async (p) => {
-      try {
-        const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, p);
-        return { data, payload: p };
-      } catch (err: any) {
-        this.emitAndLogError(this.formatBybitVenueError(err?.response?.data, err?.message));
-        return undefined;
-      }
-    });
-
-    const fullfilled = responses.filter((r): r is NonNullable<(typeof responses)[number]> => r !== undefined);
+    const fullfilled = await this.submitCreateOrders(payloads, opts);
 
     let errMsg = '';
     fullfilled.forEach((resp) => {
@@ -2473,12 +2489,28 @@ export class BybitExchange extends BaseExchange {
 
     return fullfilled.map((resp) => {
       const orderId = resp.data.result.orderId;
-      if (orderId) {
+      if (orderId && !resp.terminal && !resp.recorded) {
         this.recordRecentlyPlacedOrderFromOpts(orderId, opts, resp.payload);
       }
       return orderId;
     });
   };
+
+  protected async submitCreateOrders(
+    payloads: Record<string, any>[],
+    _opts: PlaceOrderOpts,
+  ): Promise<BybitCreateOrderResponse[]> {
+    const responses = await mapSeries(payloads, async (payload) => {
+      try {
+        const { data } = await this.xhr.post(ENDPOINTS.CREATE_ORDER, payload);
+        return { data, payload };
+      } catch (err: any) {
+        this.emitAndLogError(this.formatBybitVenueError(err?.response?.data, err?.message));
+        return undefined;
+      }
+    });
+    return responses.filter((response): response is NonNullable<typeof response> => response !== undefined);
+  }
 
   placeStopLossOrTakeProfit = async (opts: PlaceOrderOpts) => {
     const market = this.store.marketsBySymbol[opts.symbol];
@@ -3355,7 +3387,7 @@ export class BybitExchange extends BaseExchange {
     return orders;
   }
 
-  private fetchPositionMode = async (symbol: string): Promise<PositionMode> => {
+  protected fetchPositionMode = async (symbol: string): Promise<PositionMode> => {
     const foundPosition = this.store.positions.find((p) => p.symbol === symbol);
     if (foundPosition?.positionMode) return foundPosition.positionMode;
 

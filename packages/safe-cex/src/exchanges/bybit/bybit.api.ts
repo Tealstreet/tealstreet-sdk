@@ -174,7 +174,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // and some signature errors
   retry(xhr, {
     retries: 3,
-    retryCondition: shouldRetryBybitRequest,
+    retryCondition: (error) =>
+      !(exchange.name === 'hyrotrader' && error.config?.url === ENDPOINTS.CREATE_ORDER) &&
+      shouldRetryBybitRequest(error),
   });
 
   // Add requestId, skip auth for public endpoints, and sign requests.

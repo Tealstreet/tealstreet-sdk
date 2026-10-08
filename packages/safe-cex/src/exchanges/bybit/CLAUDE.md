@@ -1078,6 +1078,102 @@ of pretending its exchange name is `bybitdemo`:
   contract does not support Bybit's USDC linear branch
 - order placement sends a generated `orderLinkId` because the simulator requires
   idempotent client order IDs; regular Bybit remains unchanged
+- Hyro validates through the UNIFIED wallet, keeps one-way/cross settings, and
+  skips API-key/fee metadata. Multiple placements and cancellations use individual
+  endpoints; batch endpoints are outside the simulator contract.
+- Hyro income-history methods carry the base unsupported-capability brand because
+  transaction-log is unavailable. Explicit Bybit BBO/TickSize controls are rejected.
+- Hyro create recovery disables transport retries, queries realtime/history after
+  uncertain outcomes, and reuses the original ID only after both axes show absence.
+  Failed/incomplete queries keep the outcome unknown and block replacement submission.
+- Pending split/list submissions retain accepted siblings and unresolved IDs for the
+  adapter lifetime. Concurrent identical submissions share recovery; after completion
+  an identical new submission is independent. Definitive rejection permits a fresh ID.
+- Duplicate client-ID responses preserve the original identity and require reconciliation.
+  Readiness is checked immediately before every create dispatch, including split siblings
+  and retries; a recovery pause preserves accepted siblings and pending IDs.
+- Recovered open/partial orders publish the authoritative row, including filled/remaining
+  quantity and amended price. Private order sightings during an active submission prevent
+  late acknowledgements or stale lookups from overwriting newer state, even if a terminal
+  row has since left the store. Matching client-ID observations persist with unresolved
+  groups between caller retries and are cleared on resolution/rejection/disposal.
+- An acknowledgement crossing a private session or authoritative orders-snapshot boundary
+  is reconciled before publication. An already acknowledged identity is never re-created;
+  complete lookup absence returns that ID without an optimistic open row.
+- Recovery lookups and group publication check that same boundary. A change surfaces an
+  unknown outcome and retains any discovered identity for caller reconciliation; stale
+  responses cannot overwrite a newer snapshot or trigger another create for a known ID.
+- A recovered terminal order returns its ID without becoming an optimistic open row.
+  Unresolved IDs are included in errors; reconnect/restart requires authoritative REST
+  state, and callers must not blindly replace an unresolved order after recreating the adapter.
+
+### HyroTrader simulator recovery and acceptance
+
+The supported subset follows the partner's October 6 simulator contract. Wallet
+validation replaces `/v5/account/info`; API-key metadata, fee-rate metadata,
+transaction-log, batch operations, mode switching and margin adjustment are unavailable.
+Only USDT perpetuals, one-way positions (`positionIdx=0`) and cross margin are supported.
+Slippage protection uses the simulator-configured gate. Explicit `maxSlippagePct`
+and Bybit BBO/TickSize options are rejected because the contract does not establish
+client-defined protection. Plain market orders remain supported.
+Optional simulator preview/evidence endpoints are not used by this connector.
+
+`hyrotrader.ws-private.ts` waits for correlated auth and subscribe acknowledgements,
+then reconciles all pages of current orders/positions and the UNIFIED wallet before
+opening the event gate. The snapshot publishes atomically; failed, malformed, stale
+or incomplete responses preserve prior state and leave recovery unhealthy. Position
+rows require valid leverage, and mapped numeric fields must be finite before publication. Frames
+arriving during recovery invalidate the in-flight snapshot and trigger a bounded
+re-read. A failed handshake or unsettled snapshot reconnects with visible errors.
+Creates are refused while an established private session is recovering.
+
+Public streams carry periodic snapshots. Hyro candles use authoritative kline volume
+and never accumulate publicTrade snapshots; seconds candles are unavailable. Bybit's
+trade-derived candle path is unchanged. Orderbook snapshot/delta and ticker parsing
+remain shared.
+
+Configure the web build before enabling the connector:
+
+| Setting | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL` | Required simulator REST origin; no fallback to Bybit |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL` | Optional exact public socket URL; defaults to REST-derived `/v5/public/linear` |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL` | Optional exact private socket URL; defaults to REST-derived `/v5/private` |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here |
+| `HYROTRADER_ENABLED` | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
+
+Normal connected accounts supply their own credentials through exchange options.
+All `NEXT_PUBLIC_*` settings are fixed at build time. Changing deployment settings
+requires a new web build. Keep account credentials out of committed files and logs.
+
+The live acceptance sequence requires the configured simulator origin and a
+simulator account permitted to trade:
+
+1. Fetch server time, instruments, tickers, kline and book; confirm USDT-only markets
+   and periodic snapshot semantics without duplicate candle volume.
+2. Validate the UNIFIED wallet, orders and positions; prove REST and private WS
+   signatures against the actual host, including rejected auth and subscribe failures.
+3. Place/amend/cancel a small resting limit order, exercise market execution,
+   leverage and position TP/SL, then close and reconcile fills, PnL and wallet.
+4. Interrupt a create response and query realtime plus history before retrying its
+   original `orderLinkId`; prove the accepted order is neither lost nor duplicated.
+5. Force a private disconnect; require fresh auth/sub ACKs and a complete REST
+   snapshot before accepting private events or placing another order.
+6. Verify the effective feature flag, signed-out branded-demo startup and
+   `?code=hyrotrader` referral attribution through the existing RefWorker/set-ref flow.
+
+Local regressions cover steps 1–5 with contract fixtures, exact transmitted HMAC
+signatures, and a server-initiated native WebSocket close. They do not establish live
+host compatibility or referral conversion reporting. The partner referral code's
+existence alone does not prove end-to-end signup attribution.
+
+Scoped gates from the repository root:
+
+```sh
+yarn workspace @tealstreet/safe-cex vitest run src/__tests__/audit-regressions/hyrotrader.contract.test.ts src/__tests__/audit-regressions/hyrotrader.order-recovery.test.ts src/__tests__/audit-regressions/hyrotrader.private-recovery.test.ts src/__tests__/audit-regressions/hyrotrader.public-snapshot.test.ts src/__tests__/audit-regressions/hyrotrader.signing.test.ts src/__tests__/audit-regressions/hyrotrader.configuration.test.ts
+yarn workspace @tealstreet/safe-cex typecheck
+yarn workspace @tealstreet/safe-cex lint
+```
 
 ### URL Differences
 
@@ -1109,8 +1205,7 @@ available during parent construction.
 - Demo testnet fallback: `DEMO_URL.testnet` falls through to `api-testnet.bybit.com` (same as regular testnet)
 - Demo only supports `linear` category (no inverse or spot)
 - HyroTrader only supports `linear` USDT perpetuals and a documented subset of
-  Bybit V5 endpoints. Unsupported inherited Bybit calls such as API-key info are
-  best-effort and must not block startup.
+  Bybit V5 endpoints. Do not probe unsupported inherited endpoints, even best-effort.
 - Demo's private WS drops `order` frames. `recordRecentlyPlacedOrder`
   therefore upserts just-placed **resting** rows into the store on `isDemo`
   only (`this.store.addOrUpdateOrders([order])`). Without it a limit/chaser row

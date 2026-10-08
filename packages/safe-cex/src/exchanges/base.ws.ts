@@ -214,6 +214,10 @@ export class BaseWebSocket<T extends BaseExchange> {
     return this.parent.isDisposed;
   }
 
+  get isRecoveryComplete() {
+    return true;
+  }
+
   get store() {
     return this.parent.store;
   }
