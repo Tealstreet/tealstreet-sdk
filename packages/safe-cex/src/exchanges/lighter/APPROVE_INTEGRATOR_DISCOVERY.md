@@ -51,7 +51,19 @@ The following `ApproveIntegrator` details are confirmed from official references
 The deleted `test-approve-integrator-discovery.ts` was an untrusted,
 one-off probe used to collect the historical findings above. Its environment
 variables, live submission scenarios, and run command are intentionally not
-retained here. No replacement script is provided.
+retained here. Do not restore a probe that signs or submits approval
+transactions without a fresh, authorized validation plan.
+
+For Robinhood builder account-index discovery only, use the read-only lookup
+probe:
+
+```bash
+yarn probe:lighter-rh-builder-index --l1 0x...
+```
+
+That probe only queries Lighter account lookup endpoints and prints candidate
+`accountIndex` values. It does not sign, call `sendTx`, approve an integrator,
+or validate attributed order placement.
 
 The recorded probe constructed a `LighterApiClient` with request/response
 logging and explored account/configuration reads plus candidate
