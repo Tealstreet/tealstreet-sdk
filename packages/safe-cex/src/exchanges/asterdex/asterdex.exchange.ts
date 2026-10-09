@@ -740,6 +740,7 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
+    this.resolveCallerClientOrderId(opts);
     // Aster requires callbackRate for TRAILING_STOP_MARKET, but shared order
     // inputs do not expose it. Reject this before any capacity checks or REST
     // calls so programmatic callers cannot submit an invalid order.
@@ -967,6 +968,7 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     const orderIds: string[] = [];
     let errMsg = '';
 

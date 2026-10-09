@@ -601,6 +601,7 @@ export class PolymarketExchange extends BaseExchange {
    * Place an order
    */
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    this.resolveCallerClientOrderId(opts);
     const rejectOrder = (message: string): never => {
       this.emitAndLogError(message);
       throw new Error(message);

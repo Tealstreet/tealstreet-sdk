@@ -162,3 +162,7 @@ portfolio order mapping, and derived margin/PnL.
 
 Validate from `packages/safe-cex` with `yarn lint`, `yarn typecheck`, the
 targeted Breakout audit suite, and the complete deterministic test suite.
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

@@ -50,6 +50,7 @@ import { splitTimeRange } from '../../utils/splitTimeRange';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
 import { mapBitgetFills } from './bitget.fills';
@@ -120,6 +121,8 @@ const isBitgetEnvironmentMismatch = (message?: string): boolean =>
   message?.toLowerCase().includes('environment is incorrect') ?? false;
 
 export class BitgetExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
+
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: false });
@@ -1864,6 +1867,7 @@ export class BitgetExchange extends BaseExchange {
   }
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       if (this.isAlgoOrder(opts)) {
@@ -1889,6 +1893,7 @@ export class BitgetExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     await this.ensureAccountTypeDetected();
     const [algoOrders, normalOrders] = partition(orders, this.isAlgoOrder);
 
@@ -1982,8 +1987,10 @@ export class BitgetExchange extends BaseExchange {
       payloads.push({ ...req, size: `${rest}` });
     }
 
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     for (const payload of payloads) {
-      payload.clientOid = uuid();
+      payload.clientOid = clientOrderId ?? uuid();
     }
 
     return payloads;
@@ -2045,8 +2052,10 @@ export class BitgetExchange extends BaseExchange {
       payloads.push({ ...req, qty: `${rest}` });
     }
 
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     for (const payload of payloads) {
-      payload.clientOid = uuid();
+      payload.clientOid = clientOrderId ?? uuid();
     }
 
     return payloads;

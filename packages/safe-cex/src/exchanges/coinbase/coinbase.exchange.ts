@@ -38,6 +38,7 @@ import { loop } from '../../utils/loop';
 import { adjust, multiply, round } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './coinbase.api';
 import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
@@ -92,6 +93,8 @@ const isCoinbaseZeroDecimal = (value: unknown): value is string =>
   typeof value === 'string' && COINBASE_ZERO_DECIMAL.test(value);
 
 export class CoinbaseExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S+$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -1565,6 +1568,7 @@ export class CoinbaseExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     const payload = this.formatCreateOrder(opts);
     try {
       const { data } = await this.xhr.post<PLACE_ORDER_RESPONSE>(ENDPOINTS.ORDER, payload);
@@ -1715,7 +1719,7 @@ export class CoinbaseExchange extends BaseExchange {
     }
 
     const req: PLACE_ORDER_REQUEST = {
-      client_order_id: 'tealstreet-' + uuid(),
+      client_order_id: this.resolveCallerClientOrderId(opts) ?? 'tealstreet-' + uuid(),
       product_id: opts.symbol,
       side: opts.side === OrderSide.Buy ? 'BUY' : 'SELL',
       // TODO. leverage setting?

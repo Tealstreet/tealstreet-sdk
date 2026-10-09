@@ -42,6 +42,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
 import {
   ENDPOINTS,
@@ -90,6 +91,8 @@ const requireBinancePMArrayResponse = <T>(endpoint: string, payload: unknown): T
 
 // TODO: translate our err messages
 export class BinancePMExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/);
+
   papiXhr: Axios;
   fapiXhr: Axios;
   unlimitedXHR: Axios;
@@ -842,11 +845,13 @@ export class BinancePMExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       return this.formatCreateTrailingStopLossOrder(opts);
     }
@@ -935,11 +940,10 @@ export class BinancePMExchange extends BaseExchange {
       });
     }
 
-    // We need to set orderId for each order
-    // otherwise Binance will duplicate the IDs
-    // when its sent in batches
+    // A unique ID per payload, otherwise Binance duplicates the IDs in batches.
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     for (const payload of payloads) {
-      payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+      payload.newClientOrderId = clientOrderId ?? 'x-s3vFFRQp' + uuid();
     }
 
     return payloads;

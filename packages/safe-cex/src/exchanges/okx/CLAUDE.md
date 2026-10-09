@@ -1084,3 +1084,10 @@ The long closes at the flip instant and the short opens at that same instant, ea
 the CLOSED size (140), not the fill size (280). So on OKX the split does not have to be
 inferred — the venue reports it, and `opened` is a real open time. Prefer this axis over
 folding fills whenever it is available; the fold is only needed where it is not.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
+- The native amend keeps the order and its `clOrdId`; no new client ID is sent.

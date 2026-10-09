@@ -57,6 +57,7 @@ import { add, adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './blofin.api';
 import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from './blofin.income';
 import { mapBlofinHistoricalOrder } from './blofin.order-history';
@@ -106,6 +107,8 @@ const isKnownNonSwapInstrument = (payload: Record<string, any>) => {
 };
 
 export class BlofinExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/);
+
   xhr: Axios;
 
   publicWebsocket: BlofinPublicWebsocket;
@@ -1510,6 +1513,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.Conditional) {
       return [await this.placeTriggerOrder(await this.formatTriggerOrder(opts))];
     }
@@ -1530,6 +1534,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(opts);
     const [triggerOrders, nonTriggerOrders] = partition(opts, (o) => o.type === OrderType.Conditional);
     const [algoOrders, normalOrders] = partition(nonTriggerOrders, (o) => this.isAlgoOrder(o.type));
 
@@ -2095,9 +2100,10 @@ export class BlofinExchange extends BaseExchange {
     const price = opts.price ? adjust(opts.price, pPrice) : null;
     const marginMode = await this.getOrFetchMarginType(market.symbol);
 
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     const req: Record<string, any> = omitUndefined({
       instId: market.id,
-      clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      clientOrderId: callerClientOrderId ?? `${BROKER_ID}${uuid()}`.slice(0, 32),
       side: inverseObj(ORDER_SIDE)[opts.side],
       orderType:
         opts.timeInForce === OrderTimeInForce.PostOnly && opts.type === 'limit'
@@ -2168,6 +2174,7 @@ export class BlofinExchange extends BaseExchange {
         clientOrderId: `${BROKER_ID}${uuid()}`.slice(0, 32),
       });
 
+    this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
     return payloads;
   };
 

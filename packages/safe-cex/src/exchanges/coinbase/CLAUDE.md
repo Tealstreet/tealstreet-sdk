@@ -994,3 +994,9 @@ For implementation inspiration and reference, consult the CCXT library's Coinbas
 - **REST API Implementation**: https://github.com/ccxt/ccxt/blob/master/ts/src/coinbase.ts
   - Note: `coinbaseadvanced.ts` is a thin alias that extends `coinbase.ts`
 - **WebSocket Implementation**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/coinbase.ts
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `client_order_id` (no published limit; the rule refuses empty or whitespace-bearing IDs) in place of the generated `tealstreet-…` ID. Coinbase dedupes on it — a reused ID returns the existing order instead of creating one — which is also why a cancel+replace never reuses an ID.

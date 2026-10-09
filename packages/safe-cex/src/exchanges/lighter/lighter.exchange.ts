@@ -2372,6 +2372,7 @@ export class LighterExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     const signerAdapter = await this.ensureSignerAdapter();
 
     const market = this.store.marketsBySymbol[opts.symbol];
@@ -2592,6 +2593,7 @@ export class LighterExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     if (!this.shouldUseBatchedCreateOrders(orders)) {
       return await this.placeOrdersSequentially(orders);
     }

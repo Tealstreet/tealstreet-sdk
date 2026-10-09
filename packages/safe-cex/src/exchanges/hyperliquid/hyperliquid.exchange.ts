@@ -3721,6 +3721,7 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
@@ -4304,6 +4305,7 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
   };

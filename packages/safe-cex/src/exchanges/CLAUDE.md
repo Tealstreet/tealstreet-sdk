@@ -286,6 +286,13 @@ if (!position) {
 }
 ```
 
+`BaseExchange.rejectPreflight(message)` is the shared helper for this shape —
+emit first, then throw. Prefer it over a hand-rolled pair in new checks. Caller
+`clientOrderId` validation is built on it (`resolveCallerClientOrderId` /
+`assertCallerClientOrderIds`); every `placeOrder`/`placeOrders` override must
+call those first — see `packages/safe-cex/CLAUDE.md` → "Client order ID
+contract".
+
 Lighter's `assertReduceOnlyLimitHasPosition` (`lighter.exchange.ts`, near
 the `buildNoPositionReduceOnlyMessage` helper) is the direct analog for
 reduce-only-no-position validation; mirror that shape when adding similar

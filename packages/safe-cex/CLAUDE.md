@@ -36,6 +36,66 @@ yarn test-ci       # Run all tests (deterministic, no network)
 yarn test          # Watch mode
 ```
 
+## Client order ID contract
+
+`PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native
+client-order-ID field. **Honored verbatim on exactly one native order, or
+rejected before any write — never dropped, rewritten, prefixed or replaced by a
+generated ID.** A silently substituted ID makes a later lookup by that ID
+truthfully answer "not found" while the order is live, and the natural response
+to "not found" is to place it again: a double placement manufactured inside the
+SDK.
+
+- **One mechanism, in `BaseExchange`** (`exchanges/clientOrderId.ts` holds the
+  types). A venue that can honor the field declares `clientOrderIdRule` (label,
+  charset/length check, optional shape override); a venue without one rejects
+  every caller ID. `resolveCallerClientOrderId(opts)` returns the ID or rejects
+  through `rejectPreflight` (emit, then throw). It rejects non-regular shapes
+  (anything but plain Limit/Market with no trigger, stop-loss or take-profit),
+  an ID the venue rule refuses, and an order whose amount exceeds the market's
+  `maxSize` (it would split). Call it as the **first statement** of
+  `placeOrder`; `assertCallerClientOrderIds(orders)` is the `placeOrders`
+  equivalent and also refuses a duplicated ID, so **a batch is all-or-nothing**:
+  one unhonorable ID rejects it before any order in it is sent. Formatters then
+  set the native field from `resolveCallerClientOrderId` and call
+  `assertSingleNativeClientOrderId(id, payloads.length)` as a backstop.
+- **Every override of `placeOrder`/`placeOrders` must call the guard**,
+  including venues that honor nothing. `client-order-id.fail-closed.test.ts`
+  drives every venue class with every transport replaced by a recorder; add a
+  new venue to its tables. That test found HyroTrader's own `placeOrders`
+  override placing the first order of a batch before the second one's ID was
+  checked.
+- **Honoring venues** (rule in each venue's CLAUDE.md): Binance USD-M/PM/Spot,
+  OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
+  KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
+  Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni.
+  **Rejecting venues**: AsterDEX, BitMEX, BreakoutProp, Hyperliquid (+spot),
+  HyroTrader, Kraken (+spot), Lighter, MEXC, Polymarket.
+- **No broker prefix is composed onto a caller ID.** The generated paths keep
+  their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
+  `BROKER_ID_…`); a caller ID goes out bare, so those orders carry no
+  client-ID attribution. Composing one is deliberately deferred.
+- **`placeOrderWithClientOrderId(opts)` returns `{ orderIds, clientOrderId }`**,
+  where `clientOrderId` is the value on the wire. It is the caller's string
+  because no adapter transforms an honored ID; the numeric venues (Backpack
+  uint32, WOO safe integer, GRVT uint64) accept only canonical decimal strings,
+  so `String(wire) === clientOrderId`. `placeOrder` still returns venue order
+  IDs only — except where the venue's canonical ID already is the client ID
+  (GRVT, Binance PM).
+- **`updateOrder` never moves a caller ID to a different native order.** A
+  native amend keeps the venue order and so its client ID (Bybit `REPLACE_ORDER`,
+  OKX amend, Crypto.com, KuCoin Spot, WOO, Orderly, Paradex, BingX, Bitunix,
+  Coinbase). A cancel+replace path gives the replacement a GENERATED ID: reuse
+  collides with venue uniqueness rules (Bybit/OKX/Bitget reject it, Binance Spot
+  refuses it until the old order fills, Coinbase dedupes and returns the
+  cancelled order without creating one), and `Order` carries no record of
+  which client IDs were caller-supplied. The caller's ID stays on the cancelled
+  order, so a lookup reports it cancelled rather than "not found". **Bitget's
+  native modify-order sends `newClientOid: uuid()`**, so a Bitget amend does
+  rewrite the client ID; changing that needs a live check of whether Bitget
+  accepts the old ID there, because a rejection silently falls back to
+  cancel+replace.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual

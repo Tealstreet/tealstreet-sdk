@@ -674,3 +674,9 @@ on the exchange-server, but `signWsAuth` runs in the **browser**, so the fix is
 not live until the web bundle ships too. Dispatching e2e after only the server
 redeploy yields `Unsupported WS auth outputFormat: bitunix-double-sha256` from
 the still-old browser — a real symptom of a stale deploy, not of a broken fix.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clientId`. Bitunix publishes no length limit; the rule refuses only empty or whitespace-bearing IDs. The TIF / reduce-only caches key on whichever `clientId` is sent.

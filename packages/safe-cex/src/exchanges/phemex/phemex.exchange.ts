@@ -46,6 +46,7 @@ import { adjust, multiply1, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { BROKER_ID, createAPI } from './phemex.api';
 import {
   ENDPOINTS,
@@ -61,6 +62,8 @@ import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
 
 export class PhemexExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Phemex', /^.{1,40}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -1244,6 +1247,7 @@ export class PhemexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     const payloads = await this.formatCreateOrder(opts);
     const orderIds = [];
     const openOrders: Order[] = [];
@@ -1407,11 +1411,11 @@ export class PhemexExchange extends BaseExchange {
     //   });
     // }
 
-    // We need to set orderId for each order
-    // otherwise Binance will duplicate the IDs
-    // when its sent in batches
+    // A unique ID per payload, otherwise the venue duplicates the IDs in batches.
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     for (const payload of payloads) {
-      payload.clOrdID = `${BROKER_ID}_${uuid()}`;
+      payload.clOrdID = clientOrderId ?? `${BROKER_ID}_${uuid()}`;
     }
 
     return payloads;

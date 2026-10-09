@@ -42,6 +42,7 @@ import { adjust } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './paradex.api';
 import { mapParadexFillToIncomeRecords } from './paradex.income';
 import { mapParadexHistoricalOrder } from './paradex.order-history';
@@ -111,6 +112,10 @@ const roundPriceToStep = (price: number, priceStep: number, direction: 'up' | 'd
 const signerHeaders = (headers?: Record<string, string>) => (headers ? [{ headers }] : []);
 
 export class ParadexExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Paradex', /^.{1,64}$/, {
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+  });
+
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: true });
@@ -1381,6 +1386,7 @@ export class ParadexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    this.resolveCallerClientOrderId(opts);
     try {
       const orderIds: string[] = [];
 
@@ -1586,7 +1592,7 @@ export class ParadexExchange extends BaseExchange {
       }
 
       this.log('Signing order...', LogSeverity.Debug);
-      const clientId = this.generateClientId();
+      const clientId = this.resolveCallerClientOrderId(opts) ?? this.generateClientId();
       const { payload, headers } = await this.buildMainOrderPayload(opts, clientId);
 
       this.log(`Placing order: ${JSON.stringify(payload)}`, LogSeverity.Debug);
@@ -1663,7 +1669,7 @@ export class ParadexExchange extends BaseExchange {
       }
       const clientIdSet = new Set<string>();
       for (let index = 0; index < orders.length; index++) {
-        const clientId = this.generateClientId();
+        const clientId = orders[index].clientOrderId ?? this.generateClientId();
         if (clientIdSet.has(clientId)) {
           throw new Error(`Paradex batch generated an invalid or duplicate client_id at index ${index}`);
         }
@@ -1909,6 +1915,7 @@ export class ParadexExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     const results: string[] = [];
     let nativeBatch: PlaceOrderOpts[] = [];
     const flushNativeBatch = async () => {

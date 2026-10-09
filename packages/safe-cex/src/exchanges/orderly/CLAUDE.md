@@ -374,3 +374,9 @@ Fresh deterministic Orderly regressions live under `src/__tests__/audit-regressi
 ## CCXT Reference
 
 Orderly Network is not available in CCXT. Use https://github.com/ccxt/ccxt for general exchange pattern reference.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `client_order_id`, rule up to 36 characters not starting with `-`.

@@ -745,3 +745,9 @@ Notable cross-references for leverage handling:
   this integration uses only `account/batch-leverage-info`, including for a
   single symbol.
 - `pro/blofin.ts → handlePositions` / `parsePosition`: confirms there is no separate WS leverage stream; leverage is read from the `leverage` field of the `positions` channel payload, identical to our private WS handler.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clientOrderId`, rule `^[A-Za-z0-9]{1,32}$`, on `placeOrder` and on each regular order of `placeOrders`. Replaces the generated `BROKER_ID…` ID; no prefix is composed.

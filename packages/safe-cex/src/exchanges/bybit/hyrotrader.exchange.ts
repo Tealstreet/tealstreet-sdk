@@ -11,6 +11,8 @@ import { HyroOrderRecovery, hyroSubmissionKey } from './hyrotrader.order-recover
 import { HyroPrivateWebsocket } from './hyrotrader.ws-private';
 
 export class HyrotraderExchange extends BybitExchange {
+  // Order recovery re-mints orderLinkId after a reject, so a caller ID could be rewritten.
+  protected readonly clientOrderIdRule = undefined;
   isDemo = true;
   positionMode = PositionMode.OneWay;
   privateWebsocket = new HyroPrivateWebsocket(this);
@@ -318,6 +320,7 @@ export class HyrotraderExchange extends BybitExchange {
   }
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     orders.forEach((order) => this.validateOrderCapabilities(order));
     const key = hyroSubmissionKey(orders);
     let pending = this.pendingOrderLists.get(key);

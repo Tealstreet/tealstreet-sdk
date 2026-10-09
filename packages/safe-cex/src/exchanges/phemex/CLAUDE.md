@@ -595,3 +595,9 @@ Exchange-specific unit coverage exists for private WS reconciliation:
 - `src/__tests__/phemex.ws-private.test.ts` - Covers WS position upsert behavior, zero-contract guard behavior, and debounced REST reconciliation after terminal `orders_p` events.
 - `validateAccount()` - Attempts GET on `/g-accounts/accountPositions` with `currency: USDT`. Returns empty string on success, error message on failure.
 - `getAccount()` - Reads `data.account.userID` from the USDT account-position response for user identification.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clOrdID`, rule 1-40 characters. Replaces the generated `BROKER_ID_…` ID; no prefix is composed.

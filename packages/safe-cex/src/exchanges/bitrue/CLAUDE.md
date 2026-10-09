@@ -574,3 +574,9 @@ Fresh deterministic Bitrue regressions live under `src/__tests__/audit-regressio
 
 - **Every-call endpoints**: `ENDPOINTS.PLACE_ORDER`
 - **Periodic endpoints**: `ENDPOINTS.ORDERS`, `ENDPOINTS.ACCOUNT`
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clientOrderId` on the regular payload, rule 1-31 characters (Bitrue: shorter than 32).

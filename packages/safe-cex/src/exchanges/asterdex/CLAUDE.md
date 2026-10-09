@@ -679,3 +679,7 @@ nonce monotonicity, and approval-status parsing.
 ## CCXT Reference
 
 Aster is available in CCXT (`ts/src/aster.ts`). This implementation follows Binance Futures-style request/response patterns while preserving Aster-specific behaviors.
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

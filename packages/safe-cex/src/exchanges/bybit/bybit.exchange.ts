@@ -60,6 +60,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { splitTimeRange } from '../../utils/splitTimeRange';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule, type ClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
@@ -382,6 +383,11 @@ const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => 
 };
 
 export class BybitExchange extends BaseExchange {
+  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined = patternClientOrderIdRule(
+    'Bybit',
+    /^[A-Za-z0-9_-]{1,36}$/,
+  );
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -508,6 +514,10 @@ export class BybitExchange extends BaseExchange {
 
   protected requiresOrderLinkId() {
     return false;
+  }
+
+  private generatedOrderLinkId() {
+    return this.requiresOrderLinkId() ? nanoid() : undefined;
   }
 
   protected validateOrderCapabilities(_opts: BybitPlaceOrderOpts) {}
@@ -2387,6 +2397,7 @@ export class BybitExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.validateOrderCapabilities(opts);
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
@@ -2489,11 +2500,12 @@ export class BybitExchange extends BaseExchange {
       // because they are already set on the first one
       const payload = idx > 0 ? omit(req, ['stopLoss', 'takeProfit', 'slTriggerBy', 'tpTriggerBy']) : req;
 
-      return { ...payload, qty: `${lotSize}`, orderLinkId: this.requiresOrderLinkId() ? nanoid() : undefined };
+      return { ...payload, qty: `${lotSize}`, orderLinkId: clientOrderId ?? this.generatedOrderLinkId() };
     });
 
-    if (rest) payloads.push({ ...req, qty: `${rest}`, orderLinkId: this.requiresOrderLinkId() ? nanoid() : undefined });
+    if (rest) payloads.push({ ...req, qty: `${rest}`, orderLinkId: clientOrderId ?? this.generatedOrderLinkId() });
 
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     const fullfilled = await this.submitCreateOrders(payloads, opts);
 
     let errMsg = '';
@@ -2634,8 +2646,9 @@ export class BybitExchange extends BaseExchange {
       return [];
     }
 
-    // Explicit execution controls must reject atomically before any request;
-    // the special-order loop intentionally continues after transport errors.
+    // Explicit execution controls and caller client IDs must reject atomically
+    // before any request; the special-order loop continues after transport errors.
+    this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
       this.getOrderExecutionParams(order);
     }
@@ -2870,6 +2883,7 @@ export class BybitExchange extends BaseExchange {
           opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
         closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
         positionIdx,
+        orderLinkId: opts.clientOrderId,
       });
 
       return req;

@@ -893,3 +893,9 @@ different value shapes, do not mix them:
 - **WebSocket**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/kucoin.ts
 - **Futures REST API**: https://github.com/ccxt/ccxt/blob/master/ts/src/kucoinfutures.ts
 - **Futures WebSocket**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/kucoinfutures.ts
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Futures and spot send `clientOid`, rule `^[A-Za-z0-9_-]{1,40}$` (KuCoin: at most 40; letters, digits, `_`, `-`).

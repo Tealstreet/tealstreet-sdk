@@ -707,3 +707,9 @@ cd packages/safe-cex && yarn test-ci
 1. Validates REST API credentials by calling `GET /v3/user`.
 2. Validates zkLink signing key by initializing SDK and attempting `signer.initZklinkSigner(omniKeySeed)`.
 3. Returns empty string on success, or error message on failure (`'Invalid OmniKey seed'` for bad seed).
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends the caller's ID as both `clientId` and `clientOrderId`; it is hashed into the signed nonce, so it is resolved before SDK init and signing. Rule: non-empty, no whitespace.

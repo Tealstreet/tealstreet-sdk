@@ -582,3 +582,9 @@ scripts beside the exchange runtime implementation.
 
 - **Every-call endpoints**: `ENDPOINTS.ORDER`, `ENDPOINTS.ORDERS`
 - **Periodic endpoints**: `ENDPOINTS.CAPITAL`, `ENDPOINTS.POSITIONS`
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clientId` as a number. Backpack types it `uint32`, so the rule accepts only canonical decimal strings `1..4294967295` — the only form whose `String()` is the caller's value. A caller ID routes the order through `placeOrder`, never a native batch pair, because batch pairs mint their own correlation IDs.

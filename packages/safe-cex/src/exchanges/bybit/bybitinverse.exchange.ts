@@ -53,6 +53,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, divide, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './bybit.api';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange, type BybitIncomeContext } from './bybit.income';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
@@ -132,6 +133,8 @@ const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => 
 };
 
 export class BybitInverseExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Bybit inverse', /^[A-Za-z0-9_-]{1,36}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -1478,6 +1481,7 @@ export class BybitInverseExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -1617,10 +1621,11 @@ export class BybitInverseExchange extends BaseExchange {
       // because they are already set on the first one
       const payload = idx > 0 ? omit(req, ['stopLoss', 'takeProfit', 'slTriggerBy', 'tpTriggerBy']) : req;
 
-      return { ...payload, qty: `${lotSize}` };
+      return { ...payload, qty: `${lotSize}`, ...(clientOrderId !== undefined && { orderLinkId: clientOrderId }) };
     });
 
     if (rest) payloads.push({ ...req, qty: `${rest}` });
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
 
     const responses = await mapSeries(payloads, async (p) => {
       try {
@@ -1750,6 +1755,7 @@ export class BybitInverseExchange extends BaseExchange {
       return [];
     }
 
+    this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
       this.getOrderExecutionParams(order);
     }
@@ -2006,6 +2012,7 @@ export class BybitInverseExchange extends BaseExchange {
           opts.type === OrderType.Limit || (opts.type === OrderType.Conditional && price) ? timeInForce : undefined,
         closeOnTrigger: opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit,
         positionIdx,
+        orderLinkId: opts.clientOrderId,
       });
 
       return req;

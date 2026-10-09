@@ -624,6 +624,7 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       const message = 'MEXC trailing-stop order placement is not implemented yet';
       this.emitAndLogError(message);
@@ -1027,6 +1028,7 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     if (!orders.length) return [];
     if (orders.every(this.isRegularPlaceOrder)) {
       if (this.nativeBatchOrdersAvailable !== false) {

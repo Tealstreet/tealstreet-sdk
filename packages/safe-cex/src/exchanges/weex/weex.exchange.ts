@@ -44,6 +44,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI } from './weex.api';
 import {
@@ -115,6 +116,8 @@ const extractArray = <T = Record<string, any>>(payload: any, keys: string[] = []
 };
 
 export class WeexExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/);
+
   xhr: Axios;
   publicWebsocket: WeexPublicWebsocket;
   privateWebsocket: WeexPrivateWebsocket;
@@ -551,6 +554,7 @@ export class WeexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    this.resolveCallerClientOrderId(opts);
     const payload = this.formatOrderPayload(opts);
     const endpoint =
       opts.type === OrderType.Conditional
@@ -585,6 +589,7 @@ export class WeexExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     const ids: string[] = [];
     let regularBatch: PlaceOrderOpts[] = [];
 
@@ -1104,7 +1109,7 @@ export class WeexExchange extends BaseExchange {
           : undefined,
       quantity: `${amount}`,
       price: opts.type === OrderType.Limit ? `${price}` : undefined,
-      newClientOrderId: `ts${uuid()}`.slice(0, 36),
+      newClientOrderId: this.resolveCallerClientOrderId(opts) ?? `ts${uuid()}`.slice(0, 36),
       reduceOnly: opts.reduceOnly || undefined,
       tpTriggerPrice: opts.takeProfit ? `${adjust(opts.takeProfit, market.precision.price)}` : undefined,
       slTriggerPrice: opts.stopLoss ? `${adjust(opts.stopLoss, market.precision.price)}` : undefined,

@@ -726,6 +726,9 @@ export type PlaceOrderOpts = {
   readonly triggerType?: OrderStopTriggerType;
   readonly tpTriggerType?: OrderStopTriggerType;
   readonly slTriggerType?: OrderStopTriggerType;
+  // Sent verbatim as the venue-native client order ID, or the order is rejected
+  // before any write (see CLAUDE.md → "Client order ID contract").
+  readonly clientOrderId?: string;
   readonly maxSlippagePct?: number;
   readonly close?: boolean;
 };

@@ -108,3 +108,7 @@ MEXC `rs.*` channels are one-shot control responses (for example `rs.sub.ticker`
 ## Current Validation Status
 
 Public REST contract detail, ticker, depth, and kline endpoints were probed successfully without credentials. Authenticated REST write and private WebSocket probes still require `MEXC_API_KEY` and `MEXC_API_SECRET`.
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

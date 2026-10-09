@@ -1332,3 +1332,7 @@ fill would land in an empty bucket and the position would never reconcile.
 
 `closedPnl` excludes the fee, which rides on the same fill (see the ledger section
 above); do not net it a second time.
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

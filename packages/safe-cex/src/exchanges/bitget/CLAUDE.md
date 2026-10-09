@@ -844,3 +844,10 @@ Key validation points:
 - `validateAccount()` tests API key validity by fetching balance
 - `getAccount()` uses the V2 spot account-info endpoint and maps its camelCase user, parent, and inviter IDs
 - Environment mismatch detection in both `validateAccount()` and `fetchOpenPositions()`
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Classic and UTA both send `clientOid`, rule `^[.A-Z:/a-z0-9_-]{1,32}$`. Inherited by inverse and USDC.
+- **The native modify-order sends `newClientOid: uuid()`**, so an amend rewrites the client ID even though it keeps the order. Not changed: whether Bitget accepts the old ID as `newClientOid` is unverified, and a rejection falls back to cancel+replace silently.

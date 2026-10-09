@@ -945,3 +945,9 @@ No exchange-specific test files exist in this directory. Validation is done thro
 - `validateAccount()` - Tests API key validity against `/v3/accountinfo`
 - Account mode check in `fetchBalance()` ensures FUTURES mode
 - Position metadata queries validate per-symbol leverage configuration
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends numeric `client_order_id`. The rule accepts only canonical positive decimal strings within the JavaScript safe-integer range, so the number on the wire stringifies back to the caller's value.

@@ -51,10 +51,19 @@ import {
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
+import { adjust } from '../utils/safe-math';
 import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import { tryParseJson } from '../utils/tryParseJson';
 import { BaseWebSocket } from './base.ws';
+import {
+  clientOrderIdShapeMessage,
+  clientOrderIdSplitMessage,
+  isRegularClientOrderShape,
+  type ClientOrderIdPlaceOrderOpts,
+  type ClientOrderIdRule,
+  type PlacedOrderRef,
+} from './clientOrderId';
 import { ExternalPublicDataProvider } from './external-public-data';
 import { reportException } from '../telemetry';
 import { InProcessPublicDataProvider } from './in-process-public-data';
@@ -282,6 +291,7 @@ export interface Exchange {
   setAllLeverage: (leverage: number) => Promise<void>;
   placeOrder: (opts: PlaceOrderOpts) => Promise<string[]>;
   placeOrders: (orders: PlaceOrderOpts[]) => Promise<string[]>;
+  placeOrderWithClientOrderId: (opts: ClientOrderIdPlaceOrderOpts) => Promise<PlacedOrderRef>;
   updateOrder: (opts: UpdateOrderOpts) => Promise<string[]>;
   cancelOrders: (orders: Order[]) => Promise<void>;
   cancelSymbolOrders: (symbol: string) => Promise<void>;
@@ -824,9 +834,78 @@ export class BaseExchange implements Exchange {
   });
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
   };
+
+  // The returned clientOrderId is the wire value: honoring adapters send the
+  // caller ID verbatim or reject, so it is never recomposed here.
+  placeOrderWithClientOrderId = async (opts: ClientOrderIdPlaceOrderOpts): Promise<PlacedOrderRef> => {
+    // A worker or JS caller can drop the field; never place an untracked order in its name.
+    if (typeof opts.clientOrderId !== 'string') {
+      return this.rejectPreflight(`${this._exchangeName} placeOrderWithClientOrderId requires a clientOrderId`);
+    }
+    const clientOrderId = this.resolveCallerClientOrderId(opts) as string;
+    const orderIds = await this.placeOrder(opts);
+    return { orderIds, clientOrderId };
+  };
+
+  /** Venue rule for `PlaceOrderOpts.clientOrderId`; undefined means the venue cannot honor caller IDs. */
+  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined = undefined;
+
+  /**
+   * Returns the caller's clientOrderId for a shape this venue can honor, or
+   * rejects (emit, then throw) before any write. Call before any request.
+   */
+  protected resolveCallerClientOrderId(opts: PlaceOrderOpts): string | undefined {
+    const { clientOrderId } = opts;
+    if (clientOrderId === undefined) return undefined;
+    const rule = this.clientOrderIdRule;
+    if (!rule) {
+      return this.rejectPreflight(`${this._exchangeName} cannot honor a caller clientOrderId`);
+    }
+    if (!(rule.isHonorableShape ?? isRegularClientOrderShape)(opts)) {
+      return this.rejectPreflight(clientOrderIdShapeMessage(rule.label, opts));
+    }
+    if (typeof clientOrderId !== 'string' || !rule.isValid(clientOrderId)) {
+      return this.rejectPreflight(`${rule.label} clientOrderId must ${rule.requirement}`);
+    }
+    this.assertCallerClientOrderIdUnsplit(opts);
+    return clientOrderId;
+  }
+
+  /** Whole-batch fail-closed: every caller ID is honorable and unique, or nothing is sent. */
+  protected assertCallerClientOrderIds(orders: PlaceOrderOpts[]) {
+    const seen = new Set<string>();
+    for (const order of orders) {
+      const clientOrderId = this.resolveCallerClientOrderId(order);
+      if (clientOrderId === undefined) continue;
+      if (seen.has(clientOrderId)) {
+        this.rejectPreflight(`${this.clientOrderIdRule!.label} clientOrderId ${clientOrderId} is duplicated in one batch`);
+      }
+      seen.add(clientOrderId);
+    }
+  }
+
+  protected assertSingleNativeClientOrderId(clientOrderId: string | undefined, nativeOrderCount: number) {
+    if (clientOrderId !== undefined && nativeOrderCount !== 1) {
+      this.rejectPreflight(clientOrderIdSplitMessage(this.clientOrderIdRule?.label ?? this._exchangeName));
+    }
+  }
+
+  // An order above the market's maxSize splits into several native orders, so it rejects up front;
+  // adapters still assert the payload count after formatting as a backstop.
+  private assertCallerClientOrderIdUnsplit(opts: PlaceOrderOpts) {
+    const market = this.store.marketsBySymbol[opts.symbol];
+    if (opts.clientOrderId === undefined || !market) return;
+    const maxSize = market.limits.amount.max;
+    if (maxSize > 0 && adjust(opts.amount, market.precision.amount) > maxSize) {
+      this.rejectPreflight(
+        `${this.clientOrderIdRule?.label ?? this._exchangeName} order exceeds the market's max size for one order; a caller clientOrderId cannot span several orders`,
+      );
+    }
+  }
 
   updateOrder = async (_opts: UpdateOrderOpts) => {
     await Promise.reject(new Error('Not implemented'));
@@ -1653,6 +1732,12 @@ export class BaseExchange implements Exchange {
         suppressConsoleLog,
       });
     }
+  }
+
+  /** Pre-flight reject: emit first (toast pipeline), then throw. See src/exchanges/CLAUDE.md. */
+  protected rejectPreflight(message: string): never {
+    this.emitAndLogError(message);
+    throw new Error(message);
   }
 
   // if multiple child WS they will all send reconnect messages, try and only emit once...

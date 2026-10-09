@@ -1,0 +1,251 @@
+import type { Market, PlaceOrderOpts } from '../../types';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
+import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
+import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
+import { BaseExchange } from '../../exchanges/base';
+import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
+import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
+import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
+import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
+import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BitmexExchange } from '../../exchanges/bitmex/bitmex.exchange';
+import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
+import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
+import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
+import { BreakoutpropExchange } from '../../exchanges/breakoutprop/breakoutprop.exchange';
+import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
+import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
+import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
+import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
+import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
+import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
+import { KrakenExchange } from '../../exchanges/kraken/kraken.exchange';
+import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';
+import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
+import { KucoinSpotExchange } from '../../exchanges/kucoin/kucoinspot.exchange';
+import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
+import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
+import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
+import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
+import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
+import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
+import { WeexExchange } from '../../exchanges/weex/weex.exchange';
+import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
+import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderType } from '../../types';
+
+// Contract: a caller clientOrderId is sent verbatim on one native order, or the
+// call rejects — emitting first — before ANY transport is touched.
+
+const MARKET: Market = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0.001, max: 10 }, leverage: { min: 1, max: 100 } },
+  info: {},
+};
+
+type ExchangeCtor = new (name: any, options: any, store: DefaultStore) => BaseExchange;
+
+const HONORING: Array<[string, ExchangeCtor]> = [
+  ['apexomni', ApexOmniExchange],
+  ['backpack', BackpackExchange],
+  ['binance', BinanceExchange],
+  ['binancepm', BinancePMExchange],
+  ['binancespot', BinanceSpotExchange],
+  ['bingx', BingxExchange],
+  ['bitget', BitgetExchange],
+  ['bitrue', BitrueExchange],
+  ['bitunix', BitunixExchange],
+  ['blofin', BlofinExchange],
+  ['bybit', BybitExchange],
+  ['bybitinverse', BybitInverseExchange],
+  ['bybitspot', BybitSpotExchange],
+  ['coinbase', CoinbaseExchange],
+  ['cryptocom', CryptocomExchange],
+  ['grvt', GrvtExchange],
+  ['kucoin', KucoinExchange],
+  ['kucoinspot', KucoinSpotExchange],
+  ['okx', OKXExchange],
+  ['salsadex', OrderlyExchange],
+  ['paradex', ParadexExchange],
+  ['phemex', PhemexExchange],
+  ['weex', WeexExchange],
+  ['woo', WOOXExchange],
+];
+
+const NOT_HONORING: Array<[string, ExchangeCtor]> = [
+  ['asterdex', AsterDEXExchange],
+  ['bitmex', BitmexExchange],
+  ['breakoutprop', BreakoutpropExchange],
+  ['hyperliquid', HyperliquidExchange],
+  ['hyperliquidspot', HyperliquidSpotExchange],
+  ['hyrotrader', HyrotraderExchange],
+  ['kraken', KrakenExchange],
+  ['krakenspot', KrakenSpotExchange],
+  ['lighter', LighterExchange],
+  ['mexc', MexcExchange],
+  ['polymarket', PolymarketExchange],
+];
+
+const order = (overrides: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
+  symbol: MARKET.symbol,
+  type: OrderType.Limit,
+  side: OrderSide.Buy,
+  amount: 1,
+  price: 50_000,
+  ...overrides,
+});
+
+const isTransport = (value: unknown): value is Record<string, unknown> =>
+  !!value &&
+  typeof value === 'object' &&
+  ['get', 'post', 'put', 'delete'].some((m) => typeof (value as any)[m] === 'function');
+
+// Replace every axios-like client on the instance with recorders, so any write is observable.
+const setup = (name: string, Ctor: ExchangeCtor) => {
+  const store = new DefaultStore();
+  store.update({ markets: [MARKET] });
+  const exchange = new Ctor(
+    name,
+    { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false },
+    store,
+  );
+  const transportCalls = vi.fn();
+  for (const key of Object.keys(exchange)) {
+    if (!isTransport((exchange as any)[key])) continue;
+    const recorder = (..._args: unknown[]) => {
+      transportCalls(key);
+      return Promise.reject(new Error('transport must not be reached'));
+    };
+    (exchange as any)[key] = { get: recorder, post: recorder, put: recorder, delete: recorder, request: recorder };
+  }
+  const emitted: string[] = [];
+  vi.spyOn(exchange, 'emitAndLogError').mockImplementation((err) => {
+    emitted.push(String(err));
+  });
+  return { exchange, transportCalls, emitted };
+};
+
+describe('clientOrderId fails closed before any write', () => {
+  beforeEach(() => {
+    // HyroTrader's REST origin is fixed at build time; any origin lets it construct.
+    vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');
+  });
+
+  it.each(HONORING)('%s rejects a caller ID on a TP/SL bracket shape before any transport', async (name, Ctor) => {
+    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+
+    await expect(exchange.placeOrder(order({ clientOrderId: '12345', stopLoss: 49_000 }))).rejects.toThrow(
+      /clientOrderId cannot be honored for this order shape/,
+    );
+    expect(emitted).toEqual([expect.stringMatching(/clientOrderId cannot be honored/)]);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING)('%s rejects a caller ID on a standalone stop before any transport', async (name, Ctor) => {
+    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+
+    await expect(
+      exchange.placeOrder(order({ type: OrderType.StopLoss, side: OrderSide.Sell, clientOrderId: '12345' })),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(emitted).toHaveLength(1);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING)('%s rejects a caller ID that breaks the venue charset before any transport', async (name, Ctor) => {
+    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+
+    await expect(exchange.placeOrder(order({ clientOrderId: `${'x'.repeat(80)} y` }))).rejects.toThrow(
+      /clientOrderId must /,
+    );
+    expect(emitted).toHaveLength(1);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING)('%s rejects a caller ID on an order above the max size for one order', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+    const split = /exceeds the market's max size for one order; a caller clientOrderId cannot span several orders/;
+
+    await expect(exchange.placeOrder(order({ amount: 25, clientOrderId: '12345' }))).rejects.toThrow(split);
+    await expect(exchange.placeOrders([order(), order({ amount: 25, clientOrderId: '12345' })])).rejects.toThrow(split);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING)('%s rejects a whole batch when one caller ID cannot be honored', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+
+    await expect(
+      exchange.placeOrders([
+        order(),
+        order({ clientOrderId: '12345' }),
+        order({ type: OrderType.TakeProfit, side: OrderSide.Sell, clientOrderId: '67890' }),
+      ]),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING)('%s rejects a batch that repeats one caller ID', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+
+    await expect(
+      exchange.placeOrders([order({ clientOrderId: '12345' }), order({ clientOrderId: '12345' })]),
+    ).rejects.toThrow(/duplicated in one batch/);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(NOT_HONORING)('%s rejects any caller ID, single or batch, before any transport', async (name, Ctor) => {
+    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+
+    await expect(exchange.placeOrder(order({ clientOrderId: '12345' }))).rejects.toThrow(
+      /cannot honor a caller clientOrderId/,
+    );
+    await expect(exchange.placeOrders([order(), order({ clientOrderId: '12345' })])).rejects.toThrow(
+      /cannot honor a caller clientOrderId/,
+    );
+    await expect(exchange.placeOrderWithClientOrderId(order({ clientOrderId: '12345' }) as any)).rejects.toThrow(
+      /cannot honor a caller clientOrderId/,
+    );
+    expect(emitted).toHaveLength(3);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+});
+
+describe('placeOrderWithClientOrderId', () => {
+  it.each(HONORING)('%s refuses to place an order when the caller ID went missing', async (name, Ctor) => {
+    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+
+    await expect(exchange.placeOrderWithClientOrderId(order() as any)).rejects.toThrow(/requires a clientOrderId/);
+    expect(emitted).toHaveLength(1);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+});
+
+describe('BaseExchange client order ID helpers', () => {
+  it('rejectPreflight emits before it throws', () => {
+    const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const events: string[] = [];
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {
+      events.push('emit');
+    });
+
+    expect(() => {
+      try {
+        (exchange as any).rejectPreflight('cannot honor');
+      } finally {
+        events.push('threw');
+      }
+    }).toThrow('cannot honor');
+    expect(events).toEqual(['emit', 'threw']);
+  });
+});

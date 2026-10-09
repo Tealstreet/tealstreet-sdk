@@ -645,3 +645,9 @@ Key validation points:
 - `validateAccount()` tests API key validity by fetching balance
 - `getAccount()` extracts the documented v3 balance row's masked `userId`; `fetchBalance()` and `validateAccount()` prefer the USDT row and fall back to the first settlement-asset row.
 - Public data only mode for unauthenticated access
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `clientOrderId`, rule 1-40 characters with **no uppercase letters**: BingX lowercases the field server-side, so an uppercase ID could never be looked up by the caller's value.

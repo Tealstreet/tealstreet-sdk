@@ -53,6 +53,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
+import type { ClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './woo.api';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
 import { mapWooHistoricalOrder } from './woo.order-history';
@@ -189,6 +190,13 @@ const isPostOnlyCrossingFairPrice = (side: OrderSide, price: number, ticker: Tic
 // testable — the parser below is an instance field and unreachable from tests.
 
 export class WOOXExchange extends BaseExchange {
+  // WOO client_order_id is numeric; only a canonical JS-safe integer string survives the round trip.
+  protected readonly clientOrderIdRule: ClientOrderIdRule = {
+    label: 'WOO',
+    requirement: 'be a canonical positive decimal integer within the JavaScript safe-integer range',
+    isValid: (clientOrderId) => /^[1-9]\d*$/.test(clientOrderId) && Number.isSafeInteger(Number(clientOrderId)),
+  };
+
   /**
    * Journal records fold from the ORDER axis, not fills.
    *
@@ -1991,6 +1999,7 @@ export class WOOXExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if (this.isAlgoOrder(opts.type)) {
       return this.placeAlgoOrder(opts);
     }
@@ -2061,6 +2070,7 @@ export class WOOXExchange extends BaseExchange {
       reduce_only: opts.reduceOnly,
       side: inverseObj(ORDER_SIDE)[opts.side],
       position_side: await this.getPositionSideForOrder(opts),
+      client_order_id: callerClientOrderId === undefined ? undefined : Number(callerClientOrderId),
     });
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
@@ -2072,6 +2082,7 @@ export class WOOXExchange extends BaseExchange {
     if (rest) {
       payloads.push({ ...req, order_quantity: rest });
     }
+    this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
 
     try {
       const orderIds = await mapSeries(payloads, async (payload) => {

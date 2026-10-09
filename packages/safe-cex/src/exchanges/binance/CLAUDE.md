@@ -1002,3 +1002,11 @@ For batch order placement via `/fapi/v1/batchOrders`, each item in the response 
 | Throttled order refresh | 10s debounce                                          | No                                                                       | No                                           |
 | Batch order placement   | Yes (5 per batch)                                     | No (one at a time)                                                       | No (one at a time)                           |
 | Batch order cancel      | Yes (10 per batch)                                    | No (one at a time)                                                       | No (one at a time)                           |
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- **USD-M** sends `newClientOrderId`, rule `^[.A-Z:/a-z0-9_-]{1,36}$`; **PM** the same charset capped at 32. **Spot's documented legal range is narrower**, `^[A-Za-z0-9_-]{1,36}$` — `.`, `:` and `/` that USD-M accepts are rejected by Spot, so it has its own rule.
+- A caller ID replaces the generated `x-s3vFFRQp…` ID outright; no broker prefix is composed. PM and Spot return `newClientOrderId` as the order ID, so the placement result is the caller's ID there.
+- `updateOrder` is cancel+replace on all three; the replacement gets a generated ID (Spot refuses a reused ID until the old order fills).

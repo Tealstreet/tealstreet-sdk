@@ -110,3 +110,7 @@ yarn test-ci
 ```
 
 For fast iteration, run the `polymarket.*.test.ts` files in `src/__tests__/audit-regressions/` directly with Vitest, then complete the full package checks before review.
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

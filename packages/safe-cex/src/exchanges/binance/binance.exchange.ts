@@ -56,6 +56,7 @@ import { splitTimeRange } from '../../utils/splitTimeRange';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI, createPublicAPI } from './binance.api';
 import { deriveBinanceClosedPositions } from './binance.closed-pnl';
@@ -152,6 +153,8 @@ const REQUEST_WEIGHT_BACKOFF_MS = 60_000;
 
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/);
+
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>
     this.foldClosedPositionRecords(opts, { symbolScoped: true });
@@ -1575,6 +1578,7 @@ export class BinanceExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     // Cancel existing closePosition orders if placing a new closePosition order
     // Binance only allows ONE closePosition order per direction per symbol
     await this.cancelExistingClosePositionOrders(opts);
@@ -1638,6 +1642,7 @@ export class BinanceExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     const allRegular: any[] = [];
     const allAlgo: any[] = [];
 
@@ -1795,9 +1800,10 @@ export class BinanceExchange extends BaseExchange {
         payloads.push({ ...req, quantity: `${rest}` });
       }
 
-      // Set orderId for each regular order
+      const clientOrderId = this.resolveCallerClientOrderId(opts);
+      this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
       for (const payload of payloads) {
-        payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+        payload.newClientOrderId = clientOrderId ?? 'x-s3vFFRQp' + uuid();
       }
 
       regularPayloads.push(...payloads);

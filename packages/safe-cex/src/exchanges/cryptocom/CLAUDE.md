@@ -661,3 +661,9 @@ Fresh audit regressions live in `src/__tests__/audit-regressions/` and cover:
 Before enabling Crypto.com outside development, run UAT end to end with real
 credentials for create/amend/cancel (regular and advanced), reconnect recovery,
 position/balance state, and isolated-position behavior.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `client_oid`, rule 1-36 characters.

@@ -786,3 +786,7 @@ Use a small funded account and minimum-safe size.
    - positions reconcile correctly,
    - balance updates continue.
 8. Confirm no nonce/auth errors are emitted in logs for place/cancel/auth flows.
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

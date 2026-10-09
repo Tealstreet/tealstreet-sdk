@@ -878,3 +878,7 @@ backlog. Run the relevant subset before enabling or releasing Kraken Spot.
 - OHLC via WebSocket v2 (unlike Futures which uses REST polling)
 - WebSocket token authentication flow
 - WebSocket reconnection and token refresh
+
+## Client order ID
+
+This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.

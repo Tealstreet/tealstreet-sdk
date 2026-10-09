@@ -424,6 +424,7 @@ export class KrakenExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    this.resolveCallerClientOrderId(opts);
     try {
       // Map order type/timeInForce
       let orderType = opts.type === OrderType.Limit ? 'lmt' : 'mkt';

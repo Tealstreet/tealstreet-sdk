@@ -1777,3 +1777,11 @@ operation on this venue.
 
 OKX is the contrast: its fills carry `posSide` directly, so the same reconstruction is
 single-axis there. Do not write one fold and assume it ports.
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Linear, inverse and spot send `orderLinkId`, rule `^[A-Za-z0-9_-]{1,36}$`, on the single-order path and on the batch path (`formatOrderForBatch`).
+- **HyroTrader rejects caller IDs** (`clientOrderIdRule = undefined`): its order recovery re-mints `orderLinkId` after a reject, which would rewrite a caller's ID. Its own `placeOrders` override must keep calling `assertCallerClientOrderIds` first.
+- Regular-order `updateOrder` uses `REPLACE_ORDER` (amend), which keeps `orderLinkId`.

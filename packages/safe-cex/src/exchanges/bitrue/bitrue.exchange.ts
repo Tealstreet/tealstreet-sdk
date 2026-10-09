@@ -40,6 +40,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './bitrue.api';
 import {
   ENDPOINTS,
@@ -61,6 +62,9 @@ import { BitruePublicWebsocket } from './bitrue.ws-public';
 // const TEST_SYMBOL = 'E-BTC-USDT';
 
 export class BitrueExchange extends BaseExchange {
+  // Bitrue documents clientOrderId as shorter than 32 characters.
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Bitrue', /^.{1,31}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -1123,6 +1127,10 @@ export class BitrueExchange extends BaseExchange {
       payloads.push({ ...req, volume: `${rest}` });
     }
 
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
+    this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
+    if (callerClientOrderId !== undefined) payloads[0].clientOrderId = callerClientOrderId;
+
     //
     if (opts.type === OrderType.Market && !opts.reduceOnly) {
       const ticker = this.store.tickersBySymbol[opts.symbol];
@@ -1176,6 +1184,7 @@ export class BitrueExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     const payloads = this.formatCreateOrder(opts);
     const res = await this.placeOrderBatch(payloads);
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit || opts.stopLoss || opts.takeProfit) {
@@ -1187,6 +1196,7 @@ export class BitrueExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     const res = await this.placeOrderBatch(requests);
     // set of symbols of orders that were TP or SL

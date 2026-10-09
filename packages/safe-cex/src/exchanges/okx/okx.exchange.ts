@@ -53,6 +53,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
 import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { oldestCursorId } from '../../utils/oldestCursorId';
 import { createAPI } from './okx.api';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
@@ -106,6 +107,8 @@ const parseOKXTriggerPxType = (triggerPxType?: string) => {
 };
 
 export class OKXExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/);
+
   xhr: Axios;
   region: OkxRegion;
 
@@ -1602,6 +1605,7 @@ export class OKXExchange extends BaseExchange {
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(opts);
     // need to ensure position mode is loaded
     await this.getOrFetchPositionMode();
     const [algoOrders, normalOrders] = partition(opts, (o) => this.isAlgoOrder(o.type));
@@ -2114,9 +2118,10 @@ export class OKXExchange extends BaseExchange {
       posSide: this.getPositionSide(opts),
     });
 
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     const createPayload = (size: BigNumber) => ({
       ...req,
-      clOrdId: `${BROKER_ID}${uuid()}`.slice(0, 32),
+      clOrdId: clientOrderId ?? `${BROKER_ID}${uuid()}`.slice(0, 32),
       sz: size.toFixed(),
     });
 
@@ -2140,6 +2145,7 @@ export class OKXExchange extends BaseExchange {
       remaining = remaining.minus(lotSize);
     }
 
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     return payloads;
   };
 

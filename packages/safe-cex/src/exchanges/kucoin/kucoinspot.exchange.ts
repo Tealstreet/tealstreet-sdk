@@ -34,6 +34,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createKucoinSpotAPI } from './kucoinspot.api';
 import {
   KUCOIN_SPOT_ENDPOINTS,
@@ -54,6 +55,8 @@ const KUCOIN_SPOT_OPEN_ORDERS_PAGE_SIZE = 50;
 const KUCOIN_SPOT_OPEN_ORDERS_MAX_PAGES = 100;
 
 export class KucoinSpotExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('KuCoin Spot', /^[A-Za-z0-9_-]{1,40}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -404,6 +407,7 @@ export class KucoinSpotExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) {
       const msg = `KuCoin Spot does not support ${opts.type} orders`;
       this.emitAndLogError(msg);
@@ -430,7 +434,7 @@ export class KucoinSpotExchange extends BaseExchange {
           : 'GTC';
 
     const payload = omitUndefined({
-      clientOid: uuid(),
+      clientOid: clientOrderId ?? uuid(),
       symbol: market.id,
       type: opts.type === OrderType.Market ? 'market' : 'limit',
       side: opts.side === OrderSide.Sell ? 'sell' : 'buy',

@@ -34,6 +34,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './binancespot.api';
 import {
   ENDPOINTS,
@@ -48,6 +49,9 @@ import { BinancePublicWebsocket } from './binancespot.ws-public';
 
 // TODO: translate our err messages
 export class BinanceSpotExchange extends BaseExchange {
+  // Spot's legal range differs from USD-M/PM: no '.', ':' or '/'.
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance Spot', /^[A-Za-z0-9_-]{1,36}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -459,11 +463,13 @@ export class BinanceSpotExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Binance Spot trailing-stop placement requires trailingDelta and is not supported');
     }
@@ -556,11 +562,10 @@ export class BinanceSpotExchange extends BaseExchange {
       });
     }
 
-    // We need to set orderId for each order
-    // otherwise Binance will duplicate the IDs
-    // when its sent in batches
+    // A unique ID per payload, otherwise Binance duplicates the IDs in batches.
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
     for (const payload of payloads) {
-      payload.newClientOrderId = 'x-s3vFFRQp' + uuid();
+      payload.newClientOrderId = clientOrderId ?? 'x-s3vFFRQp' + uuid();
     }
 
     return payloads;

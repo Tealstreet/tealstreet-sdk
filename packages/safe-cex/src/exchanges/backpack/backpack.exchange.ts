@@ -37,6 +37,7 @@ import { createPositionId } from '../../utils/createPositionId';
 import { loop } from '../../utils/loop';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import type { ClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './backpack.api';
 import {
   BackpackAccount,
@@ -57,6 +58,13 @@ import { BackpackPrivateWebSocket } from './backpack.ws-private';
 import { BackpackPublicWebSocket } from './backpack.ws-public';
 
 export class BackpackExchange extends BaseExchange {
+  // Backpack's clientId is a uint32; only the canonical decimal form round-trips as the same string.
+  protected readonly clientOrderIdRule: ClientOrderIdRule = {
+    label: 'Backpack',
+    requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
+    isValid: (clientOrderId) => /^[1-9]\d{0,9}$/.test(clientOrderId) && Number(clientOrderId) <= 0xffff_ffff,
+  };
+
   xhr: Axios;
 
   publicWebsocket: BackpackPublicWebSocket;
@@ -707,7 +715,8 @@ export class BackpackExchange extends BaseExchange {
     opts.close !== true;
 
   private canUseNativeBatch = (opts: PlaceOrderOpts): boolean => {
-    if (!this.isOrdinaryLimitOrder(opts)) return false;
+    // Batch pairs mint their own correlation clientIds; a caller ID goes through placeOrder.
+    if (!this.isOrdinaryLimitOrder(opts) || opts.clientOrderId !== undefined) return false;
 
     try {
       this.buildBatchLimitOrderRequest(opts, 1);
@@ -872,6 +881,7 @@ export class BackpackExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     try {
       const market = this.store.marketsBySymbol[opts.symbol];
       if (!market) {
@@ -929,6 +939,7 @@ export class BackpackExchange extends BaseExchange {
         symbol: market.id,
         side: opts.side === OrderSide.Buy ? 'Bid' : 'Ask',
         orderType: apiOrderType,
+        ...(callerClientOrderId !== undefined && { clientId: Number(callerClientOrderId) }),
       };
 
       // PostOnly and timeInForce only apply to Limit orders, not Market orders
@@ -1191,6 +1202,7 @@ export class BackpackExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     const orderIds: string[] = [];
 
     for (let index = 0; index < orders.length;) {

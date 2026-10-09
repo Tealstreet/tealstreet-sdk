@@ -784,3 +784,9 @@ add a credential-reading script under `src/exchanges/**`.
 - [ ] Cross-exchange vault support
 - [ ] Cache instrument data to avoid re-fetching on every order
 - [ ] Resolve chainId discrepancy between signing.ts and exchange.ts
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `metadata.client_order_id`. GRVT types it uint64 with the top half reserved for its own UI, so the rule accepts canonical decimal strings `1..2^63-1`. The caller's ID then becomes the canonical safe-cex order ID: it replaces the nonce everywhere the nonce was used (`recordNonce`, builder-fee events, the return value).

@@ -49,6 +49,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './apexomni.api';
 import {
   BROKER_ID,
@@ -121,6 +122,8 @@ const textEncoder = new TextEncoder();
 const hashClientOrderId = (clientOrderId: string): Uint8Array => sha256(textEncoder.encode(clientOrderId));
 
 export class ApexOmniExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('ApeX Omni', /^\S+$/);
+
   // Rate-limited xhr (5 RPS) for non-critical operations like balance/positions polling
   xhr: Axios;
   // Unlimited xhr for critical time-sensitive operations (order placement, cancellation, leverage changes)
@@ -1232,6 +1235,8 @@ export class ApexOmniExchange extends BaseExchange {
     tpTriggerPriceType: INDEX
    */
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // Resolved before SDK init and signing: the ID is hashed into the signed nonce.
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     const market = this.store.marketsBySymbol[opts.symbol];
 
     if (!market) {
@@ -1329,7 +1334,7 @@ export class ApexOmniExchange extends BaseExchange {
     if (rest) payloads.push({ ...req, size: `${rest}` });
 
     const responses = await mapSeries(payloads, async (p, index) => {
-      const clientOrderId = generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
+      const clientOrderId = callerClientOrderId ?? generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
       const expirationIsoTimestamp = (virtualClock.getCurrentTimeMs() + 30 * 24 * 60 * 60 * 1000) as any;
 
       // if (!this.store.starkConfig) {

@@ -41,6 +41,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './bybit.api';
 import { getBybitOrderExecutionParams } from './bybit.order-params';
 import { BYBIT_BRAZIL_SITE_ID } from './bybit.site';
@@ -71,6 +72,8 @@ const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
 };
 
 export class BybitSpotExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Bybit spot', /^[A-Za-z0-9_-]{1,36}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -729,6 +732,7 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    const clientOrderId = this.resolveCallerClientOrderId(opts);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
     if (
@@ -825,10 +829,11 @@ export class BybitSpotExchange extends BaseExchange {
       // because they are already set on the first one
       const payload = idx > 0 ? omit(req, ['stopLoss', 'takeProfit', 'slTriggerBy', 'tpTriggerBy']) : req;
 
-      return { ...payload, qty: `${lotSize}` };
+      return { ...payload, qty: `${lotSize}`, ...(clientOrderId !== undefined && { orderLinkId: clientOrderId }) };
     });
 
     if (rest) payloads.push({ ...req, qty: `${rest}` });
+    this.assertSingleNativeClientOrderId(clientOrderId, payloads.length);
 
     const responses = await mapSeries(payloads, async (p) => {
       try {
@@ -865,6 +870,7 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
       this.getOrderExecutionParams(order);
     }

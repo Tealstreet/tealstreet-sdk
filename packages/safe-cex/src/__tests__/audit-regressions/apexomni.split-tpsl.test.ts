@@ -190,4 +190,22 @@ describe('Apex Omni order placement regressions', () => {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' } },
     );
   });
+
+  it('signs and sends a caller clientOrderId verbatim as clientId and clientOrderId', async () => {
+    const { exchange, post } = createBracketExchange();
+
+    await expect(
+      exchange.placeOrderWithClientOrderId({
+        symbol: 'BTC-USDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 100,
+        clientOrderId: 'caller-apex-1',
+      }),
+    ).resolves.toEqual({ orderIds: ['order-1'], clientOrderId: 'caller-apex-1' });
+
+    const params = Object.fromEntries(new URLSearchParams(post.mock.calls[0][1]));
+    expect(params).toMatchObject({ clientId: 'caller-apex-1', clientOrderId: 'caller-apex-1' });
+  });
 });

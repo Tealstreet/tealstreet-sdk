@@ -43,6 +43,7 @@ import { loop } from '../../utils/loop';
 import { adjust } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import type { ClientOrderIdRule } from '../clientOrderId';
 import { createAPI, createEdgeAPI, createTradingAPI } from './grvt.api';
 import {
   createGrvtBuilderInfo,
@@ -67,6 +68,13 @@ type GrvtBuilderAuthState =
 type GrvtInstrumentSigningMetadata = Required<Pick<GrvtInstrumentLite, 'ih' | 'bd' | 'qd'>>;
 
 export class GrvtExchange extends BaseExchange {
+  // GRVT client_order_id is a uint64; 2^63 and above are reserved for GRVT's own UI.
+  protected readonly clientOrderIdRule: ClientOrderIdRule = {
+    label: 'GRVT',
+    requirement: 'be a canonical decimal integer between 1 and 9223372036854775807',
+    isValid: (clientOrderId) => /^[1-9]\d{0,18}$/.test(clientOrderId) && BigInt(clientOrderId) < 2n ** 63n,
+  };
+
   xhr: Axios; // Market Data Gateway (public)
   edgeXhr: Axios; // Edge Gateway (authentication)
   tradingXhr: Axios; // Trading Data Gateway (private)
@@ -1337,6 +1345,7 @@ export class GrvtExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     try {
       // Wallet is required for order signing
       if (!this.wallet) {
@@ -1481,7 +1490,7 @@ export class GrvtExchange extends BaseExchange {
       // Convert to API format (NOT the EIP-712 format - that's only for signing!)
       // API uses regular decimal values as strings, NOT multiplied
       // Generate unique client order ID (simple uint32 like Python SDK) and create time
-      const clientOrderId = nonce.toString(); // Use nonce as client_order_id (uint32)
+      const clientOrderId = callerClientOrderId ?? nonce.toString(); // Generated: nonce as client_order_id (uint32)
       const createTime = (Date.now() * 1_000_000).toString(); // Current time in nanoseconds
 
       // Prepare trigger for TP/SL if provided
@@ -1606,11 +1615,10 @@ export class GrvtExchange extends BaseExchange {
       }
 
       // GRVT returns oi="0x00" for new orders — the real order_id is assigned
-      // asynchronously. Use the nonce (= client_order_id) as the canonical ID
-      // since it's consistent across REST placement, WS updates (metadata.co),
-      // and REST fetches (metadata.client_order_id).
-      const nonceStr = String(nonce);
-      this.log(`Order created successfully: nonce=${nonceStr}`, LogSeverity.Info);
+      // asynchronously. Use client_order_id (the nonce unless the caller supplied
+      // one) as the canonical ID: it is consistent across REST, WS and fetches.
+      const nonceStr = clientOrderId;
+      this.log(`Order created successfully: client_order_id=${nonceStr}`, LogSeverity.Info);
 
       // Record the locally-created canonical nonce even while GRVT has not
       // assigned a real ID, so later reconciliation reaches its true start.
@@ -1764,6 +1772,7 @@ export class GrvtExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     // GRVT doesn't have batch order placement, so we place sequentially
     const orderIds: string[] = [];
     for (const order of orders) {

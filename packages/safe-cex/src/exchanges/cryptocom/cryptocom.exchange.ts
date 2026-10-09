@@ -44,12 +44,15 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI, isCryptocomAuthenticationErrorCode, isCryptocomAuthenticationFailureMessage } from './cryptocom.api';
 import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, mapCandlestickInterval } from './cryptocom.types';
 import { CryptocomPrivateWebSocket } from './cryptocom.ws-private';
 import { CryptocomPublicWebSocket } from './cryptocom.ws-public';
 
 export class CryptocomExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Crypto.com', /^.{1,36}$/);
+
   xhr: Axios;
 
   declare publicWebsocket: CryptocomPublicWebSocket;
@@ -475,6 +478,7 @@ export class CryptocomExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     try {
       const market = this.store.marketsBySymbol[opts.symbol];
       if (!market) {
@@ -485,6 +489,7 @@ export class CryptocomExchange extends BaseExchange {
         instrument_name: market.id,
         side: opts.side === OrderSide.Buy ? 'BUY' : 'SELL',
         type: this.mapOrderType(opts.type),
+        ...(callerClientOrderId !== undefined && { client_oid: callerClientOrderId }),
       };
       const isTrigger = opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit;
 
@@ -616,6 +621,7 @@ export class CryptocomExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    this.assertCallerClientOrderIds(orders);
     const orderIds: string[] = [];
 
     for (const order of orders) {

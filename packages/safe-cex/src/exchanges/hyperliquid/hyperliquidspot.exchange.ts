@@ -700,6 +700,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
   // }
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }

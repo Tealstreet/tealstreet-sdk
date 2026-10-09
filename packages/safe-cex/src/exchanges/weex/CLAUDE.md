@@ -193,3 +193,9 @@ Private channels:
 - `positions`
 - `orders`
 - `fill`
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `newClientOrderId`, rule `^[.A-Z:/a-z0-9_-]{1,36}$`, on the single and regular batch paths.

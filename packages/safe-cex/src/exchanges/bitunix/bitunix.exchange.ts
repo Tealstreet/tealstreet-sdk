@@ -52,6 +52,7 @@ import { adjust, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './bitunix.api';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from './bitunix.income';
@@ -71,6 +72,9 @@ import { BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION, BitunixPublicWebsocket } from
 
 // TODO: translate our err messages
 export class BitunixExchange extends BaseExchange {
+  // Bitunix publishes no clientId length limit; reject only empty or whitespace-bearing IDs.
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Bitunix', /^\S+$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -1949,6 +1953,7 @@ export class BitunixExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     try {
       await this.hydratePositionIdBeforeFormatting(opts);
       const payloads = this.formatCreateOrder(opts);
@@ -1982,6 +1987,7 @@ export class BitunixExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
       await this.hydratePositionIdBeforeFormatting(order);
     }
@@ -2066,6 +2072,7 @@ export class BitunixExchange extends BaseExchange {
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Trailing stop loss is not supported');
     }
@@ -2141,7 +2148,7 @@ export class BitunixExchange extends BaseExchange {
       positionId: positionId,
       orderType: inverseObj(ORDER_TYPE)[opts.type],
       effect,
-      clientId: 'ts_' + uuid(),
+      clientId: callerClientOrderId ?? 'ts_' + uuid(),
       reduceOnly,
 
       // Take profit parameters
@@ -2159,14 +2166,6 @@ export class BitunixExchange extends BaseExchange {
       }),
     });
 
-    // Cache TIF by clientId for REST API workaround
-    if (req.clientId && opts.timeInForce) {
-      this.orderTifCache.set(req.clientId, opts.timeInForce);
-    }
-    if (req.clientId) {
-      this.orderReduceOnlyCache.set(req.clientId, reduceOnly);
-    }
-
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
     const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
     const lotSize = adjust((amount - rest) / lots, pAmount);
@@ -2178,6 +2177,15 @@ export class BitunixExchange extends BaseExchange {
 
     if (rest) {
       payloads.push({ ...req, qty: `${rest}` });
+    }
+    this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
+
+    // Cache TIF by clientId for REST API workaround
+    if (req.clientId && opts.timeInForce) {
+      this.orderTifCache.set(req.clientId, opts.timeInForce);
+    }
+    if (req.clientId) {
+      this.orderReduceOnlyCache.set(req.clientId, reduceOnly);
     }
 
     // For Bitunix, we'll handle TP/SL in the main order

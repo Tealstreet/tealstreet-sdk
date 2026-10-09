@@ -36,6 +36,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './orderly.api';
 import {
   ACCOUNT_RESPONSE,
@@ -87,6 +88,9 @@ const getOrderlyOrderErrorLogOptions = (message?: string): Record<string, boolea
   isExpectedOrderlyOrderRejection(message) ? { suppressConsoleLog: true } : undefined;
 
 export class OrderlyExchange extends BaseExchange {
+  // Orderly: up to 36 characters, and a hyphen may not be the first character.
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-).{1,36}$/);
+
   xhr: Axios;
 
   publicWebsocket: OrderlyPublicWebsocket;
@@ -1021,6 +1025,7 @@ export class OrderlyExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if (this.isAlgoOrder(opts.type)) {
       return this.placeAlgoOrder(opts);
     }
@@ -1063,6 +1068,7 @@ export class OrderlyExchange extends BaseExchange {
       position_side: await this.getPositionSideForOrder(opts),
       margin_mode: marginMode,
       order_tag: orderTag,
+      client_order_id: callerClientOrderId,
     });
 
     const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
@@ -1074,6 +1080,7 @@ export class OrderlyExchange extends BaseExchange {
     });
 
     if (rest) payloads.push({ ...req, order_quantity: rest });
+    this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
 
     try {
       const orderIds = await mapSeries(payloads, async (payload) => {

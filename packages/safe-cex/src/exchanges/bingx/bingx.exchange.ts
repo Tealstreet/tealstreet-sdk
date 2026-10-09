@@ -46,6 +46,7 @@ import { add, adjust, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import type { ClientOrderIdRule } from '../clientOrderId';
 import { createAPI, FETCH_POSITIONS_RESPONSE } from './bingx.api';
 import {
   BINGX_BALANCE,
@@ -67,6 +68,14 @@ import { BingxPrivateWebsocket } from './bingx.ws-private';
 import { BingxPublicWebsocket } from './bingx.ws-public';
 
 export class BingxExchange extends BaseExchange {
+  // BingX lowercases client order IDs server-side, so an uppercase ID could never be queried back.
+  protected readonly clientOrderIdRule: ClientOrderIdRule = {
+    label: 'BingX',
+    requirement: 'be 1-40 characters with no uppercase letters',
+    isValid: (clientOrderId) =>
+      clientOrderId.length >= 1 && clientOrderId.length <= 40 && clientOrderId === clientOrderId.toLowerCase(),
+  };
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -1426,6 +1435,7 @@ export class BingxExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
     // prefetch position mode to prevent dispatching request for every order
     await this.getOrFetchPositionMode();
     const payloads = (await Promise.all(orders.flatMap(this.formatCreateOrder.bind(this)))).flat();
@@ -1433,6 +1443,7 @@ export class BingxExchange extends BaseExchange {
   };
 
   private formatCreateOrder = async (opts: PlaceOrderOpts) => {
+    const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       return await this.formatCreateTrailingStopLossOrder(opts);
     }
@@ -1527,7 +1538,7 @@ export class BingxExchange extends BaseExchange {
 
     const isOrdinaryOrder = opts.type === OrderType.Market || opts.type === OrderType.Limit;
     const withClientOrderId = (payload: Record<string, any>) =>
-      isOrdinaryOrder ? { ...payload, clientOrderId: this.createClientOrderId() } : payload;
+      isOrdinaryOrder ? { ...payload, clientOrderId: callerClientOrderId ?? this.createClientOrderId() } : payload;
 
     const payloads: Array<Record<string, any>> = wantsFullPositionStop
       ? [req]
@@ -1541,6 +1552,7 @@ export class BingxExchange extends BaseExchange {
     if (rest) {
       payloads.push(withClientOrderId({ ...req, quantity: rest }));
     }
+    this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
 
     if (opts.stopLoss) {
       // For attached SL/TP with entry orders, use the entry order size

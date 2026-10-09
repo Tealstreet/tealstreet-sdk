@@ -39,6 +39,7 @@ import { toBinance } from '../../utils/symbolConverter';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './kucoin.api';
 import {
   ENDPOINTS,
@@ -53,6 +54,8 @@ import { KucoinPrivateWebsocket } from './kucoin.ws-private';
 import { createKucoinSnapshotWebsockets, KucoinPublicWebsocket } from './kucoin.ws-public';
 
 export class KucoinExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('KuCoin', /^[A-Za-z0-9_-]{1,40}$/);
+
   xhr: Axios;
   unlimitedXHR: Axios;
 
@@ -846,6 +849,7 @@ export class KucoinExchange extends BaseExchange {
   }
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    this.resolveCallerClientOrderId(opts);
     if (this.isAlgoOrder(opts)) {
       const payload = this.formatAlgoOrder(opts);
       return await this.placeAlgoOrders([payload]);
@@ -910,7 +914,7 @@ export class KucoinExchange extends BaseExchange {
       marginMode: this.getKucoinMarginMode(position),
       positionSide: this.getKucoinPositionSide(opts, position),
       timeInForce: orderType === 'limit' ? timeInForce : undefined,
-      clientOid: uuid(),
+      clientOid: this.resolveCallerClientOrderId(opts) ?? uuid(),
       triggerStopUpPrice: triggerStopUpPrice ? `${adjust(triggerStopUpPrice, pPrice)}` : undefined,
       triggerStopDownPrice: triggerStopDownPrice ? `${adjust(triggerStopDownPrice, pPrice)}` : undefined,
       stopPriceType: hasAttachedStop ? this.mapStopPriceType(opts.tpTriggerType || opts.slTriggerType) : undefined,

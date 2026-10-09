@@ -810,3 +810,9 @@ preflight boundary.
 - Short positions: Not thoroughly tested
 - TP/SL orders: Trigger price handling, WebSocket updates for triggered orders
 - Cancelled order UI responsiveness
+
+## Client order ID
+
+Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
+
+- Sends `client_id` (single and native batch), rule 1-64 characters, in place of the generated `ts_…` ID. Close orders (`close: true`) are not an honorable shape.
