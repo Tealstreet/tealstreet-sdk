@@ -1100,6 +1100,10 @@ export class BaseWebSocket<T extends BaseExchange> {
   };
 
   private forceClosed = false;
+  /** Read-only, so a subclass's own retry timer can respect forceClose(). */
+  protected get isForceClosed(): boolean {
+    return this.forceClosed;
+  }
 
   forceClose = () => {
     this.forceClosed = true;

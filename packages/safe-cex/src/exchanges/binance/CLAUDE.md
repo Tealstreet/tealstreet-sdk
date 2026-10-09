@@ -104,6 +104,22 @@ All three variants follow the same high-level pattern, with variant-specific dif
 ### Private Startup (`_startPrivate()`, `binance.exchange.ts:180-205`)
 
 1. **`privateWebsocket.connectAndSubscribe()`** -- Fetches listen key via `POST /fapi/v1/listenKey`, opens WebSocket to `wss://fstream.binance.com/private/ws?listenKey={listenKey}` (post-2026-04-23 format; the old `/ws/{listenKey}` path was decommissioned). Non-blocking.
+   **A failed listenKey request retries** (5s doubling to 60s) instead of
+   rejecting un-awaited and leaving the private stream unbuilt; there is ONE
+   keepalive chain per socket (`scheduleListenKeyRefresh` — every reconnect used
+   to start another) and a failed keepalive reschedules in 60s rather than ending
+   it. A failed startup `fetchOrders` sets `ordersSnapshotStale`: orders are NOT
+   marked loaded (an empty list would read as "no open orders") and the tick
+   refetches until one succeeds. Binance PM carries the same code. Gated by
+   `__tests__/audit-regressions/binance.private-stream-recovery.test.ts`.
+   **The livenet listenKey and every public request are tagged
+   `markSkipRemoteSigning`** (both `createAPI` and `createPublicAPI`, plus PM and
+   spot), so a hosted server sends them without a browser round trip — they were
+   already unsigned. Never tag on a credential condition; see
+   `__tests__/binance.public-endpoint-tagging.test.ts`.
+   **Every open after the first resyncs orders** (`throttledFetchOrders`): the
+   base house-keep snapshot attaches to `this.ws` while the async connect is still
+   awaiting the listenKey, so it never fired, and events in the gap were lost.
 2. **`fetchPositionMode()`** -- `GET /fapi/v1/positionSide/dual`. Sets `isHedged` store setting based on `dualSidePosition`.
 3. **`tick()`** -- The first tick immediately fetches both `/positionRisk` and `/account`. A 3s health loop then reconciles `/account` every 25s while the private WS is connected, or every 3s while it is disconnected. `/positionRisk` is refreshed every 75s in addition to event-triggered repairs.
 4. **`fetchOrders()`** -- Two parallel calls: `GET /fapi/v1/openOrders` + `GET /fapi/v1/openAlgoOrders?algoType=CONDITIONAL`. Merges regular + algo orders. A failed pair returns the current order-store snapshot, rather than an authoritative empty list, so startup/reconnect refreshes preserve live order state until Binance answers successfully.

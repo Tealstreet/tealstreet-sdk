@@ -60,6 +60,9 @@ import {
 import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
 
+const REINIT_RETRY_MS = 15_000;
+const REINIT_RETRY_MAX_MS = 5 * 60_000;
+
 const RECENTLY_PLACED_ORDER_GRACE_MS = 8_000;
 
 const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
@@ -84,6 +87,15 @@ export class BybitSpotExchange extends BaseExchange {
   private unifiedMarginStatus: number = 6;
 
   private needsReinit = false;
+  private lastReinitAt = 0;
+  private reinitRetryMs = REINIT_RETRY_MS;
+  // A thrown request (an unavailable or timed-out remote signer) must trigger the
+  // full refetch exactly like a venue error does.
+  private reinitOnThrow = <T>(request: Promise<T>): Promise<T> =>
+    request.catch((error: unknown) => {
+      this.needsReinit = true;
+      throw error;
+    });
 
   positionMode: PositionMode | null = null;
 
@@ -400,9 +412,15 @@ export class BybitSpotExchange extends BaseExchange {
 
   tick = async () => {
     if (!this.isDisposed) {
-      if (this.needsReinit) {
-        await this.fetchOrdersPositionsAndBalance();
+      // Cleared BEFORE the refetch so a failure inside can set it again; backed off so
+      // a persistent failure (a key missing a permission) is not refetched every tick.
+      if (this.needsReinit && Date.now() - this.lastReinitAt >= this.reinitRetryMs) {
         this.needsReinit = false;
+        this.lastReinitAt = Date.now();
+        await this.fetchOrdersPositionsAndBalance();
+        this.reinitRetryMs = this.needsReinit
+          ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS)
+          : REINIT_RETRY_MS;
       }
 
       try {
@@ -480,13 +498,15 @@ export class BybitSpotExchange extends BaseExchange {
       cursor: string = '',
       orders: Array<Record<string, any>> = [],
     ): Promise<Array<Record<string, any>>> => {
-      const { data } = await this.xhr.get(ENDPOINTS.UNFILLED_ORDERS, {
-        params: {
-          category: 'spot',
-          limit: 50,
-          cursor,
-        },
-      });
+      const { data } = await this.reinitOnThrow(
+        this.xhr.get(ENDPOINTS.UNFILLED_ORDERS, {
+          params: {
+            category: 'spot',
+            limit: 50,
+            cursor,
+          },
+        }),
+      );
 
       if (v(data, 'retMsg') !== 'OK') {
         this.emitAndLogError(v(data, 'retMsg'));

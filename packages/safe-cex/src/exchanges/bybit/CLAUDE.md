@@ -787,10 +787,20 @@ The private WS `handleOrderTopic` processes order lifecycle events:
 
 Set to `true` when:
 
-- `fetchOrdersHelper` fails (`bybit.exchange.ts:537-538`)
-- `fetchPositionsHelper` fails without symbols (`bybit.exchange.ts:601-602`)
+- `fetchOrdersHelper` fails — a venue error OR a request that THROWS
+- `fetchPositionsHelper` fails without symbols, or its request throws
 
-When set, the next tick cycle performs a full `fetchOrdersPositionsAndBalance()` instead of the normal positions+balance-only snapshot.
+The throw case is the hosted remote signer being unavailable or timing out
+(`reinitOnThrow`); before it was covered, a failed startup order fetch stayed
+empty until a private order frame happened to arrive. When set, the next tick
+performs a full `fetchOrdersPositionsAndBalance()` instead of the normal
+positions+balance-only snapshot. **The tick clears the flag BEFORE that refetch**,
+because the refetch swallows its own errors: clearing it after meant a failed
+reinit was retried exactly once. **It backs off from 15s to 5min
+(`REINIT_RETRY_MS` doubling, reset by a reinit that succeeds)**: a persistent
+failure such as a key missing the order permission otherwise refetched — and
+toasted — on every 500ms tick. Inverse and spot carry the same helpers and the
+same tick. Gated by `__tests__/audit-regressions/bybit.reinit-on-signing-failure.test.ts`.
 
 ## Exchange Metadata
 

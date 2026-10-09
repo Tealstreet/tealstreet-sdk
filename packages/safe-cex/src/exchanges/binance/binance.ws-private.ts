@@ -1,12 +1,25 @@
 import type { BinanceExchange } from './binance.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { MarginType, OrderRejectReason, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import {
+  LogSeverity,
+  MarginType,
+  OrderRejectReason,
+  OrderStatus,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE, POSITION_SIDE } from './binance.types';
+
+// Binance expires a listenKey 60 minutes after the last keepalive.
+const LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
+const LISTEN_KEY_RETRY_MIN_MS = 5_000;
+const LISTEN_KEY_RETRY_MAX_MS = 60_000;
 
 export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private lastPositionFetchTime = 0;
@@ -15,12 +28,51 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   private positionFetchInFlight = false;
   private hasPendingPositionEvents = false;
   private ordersThrottleTimeout?: NodeJS.Timeout;
+  private listenKeyRefreshTimer?: ReturnType<typeof setTimeout>;
+  private listenKeyRetryDelayMs = LISTEN_KEY_RETRY_MIN_MS;
+  private listenKeyRetryTimer?: ReturnType<typeof setTimeout>;
+  // A pending retry, a native reconnect and forceOpen() can all call
+  // connectAndSubscribe; overlapping calls each built a socket and leaked one.
+  private connecting = false;
+  private resyncOrdersOnOpen = false;
+  private hasOpened = false;
+  private keepaliveFailing = false;
+
+  dispose() {
+    clearTimeout(this.listenKeyRetryTimer);
+    clearTimeout(this.listenKeyRefreshTimer);
+    super.dispose();
+  }
 
   connectAndSubscribe = async () => {
     // payloadSigner signs REST only; auth here needs the local secret.
     if (this.parent.options.payloadSigner) return;
-    if (!this.isDisposed) {
-      const listenKey = await this.fetchListenKey();
+    if (!this.isDisposed && !this.connecting) {
+      clearTimeout(this.listenKeyRetryTimer);
+      this.connecting = true;
+      let listenKey: string;
+      try {
+        listenKey = await this.fetchListenKey();
+      } catch (error) {
+        // In hosted mode this request is signed by the browser over a link that can
+        // drop. It used to reject un-awaited and leave the private stream unbuilt with
+        // nothing retrying, so orders and positions stopped updating silently.
+        const message = `Binance user data stream unavailable: ${error instanceof Error ? error.message : String(error)}`;
+        // Toast once per failure streak; a bad key would otherwise toast every minute forever.
+        if (this.listenKeyRetryDelayMs === LISTEN_KEY_RETRY_MIN_MS) this.emitAndLogError(message);
+        else this.parent.log(message, LogSeverity.Warning);
+        this.resyncOrdersOnOpen = true;
+        const delay = this.listenKeyRetryDelayMs;
+        this.listenKeyRetryDelayMs = Math.min(delay * 2, LISTEN_KEY_RETRY_MAX_MS);
+        this.listenKeyRetryTimer = setTimeout(() => {
+          if (!this.isDisposed && !this.isForceClosed) void this.connectAndSubscribe();
+        }, delay);
+        return;
+      } finally {
+        this.connecting = false;
+      }
+      this.listenKeyRetryDelayMs = LISTEN_KEY_RETRY_MIN_MS;
+      if (this.isDisposed || this.isForceClosed) return;
 
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';
       const base = BASE_WS_URL.private[key];
@@ -30,6 +82,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
       // types for the listenKey, matching the old `/ws/{listenKey}` behavior.
       const url = `${base}?listenKey=${encodeURIComponent(listenKey)}`;
 
+      this.detachSocket();
       this.ws = this.createWebsocket(url);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
@@ -40,7 +93,25 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
   onOpen = () => {
     if (!this.isDisposed) {
       this.ping();
+      // Order events while no stream was open (a failed listenKey, or any reconnect)
+      // were never delivered. The base house-keep resync cannot cover it: it attaches
+      // to `this.ws` while this async connect is still awaiting the listenKey.
+      if (this.resyncOrdersOnOpen || this.hasOpened) {
+        this.resyncOrdersOnOpen = false;
+        this.throttledFetchOrders();
+      }
+      this.hasOpened = true;
     }
+  };
+
+  /** forceOpen() on a live native socket used to build a second one and leak the first. */
+  private detachSocket = () => {
+    const previous = this.ws;
+    if (!previous) return;
+    previous.removeEventListener?.('message', this.onMessage);
+    previous.removeEventListener?.('close', this.onClose);
+    previous.removeEventListener?.('open', this.onOpen);
+    if (previous.readyState === WebSocket.OPEN || previous.readyState === WebSocket.CONNECTING) previous.close();
   };
 
   onMessage = ({ data }: MessageEvent) => {
@@ -332,14 +403,29 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
 
   private fetchListenKey = async () => {
     const { data } = await this.parent.xhr.post(ENDPOINTS.LISTEN_KEY);
-    setTimeout(() => this.updateListenKey(), 30 * 60 * 1000);
+    this.scheduleListenKeyRefresh(LISTEN_KEY_REFRESH_MS);
     return data.listenKey;
   };
 
+  /** One keepalive chain per socket: every reconnect used to start another. */
+  private scheduleListenKeyRefresh = (delayMs: number) => {
+    clearTimeout(this.listenKeyRefreshTimer);
+    this.listenKeyRefreshTimer = setTimeout(() => void this.updateListenKey(), delayMs);
+  };
+
   private updateListenKey = async () => {
-    if (!this.isDisposed) {
+    if (this.isDisposed) return;
+    try {
       await this.parent.xhr.put(ENDPOINTS.LISTEN_KEY);
-      setTimeout(() => this.updateListenKey(), 30 * 60 * 1000);
+      this.scheduleListenKeyRefresh(LISTEN_KEY_REFRESH_MS);
+      this.keepaliveFailing = false;
+    } catch (error) {
+      // A failed keepalive must not end the chain; the key outlives it by 30 minutes.
+      const message = `Binance user data stream keepalive failed: ${error instanceof Error ? error.message : String(error)}`;
+      if (this.keepaliveFailing) this.parent.log(message, LogSeverity.Warning);
+      else this.emitAndLogError(message);
+      this.keepaliveFailing = true;
+      this.scheduleListenKeyRefresh(LISTEN_KEY_RETRY_MAX_MS);
     }
   };
 
@@ -355,6 +441,8 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
+        // A failed fetch returns the current store; do not mark it freshly loaded.
+        if (this.isDisposed || this.parent.ordersSnapshotStale) return;
         this.parent.store.update({
           orders,
           loaded: {

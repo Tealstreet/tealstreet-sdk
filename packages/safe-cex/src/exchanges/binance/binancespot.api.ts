@@ -4,6 +4,7 @@ import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
@@ -34,13 +35,13 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   xhr.interceptors.request.use((config) => {
     const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);
     if (isPublicEndPoint) {
-      return {
+      return markSkipRemoteSigning({
         ...config,
         headers: AxiosHeaders.from({
           'Content-Type': 'application/json, charset=utf-8',
         }),
         timeout: 20_000,
-      };
+      });
     }
 
     return signBinanceRequest(config, options, exchange.name, options?.extra?.recvWindow ?? RECV_WINDOW);

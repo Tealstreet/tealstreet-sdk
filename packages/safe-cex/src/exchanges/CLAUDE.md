@@ -603,9 +603,12 @@ Two related traps in the same area:
     **This only applies where `subscribe()` is called straight after auth.**
     bitget, blofin, okx (private and business) and phemex all subscribe from their
     login/auth RESPONSE handler, so they are unaffected by the ORDERING bug — but
-    not by the rest of this entry: they still `ping()` from the open handler beside
-    an un-awaited `auth()`, so a pong sets `isInitialized` and a zero-topic socket
-    reports healthy there too. The `Remote WS auth failed:` wording that
+    not by the rest of this entry: bitget, blofin and phemex still `ping()` from the
+    open handler beside an un-awaited `auth()`, so a pong sets `isInitialized` and a
+    zero-topic socket reports healthy there too. **okx is FIXED**: its `onOpen`
+    awaits `auth()` (now returning a boolean), and on a thrown or `{error}` signature
+    sends nothing, `disregardSilence()`s and reconnects — gated by
+    `__tests__/audit-regressions/okx.private-ws-auth-failure.test.ts`. The `Remote WS auth failed:` wording that
     `auth_invalid` matches has been swept out of every remote-signer private-WS
     site in this tree; a new venue must not reintroduce it. **apexomni had the same shape and is FIXED**
     (`598a9553f4`): its `onOpen` is now `async` and awaits the login. Read

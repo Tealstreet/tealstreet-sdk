@@ -31,6 +31,8 @@ export type ServiceSentryOptions = {
   service: string;
   release?: string;
   environment?: string;
+  /** Extra tags on every event, e.g. the container's region, so a rate can be split by it. */
+  tags?: Record<string, string>;
 };
 
 let initialised = false;
@@ -39,14 +41,14 @@ export function isServiceSentryEnabled(): boolean {
   return initialised;
 }
 
-export function initServiceSentry({ dsn, service, release, environment }: ServiceSentryOptions): boolean {
+export function initServiceSentry({ dsn, service, release, environment, tags = {} }: ServiceSentryOptions): boolean {
   if (!dsn || initialised) return initialised;
 
   Sentry.init({
     dsn,
     release,
     environment,
-    initialScope: { tags: { service } },
+    initialScope: { tags: { ...tags, service } },
 
     // These processes hold users' exchange credentials and act on their
     // accounts. Keep the restrictive v10 baseline explicit: Sentry v11

@@ -161,6 +161,61 @@ export function captureAlert({
   }
 }
 
+/**
+ * A periodic measurement, not an alert: info level, never throttled (the caller
+ * owns the cadence) and never routed to Slack. Counts go in `extra` so they can
+ * be summed across containers and compared release to release.
+ */
+export function captureServiceInfo({
+  key,
+  message,
+  detail = {},
+}: {
+  key: string;
+  message: string;
+  detail?: Record<string, unknown>;
+}): void {
+  if (!isServiceSentryEnabled()) return;
+  try {
+    const fingerprint = fingerprintFor(key);
+    Sentry.captureEvent({
+      message: scrubString(message),
+      level: 'info',
+      fingerprint: [fingerprint],
+      extra: { ...(scrub(detail) as Record<string, unknown>), alert_key: fingerprint },
+    });
+  } catch {
+    // Telemetry must never be able to fail the service.
+  }
+}
+
+/**
+ * Window totals as Sentry metrics, which — unlike event `extra` — Sentry can sum
+ * and split by `release` and attributes. Counts are window totals; gauges are
+ * per-window summaries (percentiles), never per-sample, to bound volume.
+ */
+export function recordServiceMetrics({
+  prefix,
+  counts,
+  gauges,
+  attributes,
+}: {
+  prefix: string;
+  counts: Record<string, number>;
+  gauges: Record<string, number>;
+  attributes: Record<string, string>;
+}): void {
+  if (!isServiceSentryEnabled()) return;
+  try {
+    for (const [name, value] of Object.entries(counts)) {
+      if (value > 0) Sentry.metrics.count(`${prefix}.${name}`, value, { attributes });
+    }
+    for (const [name, value] of Object.entries(gauges)) Sentry.metrics.gauge(`${prefix}.${name}`, value, { attributes });
+  } catch {
+    // Telemetry must never be able to fail the service.
+  }
+}
+
 /** Test seam — the throttle map is module-level. */
 export function resetCaptureAlertForTests(): void {
   buckets.clear();

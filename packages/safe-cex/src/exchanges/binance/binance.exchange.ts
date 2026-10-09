@@ -360,6 +360,20 @@ export class BinanceExchange extends BaseExchange {
     }
   };
 
+  /** The last full order fetch failed; the tick refetches until one succeeds. */
+  ordersSnapshotStale = false;
+
+  private lastOrdersRetryAt = 0;
+
+  // At most every 15s: each failure emits, and the tick runs far more often.
+  private retryOrdersSnapshot = async () => {
+    if (Date.now() - this.lastOrdersRetryAt < 15_000) return;
+    this.lastOrdersRetryAt = Date.now();
+    const orders = await this.fetchOrders();
+    if (this.isDisposed || this.ordersSnapshotStale) return;
+    this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+  };
+
   _startPrivate = async () => {
     this.privateWebsocket.connectAndSubscribe();
 
@@ -376,6 +390,10 @@ export class BinanceExchange extends BaseExchange {
     // fetch unfilled orders
     const orders = await this.fetchOrders();
     if (this.isDisposed) return;
+
+    // A failed fetch returns the current (at startup, empty) store; marking that
+    // loaded would show "no open orders". The tick retries until one succeeds.
+    if (this.ordersSnapshotStale) return;
 
     this.log(`Loaded Binance orders`);
 
@@ -420,6 +438,8 @@ export class BinanceExchange extends BaseExchange {
           now - this.lastAccountReconciliationAt >= accountReconciliationInterval);
 
       try {
+        if (this.ordersSnapshotStale) await this.retryOrdersSnapshot();
+        if (this.isDisposed) return;
         if (shouldReconcilePositionRisk) {
           const positionStateVersion = this.getPositionStateVersion();
           const positionsWithRisk = await this.fetchPositions();
@@ -901,6 +921,7 @@ export class BinanceExchange extends BaseExchange {
         };
       });
 
+      this.ordersSnapshotStale = false;
       return [...orders, ...algoOrders];
     } catch (error: any) {
       console.error('[Binance] fetchOrders error:', error);
@@ -910,6 +931,7 @@ export class BinanceExchange extends BaseExchange {
       // A failed full snapshot is not authoritative. Preserve the current
       // store state so startup, reconnect, and throttled refresh callers
       // cannot erase live regular or algo orders on transient failures.
+      this.ordersSnapshotStale = true;
       return this.store.orders;
     }
   };

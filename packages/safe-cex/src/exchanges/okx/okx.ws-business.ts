@@ -57,13 +57,30 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
     }
   };
 
-  onOpen = () => {
-    if (!this.isDisposed) {
-      this.auth();
-      this.ping();
-      if (ENABLE_RECONNECTING_WEBSOCKET) {
-        this.emitWsReconnected();
-      }
+  onOpen = async () => {
+    if (this.isDisposed) return;
+    let authed = false;
+    try {
+      authed = await this.auth();
+    } catch (error) {
+      // `remoteSigner.sign` THROWS (unavailable, timed out, aborted) rather than
+      // resolving `{ error }`; un-awaited this was an unhandled rejection and a
+      // socket that never logged in. Pass the error alone — see bybit.ws-private.
+      this.emitAndLogError(error instanceof Error ? error : new Error(String(error)));
+    }
+    if (this.isDisposed) return;
+    if (!authed) {
+      // Send NOTHING, not even a ping: a pong on an unauthenticated socket keeps a
+      // zero-topic socket looking healthy forever (measured on bybit; unmeasured
+      // here, so not risked). Reconnect, and tell the host chain the silence was
+      // ours. See ../CLAUDE.md → "Remote-signer WS auth".
+      this.directFallback.disregardSilence();
+      void this.reconnect();
+      return;
+    }
+    this.ping();
+    if (ENABLE_RECONNECTING_WEBSOCKET) {
+      this.emitWsReconnected();
     }
   };
 
@@ -74,7 +91,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
     }
   };
 
-  auth = async () => {
+  auth = async (): Promise<boolean> => {
     const timestamp = virtualClock.getCurrentTime().unix();
 
     if (this.parent.options.remoteSigner) {
@@ -98,7 +115,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
         // backgrounded tab or a 15s signer timeout must not look like a bad key.
         // Mirrors the bybit fix in `bybit/bybit.ws-private.ts` → auth.
         this.emitAndLogError(`Remote WS signing unavailable: ${result.error}`);
-        return;
+        return false;
       }
 
       this.sendWithLog(
@@ -114,7 +131,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
           ],
         }),
       );
-      return;
+      return true;
     }
 
     const signature = createHmac('sha256', this.parent.options.secret)
@@ -134,6 +151,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
         ],
       }),
     );
+    return true;
   };
 
   subscribe = () => {

@@ -6,6 +6,7 @@ import qs from 'qs';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { bigIntAxiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import {
   safeCexAxiosCreate,
   safeCexAxiosCreateNoProxy,
@@ -38,14 +39,15 @@ export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange
   // retry requests on network errors instead of throwing
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
+  // Every request on this client is public; a hosted server need not ask the device.
   xhr.interceptors.request.use((config) => {
-    return {
+    return markSkipRemoteSigning({
       ...config,
       headers: AxiosHeaders.from({
         'Content-Type': 'application/json, charset=utf-8',
       }),
       timeout: 20_000,
-    };
+    });
   });
 
   if (options.tealstreetTunnel) {
@@ -82,18 +84,18 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   xhr.interceptors.request.use((config) => {
     // on livenet, don't sign listen key requests (they don't need it)
     if (config.url === ENDPOINTS.LISTEN_KEY && !options.testnet) {
-      return config;
+      return markSkipRemoteSigning(config);
     }
 
     const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);
     if (isPublicEndPoint) {
-      return {
+      return markSkipRemoteSigning({
         ...config,
         headers: AxiosHeaders.from({
           'Content-Type': 'application/json, charset=utf-8',
         }),
         timeout: 20_000,
-      };
+      });
     }
 
     return signBinanceRequest(config, options, exchange.name, options?.extra?.recvWindow ?? RECV_WINDOW);

@@ -93,6 +93,9 @@ import { BybitPublicWebsocket } from './bybit.ws-public';
 import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
 import { bybitFeeOverlay } from './bybit.fee-overlay';
 
+const REINIT_RETRY_MS = 15_000;
+const REINIT_RETRY_MAX_MS = 5 * 60_000;
+
 const MAX_CLOSED_PNL_PAGES = 20;
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
@@ -406,6 +409,15 @@ export class BybitExchange extends BaseExchange {
   private marginType: MarginType = MarginType.Cross;
 
   private needsReinit = false;
+  private lastReinitAt = 0;
+  private reinitRetryMs = REINIT_RETRY_MS;
+  // A thrown request (an unavailable or timed-out remote signer) must trigger the
+  // full refetch exactly like a venue error does.
+  private reinitOnThrow = <T>(request: Promise<T>): Promise<T> =>
+    request.catch((error: unknown) => {
+      this.needsReinit = true;
+      throw error;
+    });
   private readonly debouncedPrivateSnapshotRefresh = debounce(
     async () => {
       if (this.isDisposed || this.isPublicDataOnly) {
@@ -1066,9 +1078,15 @@ export class BybitExchange extends BaseExchange {
       // Wait for remote signer if configured but unavailable
       if (!(await this.waitForRemoteSigner())) return;
 
-      if (this.needsReinit) {
-        await this.fetchOrdersPositionsAndBalance();
+      // Cleared BEFORE the refetch so a failure inside can set it again; backed off so
+      // a persistent failure (a key missing a permission) is not refetched every tick.
+      if (this.needsReinit && Date.now() - this.lastReinitAt >= this.reinitRetryMs) {
         this.needsReinit = false;
+        this.lastReinitAt = Date.now();
+        await this.fetchOrdersPositionsAndBalance();
+        this.reinitRetryMs = this.needsReinit
+          ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS)
+          : REINIT_RETRY_MS;
       }
 
       try {
@@ -1258,14 +1276,16 @@ export class BybitExchange extends BaseExchange {
       cursor: string = '',
       orders: Array<Record<string, any>> = [],
     ): Promise<Array<Record<string, any>>> => {
-      const { data } = await this.xhr.get(ENDPOINTS.UNFILLED_ORDERS, {
-        params: {
-          category,
-          settleCoin,
-          limit: 50,
-          cursor,
-        },
-      });
+      const { data } = await this.reinitOnThrow(
+        this.xhr.get(ENDPOINTS.UNFILLED_ORDERS, {
+          params: {
+            category,
+            settleCoin,
+            limit: 50,
+            cursor,
+          },
+        }),
+      );
 
       if (v(data, 'retMsg') !== 'OK') {
         this.emitAndLogError(v(data, 'retMsg'));
@@ -1366,9 +1386,11 @@ export class BybitExchange extends BaseExchange {
       cursor = '',
       accumulated: Array<Record<string, any>> = [],
     ): Promise<Array<Record<string, any>>> => {
-      const { data } = await this.xhr.get(ENDPOINTS.POSITIONS, {
-        params: { ...params, limit: 200, cursor },
-      });
+      const { data } = await this.reinitOnThrow(
+        this.xhr.get(ENDPOINTS.POSITIONS, {
+          params: { ...params, limit: 200, cursor },
+        }),
+      );
       if (v(data, 'retMsg') !== 'OK') {
         this.emitAndLogError(v(data, 'retMsg'));
         if (failClosed) throw new Error(v(data, 'retMsg'));
