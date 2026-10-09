@@ -39,4 +39,25 @@ export type ChaserOrderOptions = {
   accountName?: string;
   /** Optional termination condition for `chase ... to <length>`. */
   terminate?: ChaserTerminate;
+  /** Caller's id, echoed on `chaser:complete` so the caller can match its own chase. */
+  clientId?: string;
+};
+
+/** Stop reason of `removeKeepOrder`: the chase stopped but its order rests on. */
+export const CHASER_KEPT_ORDER_STOP_REASON = 'User cancelled, kept order in book';
+
+/**
+ * Emitted once on the exchange emitter when a chase ends, however it ends.
+ * `filled` is in order-placement units (the unit of `size`), clamped to
+ * `[0, size]`; it can undercount a fill that lands during the final cancel.
+ */
+export type ChaserCompleteEvent = {
+  id: string;
+  clientId?: string;
+  symbol: string;
+  side: OrderSide;
+  reduceOnly: boolean;
+  size: number;
+  filled: number;
+  stopReason: string;
 };

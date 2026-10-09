@@ -15,7 +15,10 @@ import {
 import { getTickerPredictedBestAsk } from '../../utils/getTickerPredictedBestAsk';
 import { getTickerPredictedBestBid } from '../../utils/getTickerPredictedBestBid';
 import { adjust } from '../../utils/safe-math';
-import { ChaserOrderInstance } from './ChaserOrderInstance';
+import { ChaserOrderInstance, placementFilled } from './ChaserOrderInstance';
+import { CHASER_KEPT_ORDER_STOP_REASON, ChaserCompleteEvent } from './ChaserOrderOptions';
+
+const FILL_RECONCILED_VENUES = new Set(['hyperliquid', 'grvt', 'bybitdemo']);
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
 const CHASER_MISSING_ORDER_CONFIRMATIONS = 2;
@@ -508,6 +511,7 @@ export class ChaserOrderManager {
                 if (instance.isStopped) {
                   this.log('fully filled after REST check - marking ourselves completed', instance);
                   cleanup();
+                  await this.cleanupInstance(instance);
                   return;
                 }
               } catch (e) {
@@ -776,6 +780,9 @@ export class ChaserOrderManager {
 
   async cleanupInstance(instance: ChaserOrderInstance) {
     const exchange = instance.exchange;
+    // Claimed on entry: a second, concurrent cleanup finds no ids left to
+    // cancel and must not report the fill before the first one's cancel lands.
+    const ownsCompletion = instance.claimCompleteEmission();
 
     // Detach the supervisor's event listeners and pending timeouts up
     // front, before we start awaiting cancels. Without this, an
@@ -819,6 +826,71 @@ export class ChaserOrderManager {
         // never trip the splice below on a cancel-loop error
       }
     }
+
+    if (ownsCompletion) await this.emitComplete(instance);
+  }
+
+  /**
+   * One `chaser:complete` per chase. Listeners are already detached, so the
+   * fill count is refreshed from the store's rows for every order it placed,
+   * and on bybitdemo — whose order frames may never arrive — from the position.
+   */
+  private async emitComplete(instance: ChaserOrderInstance) {
+    const stopReason = instance.state.stopReason;
+    const orderIds = [...instance.everTrackedOrderIds];
+    for (const orderId of orderIds) {
+      const order = instance.exchange.store?.orders?.find((o) => o.id === orderId);
+      if (order) instance.setFilledAmount(order.id, placementFilled(order));
+    }
+    // Rows of filled orders vanish (Hyperliquid/GRVT) or never arrive (bybitdemo),
+    // so only REST sees a fill that beat the final cancel. Paged and sequential, so
+    // only for a chase someone awaits. Best effort: undercount on failure.
+    let reconciledOverRest = false;
+    const fetchFills = (instance.exchange as any).fetchFillsForOrderIds;
+    if (
+      instance.options.clientId &&
+      orderIds.length &&
+      FILL_RECONCILED_VENUES.has(instance.exchange.name) &&
+      typeof fetchFills === 'function'
+    ) {
+      try {
+        const fillsMap: Map<string, number> = await fetchFills.call(instance.exchange, orderIds);
+        for (const [orderId, filledAmount] of fillsMap) instance.setFilledAmount(orderId, filledAmount);
+        reconciledOverRest = true;
+      } catch (e) {
+        this.log(`chaser:complete fill reconciliation failed: ${e}`, instance);
+      }
+    }
+    const event: ChaserCompleteEvent = {
+      id: instance.id,
+      clientId: instance.options.clientId,
+      symbol: instance.options.symbol,
+      side: instance.options.side,
+      reduceOnly: Boolean(instance.options.reduceOnly),
+      size: instance.options.size,
+      // The position delta counts any same-side trade, so it is only the
+      // fallback for when REST could not say what this chase filled.
+      filled: reconciledOverRest
+        ? instance.filledSize
+        : Math.max(instance.filledSize, this.bybitDemoPositionFill(instance)),
+      stopReason,
+    };
+    try {
+      instance.exchange.emitter.emit('chaser:complete', event);
+    } catch (e) {
+      this.log(`chaser:complete listener threw: ${e}`, instance);
+    }
+  }
+
+  private bybitDemoPositionFill(instance: ChaserOrderInstance) {
+    if (instance.exchange.name !== 'bybitdemo' || instance.targetPositionContracts === undefined) return 0;
+    const startingContracts = instance.targetPositionContracts - instance.options.size;
+    const targetSide = instance.options.side === OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+    const position = (instance.exchange.store?.positions || []).find(
+      (p) => p.symbol === instance.options.symbol && p.side === targetSide,
+    );
+    const delta = Math.abs(position?.contracts || 0) - startingContracts;
+    return Math.min(instance.options.size, Math.max(0, delta));
   }
 
   cleanupExchange(exchange: Exchange, reason = 'Exchange disposed while chase was active') {
@@ -854,7 +926,7 @@ export class ChaserOrderManager {
   removeKeepOrder(id: string) {
     const instance = this._chaserOrderInstances.find((instance) => instance.id === id);
     if (!instance) return;
-    instance.markComplete('User cancelled, kept order in book');
+    instance.markComplete(CHASER_KEPT_ORDER_STOP_REASON);
     // Clear currentOrderIds BEFORE the array splice so any concurrent
     // pass through cleanupInstance won't see them; we deliberately
     // don't call cleanupInstance here (it would cancel them).
@@ -869,6 +941,7 @@ export class ChaserOrderManager {
     instance.dispose();
     const index = this._chaserOrderInstances.indexOf(instance);
     if (index > -1) this._chaserOrderInstances.splice(index, 1);
+    if (instance.claimCompleteEmission()) void this.emitComplete(instance);
   }
 
   get instances() {

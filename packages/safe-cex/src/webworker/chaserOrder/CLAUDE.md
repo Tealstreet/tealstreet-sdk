@@ -263,3 +263,24 @@ When extending the chaser, treat `isStopped` as a cooperative
 abort signal at every `await` boundary that can lead to a fresh
 order being placed, and register every long-lived listener /
 timeout as a disposer.
+
+## `chaser:complete` reports the filled size exactly once
+
+Every ending emits one `chaser:complete` (`ChaserCompleteEvent`) on the exchange
+emitter, bridged to the browser, which uses it to attach TP/SL to a finished
+chase (`apps/web/src/order/chaseOrder.ts`). Three rules keep `filled` right:
+
+- **The first `cleanupInstance` claims it on entry** and emits after its own
+  cancel loop. A concurrent second cleanup finds `currentOrderIds` already
+  cleared and would otherwise report before the cancel landed.
+- **Listeners are detached by then**, so `emitComplete` re-reads the store row of
+  every id in `everTrackedOrderIds` (not `currentOrderIds`, which
+  `checkAndMarkIfComplete` clears for Closed orders) through the monotonic
+  `setFilledAmount`, then — only for a chase with a `clientId`, on
+  hyperliquid/grvt/bybitdemo — asks `fetchFillsForOrderIds` (Hyperliquid/GRVT
+  drop a filled order's row at once; it is paged and sequential, so never for
+  every chase). bybitdemo falls back to the position delta only when that REST
+  read fails: the delta counts any same-side trade and over-counts.
+- **It can still undercount** a fill the store has not seen yet, or one on an
+  order placed while STOP was in flight (`tryPlaceOrders` cancels those itself). That is the
+  safe direction for a reduce-only TP/SL; never pad it upward.

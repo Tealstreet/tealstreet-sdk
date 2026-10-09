@@ -943,4 +943,203 @@ describe('ChaserOrderManager', () => {
       expect.stringMatching(/stopped because the exchange connection was disposed/i),
     );
   });
+
+  describe('chaser:complete', () => {
+    const completeEvents = (exchange: Exchange) =>
+      (exchange.emitter.emit as any).mock.calls.filter(([event]: [string]) => event === 'chaser:complete');
+
+    const newInstance = (exchange: Exchange) =>
+      new ChaserOrderInstance(exchange, {
+        symbol: 'BTCUSDT',
+        size: 1,
+        side: OrderSide.Buy,
+        maxAttempts: 10,
+        reduceOnly: false,
+        delay: 5000,
+        clientId: 'CHS-test',
+      });
+
+    it('emits once with the full size when the chase fills', async () => {
+      const { emit, exchange, order, store } = createMockExchange();
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      await emit('update', store);
+
+      (order as any).status = OrderStatus.Closed;
+      (order as any).filled = 1;
+      store.updateIds.orders += 1;
+      await emit('update', store);
+      await vi.advanceTimersByTimeAsync(0);
+      manager.remove(instance.id);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(completeEvents(exchange)).toEqual([
+        [
+          'chaser:complete',
+          expect.objectContaining({
+            id: instance.id,
+            clientId: 'CHS-test',
+            side: OrderSide.Buy,
+            reduceOnly: false,
+            size: 1,
+            filled: 1,
+            stopReason: 'Completed',
+          }),
+        ],
+      ]);
+    });
+
+    it('counts a partial fill the store shows on the cancelled order when the user stops', async () => {
+      const { exchange, order } = createMockExchange();
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      // The fill landed but its update never reached the (now detached) supervisor.
+      (order as any).filled = 0.4;
+
+      manager.remove(instance.id);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(completeEvents(exchange)).toEqual([
+        ['chaser:complete', expect.objectContaining({ filled: 0.4, stopReason: 'User cancelled' })],
+      ]);
+    });
+
+    it('emits filled 0 when nothing filled', async () => {
+      const { exchange } = createMockExchange();
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      manager.removeKeepOrder(instance.id);
+
+      expect(completeEvents(exchange)).toEqual([['chaser:complete', expect.objectContaining({ filled: 0 })]]);
+    });
+
+    it('sizes a bybitdemo fill from the position when order frames never arrived', async () => {
+      const { emit, exchange, store } = createMockExchange();
+      (exchange as any).name = 'bybitdemo';
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      (store as any).positions = [
+        { id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
+      ];
+      store.updateIds.positions += 1;
+      await emit('update', store);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(completeEvents(exchange)).toEqual([
+        ['chaser:complete', expect.objectContaining({ filled: 1, stopReason: 'Completed' })],
+      ]);
+    });
+
+    it('a concurrent second cleanup does not report before the first cancel lands', async () => {
+      const { exchange, order } = createMockExchange();
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      let resolveCancel!: () => void;
+      (exchange.cancelOrders as any).mockReturnValueOnce(new Promise<void>((resolve) => (resolveCancel = resolve)));
+      instance.markComplete('User cancelled');
+      const first = manager.cleanupInstance(instance);
+      await manager.cleanupInstance(instance);
+      expect(completeEvents(exchange)).toEqual([]);
+
+      (order as any).filled = 0.4;
+      resolveCancel();
+      await first;
+
+      expect(completeEvents(exchange)).toEqual([['chaser:complete', expect.objectContaining({ filled: 0.4 })]]);
+    });
+
+    it('reads REST fills for an order whose row the venue already dropped', async () => {
+      const { exchange, store } = createMockExchange();
+      (exchange as any).name = 'grvt';
+      (exchange as any).fetchFillsForOrderIds = vi.fn().mockResolvedValue(new Map([['order-1', 0.7]]));
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      (store as any).orders = [];
+
+      manager.remove(instance.id);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((exchange as any).fetchFillsForOrderIds).toHaveBeenCalledWith(['order-1']);
+      expect(completeEvents(exchange)).toEqual([['chaser:complete', expect.objectContaining({ filled: 0.7 })]]);
+    });
+
+    it('skips REST reconciliation for a chase nobody is waiting on', async () => {
+      const { exchange } = createMockExchange();
+      (exchange as any).name = 'grvt';
+      (exchange as any).fetchFillsForOrderIds = vi.fn().mockResolvedValue(new Map());
+      const manager = new ChaserOrderManager();
+      const instance = new ChaserOrderInstance(exchange, {
+        symbol: 'BTCUSDT',
+        size: 1,
+        side: OrderSide.Buy,
+        maxAttempts: 10,
+        reduceOnly: false,
+        delay: 5000,
+      });
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      manager.remove(instance.id);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((exchange as any).fetchFillsForOrderIds).not.toHaveBeenCalled();
+      expect(completeEvents(exchange)).toHaveLength(1);
+    });
+
+    it('trusts REST over the bybitdemo position delta, which counts other trades', async () => {
+      const { exchange, store } = createMockExchange();
+      (exchange as any).name = 'bybitdemo';
+      (exchange as any).fetchFillsForOrderIds = vi.fn().mockResolvedValue(new Map([['order-1', 0]]));
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      // A separate market buy grew the long; this chase filled nothing.
+      (store as any).positions = [
+        { id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.5 },
+      ];
+
+      manager.remove(instance.id);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(completeEvents(exchange)).toEqual([['chaser:complete', expect.objectContaining({ filled: 0 })]]);
+    });
+
+    it('counts a closed order the supervisor never processed when the user stops', async () => {
+      const { exchange, order } = createMockExchange();
+      const manager = new ChaserOrderManager();
+      const instance = newInstance(exchange);
+
+      manager.add(instance);
+      await vi.advanceTimersByTimeAsync(1000);
+      (order as any).status = OrderStatus.Closed;
+      (order as any).filled = 1;
+
+      manager.remove(instance.id);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(completeEvents(exchange)).toEqual([['chaser:complete', expect.objectContaining({ filled: 1 })]]);
+    });
+  });
 });

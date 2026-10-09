@@ -256,11 +256,12 @@ phase tag and never ship it. Counts from this tag are a floor, not a census.
 - The bridge re-emits exchange events to the main thread by
   postMessaging `{op: '<event>', data: [...args]}` for a fixed
   set (`error`, `warning`, `log`, `exec-log`, `exec-result`,
-  `grafana-info`, `grafana-error`, `grafana-pws`, `grafana-pws-sub`,
+  `chaser:complete`, `grafana-info`, `grafana-error`, `grafana-pws`, `grafana-pws-sub`,
   `grafana-http-request`, `grafana-http-response`). Adding a new
   bridged event requires adding it both to the worker-side
   forwarder in `_setupExchangeEventListeners` and the main-side
-  `workerListener` switch in `exchangeAccountController.ts`.
+  `workerListener` switch in `exchangeAccountController.ts`, plus
+  `StoreWorkerOutgoingOp` in `StoreWorkerPayload.ts`.
 - Startup failures should go through `ExchangeWorker.logError(...)` once. That
   path sends structured `{ error, tags, extra }` data for the web app's Sentry
   sanitizer; do not also post a bare string `op: 'error'`, because it loses the

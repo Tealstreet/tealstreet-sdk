@@ -12,6 +12,16 @@ export const defaultChaserState: ChaserOrderState = Object.freeze({
   currentOrdersIds: [],
 });
 
+// Most adapters expose `Order.filled` in the same unit accepted by
+// `PlaceOrderOpts.amount`. BloFin-style contract adapters keep the public
+// value in base units, so they supply the equivalent placement-unit fill.
+export const placementFilled = (order: Order): number => {
+  const placementFill = order.extra?.filledInPlacementUnits;
+  return typeof placementFill === 'number' && Number.isFinite(placementFill) && placementFill >= 0
+    ? placementFill
+    : order.filled;
+};
+
 export class ChaserOrderInstance {
   private readonly _options: ChaserOrderOptions;
   private readonly _id: string;
@@ -23,6 +33,8 @@ export class ChaserOrderInstance {
   private _freshOrder = false;
   private _disposers: Array<() => void> = [];
   private _targetPositionContracts: number | undefined;
+  private _completeEmitted = false;
+  private _everTrackedOrderIds = new Set<string>();
   // Wall-clock ms of the most recent partial fill we observed.
   // Used by the manager to skip cancel+replace immediately after a
   // fill — see `ChaserOrderManager.updateOrders` for the rationale.
@@ -89,14 +101,7 @@ export class ChaserOrderInstance {
   }
 
   subtractFilledSize(order: Order) {
-    // Most adapters expose `Order.filled` in the same unit accepted by
-    // `PlaceOrderOpts.amount`. BloFin-style contract adapters keep the public
-    // value in base units, so they supply the equivalent placement-unit fill.
-    const placementFill = order.extra?.filledInPlacementUnits;
-    const filled =
-      typeof placementFill === 'number' && Number.isFinite(placementFill) && placementFill >= 0
-        ? placementFill
-        : order.filled;
+    const filled = placementFilled(order);
 
     const prevFilled = this._filledByOrderId[order.id] || 0;
     if (filled > prevFilled) {
@@ -154,12 +159,29 @@ export class ChaserOrderInstance {
     }
   }
 
+  /** True exactly once, so `chaser:complete` cannot fire twice for one chase. */
+  claimCompleteEmission() {
+    if (this._completeEmitted) return false;
+    this._completeEmitted = true;
+    return true;
+  }
+
+  get filledSize() {
+    return Math.min(this._options.size, Math.max(0, this._options.size - this._remainingSize));
+  }
+
   get lastPartialFillAt() {
     return this._lastPartialFillAt;
   }
 
   set currentOrderIds(orderIds: string[]) {
     this._state.currentOrdersIds = orderIds;
+    for (const id of orderIds) this._everTrackedOrderIds.add(id);
+  }
+
+  /** Every order id this chase has placed, kept after `currentOrderIds` is cleared. */
+  get everTrackedOrderIds(): ReadonlySet<string> {
+    return this._everTrackedOrderIds;
   }
 
   get isStopped() {

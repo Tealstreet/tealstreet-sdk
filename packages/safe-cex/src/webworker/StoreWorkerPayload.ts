@@ -65,6 +65,7 @@ export type StoreWorkerOutgoingOp =
   | 'updatePositions:done'
   | 'callMethod:done'
   | 'twap:stateUpdate'
+  | 'chaser:complete'
   // Lifecycle
   | 'deactivate-status'
   | 'start-status'
@@ -87,6 +88,7 @@ export type StoreWorkerOutgoingOp =
   | 'grafana-http-response'
   // Infrastructure (ExchangeServerWorker only)
   | 'connection-state'
+  | 'session-lost'
   // Hosted exchange-server server-load telemetry (diagnostic builds only).
   | 'diagnostic:server-health'
   | 'signing_request'
