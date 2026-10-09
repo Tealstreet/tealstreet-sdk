@@ -6,21 +6,6 @@ export const BASE_URL = {
   testnet: 'https://testnet.bitunix.com',
 };
 
-export const FALLBACK_WS_URL = {
-  public: {
-    livenet: 'wss://bitunix-fapi-proxy-ja.tealstreet.io/public/',
-    testnet: 'wss://bitunix-fapi-proxy-ja.tealstreet.io/public/',
-  },
-  private: {
-    livenet: 'wss://bitunix-fapi-proxy-ja.tealstreet.io/private/',
-    testnet: 'wss://bitunix-fapi-proxy-ja.tealstreet.io/private/',
-  },
-  frontendfutures: {
-    livenet: 'wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2',
-    testnet: 'wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2',
-  },
-};
-
 export const BASE_WS_URL = {
   public: {
     livenet: 'wss://fapi.bitunix.com/public/',

@@ -4,12 +4,11 @@ import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import {
   safeCexAxiosCreate,
   safeCexAxiosCreateNoProxy,
-  setInnerAdapterForRemoteSigning,
+  installTransportAdapter,
 } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
@@ -60,7 +59,7 @@ export const createBinanceAPI = (options: ExchangeOptions, exchange: BaseExchang
   });
 
   if (options.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   return xhr;
@@ -109,7 +108,7 @@ export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange
   });
 
   if (options.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   return xhr;

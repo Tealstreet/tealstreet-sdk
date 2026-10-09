@@ -3,6 +3,8 @@ import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
 import { ethers } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import '../../transport/registerTealstreetTransport';
+
 import { setProxyToken } from '../../accessToken';
 import {
   buildAsterDEXCodeQueryString,
@@ -24,7 +26,7 @@ import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
 import { asterDEXVirtualClock } from '../../exchanges/asterdex/asterdex.virtualClock';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
-import { PRIVATE_PROXY_JP } from '../../utils/transportResolution';
+import { PRIVATE_PROXY_JP } from '../../transport/tealstreet/transportResolution';
 
 const builderAddress = '0xc2af13e1B1de3A015252A115309A0F9DEEDCFa0A';
 const userAddress = '0x1111111111111111111111111111111111111111';

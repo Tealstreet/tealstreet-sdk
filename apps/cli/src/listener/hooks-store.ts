@@ -26,13 +26,14 @@ interface HooksFile {
 }
 
 function ensureDir(): void {
-  if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
+  if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true, mode: 0o700 });
 }
 
+// hooks.json holds webhook shared secrets; the rename keeps the temp file's 0600.
 function atomicWrite(path: string, contents: string): void {
   ensureDir();
   const tmp = `${path}.tmp.${process.pid}`;
-  writeFileSync(tmp, contents);
+  writeFileSync(tmp, contents, { mode: 0o600 });
   try {
     renameSync(tmp, path);
   } catch (err) {

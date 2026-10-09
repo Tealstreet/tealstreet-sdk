@@ -23,7 +23,7 @@ describe('virtualClock', () => {
     (virtualClock as any).client = null;
     (virtualClock as any).offsetMs = 0;
     (virtualClock as any).syncInFlight = null;
-    delete process.env.NEXT_PUBLIC_TIME_API_ORIGIN;
+    virtualClock.setServerTimeSource(undefined);
   });
 
   afterEach(() => {
@@ -243,49 +243,69 @@ describe('virtualClock', () => {
     });
   });
 
-  describe('dedicated time origin', () => {
-    it('uses the configured public endpoint instead of the Vercel route', async () => {
+
+  describe('time source order', () => {
+    it('syncs to venue time when the host registered no time source', async () => {
       (global as any).window = {};
-      process.env.NEXT_PUBLIC_TIME_API_ORIGIN = 'https://time.tealstreet.io///';
-      vi.mocked(axios.get).mockResolvedValueOnce({ data: { time: new Date().toISOString(), unixMs: Date.now() } });
+      vi.mocked(axios.get).mockResolvedValueOnce({ data: { time: Date.now() + 10_000 } });
 
       await virtualClock.syncClientServerTime();
 
-      expect(axios.get).toHaveBeenCalledWith('https://time.tealstreet.io/v1/time', { timeout: 5000 });
+      expect(axios.get).toHaveBeenCalledTimes(1);
+      expect(String(vi.mocked(axios.get).mock.calls[0][0])).toContain('api.bybit.com/v5/market/time');
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(9_000);
       delete (global as any).window;
     });
 
-    // The native app has no usable same-origin — `self.location.origin` there
-    // is the Metro dev server — so it names the edge route outright rather
-    // than relying on the bare-origin form.
-    it('uses a configured full endpoint URL verbatim', async () => {
+    it('prefers a registered time source over venue time', async () => {
       (global as any).window = {};
-      process.env.NEXT_PUBLIC_TIME_API_ORIGIN = 'https://preview.tealstreet.io/api/time/';
-      vi.mocked(axios.get).mockResolvedValueOnce({ data: { time: new Date().toISOString(), unixMs: Date.now() } });
+      const source = vi.fn().mockResolvedValue(Date.now() + 20_000);
+      virtualClock.setServerTimeSource(source);
 
       await virtualClock.syncClientServerTime();
 
-      expect(axios.get).toHaveBeenCalledWith('https://preview.tealstreet.io/api/time', { timeout: 5000 });
+      expect(source).toHaveBeenCalledTimes(1);
+      expect(axios.get).not.toHaveBeenCalled();
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(19_000);
       delete (global as any).window;
     });
 
-    it('falls back to the local clock after the two maintained sources fail', async () => {
+    it('falls back to venue time, then the local clock, when the source fails', async () => {
       (global as any).window = {};
+      virtualClock.setServerTimeSource(async () => undefined);
       vi.mocked(axios.get).mockRejectedValue(new Error('offline'));
 
       await virtualClock.syncClientServerTime();
 
-      expect(axios.get).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(axios.get).mock.calls.some(([url]) => String(url).includes('worldtimeapi.org'))).toBe(false);
+      expect(axios.get).toHaveBeenCalledTimes(1);
+      expect((virtualClock as any).offsetMs).toBe(0);
       delete (global as any).window;
     });
-  });
 
-  describe('private getBaseUrl', () => {
-    it('should return empty string when self is undefined', () => {
-      const getBaseUrl = (virtualClock as any).getBaseUrl;
-      // In Node.js environment, self is undefined
-      expect(typeof getBaseUrl()).toBe('string');
+    it('treats a throwing source as unavailable', async () => {
+      (global as any).window = {};
+      virtualClock.setServerTimeSource(async () => {
+        throw new Error('host clock broke');
+      });
+      vi.mocked(axios.get).mockResolvedValueOnce({ data: { time: Date.now() + 10_000 } });
+
+      await expect(virtualClock.syncClientServerTime()).resolves.toBeUndefined();
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(9_000);
+      delete (global as any).window;
+    });
+
+    it('bybit sync leads with venue time and falls back to the source', async () => {
+      (global as any).window = {};
+      const source = vi.fn().mockResolvedValue(Date.now() + 30_000);
+      virtualClock.setServerTimeSource(source);
+      vi.mocked(axios.get).mockRejectedValue(new Error('geo-blocked'));
+
+      await virtualClock.syncBybitClientServerTime();
+
+      expect(axios.get).toHaveBeenCalledTimes(1);
+      expect(source).toHaveBeenCalledTimes(1);
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(29_000);
+      delete (global as any).window;
     });
   });
 });

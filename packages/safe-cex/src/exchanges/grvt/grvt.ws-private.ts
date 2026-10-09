@@ -1,5 +1,5 @@
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import {
   LogSeverity,
   Order,
@@ -39,6 +39,7 @@ const parsePositiveFiniteDecimal = (value: unknown): number | undefined => {
  * Requires authentication via session cookie and account ID sent to proxy
  */
 export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
+  private reportedMissingProxyHost = false;
   // GRVT's private stream is purely event-driven (only fires on
   // order/position/fill changes) and goes minutes-long idle when the user
   // isn't trading. Under the default pong-miss watchdog, even reliable pongs
@@ -142,7 +143,18 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       // Connect to the proxy WebSocket - auth happens after connection
-      this.ws = this.createWebsocket(resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.host!);
+      const host = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.host;
+      if (!host) {
+        // Every reconnect lands here again; one error per instance is the signal.
+        if (!this.reportedMissingProxyHost) {
+          this.reportedMissingProxyHost = true;
+          this.parent.emitAndLogError(
+            'GRVT private stream needs a proxy transport (its session cookie cannot be set from a browser); the active transport resolves none.',
+          );
+        }
+        return;
+      }
+      this.ws = this.createWebsocket(host);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);

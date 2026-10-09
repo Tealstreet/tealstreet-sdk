@@ -21,7 +21,7 @@ import { logger } from '../logger';
 // the watcher attaches and subsequent edits (CLI or external) fire events.
 function ensureStateFilesExist(): void {
   const dir = join(homedir(), '.tealstreet');
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   const seeds: Array<[string, string]> = [
     [getConfigFilePath(), JSON.stringify({ accounts: [] }, null, 2)],
     [TASKS_FILE, JSON.stringify({ version: 1, tasks: [] }, null, 2)],
@@ -31,7 +31,8 @@ function ensureStateFilesExist(): void {
   for (const [path, seed] of seeds) {
     if (!existsSync(path)) {
       try {
-        writeFileSync(path, seed);
+        // config.json and hooks.json later hold credentials.
+        writeFileSync(path, seed, { mode: 0o600 });
       } catch (err) {
         logger.warn(`listener: failed to seed ${path}: ${(err as Error).message}`);
       }

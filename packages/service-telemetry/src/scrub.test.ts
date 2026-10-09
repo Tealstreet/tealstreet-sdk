@@ -25,7 +25,7 @@ describe('scrubString', () => {
     // stack of a signing timeout.
     const frame = '/app/services/exchange-server/src/remote-signer.ts:62:20';
     expect(scrubString(frame)).toBe(frame);
-    expect(scrubString('at sign (/Users/sam/cs/tealstreet-next/packages/safe-cex/src/exchanges/binance/binance.api.ts:118:9)')).toContain(
+    expect(scrubString('at sign (/Users/alice/src/project/packages/safe-cex/src/exchanges/binance/binance.api.ts:118:9)')).toContain(
       'binance.api.ts:118:9',
     );
   });

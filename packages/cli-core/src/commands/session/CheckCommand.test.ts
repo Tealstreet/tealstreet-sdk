@@ -4,7 +4,7 @@ import type { CommandContext } from '../Command';
 import { CheckCommand } from './CheckCommand';
 
 /**
- * The question jrnats asked: "check symbol SHOP and gives back is crypto i.e.
+ * The question a user report asked: "check symbol SHOP and gives back is crypto i.e.
  * tradeable or false - tradfi". These tests pin that the output names the
  * class correctly on both sides and uses the "may require" phrasing from
  * `bybit/CLAUDE.md` — never "you can trade this".

@@ -21,7 +21,7 @@
 // `WebSocket` option, from a URL of the form
 //   wss://fsjnpy143pbz.<region>.tealstreet.io/tunnel?ts-relay=<encoded upstream>
 // (`buildRelayUrl`), so the exchange classes keep treating it as just another
-// host in `routing/routingTable.ts`. In Node/Bun the inner socket is the `ws`
+// host in `transport/tealstreet/routing/routingTable.ts`. In Node/Bun the inner socket is the `ws`
 // client with whatever upgrade options the caller passed (Origin/UA headers,
 // ALPN http/1.1 — the tunnel's WAF needs them); in browsers it is the native
 // WebSocket, which ignores those options.

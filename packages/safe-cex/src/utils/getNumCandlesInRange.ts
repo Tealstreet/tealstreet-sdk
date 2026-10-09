@@ -1,16 +1,10 @@
-import { createDebugLogger, DebugLevel } from '@tealstreet/logging/src/debugLogger';
 import { Timeframe, timeframeToSeconds } from '../types';
 import { getCandleStartTime } from './getCandleStartTime';
 import { normalizeEpochToSeconds } from './normalizeEpochToSeconds';
 
-const debug = createDebugLogger({
-  prefix: 'getNumCandlesInRange',
-  shouldLogToConsole: () => true,
-});
-
 export const getNumCandlesInRange = (timeframe: Timeframe, from: number, to: number) => {
   if (from > to) {
-    debug(DebugLevel.Info, `Invalid range: from (${from}) must be less than to (${to})`);
+    console.warn(`[getNumCandlesInRange] Invalid range: from (${from}) must be less than to (${to})`);
     return 0;
   }
   // easy out

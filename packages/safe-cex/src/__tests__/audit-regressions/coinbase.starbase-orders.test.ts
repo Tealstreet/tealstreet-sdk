@@ -344,7 +344,7 @@ describe('Coinbase Starbase inert order-write contracts', () => {
       'coinbase.ws-public.ts',
       '../../createExchangeFromAccount.ts',
       '../../exchangeMetadata.ts',
-      '../../routing/routingTable.ts',
+      '../../transport/tealstreet/routing/routingTable.ts',
     ]) {
       const source = readFileSync(resolve(__dirname, '../../exchanges/coinbase', file), 'utf8');
       expect(source).not.toContain('coinbase.starbase-orders');

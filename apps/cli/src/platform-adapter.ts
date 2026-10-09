@@ -29,7 +29,7 @@ import { logAccountRoute } from './account-log';
 import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
-import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/utils/transportResolution';
+import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
 
 // Default timeout for exchange operations (30 seconds)
 const EXCHANGE_OPERATION_TIMEOUT = 30000;

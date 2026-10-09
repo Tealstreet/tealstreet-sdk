@@ -1,40 +1,24 @@
-Tealstreet SDK — Proprietary and Confidential
+MIT License
 
-Copyright (c) 2026 Tealstreet Ltd. All rights reserved.
+Copyright (c) 2026 Tealstreet Ltd
 
-"Tealstreet" means Tealstreet Ltd, a Cayman Islands company.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-This is NOT open-source software. No open-source license is granted.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-The contents of this repository — including, without limitation, `safe-cex`,
-the Tealstreet CLI, and every package, application, and supporting file herein
-(collectively, the "Licensed Software") — are the proprietary and confidential
-property of Tealstreet.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
-GOVERNED BY YOUR SIGNED AGREEMENT
-
-Your access to and use of the Licensed Software are governed solely by the
-written agreement you have signed with Tealstreet — typically one or more of:
-
-  - a Contributor Agreement (confidentiality + IP assignment + a personal,
-    non-commercial use license);
-  - a Non-Disclosure Agreement (for pre-access evaluation); and/or
-  - a Commercial License (required for ANY use beyond the non-commercial
-    personal use granted by the Contributor Agreement).
-
-That signed agreement controls. In the event of any conflict between it and
-this notice, the signed agreement supersedes this notice.
-
-NO AGREEMENT, NO RIGHTS
-
-If you have not signed such an agreement with Tealstreet, you have NO right to
-access, use, copy, modify, distribute, or create derivative works from the
-Licensed Software, and you must delete all copies in your possession.
-
-BROKER / REFERRAL CODES
-
-Regardless of any rights granted by a signed agreement, you may not remove,
-disable, or alter any broker, referral, or affiliate codes embedded in the
-exchange integrations.
-
-For licensing inquiries, contact Tealstreet.
+Third-party components in this repository keep their own licences; see
+THIRD_PARTY_NOTICES.md.

@@ -9,8 +9,7 @@ import axiosRetry from 'axios-retry';
 import { ethers } from 'ethers';
 
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { ExchangeOptions, LogSeverity } from '../../types';
 import { appendHttpFailure } from '../../utils/httpFailure';
 import {
@@ -214,7 +213,7 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
 
   // Set up HTTP over WebSocket adapter if tunnel is enabled
   if (exchange?.options?.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(api, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(api, exchange.options, exchange.name);
   }
 
   // Add retry logic for network errors
@@ -263,7 +262,7 @@ export const createAPI = (
 
   // Set up HTTP over WebSocket adapter if tunnel is enabled
   if (transportOptions.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(api, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(api, transportOptions, exchange.name);
   }
 
   // Add authentication interceptor

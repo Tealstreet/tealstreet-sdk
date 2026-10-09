@@ -8,7 +8,7 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 /**
  * `check <symbol>` — says what a listed contract IS, in one line.
  *
- * The question jrnats asked in the Discord report is "is this crypto or
+ * The question a user report asked is "is this crypto or
  * tradfi" — answered without placing an order, without a new REST call, and
  * without the classifier's warning being hidden inside an order's refusal.
  * `classifyMarket` already reads from `Market.info` on the startup cache; this

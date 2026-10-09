@@ -271,7 +271,7 @@ describe('Coinbase Starbase inert public WebSocket frame classifier', () => {
       '../../exchangeMetadata.ts',
       '../registry.native.ts',
       '../registry.ts',
-      '../../routing/routingTable.ts',
+      '../../transport/tealstreet/routing/routingTable.ts',
     ]) {
       const source = readFileSync(resolve(__dirname, '../../exchanges/coinbase', file), 'utf8');
       expect(source).not.toContain('coinbase.starbase-public-frames');

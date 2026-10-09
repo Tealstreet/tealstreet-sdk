@@ -586,9 +586,9 @@ an auth failure — they are real rejections but not credential problems.
 When `tealstreetProxy` is enabled:
 
 - **Private WS** resolves its tunnelled or direct host through
-  `src/routing/resolveExchangeRouting.ts`.
+  `src/transport/tealstreet/routing/resolveExchangeRouting.ts`.
 - **REST** resolves the configured CORS proxy through the routing table and
-  `src/utils/transportResolution.ts` inside `safeCexAxiosCreate`.
+  `src/transport/tealstreet/transportResolution.ts` inside `safeCexAxiosCreate`.
 
 Blofin does **not** use the HTTP-over-WebSocket adapter for REST requests. In proxy/tunnel option mapping, Blofin is handled as proxy-first routing (`supportsTunnel: false` at metadata level).
 

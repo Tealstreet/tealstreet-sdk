@@ -55,6 +55,18 @@ git pull --ff-only origin master
 git branch -d feat/my-change
 ```
 
+## Licensing
+
+This repository is MIT-licensed (see `LICENSE`). By opening a pull request you
+agree that your contribution is licensed under the same terms. Vendored code
+under `thirdparty/` keeps its upstream licence; see `THIRD_PARTY_NOTICES.md`.
+
+## Secrets
+
+Never commit API keys, secrets, private keys or session tokens, including in
+test fixtures and comments. CI scans every new commit and fails the PR on a
+match. Report a vulnerability as described in `SECURITY.md`, not in an issue.
+
 ## Rules
 
 - Do not commit directly to `master`.

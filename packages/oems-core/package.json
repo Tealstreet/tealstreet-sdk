@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "build": "echo \"Source-only via tsconfig path aliases \u2014 no build.\"",
+    "build": "echo \"Source-only via tsconfig path aliases — no build.\"",
     "clean": "rimraf ./coverage ./tsconfig.tsbuildinfo",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/oems-core.eslintcache",
     "test": "vitest run",
@@ -22,5 +22,6 @@
     "@tealstreet/prettierrc": "*",
     "typescript": "^6.0.3",
     "vitest": "^5.0.2"
-  }
+  },
+  "license": "MIT"
 }

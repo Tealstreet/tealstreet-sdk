@@ -34,7 +34,7 @@
     "crypto"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/set-cookie-parser": "^2.4.10",
@@ -69,5 +69,6 @@
   "bugs": {
     "url": "https://github.com/gravity-technologies/grvt-ts-sdk/issues"
   },
-  "homepage": "https://github.com/gravity-technologies/grvt-ts-sdk#readme"
+  "homepage": "https://github.com/gravity-technologies/grvt-ts-sdk#readme",
+  "private": true
 }

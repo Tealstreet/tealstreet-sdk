@@ -7,7 +7,7 @@ import { OKXDemoExchange } from '../../exchanges/okx/okxdemo.exchange';
 import { OKXEUDemoExchange } from '../../exchanges/okx/okxeudemo.exchange';
 import { BASE_URLS, BASE_WS_URLS } from '../../exchanges/okx/okx.types';
 import { exchangeRegistry } from '../../exchanges/registry';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveExchangeRouting } from '../../transport/tealstreet/routing/resolveExchangeRouting';
 import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {

@@ -2,7 +2,7 @@ import type { BaseExchange } from './base';
 
 import { RingBuffer } from '@tealstreet/data-structures/src/RingBuffer';
 import { RelayWebSocket } from '@tealstreet/http-over-websocket/src/RelayWebSocket';
-import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { getTransport } from '../transport/registry';
 import { Options, ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import {
@@ -17,7 +17,11 @@ import {
   WS_MIN_RECONNECTION_DELAY,
 } from '../config/config';
 import { LogSeverity } from '../types';
-import { isWsDiagnosticsEnabled, redactWsDiagnosticPayload, stringifyWsDiagnosticPayload } from '../utils/wsDiagnostics';
+import {
+  isWsDiagnosticsEnabled,
+  redactWsDiagnosticPayload,
+  stringifyWsDiagnosticPayload,
+} from '../utils/wsDiagnostics';
 import { MessageHandlers, MessageHandlersStats } from './types';
 
 type FreshHeadersProvider = () => Record<string, string>;
@@ -52,21 +56,6 @@ const STATS_RECONCILE_FORCE_MIN_MS = 250;
 const WS_DIAGNOSTIC_RATE_WINDOW_MS = 1000;
 const WS_DIAGNOSTIC_MAX_FRAMES_PER_WINDOW = 200;
 const WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS = 4096;
-
-const TEALSTREET_WS_HEADERS = {
-  Origin: 'https://preview.tealstreet.io',
-  'User-Agent':
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-};
-
-const isTealstreetWebSocketUrl = (url: string): boolean => {
-  try {
-    const hostname = new URL(url).hostname;
-    return hostname === 'tealstreet.io' || hostname.endsWith('.tealstreet.io');
-  } catch {
-    return false;
-  }
-};
 
 type ModuleWithCreateRequire = {
   createRequire?: (url: string | URL) => (id: string) => unknown;
@@ -539,31 +528,27 @@ export class BaseWebSocket<T extends BaseExchange> {
       // not silently open a socket that cannot carry required authentication.
       throw new HeaderCapableWebSocketUnavailableError();
     }
-    if (isRelayUrl(url)) {
-      // Tunnel rpc.relay: RelayWebSocket owns the rpc.auth/rpc.relay preface and
-      // the inner transport (`ws` in Node with the tunnel's Origin/UA headers,
-      // native WebSocket in browsers). Checked before the generic tealstreet.io
-      // branch because the relay url IS a tealstreet.io host.
+    const connection = getTransport(this.parent.options).wsConnection(url);
+    const withConnectionHeaders = (extra: Record<string, string>) => {
       const headers = reconnectingOptions.headers;
+      return typeof headers === 'function' ? () => ({ ...headers(), ...extra }) : { ...headers, ...extra };
+    };
+    if (connection?.kind === 'relay') {
+      // Tunnel rpc.relay: RelayWebSocket owns the rpc.auth/rpc.relay preface and
+      // the inner transport (`ws` in Node with the transport's headers, native
+      // WebSocket in browsers).
       ws = new ReconnectingWebSocket(url, protocols, {
         ...reconnectingOptions,
         WebSocket: RelayWebSocket,
-        headers:
-          typeof headers === 'function'
-            ? () => ({ ...headers(), ...TEALSTREET_WS_HEADERS })
-            : { ...headers, ...TEALSTREET_WS_HEADERS },
+        headers: withConnectionHeaders(connection.headers),
       } as Options);
-    } else if (isTealstreetWebSocketUrl(url)) {
-      const headers = reconnectingOptions.headers;
+    } else if (connection?.kind === 'headers') {
       ws = new ReconnectingWebSocket(url, protocols, {
         ...reconnectingOptions,
         ...(NodeWebSocket ? { WebSocket: NodeWebSocket } : {}),
-        // These proxy-routing headers are best effort: browser-native sockets
-        // cannot attach them, and must retain the existing fallback.
-        headers:
-          typeof headers === 'function'
-            ? () => ({ ...headers(), ...TEALSTREET_WS_HEADERS })
-            : { ...headers, ...TEALSTREET_WS_HEADERS },
+        // These routing headers are best effort: browser-native sockets cannot
+        // attach them, and must retain the existing fallback.
+        headers: withConnectionHeaders(connection.headers),
       } as Options);
     } else if (NodeWebSocket && reconnectingOptions.headers) {
       // Native/browser WebSocket constructors cannot attach upgrade headers.

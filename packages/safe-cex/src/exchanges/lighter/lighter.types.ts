@@ -1,7 +1,7 @@
 import type { ExchangeName } from '../../types';
 
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, Timeframe } from '../../types';
-import { getPublicCorsProxy } from '../../utils/transportResolution';
+import { withPublicCorsProxy } from '../../transport/registry';
 
 export const RECV_WINDOW = 20_000;
 
@@ -80,7 +80,7 @@ export const resolveLighterDeploymentProfile = (params: {
 // baked into a module-eval string.
 export const getBaseUrl = (net: LighterDeploymentNetwork): string =>
   LIGHTER_DEPLOYMENT_PROFILES[net].usesRestProxy
-    ? `${getPublicCorsProxy()}/${LIGHTER_DEPLOYMENT_PROFILES[net].apiBaseUrl}`
+    ? withPublicCorsProxy(LIGHTER_DEPLOYMENT_PROFILES[net].apiBaseUrl)
     : LIGHTER_DEPLOYMENT_PROFILES[net].apiBaseUrl;
 
 export const getLighterApiBaseUrl = (params: { exchangeName?: ExchangeName; testnet?: boolean }): string =>

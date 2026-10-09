@@ -23,21 +23,21 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 
 ### Core Perpetual Futures
 
-| File                         | Description                                                                                                                                                                                                                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hyperliquid.exchange.ts`    | Main exchange class extending `BaseExchange`. Orchestrates startup, order/position management, HIP-3 lifecycle, builder fee, cancel suppression, and tick loop.                                                                                                                                               |
-| `hyperliquid.api.ts`         | Axios client factory. Creates two clients: `createExchangeAPI` (for `/exchange` endpoint) and `createInfoAPI` (for `/info` endpoint).                                                                                                                                                                         |
-| `hyperliquid.types.ts`       | All TypeScript interfaces: REST responses, WS payloads, order wires, HIP-3 types (`PerpDex`, `PerpDexs`), builder fee types, candle types, etc. Also defines `BASE_URLS`, `WSS_URLS`, `ENDPOINTS`, `INFO_TYPES`, `EXCHANGE_TYPES`, `WEBSOCKET` constants.                                                     |
-| `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), the DEFAULT builder fee (10 tenths bps = 1bp), and `HYPERLIQUID_BUILDER_TIERS` — the whole 10/30/50 ladder, which the standalone approval page validates a URL against.                                                                                                                 |
-| `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`). |
-| `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                |
-| `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                               |
-| `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                |
-| `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                   |
-| `hyperliquid.rateLimiter.ts` | Shared weighted REST limiter (1200 weight/minute) plus request-weight classification for `/info` and `/exchange`.                                                                                                                                                                                            |
-| `hyperliquid.agent.ts`       | Agent wallet (API wallet) creation and approval via browser wallet (MetaMask). Handles EIP-712 `ApproveAgent` signing, network switching (Arbitrum One / Sepolia).                                                                                                                                            |
-| `hyperliquid.builderFee.ts`  | Builder fee approval and checking. EIP-712 `ApproveBuilderFee` signing, `checkBuilderFeeApproved()` REST check, `approveBuilderFeeWithBrowserWallet()` full browser flow.                                                                                                                                     |
-| `hyperliquid.cross-cache.ts` | Cross-context singleton cache for HIP-3 order type tracking and fill deduplication. Uses `sessionStorage` + `BroadcastChannel` for cross-worker/iframe synchronization. Manages pre-placement cache, pending orders cache, and seen fills set.                                                                |
+| File                         | Description                                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hyperliquid.exchange.ts`    | Main exchange class extending `BaseExchange`. Orchestrates startup, order/position management, HIP-3 lifecycle, builder fee, cancel suppression, and tick loop.                                                                                                                                                     |
+| `hyperliquid.api.ts`         | Axios client factory. Creates two clients: `createExchangeAPI` (for `/exchange` endpoint) and `createInfoAPI` (for `/info` endpoint).                                                                                                                                                                               |
+| `hyperliquid.types.ts`       | All TypeScript interfaces: REST responses, WS payloads, order wires, HIP-3 types (`PerpDex`, `PerpDexs`), builder fee types, candle types, etc. Also defines `BASE_URLS`, `WSS_URLS`, `ENDPOINTS`, `INFO_TYPES`, `EXCHANGE_TYPES`, `WEBSOCKET` constants.                                                           |
+| `hyperliquid.constants.ts`   | WS subscription type lists (`singularSubscriptionTypes`, `systemSubscriptionTypes`), Tealstreet builder wallet addresses (mainnet/testnet), the DEFAULT builder fee (10 tenths bps = 1bp), and `HYPERLIQUID_BUILDER_TIERS` — the whole 10/30/50 ladder, which the standalone approval page validates a URL against. |
+| `hyperliquid.signing.ts`     | EIP-712 phantom agent signing, L1 action signing, user-signed action signing (agent approval, builder fee, USD transfer, withdraw). Contains `floatToWire`, `orderRequestToOrderWire`, order action builders (`orderWiresToOrderAction`, `orderWiresToNormalTPSLAction`, `orderWiresToPositionalTPSLAction`).       |
+| `hyperliquid.ws-public.ts`   | Public WebSocket: `allMids` ticker updates, `l2Book` orderbook, `candle` OHLCV. Connects to `wss://api-ui.hyperliquid.xyz/ws`.                                                                                                                                                                                      |
+| `hyperliquid.ws-private.ts`  | Private WebSocket handling `clearinghouseState`, mode-gated `spotState` (unified/portfolio), HIP-3 `allMids`, `activeAssetData`, `orderUpdates`, `userFills`, `userEvents`, `userFundings`, and `notification`.                                                                                                     |
+| `hyperliquid.utils.ts`       | `symbolToCoin()` (display symbol to API coin format), `calculatePricePrecision()` (CCXT-compatible price precision algorithm).                                                                                                                                                                                      |
+| `hyperliquid.errors.ts`      | `HyperliquidAPIError` class and `handleApiError()` utility.                                                                                                                                                                                                                                                         |
+| `hyperliquid.rateLimiter.ts` | Shared weighted REST limiter (1200 weight/minute) plus request-weight classification for `/info` and `/exchange`.                                                                                                                                                                                                   |
+| `hyperliquid.agent.ts`       | Agent wallet (API wallet) creation and approval via browser wallet (MetaMask). Handles EIP-712 `ApproveAgent` signing, network switching (Arbitrum One / Sepolia).                                                                                                                                                  |
+| `hyperliquid.builderFee.ts`  | Builder fee approval and checking. EIP-712 `ApproveBuilderFee` signing, `checkBuilderFeeApproved()` REST check, `approveBuilderFeeWithBrowserWallet()` full browser flow.                                                                                                                                           |
+| `hyperliquid.cross-cache.ts` | Cross-context singleton cache for HIP-3 order type tracking and fill deduplication. Uses `sessionStorage` + `BroadcastChannel` for cross-worker/iframe synchronization. Manages pre-placement cache, pending orders cache, and seen fills set.                                                                      |
 
 ### Spot Trading
 
@@ -214,7 +214,7 @@ check became configurable, a 3bp user would sign `0.01%`, the venue would record
 10, the check would demand 30, and the approval prompt would reappear forever
 with no way out.
 
-**Approval status** is cached in `_builderFeeApproved` (null = unknown, true = approved, false = not approved). If unknown when placing an order, `getBuilderInfo()` re-fetches the status. On successful browser-wallet approval, a fire-and-forget POST to `/api/logger/builder-fee` logs the event.
+**Approval status** is cached in `_builderFeeApproved` (null = unknown, true = approved, false = not approved). If unknown when placing an order, `getBuilderInfo()` re-fetches the status. On successful browser-wallet approval it emits the `hyperliquid.builder-fee-approved` telemetry event (`reportEvent`); the web host's sink turns that into the `/api/logger/builder-fee` POST.
 
 `HyperliquidExchange.getBuilderInfo()` is the only order-path builder-info gate. Keep it tied to the live `maxBuilderFee` approval state; do not reintroduce environment-based signing helpers.
 
@@ -513,12 +513,12 @@ remain a clear transport/venue failure, not an accepted empty-id result.
 **A non-2xx reaching that validator at all is the bug behind
 `Invalid response from Hyperliquid API: null`.** The HOW tunnel adapter
 resolves without axios' `settle()`, so a 4xx/5xx from Hyperliquid or from the
-egress proxy arrives at the response interceptor as a *success* with its status
+egress proxy arrives at the response interceptor as a _success_ with its status
 intact but never read — and the caller then reports the body SHAPE instead of
 the failure. Hyperliquid's own error bodies are not JSON objects (`422` returns
 the bare text `Failed to deserialize the JSON body into the target type`), so
-what the user saw was a body-shape complaint naming nothing actionable: 122
-Sentry events across 25 users, every one of them ending in `: null`. The
+what the user saw was a body-shape complaint naming nothing actionable, every
+one of them ending in `: null`. The
 interceptor now reads `response.status`, and appends it to the venue's own error
 text rather than choosing between them, via the shared
 `describeHttpFailure('Hyperliquid', response)` in `utils/httpFailure.ts` — there
@@ -535,7 +535,7 @@ one of those is already swallowed by its caller, so throwing turns a silent
 fallback into a full error toast per attempt, multiplied by the startup retries
 and the 120s HIP-3 sweep — and `errorPatterns.ts` has no arm for
 `Unprocessable Entity`, so it classifies `unknown` and toasts at error level. A
-401/403 from the *egress proxy* would classify as `auth_invalid` and tell the
+401/403 from the _egress proxy_ would classify as `auth_invalid` and tell the
 user their API key is bad for what is a transport failure. Worse, `/info`
 failures reach paged collectors: `fetchHistoricalFills` wraps its whole window
 loop in one try/catch returning `[]`, and `collectAccountAxis` reads a resolved
@@ -552,7 +552,7 @@ once per oid. Dedupe + squelch that miss only — see Error-as-Success below.
 An `/exchange` POST that fails **after** leaving the browser means the placement
 is **unknown, not failed** — the order may be resting right now. `postOrderAction`
 therefore schedules a REST order refresh on ANY rejection and rethrows: a tunnel
-timeout, an egress 502 and an unreadable body all reject *before* the response
+timeout, an egress 502 and an unreadable body all reject _before_ the response
 parser runs, so hanging the refresh off the parse would miss every one of them.
 `parseHyperliquidOrderResponse` additionally throws the typed
 `HyperliquidUnreadableOrderResponseError` (venue rejections stay plain `Error`s)
@@ -1037,9 +1037,9 @@ Entries expire after 60 seconds.
    moved hyperliquid 4/11 → 5/11 without touching the TIF assertion at all.
 
    **Positional TP/SL cancel+replace also carries this omission on core perps.** When a positional TP/SL is placed via cancel+replace (Hyperliquid does not support amend for stops), the very first `orderUpdates` frame for the new oid arrives with `orderType`, `triggerPx`, `isTrigger`, and `tpsl` **all `undefined`** — only `limitPx`, `reduceOnly`, and `origSz: "0.0"` are populated. The correct fields only materialize on the REST `frontendOpenOrders` snapshot ~500–700 ms later. This was previously believed to be HIP-3-only; a Aug 2026 debug dump confirmed it happens on plain core perps too.
-   
+
    Feeding that first WS frame through `inferHyperliquidOrderTypeAndPrice()` mis-classifies it as `type: Limit` at `limitPx`. Downstream, three amplifiers turn that into a visible SL-drag flicker: (1) the store row carries the wrong price and status; (2) the frontend's `formatOrderPricesInBounds` snaps the "limit" toward bestBid/bestAsk (a full spread away from the intended stop); (3) `OrderLineManager._claimPendingNoIdTriggerMove` gates on `isProtectiveStopOrder(candidate)` and skips the claim for `type: Limit`, so the chart spawns a phantom line beside the parked ghost line, then executes a DESTRUCTIVE `_moveOrderLineMeta` once REST arrives with the correct type — producing the "SL teleports between 3–4 positions" flicker in ~1 second.
-   
+
    The `handleOrderUpdates` fix is a defer branch scoped to `reduceOnly && (!origSz || Number(origSz) === 0) && !orderType && !triggerPx && !isTrigger` on **non-HIP-3** markets. If the oid is already in the store (later WS frame after REST populated it), preserve type/price. Otherwise skip the insert entirely and call `scheduleOrderRefresh()`; the frontend-side `Updating` ghost keeps the parked line at the drag price until REST provides the authoritative first snapshot, and the pending-no-id trigger claim then fires as a RENAME (no phantom, no destructive move). `formatOrderPricesInBounds` in `apps/web/src/utils/order/getOpenOrders.ts` also skips the snap for `amount === 0 && remaining === 0` orders as a defensive belt-and-braces layer.
 
 2. **Aggregate feeds are not drop-in reconciliation replacements**: `webData2` is rejected and current `webData3` contains frontend user/DEX status but no positions, orders, or ticker contexts. Current `allDexs*` live frames also differ from their published record-shaped contract and do not remove the metadata dependency. Do not adopt them without a concrete consumer, stable mapping, and refreshed upstream evidence.
@@ -1083,7 +1083,7 @@ Three traps, none of which a typecheck catches:
 
 `fetchIncomeHistory` deliberately diverges from `fetchHistoricalFills` in the same file:
 
-|        | `fetchHistoricalFills`                                                              | `fetchIncomeHistory`                     |
+|        | `fetchHistoricalFills`                                                         | `fetchIncomeHistory`                     |
 | ------ | ------------------------------------------------------------------------------ | ---------------------------------------- |
 | client | `xhr` (3 RPS)                                                                  | `infoXhr`, like every other private read |
 | user   | `applicationId` only — **returns the master wallet's data on a vault account** | `vault \|\| applicationId`               |
@@ -1267,7 +1267,7 @@ Custom error class in `hyperliquid.errors.ts` with `code` and `message` properti
 
 - Cancel response with `status: "err"` is treated as a real error (interceptor throws)
 - Order placement response with any `status.error` in the statuses array causes full rejection of the batch
-- **Terminal cancel misses are not user errors.** After a full reduce-only market close, Hyperliquid auto-drops positional TP/SL. The follow-up `cancel` then returns `Order was never placed, already canceled, or filled. asset=N` once per oid (BTC is `asset=0`). `extractHyperliquidResponseError` unique-dedupes identical status strings; `isOnlyHyperliquidTerminalCancelError` matches a cancel/`cancelByCloid` batch that is *only* that miss. The interceptor still throws so callers can distinguish it from a 2xx, but it does **not** `emitAndLogError` (no toast). `cancelOrders` treats it as success and still suppresses/removes the local rows. Any other error in the same batch still toasts and throws.
+- **Terminal cancel misses are not user errors.** After a full reduce-only market close, Hyperliquid auto-drops positional TP/SL. The follow-up `cancel` then returns `Order was never placed, already canceled, or filled. asset=N` once per oid (BTC is `asset=0`). `extractHyperliquidResponseError` unique-dedupes identical status strings; `isOnlyHyperliquidTerminalCancelError` matches a cancel/`cancelByCloid` batch that is _only_ that miss. The interceptor still throws so callers can distinguish it from a 2xx, but it does **not** `emitAndLogError` (no toast). `cancelOrders` treats it as success and still suppresses/removes the local rows. Any other error in the same batch still toasts and throws.
 
 ## Testing / Validation
 

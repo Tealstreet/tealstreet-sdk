@@ -25,7 +25,7 @@ describe('toFixedFloat', () => {
     expect(toFixedFloat(0, 2)).toBe(0);
     expect(toFixedFloat(Infinity, 2)).toBe(Infinity);
     expect(toFixedFloat(-Infinity, 2)).toBe(-Infinity);
-    // shouldn't this be NaN ideally? --rayana
+    // shouldn't this be NaN ideally?
     expect(toFixedFloat(NaN, 2)).toBe(0);
   });
 

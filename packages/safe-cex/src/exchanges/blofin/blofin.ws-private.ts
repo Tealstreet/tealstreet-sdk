@@ -8,7 +8,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { roundUSD } from '../../utils/roundUSD';
 import { multiply, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -42,7 +42,7 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       //this.ws = new WebSocket(this.endpoint);
-      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate;
       this.ws = this.createWebsocket(route.tunnelled ? route.host! : this.endpoint);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);

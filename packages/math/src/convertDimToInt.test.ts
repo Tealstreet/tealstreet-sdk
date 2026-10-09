@@ -29,7 +29,7 @@ describe('convertDimToInt', () => {
 
   test('handles invalid string inputs', () => {
     expect(convertDimToInt('abc')).toBeNaN();
-    // borked? --rayana
+    // borked?
     expect(convertDimToInt('100abc')).toBe(100);
     expect(convertDimToInt('px')).toBeNaN();
   });

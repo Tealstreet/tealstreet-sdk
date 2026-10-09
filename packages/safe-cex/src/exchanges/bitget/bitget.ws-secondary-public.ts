@@ -1,5 +1,5 @@
 import type { Ticker, Writable } from '../../types';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import type { BitgetExchange } from './bitget.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -102,8 +102,11 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
           {},
         );
 
-      const url = this.useFallbackUrl ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic.fallback! : BASE_WS_URL;
-      if (this.useFallbackUrl) {
+      // Only a transport that declares a fallback host has one to switch to.
+      const fallbackUrl = resolveTransportRouting(this.parent.name, this.parent.options).wsPublic.fallback;
+      const useFallbackUrl = this.useFallbackUrl && !!fallbackUrl;
+      const url = useFallbackUrl ? fallbackUrl : BASE_WS_URL;
+      if (useFallbackUrl) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bitget proxy (secondary public)');
         } catch (_e) {}

@@ -17,7 +17,6 @@ const createWorker = () => {
     {} as any,
     {} as any,
     'session',
-    false,
   );
 
   return { messages, worker };

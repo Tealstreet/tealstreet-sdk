@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import '../transport/registerTealstreetTransport';
+
 import { WS_MIN_RECONNECTION_DELAY } from '../config/config';
 import { resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
 import { LighterPrivateWebsocket } from '../exchanges/lighter/lighter.ws-private';
-import { resolveExchangeRouting } from '../routing/resolveExchangeRouting';
+import { resolveExchangeRouting } from '../transport/tealstreet/routing/resolveExchangeRouting';
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 const MOCK_RATE_LIMIT_WARNING =

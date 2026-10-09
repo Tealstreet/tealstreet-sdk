@@ -18,7 +18,6 @@ import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor
 import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 import { MessageHandlerStatsPostprocessor } from './MessageHandlerStatsPostprocessor';
 import { OrdersRiskProfilePostprocessor } from './OrdersRiskProfilePostprocessor';
-import { SnapshotPostprocessor } from './tasks/SnapshotPostprocessor';
 import { TwapPostprocessor } from './TwapPostprocessor';
 
 export const independentPostprocessors: (typeof BasePostprocessor)[] = [
@@ -28,8 +27,13 @@ export const independentPostprocessors: (typeof BasePostprocessor)[] = [
   DisplayedMarginPostprocessor,
   ChaserOrderEnrichmentPostprocessor,
   OrdersRiskProfilePostprocessor,
-  SnapshotPostprocessor,
 ];
+
+// Hosts add their own independent post-processors (Tealstreet's account
+// snapshot upload lives in apps/web). Appended, so built-in order is kept.
+export const registerIndependentPostprocessor = (Cls: typeof BasePostprocessor): void => {
+  if (!independentPostprocessors.includes(Cls)) independentPostprocessors.push(Cls);
+};
 
 export const exchangeDependentPostprocessors: (typeof ExchangeDependentPostprocessor)[] = [
   ChaserOrderPostprocessor,

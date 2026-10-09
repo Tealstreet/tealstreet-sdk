@@ -12,7 +12,8 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test-ci test-unit",
     "build": "turbo run build",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore"
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
+    "check:licenses": "node scripts/check-licenses.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
@@ -46,5 +47,6 @@
     "brace-expansion": ">=5.0.5",
     "tar": "^7.5.3",
     "esbuild": "^0.28.1"
-  }
+  },
+  "license": "MIT"
 }

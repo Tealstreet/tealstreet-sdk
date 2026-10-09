@@ -8,8 +8,6 @@ vi.hoisted(() => {
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { BaseCapabilityMethod, BaseExchange, isBaseCapabilityFallback, isInertCapability } from '../../exchanges/base';
 import { exchangeRegistry } from '../../exchanges/registry';
-import { getAxisStatus } from '../../journal/axis-grading';
-import { isPracticeVenue } from '../../journal/practiceVenues';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
 
@@ -152,51 +150,4 @@ describe('exchange metadata runtime non-fallback invariants', () => {
       }
     }
   });
-
-  /**
-   * THE GATE THAT WOULD HAVE CAUGHT THE VARIANT GAP.
-   *
-   * `AVAILABLE_AXES` in `journal/axis-grading.ts` is hand-maintained, and
-   * `collectAccountAxes` treats a venue missing from it as having no axes at
-   * all — so it is never asked. Five venues with a working `fetchHistoricalFills`
-   * (`kucoinspot` and `bybitinverse` implement their own; `bitgetusdc`,
-   * `bitgetinverse` and `okxeu` inherit their parent class's) were absent, and
-   * the failure was invisible: no error, no empty result, just a venue quietly
-   * never collected while its retention window rolled past.
-   *
-   * That is why this is asserted from the RUNTIME registry rather than from a
-   * list. A list would have to be kept in step with exactly the thing it is
-   * meant to police. Adding a venue, or a variant that inherits a parent's
-   * implementation, now fails here until it is graded.
-   */
-  it(
-    'every venue that can serve fills is present in the journal axis table',
-    async () => {
-      // Practice venues are excluded by the RUNTIME registry, imported rather
-      // than redeclared. This test used to carry its own copy, which is how the
-      // exclusion came to exist only here: the fills axis skipped those venues
-      // for the wrong reason while the orders axis collected them.
-      const missing: string[] = [];
-
-      for (const name of Object.keys(exchangeMetadata) as ExchangeName[]) {
-        if (isPracticeVenue(name)) continue;
-
-        const exchange = await createImplementation(name, exchangeMetadata[name].supportsPublicOnly);
-
-        // Capability, not metadata: the question is whether this class actually
-        // has a real implementation, inherited or its own — which is exactly the
-        // condition under which the collector would ask.
-        const canServeFills = !isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills');
-        if (!canServeFills) continue;
-
-        if (getAxisStatus(name, 'fills').grade === 'unsupported') missing.push(name);
-      }
-
-      expect(
-        missing,
-        `these venues implement fetchHistoricalFills but AVAILABLE_AXES omits them, so collectAccountAxes will never ask: ${missing.join(', ')}`,
-      ).toEqual([]);
-    },
-    REGISTRY_CONSTRUCTION_TIMEOUT_MS,
-  );
 });

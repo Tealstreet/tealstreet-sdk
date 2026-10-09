@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
 import type { TwapOptions } from './webworker/twap/TwapOptions';
@@ -126,7 +127,6 @@ export type ExchangeOptions = {
   readonly orderlyExchangeId?: string;
   readonly tuning?: {
     readonly activeTickerSymbols?: string[];
-    readonly isMobile?: boolean;
     readonly calculateUpnlFromRealtimeLastPrice?: boolean;
     readonly dataUpdateThrottleMultiplier?: number;
     readonly skipRendersWhenWindowIsHidden?: boolean;
@@ -165,6 +165,13 @@ export type ExchangeOptions = {
 
   /** Delegates request signing to a signer outside this exchange runtime. */
   readonly remoteSigner?: RemoteSigner;
+
+  /**
+   * Overrides the runtime's registered transport (`setDefaultTransport`) for this
+   * in-process instance. Never set it where options cross a worker or wire boundary:
+   * a function does not survive structuredClone, and exchange-server drops it.
+   */
+  readonly transport?: TransportProvider;
 
   /**
    * Stands in for `secret`: receives the exact bytes the exchange would HMAC and
@@ -697,7 +704,7 @@ export type Execution = {
    *
    * Almost always absent: of the twelve venues we attach broker attribution to,
    * only hyperliquid reports it (`builderFee` on `userFills`). Everywhere else
-   * our cut is COMPUTED from the fill — see `src/revenue/` — and this field
+   * our cut is COMPUTED from the fill — see Tealstreet's revenue attribution, outside this package — and this field
    * stays undefined. It is not a fallback for that computation; it is the only
    * thing the computation can be checked against, on the one venue that offers it.
    */

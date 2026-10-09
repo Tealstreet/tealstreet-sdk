@@ -1,21 +1,15 @@
+import type { RestAdapterVariant } from './transport/types';
 import type { ExchangeName, ExchangeOptions, RequestOutcome } from './types';
 
 import axios, { AxiosInstance, CreateAxiosDefaults } from 'axios';
 
-import { getProxyToken } from './accessToken';
 import { BaseExchange } from './exchanges/base';
 import { createRemoteSigningAdapter } from './remoteSigningAdapter';
-import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
+import { getTransport } from './transport/registry';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
 import { isSigningCaptureRequest } from './utils/signingCapture';
-import {
-  markRestProxyHeader,
-  markRestRequestStart,
-  noteRestFailure,
-  noteRestSuccess,
-} from './utils/venueRestDiagnostics';
-import { getPublicCorsProxy } from './utils/transportResolution';
+import { markRestRequestStart, noteRestFailure, noteRestSuccess } from './utils/venueRestDiagnostics';
 
 /**
  * Tracks the "real" inner adapter for remote signing instances.
@@ -37,6 +31,20 @@ export const setInnerAdapterForRemoteSigning = (instance: AxiosInstance, adapter
     // No remote signing on this instance, set directly
     instance.defaults.adapter = adapter;
   }
+};
+
+/**
+ * Installs the transport's adapter for a tunnelled client, chained under remote
+ * signing. A transport that returns none leaves the instance on axios's own adapter.
+ */
+export const installTransportAdapter = (
+  instance: AxiosInstance,
+  options: ExchangeOptions,
+  exchange: ExchangeName,
+  variant: RestAdapterVariant = 'default',
+): void => {
+  const adapter = getTransport(options).restAdapter({ exchange, options, variant });
+  if (adapter) setInnerAdapterForRemoteSigning(instance, adapter);
 };
 
 /**
@@ -148,28 +156,15 @@ class HttpRequestStatsTracker {
 // Global HTTP request stats tracker
 export const httpStats = new HttpRequestStatsTracker();
 
-export const getProxyForAxios = (
-  config: CreateAxiosDefaults,
-  options: ExchangeOptions,
-  exchange: ExchangeName,
-): string =>
-  config.baseURL?.includes('binance') &&
-  (options.publicDataOnly || !Boolean((config?.headers as any)?.['X-MBX-APIKEY']))
-    ? getPublicCorsProxy()
-    : options.tealstreetProxy
-      ? resolveExchangeRouting(exchange, options).restProxyHost
-      : '';
+export { isNodeOrBunRuntime } from './utils/runtime';
 
 const lastLogReq: { [key: string]: number } = {};
 const lastLogRes: { [key: string]: number } = {};
 
-export const isNodeOrBunRuntime = (): boolean =>
-  typeof process !== 'undefined' && (Boolean(process.versions?.node) || Boolean((process as any).isBun));
-
 export const LAST_LOG_PERIODICY = 30 * 1_000;
 
 const stringifyResponseBody = (body: unknown): string =>
-  typeof body === 'string' ? body : JSON.stringify(body) ?? String(body);
+  typeof body === 'string' ? body : (JSON.stringify(body) ?? String(body));
 
 const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
   const message =
@@ -282,32 +277,13 @@ export const safeCexAxiosCreate = (
   options: ExchangeOptions,
   exchange: BaseExchange,
 ): AxiosInstance => {
-  // For GRVT and blofin, use private proxy when either tealstreetTunnel or tealstreetProxy is enabled
-  // (these exchanges don't support the tunnel/HOW adapter)
-  const effectiveOptions =
-    (exchange.name === 'grvt' || exchange.name === 'blofin') && options.tealstreetTunnel
-      ? { ...options, tealstreetProxy: true }
-      : options;
-
-  const privateProxyUrl =
-    options.tealstreetTunnel && exchange.name !== 'blofin' && exchange.name !== 'grvt'
-      ? ''
-      : getProxyForAxios(config, effectiveOptions, exchange.name);
-  const isPrivateProxyEnabled = privateProxyUrl !== '';
-  const baseURLWithProxy = isPrivateProxyEnabled ? `${privateProxyUrl}/${config?.baseURL}` : config?.baseURL;
-  const finalBaseURLWithProxy =
-    (baseURLWithProxy?.includes('fsjnpy143pbz') || baseURLWithProxy?.includes('cors-anywhere-cf-sg')) &&
-    baseURLWithProxy?.includes('www.bitmex.com') &&
-    !options.tealstreetTunnel
-      ? baseURLWithProxy?.replace(/www\.bitmex\.com/, 'api.direct.bitmex.com')
-      : baseURLWithProxy;
-  //const finalBaseURLWithProxy = baseURLWithProxy;
+  const restTransport = getTransport(options).rest({ exchange: exchange.name, options, config });
+  const isPrivateProxyEnabled = restTransport.proxied;
   const axiosInstance = axios.create({
     ...config,
     // 20_000 is more than reasonable just in case
     timeout: 20_000,
-    baseURL: finalBaseURLWithProxy,
-    ...(options.overrideProxyUrl ? { baseURL: `${options.overrideProxyUrl}/${config?.baseURL}` } : {}),
+    baseURL: restTransport.baseURL,
   });
 
   // Track HTTP request stats (first interceptor)
@@ -322,49 +298,10 @@ export const safeCexAxiosCreate = (
 
   axiosInstance.interceptors.request.use(
     async (config) => {
-      // console.log(config, privateProxyUrl, options, isPrivateProxyEnabled);
       if (!isPrivateProxyEnabled) {
         return config;
       }
-
-      // Get proxy token from SharedWorker (handles all fetching centrally)
-      const token = await getProxyToken();
-
-      // Use Tealstreet-Authorization when the venue has its own Authorization
-      // semantics. MEXC futures uses Authorization for WEB/APP sessions, while
-      // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
-      // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
-      //
-      // Only when there is something to send. `Bearer ` with nothing after it is
-      // a MALFORMED credential, not an absent one, and it is strictly worse:
-      // the edge reports it as "Authorization header is missing", which is then
-      // the only string anyone downstream has to go on — and it points at the
-      // venue rather than at us. A host can still hold '' here legitimately
-      // (the browser SharedWorker and the CLI both return it while warming);
-      // exchange-server cannot, since `getProxyToken` throws for it instead.
-      markRestProxyHeader(config, token ? 'present' : 'empty');
-
-      if (token) {
-        if (exchange.name === 'grvt' || exchange.name === 'mexc') {
-          config.headers['Tealstreet-Authorization'] = `Bearer ${token}`;
-        } else {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-      }
-
-      // Add browser-like headers for CLI requests to proxy
-      // Cloudflare Worker requires these headers for CORS validation
-      if (isNodeOrBunRuntime()) {
-        config.headers.Origin = 'https://trade.tealstreet.io';
-        config.headers.Referer = 'https://trade.tealstreet.io/';
-        config.headers['User-Agent'] =
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-        config.headers['sec-fetch-mode'] = 'cors';
-        config.headers['sec-fetch-site'] = 'cross-site';
-        config.headers['sec-fetch-dest'] = 'empty';
-      }
-
-      // Token expiration is handled by SharedWorker - it auto-refreshes before expiration
+      await restTransport.authorize?.(config);
       return config;
     },
     (error) => {

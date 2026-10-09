@@ -6,7 +6,7 @@
 # alter how the mirror builds or what runs in CI.
 #
 # Owned by the @Tealstreet/mirror-maintainers org team (granted push on this
-# mirror). Outside/NDA contributors are not members, so their reviews never
+# mirror). Outside contributors are not members, so their reviews never
 # satisfy code-owner review.
 
 # Everything requires a maintainer review by default.

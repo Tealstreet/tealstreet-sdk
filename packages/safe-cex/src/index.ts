@@ -13,7 +13,7 @@ import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './typ
 import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { DefaultStore } from './store/store.base';
-import { PRIVATE_PROXY_JP } from './utils/transportResolution';
+import { getTransport } from './transport/registry';
 import { virtualClock } from './utils/virtualClock';
 
 export {
@@ -89,7 +89,8 @@ export const buildPublicExchangeOptions = (
   // are whitelisted on the exchange side). The proxy itself must accept the
   // caller's IP without JWT (e.g. K8s NAT gateway whitelisted in Lambda@Edge).
   const needsProxy = !forceAllProxiesOff && (metadata.requiresCors || metadata.enforceWsTunnel);
-  const proxyOpts: Partial<ExchangeOptions> = needsProxy ? { overrideProxyUrl: PRIVATE_PROXY_JP } : {};
+  const serverProxyUrl = needsProxy ? getTransport(exchangeOptions).serverProxyUrl(exchangeName) : undefined;
+  const proxyOpts: Partial<ExchangeOptions> = serverProxyUrl ? { overrideProxyUrl: serverProxyUrl } : {};
   const disabledProxyOpts: Partial<ExchangeOptions> = forceAllProxiesOff
     ? {
         overrideProxyUrl: undefined,
@@ -180,6 +181,9 @@ export const createPublicExchange = async (
 ): Promise<BaseExchange> => {
   return createExchange(exchangeName, buildPublicExchangeOptions(exchangeName, options), store);
 };
+
+export { setTelemetrySink } from './telemetry';
+export type { TelemetryContext, TelemetrySink } from './telemetry';
 
 /**
  * Account-based exchange creation

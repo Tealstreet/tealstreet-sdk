@@ -2,7 +2,6 @@ import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../utils/wsDiagnostics';
-import { setWsRelayEnabled } from '../utils/wsRelay';
 import { ExchangeWorker } from './ExchangeWorker';
 import {
   configurePerfFixture,
@@ -33,6 +32,15 @@ const portStates: Map<MessagePort | Worker, PortState> = new Map();
 // Throttle interval for hidden clients only
 // Visible clients: no throttle here - ExchangeWorker already throttles at 250ms
 const THROTTLE_HIDDEN_MS = 2500;
+
+type WorkerConfigHandler = (cfg: Record<string, unknown>) => void;
+const workerConfigHandlers: WorkerConfigHandler[] = [];
+
+// Host-specific '__workerConfig' keys (e.g. Tealstreet's WS relay flag) are
+// applied by the host's own handler; register it before any message arrives.
+export const registerWorkerConfigHandler = (handler: WorkerConfigHandler): void => {
+  workerConfigHandlers.push(handler);
+};
 
 function cleanupPortEverywhere(port: MessagePort | Worker): void {
   cleanupPortState(port);
@@ -259,7 +267,6 @@ const start = (ctx: Worker, shared = false) => {
       settings,
       metadata,
       sessionKey,
-      payload.data.isMobile,
       payload.instanceId,
     );
 
@@ -315,7 +322,13 @@ const start = (ctx: Worker, shared = false) => {
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       if ('wsDiagnosticsEnabled' in cfg) setWsDiagnosticsEnabled(cfg.wsDiagnosticsEnabled === true);
-      if ('wsRelayEnabled' in cfg) setWsRelayEnabled(cfg.wsRelayEnabled === true);
+      for (const handler of workerConfigHandlers) {
+        try {
+          handler(cfg as Record<string, unknown>);
+        } catch (e) {
+          console.error('[store.webworker] __workerConfig host handler threw', e);
+        }
+      }
       if ('perfFixture' in cfg) {
         configurePerfFixture(cfg.perfFixture);
         // Replay drives the main thread by itself — see `perfFixture.ts`. It is

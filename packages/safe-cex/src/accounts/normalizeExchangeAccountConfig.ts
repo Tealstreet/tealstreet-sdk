@@ -1,7 +1,7 @@
 import type { ExchangeAccountConfig } from '../types';
 
 import { getExchangeMetadata } from '../exchangeMetadata';
-import { defaultProxyRegion } from '../utils/transportResolution';
+import { defaultProxyRegion } from '../transport/tealstreet/transportResolution';
 
 export function normalizeExchangeAccountConfig(account: ExchangeAccountConfig): ExchangeAccountConfig {
   const metadata = getExchangeMetadata(account.exchange);

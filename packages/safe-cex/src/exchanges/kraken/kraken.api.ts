@@ -5,9 +5,8 @@ import createHash from 'create-hash';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -72,7 +71,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange, base
 
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
   if (!options.publicDataOnly) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   xhr.interceptors.request.use((config) => {

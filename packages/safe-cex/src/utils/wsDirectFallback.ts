@@ -15,7 +15,7 @@
  * fallback shares its egress against the venue's per-IP caps — which is why
  * these must stay fallbacks and never become the default path.
  *
- * The host DATA lives in routing/routingTable.ts (`relay` / `fallback` on a WS
+ * The host DATA lives in transport/tealstreet/routing/routingTable.ts (`relay` / `fallback` on a WS
  * channel, attached by the resolver only when the channel resolved DIRECT);
  * this owns only the trigger state.
  */

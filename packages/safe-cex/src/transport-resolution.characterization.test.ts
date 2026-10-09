@@ -2,9 +2,11 @@ import type { ExchangeAccountConfig, ExchangeName, ExchangeOptions } from './typ
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import './transport/registerTealstreetTransport';
+
 import { accountToExchangeOptions } from './createExchangeFromAccount';
 import { exchangeMetadata } from './exchangeMetadata';
-import { getProxyForAxios } from './safeCexAxiosCreate';
+import { getProxyForAxios } from './transport/tealstreet/tealstreetTransport';
 
 // Golden-master characterization of the proxy / tunnel / CORS transport
 // resolution. It locks CURRENT behavior across EVERY exchange and EVERY

@@ -5,8 +5,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { addKucoinBrokerHeaders, getKucoinRequestTimestamp } from './kucoin.broker';
@@ -51,7 +50,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (shouldAuthenticate) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   xhr.interceptors.request.use((config) => {

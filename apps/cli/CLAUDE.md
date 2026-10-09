@@ -403,7 +403,6 @@ yarn logs          # Tail ~/.tealstreet/cli.log
 ## Key Documentation
 
 - `README.md` — **dev-focused** (runtime, local dev, architecture pointers, terminal/watch-mode patterns, build & release). User-facing command/usage docs are NOT here — they live in `apps/documentation/cli/` → `docs.tealstreet.io/cli`.
-- `PLAN.md` — Implementation roadmap
 - `ROADMAP.md` — Feature priorities
 
 ## Gotchas

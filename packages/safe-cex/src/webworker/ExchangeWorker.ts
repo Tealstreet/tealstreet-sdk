@@ -7,7 +7,6 @@ import throttle from 'lodash/throttle';
 
 import { exchangeRegistry } from '../exchanges/registry';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
-import { isNonPrivateDataAccount } from '../utils/isNonPrivateDataAccount';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
@@ -86,7 +85,6 @@ export class ExchangeWorker {
   private readonly _settings: AppSettingsWorkerType;
   private readonly _metadata: ExchangeMetadataWorkerType;
   private readonly _sessionKey: string;
-  private readonly _isMobile: boolean;
   private _throttledStoreUpdate: ReturnType<typeof throttle<(data: StoreData) => void>>;
   instanceId: string | undefined = undefined;
 
@@ -130,7 +128,6 @@ export class ExchangeWorker {
     settings: AppSettingsWorkerType,
     metadata: ExchangeMetadataWorkerType,
     sessionKey: string,
-    isMobile: boolean,
     instanceId: string | undefined = undefined,
   ) {
     this._exchangeName = exchangeName;
@@ -140,7 +137,6 @@ export class ExchangeWorker {
     this._settings = settings;
     this._metadata = metadata;
     this._sessionKey = sessionKey;
-    this._isMobile = isMobile;
     this.instanceId = instanceId;
 
     const throttleMs = 250 * (this._options?.tuning?.dataUpdateThrottleMultiplier || 1);
@@ -351,7 +347,6 @@ export class ExchangeWorker {
 
       this._throttledStoreUpdate.cancel();
       this._storeUpdate(this._store.serialize(), { forceFullStore: true });
-      this._fetchHistoricalData();
       return true;
     } catch (e) {
       if (startupToken !== this._startupToken || this._exchange?.isDisposed) {
@@ -762,17 +757,6 @@ export class ExchangeWorker {
         }
     }
   };
-
-  private _fetchHistoricalData() {
-    if (process.env.NEXT_PUBLIC_DISABLE_EXTRA_APIS_IN_DEV !== '1') {
-      if (!this._isMobile && !isNonPrivateDataAccount(this._exchange?.name, this._exchange?.options)) {
-        const methods = ['fetchHistoricalOrders', 'fetchTradeHistory', 'fetchClosedPnL'];
-        methods.forEach((method) => {
-          (this._exchange as any)[`${method}Recursively`]?.(this._accountName);
-        });
-      }
-    }
-  }
 
   private _initializeProcessorsAndHandlers() {
     // In hosted mode, independent post-processors run client-side (ExchangeServerWorker).

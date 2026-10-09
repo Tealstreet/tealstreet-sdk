@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { LogSeverity, OrderStatus, Position } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -189,7 +189,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       const endpointWithLiveTimestamp = defaultEndpoint.replace(/timestamp=\d+/, `timestamp=${liveTimestamp}`);
       const joinChar = endpointWithLiveTimestamp.includes('?') ? '&' : '?';
       const requestIdEndpoint = `${endpointWithLiveTimestamp}${joinChar}requestId=${nanoid()}`;
-      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate;
       this.ws = this.createWebsocket(route.tunnelled ? route.host! : requestIdEndpoint);
 
       this.ws.addEventListener('open', this.onOpen);

@@ -194,13 +194,22 @@ the chain falls through, so sync still works — but the browser logs a
 **failed request + console error on every page load** for those users, and
 it inflates the e2e load-gate's diagnostic counters.
 
-- `fetchServerTime` (generic) leads with the configured public time service or
-  same-origin **`${origin}/api/time`** (no CORS, no geo-block), then the public
-  CORS proxy. If both fail it uses the local UTC clock; do not add an
-  unmaintained third-party time dependency to this signing path.
-- `fetchBybitTime` (bybit-specific, wants Bybit's real clock) leads with the
-  **public CORS proxy** (`getPublicCorsProxy()` → `exchange-proxy.jp.tealstreet.io`,
-  Bybit's real time via non-blocked egress), then `/api/time`.
+**The Tealstreet endpoints are not in this file.** `virtualClock` takes a host
+clock through `setServerTimeSource`; `transport/registerTealstreetTransport`
+registers `transport/tealstreet/tealstreetTimeSource` (same-origin `/api/time`,
+or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction). Without a
+registered source — a plain OSS consumer — generic sync uses venue time (Bybit
+through the transport's public CORS proxy, which is `api.bybit.com` directly
+under the direct transport and can 403 in geo-blocked regions or fail CORS in a
+browser), then the local clock.
+
+- `fetchServerTime` (generic): registered source, then venue time, then the
+  local UTC clock. Do not add an unmaintained third-party time dependency to
+  this signing path.
+- `fetchBybitTime` (bybit-specific, wants Bybit's real clock) leads with venue
+  time through the **public CORS proxy** (`exchange-proxy.jp.tealstreet.io`
+  under Tealstreet — Bybit's real time via non-blocked egress), then the
+  registered source.
 
 If you "simplify" either chain back to a direct Bybit lead, you reintroduce
 the 403 noise for every geo-blocked user. The offset only needs ~1s
@@ -273,5 +282,4 @@ drift measurement.
   Scientific notation precision includes both mantissa decimals and the signed
   exponent (`2.5e-7` has eight decimal places); do not reduce it to the
   exponent's absolute value.
-- `transportResolution.ts` — Proxy pool hosts + public CORS-proxy resolver (`PRIVATE_PROXY_JP` / `PRIVATE_PROXY_ASIA` / `PRIVATE_PROXY_GRVT_TINY`, `AWS_PUBLIC_CORS_PROXY`, `getPublicCorsProxy`); consumed by the routing resolver (`../routing/resolveExchangeRouting.ts`)
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges

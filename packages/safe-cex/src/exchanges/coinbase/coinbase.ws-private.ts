@@ -8,7 +8,7 @@ import {
   sign,
 } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
 import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { add, multiply } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
@@ -30,7 +30,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         return;
       }
 
-      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate;
+      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate;
       this.ws = this.createWebsocket(
         route.tunnelled ? route.host! : BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'],
       );

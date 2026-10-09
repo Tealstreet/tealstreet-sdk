@@ -14,7 +14,7 @@ import type { ExchangeName, Market } from '../types';
  * rules that apply to nothing else. The first report of this was a user who
  * placed an order on Bybit's tokenized Shopify perp and got back "You must sign
  * the required agreement before trading this contract" with no way to know in
- * advance (jrnats, Discord, 2026-09-28).
+ * advance (user report, 2026-09-28).
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS DOES NOT ANSWER
@@ -71,7 +71,7 @@ export type InstrumentClassResult =
  * Classification is derived from the MARKET alone — `Market.info` holds the
  * venue's raw instrument object, so no venue needs a request of its own and
  * none needs per-venue inputs. That is the whole reason this registry is
- * simpler than `revenue/`, which has to carry commercial facts the fill cannot
+ * simpler than revenue attribution, which has to carry commercial facts the fill cannot
  * supply.
  */
 export type VenueInstrumentClassFn = (market: Market) => InstrumentClassResult;

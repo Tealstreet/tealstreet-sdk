@@ -10,8 +10,8 @@ import { DefaultStore } from '../../store/store.base';
  *
  * These assert the recorded slot rather than the emitted Sentry tags on
  * purpose: under happy-dom `window` exists, so `emitAndLogError` takes the
- * main-thread branch, which hands its tags to `Sentry.captureException` (absent
- * here) rather than to the emitter. Asserting the emitted payload would pass
+ * main-thread branch, which hands its tags to the telemetry sink (the no-op
+ * default here) rather than to the emitter. Asserting the emitted payload would pass
  * against a field that is undefined in every case, proving nothing.
  */
 const makeExchange = () => new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
@@ -20,9 +20,9 @@ const slot = (exchange: BaseExchange) => (exchange as any)._lastHttpFailure;
 
 /**
  * Force the web-worker branch of emitAndLogError. On the main-thread branch the
- * tags go to `Sentry.captureException`, which is undefined here because base.ts
- * `require('@sentry/nextjs')` inside a try/catch — so asserting the emitted
- * payload there would pass against a field that is undefined in every case.
+ * tags go to the telemetry sink, which is the no-op default here — so asserting
+ * the emitted payload there would pass against a field that is undefined in
+ * every case.
  */
 const asWorker = <T>(fn: () => T): T => {
   vi.stubGlobal('window', undefined);

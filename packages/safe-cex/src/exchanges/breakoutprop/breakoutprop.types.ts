@@ -71,7 +71,7 @@ export const POSITION_SIDE: Record<string, PositionSide> = {
   SELL: PositionSide.Short,
 };
 
-// {"sessionToken":"6389toqr91e0i6t7oi3ekodb8j","timeout":"00:30:00"}%
+// {"sessionToken":"<session-token>","timeout":"00:30:00"}%
 export type LOGIN_RESPONSE = {
   sessionToken: string;
   timeout: string;
@@ -80,14 +80,14 @@ export type LOGIN_RESPONSE = {
 // {
 //   "userDetails": [
 //   {
-//     "login": "btg_C17690",
+//     "login": "btg_XXXXXX",
 //     "domain": "default",
 //     "version": 18758,
-//     "fullName": "btg_C17690",
+//     "fullName": "btg_XXXXXX",
 //     "accounts": [
 //       {
-//         "owner": "btg_C17690@default",
-//         "account": "default:13659",
+//         "owner": "btg_XXXXXX@default",
+//         "account": "default:00001",
 //         "version": 120,
 //         "baseCurrency": "USD",
 //         "registrationTime": "2024-06-12T11:37:59.548Z",
@@ -96,7 +96,7 @@ export type LOGIN_RESPONSE = {
 //         "positionBased": true
 //       }
 //     ],
-//     "username": "btg_C17690@default"
+//     "username": "btg_XXXXXX@default"
 //   }
 // ]
 // }
@@ -124,11 +124,11 @@ export type USER_RESPONSE = {
 // {
 //   "portfolios": [
 //   {
-//     "account": "default:36224",
+//     "account": "default:00002",
 //     "version": 86,
 //     "balances": [
 //       {
-//         "account": "default:36224",
+//         "account": "default:00002",
 //         "version": 86,
 //         "value": 4999.96,
 //         "currency": "USD"
@@ -136,7 +136,7 @@ export type USER_RESPONSE = {
 //     ],
 //     "positions": [
 //       {
-//         "account": "default:36224",
+//         "account": "default:00002",
 //         "version": 85,
 //         "positionCode": "76515503",
 //         "symbol": "ETHUSD",
@@ -149,7 +149,7 @@ export type USER_RESPONSE = {
 //         "marginRate": 0.2
 //       },
 //       {
-//         "account": "default:36224",
+//         "account": "default:00002",
 //         "version": 82,
 //         "positionCode": "76515542",
 //         "symbol": "ETHUSD",
@@ -164,7 +164,7 @@ export type USER_RESPONSE = {
 //     ],
 //     "orders": [
 //       {
-//         "account": "default:36224",
+//         "account": "default:00002",
 //         "version": 73,
 //         "orderId": 76515500,
 //         "orderCode": "4471153:55639",
@@ -196,7 +196,7 @@ export type USER_RESPONSE = {
 //         "transactionTime": "2024-12-11T05:55:49.900Z",
 //         "executions": [
 //           {
-//             "account": "default:36224",
+//             "account": "default:00002",
 //             "executionCode": "3612101:13706396",
 //             "orderCode": "4471153:55639",
 //             "updateOrderId": 76515500,
@@ -310,7 +310,7 @@ export type PORTFOLIO_RESPONSE = {
 // }]
 
 // {
-//   "account": "default:36224",
+//   "account": "default:00002",
 //   "type": "FOREX",
 //   "symbol": "ARUSD",
 //   "tradingStatus": "FULL",
@@ -347,7 +347,7 @@ export type INSTRUMENTS_RESPONSE = {
 };
 
 // {
-//   "account": "default:36224",
+//   "account": "default:00002",
 //   "type": "FOREX",
 //   "symbol": "ETHUSD",
 //   "tradingStatus": "FULL",

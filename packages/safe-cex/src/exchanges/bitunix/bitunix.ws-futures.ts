@@ -6,7 +6,8 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { MessageHandlers } from '../types';
 import { BitunixExchange } from './bitunix.exchange';
-import { BASE_WS_URL, FALLBACK_WS_URL } from './bitunix.types';
+import { resolveTransportRouting } from '../../transport/registry';
+import { BASE_WS_URL } from './bitunix.types';
 import { INTERVAL } from './bitunix.ws-public';
 
 export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
@@ -33,9 +34,10 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
       this.messageCount = 0; // Reset message counter on new connection
 
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';
-      const url = this.useFallbackUrl ? FALLBACK_WS_URL.frontendfutures[key] : BASE_WS_URL.frontendfutures[key];
+      const fallbackUrl = resolveTransportRouting(this.parent.name, this.parent.options).wsBusiness.fallback;
+      const url = this.useFallbackUrl && fallbackUrl ? fallbackUrl : BASE_WS_URL.frontendfutures[key];
 
-      if (this.useFallbackUrl) {
+      if (this.useFallbackUrl && fallbackUrl) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bitunix proxy (futures)');
         } catch (_e) {}

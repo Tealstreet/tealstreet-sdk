@@ -70,6 +70,7 @@ import {
   PLACE_ALGO_ORDER_RESPONSE,
   PLACE_ORDER_RESPONSE,
 } from './woo.types';
+import { getTransport } from '../../transport/registry';
 import { mapWooHedgeTransactionSide, normalizeSymbol, reverseSymbol } from './woo.utils';
 import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
@@ -266,13 +267,7 @@ export class WOOXExchange extends BaseExchange {
     this._primaryXhr = primaryXhr;
     this._secondaryXhr = secondaryXhr;
 
-    this._proxyEnforcedXhr = createAPI(
-      {
-        ...this.options,
-        tealstreetProxy: !this.options.tealstreetTunnel,
-      },
-      this,
-    );
+    this._proxyEnforcedXhr = createAPI(getTransport(this.options).requireProxy(this.options), this);
 
     this.publicWebsocket = new WooPublicWebsocket(this);
     this.privateWebsocket = new WooPrivateWebscoket(this);

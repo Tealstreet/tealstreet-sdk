@@ -6,9 +6,8 @@ import retry, { isNetworkError } from 'axios-retry';
 import { nanoid } from 'nanoid';
 import qs from 'qs';
 
-import { createAxiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { canSignPayload, signPayload } from '../../utils/payloadSigner';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -236,7 +235,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   if (options.tealstreetTunnel) {
     const region = options.proxyRegion as HOWRegion | undefined;
-    setInnerAdapterForRemoteSigning(xhr, createAxiosHttpOverWebsocketAdapter({ region }));
+    installTransportAdapter(xhr, options, exchange.name, { region });
   }
 
   xhr.interceptors.response.use(async (response) => {

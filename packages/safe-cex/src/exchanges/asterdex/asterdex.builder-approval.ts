@@ -2,8 +2,7 @@ import type { AsterBuilderFeeConfig } from './asterdex.builder-fee';
 
 import { ethers } from 'ethers';
 
-import { getProxyToken } from '../../accessToken';
-import { PRIVATE_PROXY_JP } from '../../utils/transportResolution';
+import { getTransport } from '../../transport/registry';
 import {
   buildAsterDEXCodeQueryString,
   buildAsterDEXV3Nonce,
@@ -64,15 +63,14 @@ const buildAsterApprovalRequest = async (
     return { headers: {}, url: targetUrl };
   }
 
-  const proxyToken = await getProxyToken();
-  if (!proxyToken) {
+  // No transport proxy, or no credentials for it yet: go to the venue directly.
+  const proxy = getTransport({}).privateProxy('asterdex');
+  const headers = proxy ? await proxy.resolveHeaders() : {};
+  if (!proxy || Object.keys(headers).length === 0) {
     return { headers: {}, url: targetUrl };
   }
 
-  return {
-    headers: { Authorization: `Bearer ${proxyToken}` },
-    url: `${PRIVATE_PROXY_JP}/${targetUrl}`,
-  };
+  return { headers, url: `${proxy.url}/${targetUrl}` };
 };
 
 const normalizeAddress = (value: string, fieldName: string): string => {

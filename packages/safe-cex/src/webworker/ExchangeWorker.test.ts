@@ -111,7 +111,6 @@ const createWorker = () => {
     {} as any,
     {} as any,
     'test-session',
-    false,
   );
 
   return { worker, messages };
@@ -132,7 +131,6 @@ const createHostedWorker = () => {
     {} as any,
     {} as any,
     'test-session',
-    false,
   );
 
   return { worker, messages };

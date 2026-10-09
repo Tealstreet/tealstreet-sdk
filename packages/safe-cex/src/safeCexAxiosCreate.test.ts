@@ -4,11 +4,12 @@ import type { ExchangeOptions } from './types';
 import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getProxyToken } from './accessToken';
+import './transport/registerTealstreetTransport';
 
+import { getProxyToken } from './accessToken';
+import { getProxyForAxios } from './transport/tealstreet/tealstreetTransport';
 // Import after mocking
 import {
-  getProxyForAxios,
   httpStats,
   LAST_LOG_PERIODICY,
   safeCexAxiosCreate,
@@ -33,6 +34,8 @@ vi.mock('axios', () => ({
 
 vi.mock('./accessToken', () => ({
   getProxyToken: vi.fn(() => Promise.resolve('mock-token')),
+  // Read by configureHOW, which the Tealstreet transport pulls in at import.
+  isTokenExpired: vi.fn(() => false),
 }));
 
 vi.mock('./utils/axiosErrorEnhancer', () => ({

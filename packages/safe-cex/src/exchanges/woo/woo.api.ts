@@ -6,8 +6,8 @@ import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { getProxyForAxios, safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
+import { getTransport } from '../../transport/registry';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW, TESTNET_BROKER_ID } from './woo.types';
@@ -19,7 +19,7 @@ const signV1 = (config: AxiosRequestConfig, options: ExchangeOptions) => {
 
   // proxy use with non base url
   if (nextConfig?.url?.startsWith('http')) {
-    const privateProxyUrl = getProxyForAxios(nextConfig, options, 'woo');
+    const privateProxyUrl = getTransport(options).proxyPrefix({ exchange: 'woo', options, config: nextConfig });
     const isPrivateProxyEnabled = privateProxyUrl !== '';
     nextConfig.url = isPrivateProxyEnabled ? `${privateProxyUrl}/${nextConfig.url}` : nextConfig.url;
   }
@@ -59,7 +59,7 @@ const signV3 = (c: AxiosRequestConfig, options: ExchangeOptions) => {
 
   // proxy use with non base url
   if (nextConfig?.url?.startsWith('http')) {
-    const privateProxyUrl = getProxyForAxios(nextConfig, options, 'woo');
+    const privateProxyUrl = getTransport(options).proxyPrefix({ exchange: 'woo', options, config: nextConfig });
     const isPrivateProxyEnabled = privateProxyUrl !== '';
     nextConfig.url = isPrivateProxyEnabled ? `${privateProxyUrl}/${nextConfig.url}` : nextConfig.url;
   }
@@ -111,7 +111,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (options.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   xhr.interceptors.request.use((config) => {

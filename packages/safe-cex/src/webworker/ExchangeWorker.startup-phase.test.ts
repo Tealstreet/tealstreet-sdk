@@ -56,7 +56,6 @@ const createWorker = (exchangeName = 'bybit') => {
     {} as any,
     {} as any,
     'session',
-    false,
   );
   return { messages, worker };
 };

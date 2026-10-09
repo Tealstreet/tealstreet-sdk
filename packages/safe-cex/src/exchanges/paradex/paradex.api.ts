@@ -5,8 +5,7 @@ import type { ParadexExchange } from './paradex.exchange';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
 import { BASE_URL, RECV_WINDOW } from './paradex.types';
@@ -78,7 +77,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   // A payloadSigner caller controls the request's transport, so private requests go direct.
   if (!options.publicDataOnly && !options.payloadSigner) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   // Request interceptor for authentication

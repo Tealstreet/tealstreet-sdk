@@ -53,12 +53,12 @@ When working with Bybit exchange integration, consult the official API documenta
 
 ### Spot Trading - `BybitSpotExchange`
 
-| File                      | Description                                                                                                                                                                                                                                                                                         |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bybitspot.exchange.ts`   | Standalone exchange class for spot trading (extends `BaseExchange` directly). Sets `isSpot = true`. No position tracking (`fetchPositions` returns `[]`). All API calls use `category: 'spot'`. Leverage fixed at min:1, max:1.                                                                     |
-| `bybitspot.types.ts`      | Spot-specific type definitions. Contains separate `BASE_WS_URL` with `v5/public/spot` WebSocket endpoint. Shares the same `ENDPOINTS` and type mappings as linear, but lacks `CREATE_BATCH_ORDER`.                                                                                                  |
+| File                      | Description                                                                                                                                                                                                                         |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bybitspot.exchange.ts`   | Standalone exchange class for spot trading (extends `BaseExchange` directly). Sets `isSpot = true`. No position tracking (`fetchPositions` returns `[]`). All API calls use `category: 'spot'`. Leverage fixed at min:1, max:1.     |
+| `bybitspot.types.ts`      | Spot-specific type definitions. Contains separate `BASE_WS_URL` with `v5/public/spot` WebSocket endpoint. Shares the same `ENDPOINTS` and type mappings as linear, but lacks `CREATE_BATCH_ORDER`.                                  |
 | `bybitspot.ws-public.ts`  | Public WebSocket for spot markets (`BybitPublicWebsocket` - note: same class name as linear). Connects to `v5/public/spot`. Orderbook depth is 200 levels (vs 1000 for linear/inverse). Supports dynamic ticker topic subscription. |
-| `bybitspot.ws-private.ts` | Private WebSocket for spot markets. Same structure as linear, except it subscribes to `order` ALONE — spot has no positions.                                                                                                                                                                                                                            |
+| `bybitspot.ws-private.ts` | Private WebSocket for spot markets. Same structure as linear, except it subscribes to `order` ALONE — spot has no positions.                                                                                                        |
 
 ## Per-account fees on exchange-server
 
@@ -282,19 +282,19 @@ All six non-demo socket classes (`bybit`/`bybitinverse`/`bybitspot` × public/pr
 hold a `WsDirectFallback` (`utils/wsDirectFallback.ts`). A connection that produced
 zero messages is a silent failure; after two consecutive silent connects the class
 dials `route.fallback` — the athena Caddy passthrough `bybit-proxy-ja.tealstreet.io`
-declared in `routing/routingTable.ts` — for the rest of the socket's lifetime and
+declared in `transport/tealstreet/routing/routingTable.ts` — for the rest of the socket's lifetime and
 emits `grafana-info` `Using tealstreet bybit … proxy`. Any message at all (a pong,
 an auth error) resets the streak, so a bad key never trips it. The resolver attaches
 `fallback` only to a DIRECT resolution: a Brazil (`BRA_BTL`) account is tunnelled
 through the header-injecting `bybitbra` path and gets no fallback, because the
 passthrough would drop `x-site-id`. Demo and hyrotrader terminate elsewhere and
 declare none. It must stay a fallback, never the default: everyone on it shares
-athena's single egress IP against Bybit's per-IP connection cap.
+one egress IP, and Bybit limits connections per IP.
 
 The three PRIVATE classes walk a chain instead of a single fallback: direct →
 `route.relay` (the tradetunnel's `rpc.relay`, dialled via `RelayWebSocket` through
 the private proxy fleet so an IP-restricted key still authenticates) → `route.fallback`.
-The relay is only offered while `utils/wsRelay` is on (`WS_RELAY_PRIVATE` flag via
+The relay is only offered while `transport/tealstreet/wsRelay` is on (`WS_RELAY_PRIVATE` flag via
 `__workerConfig`), and Bybit's cosmetic `?requestId=` is NOT appended to a relay url
 because that url already carries the `ts-relay` query.
 
@@ -1145,13 +1145,13 @@ remain shared.
 
 Configure the web build before enabling the connector:
 
-| Setting | Purpose |
-| --- | --- |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL` | Required simulator REST origin; no fallback to Bybit |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL` | Optional exact public socket URL; defaults to REST-derived `/v5/public/linear` |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL` | Optional exact private socket URL; defaults to REST-derived `/v5/private` |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here |
-| `HYROTRADER_ENABLED` | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
+| Setting                                                                                    | Purpose                                                                                               |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`                                                | Required simulator REST origin; no fallback to Bybit                                                  |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL`                                           | Optional exact public socket URL; defaults to REST-derived `/v5/public/linear`                        |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL`                                          | Optional exact private socket URL; defaults to REST-derived `/v5/private`                             |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here  |
+| `HYROTRADER_ENABLED`                                                                       | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
 
 Normal connected accounts supply their own credentials through exchange options.
 All `NEXT_PUBLIC_*` settings are fixed at build time. Changing deployment settings

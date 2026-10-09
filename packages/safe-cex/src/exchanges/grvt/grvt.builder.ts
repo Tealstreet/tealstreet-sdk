@@ -10,8 +10,7 @@
 
 import { BrowserProvider, Eip1193Provider, isAddress } from 'ethers';
 
-import { getProxyToken } from '../../accessToken';
-import { PRIVATE_PROXY_GRVT_TINY } from '../../utils/transportResolution';
+import { getTransport } from '../../transport/registry';
 import { BASE_URLS } from './grvt.types';
 
 // Tealstreet builder wallet addresses
@@ -144,19 +143,21 @@ interface AuthorizeBuilderMessage {
   expiration: string;
 }
 
-/**
- * `Bearer ` with nothing after it is a MALFORMED credential, not an absent one.
- * The proxy's viewer-request Lambda answers 403 "Invalid JWT" for that, while an
- * absent header gets a 401 that names the real problem — so sending empty is
- * strictly worse than sending nothing. A browser host can legitimately hold ''
- * while its SharedWorker warms; exchange-server cannot, since `getProxyToken`
- * throws for it instead.
- */
-const proxyAuthHeader = (proxyToken: string): Record<string, string> =>
-  proxyToken ? { 'Tealstreet-Authorization': `Bearer ${proxyToken}` } : {};
+// The transport's whitelisted proxy, when it has one; otherwise GRVT is called directly.
+const grvtProxy = () => getTransport({}).privateProxy('grvt');
 
-// GRVT proxy — requires Tealstreet-Authorization header
-const GRVT_PROXY_URL = PRIVATE_PROXY_GRVT_TINY;
+const viaGrvtProxy = (baseUrl: string): string => {
+  const proxy = grvtProxy();
+  return proxy ? `${proxy.url}/${baseUrl}` : baseUrl;
+};
+
+/**
+ * Proxy credentials, empty when there are none. Never `Bearer ` with nothing
+ * after it: the proxy answers that with a 403 "Invalid JWT" instead of a 401
+ * naming the real problem. exchange-server throws instead of returning empty.
+ */
+const resolveGrvtProxyHeaders = async (): Promise<Record<string, string>> =>
+  (await grvtProxy()?.resolveHeaders()) ?? {};
 
 const getStringField = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
@@ -168,7 +169,7 @@ const getValidAddress = (...values: Array<string | undefined>): string | undefin
  */
 const getGrvtEdgeApiUrl = (testnet: boolean): string => {
   const baseUrl = testnet ? BASE_URLS.TESTNET_EDGE : BASE_URLS.PRODUCTION_EDGE;
-  return `${GRVT_PROXY_URL}/${baseUrl}`;
+  return viaGrvtProxy(baseUrl);
 };
 
 /**
@@ -176,7 +177,7 @@ const getGrvtEdgeApiUrl = (testnet: boolean): string => {
  */
 const getGrvtTradingApiUrl = (testnet: boolean): string => {
   const baseUrl = testnet ? BASE_URLS.TESTNET_TDG : BASE_URLS.PRODUCTION_TDG;
-  return `${GRVT_PROXY_URL}/${baseUrl}`;
+  return viaGrvtProxy(baseUrl);
 };
 
 /**
@@ -189,14 +190,14 @@ const getGrvtTradingApiUrl = (testnet: boolean): string => {
  *
  * ## API Call
  *
- * **Endpoint**: `POST {GRVT_PROXY_URL}/{EDGE_BASE_URL}/auth/api_key/login`
+ * **Endpoint**: `POST {transport proxy}/{EDGE_BASE_URL}/auth/api_key/login`
  *   - Testnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.testnet.grvt.io/auth/api_key/login`
  *   - Mainnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io/auth/api_key/login`
  *
  * **Request Headers**:
  * ```
  * Content-Type: application/json
- * Tealstreet-Authorization: Bearer <proxyToken>
+ * <transport proxy headers>
  * X-Grvt-Remember-Me: true
  * ```
  *
@@ -222,7 +223,7 @@ const getGrvtTradingApiUrl = (testnet: boolean): string => {
 const authenticateGrvt = async (
   apiKey: string,
   testnet: boolean,
-  proxyToken: string,
+  proxyHeaders: Record<string, string>,
 ): Promise<{
   success: boolean;
   accountId?: string;
@@ -238,7 +239,7 @@ const authenticateGrvt = async (
   const url = `${edgeUrl}/auth/api_key/login`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...proxyAuthHeader(proxyToken),
+    ...proxyHeaders,
     'X-Grvt-Remember-Me': 'true',
   };
   const body = { api_key: apiKey };
@@ -299,13 +300,13 @@ const authenticateGrvt = async (
 
 const fetchGrvtMainAccountId = async (
   testnet: boolean,
-  proxyToken: string,
+  proxyHeaders: Record<string, string>,
   authResult: { accountId?: string; sessionCookie?: string },
 ): Promise<string | undefined> => {
   const apiUrl = getGrvtTradingApiUrl(testnet);
   const requestHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...proxyAuthHeader(proxyToken),
+    ...proxyHeaders,
   };
 
   if (authResult.accountId) {
@@ -408,20 +409,20 @@ export const requestWalletConnection = async (): Promise<string | null> => {
  * This is called during exchange startup (in background) to cache authorization status.
  *
  * ## Flow
- * 1. Get proxy token via `getProxyToken()`
+ * 1. Resolve the transport's proxy headers
  * 2. Authenticate with GRVT via `authenticateGrvt()` to get session credentials
  * 3. Call `get_authorized_builders` API to check if Tealstreet builder is in the authorized list
  *
  * ## API Call
  *
- * **Endpoint**: `POST {GRVT_PROXY_URL}/{TDG_BASE_URL}/full/v1/get_authorized_builders`
+ * **Endpoint**: `POST {transport proxy}/{TDG_BASE_URL}/full/v1/get_authorized_builders`
  *   - Testnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.testnet.grvt.io/full/v1/get_authorized_builders`
  *   - Mainnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/full/v1/get_authorized_builders`
  *
  * **Request Headers**:
  * ```
  * Content-Type: application/json
- * Tealstreet-Authorization: Bearer <proxyToken>
+ * <transport proxy headers>
  * X-Grvt-Account-Id: <accountId>           // From authenticateGrvt() response
  * X-Ts-Grvt-Session: <sessionCookie>       // From authenticateGrvt() response (optional)
  * ```
@@ -474,11 +475,11 @@ export const checkGrvtBuilderAuthorized = async (
   // failing, not GRVT declining the builder, and the catch below collapses
   // everything to `{ authorized: false }` — which is exactly how an auth
   // failure disguises itself as a venue answer.
-  const proxyToken = await getProxyToken();
+  const proxyHeaders = await resolveGrvtProxyHeaders();
 
   try {
     // Authenticate with GRVT via proxy
-    const authResult = await authenticateGrvt(apiKey, testnet, proxyToken);
+    const authResult = await authenticateGrvt(apiKey, testnet, proxyHeaders);
     if (!authResult.success) {
       return { authorized: false };
     }
@@ -490,7 +491,7 @@ export const checkGrvtBuilderAuthorized = async (
     // Build headers — pass session cookie via proxy header
     const requestHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...proxyAuthHeader(proxyToken),
+      ...proxyHeaders,
       'X-Grvt-Account-Id': authResult.accountId!,
     };
 
@@ -588,7 +589,7 @@ export function createGrvtBuilderInfo(
  *
  * ## Complete Flow
  *
- * **Step 1**: Get proxy token via `getProxyToken()`
+ * **Step 1**: Resolve the transport's proxy headers
  * **Step 2**: Authenticate with GRVT via `authenticateGrvt()` (see its docs for API details)
  * **Step 3**: Connect browser wallet via `window.ethereum` / `eth_requestAccounts`
  * **Step 4**: Sign EIP-712 typed data with user's wallet (prompts wallet popup)
@@ -616,14 +617,14 @@ export function createGrvtBuilderInfo(
  *
  * ## API Call (Step 5)
  *
- * **Endpoint**: `POST {GRVT_PROXY_URL}/{EDGE_BASE_URL}/auth/builder/authorize`
+ * **Endpoint**: `POST {transport proxy}/{EDGE_BASE_URL}/auth/builder/authorize`
  *   - Testnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.testnet.grvt.io/auth/builder/authorize`
  *   - Mainnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io/auth/builder/authorize`
  *
  * **Request Headers**:
  * ```
  * Content-Type: application/json
- * Tealstreet-Authorization: Bearer <proxyToken>
+ * <transport proxy headers>
  * X-Grvt-Account-Id: <accountId>           // From authenticateGrvt()
  * X-Ts-Grvt-Session: <sessionCookie>       // From authenticateGrvt() (optional)
  * ```
@@ -684,11 +685,11 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
   // Outside the try, for the same reason as `checkGrvtBuilderAuthorized`: the
   // catch turns everything into `{ success: false }`, so a token failure caught
   // there is indistinguishable from GRVT saying no.
-  const proxyToken = await getProxyToken();
+  const proxyHeaders = await resolveGrvtProxyHeaders();
 
   try {
     // Step 1: Authenticate with GRVT via proxy to get session
-    const authResult = await authenticateGrvt(apiKey, testnet, proxyToken);
+    const authResult = await authenticateGrvt(apiKey, testnet, proxyHeaders);
     if (!authResult.success) {
       return { success: false, message: authResult.message || 'GRVT authentication failed' };
     }
@@ -757,7 +758,7 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     // address-shaped values and fall back to account summary when auth omits one.
     const mainAccountId =
       getValidAddress(authResult.fundingAccountAddress, authResult.accountId) ||
-      (await fetchGrvtMainAccountId(testnet, proxyToken, authResult));
+      (await fetchGrvtMainAccountId(testnet, proxyHeaders, authResult));
     if (!mainAccountId) {
       return { success: false, message: 'GRVT authentication did not return a valid main account ID' };
     }
@@ -788,7 +789,7 @@ export const authorizeGrvtBuilderWithBrowserWallet = async (
     // Build headers with session cookie if available
     const requestHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...proxyAuthHeader(proxyToken),
+      ...proxyHeaders,
       'X-Grvt-Account-Id': authResult.accountId!, // Include account ID from auth
     };
 

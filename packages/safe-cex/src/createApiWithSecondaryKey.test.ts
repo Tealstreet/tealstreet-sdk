@@ -4,6 +4,8 @@ import type { ExchangeOptions } from './types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import './transport/registerTealstreetTransport';
+
 import { createApiWithSecondaryKey } from './createApiWithSecondaryKey';
 
 type CreateApiFn = (options: ExchangeOptions, exchange: BaseExchange) => AxiosInstance;

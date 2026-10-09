@@ -11,7 +11,7 @@ import { multiply } from '../../utils/safe-math';
 import { updateOrderBook } from '../../utils/updateOrderBook';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URLS } from './okx.types';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 
 type Data = Record<string, any>;
@@ -40,7 +40,7 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
-      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic;
+      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPublic;
       const directUrl = BASE_WS_URLS[this.parent.region].public[this.parent.options.testnet ? 'testnet' : 'livenet'];
       const baseUrl = this.directFallback.resolveUrl(directUrl, route.fallback);
       if (baseUrl === route.fallback) {

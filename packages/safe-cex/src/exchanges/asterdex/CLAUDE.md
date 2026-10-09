@@ -133,7 +133,7 @@ Both V1 and V3 public prefixes are treated as public (examples):
 - attempts preferred version first, then fallback:
   - preferred `v1`: `/fapi/v1/time` then `/fapi/v3/time`
   - preferred `v3`: `/fapi/v3/time` then `/fapi/v1/time`
-- also attempts proxy fallback via the public CORS proxy (`getPublicCorsProxy()`)
+- also attempts proxy fallback via the transport's public CORS proxy (`withPublicCorsProxy`)
 - falls back to local UTC time if all attempts fail
 
 ## Startup Sequence

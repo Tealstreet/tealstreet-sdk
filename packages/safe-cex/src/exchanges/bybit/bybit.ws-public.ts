@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import {
   Candle,
@@ -68,7 +68,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
   connectAndSubscribe = (_isReconnect = false) => {
     if (!this.isDisposed) {
       const network = this.parent.options.testnet ? 'testnet' : 'livenet';
-      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic;
+      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPublic;
       const directUrl =
         this.parent.getBybitPublicWsUrl?.(this.category, network) ?? BASE_WS_URL.public[this.category][network];
       const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);

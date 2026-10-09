@@ -3,7 +3,8 @@ import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 import { normalizeBybitSiteId } from './exchanges/bybit/bybit.site';
 import { getExchangeMetadata } from './exchangeMetadata';
 import { createExchange } from './index';
-import { getPublicCorsProxy, resolveAccountTransport } from './utils/transportResolution';
+import { getTransport } from './transport/registry';
+import { resolveAccountTransport } from './transport/tealstreet/transportResolution';
 
 type KucoinBrokerConfig = NonNullable<NonNullable<ExchangeOptions['extra']>['kucoinBroker']>;
 
@@ -102,12 +103,12 @@ export function accountToExchangeOptions(
   }
 
   // Resolve proxy / tunnel / region from preferences + metadata (single source
-  // of truth — see utils/transportResolution.ts).
+  // of truth — see transport/tealstreet/transportResolution.ts).
   const { tealstreetProxy, tealstreetTunnel, proxyRegion } = resolveAccountTransport(account, metadata);
 
   // When a secondary (read-only) key is configured, its reads egress the public AWS
   // CORS proxy while writes stay on the primary/whitelisted transport.
-  const secondaryProxyUrl = account.secondary_apiKey ? getPublicCorsProxy() : undefined;
+  const secondaryProxyUrl = account.secondary_apiKey ? getTransport(overrides ?? {}).publicCorsProxy() : undefined;
   const bybitSiteId = normalizeBybitSiteId(account.exchange, account.bybitSiteId);
 
   const options: ExchangeOptions = {

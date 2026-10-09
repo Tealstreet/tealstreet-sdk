@@ -14,7 +14,6 @@
     "paths": {
       "@tealstreet/logging/src": ["../logging/src"],
       "@tealstreet/logging/src/*": ["../logging/src/*"],
-      "@tealstreet/eye-websocket/*": ["../eye-websocket/*"],
       "@tealstreet/http-over-websocket/*": ["../http-over-websocket/*"],
       "@tealstreet/json-parse/*": ["../json-parse/*"],
       "@tealstreet/sleep/*": ["../sleep/*"],

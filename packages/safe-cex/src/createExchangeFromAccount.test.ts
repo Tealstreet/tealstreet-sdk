@@ -2,6 +2,8 @@ import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import './transport/registerTealstreetTransport';
+
 import { accountToExchangeOptions, createExchangeFromAccount } from './createExchangeFromAccount';
 
 // Partial metadata for testing - only fields used by accountToExchangeOptions

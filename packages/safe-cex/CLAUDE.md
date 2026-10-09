@@ -120,7 +120,7 @@ what an instrument IS, derived from `Market.info` alone so no venue needs a
 request of its own.
 
 Three properties are load-bearing, and each is the mirror of a rule in
-`revenue/`, which this registry is modelled on:
+Tealstreet's revenue attribution (outside this package), which this registry is modelled on:
 
 - **`unknown` is not `crypto`.** A venue with no classifier must be loudly
   unclassified; defaulting it to crypto says "safe to trade like a perp", which
@@ -366,11 +366,50 @@ signed. Anything per-account that a venue's `fetchMarkets` folded in behind
 **A new venue that puts signed data into `Market` must add an overlay**, or its
 exchange-server users silently get the keyless value.
 
+## Telemetry sink (`src/telemetry.ts`)
+
+safe-cex reports to nothing by default. `setTelemetrySink({ event, captureException })`
+is how a host opts in; the web main thread registers one in
+`apps/web/src/utils/telemetry/safeCexTelemetrySink.ts` (imported from
+`instrumentation-client.ts`) that forwards exceptions to Sentry and the
+`hyperliquid.builder-fee-approved` event to `/api/logger/builder-fee`. **Never
+import a telemetry client or POST to a Tealstreet route from this package** —
+call `reportException` / `reportEvent` and let the host decide. Workers still
+ship errors through the `sendToSentry` op, not the sink.
+
 ## Proxy & Tunnel Architecture
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.
 
-**Routing source of truth (`src/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. Behavior is locked by `src/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`. A channel may also declare an optional `fallback` host (the athena Caddy passthroughs `bybit-proxy-ja` / `okx-proxy-ja`); the resolver attaches it **only to a DIRECT resolution**, and the class's `WsDirectFallback` (`utils/wsDirectFallback.ts`) dials it after two consecutive silent connects. Bitget's older inline counters do the same job with `fallbackOnly`. A PRIVATE channel may additionally declare `relayUpstream`, which the resolver turns into a tunnel `rpc.relay` url (`relay` on `ResolvedWs`, `RelayWebSocket` in http-over-websocket, dialled through the PRIVATE proxy fleet so the socket egresses from a whitelisted IP). The class walks the chain direct → relay → athena, but only offers the relay while `utils/wsRelay` is on — pushed by the host app from the `WS_RELAY_PRIVATE` flag via `__workerConfig`, off by default. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
+**All routing goes through a `TransportProvider` (`src/transport/`).** `safeCexAxiosCreate`
+asks it for the REST baseURL and proxy authorization, every ws class resolves its host
+through `resolveTransportRouting`, and `BaseWebSocket.createWebsocket` asks it how to
+open a socket (relay, or routing headers). Factories get their tunnel adapter from
+`installTransportAdapter`; one-off calls (coinbase/woo absolute URLs, builder
+approvals, the public CORS proxy for clocks, UDF and lighter, the secondary-key and
+public-server proxies) use `proxyPrefix` / `privateProxy` / `withPublicCorsProxy` /
+`serverProxyUrl`. A method returning nothing means "go direct". Tealstreet's pools,
+tunnel and passthroughs are `transport/tealstreet/tealstreetTransport.ts`.
+
+**The default is `directTransport` (`transport/direct.ts`).** Every Tealstreet entry
+point imports `transport/registerTealstreetTransport` as a side effect: the web main
+thread (through `apps/web/src/registerTealstreetRealm.ts`, which also registers the
+telemetry sink and snapshot upload — any host that copies apps/web, like the RN app,
+must import that one file), its store worker (`StoreWorkerEntry.ts`) and
+exchange-server worker (`ExchangeServerWorker.ts`), the CLI, exchange-server,
+candle-server, and the `scripts/keys` / `scripts/history-audit` CLIs. **A new realm that
+constructs exchanges must add that import**, or its accounts go direct. Direct refuses
+an account carrying `tealstreetProxy`/`tealstreetTunnel` (it throws in `rest()`), so a
+missed registration fails loudly instead of tripping venue IP allowlists. Tests that
+depend on Tealstreet routing import the registration themselves, after their
+`vi.mock` calls; registering in `setupVitest.ts` loads the transport before those
+mocks and breaks them. **`ExchangeOptions.transport` covers an exchange's own REST and sockets only**; standalone helpers with no instance in scope (builder approvals, the clocks, Lighter's base URL) use the registered default, so a host that proxies must call `setDefaultTransport`. **Never put a provider in `ExchangeOptions.transport` where options
+cross a boundary**: the web app posts `exchange.options` to its worker through
+structuredClone, which throws on a function, and exchange-server's `INIT_FIELDS`
+allowlist silently drops it. Pinned by `__tests__/transport-adapter-selection.characterization.test.ts`
+plus the two routing snapshots.
+
+**Routing source of truth (`src/transport/tealstreet/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `transport/tealstreet/routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. Behavior is locked by `src/transport/tealstreet/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`. A channel may also declare an optional `fallback` host (the athena Caddy passthroughs `bybit-proxy-ja` / `okx-proxy-ja`); the resolver attaches it **only to a DIRECT resolution**, and the class's `WsDirectFallback` (`utils/wsDirectFallback.ts`) dials it after two consecutive silent connects. Bitget's older inline counters do the same job with `fallbackOnly`. A PRIVATE channel may additionally declare `relayUpstream`, which the resolver turns into a tunnel `rpc.relay` url (`relay` on `ResolvedWs`, `RelayWebSocket` in http-over-websocket, dialled through the PRIVATE proxy fleet so the socket egresses from a whitelisted IP). The class walks the chain direct → relay → athena, but only offers the relay while `transport/tealstreet/wsRelay` is on — pushed by the host app from the `WS_RELAY_PRIVATE` flag via `__workerConfig`, which safe-cex forwards to host handlers (`registerWorkerConfigHandler` in `store.webworker`; apps/web registers it in `StoreWorkerEntry.ts`), off by default. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
@@ -399,7 +438,7 @@ whether code may set browser-forbidden `Origin`, `Referer`, `User-Agent`, or
 `sec-fetch-*` headers.
 
 Before changing proxy/tunnel routing, the typed source of truth is the
-`routing/` table + resolver, locked by `routing/__tests__/routing.equivalence.test.ts`
+`routing/` table + resolver, locked by `transport/tealstreet/routing/__tests__/routing.equivalence.test.ts`
 and its golden-master snapshot (the always-current, machine-checked per-exchange
 routing map). The repo-root `docs/proxy-routing-flow.html` is a manually rendered human-facing
 **mirror** of the same web → safe-cex → HOW flow (it re-implements resolution in
@@ -553,7 +592,7 @@ Is requiresCors true?
 - **`supportsTunnel: false` in defaults**: Many exchanges inherit this. If adding `enforceWsTunnel: true` to a new exchange, you don't need to also set `supportsTunnel: true` — `enforceWsTunnel` takes precedence in `createExchangeFromAccount.ts`.
 - **`requiresCors: true` needs `privateProxyIps`**: The proxy IPs are shown to users for IP whitelisting. Without them, users can't configure their API keys.
 - **Runtime checks for proxy resolution**: treat browser main thread and WebWorker as browser runtimes. Do not use `typeof window === 'undefined'` alone to infer "server"; that breaks worker-local proxy routing.
-- **Package-boundary discipline**: do not import proxy helpers from `apps/web` into `packages/safe-cex`. Shared routing logic lives in `packages/safe-cex/src/routing/resolveExchangeRouting.ts` and `packages/safe-cex/src/utils/transportResolution.ts`.
+- **Package-boundary discipline**: do not import proxy helpers from `apps/web` into `packages/safe-cex`. Shared routing logic lives in `packages/safe-cex/src/transport/tealstreet/routing/resolveExchangeRouting.ts` and `packages/safe-cex/src/transport/tealstreet/transportResolution.ts`.
 - **Multi-tenant token contexts**: `accessToken.ts` supports a per-async-context
   proxy token provider used by exchange-server. Contextual tokens are checked
   before the browser shared-worker or CLI/global refresh path, but invalid,
@@ -601,7 +640,7 @@ https://preview.tealstreet.io` plus a browser-like `User-Agent`, and rely on
 - `src/proxyTokenExpiry.ts` — The single hardened proxy-JWT expiry check
   re-exported by both `accessToken.ts` and `proxyTokenClient.ts`; keep malformed
   token handling and virtual-clock semantics centralized here.
-- `src/routing/resolveExchangeRouting.ts` + `src/utils/transportResolution.ts` — CORS proxy URL / transport resolver used by safe-cex REST clients (the old `src/utils/getPrivateProxy.ts` no longer exists)
+- `src/transport/tealstreet/routing/resolveExchangeRouting.ts` + `src/transport/tealstreet/transportResolution.ts` — CORS proxy URL / transport resolver used by safe-cex REST clients (the old `src/utils/getPrivateProxy.ts` no longer exists)
 - `src/types.ts` — Shared types (`ExchangeOptions`, `ExchangeAccountConfig`, etc.)
 - `src/health/errorPatterns.ts` — Fuzzy health classification. Critical auth
   expiry requires key/token/session/signature context; never add bare lifecycle
@@ -619,7 +658,7 @@ The same two success interceptors also call `exchange.noteHttpResponse?.()`,
 which records the most recent non-2xx that axios **resolved instead of
 rejecting** — the HOW tunnel adapter never calls `settle()`, so on that path no
 axios error is ever built and the status is lost before any error is emitted.
-It is read once in `emitAndLogError` and merged into Sentry tags only; it never
+It is read once in `emitAndLogError` and merged into the telemetry tags only; it never
 touches the store, the message text, or `errorPatterns` classification. See
 `utils/httpFailureContext.ts`. **Call it optionally (`?.`)** — `exchange` is
 duck-typed in several paths and in tests, and an interceptor that throws on a

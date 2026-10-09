@@ -18,6 +18,7 @@ import {
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
   TEALSTREET_BUILDER_FEE,
 } from './hyperliquid.constants';
+import { reportEvent } from '../../telemetry';
 import { BASE_URLS, BuilderFeeApprovalResult, BuilderFeeCheckResult, Signature } from './hyperliquid.types';
 
 // Re-export for public API
@@ -401,15 +402,8 @@ export async function approveBuilderFeeWithBrowserWallet(
     // Submit to Hyperliquid
     const result = await submitBuilderFeeApproval(builder, maxFeeRate, nonce, signature, testnet);
 
-    // Send notification on success (fire and forget)
     if (result.success) {
-      fetch('/api/logger/builder-fee', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: address, testnet }),
-      }).catch(() => {
-        // Silently ignore notification errors
-      });
+      reportEvent('hyperliquid.builder-fee-approved', { wallet: address, testnet });
     }
 
     return result;

@@ -5,8 +5,7 @@ import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { v } from '../../utils/get-key';
 import { appendHttpFailure } from '../../utils/httpFailure';
 import { virtualClock } from '../../utils/virtualClock';
@@ -118,7 +117,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   if (options.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   return xhr;

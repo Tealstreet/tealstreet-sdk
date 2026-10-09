@@ -118,8 +118,8 @@ describe('Hyperliquid order response contract', () => {
 describe('Hyperliquid transport failure reporting', () => {
   // The HOW tunnel adapter resolves non-2xx without axios' settle(), so these
   // arrive as successes. Before this, an unreadable error page reached the user
-  // as "Invalid response from Hyperliquid API: null" — 122 Sentry events across
-  // 25 users, none of which named the status that caused them.
+  // as "Invalid response from Hyperliquid API: null", which never named the
+  // status that caused it.
   it('names the status, and never the canonical reason, on a tunnel-delivered non-2xx', () => {
     expect(describeHttpFailure('Hyperliquid', { status: 429, statusText: 'Too Many Requests', data: null })).toBe(
       'Hyperliquid API error (HTTP 429)',
@@ -130,7 +130,7 @@ describe('Hyperliquid transport failure reporting', () => {
     expect(describeHttpFailure('Hyperliquid', { data: null })).toBe('Hyperliquid API error (HTTP unknown)');
   });
 
-  it('never leaks the tunnel frame\'s status_text into the message', () => {
+  it("never leaks the tunnel frame's status_text into the message", () => {
     // A real tunnel frame always carries status_text (the Rust side fills it
     // from canonical_reason()), so this is the shape that would regress if the
     // reason were ever put back. `getHttpFailure` still READS it — that is

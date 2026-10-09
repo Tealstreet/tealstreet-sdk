@@ -62,7 +62,7 @@ close codes — is documented in
   "clients": [
     {
       "clientId": "4f3a1c8e-…",
-      "label": "Sam's laptop — Chrome",
+      "label": "Work laptop — Chrome",
       "origin": "https://app.tealstreet.io",
       "approvedAt": 1716045000000
     }

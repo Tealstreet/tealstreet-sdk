@@ -4,9 +4,8 @@ import type { BackpackSigningParams } from './backpack.signing';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { appendHttpFailure } from '../../utils/httpFailure';
 import { BaseExchange } from '../base';
 import { generateAuthHeaders } from './backpack.signing';
@@ -47,7 +46,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   // Only use HTTP-over-WebSocket adapter when tealstreetTunnel is enabled (browser/production)
   if (options.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   // Request interceptor to add authentication headers

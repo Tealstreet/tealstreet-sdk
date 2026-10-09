@@ -6,9 +6,9 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { virtualClock } from '../../utils/virtualClock';
-import { isWsRelayEnabled } from '../../utils/wsRelay';
+import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
 import { OKXPrivateWebsocket } from './okx.ws-private';
 
@@ -36,7 +36,7 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
-      const route = resolveExchangeRouting(this.parent.name, this.parent.options).wsBusiness;
+      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsBusiness;
       const baseUrl = this.directFallback.resolveUrl(
         route.tunnelled ? route.host! : this.endpoint,
         isWsRelayEnabled() ? route.relay : undefined,

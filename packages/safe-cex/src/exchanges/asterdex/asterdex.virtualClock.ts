@@ -5,7 +5,7 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import { getPublicCorsProxy } from '../../utils/transportResolution';
+import { withPublicCorsProxy } from '../../transport/registry';
 
 dayjs.extend(utc);
 
@@ -140,7 +140,7 @@ class AsterDEXVirtualClock {
     // Try through proxy
     for (const timePath of timePathCandidates) {
       try {
-        const { data } = await axios.get(`${getPublicCorsProxy()}/${baseUrl}${timePath}`, { timeout: 5000 });
+        const { data } = await axios.get(withPublicCorsProxy(`${baseUrl}${timePath}`), { timeout: 5000 });
         const serverTime = this.parseServerTime(data?.serverTime);
         if (serverTime !== undefined) {
           return dayjs.utc(serverTime);

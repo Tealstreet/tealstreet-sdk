@@ -4,14 +4,11 @@ Pipeline of post-processors that runs on every throttled store
 update (4 Hz default). Each one mutates the snapshot before
 `postMessage` ships it to the main thread.
 
-`SnapshotPostprocessor` is the exception: it only uploads changed historical
-account data every five minutes. It is non-critical admin/history telemetry,
-not the trading-state path; do not restore per-minute uploads without a
-freshness requirement and cost review. New web builds use the authenticated
-`snapshot-ingest.tealstreet.io` Worker when `NEXT_PUBLIC_SNAPSHOT_INGEST_ORIGIN`
-is set; the relative Vercel route is only the legacy/configuration rollback
-path. The Worker derives the user ID from a scoped token, so do not put a user
-ID in the browser payload or weaken its exact Tealstreet/Disrupt CORS allowlist.
+**Hosts add their own independent post-processors** through
+`registerIndependentPostprocessor` (`registry.ts`); they are appended, so the
+built-in order holds. Tealstreet's account snapshot upload is one, and it lives
+in `apps/web/src/utils/snapshot/` because it posts to Tealstreet routes — this
+package ships in the OSS mirror and must not.
 
 For the broader hot-path rule set, see `../../exchanges/CLAUDE.md`
 → "Public WebSocket Hot-Path Patterns".

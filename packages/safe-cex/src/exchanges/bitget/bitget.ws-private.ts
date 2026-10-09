@@ -6,7 +6,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { LogSeverity, OrderStatus, OrderType } from '../../types';
 import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -172,9 +172,11 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.messageCount = 0; // Reset message counter on new connection
 
       const useUtaRouting = this.parent.usesUtaRouting;
-      const useFallbackUrl = !useUtaRouting && this.useFallbackUrl;
+      // Only a transport that declares a fallback host has one to switch to.
+      const fallbackUrl = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.fallback;
+      const useFallbackUrl = !useUtaRouting && this.useFallbackUrl && !!fallbackUrl;
       const url = useFallbackUrl
-        ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.fallback!
+        ? fallbackUrl
         : useUtaRouting
           ? BASE_WS_PRIVATE_UTA_URL
           : BASE_WS_PRIVATE_URL;
@@ -219,7 +221,8 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
     this.lastPrivateStreamRecoveryAt = now;
 
-    if (!this.parent.usesUtaRouting && !this.useFallbackUrl) {
+    const hasFallback = !!resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.fallback;
+    if (!this.parent.usesUtaRouting && !this.useFallbackUrl && hasFallback) {
       this.useFallbackUrl = true;
       this.parent.log(
         `Bitget private WS received no authenticated stream payloads after a write; switching to Tealstreet fallback route. Reason: ${reason}`,

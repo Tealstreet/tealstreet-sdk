@@ -3,9 +3,8 @@ import type { ExchangeOptions } from '../../types';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { isSigningCaptureRequest } from '../../utils/signingCapture';
 import { BaseExchange } from '../base';
 import { getHyperliquidRestRequestWeight, hyperliquidRestRateLimiter } from './hyperliquid.rateLimiter';
@@ -33,7 +32,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (!options.publicDataOnly) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   xhr.interceptors.request.use((config) => {

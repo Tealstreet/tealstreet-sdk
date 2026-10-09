@@ -18,10 +18,10 @@ import { v } from '../../utils/get-key';
 import { subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
+import { resolveTransportRouting } from '../../transport/registry';
 import { BaseWebSocket } from '../base.ws';
 import {
   BASE_WS_URL,
-  FALLBACK_WS_URL,
   ORDER_SIDE,
   ORDER_TRIGGER_TYPE,
   ORDER_TYPE,
@@ -53,9 +53,10 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
       this.messageCount = 0; // Reset message counter on new connection
 
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';
-      const url = this.useFallbackUrl ? FALLBACK_WS_URL.private[key] : BASE_WS_URL.private[key];
+      const fallbackUrl = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.fallback;
+      const url = this.useFallbackUrl && fallbackUrl ? fallbackUrl : BASE_WS_URL.private[key];
 
-      if (this.useFallbackUrl) {
+      if (this.useFallbackUrl && fallbackUrl) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bitunix proxy (private)');
         } catch (_e) {}

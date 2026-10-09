@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import './transport/registerTealstreetTransport';
+
 import { buildPublicExchangeOptions, createPublicExchange } from './index';
 
 const testState = vi.hoisted(() => {
@@ -37,6 +39,7 @@ vi.mock('./exchanges/registry', () => ({
 vi.mock('./utils/virtualClock', () => ({
   virtualClock: {
     start: vi.fn(),
+    setServerTimeSource: vi.fn(),
   },
 }));
 

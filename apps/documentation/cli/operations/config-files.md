@@ -121,7 +121,8 @@ path.
 `config.json` and `hooks.json` are the sensitive ones — `config.json`
 contains exchange API credentials, `hooks.json` contains webhook
 secrets. Treat both like credentials. Don't sync them through anything
-unencrypted.
+unencrypted. The CLI writes both, and `account export` output, as owner-only
+(`0600`).
 
 The rest of the directory (vars, aliases, whitelist, fatfingers, sim
 state, history, market-data.db) is safe to back up wholesale:

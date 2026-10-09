@@ -332,7 +332,7 @@ export class ApexOmniExchange extends BaseExchange {
     // balance envelope — an error body, a throttle, a truncated response — and
     // apexomni does that on roughly a fifth of its calls (measured 2026-08-17).
     // Dereferencing it produced `Cannot read properties of undefined (reading
-    // 'totalEquityValue')` for 85 users and 2k events, from inside a worker, so
+    // 'totalEquityValue')` in production, from inside a worker, so
     // the stack pointed at the Sentry sanitiser rather than at this line.
     //
     // Returning the LAST KNOWN balance, not a zeroed one. A fabricated zero

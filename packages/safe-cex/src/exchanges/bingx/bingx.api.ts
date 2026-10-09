@@ -6,8 +6,7 @@ import omit from 'lodash/omit';
 import qs from 'qs';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './bingx.types';
@@ -47,7 +46,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // opt out via `tealstreetTunnel: false`. Keeping the gate explicit so a
   // future audit doesn't reintroduce the unconditional adapter.
   if (!options.publicDataOnly && options.tealstreetTunnel !== false) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   xhr.interceptors.request.use((config) => {

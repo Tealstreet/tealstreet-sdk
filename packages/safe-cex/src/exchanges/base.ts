@@ -56,17 +56,8 @@ import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import { tryParseJson } from '../utils/tryParseJson';
 import { BaseWebSocket } from './base.ws';
 import { ExternalPublicDataProvider } from './external-public-data';
+import { reportException } from '../telemetry';
 import { InProcessPublicDataProvider } from './in-process-public-data';
-
-// Conditional Sentry import - may not be available in all contexts
-let Sentry: any;
-try {
-  // Try to load Sentry if available
-  Sentry = require('@sentry/nextjs');
-} catch {
-  // Sentry not available (e.g., in some Web Worker contexts)
-  Sentry = undefined;
-}
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -889,7 +880,7 @@ export class BaseExchange implements Exchange {
    * happened". The seam turns this into a named, reported state.
    *
    * Whether a venue may be shown AT ALL is not decided here. That lives once in
-   * `journal/select.ts`, so a venue is never fetched and then discarded, and no adapter can
+   * the host's journal selection, so a venue is never fetched and then discarded, and no adapter can
    * answer the question differently from its neighbours.
    */
   /**
@@ -1632,9 +1623,9 @@ export class BaseExchange implements Exchange {
         suppressConsoleLog,
       });
     } else {
-      // In main thread: send directly to Sentry for better stack trace
-      if (Sentry && errorObject) {
-        Sentry.captureException(errorObject, {
+      // In main thread: report directly for a better stack trace (to the host's sink).
+      if (errorObject) {
+        reportException(errorObject, {
           tags: {
             exchange: this.name,
             module: 'Exchange',

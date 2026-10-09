@@ -9,7 +9,8 @@ the Tealstreet CLI, and the shared packages they depend on.
 > upstream to work here — everything required to build and test lives in this
 > repo.
 
-For contributor workflow details, see [`CONTRIBUTING.md`](CONTRIBUTING.md). For
+To report a vulnerability, see [`SECURITY.md`](SECURITY.md). For contributor
+workflow details, see [`CONTRIBUTING.md`](CONTRIBUTING.md). For
 coding agents and LLM tools, see [`AGENTS.md`](AGENTS.md).
 
 ## Top-level consumables
@@ -136,9 +137,5 @@ owned entirely by the upstream. Please don't add release automation.
 
 ## License
 
-**Proprietary and confidential — NOT open source.** See [`LICENSE`](LICENSE).
-The contents of this repository (safe-cex, the CLI, and all packages herein)
-are proprietary to Tealstreet. Your access and use are governed solely by the
-agreement you signed with Tealstreet (Contributor Agreement / NDA / Commercial
-License), which supersedes the `LICENSE` notice in any conflict. Without a
-signed agreement you have no rights to the code.
+MIT. See [`LICENSE`](LICENSE). Vendored third-party components keep their
+upstream licences, listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

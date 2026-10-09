@@ -4,9 +4,9 @@ import { AxiosHeaders } from 'axios';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { getProxyForAxios, safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
+import { getTransport } from '../../transport/registry';
 import { replaceUrlParams } from '../../utils/replaceUrlParams';
 import { BaseExchange } from '../base';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './coinbase.types';
@@ -45,7 +45,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     // proxy use with non base url
     if (config?.url?.startsWith('http')) {
-      const privateProxyUrl = getProxyForAxios(config, options, 'coinbase');
+      const privateProxyUrl = getTransport(options).proxyPrefix({ exchange: 'coinbase', options, config });
       const isPrivateProxyEnabled = privateProxyUrl !== '';
       config.url = isPrivateProxyEnabled ? `${privateProxyUrl}/${config.url}` : config.url;
     }
@@ -82,7 +82,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   if (options.tealstreetTunnel) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
 
   return xhr;

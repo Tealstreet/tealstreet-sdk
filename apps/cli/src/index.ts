@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Shim WebSocket for tealstreet.io proxy connections (must be first import)
 import './ws-shim';
+import '@tealstreet/safe-cex/src/transport/registerTealstreetTransport';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
@@ -401,7 +402,7 @@ accountCmd
   .command('export [file]')
   .description('Export accounts to JSON file')
   .action((file) => {
-    const { writeFileSync } = require('fs');
+    const { chmodSync, writeFileSync } = require('fs');
     const { resolve } = require('path');
 
     const accounts = listAccounts();
@@ -412,7 +413,9 @@ accountCmd
 
     const outputFile = file ? resolve(file) : resolve('tealstreet-accounts.json');
     try {
-      writeFileSync(outputFile, JSON.stringify(accounts, null, 2));
+      // The export carries API keys; chmod covers overwriting an older export.
+      writeFileSync(outputFile, JSON.stringify(accounts, null, 2), { mode: 0o600 });
+      chmodSync(outputFile, 0o600);
       console.log(chalk.green(`Exported ${accounts.length} account(s) to ${outputFile}`));
     } catch (error) {
       console.log(chalk.red(`Failed to write file: ${(error as Error).message}`));

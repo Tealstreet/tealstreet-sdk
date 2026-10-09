@@ -4,6 +4,7 @@ import type { Config, ExchangeAccountConfig } from './config';
 
 // Mock the fs module
 vi.mock('fs', () => ({
+  chmodSync: vi.fn(),
   existsSync: vi.fn(),
   mkdirSync: vi.fn(),
   readFileSync: vi.fn(),
@@ -90,7 +91,7 @@ describe('config', () => {
 
       loadConfig();
 
-      expect(fs.mkdirSync).toHaveBeenCalledWith(expect.any(String), { recursive: true });
+      expect(fs.mkdirSync).toHaveBeenCalledWith(expect.any(String), { recursive: true, mode: 0o700 });
     });
   });
 
@@ -108,7 +109,16 @@ describe('config', () => {
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('config.json'),
         JSON.stringify(config, null, 2),
+        { mode: 0o600 },
       );
+    });
+
+    it('keeps the credentials file owner-only, including one written before', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      saveConfig({ accounts: [] });
+
+      expect(fs.chmodSync).toHaveBeenCalledWith(expect.stringContaining('config.json'), 0o600);
     });
 
     it('creates directory if it does not exist', () => {
@@ -116,7 +126,7 @@ describe('config', () => {
 
       saveConfig({ accounts: [] });
 
-      expect(fs.mkdirSync).toHaveBeenCalledWith(expect.any(String), { recursive: true });
+      expect(fs.mkdirSync).toHaveBeenCalledWith(expect.any(String), { recursive: true, mode: 0o700 });
     });
   });
 
@@ -192,7 +202,11 @@ describe('config', () => {
 
       addAccount(newAccount);
 
-      expect(fs.writeFileSync).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('new-account'));
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.stringContaining('new-account'),
+        expect.anything(),
+      );
     });
 
     it('updates existing account with same name', () => {

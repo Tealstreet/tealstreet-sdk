@@ -3,9 +3,8 @@ import type { ExchangeOptions } from '../../types';
 import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
-import { axiosHttpOverWebsocketAdapter } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, setInnerAdapterForRemoteSigning } from '../../safeCexAxiosCreate';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
 import { describeHttpFailure } from '../../utils/httpFailure';
 import { isSigningCaptureRequest } from '../../utils/signingCapture';
@@ -196,7 +195,7 @@ export const createExchangeAPI = (options: ExchangeOptions, exchange: BaseExchan
   retry(xhr, { retries: 3, retryCondition: isNetworkError });
   if (!options.publicDataOnly) {
     addSigningInterceptor(xhr, options, exchange);
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
   addRateLimitInterceptor(xhr);
   addResponseInterceptor(xhr, exchange);
@@ -239,7 +238,7 @@ export const createInfoAPI = (options: ExchangeOptions, exchange: BaseExchange) 
   });
 
   if (!options.publicDataOnly) {
-    setInnerAdapterForRemoteSigning(xhr, axiosHttpOverWebsocketAdapter);
+    installTransportAdapter(xhr, options, exchange.name);
   }
   addRateLimitInterceptor(xhr);
   addResponseInterceptor(xhr, exchange);

@@ -4,13 +4,19 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import { getPublicCorsProxy } from './transportResolution';
-
 dayjs.extend(utc);
+
+// Imported at call time: the transport module imports this one (via accessToken).
+const bybitTimeUrl = async (): Promise<string> =>
+  (await import('../transport/registry')).withPublicCorsProxy('https://api.bybit.com/v5/market/time');
 
 export const TIME_SYNC_INTERVAL_MS = 300_000;
 
 type TimeSyncListener = (timeMs: number) => void;
+
+// A host-provided clock (epoch ms, or undefined on failure). Without one the
+// clock syncs to venue time, then falls back to the local clock.
+export type ServerTimeSource = () => Promise<number | undefined>;
 
 class VirtualClock {
   started = false;
@@ -26,6 +32,7 @@ class VirtualClock {
   // (~209 callsites in safe-cex), this was steady allocator pressure.
   private offsetMs = 0;
   private syncInFlight: Promise<void> | null = null;
+  private serverTimeSource: ServerTimeSource | undefined;
   private readonly syncListeners = new Set<TimeSyncListener>();
 
   start = async () => {
@@ -44,25 +51,31 @@ class VirtualClock {
     this.started = false;
   };
 
-  private getBaseUrl = (): string => {
-    return typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
+  setServerTimeSource = (source: ServerTimeSource | undefined) => {
+    this.serverTimeSource = source;
   };
 
-  /**
-   * Accepts either a bare origin for the dedicated time service, which serves
-   * `/v1/time`, or a full endpoint URL.
-   *
-   * The full-URL form exists for the native app. It has no usable same-origin
-   * to fall back to — `self.location.origin` there is the Metro dev server —
-   * so it must name a route explicitly, and the route it wants is the edge
-   * `/api/time` rather than the CloudFront-fronted service. Measured: ~750ms
-   * against the dedicated host versus ~70ms against the edge route, on a call
-   * that sits on the boot path.
-   */
-  private getTimeEndpoint = (): string => {
-    const configured = process.env.NEXT_PUBLIC_TIME_API_ORIGIN?.trim().replace(/\/+$/, '');
-    if (!configured) return `${this.getBaseUrl()}/api/time`;
-    return /\/time$/.test(configured) ? configured : `${configured}/v1/time`;
+  private fetchFromServerTimeSource = async (): Promise<Dayjs | undefined> => {
+    try {
+      const serverMs = await this.serverTimeSource?.();
+      return serverMs != null && Number.isFinite(serverMs) ? dayjs.utc(serverMs) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  private fetchVenueTime = async (): Promise<Dayjs | undefined> => {
+    try {
+      const {
+        data: { time },
+      } = await axios.get(await bybitTimeUrl(), { timeout: 5000 });
+      if (time != null) {
+        return dayjs(time);
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
   };
 
   private notifyTimeSync = () => {
@@ -162,41 +175,8 @@ class VirtualClock {
     this.notifyTimeSync();
   };
 
-  private fetchServerTime = async () => {
-    // Lead with the dedicated public time service when configured, otherwise
-    // keep the same-origin route as a rollout-safe fallback. The dedicated
-    // service is CloudFront-fronted and makes this hot endpoint independent of
-    // the Vercel deployment that serves the UI.
-    try {
-      const requestedAt = Date.now();
-      const {
-        data: { time, unixMs },
-      } = await axios.get(this.getTimeEndpoint(), { timeout: 5000 });
-      const receivedAt = Date.now();
-      const serverMs = typeof unixMs === 'number' ? unixMs : dayjs.utc(time).valueOf();
-      if (Number.isFinite(serverMs)) {
-        // Account for half the request round-trip. The endpoint records its
-        // timestamp immediately before responding, so this is conservative
-        // while avoiding a systematic network-latency lag.
-        return dayjs.utc(serverMs + Math.floor((receivedAt - requestedAt) / 2));
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
-      const {
-        data: { time },
-      } = await axios.get(`${getPublicCorsProxy()}/https://api.bybit.com/v5/market/time`, { timeout: 5000 });
-      if (time != null) {
-        return dayjs(time);
-      }
-    } catch {
-      // ignore
-    }
-
-    return dayjs.utc();
-  };
+  private fetchServerTime = async () =>
+    (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ?? dayjs.utc();
 
   public syncBybitClientServerTime = async (time?: number) => {
     if (typeof window === 'undefined') {
@@ -223,35 +203,9 @@ class VirtualClock {
     }
   };
 
-  private fetchBybitTime = async () => {
-    // Bybit-specific sync wants Bybit's actual server time. Route through the
-    // JP proxy first: it returns Bybit's real clock via a non-geo-blocked
-    // egress, so we get the right value without the direct api.bybit.com call
-    // that 403s (CloudFront country block) from blocked regions.
-    try {
-      const {
-        data: { time },
-      } = await axios.get(`${getPublicCorsProxy()}/https://api.bybit.com/v5/market/time`, { timeout: 5000 });
-      if (time != null) {
-        return dayjs(time);
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
-      const {
-        data: { time },
-      } = await axios.get(`${this.getBaseUrl()}/api/time`, { timeout: 5000 });
-      if (time != null) {
-        return dayjs.utc(time);
-      }
-    } catch {
-      // ignore
-    }
-
-    return dayjs.utc();
-  };
+  // Bybit-specific sync wants Bybit's actual clock, so venue time leads here.
+  private fetchBybitTime = async () =>
+    (await this.fetchVenueTime()) ?? (await this.fetchFromServerTimeSource()) ?? dayjs.utc();
 }
 
 export const virtualClock = new VirtualClock();

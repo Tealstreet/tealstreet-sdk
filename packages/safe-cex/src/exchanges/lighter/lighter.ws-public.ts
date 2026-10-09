@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { WS_MIN_RECONNECTION_DELAY } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, PositionSide, Ticker, Writable } from '../../types';
 import { getCandleStartTime } from '../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../utils/orderbook';
@@ -116,10 +116,12 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     super(parent);
   }
 
+  // A transport that resolves no host (the direct default) means there is no route to use.
   private isWsProxyRouteEnabled = (): boolean =>
     this.parent.lighterDeploymentProfile.supportsWsProxy &&
     (this.parent.options.tealstreetWsRoute ?? false) &&
-    !(this.parent.options.testnet ?? false);
+    !(this.parent.options.testnet ?? false) &&
+    !!resolveTransportRouting(this.parent.name, this.parent.options).wsPublic.host;
 
   private isTickerRestFallbackCoolingDown = (): boolean =>
     virtualClock.getCurrentTimeMs() < this.tickerRestFallbackCooldownUntil;
@@ -159,7 +161,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       const shouldUseProxyRoute = this.isWsProxyRouteEnabled() && !this.useDirectFallbackRoute;
       const shouldUseReadonlyDirectRoute = this.useReadonlyDirectRoute && !shouldUseProxyRoute;
       const endpoint = shouldUseProxyRoute
-        ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPublic.host!
+        ? resolveTransportRouting(this.parent.name, this.parent.options).wsPublic.host!
         : this.parent.lighterDeploymentProfile.wsUrl;
       const separator = endpoint.includes('?') ? '&' : '?';
       const query = `requestId=${nanoid()}${shouldUseReadonlyDirectRoute ? '&readonly=true' : ''}`;

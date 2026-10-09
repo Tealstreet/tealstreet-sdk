@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import type { ExchangeAccountConfig } from '@tealstreet/cli-core';
@@ -56,10 +56,14 @@ export function getConfigDir(): string {
   return CONFIG_DIR;
 }
 
+// config.json holds exchange API keys and the auth token: owner-only.
+const PRIVATE_DIR_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+
 export function loadConfig(): Config {
   const configDir = getConfigDirForFile();
   if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true, mode: PRIVATE_DIR_MODE });
   }
 
   if (!existsSync(CONFIG_FILE)) {
@@ -76,9 +80,11 @@ export function loadConfig(): Config {
 export function saveConfig(config: Config): void {
   const configDir = getConfigDirForFile();
   if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true, mode: PRIVATE_DIR_MODE });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: PRIVATE_FILE_MODE });
+  // `mode` applies only when the file is created; tighten configs written before.
+  chmodSync(CONFIG_FILE, PRIVATE_FILE_MODE);
 }
 
 // Tombstone retention: accounts deleted via the listener mutate path keep

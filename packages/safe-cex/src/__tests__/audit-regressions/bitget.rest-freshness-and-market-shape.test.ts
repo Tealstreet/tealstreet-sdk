@@ -5,6 +5,8 @@ import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+// The fallback-route assertion is about Tealstreet's routing, which only exists once registered.
+import '../../transport/registerTealstreetTransport';
 
 const createExchange = () => {
   const store = new DefaultStore();

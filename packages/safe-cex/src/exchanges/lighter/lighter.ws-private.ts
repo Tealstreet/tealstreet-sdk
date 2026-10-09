@@ -3,7 +3,7 @@ import type { LighterPrivateCloseClassification } from './lighter.ws-policy';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET, WS_MIN_RECONNECTION_DELAY } from '../../config/config';
-import { resolveExchangeRouting } from '../../routing/resolveExchangeRouting';
+import { resolveTransportRouting } from '../../transport/registry';
 import { LogSeverity, OrderStatus, Position, PositionSide } from '../../types';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -168,10 +168,12 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
   private shouldUseRestOrderReconciliation = (): boolean =>
     !this.hasReceivedAccountAllOrdersAck || this.useReadonlyFallback;
 
+  // A transport that resolves no host (the direct default) means there is no route to use.
   private isWsProxyRouteEnabled = (): boolean =>
     this.parent.lighterDeploymentProfile.supportsWsProxy &&
     (this.parent.options.tealstreetWsRoute ?? false) &&
-    !(this.parent.options.testnet ?? false);
+    !(this.parent.options.testnet ?? false) &&
+    !!resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.host;
 
   private shouldUseGeorestrictedConnectivityWarning = (isPolicyRestrictionError = false): boolean =>
     !this.isWsProxyRouteEnabled() &&
@@ -697,7 +699,7 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
 
     const useWsProxyRoute = this.isWsProxyRouteEnabled();
     const baseUrl = useWsProxyRoute
-      ? resolveExchangeRouting(this.parent.name, this.parent.options).wsPrivate.host!
+      ? resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.host!
       : this.parent.lighterDeploymentProfile.wsUrl;
     const shouldUseReadonlyFallback = this.useReadonlyFallback && !useWsProxyRoute;
     const wsUrl = shouldUseReadonlyFallback ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}readonly=true` : baseUrl;

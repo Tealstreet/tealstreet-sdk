@@ -25,7 +25,6 @@
       "@tealstreet/cli-core": ["../../../packages/cli-core/src/index.ts"],
       "@tealstreet/cli-core/src": ["../../../packages/cli-core/src"],
       "@tealstreet/cli-core/src/*": ["../../../packages/cli-core/src/*"],
-      "@tealstreet/eye-websocket/*": ["../../../packages/eye-websocket/*"],
       "@tealstreet/http-over-websocket/*": ["../../../packages/http-over-websocket/*"],
       "@tealstreet/json-parse/*": ["../../../packages/json-parse/*"],
       "@tealstreet/sleep/*": ["../../../packages/sleep/*"],
