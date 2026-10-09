@@ -395,9 +395,6 @@ const BybitDemoMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   forbidCors: true,
   enforceWsTunnel: true,
-  // Demo REST rejects margin mode switching (retCode 10032), so keep selector disabled.
-  marginTypes: [MarginType.Cross],
-  hideMarginTypeSelector: true,
 };
 
 const HyrotraderMetadata: ExchangeMetadata = {
