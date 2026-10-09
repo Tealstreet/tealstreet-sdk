@@ -225,11 +225,6 @@ const config = {
             to: 'docs/support/contact-us',
           },
           // {
-          //   label: 'Changelog',
-          //   position: 'right',
-          //   to: 'docs/changelog',
-          // },
-          // {
           //   href: 'https://github.com/tealstreet/',
           //   position: 'right',
           //   className: 'header-github-link',
