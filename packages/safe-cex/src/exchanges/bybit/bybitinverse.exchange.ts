@@ -258,6 +258,14 @@ export class BybitInverseExchange extends BaseExchange {
     this.recentlyPlacedOrders.delete(orderId);
   };
 
+  // Bybit sizes inverse orders in USD contracts; the store holds `remaining` in coin and the
+  // contracts in `extra.remainingNative`, or the chart prices USD as coin (qty x price). Every
+  // market here is inverse, so this must not wait on `marketsBySymbol` having loaded.
+  private remainingInStoreUnits = (remainingNative: number, price: number) => {
+    const remaining = price > 0 ? Math.round((remainingNative / price) * 1e8) / 1e8 : remainingNative;
+    return { remaining, extra: { remainingNative, remainingNotional: remainingNative } };
+  };
+
   private recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
     const qty = parseFloat(payload.qty as string) || opts.amount || 0;
     const price = parseFloat((payload.price ?? payload.triggerPrice) as string) || opts.price || opts.triggerPrice || 0;
@@ -271,7 +279,7 @@ export class BybitInverseExchange extends BaseExchange {
       price,
       amount: qty,
       filled: 0,
-      remaining: qty,
+      ...this.remainingInStoreUnits(qty, price),
       reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
       timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
       lastUpdate: virtualClock.getCurrentTimeMs(),
@@ -305,10 +313,15 @@ export class BybitInverseExchange extends BaseExchange {
   private applyLocalOrderUpdateAfterRestWrite = (order: Order, update: Partial<Order>) => {
     if (!this.shouldUseLocalRestOrderLifecycleFallback()) return;
 
+    const remainingNative =
+      typeof update.amount === 'number'
+        ? Math.max(0, update.amount - (order.filled || 0))
+        : (order.extra?.remainingNative ?? order.remaining);
     const nextOrder: Order = {
       ...order,
       ...update,
-      ...(typeof update.amount === 'number' ? { remaining: Math.max(0, update.amount - (order.filled || 0)) } : {}),
+      ...this.remainingInStoreUnits(remainingNative, update.price ?? order.price),
+      extra: { ...order.extra, remainingNative, remainingNotional: remainingNative },
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 
@@ -2430,15 +2443,8 @@ export class BybitInverseExchange extends BaseExchange {
     const type = isOpeningTriggerOrder ? OrderType.Conditional : ORDER_TYPE[oType];
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
 
-    let remaining = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
-    const remainingNative = remaining;
+    const remainingNative = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
     const price = parseFloat(oPrice);
-    const market = this.store.marketsBySymbol[o.symbol];
-    if (market?.isInverse) {
-      // Convert USD remaining to BTC amount with proper precision
-      const btcRemaining = remaining / price;
-      remaining = Math.round(btcRemaining * 1e8) / 1e8; // 8 decimals for BTC
-    }
 
     const orders: Order[] = [
       {
@@ -2447,10 +2453,7 @@ export class BybitInverseExchange extends BaseExchange {
         symbol: o.symbol,
         type,
         side: ORDER_SIDE[o.side],
-        remaining,
-        extra: {
-          remainingNative,
-        },
+        ...this.remainingInStoreUnits(remainingNative, price),
         price,
         amount: (oType === 'StopLoss' || oType === 'TakeProfit') && tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
         filled: parseFloat(v(o, 'cumExecQty') ?? 0),
@@ -2478,7 +2481,7 @@ export class BybitInverseExchange extends BaseExchange {
         side: inverseSide,
         price: sl,
         filled: 0,
-        remaining: orders[0].amount,
+        ...this.remainingInStoreUnits(remainingNative, sl),
         lastUpdate: virtualClock.getCurrentTimeMs(),
         slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slTriggerBy')],
       });
@@ -2492,7 +2495,7 @@ export class BybitInverseExchange extends BaseExchange {
         side: inverseSide,
         price: tp,
         filled: 0,
-        remaining: orders[0].amount,
+        ...this.remainingInStoreUnits(remainingNative, tp),
         lastUpdate: virtualClock.getCurrentTimeMs(),
         tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpTriggerBy')],
       });

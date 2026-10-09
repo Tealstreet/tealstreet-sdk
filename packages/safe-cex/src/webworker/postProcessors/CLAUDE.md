@@ -165,6 +165,15 @@ or fake) emitted by the current pass. When a full snapshot leaves a zeroed row
 or removes a symbol, both queue maps evict that account/position key so symbol
 rotation cannot grow worker memory for the lifetime of the tab.
 
+### Last-price UPnL on inverse markets uses USD contracts, not `contracts`
+
+When `calculateUnrealizedPnl` recomputes from `ticker.last` (Bybit forces it via
+`alwaysCalculateUnrealizedPnlFromLastPrice`; others when the user opts in or the venue
+reports 0), an inverse position is `extra.contractsNative × contractSize × move / entry`.
+`contracts` is coin converted at MARK, so `move × contracts` is off by entry/mark
+(BTCUSD showed $19.30 against the venue's $23.94). OKX counts `contractSize`-dollar
+contracts; Bybit and BitMEX inverse leave `contractSize` unset ($1).
+
 ### `DisplayedMarginPostprocessor` derives `store.displayedMargin`
 
 `DisplayedMarginPostprocessor` (independent, registered **after**

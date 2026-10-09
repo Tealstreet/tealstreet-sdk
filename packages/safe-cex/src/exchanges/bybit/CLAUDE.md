@@ -110,6 +110,7 @@ Rules:
 - Keep this as the specific `bybitSiteId` field. Do not replace it with a user-controlled generic header bag.
 - Explicitly drop the field for `bybitdemo`; demo uses `api-demo.bybit.com` credentials and has no Brazil KYC/site concept.
 - REST requests include the header on signed and unsigned routes. Public KLINE strips auth but preserves `x-site-id`.
+- Brazil inverse writes its own order rows from the REST response (`recordRecentlyPlacedOrderFromOpts`, `applyLocalOrderUpdateAfterRestWrite`). Every inverse row goes through `remainingInStoreUnits`: `remaining` in BTC, USD contracts in `extra.remainingNative`. A row holding contracts in `remaining` is drawn on the chart as contracts x price (`2,600,192 USD` for a $1,000 ETHUSD leg).
 - WS classes resolve the routing table before falling back to direct Bybit URLs. For `bybitSiteId: 'BRA_BTL'`, the routing table must send browser WS through the dedicated Bybit Brazil proxy because browser-native direct WebSockets cannot set custom upgrade headers.
 - Keep the local REST order-lifecycle fallback for `bybitSiteId: 'BRA_BTL'` until Brazil-account WS behavior is venue-validated. REST create/amend/cancel successes locally show, update, and retire chart rows while snapshots/WS catch up. Keep this scoped to Brazil/demo; normal live Bybit still lets private WS own order rows.
 

@@ -27,21 +27,36 @@ type StopTpCoverage = { hasFullStop: boolean; hasFullTP: boolean; stopAmount: nu
  */
 export class DisplayedPositionsPostprocessor extends BasePostprocessor {
   private calculateUnrealizedPnl(
-    position: { unrealizedPnl: number; side: PositionSide; entryPrice: number; contracts: number },
+    position: {
+      unrealizedPnl: number;
+      side: PositionSide;
+      entryPrice: number;
+      contracts: number;
+      extra?: { contractsNative?: number };
+    },
     ticker: { last: number } | undefined,
     alwaysCalculateUnrealizedPnlFromLastPrice: boolean,
+    market: Pick<Market, 'isInverse' | 'contractSize'> | undefined,
   ): number {
     if ((position.unrealizedPnl || !ticker || ticker.last === 0) && !alwaysCalculateUnrealizedPnlFromLastPrice) {
       return position.unrealizedPnl;
     }
     // If we're forcing calculation but ticker is still undefined, return existing unrealizedPnl
-    if (!ticker || ticker.last === 0) {
+    if (!ticker || ticker.last === 0 || position.entryPrice <= 0) {
       return position.unrealizedPnl;
     }
-    return (
-      (position.side === PositionSide.Long ? ticker.last - position.entryPrice : position.entryPrice - ticker.last) *
-      Math.abs(position.contracts)
-    );
+    const priceMove =
+      position.side === PositionSide.Long ? ticker.last - position.entryPrice : position.entryPrice - ticker.last;
+    // Inverse: N USD of contracts pays N*(1/entry - 1/last) coin, worth N*move/entry USD at last.
+    // `contracts` is coin converted at mark, so the linear formula is off by entry/mark. OKX
+    // counts contracts of `contractSize` USD each; Bybit and BitMEX contracts are $1. KuCoin
+    // reports a negative multiplier (-1) on inverse, so the sign comes from `side` alone.
+    const contractsNative = position.extra?.contractsNative;
+    if (market?.isInverse && contractsNative) {
+      const usdContracts = Math.abs(contractsNative * (market.contractSize || 1));
+      return (priceMove * usdContracts) / position.entryPrice;
+    }
+    return priceMove * Math.abs(position.contracts);
   }
 
   private getChaserPositionSide(chaser: { side: OrderSide; reduceOnly?: boolean }): PositionSide {
@@ -225,7 +240,12 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
       const displayedPosition = {
         ...position,
         contracts,
-        unrealizedPnl: this.calculateUnrealizedPnl(position, ticker, alwaysCalculateUnrealizedPnlFromLastPrice),
+        unrealizedPnl: this.calculateUnrealizedPnl(
+          position,
+          ticker,
+          alwaysCalculateUnrealizedPnlFromLastPrice,
+          marketMap[position.symbol],
+        ),
         key: `${this._accountName}:${position.symbol}:${position.side}`,
         account: this._accountName ? this._accountName : '',
         ticker,

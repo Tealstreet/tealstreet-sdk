@@ -162,6 +162,81 @@ describe('DisplayedPositionsPostprocessor', () => {
     expect(store.displayedPositions[0].unrealizedPnl).toBe(36);
   });
 
+  it('calculates inverse unrealized pnl from USD contracts, not coin size times the move', () => {
+    // Live bybit BTCUSD: 100 USD contracts long from 65548.8, last 81243.7, venue says ~$23.94.
+    const store = createStore({
+      markets: [createMarket({ id: 'BTCUSD', symbol: 'BTCUSD', quote: 'USD', isInverse: true })],
+      tickers: [createTicker({ id: 'BTCUSD', symbol: 'BTCUSD', last: 81243.7, mark: 81243.7 })],
+      positions: [
+        createPosition({
+          symbol: 'BTCUSD',
+          contracts: 0.00123,
+          entryPrice: 65548.8,
+          unrealizedPnl: 0.000294,
+          extra: { contractsNative: 100 },
+        }),
+      ],
+    });
+
+    createProcessor({ tuning: { calculateUpnlFromRealtimeLastPrice: true } } as ExchangeOptions).process(store);
+
+    expect(store.displayedPositions[0].unrealizedPnl).toBeCloseTo(23.94, 2);
+  });
+
+  it('scales inverse contracts by contract size and signs shorts', () => {
+    // OKX BTC-USD-SWAP: 10 contracts of $100, short from 66000, last 60000 -> $1000 * 6000 / 66000.
+    const store = createStore({
+      markets: [createMarket({ id: 'BTC-USD-SWAP', symbol: 'BTC-USD-SWAP', isInverse: true, contractSize: 100 })],
+      tickers: [createTicker({ id: 'BTC-USD-SWAP', symbol: 'BTC-USD-SWAP', last: 60000, mark: 60000 })],
+      positions: [
+        createPosition({
+          symbol: 'BTC-USD-SWAP',
+          side: PositionSide.Short,
+          contracts: 1000 / 60000,
+          entryPrice: 66000,
+          unrealizedPnl: 0,
+          extra: { contractsNative: 10 },
+        }),
+      ],
+    });
+
+    createProcessor({ tuning: { calculateUpnlFromRealtimeLastPrice: true } } as ExchangeOptions).process(store);
+
+    expect(store.displayedPositions[0].unrealizedPnl).toBeCloseTo((1000 * 6000) / 66000, 6);
+  });
+
+  it('takes the inverse pnl sign from the side when the venue reports a negative multiplier', () => {
+    // KuCoin XBTUSDM: multiplier -1, 1000 USD contracts long from 60000, last 66000.
+    const store = createStore({
+      markets: [createMarket({ id: 'XBTUSDM', symbol: 'XBTUSDM', isInverse: true, contractSize: -1 })],
+      tickers: [createTicker({ id: 'XBTUSDM', symbol: 'XBTUSDM', last: 66000, mark: 66000 })],
+      positions: [
+        createPosition({
+          symbol: 'XBTUSDM',
+          contracts: 1000 / 66000,
+          entryPrice: 60000,
+          unrealizedPnl: 0,
+          extra: { contractsNative: 1000 },
+        }),
+      ],
+    });
+
+    createProcessor({ tuning: { calculateUpnlFromRealtimeLastPrice: true } } as ExchangeOptions).process(store);
+
+    expect(store.displayedPositions[0].unrealizedPnl).toBeCloseTo(100, 6);
+  });
+
+  it('keeps the venue unrealized pnl when the entry price is unknown', () => {
+    const store = createStore({
+      positions: [createPosition({ contracts: 3, entryPrice: 0, unrealizedPnl: 4 })],
+      tickers: [createTicker({ last: 112 })],
+    });
+
+    createProcessor({ tuning: { calculateUpnlFromRealtimeLastPrice: true } } as ExchangeOptions).process(store);
+
+    expect(store.displayedPositions[0].unrealizedPnl).toBe(4);
+  });
+
   it('does not let a zero-contract placeholder suppress a fake chaser position', () => {
     const store = createStore({
       positions: [createPosition({ id: 'flat-position', contracts: 0 })],
