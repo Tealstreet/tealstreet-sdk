@@ -18,6 +18,11 @@ Merging to `master` only builds a **Preview** deployment on Vercel. Production i
 - Production branch: **`prod-docs`** — an intentionally parked branch. It does not move; the Vercel project tracks it so master pushes can't auto-deploy prod.
 - Ignored Build Step: `bash ./scripts/vercel-ignore.sh` (gates preview builds to only fire when `apps/documentation/**` changed; blocks production by default).
 
+The ignore step fetches only a missing previous deployment snapshot with
+`--depth=1 --filter=blob:none`, then compares the two trees with `--no-renames`.
+It does not deepen history or require ancestry. An unavailable endpoint or
+failed comparison builds conservatively; branch and override gates run first.
+
 ### Release flow (the only correct one)
 
 1. Merge docs changes into `master`.

@@ -20,6 +20,12 @@
 
 set -euo pipefail
 
+commit_available() {
+  local resolved
+  resolved="$(git rev-parse --verify --quiet "$1")" || return 1
+  git rev-list --all | grep -Fx "$resolved" >/dev/null
+}
+
 echo "=== Docs ignore-build check ==="
 echo "VERCEL_ENV=${VERCEL_ENV:-unset}"
 echo "VERCEL_GIT_COMMIT_REF=${VERCEL_GIT_COMMIT_REF:-unset}"
@@ -51,85 +57,44 @@ is_allowed_preview_branch() {
   esac
 }
 
-# Ensure the previous deployment SHA is reachable in Vercel's shallow clone.
-# This is best-effort: downstream diff logic has safe fallbacks if unavailable.
+# Compare only the two deployment snapshots; no ancestry walk is needed.
 ensure_git_history() {
   local from_sha="${VERCEL_GIT_PREVIOUS_SHA:-}"
-
-  if [ -z "$from_sha" ]; then
+  [ -z "$from_sha" ] && return 0
+  if commit_available "$from_sha"; then
     return 0
   fi
-
-  if git cat-file -e "$from_sha" 2>/dev/null; then
+  echo "Fetching the previous deployment snapshot without historical blobs..."
+  if git fetch --filter=blob:none --no-tags --depth=1 origin "+${from_sha}:refs/vercel/previous" 2>/dev/null; then
     return 0
   fi
-
-  echo "Previous SHA not in shallow clone; deepening history..."
-
-  # Try fetching the specific commit first (fastest)
-  if git fetch --depth=1 origin "$from_sha" 2>/dev/null; then
-    if git cat-file -e "$from_sha" 2>/dev/null; then
-      echo "Fetched previous SHA successfully"
-      return 0
-    fi
-  fi
-
-  # Broaden: deepen the current branch history
-  git fetch --deepen=50 2>/dev/null || true
-  if git cat-file -e "$from_sha" 2>/dev/null; then
-    echo "Found previous SHA after deepening by 50"
-    return 0
-  fi
-
-  git fetch --deepen=150 2>/dev/null || true
-  if git cat-file -e "$from_sha" 2>/dev/null; then
-    echo "Found previous SHA after deepening by 150"
-    return 0
-  fi
-
-  echo "WARNING: Could not fetch previous SHA $from_sha"
+  echo "Previous deployment snapshot could not be fetched; building conservatively."
   return 1
 }
 
 get_changed_files() {
   local from_sha="${VERCEL_GIT_PREVIOUS_SHA:-}"
   local to_sha="${VERCEL_GIT_COMMIT_SHA:-HEAD}"
-
-  if [ -z "$to_sha" ]; then
-    echo "Unable to determine current commit SHA for diff" >&2
+  if [ -z "$from_sha" ] || ! commit_available "$from_sha"; then
+    echo "No usable previous deployment snapshot; building conservatively." >&2
     return 1
   fi
-
-  # First deployment on this project/environment may not have a previous SHA.
-  if [ -z "$from_sha" ]; then
-    echo "No previous deployment SHA; using current commit file list" >&2
-    git show --name-only --pretty="" "$to_sha"
-    return 0
+  if ! commit_available "$to_sha"; then
+    echo "Current deployment snapshot is unavailable; building conservatively." >&2
+    return 1
   fi
-
-  if ! git cat-file -e "$from_sha" 2>/dev/null; then
-    echo "Previous deployment SHA is unavailable locally: $from_sha" >&2
-    echo "Falling back to current commit file list" >&2
-    git show --name-only --pretty="" "$to_sha"
-    return 0
-  fi
-
-  # Avoid invalid diff ranges when previous SHA is not in current commit ancestry.
-  if ! git merge-base --is-ancestor "$from_sha" "$to_sha" 2>/dev/null; then
-    echo "Previous SHA is not an ancestor of current SHA; using current commit file list" >&2
-    git show --name-only --pretty="" "$to_sha"
-    return 0
-  fi
-
-  git diff --name-only "$from_sha" "$to_sha"
+  git diff --no-renames --name-only "$from_sha" "$to_sha"
 }
 
 has_docs_relevant_changes() {
   local changed
-  changed="$(get_changed_files || true)"
+  if ! changed="$(get_changed_files)"; then
+    echo "Could not compare deployment snapshots; building conservatively."
+    return 0
+  fi
 
   if [ -z "$changed" ]; then
-    echo "Unable to determine changed files; skipping to avoid wasted build"
+    echo "Deployment snapshots have identical file trees"
     return 1
   fi
 
