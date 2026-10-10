@@ -3,8 +3,13 @@ import uniqBy from 'lodash/uniqBy';
 import { getExchangeMetadata } from '../exchangeMetadata';
 import type { ExchangeName, Timeframe } from '../types';
 import { timeframeToSeconds } from '../types';
-import { getCandleStartTime } from '../utils/getCandleStartTime';
-import { getNumCandlesInRange } from '../utils/getNumCandlesInRange';
+import {
+  calendarPeriodForInterval,
+  chartCandleCloseTime,
+  chartCandleStartTime,
+  getNumChartCandlesInRange,
+  nextChartCandleStartTime,
+} from '../utils/calendarCandles';
 import { normalizeEpochToSeconds } from '../utils/normalizeEpochToSeconds';
 import type {
   CandleCacheBackendReadMode,
@@ -31,13 +36,32 @@ export const cleanCandles = <TCandle extends { timestamp: number }>(candles: TCa
  *
  * Live keys keep their existing shape, so no cached entry is invalidated by
  * introducing this; only testnet accounts get a new namespace.
+ *
+ * `1w` / `1M` keys carry a `-cal` suffix: those series moved to calendar
+ * boundaries and `1M` to a different slot width (see `slotSecondsFor`), so a
+ * chunk persisted under the old key would be read at the wrong offsets — and
+ * it can hold a still-forming week or month that the old epoch-floor
+ * "closed" check stored as final.
  */
 export const getCandleCacheKey = (
   exchangeName: ExchangeName,
   symbol: string,
   interval: Timeframe,
   testnet?: boolean,
-): string => `${exchangeName}${testnet ? '-testnet' : ''}-${symbol}-${interval}`;
+): string =>
+  `${exchangeName}${testnet ? '-testnet' : ''}-${symbol}-${interval}${calendarPeriodForInterval(interval) ? '-cal' : ''}`;
+
+/**
+ * Width of one cache slot. A slot must be no wider than the shortest candle,
+ * or two candles land in one and the later overwrites the earlier. Calendar
+ * months run 28-31 days, so `1M` slots are 28 days; the gaps that leaves are
+ * never read, because lookups step from candle start to candle start
+ * (`nextChartCandleStartTime`), not slot to slot. Every other interval,
+ * Monday weeks included, is exactly one slot per candle.
+ */
+const MONTH_SLOT_SECONDS = 28 * 86_400;
+const slotSecondsFor = (interval: Timeframe): number =>
+  calendarPeriodForInterval(interval) === '1M' ? MONTH_SLOT_SECONDS : timeframeToSeconds[interval];
 
 export const fetchOHLCVWithExchange = async (
   request: Pick<CandleCacheExchangeFetchRequest, 'exchange' | 'symbol' | 'useWorker'> & {
@@ -134,16 +158,16 @@ export class CandleCache {
     limit: number,
     nowMs = Date.now(),
   ): CandleCacheRangeLookup {
-    fromMs = getCandleStartTime(interval, normalizeEpochToSeconds(fromMs)) * 1000;
+    fromMs = chartCandleStartTime(interval, normalizeEpochToSeconds(fromMs)) * 1000;
 
-    const to = getCandleStartTime(interval, normalizeEpochToSeconds(toMs));
-    const maxTo = getCandleStartTime(interval, nowMs / 1000);
+    const to = chartCandleStartTime(interval, normalizeEpochToSeconds(toMs));
+    const maxTo = chartCandleStartTime(interval, nowMs / 1000);
     if (to > maxTo) {
-      // getNumCandlesInRange(from, to) is inclusive of both endpoints. We still request
+      // getNumChartCandlesInRange(from, to) is inclusive of both endpoints. We still request
       // the maxTo boundary candle itself, so only candles strictly past maxTo are clipped.
       // Previously this passed (to, maxTo) — with from > to the helper short-circuits to
       // 0, silently disabling the limit cap and over-counting future-clipped candles.
-      limit = limit - (getNumCandlesInRange(interval, maxTo, to) - 1);
+      limit = limit - (getNumChartCandlesInRange(interval, maxTo, to) - 1);
       toMs = maxTo * 1000;
     } else {
       toMs = to * 1000;
@@ -160,12 +184,14 @@ export class CandleCache {
       };
     }
 
-    const intervalSeconds = timeframeToSeconds[interval];
+    const slotSeconds = slotSecondsFor(interval);
     const contiguousBehindCandles: CandleCacheRangeLookup['contiguousBehindCandles'] = [];
 
+    // Step candle start to candle start (in seconds, so the ms heuristic in the
+    // helpers never sees a small timestamp): a calendar month is not a fixed width.
     let currentMs = fromMs;
     while (currentMs <= toMs && limit > 0) {
-      const { chunkKey, offset } = this.getChunkInfo(currentMs / 1000, intervalSeconds);
+      const { chunkKey, offset } = this.getChunkInfo(currentMs / 1000, slotSeconds);
       const chunk = chunkMap.get(chunkKey);
       const cachedCandle = chunk?.[offset];
 
@@ -174,7 +200,7 @@ export class CandleCache {
       }
 
       contiguousBehindCandles.push(cachedCandle);
-      currentMs += intervalSeconds * 1000;
+      currentMs = nextChartCandleStartTime(interval, currentMs / 1000) * 1000;
       limit -= 1;
     }
 
@@ -186,7 +212,7 @@ export class CandleCache {
       let endMs = toMs;
 
       while (endMs >= currentMs && limit > 0) {
-        const { chunkKey, offset } = this.getChunkInfo(endMs / 1000, intervalSeconds);
+        const { chunkKey, offset } = this.getChunkInfo(endMs / 1000, slotSeconds);
         const chunk = chunkMap.get(chunkKey);
         const cachedCandle = chunk?.[offset];
 
@@ -195,7 +221,8 @@ export class CandleCache {
         }
 
         forwardCandles.push(cachedCandle);
-        endMs -= intervalSeconds * 1000;
+        // The start of the candle holding the second before this one.
+        endMs = chartCandleStartTime(interval, endMs / 1000 - 1) * 1000;
         limit -= 1;
       }
 
@@ -214,7 +241,7 @@ export class CandleCache {
 
   async fetch(request: CandleCacheFetchRequest) {
     const { cacheKey, interval, fetcher, nowMs = Date.now(), usePersistentBackend = true } = request;
-    const intervalSeconds = timeframeToSeconds[interval];
+    const slotSeconds = slotSecondsFor(interval);
     const normalizedRange = this.normalizeRequestRange(interval, request.fromMs, request.toMs, request.limit, nowMs);
 
     if (usePersistentBackend && this.backend) {
@@ -241,7 +268,7 @@ export class CandleCache {
           });
 
     if (newCandles.length > 0) {
-      const currentCandleStart = getCandleStartTime(interval, nowMs / 1000);
+      const nowSeconds = nowMs / 1000;
       let chunkMap = this.chunkedCandleCache.get(cacheKey);
       const touchedChunks = new Map<number, CandleCacheSparseChunk>();
 
@@ -252,11 +279,16 @@ export class CandleCache {
 
       for (const candle of newCandles) {
         const timeInSeconds = normalizeEpochToSeconds(candle.timestamp);
-        if (timeInSeconds >= currentCandleStart) {
+        // Never cache a candle that is still forming. Judged by when THIS
+        // candle closes rather than by the chart's current boundary, so a venue
+        // that stamps off the chart grid (OKX `1D`/`1W` at 16:00 UTC) is not
+        // stored as final for part of every period; for an on-grid candle the
+        // two tests agree exactly.
+        if (chartCandleCloseTime(interval, timeInSeconds) > nowSeconds) {
           continue;
         }
 
-        const { chunkKey, offset } = this.getChunkInfo(timeInSeconds, intervalSeconds);
+        const { chunkKey, offset } = this.getChunkInfo(timeInSeconds, slotSeconds);
         let chunk = chunkMap.get(chunkKey);
         if (!chunk) {
           chunk = new Array(this.chunkSize);
@@ -274,7 +306,7 @@ export class CandleCache {
         this.backend
           .persistChunks(cacheKey, touchedChunks, {
             chunkSize: this.chunkSize,
-            intervalSeconds,
+            intervalSeconds: slotSeconds,
           })
           .catch(() => {});
       }
@@ -309,14 +341,14 @@ export class CandleCache {
   }
 
   private normalizeRequestRange(interval: Timeframe, fromMs: number, toMs: number, limit: number, nowMs = Date.now()) {
-    fromMs = getCandleStartTime(interval, normalizeEpochToSeconds(fromMs)) * 1000;
+    fromMs = chartCandleStartTime(interval, normalizeEpochToSeconds(fromMs)) * 1000;
 
-    const to = getCandleStartTime(interval, normalizeEpochToSeconds(toMs));
-    const maxTo = getCandleStartTime(interval, nowMs / 1000);
+    const to = chartCandleStartTime(interval, normalizeEpochToSeconds(toMs));
+    const maxTo = chartCandleStartTime(interval, nowMs / 1000);
     if (to > maxTo) {
-      // See getCachedCandles for the (maxTo, to) ordering rationale: getNumCandlesInRange
+      // See getCachedCandles for the (maxTo, to) ordering rationale: getNumChartCandlesInRange
       // is inclusive of both endpoints, and maxTo itself remains a requested boundary candle.
-      limit = limit - (getNumCandlesInRange(interval, maxTo, to) - 1);
+      limit = limit - (getNumChartCandlesInRange(interval, maxTo, to) - 1);
       toMs = maxTo * 1000;
     } else {
       toMs = to * 1000;
@@ -371,13 +403,18 @@ export class CandleCache {
     }
   }
 
-  private async ensureBackendStateForRequest(cacheKey: string, interval: Timeframe, fromMs: number, toMs: number): Promise<void> {
+  private async ensureBackendStateForRequest(
+    cacheKey: string,
+    interval: Timeframe,
+    fromMs: number,
+    toMs: number,
+  ): Promise<void> {
     if (!this.backend) {
       return;
     }
 
     if (this.backendReadMode === 'read-through') {
-      const intervalSeconds = timeframeToSeconds[interval];
+      const intervalSeconds = slotSecondsFor(interval);
       const chunkKeys = this.getChunkKeysForRange(fromMs, toMs, intervalSeconds);
       if (chunkKeys.length === 0) {
         return;
@@ -408,10 +445,12 @@ export class CandleCache {
         chunkSize: this.chunkSize,
         intervalSeconds,
       });
-      return new Map(chunkKeys.flatMap((chunkKey) => {
-        const chunk = allChunks.get(chunkKey);
-        return chunk ? [[chunkKey, chunk] as const] : [];
-      }));
+      return new Map(
+        chunkKeys.flatMap((chunkKey) => {
+          const chunk = allChunks.get(chunkKey);
+          return chunk ? [[chunkKey, chunk] as const] : [];
+        }),
+      );
     }
 
     return new Map<number, CandleCacheSparseChunk>();
@@ -422,7 +461,7 @@ export class CandleCache {
       return;
     }
 
-    const intervalSeconds = timeframeToSeconds[interval];
+    const intervalSeconds = slotSecondsFor(interval);
     const chunks = await this.backend.loadAllChunks(cacheKey, {
       chunkSize: this.chunkSize,
       intervalSeconds,

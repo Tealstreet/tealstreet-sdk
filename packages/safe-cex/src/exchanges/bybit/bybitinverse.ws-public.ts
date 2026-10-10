@@ -17,9 +17,9 @@ import {
   OrderSide,
   Ticker,
   Timeframe,
-  timeframeToSeconds,
   Writable,
 } from '../../types';
+import { createLiveCandleStart } from '../../utils/calendarCandles';
 import { inverseObj } from '../../utils/inverseObj';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
@@ -319,8 +319,9 @@ export class BybitInversePublicWebsocket extends BaseWebSocket<BybitInverseExcha
     const topic = `kline.${INTERVAL[opts.interval]}.${opts.symbol}`;
     const secondaryTopic = `publicTrade.${opts.symbol}`;
 
-    // Subscription-invariant: cache once instead of recomputing per trade.
-    const intervalSeconds = timeframeToSeconds[opts.interval];
+    // Subscription-invariant: built once instead of recomputed per trade.
+    // Monday weeks / calendar months for `1w` / `1M`, like the kline it extends.
+    const candleStartOf = createLiveCandleStart(opts.interval);
     const isSeconds = opts.interval.endsWith('s');
 
     let lastCandle: Candle | undefined = undefined;
@@ -365,9 +366,8 @@ export class BybitInversePublicWebsocket extends BaseWebSocket<BybitInverseExcha
       const v = trade.v;
       const S = trade.S;
 
-      // Inlined `getCandleStartTime(opts.interval, T / 1000)` — T is in ms.
-      const tSeconds = T / 1000;
-      const candleStart = Math.floor(tSeconds / intervalSeconds) * intervalSeconds;
+      // T is in ms.
+      const candleStart = candleStartOf(T / 1000);
       const price = parseFloat(p);
       if (isSeconds && (!lastCandle || lastCandle.timestamp !== candleStart)) {
         const seed = lastCandle?.close ?? price;

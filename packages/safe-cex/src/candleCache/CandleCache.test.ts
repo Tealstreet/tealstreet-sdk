@@ -392,3 +392,147 @@ describe('CandleCache', () => {
     });
   });
 });
+
+describe('CandleCache calendar candles', () => {
+  const utc = (year: number, month: number, day: number, hour = 0) => Date.UTC(year, month - 1, day, hour);
+
+  const monthStarts = (from: [number, number], count: number) =>
+    Array.from({ length: count }, (_, i) => Date.UTC(from[0], from[1] - 1 + i, 1));
+
+  it('namespaces 1w and 1M keys away from entries written on the old boundaries', () => {
+    expect(getCandleCacheKey('bybit', 'BTCUSDT', '1M' as Timeframe)).toBe('bybit-BTCUSDT-1M-cal');
+    expect(getCandleCacheKey('bybit', 'BTCUSDT', '1w', true)).toBe('bybit-testnet-BTCUSDT-1w-cal');
+    expect(getCandleCacheKey('bybit', 'BTCUSDT', '1d')).toBe('bybit-BTCUSDT-1d');
+  });
+
+  it('requests and caches every calendar month: 28, 29, 30 and 31 days and a year rollover', async () => {
+    const interval = '1M' as Timeframe;
+    const cacheKey = getCandleCacheKey('bybit', 'BTCUSDT', interval);
+    const cache = new CandleCache({ backend: new MemoryCandleCacheBackend() });
+    // Jan 2024 .. Apr 2025: Feb 2024 (29), Feb 2025 (28), Apr (30), Jan (31), Dec -> Jan.
+    const starts = monthStarts([2024, 1], 16);
+    const nowMs = utc(2025, 4, 15, 12);
+    const fetcher = vi.fn().mockResolvedValueOnce(starts.map(createCandle));
+
+    // Ask through June: Jan 2024 .. Jun 2025 is 18 candles, two of them future.
+    const first = await cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: utc(2024, 1, 10),
+      toMs: utc(2025, 6, 20),
+      limit: 18,
+      fetcher,
+      nowMs,
+    });
+
+    // The request stops at the current month, inclusive, and the future clip
+    // credits exactly May and June back.
+    expect(fetcher).toHaveBeenCalledWith({ interval, from: starts[0], to: utc(2025, 4, 1), limit: 16 });
+    expect(first.map((candle) => candle.timestamp)).toEqual(starts);
+
+    const refetch = vi.fn().mockResolvedValueOnce([createCandle(utc(2025, 4, 1))]);
+    const second = await cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: utc(2024, 1, 10),
+      toMs: nowMs,
+      limit: 16,
+      fetcher: refetch,
+      nowMs,
+    });
+
+    // Every closed month came back from the cache, no two sharing a slot; only
+    // the forming April is asked for again.
+    expect(refetch).toHaveBeenCalledWith({ interval, from: utc(2025, 4, 1), to: utc(2025, 4, 1), limit: 1 });
+    expect(second.map((candle) => candle.timestamp)).toEqual(starts);
+  });
+
+  it('persists 1M chunks a fresh cache can read back at the same offsets', async () => {
+    const interval = '1M' as Timeframe;
+    const cacheKey = getCandleCacheKey('bybit', 'BTCUSDT', interval);
+    const backend = new MemoryCandleCacheBackend();
+    // Nov 2025 .. Feb 2026, with February still forming.
+    const starts = monthStarts([2025, 11], 4);
+    const nowMs = utc(2026, 2, 10);
+
+    await new CandleCache({ backend }).fetch({
+      cacheKey,
+      interval,
+      fromMs: starts[0],
+      toMs: nowMs,
+      limit: 4,
+      fetcher: vi.fn().mockResolvedValueOnce(starts.map(createCandle)),
+      nowMs,
+    });
+
+    const readBack = vi.fn().mockResolvedValueOnce([createCandle(starts[3])]);
+    const result = await new CandleCache({ backend, backendReadMode: 'read-through' }).fetch({
+      cacheKey,
+      interval,
+      fromMs: starts[0],
+      toMs: nowMs,
+      limit: 4,
+      fetcher: readBack,
+      nowMs,
+    });
+
+    expect(readBack).toHaveBeenCalledWith({ interval, from: starts[3], to: starts[3], limit: 1 });
+    expect(result.map((candle) => candle.timestamp)).toEqual(starts);
+  });
+
+  it.each([
+    // Saturday: the epoch-floor week began Thursday, so the forming Monday bar
+    // was stored as closed.
+    ['Saturday', utc(2026, 10, 10, 12)],
+    // Wednesday: the epoch-floor week began the previous Thursday, so the
+    // request stopped short of the forming Monday bar.
+    ['Wednesday', utc(2026, 10, 7, 12)],
+  ])('keeps the forming Monday week out of the cache and in the request on %s', async (_day, nowMs) => {
+    const interval: Timeframe = '1w';
+    const cacheKey = getCandleCacheKey('bybit', 'BTCUSDT', interval);
+    const cache = new CandleCache();
+    const mondays = [utc(2026, 9, 14), utc(2026, 9, 21), utc(2026, 9, 28), utc(2026, 10, 5)];
+    const fetcher = vi.fn().mockResolvedValueOnce(mondays.map(createCandle));
+
+    await cache.fetch({ cacheKey, interval, fromMs: mondays[0], toMs: nowMs, limit: 4, fetcher, nowMs });
+    expect(fetcher).toHaveBeenCalledWith({ interval, from: mondays[0], to: mondays[3], limit: 4 });
+
+    const refetch = vi.fn().mockResolvedValueOnce([createCandle(mondays[3])]);
+    const result = await cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: mondays[0],
+      toMs: nowMs,
+      limit: 4,
+      fetcher: refetch,
+      nowMs,
+    });
+
+    expect(refetch).toHaveBeenCalledWith({ interval, from: mondays[3], to: mondays[3], limit: 1 });
+    expect(result.map((candle) => candle.timestamp)).toEqual(mondays);
+  });
+
+  it('does not store an off-grid daily candle that is still forming', async () => {
+    // OKX `1D` opens at 16:00 UTC; at 10:00 UTC yesterday's 16:00 candle is
+    // still open even though it began before today's UTC midnight.
+    const interval: Timeframe = '1d';
+    const cacheKey = getCandleCacheKey('okx', 'BTCUSDT', interval);
+    const cache = new CandleCache();
+    const nowMs = utc(2026, 10, 10, 10);
+    const closed = utc(2026, 10, 8, 16);
+    const forming = utc(2026, 10, 9, 16);
+
+    await cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: utc(2026, 10, 8),
+      toMs: nowMs,
+      limit: 10,
+      fetcher: vi.fn().mockResolvedValueOnce([createCandle(closed), createCandle(forming)]),
+      nowMs,
+    });
+
+    const cached = cache.getCachedCandles(cacheKey, interval, utc(2026, 10, 8), nowMs, 10, nowMs);
+    expect(cached.contiguousBehindCandles.map((candle) => candle.timestamp)).toEqual([closed]);
+  });
+});

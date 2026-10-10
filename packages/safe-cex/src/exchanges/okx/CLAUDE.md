@@ -541,8 +541,21 @@ mark/index value is finite and differs from the seeded `last` placeholder.
 | `12h`    | `12H` |
 | `1d`     | `1D`  |
 | `1w`     | `1W`  |
+| `1M`     | `1Mutc` |
 
 Note: Minutes use lowercase (e.g., `1m`), hours and days use uppercase (e.g., `1H`, `1D`).
+
+**Monthly is `1Mutc`, never `1M`.** OKX's plain `1M`, and the `6H`, `12H`, `1D`
+and `1W` above, are **Hong Kong time**: they open at 16:00 UTC (measured live
+2026-10-10: `1M` opened 2026-09-30T16:00Z, `1W` Sunday 2026-10-04T16:00Z, `1D`
+2026-10-09T16:00Z, `12H` 04:00/16:00Z, `6H` 04:00/10:00Z — `4H` and finer
+happen to sit on the UTC grid), while `1Mutc` opened 2026-10-01T00:00Z — the chart's month.
+A HK month matches no chart candle, so `1M` maps to the `*utc` bar (REST
+`bar=1Mutc`, WS channel `candle1Mutc`, which reverse-maps to the
+`candle.1M.{instId}` handler). `1D`/`1W`/`6H`/`12H` are deliberately left on Hong
+Kong time: switching them to `1Dutc`/`1Wutc`/`6Hutc`/`12Hutc` moves every bar
+existing OKX charts already show. The candle cache judges "closed" by each
+candle's own close time, so those off-grid bars are not stored while forming.
 
 ## Order Lifecycle
 

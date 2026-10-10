@@ -345,7 +345,7 @@ All WebSockets (public and private) send `{ op: 'ping' }` for keepalive. The `pi
 **Kline** (`bybit.ws-public.ts:208-293`):
 
 - Primary parser: Uses kline topic data. Prevents "bleeding candles backwards" by checking timestamps
-- Secondary parser: Uses `publicTrade` topic for sub-second candle construction. Calculates candle start time via `getCandleStartTime()`. Supports second-interval (`opts.interval.endsWith('s')`) candle creation from individual trades
+- Secondary parser: Uses `publicTrade` topic for sub-second candle construction. Calculates candle start time via `createLiveCandleStart(opts.interval)` (`utils/calendarCandles.ts`), built once per subscription: the epoch floor for intraday intervals, Monday weeks and calendar months for `1w`/`1M`. It used to epoch-floor `1w` too, which on Thursday-Sunday opened a bogus Thursday bar mid-week and then dropped every later `kline.W` frame as "bleeding backwards" (and on Monday-Wednesday warned on every trade). Supports second-interval (`opts.interval.endsWith('s')`) candle creation from individual trades
 - Linear single-symbol OHLCV listeners arm a per-`kline.{interval}.{symbol}` no-data timer. If neither the kline topic nor its paired `publicTrade.{symbol}` handler sees data for 25s while the socket is otherwise alive, re-subscribe that kline/trade pair rather than waiting for whole-socket staleness. Keep `publicTrade` reconnect state ref-counted by active handlers so one interval teardown does not strand another interval after reconnect.
 
 ### Dynamic Ticker Subscriptions
@@ -421,6 +421,14 @@ Tealstreet PostOnly orders remain `PostOnly` and are never promoted to RPI.
 | `12h`    | `720` |
 | `1d`     | `D`   |
 | `1w`     | `W`   |
+| `1M`     | `M`   |
+
+`1M` is not a `Timeframe` (it is an `ExtendedTimeframe`; the map is typed
+`Record<Timeframe | '1M', string>`), but the chart asks for it and Bybit serves it
+on every category: `M` is the UTC calendar month stamped the 1st 00:00 UTC, `W`
+the Monday 00:00 UTC week (REST `interval=M`, WS `kline.M.{SYMBOL}`, checked live
+2026-10-10). `bybitspot.types.ts` carries its own `INTERVAL` that nothing imports —
+every Bybit variant reads `bybit.types.ts`.
 
 ## Order Lifecycle
 

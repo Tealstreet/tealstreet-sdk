@@ -274,6 +274,21 @@ drift measurement.
   that tells two signer failures apart. Keys are capped at 120, not 60 — the
   real messages carry an exchange prefix, so the discriminating clause starts
   past character 60 and a shorter cap collapsed three distinct causes into one.
+- `calendarCandles.ts` — chart candle boundaries: `1w` is **Monday 00:00 UTC**
+  and `1M` the **1st 00:00 UTC** (what Binance, Bybit `W`/`M` and OKX `1Mutc`
+  stamp, and what TradingView draws); every other interval is the epoch floor.
+  `getCandleStartTime` stays an epoch floor on purpose — it is public SDK
+  surface, and its `1w` starts on THURSDAY — so anything that buckets, counts,
+  steps or closes CHART candles uses the `chartCandle*` /
+  `getNumChartCandlesInRange` / `createLiveCandleStart` helpers instead.
+  `CandleCache` does: its `1M` slots are 28 days wide (no two months share
+  one), its lookups step candle start to candle start, `1w`/`1M` keys carry a
+  `-cal` suffix so chunks written on the old boundaries are never read, and a
+  candle is cached only once `chartCandleCloseTime` (relative to the candle
+  itself, so OKX's 16:00 UTC `1D`/`1W` candles count too) has passed.
+  Bybit's trade-built live bar (linear, inverse, spot) uses
+  `createLiveCandleStart`; the other venues that build bars from trades still
+  epoch-floor `1w`.
 - `get-key.ts` — `v()` / `vn()` field lookup helpers (see above)
 - `updateOrderBook.ts` — Sorted upsert via binary search; object + primitive APIs (see above)
 - `sequencedDeltaOrderBook.ts` — Snapshot/delta sequence state machine; emits transport-agnostic recovery signals

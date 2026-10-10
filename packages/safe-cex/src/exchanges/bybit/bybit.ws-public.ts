@@ -18,9 +18,9 @@ import {
   OrderSide,
   Ticker,
   Timeframe,
-  timeframeToSeconds,
   Writable,
 } from '../../types';
+import { createLiveCandleStart } from '../../utils/calendarCandles';
 import { inverseObj } from '../../utils/inverseObj';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
@@ -403,10 +403,11 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
     const tradeDerived = this.parent.supportsTradeDerivedCandles !== false;
     if (!tradeDerived) this.parent.validateCandleInterval(opts.interval);
 
-    // Subscription-invariant: cache once instead of recomputing per trade.
-    // `getCandleStartTime` looks this up + checks for ms-vs-s normalization
-    // every call; on busy markets that's hundreds of redundant lookups/sec.
-    const intervalSeconds = timeframeToSeconds[opts.interval];
+    // Subscription-invariant: built once instead of recomputed per trade. The
+    // epoch floor for intraday intervals; Monday weeks / calendar months for
+    // `1w` / `1M`, matching the `kline.W` / `kline.M` bar it extends (an epoch
+    // floor would start a Thursday bar mid-week).
+    const candleStartOf = createLiveCandleStart(opts.interval);
     const isSeconds = opts.interval.endsWith('s');
 
     let lastCandle: Candle | undefined = undefined;
@@ -453,12 +454,8 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
       const v = trade.v;
       const S = trade.S;
 
-      // Inlined `getCandleStartTime(opts.interval, T / 1000)`. T is always
-      // in ms here (Bybit V5 publicTrade timestamp), so we can divide once
-      // and avoid the function call + ms-vs-s normalization branch + the
-      // `1_000_000_000_000` post-check on every trade.
-      const tSeconds = T / 1000;
-      const candleStart = Math.floor(tSeconds / intervalSeconds) * intervalSeconds;
+      // T is always in ms here (Bybit V5 publicTrade timestamp).
+      const candleStart = candleStartOf(T / 1000);
       const price = parseFloat(p);
       if (isSeconds && (!lastCandle || lastCandle.timestamp !== candleStart)) {
         const seed = lastCandle?.close ?? price;

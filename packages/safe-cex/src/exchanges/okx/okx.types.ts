@@ -123,7 +123,11 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.UNFILLED_ALGO_ORDERS,
 ];
 
-export const INTERVAL: Record<Timeframe, string> = {
+// `1M` is not a `Timeframe` (it is an ExtendedTimeframe), but the chart asks for it.
+// OKX's plain `1M` is a Hong Kong-time month (it opens 16:00 UTC on the last day of
+// the previous month); `1Mutc` opens the 1st 00:00 UTC, which is the chart's month.
+// `1D` and `1W` here are still Hong Kong time (16:00 UTC opens), deliberately unchanged.
+export const INTERVAL: Record<Timeframe | '1M', string> = {
   '1m': '1m',
   '3m': '3m',
   '5m': '5m',
@@ -136,6 +140,7 @@ export const INTERVAL: Record<Timeframe, string> = {
   '12h': '12H',
   '1d': '1D',
   '1w': '1W',
+  '1M': '1Mutc',
 };
 
 export const ORDER_STATUS: Record<string, OrderStatus> = {

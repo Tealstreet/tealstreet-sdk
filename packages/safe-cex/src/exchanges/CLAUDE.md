@@ -1153,9 +1153,14 @@ two values were being recomputed on every trade:
 - `getCandleStartTime(opts.interval, T / 1000)` — looks up
   `timeframeToSeconds[opts.interval]` and runs a ms-vs-seconds
   normalization branch that's a no-op when the caller already
-  divides by 1000. Inline as
-  `Math.floor(T / 1000 / intervalSeconds) * intervalSeconds` with
-  `intervalSeconds` cached at subscription time.
+  divides by 1000. Bybit now builds `createLiveCandleStart(opts.interval)`
+  (`utils/calendarCandles.ts`) once at subscription time and calls it per
+  trade: a bare epoch floor for intraday intervals, and for `1w` / `1M` the
+  Monday-week / calendar-month start with the current bucket cached, so the
+  hot path does no `Date` work until the bar rolls. **Do not inline an epoch
+  floor for those two** — it starts a Thursday week and a 30-day "month" that
+  match no venue kline. Other venues' trade-built bars (apexomni, bitmex,
+  blofin, lighter, woo) still epoch-floor `1w`.
 - `opts.interval.endsWith('s')` — invariant per subscription, hoist.
 
 For Bybit publicTrade on a busy market (hundreds of trades/sec), this

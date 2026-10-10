@@ -16,9 +16,9 @@ import {
   OrderBook,
   Ticker,
   Timeframe,
-  timeframeToSeconds,
   Writable,
 } from '../../types';
+import { createLiveCandleStart } from '../../utils/calendarCandles';
 import { inverseObj } from '../../utils/inverseObj';
 import { calcOrderBookTotal } from '../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../utils/updateOrderBook';
@@ -318,8 +318,9 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
     const topic = `kline.${INTERVAL[opts.interval]}.${opts.symbol}`;
     const secondaryTopic = `publicTrade.${opts.symbol}`;
 
-    // Subscription-invariant: cache once instead of recomputing per trade.
-    const intervalSeconds = timeframeToSeconds[opts.interval];
+    // Subscription-invariant: built once instead of recomputed per trade.
+    // Monday weeks / calendar months for `1w` / `1M`, like the kline it extends.
+    const candleStartOf = createLiveCandleStart(opts.interval);
 
     let lastCandle: Candle | undefined = undefined;
 
@@ -361,9 +362,8 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
       const p = trade.p;
       const v = trade.v;
 
-      // Inlined `getCandleStartTime(opts.interval, T / 1000)` — T is in ms.
-      const tSeconds = T / 1000;
-      const candleStart = Math.floor(tSeconds / intervalSeconds) * intervalSeconds;
+      // T is in ms.
+      const candleStart = candleStartOf(T / 1000);
       if (!lastCandle) return;
       // Numeric `price` once. Previous code aliased the raw string `p` as
       // `price`, relying on Math.max/min coercion — left fields briefly as

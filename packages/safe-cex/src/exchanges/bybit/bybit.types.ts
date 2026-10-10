@@ -134,7 +134,9 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.BALANCE,
 ];
 
-export const INTERVAL: Record<Timeframe, string> = {
+// `1M` is not a `Timeframe` (it is an ExtendedTimeframe), but the chart asks for it and
+// Bybit serves it: `M` is the UTC calendar month, stamped the 1st 00:00 UTC.
+export const INTERVAL: Record<Timeframe | '1M', string> = {
   '1m': '1',
   '3m': '3',
   '5m': '5',
@@ -147,6 +149,7 @@ export const INTERVAL: Record<Timeframe, string> = {
   '12h': '720',
   '1d': 'D',
   '1w': 'W',
+  '1M': 'M',
 };
 
 export const ORDER_STATUS: Record<string, OrderStatus> = {
