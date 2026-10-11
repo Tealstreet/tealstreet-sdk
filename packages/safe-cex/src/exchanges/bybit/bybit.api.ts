@@ -2,7 +2,7 @@ import type { HOWRegion } from '../../httpOverWebsocket/axiosHttpOverWebsocketAd
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import { nanoid } from 'nanoid';
 import qs from 'qs';
 
@@ -14,7 +14,6 @@ import { BaseExchange } from '../base';
 import { getBybitResponseMeta } from './bybit.response';
 import { getBybitSiteHeaders } from './bybit.site';
 import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.types';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 // Credential failures that will not self-heal on retry, so the tick backoff
 // should treat them like a 401.
@@ -58,7 +57,7 @@ const isBybitEnvProbeRequest = (config: unknown) =>
   Boolean((config as Record<string, unknown> | undefined)?.[BYBIT_ENV_PROBE_CONFIG_KEY]);
 
 export const shouldRetryBybitRequest = (error: any) => {
-  const isNetwork = networkErrorOnRead()(error);
+  const isNetwork = isNetworkError(error);
   const isErrSign = Boolean(
     error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!'),
   );
@@ -174,7 +173,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // and some signature errors
   retry(xhr, {
     retries: 3,
-    retryCondition: shouldRetryBybitRequest,
+    retryCondition: (error) =>
+      !(exchange.name === 'hyrotrader' && error.config?.url === ENDPOINTS.CREATE_ORDER) &&
+      shouldRetryBybitRequest(error),
   });
 
   // Add requestId, skip auth for public endpoints, and sign requests.

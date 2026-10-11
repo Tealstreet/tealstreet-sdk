@@ -1,7 +1,7 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
@@ -10,7 +10,6 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './apexomni.types';
 import { hmacSha256Base64 } from './apexomni.utils';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 const serializeApexPayload = (payload: unknown) => {
   if (payload === undefined || payload === null) return '';
@@ -44,7 +43,7 @@ const serializeApexPayloadLegacy = (payload: unknown) =>
   });
 
 const isErrorSignature = (error: any) => {
-  const isNetwork = networkErrorOnRead()(error);
+  const isNetwork = isNetworkError(error);
   const isErrSign =
     error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!');
   return isNetwork || isErrSign;

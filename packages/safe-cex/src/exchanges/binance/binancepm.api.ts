@@ -1,12 +1,15 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { installTransportAdapter, safeCexAxiosCreate, safeCexAxiosCreateNoProxy } from '../../safeCexAxiosCreate';
-import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import {
+  safeCexAxiosCreate,
+  safeCexAxiosCreateNoProxy,
+  installTransportAdapter,
+} from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
 import { BASE_FAPI_URL, BASE_PAPI_URL, ENDPOINTS, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancepm.types';
@@ -33,7 +36,7 @@ export const createBinanceAPI = (options: ExchangeOptions, exchange: BaseExchang
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY)) });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   xhr.interceptors.request.use((config) => {
     // on livenet, don't sign listen key requests (they don't need it)
@@ -91,7 +94,7 @@ export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY)) });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   // Every request on this client is public; a hosted server need not ask the device.
   xhr.interceptors.request.use((config) => {

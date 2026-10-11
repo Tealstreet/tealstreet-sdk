@@ -24,13 +24,12 @@ import type {
   PolymarketTrade,
 } from './polymarket.types';
 
-import { orderToJsonV2, OrderType as PolymarketOrderType } from '@polymarket/clob-client-v2';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
+import { OrderType as PolymarketOrderType, orderToJsonV2 } from '@polymarket/clob-client-v2';
 import qs from 'qs';
 
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { LogSeverity } from '../../types';
-import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
 import { ENDPOINTS, POLYMARKET_CONFIG, RATE_LIMITS } from './polymarket.constants';
 import { buildL2Headers } from './polymarket.signing';
 
@@ -70,10 +69,10 @@ export function createPolymarketAPI(
     exchange,
   );
 
-  // Retry on network errors; order books and midpoints are POSTed reads.
+  // Retry on network errors
   retry(xhr, {
     retries: 3,
-    retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.ORDER_BOOKS, ENDPOINTS.MIDPOINTS)),
+    retryCondition: isNetworkError,
     retryDelay: (retryCount) => retryCount * 1000,
   });
 
@@ -133,12 +132,11 @@ export function createPolymarketAPI(
 
       const method = config.method?.toUpperCase() || 'GET';
       const path = config.url || '';
-      const body =
-        config.data === undefined
-          ? undefined
-          : typeof config.data === 'string'
-            ? config.data
-            : JSON.stringify(config.data);
+      const body = config.data === undefined
+        ? undefined
+        : typeof config.data === 'string'
+          ? config.data
+          : JSON.stringify(config.data);
 
       const headers = buildL2Headers(credentials, walletAddress, method, path, body);
 
@@ -223,7 +221,7 @@ export class PolymarketAPI {
 
     retry(this.gammaXhr, {
       retries: 3,
-      retryCondition: networkErrorOnRead(),
+      retryCondition: isNetworkError,
       retryDelay: (retryCount) => retryCount * 1000,
     });
 
@@ -239,7 +237,7 @@ export class PolymarketAPI {
 
     retry(this.dataXhr, {
       retries: 3,
-      retryCondition: networkErrorOnRead(),
+      retryCondition: isNetworkError,
       retryDelay: (retryCount) => retryCount * 1000,
     });
   }
@@ -307,7 +305,9 @@ export class PolymarketAPI {
       ENDPOINTS.MIDPOINTS,
       tokenIds.map((tokenId) => ({ token_id: tokenId })),
     );
-    return Object.fromEntries(Object.entries(data).map(([id, price]) => [id, parseFloat(price)]));
+    return Object.fromEntries(
+      Object.entries(data).map(([id, price]) => [id, parseFloat(price)]),
+    );
   }
 
   /**
@@ -386,7 +386,11 @@ export class PolymarketAPI {
       throw new Error('Credentials not initialized');
     }
 
-    const payload = orderToJsonV2(order as any, credentials.apiKey, orderType as PolymarketOrderType);
+    const payload = orderToJsonV2(
+      order as any,
+      credentials.apiKey,
+      orderType as PolymarketOrderType,
+    );
     const { data } = await this.xhr.post<PolymarketOrderResponse>(ENDPOINTS.ORDER, payload);
 
     return data;
@@ -424,10 +428,9 @@ export class PolymarketAPI {
     while (nextCursor !== END_CURSOR) {
       const params: Record<string, string> = { next_cursor: nextCursor };
       if (market) params.market = market;
-      const { data } = await this.xhr.get<{ data: PolymarketAPIOrder[]; next_cursor: string } | PolymarketAPIOrder[]>(
-        ENDPOINTS.OPEN_ORDERS,
-        { params },
-      );
+      const { data } = await this.xhr.get<
+        { data: PolymarketAPIOrder[]; next_cursor: string } | PolymarketAPIOrder[]
+      >(ENDPOINTS.OPEN_ORDERS, { params });
 
       if (Array.isArray(data)) return data;
       orders.push(...(data.data || []));
@@ -490,10 +493,9 @@ export class PolymarketAPI {
       const params: Record<string, any> = { next_cursor: nextCursor };
       if (market) params.market = market;
       if (limit) params.limit = limit;
-      const { data } = await this.xhr.get<{ data: PolymarketTrade[]; next_cursor: string } | PolymarketTrade[]>(
-        ENDPOINTS.TRADES,
-        { params },
-      );
+      const { data } = await this.xhr.get<
+        { data: PolymarketTrade[]; next_cursor: string } | PolymarketTrade[]
+      >(ENDPOINTS.TRADES, { params });
 
       if (Array.isArray(data)) return data;
       trades.push(...(data.data || []));
@@ -531,10 +533,10 @@ export class PolymarketAPI {
       passphrase: string;
     }>(ENDPOINTS.DERIVE_API_KEY, {
       headers: {
-        POLY_ADDRESS: address,
-        POLY_SIGNATURE: signature,
-        POLY_TIMESTAMP: timestamp.toString(),
-        POLY_NONCE: nonce.toString(),
+        'POLY_ADDRESS': address,
+        'POLY_SIGNATURE': signature,
+        'POLY_TIMESTAMP': timestamp.toString(),
+        'POLY_NONCE': nonce.toString(),
       },
     });
 
@@ -553,13 +555,15 @@ export class PolymarketAPI {
   /**
    * Get all markets from Gamma API (includes metadata)
    */
-  async getGammaMarkets(params?: {
-    active?: boolean;
-    closed?: boolean;
-    archived?: boolean;
-    limit?: number;
-    offset?: number;
-  }): Promise<GammaMarketInfo[]> {
+  async getGammaMarkets(
+    params?: {
+      active?: boolean;
+      closed?: boolean;
+      archived?: boolean;
+      limit?: number;
+      offset?: number;
+    },
+  ): Promise<GammaMarketInfo[]> {
     const limit = params?.limit ?? 500;
     let offset = params?.offset ?? 0;
     const markets: GammaMarketInfo[] = [];

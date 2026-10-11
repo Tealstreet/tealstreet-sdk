@@ -65,16 +65,6 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.BitgetUSDCExchange,
     ),
 
-  // BitMEX
-  bitmex: () =>
-    import(/* webpackChunkName: "exchange-bitmex" */ './bitmex/bitmex.exchange').then((m) => m.BitmexExchange),
-
-  // BitMEX Testnet
-  bitmextestnet: () =>
-    import(/* webpackChunkName: "exchange-bitmextestnet" */ './bitmex/bitmextestnet.exchange').then(
-      (m) => m.BitmexTestnetExchange,
-    ),
-
   // Bitrue
   bitrue: () =>
     import(/* webpackChunkName: "exchange-bitrue" */ './bitrue/bitrue.exchange').then((m) => m.BitrueExchange),

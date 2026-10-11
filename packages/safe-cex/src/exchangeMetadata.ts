@@ -1726,90 +1726,6 @@ const ApexOmniMetadata: ExchangeMetadata = {
   },
 };
 
-const BitMEXMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  supportsPublicOnly: true,
-  exchangeName: 'bitmex' as ExchangeName,
-  logo: '/static/exchanges/logos/BITMEX/logo.svg',
-  lightLogo: '/static/exchanges/logos/BITMEX/light.png',
-  darkLogo: '/static/exchanges/logos/BITMEX/dark.png',
-  refLink: 'https://teal.link/BitMEX',
-  refImage: '/static/exchanges/reflinks/bitmex/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: false,
-  // BitMEX exchange services closed on 2026-09-23 at 04:00 UTC.
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
-  supportsTestnet: true,
-  supportsExecutionsHistory: true,
-  orderbookTickDelay: 60,
-  prettyName: 'BitMEX',
-  defaultQuote: 'USD',
-  requiresCors: true,
-  // JA first — new accounts default to Tokyo (BitMEX api.direct.* servers are
-  // in ap-northeast-1). Existing accounts already have proxyRegion: 'SG'
-  // stored and keep using Singapore because that's the only set of egress IPs
-  // they've whitelisted on their BitMEX API key — see bitmex/CLAUDE.md
-  // "Regional routing".
-  privateProxyRegions: {
-    JA: privateProxyIpsTokyo,
-    SG: privateProxyIpsSingapore,
-  },
-  tickInterval: 20_000,
-  orderPendingUpdateDelay: 2_000,
-  stopOrderPendingUpdateDelay: 2_000,
-  leverageIsGlobal: true,
-  tvIntraDayMultipliers: ['1', '5', '60'],
-  supportsChaser: true,
-  supportsPositionMargin: false,
-  supportsMaxCrossLeverage: false,
-  positionModes: [PositionMode.OneWay],
-  supportedTPSLTriggerTypes: [
-    OrderStopTriggerType.LastPrice,
-    OrderStopTriggerType.MarkPrice,
-    OrderStopTriggerType.IndexPrice,
-  ],
-  defaultTPTriggerType: OrderStopTriggerType.LastPrice,
-  defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
-  unifiedMargin: false,
-  enforceWsTunnel: true,
-  latencyDomain: 'www.bitmex.com',
-  requiresTickersForMarketsLoaded: true,
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
-const BitMEXTestnetMetadata: ExchangeMetadata = {
-  ...BitMEXMetadata,
-  exchangeName: 'bitmextestnet' as ExchangeName,
-  // Superseded by BitMEX's own Testnet checkbox, which is the mechanism every
-  // other testnet-capable venue uses (binance, hyperliquid, paradex, grvt,
-  // asterdex, ...). Kept enabled so existing saved accounts keep loading;
-  // hidden from the picker so nobody creates a new split account.
-  //
-  // Only safe once `getCandleCacheKey` gained a testnet dimension: the separate
-  // ExchangeName had been the one thing keeping testnet candles out of the live
-  // cache namespace.
-  hiddenFromNewAccountPicker: true,
-  prettyName: 'BitMEX Testnet',
-  logo: '/static/exchanges/logos/BITMEX_TESTNET/logo.svg',
-  lightLogo: '/static/exchanges/logos/BITMEX_TESTNET/logo.svg',
-  darkLogo: '/static/exchanges/logos/BITMEX_TESTNET/logo.svg',
-  refLink: undefined,
-  refImage: '',
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
-  supportsTestnet: false,
-  latencyDomain: 'testnet.bitmex.com',
-};
-
 const PhemexMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2357,8 +2273,6 @@ export const exchangeMetadata: {
   coinbase: CoinbaseMetadata,
   cryptocom: CryptocomMetadata,
   grvt: GrvtMetadata,
-  bitmex: BitMEXMetadata,
-  bitmextestnet: BitMEXTestnetMetadata,
   phemex: PhemexMetadata,
   bingx: BingxMetadata,
   bitrue: BitrueMetadata,

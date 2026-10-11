@@ -1,15 +1,14 @@
 import type { ExchangeOptions } from '../../types';
 
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHash from 'create-hash';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
-import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS } from './krakenspot.types';
+import { BASE_URL, PUBLIC_ENDPOINTS } from './krakenspot.types';
 
 // Kraken Spot REST API Authentication:
 // Signature: base64(HMAC_SHA512(base64_decode(secret), URI_path + SHA256(nonce + POST_body)))
@@ -28,21 +27,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, {
-    retries: 3,
-    retryCondition: networkErrorOnRead(
-      readsAndPosted(
-        ENDPOINTS.BALANCE,
-        ENDPOINTS.EXTENDED_BALANCE,
-        ENDPOINTS.TRADE_BALANCE,
-        ENDPOINTS.OPEN_ORDERS,
-        ENDPOINTS.CLOSED_ORDERS,
-        ENDPOINTS.TRADES_HISTORY,
-        ENDPOINTS.OPEN_POSITIONS,
-        ENDPOINTS.WS_TOKEN,
-      ),
-    ),
-  });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   xhr.interceptors.request.use((config) => {
     const isPublic = PUBLIC_ENDPOINTS.some((p) => (config?.url || '').includes(p));
@@ -63,9 +48,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     // 1. SHA-256 hash of (nonce + postBody)
     // 2. HMAC-SHA512 of (urlPath + sha256hash) using base64-decoded secret
     const urlPath = config.url || '';
-    const sha256Hash = createHash('sha256')
-      .update(nonce + postBody, 'utf8')
-      .digest();
+    const sha256Hash = createHash('sha256').update(nonce + postBody, 'utf8').digest();
 
     const secret = Buffer.from(options.secret, 'base64');
     const hmacPayload = Buffer.concat([Buffer.from(urlPath, 'utf8'), sha256Hash]);

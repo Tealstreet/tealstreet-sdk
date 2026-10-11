@@ -1,12 +1,11 @@
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import type { ExchangeOptions } from '../../types';
 import { replaceUrlParams } from '../../utils/replaceUrlParams';
 import type { BreakoutpropExchange } from './breakoutprop.exchange';
-import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './breakoutprop.types';
-import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import { BASE_URL, RECV_WINDOW } from './breakoutprop.types';
 
 type SessionRetryConfig = {
   url?: string;
@@ -35,7 +34,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BreakoutpropExchan
   // the response interceptor below handles one explicit 401 re-login.
   retry(xhr, {
     retries: 3,
-    retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LOGIN, ENDPOINTS.MARKET_DATA)),
+    retryCondition: isNetworkError,
   });
 
   if (options.tealstreetTunnel) {

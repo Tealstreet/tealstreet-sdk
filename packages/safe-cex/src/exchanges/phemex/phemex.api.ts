@@ -1,7 +1,7 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
@@ -10,7 +10,6 @@ import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosC
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL } from './phemex.types';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 export const BROKER_ID = 'Tealstreet';
 
@@ -28,7 +27,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (options.tealstreetTunnel) {
     installTransportAdapter(xhr, options, exchange.name);

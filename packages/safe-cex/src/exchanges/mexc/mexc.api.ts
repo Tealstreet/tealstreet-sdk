@@ -2,7 +2,7 @@ import type { AxiosRequestConfig } from 'axios';
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
@@ -10,7 +10,6 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './mexc.types';
 
@@ -65,7 +64,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };

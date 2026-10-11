@@ -1,6 +1,6 @@
 import type { ExchangeOptions } from '../../types';
 
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHash from 'create-hash';
 import createHmac from 'create-hmac';
 import qs from 'qs';
@@ -12,7 +12,6 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, HISTORY_BASE_URL, PUBLIC_ENDPOINTS } from './kraken.types';
 import type { KrakenBaseUrl } from './kraken.types';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 // NOTE: Kraken Futures always expects form-encoded data for non-GET requests
 // Signature: base64(HMAC_SHA512(SHA256(formData + nonce + path), base64Decode(secret)))
@@ -70,7 +69,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange, base
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
   if (!options.publicDataOnly) {
     installTransportAdapter(xhr, options, exchange.name);
   }

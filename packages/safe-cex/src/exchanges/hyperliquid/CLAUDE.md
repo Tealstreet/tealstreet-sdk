@@ -834,7 +834,7 @@ This ensures monotonically increasing nonces even if multiple operations happen 
 | `unlimitedXHR`                  | Unlimited          | For operations that need to bypass rate limit                      |
 | Token bucket (`rateLimiter.ts`) | 1200 tokens/minute | Application-level limiter (available but not wired into main flow) |
 
-**Retry on network errors, reads only**: Both `xhr` and `infoXhr` use `axios-retry` with `retries: 3` and `networkErrorOnRead(isHyperliquidRead)`: `/info` reads retry, `/exchange` actions never do, because a lost response may hide an accepted order (see `packages/safe-cex/CLAUDE.md` → "Automatic retries are for reads only").
+**Retry on network errors**: Both `xhr` and `infoXhr` use `axios-retry` with `retries: 3` and `retryCondition: isNetworkError`. Only network errors trigger retries, not HTTP error responses.
 
 **HIP-3 position fetch**: Sequential per-DEX to avoid rate limiting (`fetchAllHip3Positions` uses a `for` loop, not `Promise.all`).
 

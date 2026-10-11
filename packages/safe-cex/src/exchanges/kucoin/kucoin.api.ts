@@ -1,16 +1,15 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
-import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { addKucoinBrokerHeaders, getKucoinRequestTimestamp } from './kucoin.broker';
-import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './kucoin.types';
+import { BASE_URL, BROKER_ID, RECV_WINDOW } from './kucoin.types';
 
 const stringifyQuery = (params: Record<string, any>, encode: boolean) => qs.stringify(params, { encode });
 
@@ -48,10 +47,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, {
-    retries: 3,
-    retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.GET_PUBLIC_WS_TOKEN, ENDPOINTS.GET_PRIVATE_WS_TOKEN)),
-  });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (shouldAuthenticate) {
     installTransportAdapter(xhr, options, exchange.name);

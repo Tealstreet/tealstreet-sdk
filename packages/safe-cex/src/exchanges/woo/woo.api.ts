@@ -2,7 +2,7 @@ import type { AxiosRequestConfig } from 'axios';
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
@@ -11,7 +11,6 @@ import { getTransport } from '../../transport/registry';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW, TESTNET_BROKER_ID } from './woo.types';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 const signV1 = (config: AxiosRequestConfig, options: ExchangeOptions) => {
   const nextConfig = { ...config };
@@ -109,7 +108,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   if (options.tealstreetTunnel) {
     installTransportAdapter(xhr, options, exchange.name);

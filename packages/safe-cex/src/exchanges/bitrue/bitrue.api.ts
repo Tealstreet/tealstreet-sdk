@@ -1,18 +1,17 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
-import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitrue.types';
+import { BASE_URL, BROKER_ID, RECV_WINDOW } from './bitrue.types';
 
 const isErrorSignature = (error: any) => {
-  const isNetwork = networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY))(error);
+  const isNetwork = isNetworkError(error);
   const isErrSign =
     error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!');
   return isNetwork || isErrSign;

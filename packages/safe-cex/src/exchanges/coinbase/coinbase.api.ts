@@ -1,14 +1,13 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry from 'axios-retry';
+import retry, { isNetworkError } from 'axios-retry';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { getTransport } from '../../transport/registry';
 import { replaceUrlParams } from '../../utils/replaceUrlParams';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './coinbase.types';
 import { sign } from './coinbase.utils';
@@ -31,7 +30,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, { retries: 3, retryCondition: isNetworkError });
 
   xhr.interceptors.request.use(async (config) => {
     config = {
