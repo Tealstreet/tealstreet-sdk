@@ -83,11 +83,12 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
   // The web UI order path. createMarketOrder.ts and createLimitOrder.ts used
   // to be listed here and each sent to the venue itself; dcc41e7d5f moved
   // that send into sendOrder.ts (client order ids) and both now go through it,
-  // so sendOrder.ts is the entry point and they are not.
+  // so sendOrder.ts is the entry point and they are not. createStopLossOrder.ts
+  // followed on 2026-10-11 (91018c546d): a stop now mints its client order id
+  // and sends through sendOrder.ts too, so its ghost can be paired by cloid.
   'apps/web/src/order/sendOrder.ts':
-    'the web send with a client order id — createMarketOrder and createLimitOrder delegate here',
+    'the web send with a client order id — createMarketOrder, createLimitOrder and createStopLossOrder delegate here',
   'apps/web/src/order/createConditionalOrder.ts': 'web conditional orders',
-  'apps/web/src/order/createStopLossOrder.ts': 'web stop/TP orders',
   'apps/web/src/order/createScaledOrder.ts': 'web scaled ladders',
 
   // The CLI. Each of these prepares its payload with `prepareCliOrder`,
