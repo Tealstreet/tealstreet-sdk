@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TIME_SYNC_INTERVAL_MS, virtualClock } from './virtualClock';
 
+// Whether this is a Node/Bun server: the Bybit sync skips only there, not in a browser worker.
+const runtime = vi.hoisted(() => ({ node: false }));
+vi.mock('./runtime', () => ({ isNodeOrBunRuntime: () => runtime.node }));
+
 // Mock axios before importing virtualClock
 vi.mock('axios', () => ({
   default: {
@@ -90,16 +94,25 @@ describe('virtualClock', () => {
   });
 
   describe('syncClientServerTime', () => {
-    it('should set server and client to null when window is undefined', async () => {
-      // In Node.js environment, window is undefined
-      const originalWindow = global.window;
-      (global as any).window = undefined;
+    it('zeroes the offset on a Node/Bun server', async () => {
+      runtime.node = true;
+      virtualClock.syncFromServerTime(Date.now() + 10_000);
 
       await virtualClock.syncClientServerTime();
 
-      expect((virtualClock as any).server).toBeNull();
-      expect((virtualClock as any).client).toBeNull();
+      expect((virtualClock as any).offsetMs).toBe(0);
+      runtime.node = false;
+    });
 
+    // The main thread pushes the offset into a worker; the worker's own sync must not undo it.
+    it('keeps a pushed offset in a browser worker, which has no window', async () => {
+      const originalWindow = global.window;
+      (global as any).window = undefined;
+      virtualClock.syncFromServerTime(Date.now() + 10_000);
+
+      await virtualClock.syncClientServerTime();
+
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(9_000);
       (global as any).window = originalWindow;
     });
 
@@ -143,15 +156,27 @@ describe('virtualClock', () => {
   });
 
   describe('syncBybitClientServerTime', () => {
-    it('should set server and client to null when window is undefined', async () => {
-      const originalWindow = global.window;
-      (global as any).window = undefined;
+    afterEach(() => {
+      runtime.node = false;
+    });
 
-      await virtualClock.syncBybitClientServerTime();
+    it('does nothing on a Node/Bun server', async () => {
+      runtime.node = true;
+
+      await virtualClock.syncBybitClientServerTime(Date.now() + 10_000);
 
       expect((virtualClock as any).server).toBeNull();
       expect((virtualClock as any).client).toBeNull();
+    });
 
+    // A web worker has no `window` either; testing for it zeroed every browser worker's offset.
+    it('still syncs in a browser worker, which has no window', async () => {
+      const originalWindow = global.window;
+      (global as any).window = undefined;
+
+      await virtualClock.syncBybitClientServerTime(Date.now() + 10_000);
+
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(9_000);
       (global as any).window = originalWindow;
     });
 
@@ -193,6 +218,19 @@ describe('virtualClock', () => {
       expect(axios.get).toHaveBeenCalled();
 
       delete (global as any).window;
+    });
+
+    it('keeps the pushed offset in a browser worker when given no venue time', async () => {
+      const originalWindow = global.window;
+      (global as any).window = undefined;
+      virtualClock.syncFromServerTime(Date.now() + 5_000);
+      vi.mocked(axios.get).mockClear();
+
+      await virtualClock.syncBybitClientServerTime();
+
+      expect(axios.get).not.toHaveBeenCalled();
+      expect((virtualClock as any).offsetMs).toBeGreaterThan(4_000);
+      (global as any).window = originalWindow;
     });
   });
 
@@ -242,7 +280,6 @@ describe('virtualClock', () => {
       (global as any).window = originalWindow;
     });
   });
-
 
   describe('time source order', () => {
     it('syncs to venue time when the host registered no time source', async () => {
