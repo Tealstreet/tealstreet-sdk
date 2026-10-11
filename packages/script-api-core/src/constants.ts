@@ -35,8 +35,6 @@ const EXCHANGE_NAMES = [
   'bitget',
   'bitgetinverse',
   'bitgetusdc',
-  'bitmex',
-  'bitmextestnet',
   'bitrue',
   'bitunix',
   'blofin',
