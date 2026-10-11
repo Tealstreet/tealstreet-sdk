@@ -68,9 +68,13 @@ SDK.
 - **Honoring venues** (rule in each venue's CLAUDE.md): Binance USD-M/PM/Spot,
   OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
   KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
-  Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni.
-  **Rejecting venues**: AsterDEX, BreakoutProp, Hyperliquid (+spot),
-  HyroTrader, Kraken (+spot), Lighter, MEXC, Polymarket.
+  Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni,
+  Hyperliquid (+spot). **Hyperliquid honors every shape**, stops and brackets
+  included (`isHonorableShape`): a stop is one native order, and on a bracket
+  the caller's ID goes on the entry while each TP/SL leg gets its own minted
+  cloid. It also mints a cloid for every order it places, caller ID or not.
+  **Rejecting venues**: AsterDEX, BreakoutProp, HyroTrader, Kraken (+spot),
+  Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
   `BROKER_ID_…`); a caller ID goes out bare. **To keep attribution, get the ID
@@ -92,6 +96,10 @@ SDK.
   response was lost.** A miss carries `definitive`, which is true only when the
   venue was asked about closed orders too; never treat a non-definitive miss as
   "not placed". See [`CLIENT_ORDER_IDS.md`](CLIENT_ORDER_IDS.md) → Lookup.
+- **A cancel+replace `updateOrder` may resolve to `ReplacementOrderIds`** —
+  still a `string[]`, plus `clientOrderId`, the generated ID the replacement
+  went out with (`replacementClientOrderIdOf`). Hyperliquid does this, because
+  its positional TP/SL replacement answers with no order ID at all.
 - **`updateOrder` never moves a caller ID to a different native order.** A
   native amend keeps the venue order and so its client ID (Bybit `REPLACE_ORDER`,
   OKX amend, Crypto.com, KuCoin Spot, WOO, Orderly, Paradex, BingX, Bitunix,

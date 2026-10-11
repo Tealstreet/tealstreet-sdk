@@ -37,7 +37,8 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquid.rateLimiter.ts` | Shared weighted REST limiter (1200 weight/minute) plus request-weight classification for `/info` and `/exchange`.                                                                                                                                                                                                   |
 | `hyperliquid.agent.ts`       | Agent wallet (API wallet) creation and approval via browser wallet (MetaMask). Handles EIP-712 `ApproveAgent` signing, network switching (Arbitrum One / Sepolia).                                                                                                                                                  |
 | `hyperliquid.builderFee.ts`  | Builder fee approval and checking. EIP-712 `ApproveBuilderFee` signing, `checkBuilderFeeApproved()` REST check, `approveBuilderFeeWithBrowserWallet()` full browser flow.                                                                                                                                           |
-| `hyperliquid.cross-cache.ts` | Cross-context singleton cache for HIP-3 order type tracking and fill deduplication. Uses `sessionStorage` + `BroadcastChannel` for cross-worker/iframe synchronization. Manages pre-placement cache, pending orders cache, and seen fills set.                                                                      |
+| `hyperliquid.cross-cache.ts` | Cross-context singleton cache for order identification and fill deduplication. Uses `sessionStorage` + `BroadcastChannel` for cross-worker/iframe synchronization. Manages the cloid placement records, pre-placement cache, pending orders cache, and seen fills set.                                                                      |
+| `hyperliquid.cloid.ts`       | Client order IDs (cloids): `mintHyperliquidCloid`, the caller-ID rule (`hyperliquidClientOrderIdRule`), and `placementRecordFromWire`, which turns a sent wire into the record the WS handler reads. See "Client order ID" below. |
 
 ### Spot Trading
 
@@ -687,10 +688,11 @@ interface OrderWire {
 3. Get builder info if approved (`getBuilderInfo()`)
 4. Select action builder based on grouping: `orderWiresToOrderAction` (na), `orderWiresToNormalTPSLAction` (normalTpsl), `orderWiresToPositionalTPSLAction` (positionTpsl)
 5. Generate nonce, sign L1 action
-6. **HIP-3 pre-placement cache**: Before the REST call, cache `{coin, side, type, price, amount}` so WS handler can identify the order before REST returns
-7. POST to `/exchange`
-8. Validate response via `validateResponseAndExtractOrderIds()` — extracts `oid` from `resting` or `filled` status
-9. **HIP-3 post-placement**: Add to pending cache (`addPendingHip3Order`), add optimistic order to store with `OrderStatus.Creating`, start retry chain
+6. **Placement records** (every order): before the REST call, `recordPlacement` stores one record per wire, keyed by that wire's cloid (`c`). Every wire carries one — see "Client order ID".
+7. **HIP-3 pre-placement cache** (fallback): before the REST call, cache `{coin, side, type, price, amount, cloid}` for a frame that arrives without its cloid
+8. POST to `/exchange`
+9. Validate response via `validateResponseAndExtractOrderIds()` — extracts `oid` from `resting` or `filled` status
+10. **HIP-3 post-placement**: Add to pending cache (`addPendingHip3Order`), add optimistic order to store with `OrderStatus.Creating`, start retry chain
 
 ### Update Flow (Cancel + Replace)
 
@@ -701,7 +703,7 @@ Hyperliquid does not support in-place order modification for TP/SL. The `Hyperli
 3. **HIP-3 optimistic update**: Add an order with `OrderStatus.Updating` at the new price for immediate UI feedback
 4. Cancel original order via `cancelOrders()`
 5. Mark original as "dead" in `_deadOrders` Set (prevents WS from re-adding it)
-6. Place new order with updated parameters via `placeOrder()`
+6. Place new order with updated parameters under a FRESH cloid (`placeOrderWithCloid`), and resolve to the new oids plus that cloid as `clientOrderId` (`ReplacementOrderIds`). A positional TP/SL replacement answers `"waitingForTrigger"` with no oid, so the cloid is the only handle the caller gets on it.
 
 ### Cancellation Flow
 
@@ -1358,4 +1360,36 @@ above); do not net it a second time.
 
 ## Client order ID
 
-This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+**Every order we place carries a cloid** — `0x` + 32 lowercase hex chars, wire
+field `c` (`hyperliquid.cloid.ts`). That includes market orders, every wire of a
+`normalTpsl` bracket (the entry and each TP/SL leg get their own, so a bracket
+carries up to three), standalone and positional TP/SL, the cancel+replace in
+`updateOrder`, and `hyperliquidspot`. The minting happens in `placeOrder`, where
+the wire is built, so the hosted exchange-server path is covered too: order
+writes run on the browser's main-thread mirror, and signing-capture
+(`isSigningCaptureRequest`) is untouched. `c` is the LAST key of the wire, after
+`t` — msgpack key order is part of the signed hash.
+
+**Caller IDs are honored on every shape** (`hyperliquidClientOrderIdRule`): the
+caller's cloid goes on the main wire verbatim, legs get minted ones. Only a
+lowercase cloid is accepted, because the venue echoes cloids lowercase and an
+uppercase one could never be matched. `mintClientOrderId` therefore returns a
+cloid for stops too, which is what lets the web stamp a stop's optimistic ghost
+with the ID of the order it becomes.
+
+**Verified live 2026-10-11:** `orderUpdates` frames carry `order.cloid` (open
+and canceled frames for resting limits; trigger orders were not observed, the
+docs list `cloid` on every `WsBasicOrder`), and `frontendOpenOrders` rows carry
+`cloid` (`null` when the order has none). `parseOpenOrders` maps it to
+`Order.clientOrderId` — a top-level field, because `info` is stripped before the
+store worker posts to the main thread.
+
+**`updateOrder` resolves to `ReplacementOrderIds`**: the new oids, plus the
+replacement's freshly minted cloid as `clientOrderId`. Callers reading
+`result[0]` are unaffected. The cancelled order's cloid is never reused.
+
+**Lookup** (`findOrderByClientOrderId`) asks `orderStatus` with the cloid as
+`oid`, which also answers for filled and cancelled orders and, unlike
+`fetchOrders` here, never writes the store. A miss is still never definitive.
+
+**Cancel** still goes by oid; `cancelByCloid` exists but nothing needs it yet.

@@ -44,6 +44,7 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './hyperliquid.api';
+import { hyperliquidClientOrderIdRule, mintHyperliquidCloid } from './hyperliquid.cloid';
 import {
   orderRequestToOrderWire,
   orderWiresToNormalTPSLAction,
@@ -63,6 +64,9 @@ import { HyperliquidSpotPrivateWebSocket } from './hyperliquidspot.ws-private';
 import { HyperliquidSpotPublicWebSocket } from './hyperliquidspot.ws-public';
 
 export class HyperliquidSpotExchange extends BaseExchange {
+  // Same cloid contract as perps (`hyperliquid.cloid.ts`); spot has no WS order handler to read records.
+  protected readonly clientOrderIdRule = hyperliquidClientOrderIdRule;
+
   xhr: Axios;
   unlimitedXHR: Axios;
   isSpot = true;
@@ -700,7 +704,8 @@ export class HyperliquidSpotExchange extends BaseExchange {
   // }
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    this.resolveCallerClientOrderId(opts);
+    // The caller's ID goes on the main wire verbatim; otherwise we mint one. Each TP/SL leg gets its own.
+    const cloid = this.resolveCallerClientOrderId(opts) ?? mintHyperliquidCloid();
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
@@ -766,6 +771,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
             },
           },
           reduce_only: false,
+          cloid,
         },
         assetIndex,
       );
@@ -921,6 +927,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
             },
           },
           reduce_only: false,
+          cloid,
         },
         assetIndex,
       );
@@ -957,6 +964,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
                 },
               },
               reduce_only: false,
+              cloid: mintHyperliquidCloid(),
             },
             assetIndex,
           ),
@@ -980,6 +988,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
                 },
               },
               reduce_only: false,
+              cloid: mintHyperliquidCloid(),
             },
             assetIndex,
           ),

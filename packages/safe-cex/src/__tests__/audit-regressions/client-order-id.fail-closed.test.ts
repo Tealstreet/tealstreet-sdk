@@ -83,11 +83,21 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['woo', WOOXExchange],
 ];
 
+// Honor a caller ID on EVERY shape, not only plain Limit/Market: a stop is one
+// native order, and on a bracket the ID goes on the entry while each TP/SL leg
+// gets its own minted ID. So the shape-refusal cases above do not apply.
+const HONORING_EVERY_SHAPE: Array<[string, ExchangeCtor]> = [
+  ['hyperliquid', HyperliquidExchange],
+  ['hyperliquidspot', HyperliquidSpotExchange],
+];
+
+const HYPERLIQUID_CLOID = '0x0123456789abcdef0123456789abcdef';
+
 const NOT_HONORING: Array<[string, ExchangeCtor]> = [
   ['asterdex', AsterDEXExchange],
   ['breakoutprop', BreakoutpropExchange],
-  ['hyperliquid', HyperliquidExchange],
-  ['hyperliquidspot', HyperliquidSpotExchange],
+  // hyperliquid and hyperliquidspot moved to HONORING_EVERY_SHAPE when every
+  // placement started carrying a cloid (feat(hyperliquid): cloid on every order).
   ['hyrotrader', HyrotraderExchange],
   ['kraken', KrakenExchange],
   ['krakenspot', KrakenSpotExchange],
@@ -219,6 +229,58 @@ describe('clientOrderId fails closed before any write', () => {
   });
 });
 
+describe('clientOrderId on venues that honor every shape', () => {
+  it.each(HONORING_EVERY_SHAPE)('%s rejects a caller ID that breaks the venue charset before any transport', async (name, Ctor) => {
+    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+
+    await expect(exchange.placeOrder(order({ clientOrderId: '12345' }))).rejects.toThrow(/clientOrderId must /);
+    await expect(exchange.placeOrder(order({ clientOrderId: '0x0123456789ABCDEF0123456789ABCDEF' }))).rejects.toThrow(
+      /clientOrderId must /,
+    );
+    expect(emitted).toHaveLength(2);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING_EVERY_SHAPE)('%s rejects a caller ID on an order above the max size for one order', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+
+    await expect(exchange.placeOrder(order({ amount: 25, clientOrderId: HYPERLIQUID_CLOID }))).rejects.toThrow(
+      /exceeds the market's max size for one order/,
+    );
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING_EVERY_SHAPE)('%s rejects a whole batch with one bad or repeated caller ID', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+
+    await expect(exchange.placeOrders([order(), order({ clientOrderId: 'nope' })])).rejects.toThrow(/clientOrderId must /);
+    await expect(
+      exchange.placeOrders([order({ clientOrderId: HYPERLIQUID_CLOID }), order({ clientOrderId: HYPERLIQUID_CLOID })]),
+    ).rejects.toThrow(/duplicated in one batch/);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING_EVERY_SHAPE)('%s refuses to place an order when the caller ID went missing', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+
+    await expect(exchange.placeOrderWithClientOrderId(order() as any)).rejects.toThrow(/requires a clientOrderId/);
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(HONORING_EVERY_SHAPE)('%s mints a cloid for every shape it places, and none it would refuse', (name, Ctor) => {
+    const { exchange, emitted } = setup(name, Ctor);
+    const cloid = /^0x[0-9a-f]{32}$/;
+
+    expect(exchange.mintClientOrderId(order())).toMatch(cloid);
+    expect(exchange.mintClientOrderId(order({ stopLoss: 49_000, takeProfit: 51_000 }))).toMatch(cloid);
+    expect(exchange.mintClientOrderId(order({ type: OrderType.StopLoss, triggerPrice: 49_000 }))).toMatch(cloid);
+    expect(exchange.mintClientOrderId(order({ type: OrderType.TrailingStopLoss }))).toBeUndefined();
+    expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
+    expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
+    expect(emitted).toEqual([]);
+  });
+});
+
 describe('placeOrderWithClientOrderId', () => {
   it.each(HONORING)('%s refuses to place an order when the caller ID went missing', async (name, Ctor) => {
     const { exchange, transportCalls, emitted } = setup(name, Ctor);
@@ -296,7 +358,7 @@ describe('findOrderByClientOrderId on a venue that refuses caller IDs', () => {
     vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');
   });
 
-  // It never sent one, and some (Hyperliquid) write the store while fetching orders.
+  // It never sent one, and some venues write the store while fetching orders.
   it.each(NOT_HONORING)('%s misses without touching a transport', async (name, Ctor) => {
     const { exchange, transportCalls } = setup(name, Ctor);
     await expect(exchange.findOrderByClientOrderId(MARKET.symbol, 'cid-1')).resolves.toEqual({

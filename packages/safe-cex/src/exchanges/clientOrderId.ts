@@ -61,6 +61,23 @@ export type PlacedOrderRef = {
 export type ClientOrderIdPlaceOrderOpts = PlaceOrderOpts & { readonly clientOrderId: string };
 
 /**
+ * What a cancel+replace `updateOrder` resolves to: the replacement's venue
+ * order IDs, plus the client order ID the replacement went out with. It is
+ * still a `string[]`, so callers reading `result[0]` are unaffected; the ID is
+ * what identifies the replacement when the venue answers without an order ID
+ * (Hyperliquid positional TP/SL, `"waitingForTrigger"`).
+ */
+export type ReplacementOrderIds = string[] & { readonly clientOrderId?: string };
+
+export const withReplacementClientOrderId = (orderIds: string[], clientOrderId: string): ReplacementOrderIds =>
+  Object.assign(orderIds, { clientOrderId });
+
+export const replacementClientOrderIdOf = (orderIds: unknown): string | undefined => {
+  const clientOrderId = (orderIds as { clientOrderId?: unknown } | null | undefined)?.clientOrderId;
+  return typeof clientOrderId === 'string' && clientOrderId ? clientOrderId : undefined;
+};
+
+/**
  * `definitive` is true only when the venue was asked about closed orders too
  * and said no order carries the ID; an open-orders scan can never say that.
  */
@@ -86,7 +103,9 @@ const sameClientOrderId = (value: unknown, clientOrderId: string) =>
 /** Whether a mapped order carries `clientOrderId`, wherever its venue puts it. */
 export const orderCarriesClientOrderId = (order: Order, clientOrderId: string): boolean => {
   if (!clientOrderId || clientOrderId === '0' || clientOrderId === 'undefined') return false;
-  if (order.id === clientOrderId || order.parentId === clientOrderId) return true;
+  if (order.id === clientOrderId || order.parentId === clientOrderId || order.clientOrderId === clientOrderId) {
+    return true;
+  }
   const info = order.info as Record<string, unknown> | undefined;
   return !!info && CLIENT_ID_INFO_FIELDS.some((field) => sameClientOrderId(info[field], clientOrderId));
 };

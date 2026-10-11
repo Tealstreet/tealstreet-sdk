@@ -34,10 +34,15 @@ market's max size, or an unknown market.
 | Crypto.com                   | `.{1,36}`                | `ts…`               | none                 | **dropped** — mapper keeps no `info`                      |
 | Backpack                     | uint32                   | 9-digit number      | header               | **dropped** — mapper keeps no `info`                      |
 | GRVT                         | decimal, < 2^63          | 9-digit number      | builder fee          | **`Order.id`**                                            |
+| Hyperliquid (+spot)          | `0x` + 32 lowercase hex  | random `0x…`        | builder fee          | **`Order.clientOrderId`** (WS and REST)                   |
 
-**Refuse caller IDs** (`mintClientOrderId` → `undefined`): Hyperliquid (+spot),
-Lighter, Kraken (+spot), MEXC, AsterDEX, BitMEX, BreakoutProp, HyroTrader,
-Polymarket.
+Hyperliquid is the one venue that honors (and mints for) every shape it places,
+stops and brackets included; only a trailing stop, which it does not support,
+mints nothing. It also puts a cloid on every order it sends, so the WS handler
+can identify its own orders — see `src/exchanges/hyperliquid/CLAUDE.md`.
+
+**Refuse caller IDs** (`mintClientOrderId` → `undefined`): Lighter, Kraken
+(+spot), MEXC, AsterDEX, BitMEX, BreakoutProp, HyroTrader, Polymarket.
 
 ## Lookup
 
@@ -61,6 +66,10 @@ definitive miss) and **Binance USD-M** (`GET /fapi/v1/order` by
 silent, so a lookup never toasts "Order does not exist"). Every other venue
 uses the open-orders scan. Bybit is deliberately not definitive: its order
 history lags, so a just-filled order can be missing from both endpoints.
+**Hyperliquid** asks `orderStatus` by cloid, which sees filled and cancelled
+orders and never writes the store (its `fetchOrders` would), but a miss is
+still not definitive: the venue accepts a nonce up to two days old, so nothing
+bounds when a send still in flight can land.
 
 **A definitive miss right after a lost send is still not proof.** A placement
 the venue is still processing (Binance documents 503 "execution status

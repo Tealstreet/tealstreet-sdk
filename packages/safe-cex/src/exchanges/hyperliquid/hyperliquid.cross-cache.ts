@@ -1,3 +1,5 @@
+import type { HyperliquidPlacementRecord } from './hyperliquid.cloid';
+
 import { OrderSide, OrderType } from '../../types';
 
 // ============================================================================
@@ -9,12 +11,18 @@ import { OrderSide, OrderType } from '../../types';
 // ============================================================================
 
 // Type definitions for cache entries
-export type PrePlacementEntry = { type: OrderType; price: number; amount: number; timestamp: number };
+// `cloid` lets the cloid-record path in the WS handler consume exactly this entry.
+export type PrePlacementEntry = { type: OrderType; price: number; amount: number; timestamp: number; cloid?: string };
 export type PendingOrderEntry = { type: OrderType; price: number; timestamp: number };
 
 // Storage keys
 const PRE_PLACEMENT_STORAGE_KEY = 'tealstreet_hip3_prePlacement';
 const PENDING_ORDERS_STORAGE_KEY = 'tealstreet_hip3_pendingOrders';
+const PLACEMENT_RECORDS_STORAGE_KEY = 'tealstreet_hl_placementRecords';
+// A record is read on the order's first frame, which arrives within a second of
+// placement; it lives this long only so a slow or reconnecting socket still finds it.
+export const PLACEMENT_RECORD_TTL_MS = 30 * 60 * 1000;
+const MAX_PLACEMENT_RECORDS = 500;
 const MAX_SEEN_FILLS = 500; // Keep last 500 fill IDs
 
 /**
@@ -26,6 +34,7 @@ export class HyperliquidCrossCache {
   private workerPendingOrdersCache = new Map<string, PendingOrderEntry>();
   private workerPrePlacementCache = new Map<string, PrePlacementEntry[]>();
   private workerSeenFillsSet = new Set<string>(); // For fill deduplication
+  private placementRecords = new Map<string, HyperliquidPlacementRecord>();
 
   // BroadcastChannel for cross-context communication
   private orderCacheBroadcast: BroadcastChannel | null = null;
@@ -54,6 +63,10 @@ export class HyperliquidCrossCache {
             this.workerPrePlacementCache.set(key, Array.isArray(data) ? data : [data]);
           } else if (action === 'removePrePlacement' && key) {
             this.workerPrePlacementCache.delete(key);
+          } else if (action === 'addPlacementRecord' && key && data) {
+            this.placementRecords.set(key, data);
+          } else if (action === 'removePlacementRecord' && key) {
+            this.placementRecords.delete(key);
           } else if (action === 'seenFill' && key) {
             // Handle fill deduplication broadcast
             this.workerSeenFillsSet.add(key);
@@ -82,6 +95,7 @@ export class HyperliquidCrossCache {
         // Clear order caches on fresh load (will be repopulated as needed)
         storage.removeItem(PRE_PLACEMENT_STORAGE_KEY);
         storage.removeItem(PENDING_ORDERS_STORAGE_KEY);
+        storage.removeItem(PLACEMENT_RECORDS_STORAGE_KEY);
       }
     } catch {
       // Ignore cleanup errors
@@ -165,9 +179,9 @@ export class HyperliquidCrossCache {
    * Add to pre-placement cache before REST call.
    * This allows WS handlers to match incoming orders to their correct type.
    */
-  addPrePlacement(coin: string, side: OrderSide, type: OrderType, price: number, amount: number): void {
+  addPrePlacement(coin: string, side: OrderSide, type: OrderType, price: number, amount: number, cloid?: string): void {
     const key = this.getPrePlacementKey(coin, side);
-    const entry: PrePlacementEntry = { type, price, amount, timestamp: Date.now() };
+    const entry: PrePlacementEntry = { type, price, amount, timestamp: Date.now(), ...(cloid ? { cloid } : {}) };
 
     const cache = this.readPrePlacementCache();
 
@@ -315,6 +329,30 @@ export class HyperliquidCrossCache {
   }
 
   /**
+   * Drops the one entry placed with `cloid`, once the WS handler has identified
+   * that order from its cloid record. Without this the entry would linger for
+   * 30s and could be claimed by a different, cloid-less frame (FIFO fallback).
+   */
+  removePrePlacementByCloid(coin: string, side: OrderSide, cloid: string): void {
+    const key = this.getPrePlacementKey(coin, side);
+    const cache = this.readPrePlacementCache();
+    const entries = cache[key];
+    if (!entries || !entries.some((e) => e.cloid === cloid)) return;
+
+    const remaining = entries.filter((e) => e.cloid !== cloid);
+    if (remaining.length === 0) {
+      delete cache[key];
+      this.workerPrePlacementCache.delete(key);
+      this.broadcastCacheUpdate('removePrePlacement', key);
+    } else {
+      cache[key] = remaining;
+      this.workerPrePlacementCache.set(key, remaining);
+      this.broadcastCacheUpdate('addPrePlacement', key, remaining);
+    }
+    this.writePrePlacementCache(cache);
+  }
+
+  /**
    * Clear all pre-placement entries for a given coin+side.
    * Called when orders are cancelled to prevent stale entries from poisoning future matches.
    */
@@ -424,6 +462,77 @@ export class HyperliquidCrossCache {
     // Also update local in-memory cache and broadcast removal
     this.workerPendingOrdersCache.delete(orderId);
     this.broadcastCacheUpdate('removePending', orderId);
+  }
+
+  // ============================================================================
+  // PLACEMENT RECORDS (keyed by cloid)
+  // Every order we place carries a cloid, and `orderUpdates` echoes it. The
+  // record is written before the REST call, so the WS handler identifies the
+  // order exactly instead of inferring its type and trigger price. The
+  // in-memory map is authoritative in this context (own writes + broadcasts
+  // from other contexts); sessionStorage backs a same-tab context created
+  // after the write.
+  // ============================================================================
+
+  private readPlacementRecordStorage(): Record<string, HyperliquidPlacementRecord> {
+    const storage = this.getSessionStorage();
+    if (!storage) return {};
+    try {
+      const data = storage.getItem(PLACEMENT_RECORDS_STORAGE_KEY);
+      return data ? JSON.parse(data) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private writePlacementRecordStorage(records: Record<string, HyperliquidPlacementRecord>): void {
+    const storage = this.getSessionStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(PLACEMENT_RECORDS_STORAGE_KEY, JSON.stringify(records));
+    } catch {
+      // Storage full or unavailable
+    }
+  }
+
+  private isPlacementRecordLive(record: HyperliquidPlacementRecord, now: number): boolean {
+    return now - record.placedAt <= PLACEMENT_RECORD_TTL_MS;
+  }
+
+  addPlacementRecord(cloid: string, record: HyperliquidPlacementRecord): void {
+    const now = Date.now();
+    this.placementRecords.set(cloid, record);
+    for (const [key, value] of this.placementRecords) {
+      if (this.placementRecords.size <= MAX_PLACEMENT_RECORDS && this.isPlacementRecordLive(value, now)) break;
+      this.placementRecords.delete(key);
+    }
+
+    const stored = this.readPlacementRecordStorage();
+    stored[cloid] = record;
+    for (const key of Object.keys(stored)) {
+      if (!this.isPlacementRecordLive(stored[key], now)) delete stored[key];
+    }
+    const keys = Object.keys(stored);
+    for (let i = 0; i < keys.length - MAX_PLACEMENT_RECORDS; i++) delete stored[keys[i]];
+    this.writePlacementRecordStorage(stored);
+
+    this.broadcastCacheUpdate('addPlacementRecord', cloid, record);
+  }
+
+  getPlacementRecord(cloid: string): HyperliquidPlacementRecord | undefined {
+    const record = this.placementRecords.get(cloid) ?? this.readPlacementRecordStorage()[cloid];
+    if (!record) return undefined;
+    return this.isPlacementRecordLive(record, Date.now()) ? record : undefined;
+  }
+
+  removePlacementRecord(cloid: string): void {
+    const inMemory = this.placementRecords.delete(cloid);
+    const stored = this.readPlacementRecordStorage();
+    if (stored[cloid]) {
+      delete stored[cloid];
+      this.writePlacementRecordStorage(stored);
+    }
+    if (inMemory) this.broadcastCacheUpdate('removePlacementRecord', cloid);
   }
 
   // ============================================================================

@@ -504,6 +504,10 @@ export type Order = {
   readonly reduceOnly: boolean;
   readonly close?: boolean;
   readonly info?: any;
+  // The venue client order ID, where the adapter maps it to the top level
+  // (Hyperliquid's cloid). `info` is stripped before a worker posts the store,
+  // so a field the web must match on cannot live there.
+  readonly clientOrderId?: string;
   readonly timeInForce?: OrderTimeInForce;
   readonly lastUpdate: number;
   readonly triggerType?: OrderStopTriggerType;

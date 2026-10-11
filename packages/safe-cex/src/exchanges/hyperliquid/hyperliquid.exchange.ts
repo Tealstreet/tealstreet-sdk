@@ -1,5 +1,7 @@
 import type { Axios } from 'axios';
 import type { Store } from '../../store/store.interface';
+import type { ClientOrderLookup, ReplacementOrderIds } from '../clientOrderId';
+import type { HyperliquidPlacementRecord } from './hyperliquid.cloid';
 import type { BuilderFeeCheckResult, BuilderInfo } from './hyperliquid.types';
 
 import rateLimit from 'axios-rate-limit';
@@ -56,8 +58,16 @@ import { loop } from '../../utils/loop';
 import { adjust } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { orderCarriesClientOrderId, withReplacementClientOrderId } from '../clientOrderId';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
 import { checkBuilderFeeApproved } from './hyperliquid.builderFee';
+import {
+  HYPERLIQUID_CLOID_PATTERN,
+  hyperliquidClientOrderIdRule,
+  mintHyperliquidCloid,
+  placementRecordFromWire,
+  readHyperliquidCloid,
+} from './hyperliquid.cloid';
 import {
   PERP_MAX_PRICE_DECIMALS,
   SPOT_ASSET_INDEX_OFFSET,
@@ -98,6 +108,7 @@ import {
   HyperliquidUserAbstractionMode,
   INFO_TYPES,
   Meta,
+  OrderWire,
   PerpDex,
   PerpDexs,
   ScheduleCancelAction,
@@ -165,6 +176,9 @@ export class HyperliquidExchange extends BaseExchange {
 
   xhr: Axios; // For /exchange endpoint (trading operations)
   infoXhr: Axios; // For /info endpoint (read-only operations)
+
+  // Every placement carries a cloid (`hyperliquid.cloid.ts`); a caller's goes on the main wire verbatim.
+  protected readonly clientOrderIdRule = hyperliquidClientOrderIdRule;
   unlimitedXHR: Axios;
 
   public publicWebsocket: HyperliquidPublicWebSocket;
@@ -321,8 +335,44 @@ export class HyperliquidExchange extends BaseExchange {
   // different JS contexts (web workers, iframes) within the same browser tab.
 
   // Add to pre-placement cache before REST call (delegates to cross-context cache)
-  public addToPrePlacementCache(coin: string, side: OrderSide, type: OrderType, price: number, amount: number): void {
-    getCrossCache().addPrePlacement(coin, side, type, price, amount);
+  public addToPrePlacementCache(
+    coin: string,
+    side: OrderSide,
+    type: OrderType,
+    price: number,
+    amount: number,
+    cloid?: string,
+  ): void {
+    getCrossCache().addPrePlacement(coin, side, type, price, amount, cloid);
+  }
+
+  // Consume the pre-placement entry of an order the WS handler identified by its cloid record.
+  public forgetPrePlacement(coin: string, side: OrderSide, cloid: string): void {
+    getCrossCache().removePrePlacementByCloid(coin, side, cloid);
+  }
+
+  // ============================================================================
+  // PLACEMENT RECORDS (cloid -> what we signed)
+  // The PRIMARY way the WS handler identifies our own orders: written before the
+  // REST call, read on the first `orderUpdates` frame (which echoes the cloid).
+  // The pre-placement / pending caches and the reduce-only deferral are the
+  // fallback for frames with no cloid or no record (orders from other clients,
+  // or a context the record never reached — the hosted exchange-server).
+  // ============================================================================
+  public recordPlacement(wires: OrderWire[], symbol: string): void {
+    const placedAt = Date.now();
+    const cache = getCrossCache();
+    for (const wire of wires) {
+      if (wire.c) cache.addPlacementRecord(wire.c, placementRecordFromWire(wire, symbol, placedAt));
+    }
+  }
+
+  public getPlacementRecord(cloid: string): HyperliquidPlacementRecord | undefined {
+    return getCrossCache().getPlacementRecord(cloid);
+  }
+
+  public forgetPlacementRecord(cloid: string): void {
+    getCrossCache().removePlacementRecord(cloid);
   }
 
   // Match incoming order to pre-placement cache (delegates to cross-context cache)
@@ -2646,7 +2696,8 @@ export class HyperliquidExchange extends BaseExchange {
           existing.amount !== newOrder.amount ||
           existing.filled !== newOrder.filled ||
           existing.type !== newOrder.type ||
-          existing.timeInForce !== newOrder.timeInForce
+          existing.timeInForce !== newOrder.timeInForce ||
+          existing.clientOrderId !== newOrder.clientOrderId
         ) {
           // Order changed - update only this order
           this.store.updateOrder({ id: newOrder.id }, newOrder);
@@ -2790,7 +2841,6 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   private parseOpenOrders = (openOrders: any[]): Order[] => {
-    const marketsById = this.store.marketsById;
     return openOrders
       .filter((openOrder) => {
         const oid = `${openOrder.oid}`;
@@ -2800,39 +2850,79 @@ export class HyperliquidExchange extends BaseExchange {
         if (this.isOrderCancelled(oid)) return false;
         return true;
       })
-      .map((openOrder): Order | null => {
-        // Try exact match first, then case-insensitive for HIP-3 markets (O(1) map lookup)
-        let market: Market | undefined = marketsById[openOrder.coin];
-
-        if (!market && openOrder.coin.includes(':')) {
-          // Try case-insensitive lookup for HIP-3 markets via O(1) map
-          market = this.marketsLowerCaseMap.get(openOrder.coin.toLowerCase());
-        }
-        if (!market) {
-          return null;
-        }
-
-        // Infer order type from frontendOpenOrders response
-        // REST API (frontendOpenOrders) provides orderType, triggerPx, isTrigger for both core perps and HIP-3
-        const inferred = inferHyperliquidOrderTypeAndPrice(openOrder);
-
-        return {
-          id: `${openOrder.oid}`,
-          status: OrderStatus.Open,
-          symbol: market.symbol,
-          type: inferred.type,
-          side: openOrder.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
-          price: inferred.price,
-          amount: +openOrder.origSz,
-          filled: +openOrder.origSz - +openOrder.sz,
-          remaining: +openOrder.sz,
-          reduceOnly: Boolean(openOrder.reduceOnly),
-          lastUpdate: Date.now(),
-          timeInForce: parseHyperliquidOrderTimeInForce(openOrder.tif),
-          info: openOrder,
-        };
-      })
+      .map((openOrder) => this.mapOpenOrderRow(openOrder, OrderStatus.Open))
       .filter((order): order is Order => order !== null);
+  };
+
+  // One `frontendOpenOrders` row (also the `order` of an `orderStatus` answer).
+  private mapOpenOrderRow = (openOrder: any, status: OrderStatus): Order | null => {
+    // Try exact match first, then case-insensitive for HIP-3 markets (O(1) map lookup)
+    let market: Market | undefined = this.store.marketsById[openOrder.coin];
+
+    if (!market && openOrder.coin.includes(':')) {
+      // Try case-insensitive lookup for HIP-3 markets via O(1) map
+      market = this.marketsLowerCaseMap.get(openOrder.coin.toLowerCase());
+    }
+    if (!market) {
+      return null;
+    }
+
+    // Infer order type from frontendOpenOrders response
+    // REST API (frontendOpenOrders) provides orderType, triggerPx, isTrigger for both core perps and HIP-3
+    const inferred = inferHyperliquidOrderTypeAndPrice(openOrder);
+    // Live rows carry `cloid` (null when the order has none) — checked 2026-10-11.
+    const clientOrderId = readHyperliquidCloid(openOrder.cloid);
+
+    return {
+      id: `${openOrder.oid}`,
+      status,
+      symbol: market.symbol,
+      type: inferred.type,
+      side: openOrder.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
+      price: inferred.price,
+      amount: +openOrder.origSz,
+      filled: +openOrder.origSz - +openOrder.sz,
+      remaining: +openOrder.sz,
+      reduceOnly: Boolean(openOrder.reduceOnly),
+      lastUpdate: Date.now(),
+      timeInForce: parseHyperliquidOrderTimeInForce(openOrder.tif),
+      ...(clientOrderId ? { clientOrderId } : {}),
+      info: openOrder,
+    };
+  };
+
+  /**
+   * Looks the order up by cloid with `orderStatus`, which also answers for
+   * filled and cancelled orders — and, unlike `fetchOrders` here, never writes
+   * the store. A miss is still never definitive: Hyperliquid accepts a nonce up
+   * to two days old, so a send still in flight can land after the lookup.
+   */
+  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
+    const notFound: ClientOrderLookup = { found: false, definitive: false };
+    const inStore = this.store.orders.find(
+      (order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId),
+    );
+    if (inStore) return { found: true, order: inStore };
+
+    const user = this.options.vault || this.options.applicationId;
+    if (!user || !HYPERLIQUID_CLOID_PATTERN.test(clientOrderId)) return notFound;
+
+    const { data } = await this.infoXhr.post(
+      ENDPOINTS.INFO,
+      { type: INFO_TYPES.ORDER_STATUS, user, oid: clientOrderId },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    if (data?.status !== 'order' || !data.order?.order) return notFound;
+
+    const venueStatus = data.order.status;
+    const status =
+      venueStatus === 'open' || venueStatus === 'triggered'
+        ? OrderStatus.Open
+        : venueStatus === 'filled'
+          ? OrderStatus.Closed
+          : OrderStatus.Canceled;
+    const order = this.mapOpenOrderRow(data.order.order, status);
+    return order && order.symbol === symbol ? { found: true, order } : notFound;
   };
 
   /**
@@ -3402,7 +3492,8 @@ export class HyperliquidExchange extends BaseExchange {
     );
   };
 
-  createLimitOrderWires = (opts: PlaceOrderOpts) => {
+  // `cloid` goes on the entry wire; each TP/SL leg gets its own, so every wire is identifiable.
+  createLimitOrderWires = (opts: PlaceOrderOpts, cloid: string = mintHyperliquidCloid()) => {
     if (opts.type !== OrderType.Limit) {
       throw new Error('Not supported');
     }
@@ -3555,6 +3646,7 @@ export class HyperliquidExchange extends BaseExchange {
           },
         },
         reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
+        cloid,
       },
       assetIndex,
     );
@@ -3590,6 +3682,7 @@ export class HyperliquidExchange extends BaseExchange {
               },
             },
             reduce_only: this.resolveReduceOnly(market, true),
+            cloid: mintHyperliquidCloid(),
           },
           assetIndex,
         ),
@@ -3612,6 +3705,7 @@ export class HyperliquidExchange extends BaseExchange {
               },
             },
             reduce_only: this.resolveReduceOnly(market, true),
+            cloid: mintHyperliquidCloid(),
           },
           assetIndex,
         ),
@@ -3621,12 +3715,12 @@ export class HyperliquidExchange extends BaseExchange {
     return orderWires;
   };
 
-  placeLimitOrder = async (opts: PlaceOrderOpts) => {
+  placeLimitOrder = async (opts: PlaceOrderOpts, cloid: string = mintHyperliquidCloid()) => {
     if (opts.type !== OrderType.Limit) {
       throw new Error('Not supported');
     }
 
-    const orderWires = this.createLimitOrderWires(opts);
+    const orderWires = this.createLimitOrderWires(opts, cloid);
 
     // Get builder info if wallet is approved for builder fee
     const builderInfo = await this.getBuilderInfo();
@@ -3647,11 +3741,14 @@ export class HyperliquidExchange extends BaseExchange {
 
     const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
 
-    // Add to pre-placement cache BEFORE REST call so WS handler can match this order
+    // Record every wire BEFORE the REST call so the WS handler identifies each
+    // order by its cloid, even when the frame beats the response.
     const market = this.store.marketsBySymbol[opts.symbol];
+    if (market) this.recordPlacement(orderWires, market.symbol);
+    // Fallback for a frame that arrives without its cloid (see recordPlacement).
     if (market?.id.includes(':')) {
       const coin = symbolToCoin(market.symbol);
-      this.addToPrePlacementCache(coin, opts.side, OrderType.Limit, opts.price || 0, opts.amount);
+      this.addToPrePlacementCache(coin, opts.side, OrderType.Limit, opts.price || 0, opts.amount, cloid);
     }
 
     const data = await this.postOrderAction(payload);
@@ -3726,7 +3823,14 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    this.resolveCallerClientOrderId(opts);
+    // The caller's ID goes on the main wire verbatim; otherwise we mint one.
+    const cloid = this.resolveCallerClientOrderId(opts) ?? mintHyperliquidCloid();
+    return this.placeOrderWithCloid(opts, cloid);
+  };
+
+  // `cloid` is the main wire's client order ID. `updateOrder` calls this directly
+  // so it knows which cloid its replacement went out with.
+  private placeOrderWithCloid = async (opts: PlaceOrderOpts, cloid: string): Promise<string[]> => {
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
@@ -3794,6 +3898,7 @@ export class HyperliquidExchange extends BaseExchange {
             },
           },
           reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
+          cloid,
         },
         assetIndex,
       );
@@ -3813,6 +3918,8 @@ export class HyperliquidExchange extends BaseExchange {
       );
 
       const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
+      // A market order is a Gtc limit at 5% slippage; an unfilled remainder rests as one.
+      this.recordPlacement([orderWire], market.symbol);
       const data = await this.postOrderAction(payload);
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
@@ -3822,7 +3929,7 @@ export class HyperliquidExchange extends BaseExchange {
 
       return orderIds;
     } else if (opts.type === OrderType.Limit) {
-      return await this.placeLimitOrder(opts);
+      return await this.placeLimitOrder(opts, cloid);
     } else if (opts.type === OrderType.TakeProfit || opts.type === OrderType.StopLoss) {
       // Position TP/SL
       //   {
@@ -3958,6 +4065,7 @@ export class HyperliquidExchange extends BaseExchange {
             },
           },
           reduce_only: this.resolveReduceOnly(market, Boolean(opts.reduceOnly)),
+          cloid,
         },
         assetIndex,
       );
@@ -3982,15 +4090,20 @@ export class HyperliquidExchange extends BaseExchange {
 
       const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
 
-      // Add to pre-placement cache BEFORE REST call so WS handler can match this order
-      // even if WS arrives before REST returns.
+      // Record BEFORE the REST call: the WS handler identifies this order by its
+      // cloid — exact type, trigger price and reduce-only — even when the frame
+      // beats the response, and even for a positional TP/SL, whose response
+      // (`"waitingForTrigger"`) carries no oid at all.
+      this.recordPlacement([orderWire], market.symbol);
+
+      // Fallback for a frame that arrives without its cloid (see recordPlacement).
       // Core perps too, but only for a STOP ENTRY (non-reduce-only trigger):
       // its first `orderUpdates` frame carries no trigger fields and would
       // otherwise insert as a Limit at the slippage cap. Reduce-only stops
       // need no cache — the WS handler defers those to REST outright.
       if (market.id.includes(':') || !opts.reduceOnly) {
         const coin = symbolToCoin(market.symbol);
-        this.addToPrePlacementCache(coin, opts.side, opts.type, opts.price || 0, opts.amount);
+        this.addToPrePlacementCache(coin, opts.side, opts.type, opts.price || 0, opts.amount, cloid);
       }
 
       const data = await this.postOrderAction(payload);
@@ -4184,7 +4297,12 @@ export class HyperliquidExchange extends BaseExchange {
 
   public _deadOrders = new Set<string>();
 
-  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+  // Cancel+replace. The replacement gets a FRESH cloid (a caller's ID stays on
+  // the cancelled order — packages/safe-cex/CLAUDE.md, "Client order ID
+  // contract") and the result carries it as `clientOrderId`: a positional
+  // TP/SL replacement answers `"waitingForTrigger"` with no oid, and the cloid
+  // is then the only thing that identifies it.
+  updateOrder = async ({ order, update }: UpdateOrderOpts): Promise<ReplacementOrderIds> => {
     const newOrder: Writable<PlaceOrderOpts> = {
       symbol: order.symbol,
       type: order.type,
@@ -4290,7 +4408,8 @@ export class HyperliquidExchange extends BaseExchange {
 
     this._deadOrders.add(order.id);
 
-    return await this.placeOrder(newOrder);
+    const cloid = mintHyperliquidCloid();
+    return withReplacementClientOrderId(await this.placeOrderWithCloid(newOrder, cloid), cloid);
   };
 
   priceToPrecision = (symbol: string, price: any): string => {
