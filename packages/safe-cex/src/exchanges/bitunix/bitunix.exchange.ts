@@ -273,6 +273,15 @@ export class BitunixExchange extends BaseExchange {
     return triggerType === OrderStopTriggerType.LastPrice ? 'LAST_PRICE' : 'MARK_PRICE';
   };
 
+  private getInternalTriggerType = (rawTriggerType: unknown) => {
+    const raw = String(rawTriggerType || '').toUpperCase();
+    return raw === 'LAST' || raw === 'LAST_PRICE' ? OrderStopTriggerType.LastPrice : OrderStopTriggerType.MarkPrice;
+  };
+
+  private isUnsupportedOrderOperation = (message: string) => {
+    return message.toLowerCase().includes('order does not support this operation');
+  };
+
   getBitunixReduceOnly = (rawReduceOnly: unknown, clientId: unknown, fallback = false) => {
     if (typeof rawReduceOnly === 'boolean') {
       return rawReduceOnly;
@@ -1704,6 +1713,85 @@ export class BitunixExchange extends BaseExchange {
     return await this.cancelOrders(this.store.orders.filter((o) => o.symbol === symbol));
   };
 
+  private recreateAttachedTpslParentOrder = async (
+    targetOrder: Order,
+    virtualTpslLeg: 'tp' | 'sl',
+    payload: Record<string, string>,
+  ) => {
+    const rejectPreflight = (message: string): never => {
+      this.emitAndLogError(message);
+      throw new Error(message);
+    };
+
+    const replacementPrice = this.parseFiniteNumber(payload.price, NaN);
+    const replacementAmount = this.parseFiniteNumber(payload.qty, NaN);
+    if (!Number.isFinite(replacementPrice) || replacementPrice <= 0) {
+      return rejectPreflight('Bitunix cancel/recreate fallback requires a valid parent LIMIT price');
+    }
+    if (!Number.isFinite(replacementAmount) || replacementAmount <= 0) {
+      return rejectPreflight('Bitunix cancel/recreate fallback requires a valid parent quantity');
+    }
+
+    const replacementOrder: Writable<PlaceOrderOpts> = {
+      symbol: targetOrder.symbol,
+      type: targetOrder.type,
+      side: targetOrder.side,
+      price: replacementPrice,
+      amount: replacementAmount,
+      reduceOnly: targetOrder.reduceOnly || false,
+      timeInForce: targetOrder.timeInForce,
+    };
+
+    const appendProtection = (prefix: 'tp' | 'sl') => {
+      const triggerPrice = this.parseFiniteNumber(payload[`${prefix}Price`], NaN);
+      if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
+        return;
+      }
+
+      const orderType = String(payload[`${prefix}OrderType`] || 'MARKET').toUpperCase();
+      if (orderType !== 'MARKET') {
+        return rejectPreflight(
+          `Bitunix cannot cancel/recreate attached ${prefix.toUpperCase()} with LIMIT execution semantics`,
+        );
+      }
+
+      if (prefix === 'tp') {
+        replacementOrder.takeProfit = triggerPrice;
+        replacementOrder.tpTriggerType = this.getInternalTriggerType(payload.tpStopType);
+      } else {
+        replacementOrder.stopLoss = triggerPrice;
+        replacementOrder.slTriggerType = this.getInternalTriggerType(payload.slStopType);
+      }
+    };
+
+    appendProtection('tp');
+    appendProtection('sl');
+
+    if (replacementOrder.takeProfit === undefined && replacementOrder.stopLoss === undefined) {
+      return rejectPreflight('Bitunix cancel/recreate fallback requires at least one attached TP/SL leg');
+    }
+
+    const cancelResponse = await this.xhr.post(ENDPOINTS.CANCEL_ORDER, {
+      symbol: targetOrder.symbol,
+      orderList: [{ orderId: targetOrder.id }],
+    });
+    const cancelCode = Number(cancelResponse?.data?.code);
+    if (cancelCode !== 0) {
+      throw new Error(cancelResponse?.data?.msg || `Bitunix cancel order failed with code ${cancelResponse?.data?.code}`);
+    }
+
+    this.store.updateOrdersStatus(
+      this.store.orders
+        .filter((candidate) => candidate.id === targetOrder.id || candidate.id.startsWith(`${targetOrder.id}__`))
+        .map((candidate) => ({ id: candidate.id })),
+      OrderStatus.Canceled,
+    );
+
+    const replacementIds = await this.placeOrder(replacementOrder);
+    const replacementParentId = replacementIds[0];
+    return replacementParentId ? [`${replacementParentId}__${virtualTpslLeg}`] : [];
+  };
+
   private updateStandaloneTpslOrder = async (order: Order, update: UpdateOrderOpts['update']) => {
     const rejectPreflight = (message: string): never => {
       this.emitAndLogError(message);
@@ -1947,6 +2035,16 @@ export class BitunixExchange extends BaseExchange {
       return [isVirtualTpSl ? `${acknowledgedParentId}__${virtualTpslLeg}` : acknowledgedParentId];
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message || 'Bitunix modify order failed';
+      if (isVirtualTpSl && this.isUnsupportedOrderOperation(message)) {
+        try {
+          return await this.recreateAttachedTpslParentOrder(targetOrder, virtualTpslLeg, payload);
+        } catch (fallbackErr: any) {
+          const fallbackMessage =
+            fallbackErr?.response?.data?.msg || fallbackErr?.message || 'Bitunix cancel/recreate fallback failed';
+          this.emitAndLogError(fallbackMessage);
+          throw new Error(fallbackMessage);
+        }
+      }
       this.emitAndLogError(message);
       throw new Error(message);
     }

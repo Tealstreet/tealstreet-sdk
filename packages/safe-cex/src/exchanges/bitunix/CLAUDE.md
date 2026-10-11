@@ -367,13 +367,19 @@ endpoint only when identity and immutable attributes are exactly reconciled:
   acknowledgement is not authoritative, so the existing private order-channel
   refresh still owns final state reconciliation.
 
-There is no cancel/recreate fallback. Market orders, missing or inconsistent
-raw order metadata, and malformed prices or quantities reject before any
-exchange write. Standalone partial TP/SL rows route through
-`MODIFY_TP_SL_ORDER` with the raw Bitunix TP/SL id retained in `order.info`;
-full-position TP/SL rows (`info.type === "POSITION_TPSL"` or `amount === 0`)
-route through `MODIFY_POSITION_TP_SL_ORDER` and preserve the sibling leg when it
-is present in the store.
+There is no broad cancel/recreate fallback. Market orders, missing or
+inconsistent raw order metadata, and malformed prices or quantities reject
+before any exchange write. The one exception is an attached virtual TP/SL chart
+drag where `/trade/modify_order` returns Bitunix's venue-side "The order does
+not support this operation": the parent limit order is canceled and recreated
+with the requested attached TP/SL trigger plus any market-execution sibling.
+Do not use that fallback for ordinary parent price/quantity edits, and do not
+silently recreate attached LIMIT-execution protection because `PlaceOrderOpts`
+cannot preserve the execution limit price. Standalone partial TP/SL rows route
+through `MODIFY_TP_SL_ORDER` with the raw Bitunix TP/SL id retained in
+`order.info`; full-position TP/SL rows (`info.type === "POSITION_TPSL"` or
+`amount === 0`) route through `MODIFY_POSITION_TP_SL_ORDER` and preserve the
+sibling leg when it is present in the store.
 
 ### Virtual Order ID Generation
 

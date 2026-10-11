@@ -254,6 +254,78 @@ describe('Bitunix native modify-order safety boundary', () => {
     ]);
   });
 
+  it('falls back to cancel/recreate when Bitunix rejects an attached TP modify as unsupported', async () => {
+    const { exchange, post } = createExchange();
+    const parent = createParentOrder({
+      info: {
+        ...createParentOrder().info,
+        slOrderType: 'MARKET',
+        slOrderPrice: undefined,
+      },
+    });
+    const takeProfit = createVirtualOrder(parent, 'tp');
+    const stopLoss = createVirtualOrder(parent, 'sl');
+    const cancelPost = vi.fn().mockResolvedValue({ data: { code: 0, msg: 'Success' } });
+    exchange.xhr = { post: cancelPost } as unknown as Axios;
+    exchange.store.update({ orders: [parent, takeProfit, stopLoss] });
+    post
+      .mockResolvedValueOnce({
+        data: { code: 10005, data: null, msg: 'The order does not support this operation' },
+      })
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { orderId: 'replacement-parent' }, msg: 'Success' },
+      });
+
+    await expect(exchange.updateOrder({ order: takeProfit, update: { price: 51_250.08 } })).resolves.toEqual([
+      'replacement-parent__tp',
+    ]);
+
+    expect(post).toHaveBeenNthCalledWith(1, ENDPOINTS.MODIFY_ORDER, expect.any(Object));
+    expect(cancelPost).toHaveBeenCalledWith(ENDPOINTS.CANCEL_ORDER, {
+      symbol: MARKET.symbol,
+      orderList: [{ orderId: parent.id }],
+    });
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      ENDPOINTS.ORDER,
+      expect.objectContaining({
+        symbol: MARKET.symbol,
+        qty: '1.25',
+        price: '50000',
+        side: 'BUY',
+        orderType: 'LIMIT',
+        effect: 'GTC',
+        tpPrice: '51250.1',
+        tpStopType: 'MARK_PRICE',
+        tpOrderType: 'MARKET',
+        slPrice: '49000',
+        slStopType: 'LAST_PRICE',
+        slOrderType: 'MARKET',
+      }),
+    );
+    expect(exchange.store.orders.find((candidate) => candidate.id === parent.id)?.status).toBe(OrderStatus.Canceled);
+    expect(exchange.store.orders.find((candidate) => candidate.id === takeProfit.id)?.status).toBe(
+      OrderStatus.Canceled,
+    );
+    expect(exchange.store.orders.find((candidate) => candidate.id === stopLoss.id)?.status).toBe(OrderStatus.Canceled);
+  });
+
+  it('does not cancel/recreate a regular parent order when Bitunix rejects its amend as unsupported', async () => {
+    const { exchange, post } = createExchange();
+    const cancelPost = vi.fn().mockResolvedValue({ data: { code: 0, msg: 'Success' } });
+    exchange.xhr = { post: cancelPost } as unknown as Axios;
+    post.mockResolvedValue({
+      data: { code: 10005, data: null, msg: 'The order does not support this operation' },
+    });
+
+    await expect(exchange.updateOrder({ order: createParentOrder(), update: { price: 50_100 } })).rejects.toThrow(
+      'The order does not support this operation',
+    );
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(cancelPost).not.toHaveBeenCalled();
+  });
+
   it('rejects a malformed combined price-and-amount virtual TP update instead of ignoring its quantity', async () => {
     const { exchange, post } = createExchange();
     const parent = createParentOrder();
