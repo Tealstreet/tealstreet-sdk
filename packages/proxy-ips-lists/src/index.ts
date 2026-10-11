@@ -17,4 +17,4 @@ export const tokyoK8sNatGatewayIp = '18.176.98.246';
 
 export const wsProxyIps = ['54.255.57.166'];
 
-export const exchangesRequireWsIp = ['bitmex', 'coinbase', 'blofin', 'okx', 'okxeu', 'bitget'];
+export const exchangesRequireWsIp = ['coinbase', 'blofin', 'okx', 'okxeu', 'bitget'];
