@@ -81,8 +81,8 @@ const isTest = (file: string): boolean => /\.(test|cy)\.tsx?$/.test(file);
  */
 const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
   // The web UI order path.
-  'apps/web/src/order/createMarketOrder.ts': 'web market orders',
-  'apps/web/src/order/createLimitOrder.ts': 'web limit orders',
+  'apps/web/src/order/sendOrder.ts':
+    'the web send with a client order id — createMarketOrder and createLimitOrder delegate here',
   'apps/web/src/order/createConditionalOrder.ts': 'web conditional orders',
   'apps/web/src/order/createStopLossOrder.ts': 'web stop/TP orders',
   'apps/web/src/order/createScaledOrder.ts': 'web scaled ladders',
