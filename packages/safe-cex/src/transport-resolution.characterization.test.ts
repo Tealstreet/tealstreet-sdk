@@ -91,7 +91,6 @@ describe('transport resolution (golden master)', () => {
       ['https://www.okx.com/api', 'okx'],
       ['https://api.bitget.com', 'bitget'],
       ['https://grvt.io/api', 'grvt'],
-      ['https://www.bitmex.com/api', 'bitmex'],
       ['https://api.hyperliquid.xyz', 'hyperliquid'],
     ];
     const matrix: Record<string, Record<string, string>> = {};

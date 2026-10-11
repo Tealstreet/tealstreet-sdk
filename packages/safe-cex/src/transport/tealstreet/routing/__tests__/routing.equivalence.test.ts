@@ -24,8 +24,6 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   bitget: 'https://api.bitget.com',
   bitgetinverse: 'https://api.bitget.com',
   bitgetusdc: 'https://api.bitget.com',
-  bitmex: 'https://api.direct.bitmex.com/api/v1',
-  bitmextestnet: 'https://api.direct.testnet.bitmex.com/api/v1',
   bitrue: 'https://fapi.bitrue.com',
   bitunix: 'https://fapi.bitunix.com',
   blofin: 'https://openapi.blofin.com',
@@ -68,12 +66,10 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
 };
 
 // Exchanges whose HOW adapter is region-PINNED from the account's proxyRegion
-// (bitmex always; bybit family when tunnelling) rather than auto-detected from the
+// (bybit family when tunnelling) rather than auto-detected from the
 // baseURL. Their egress is covered by the region-conditional test above, so they're
 // excluded from the baseURL-vs-name agreement assertion.
 const REGION_PINNED_HOW: ExchangeName[] = [
-  'bitmex',
-  'bitmextestnet',
   'bybit',
   'bybitdemo',
   'bybitinverse',
@@ -129,15 +125,6 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('apexomni', proxy).wsPrivate.host).toBe(
       'wss://fsjnpy143pbz.asia.tealstreet.io/apex/private',
     );
-
-    // regionConditional (bitmex): JA -> jp, else -> asia, off -> direct.
-    expect(resolveExchangeRouting('bitmex', { tealstreetProxy: true, proxyRegion: 'JA' }).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/bitmex/private',
-    );
-    expect(resolveExchangeRouting('bitmex', { tealstreetProxy: true, proxyRegion: 'SG' }).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/bitmex/private',
-    );
-    expect(resolveExchangeRouting('bitmex', offProxy).wsPrivate).toEqual({ tunnelled: false });
 
     // fallbackOnly (bitget): direct primary, distinct fallback host per channel.
     expect(resolveExchangeRouting('bitget', offProxy).wsPrivate).toEqual({
@@ -318,9 +305,9 @@ describe('routing table / resolver (Epic 1 net)', () => {
   });
 
   it('howEgress is region-conditional for the region-pinned exchanges', () => {
-    // bitmex (always) and bybit (when tunnelling) pin the HOW adapter to proxyRegion:
+    // bybit (when tunnelling) pins the HOW adapter to proxyRegion:
     // JA -> jp, otherwise the bare-adapter fallback -> sg.
-    for (const ex of ['bitmex', 'bitmextestnet', 'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'] as ExchangeName[]) {
+    for (const ex of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'] as ExchangeName[]) {
       expect(resolveExchangeRouting(ex, { proxyRegion: 'JA' }).howEgress).toBe('jp');
       expect(resolveExchangeRouting(ex, { proxyRegion: 'SG' }).howEgress).toBe('sg');
       expect(resolveExchangeRouting(ex, {}).howEgress).toBe('sg');

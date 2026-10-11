@@ -39,8 +39,6 @@ const WS = {
   blofin: `${ASIA}/blofin/private`,
   coinbase: `${ASIA}/coinbase/private`,
   apex: `${ASIA}/apex/private`,
-  bitmexJa: `${JP}/bitmex/private`,
-  bitmexOther: `${ASIA}/bitmex/private`,
   bitgetPrivate: `${ASIA}/bitget/v2/private`,
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
   lighterPublic: `${JP}/lighter/stream?readonly=true`,
@@ -111,9 +109,6 @@ const bitgetWs: WsGroup = {
   private: { kind: 'fallbackOnly', fallback: WS.bitgetPrivate },
 };
 const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };
-const bitmexWs: WsGroup = {
-  private: { kind: 'regionConditional', ja: WS.bitmexJa, other: WS.bitmexOther },
-};
 const bybitBrazilPrivateWs = {
   kind: 'bybitBrazilConditional',
   host: WS.bybitBraPrivate,
@@ -139,8 +134,6 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
   coinbase: coinbaseWs,
   coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
   apexomni: { private: { kind: 'proxyConditional', host: WS.apex } },
-  bitmex: bitmexWs,
-  bitmextestnet: bitmexWs, // BitmexTestnetExchange extends BitmexExchange
   bitget: bitgetWs,
   bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
   bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange
@@ -167,15 +160,13 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
 };
 
 // Exchanges that install a region-pinned HOW adapter from the account's proxyRegion
-// (bitmex always; bybit when tunnelling) -> howEgress is 'regionConditional'. Their
+// (bybit when tunnelling) -> howEgress is 'regionConditional'. Their
 // variants that extend the same class inherit it.
 // bybit.api.ts's createAPI region-pins the HOW adapter; its consumers are bybit,
 // bybitinverse, bybitspot, and bybitdemo (extends BybitExchange {}). HyroTrader
 // is Bybit-compatible but direct to a first-party simulator, so it intentionally
-// stays out of this list. bitmex.api.ts likewise -> bitmex + bitmextestnet.
+// stays out of this list.
 const HOW_REGION_CONDITIONAL: ExchangeName[] = [
-  'bitmex',
-  'bitmextestnet',
   'bybit',
   'bybitdemo',
   'bybitinverse',

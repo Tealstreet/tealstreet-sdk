@@ -59,15 +59,9 @@ export const tealstreetTransport: TransportProvider = {
         : getProxyForAxios(config, effectiveOptions, exchange);
     const proxied = privateProxyUrl !== '';
     const baseURLWithProxy = proxied ? `${privateProxyUrl}/${config?.baseURL}` : config?.baseURL;
-    const routedBaseURL =
-      (baseURLWithProxy?.includes('fsjnpy143pbz') || baseURLWithProxy?.includes('cors-anywhere-cf-sg')) &&
-      baseURLWithProxy?.includes('www.bitmex.com') &&
-      !options.tealstreetTunnel
-        ? baseURLWithProxy?.replace(/www\.bitmex\.com/, 'api.direct.bitmex.com')
-        : baseURLWithProxy;
 
     return {
-      baseURL: options.overrideProxyUrl ? `${options.overrideProxyUrl}/${config?.baseURL}` : routedBaseURL,
+      baseURL: options.overrideProxyUrl ? `${options.overrideProxyUrl}/${config?.baseURL}` : baseURLWithProxy,
       proxied,
       authorize: async (request) => {
         // Get proxy token from SharedWorker (handles all fetching centrally)

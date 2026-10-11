@@ -21,7 +21,7 @@ export type RestPool = 'jp' | 'asia' | 'tiny';
 // HOW (HTTP-over-WebSocket) tradetunnel egress region for REST-over-WS. 'jp'/'sg'
 // reproduce the adapter's TOKYO_EGRESS_PATTERN outcome (baseURL-keyed, per-exchange).
 // 'regionConditional' is for exchanges that install a region-pinned adapter from
-// the account's proxyRegion (bitmex always, bybit when tunnelling) -> the resolver
+// the account's proxyRegion (bybit when tunnelling) -> the resolver
 // returns 'jp' when proxyRegion === 'JA', else 'sg' (their bare-adapter fallback).
 export type HowEgress = 'jp' | 'sg' | 'regionConditional';
 
@@ -38,7 +38,7 @@ export type WsStrategy = (
   | { kind: 'alwaysProxy'; host: WsHost }
   // tealstreetProxy ? host : direct (okx private/business, blofin, coinbase, apexomni).
   | { kind: 'proxyConditional'; host: WsHost }
-  // tealstreetProxy ? (proxyRegion === 'JA' ? ja : other) : direct (bitmex).
+  // tealstreetProxy ? (proxyRegion === 'JA' ? ja : other) : direct (no current exchange; was bitmex).
   | { kind: 'regionConditional'; ja: WsHost; other: WsHost }
   // bybitSiteId === 'BRA_BTL' ? host : direct. Browser WS cannot send the site
   // header, so the dedicated proxy path injects it upstream.
