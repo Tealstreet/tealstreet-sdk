@@ -106,6 +106,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // Error codes that are handled silently by calling code (don't emit to UI)
   const SILENT_ERROR_CODES = [
     -2011, // "Unknown order sent" - order already cancelled, handled in cancelOrders
+    -2013, // "Order does not exist" - an expected answer to findOrderByClientOrderId
     -4059, // "No need to change position side" - idempotent position-mode change
     -5022, // Post-only rejection ("order would execute as taker") - expected during chaser retries
   ];

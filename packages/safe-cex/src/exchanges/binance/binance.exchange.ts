@@ -1,6 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
+import type { ClientOrderLookup } from '../clientOrderId';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -56,7 +57,7 @@ import { splitTimeRange } from '../../utils/splitTimeRange';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
-import { patternClientOrderIdRule } from '../clientOrderId';
+import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../clientOrderId';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI, createPublicAPI } from './binance.api';
 import { deriveBinanceClosedPositions } from './binance.closed-pnl';
@@ -76,6 +77,8 @@ import {
 import { USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
+
+const BINANCE_ORDER_DOES_NOT_EXIST = -2013;
 
 type BinanceResponseRecord = Record<string, any>;
 
@@ -156,6 +159,45 @@ export class BinanceExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
     mint: () => 'x-s3vFFRQp' + uuid(),
   });
+
+  // Query order sees filled and cancelled orders too, so Binance can say an ID was never placed.
+  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
+    const inStore = this.store.orders.find(
+      (order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId),
+    );
+    if (inStore) return { found: true, order: inStore };
+    if (!this.store.marketsBySymbol[symbol]) return { found: false, definitive: false };
+
+    try {
+      // The primary key placed it; a read-only secondary key may belong to another account.
+      // `symbol` as placed (BTCUSDT) — Binance's market.id is BTC/USDT:USDT.
+      const { data } = await (this._primaryXhr ?? this.xhr).get<Record<string, any>>(ENDPOINTS.ORDER, {
+        params: { symbol, origClientOrderId: clientOrderId },
+      });
+      const order = mapBinanceHistoricalOrder(data ?? {});
+      if (!order) return { found: false, definitive: false };
+      return {
+        found: true,
+        order: {
+          id: order.id,
+          symbol,
+          side: order.side,
+          type: order.type,
+          status: order.status,
+          price: order.price ?? 0,
+          amount: order.amount,
+          filled: order.filled,
+          remaining: Math.max(order.amount - order.filled, 0),
+          reduceOnly: order.reduceOnly ?? false,
+          lastUpdate: order.updatedTime ?? order.createdTime,
+          info: data,
+        },
+      };
+    } catch (error: any) {
+      if (error?.response?.data?.code === BINANCE_ORDER_DOES_NOT_EXIST) return { found: false, definitive: true };
+      throw error;
+    }
+  };
 
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>

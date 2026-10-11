@@ -1,6 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
+import type { ClientOrderLookup } from '../clientOrderId';
 import type { OkxInstrumentType, OkxRegion } from './okx.types';
 
 import BigNumber from 'bignumber.js';
@@ -12,6 +13,7 @@ import sumBy from 'lodash/sumBy';
 import { forEachSeries, map, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import {
   Balance,
   Candle,
@@ -46,17 +48,16 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { inverseObj } from '../../utils/inverseObj';
 import { loop } from '../../utils/loop';
+import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
+import { oldestCursorId } from '../../utils/oldestCursorId';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { roundUSD } from '../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../utils/safe-math';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
-import { normalizeExecutionPositionSide } from '../../utils/normalizeExecutionPositionSide';
 import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../base';
-import { patternClientOrderIdRule } from '../clientOrderId';
-import { oldestCursorId } from '../../utils/oldestCursorId';
+import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './okx.api';
-import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { mapOkxClosedPosition } from './okx.closed-pnl';
 import { mapOkxBillToIncomeRecords, OKX_BILL_TYPE_BY_INCOME_TYPE } from './okx.income';
 import { mapOkxHistoricalOrder } from './okx.order-history';
@@ -74,6 +75,15 @@ import {
 import { OKXBusinessWebsocket } from './okx.ws-business';
 import { OKXPrivateWebsocket } from './okx.ws-private';
 import { OKXPublicWebsocket } from './okx.ws-public';
+
+const OKX_ORDER_DOES_NOT_EXIST = '51603';
+const OKX_LOOKUP_STATUS: Record<string, OrderStatus> = {
+  filled: OrderStatus.Closed,
+  canceled: OrderStatus.Canceled,
+  mmp_canceled: OrderStatus.Canceled,
+};
+// mapOrders only accepts the live states it knows; feed it one, then restore the real status.
+const OKX_LOOKUP_LIVE_STATE: Record<string, string> = { live: 'live', partially_filled: 'partially_filled' };
 
 /**
  * Resolve the USD mark price for a balance currency by matching the exact
@@ -110,6 +120,32 @@ export class OKXExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
   });
+
+  // Order details see filled and cancelled orders too, so OKX can say an ID was never placed.
+  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
+    const inStore = this.store.orders.find(
+      (order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId),
+    );
+    if (inStore) return { found: true, order: inStore };
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) return { found: false, definitive: false };
+
+    try {
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.ORDER_DETAIL, {
+        params: { instId: market.id, clOrdId: clientOrderId },
+      });
+      const row = data?.[0];
+      // The shared status map covers live states only; a detail row may be closed.
+      const [order] = row ? this.mapOrders([{ ...row, state: OKX_LOOKUP_LIVE_STATE[row.state] ?? 'live' }]) : [];
+      if (!order) return { found: false, definitive: false };
+      return { found: true, order: { ...order, status: OKX_LOOKUP_STATUS[row.state] ?? order.status } };
+    } catch (error: any) {
+      if (error?.response?.data?.code === OKX_ORDER_DOES_NOT_EXIST) return { found: false, definitive: true };
+      throw error;
+    }
+  };
 
   xhr: Axios;
   region: OkxRegion;

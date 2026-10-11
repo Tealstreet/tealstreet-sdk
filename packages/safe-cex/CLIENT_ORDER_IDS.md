@@ -30,7 +30,7 @@ market's max size, or an unknown market.
 | Bitunix                      | `\S+`                    | `ts…`               | none                 | `info.clientId`                                           |
 | Paradex                      | `.{1,64}`, not `close`   | `ts_…`              | header               | `info.client_id`                                          |
 | Orderly family               | `(?!-).{1,36}`           | `ts…`               | body `broker_id`     | `info.client_order_id` / `info.clientOrderId` †           |
-| WOO                          | positive safe integer    | 9-digit number      | body `broker_id`     | `info.client_order_id` (v1) / `info.clientOrderId` (v3) † |
+| WOO                          | positive safe integer    | 15-digit number     | body `broker_id`     | `info.client_order_id` (v1) / `info.clientOrderId` (v3) † |
 | Crypto.com                   | `.{1,36}`                | `ts…`               | none                 | **dropped** — mapper keeps no `info`                      |
 | Backpack                     | uint32                   | 9-digit number      | header               | **dropped** — mapper keeps no `info`                      |
 | GRVT                         | decimal, < 2^63          | 9-digit number      | builder fee          | **`Order.id`**                                            |
@@ -39,13 +39,42 @@ market's max size, or an unknown market.
 Lighter, Kraken (+spot), MEXC, AsterDEX, BitMEX, BreakoutProp, HyroTrader,
 Polymarket.
 
+## Lookup
+
+`exchange.findOrderByClientOrderId(symbol, id)` checks the store, then the
+venue, and matches with `orderCarriesClientOrderId` — the ID's location on the
+mapped `Order` in the table above. It never writes the store. The base version
+scans `fetchOrders([symbol])`, which lists OPEN orders only and on several
+venues returns the store on failure, so its miss is `definitive: false`: it
+cannot tell an order never placed from one already filled or cancelled. Only a
+venue override that asks about closed orders as well may return
+`definitive: true`. A venue that refuses caller IDs always misses without a
+request. A venue fetch that fails can throw (Backpack) — treat that as "could
+not check". A match is returned with its status, which may already be filled
+or cancelled, so read `order.status` rather than assuming it is open. Crypto.com and Backpack drop the ID from their mapped orders, so their
+lookup can never find one.
+
+**Definitive lookups** ask a single-order endpoint that also sees filled and
+cancelled orders: **OKX** (+EU, demo; `GET /api/v5/trade/order` by `clOrdId`; `51603` is a
+definitive miss) and **Binance USD-M** (`GET /fapi/v1/order` by
+`origClientOrderId`, on the PRIMARY key; `-2013` is a definitive miss and is
+silent, so a lookup never toasts "Order does not exist"). Every other venue
+uses the open-orders scan. Bybit is deliberately not definitive: its order
+history lags, so a just-filled order can be missing from both endpoints.
+
+**A definitive miss right after a lost send is still not proof.** A placement
+the venue is still processing (Binance documents 503 "execution status
+unknown") can answer "does not exist" for a few seconds. Callers decide "never
+placed" only after misses some seconds apart, well after the send — the web
+resolver's rule is in `apps/web/src/order/CLAUDE.md`.
+
 ## Gaps this leaves
 
-- **No venue has a lookup by client ID in safe-cex.** The only order read is the
-  `fetchOrders` list. Several venues expose one (OKX
-  `GET /api/v5/trade/order?clOrdId`, KuCoin `byClientOid`, Binance `ORDER` with
-  `origClientOrderId`, Crypto.com `ORDER_DETAIL`, Backpack `ORDER_QUERY`); none is
-  called.
+- **Only OKX (+EU, demo) and Binance USD-M look up closed orders.** Every other
+  venue scans open orders, so a filled or cancelled order is invisible to it.
+  Several expose a single-order endpoint that could be wired the same way
+  (KuCoin `byClientOid`, Crypto.com `ORDER_DETAIL`, Backpack `ORDER_QUERY`,
+  Binance Spot/PM `ORDER` with `origClientOrderId`).
 - **The ID's location differs by venue** (`Order.id`, `parentId`, several
   `info.*` names, sometimes different between REST and WS on one venue), so a
   matcher needs a per-venue accessor rather than one field.

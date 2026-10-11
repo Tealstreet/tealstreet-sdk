@@ -35,6 +35,8 @@ const limit = (overrides: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
 });
 
 const exchanges: OKXExchange[] = [];
+// Orders the fake venue reports as filled, by acceptance index.
+const filledOnVenue = new Set<number>();
 
 const setup = () => {
   const store = new DefaultStore();
@@ -48,6 +50,43 @@ const setup = () => {
 
   const accepted: Array<Record<string, any>> = [];
   const venue = createFakeVenue({
+    // The venue's open orders, as OKX lists them.
+    'get /api/v5/trade/orders-pending': () => ({
+      status: 200,
+      data: {
+        code: '0',
+        data: accepted.map((order, index) => ({
+          ...order,
+          ordId: `okx-${index}`,
+          state: 'live',
+          accFillSz: '0',
+          uTime: '1000000',
+        })),
+      },
+    }),
+    'get /api/v5/trade/orders-algo-pending': () => ({ status: 200, data: { code: '0', data: [] } }),
+    // Order details by client ID, live or closed; OKX answers 51603 for an ID it never saw.
+    'get /api/v5/trade/order': ({ params }) => {
+      const { clOrdId } = params as { clOrdId: string };
+      const index = accepted.findIndex((order) => order.clOrdId === clOrdId);
+      if (index < 0) return { status: 200, data: { code: '51603', msg: 'Order does not exist', data: [] } };
+      const state = filledOnVenue.has(index) ? 'filled' : 'live';
+      return {
+        status: 200,
+        data: {
+          code: '0',
+          data: [
+            {
+              ...accepted[index],
+              ordId: `okx-${index}`,
+              state,
+              accFillSz: state === 'filled' ? '1' : '0',
+              uTime: '1000000',
+            },
+          ],
+        },
+      };
+    },
     [BATCH_ORDERS]: ({ body }) => {
       const orders = body as Array<Record<string, any>>;
       const data = orders.map((order) => {
@@ -81,6 +120,7 @@ const openOrder = (overrides: Partial<Order> = {}): Order => ({
 });
 
 afterEach(() => {
+  filledOnVenue.clear();
   for (const exchange of exchanges.splice(0)) exchange.dispose();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -112,6 +152,65 @@ describe('bad link: placing an order (OKX, real factory over the fault bench)', 
 
     await expect(exchange.placeOrderWithClientOrderId({ ...limit(), clientOrderId: 'tealLookup1' })).rejects.toThrow();
     expect(accepted.map((order) => order.clOrdId)).toEqual(['tealLookup1']);
+  });
+});
+
+describe('bad link: finding an order whose response was lost', () => {
+  it('finds it by the client order id it went out with', async () => {
+    const { exchange, bench, venue } = setup();
+    bench.on(BATCH_ORDERS, 'loseResponse');
+    const clientOrderId = exchange.mintClientOrderId(limit())!;
+
+    await expect(exchange.placeOrderWithClientOrderId({ ...limit(), clientOrderId })).rejects.toThrow();
+    const lookup = await exchange.findOrderByClientOrderId(MARKET.symbol, clientOrderId);
+
+    expect(lookup).toMatchObject({ found: true, order: { id: 'okx-0', status: OrderStatus.Open } });
+    expect(venue.received.some((request) => request.key === 'get /api/v5/trade/order')).toBe(true);
+  });
+
+  it('answers from the store without asking the venue when the stream already has it', async () => {
+    const { exchange, store, venue } = setup();
+    store.update({ orders: [openOrder({ id: 'okx-9', info: { clOrdId: 'tealStored1' } })] });
+
+    await expect(exchange.findOrderByClientOrderId(MARKET.symbol, 'tealStored1')).resolves.toMatchObject({
+      found: true,
+      order: { id: 'okx-9' },
+    });
+    expect(venue.received).toHaveLength(0);
+  });
+
+  it('reports an order the venue never received as definitively not found', async () => {
+    const { exchange, bench } = setup();
+    bench.on(BATCH_ORDERS, 'dropBeforeSend');
+    const clientOrderId = exchange.mintClientOrderId(limit())!;
+
+    await expect(exchange.placeOrderWithClientOrderId({ ...limit(), clientOrderId })).rejects.toThrow();
+    // OKX's order details cover closed orders too, so its miss means "never placed".
+    await expect(exchange.findOrderByClientOrderId(MARKET.symbol, clientOrderId)).resolves.toEqual({
+      found: false,
+      definitive: true,
+    });
+  });
+
+  it('finds an order that already filled, with its real status', async () => {
+    const { exchange, bench, accepted } = setup();
+    bench.on(BATCH_ORDERS, 'loseResponse');
+    filledOnVenue.add(0);
+    const clientOrderId = exchange.mintClientOrderId(limit())!;
+
+    await expect(exchange.placeOrderWithClientOrderId({ ...limit(), clientOrderId })).rejects.toThrow();
+    expect(accepted).toHaveLength(1);
+    await expect(exchange.findOrderByClientOrderId(MARKET.symbol, clientOrderId)).resolves.toMatchObject({
+      found: true,
+      order: { id: 'okx-0', status: OrderStatus.Closed },
+    });
+  });
+
+  it('cannot call it definitive when the lookup itself fails', async () => {
+    const { exchange, bench } = setup();
+    bench.on('get /api/v5/trade/order', 'dropBeforeSend', 'dropBeforeSend', 'dropBeforeSend', 'dropBeforeSend');
+
+    await expect(exchange.findOrderByClientOrderId(MARKET.symbol, 'tealNever1')).rejects.toThrow();
   });
 });
 

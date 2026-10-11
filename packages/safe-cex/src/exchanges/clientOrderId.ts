@@ -1,4 +1,4 @@
-import type { PlaceOrderOpts } from '../types';
+import type { Order, PlaceOrderOpts } from '../types';
 
 import { OrderType } from '../types';
 import { uuid } from '../utils/uuid';
@@ -59,3 +59,34 @@ export type PlacedOrderRef = {
 };
 
 export type ClientOrderIdPlaceOrderOpts = PlaceOrderOpts & { readonly clientOrderId: string };
+
+/**
+ * `definitive` is true only when the venue was asked about closed orders too
+ * and said no order carries the ID; an open-orders scan can never say that.
+ */
+export type ClientOrderLookup = { found: true; order: Order } | { found: false; definitive: boolean };
+
+// Where mappers put the venue's client ID on `info` (CLIENT_ORDER_IDS.md); `c` is Binance/BingX/Bitrue WS.
+const CLIENT_ID_INFO_FIELDS = [
+  'clOrdId',
+  'clientOrderId',
+  'orderLinkId',
+  'clientOid',
+  'clOrdID',
+  'c',
+  'client_id',
+  'client_order_id',
+  'clientId',
+] as const;
+
+// Venues default unset IDs to '', 0 or the string "undefined"; none of those is an ID.
+const sameClientOrderId = (value: unknown, clientOrderId: string) =>
+  value !== undefined && value !== null && String(value) === clientOrderId;
+
+/** Whether a mapped order carries `clientOrderId`, wherever its venue puts it. */
+export const orderCarriesClientOrderId = (order: Order, clientOrderId: string): boolean => {
+  if (!clientOrderId || clientOrderId === '0' || clientOrderId === 'undefined') return false;
+  if (order.id === clientOrderId || order.parentId === clientOrderId) return true;
+  const info = order.info as Record<string, unknown> | undefined;
+  return !!info && CLIENT_ID_INFO_FIELDS.some((field) => sameClientOrderId(info[field], clientOrderId));
+};

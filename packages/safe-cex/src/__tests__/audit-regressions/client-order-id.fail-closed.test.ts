@@ -290,3 +290,19 @@ describe('mintClientOrderId', () => {
     expect(emitted).toEqual([]);
   });
 });
+
+describe('findOrderByClientOrderId on a venue that refuses caller IDs', () => {
+  beforeEach(() => {
+    vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');
+  });
+
+  // It never sent one, and some (Hyperliquid) write the store while fetching orders.
+  it.each(NOT_HONORING)('%s misses without touching a transport', async (name, Ctor) => {
+    const { exchange, transportCalls } = setup(name, Ctor);
+    await expect(exchange.findOrderByClientOrderId(MARKET.symbol, 'cid-1')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
+    expect(transportCalls).not.toHaveBeenCalled();
+  });
+});

@@ -61,7 +61,9 @@ import {
   clientOrderIdSplitMessage,
   defaultMintCandidates,
   isRegularClientOrderShape,
+  orderCarriesClientOrderId,
   type ClientOrderIdPlaceOrderOpts,
+  type ClientOrderLookup,
   type ClientOrderIdRule,
   type PlacedOrderRef,
 } from './clientOrderId';
@@ -294,6 +296,7 @@ export interface Exchange {
   placeOrders: (orders: PlaceOrderOpts[]) => Promise<string[]>;
   placeOrderWithClientOrderId: (opts: ClientOrderIdPlaceOrderOpts) => Promise<PlacedOrderRef>;
   mintClientOrderId: (opts: PlaceOrderOpts) => string | undefined;
+  findOrderByClientOrderId: (symbol: string, clientOrderId: string) => Promise<ClientOrderLookup>;
   updateOrder: (opts: UpdateOrderOpts) => Promise<string[]>;
   cancelOrders: (orders: Order[]) => Promise<void>;
   cancelSymbolOrders: (symbol: string) => Promise<void>;
@@ -864,6 +867,24 @@ export class BaseExchange implements Exchange {
     // A venue's own format carries its attribution; never trade it for a generic ID.
     const candidates = rule.mint ? [rule.mint()] : defaultMintCandidates();
     return candidates.find((candidate) => rule.isValid(candidate));
+  };
+
+  /**
+   * Finds the order placed with `clientOrderId`, for a placement whose response
+   * was lost. This base version sees open orders only, so a miss is never
+   * definitive: a filled or cancelled order is invisible to it, and several
+   * venues' fetchOrders return the store on failure. Venues with a single-order
+   * endpoint override it. Never writes the store.
+   */
+  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
+    const notFound: ClientOrderLookup = { found: false, definitive: false };
+    // A venue that refuses caller IDs never sent one; some (Hyperliquid) also write the store while fetching.
+    if (!this.clientOrderIdRule) return notFound;
+    const matches = (order: Order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId);
+    const inStore = this.store.orders.find(matches);
+    if (inStore) return { found: true, order: inStore };
+    const order = (await this.fetchOrders([symbol])).find(matches);
+    return order ? { found: true, order } : notFound;
   };
 
   /** Venue rule for `PlaceOrderOpts.clientOrderId`; undefined means the venue cannot honor caller IDs. */

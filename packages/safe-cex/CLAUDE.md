@@ -88,6 +88,10 @@ SDK.
   so `String(wire) === clientOrderId`. `placeOrder` still returns venue order
   IDs only — except where the venue's canonical ID already is the client ID
   (GRVT, Binance PM).
+- **`findOrderByClientOrderId(symbol, id)` finds an order whose placement
+  response was lost.** A miss carries `definitive`, which is true only when the
+  venue was asked about closed orders too; never treat a non-definitive miss as
+  "not placed". See [`CLIENT_ORDER_IDS.md`](CLIENT_ORDER_IDS.md) → Lookup.
 - **`updateOrder` never moves a caller ID to a different native order.** A
   native amend keeps the venue order and so its client ID (Bybit `REPLACE_ORDER`,
   OKX amend, Crypto.com, KuCoin Spot, WOO, Orderly, Paradex, BingX, Bitunix,

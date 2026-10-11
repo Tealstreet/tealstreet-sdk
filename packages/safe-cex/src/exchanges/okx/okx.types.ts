@@ -88,6 +88,7 @@ export const ENDPOINTS = {
   BILLS: '/api/v5/account/bills',
   BILLS_ARCHIVE: '/api/v5/account/bills-archive',
   UNFILLED_ORDERS: '/api/v5/trade/orders-pending',
+  ORDER_DETAIL: '/api/v5/trade/order',
   UNFILLED_ALGO_ORDERS: '/api/v5/trade/orders-algo-pending',
   CANCEL_ORDERS: '/api/v5/trade/cancel-batch-orders',
   CANCEL_ALGO_ORDERS: '/api/v5/trade/cancel-algos',
