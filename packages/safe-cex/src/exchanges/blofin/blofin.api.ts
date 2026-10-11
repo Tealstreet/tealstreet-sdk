@@ -1,13 +1,14 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import { BASE_URL } from './blofin.types';
 
@@ -34,7 +35,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   // if (options.tealstreetTunnel) {
   //   xhr.defaults.adapter = axiosHttpOverWebsocketAdapter;

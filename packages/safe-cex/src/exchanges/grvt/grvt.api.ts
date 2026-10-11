@@ -1,10 +1,12 @@
 import type { AxiosInstance } from 'axios';
 import type { ExchangeOptions } from '../../types';
 
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { LogSeverity } from '../../types';
+import { isGrvtRead } from './grvtRetry';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BASE_URLS } from './grvt.types';
 
 export function createAPI(opts: ExchangeOptions, exchange: any): AxiosInstance {
@@ -23,7 +25,7 @@ export function createAPI(opts: ExchangeOptions, exchange: any): AxiosInstance {
     exchange,
   );
 
-  retry(instance, { retries: 5, retryCondition: isNetworkError });
+  retry(instance, { retries: 5, retryCondition: networkErrorOnRead(isGrvtRead) });
 
   // NOTE: Market Data Gateway uses direct HTTP, not HOW proxy
   // Commented out to avoid routing public MDG requests through proxy
@@ -123,7 +125,7 @@ export function createEdgeAPI(opts: ExchangeOptions, exchange: any): AxiosInstan
     exchange,
   );
 
-  retry(instance, { retries: 5, retryCondition: isNetworkError });
+  retry(instance, { retries: 5, retryCondition: networkErrorOnRead(isGrvtRead) });
 
   // Only use HTTP-over-WebSocket adapter in browser environment
   // In Node.js/CLI, use native HTTP
@@ -233,7 +235,7 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
     exchange,
   );
 
-  retry(instance, { retries: 5, retryCondition: isNetworkError });
+  retry(instance, { retries: 5, retryCondition: networkErrorOnRead(isGrvtRead) });
 
   // Track if we're currently re-authenticating to prevent loops
   let isReauthenticating = false;

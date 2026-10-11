@@ -2,13 +2,14 @@ import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeOptions } from '../../types';
 import type { ParadexExchange } from './paradex.exchange';
 
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import qs from 'qs';
 
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
 import { BASE_URL, RECV_WINDOW } from './paradex.types';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 /**
  * Add JWT authentication to REST API requests
@@ -71,7 +72,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // Retry on network errors
   retry(xhr, {
     retries: 3,
-    retryCondition: isNetworkError,
+    retryCondition: networkErrorOnRead(),
     retryDelay: (retryCount) => retryCount * 1000,
   });
 

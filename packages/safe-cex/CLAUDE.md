@@ -96,6 +96,37 @@ SDK.
   accepts the old ID there, because a rejection silently falls back to
   cancel+replace.
 
+## Automatic retries are for reads only
+
+**Never let `axios-retry` resend a write.** A connection reset after the venue
+accepted an order loses the response, not the order; resending it places the
+order twice. Every factory's `retryCondition` goes through
+`utils/retryReadsOnly.ts`: `networkErrorOnRead()` where reads are GET,
+`networkErrorOnRead(readsAndPosted(...paths))` where a few reads are POSTed
+(Kraken spot's private API, KuCoin ws tokens, listen keys), or a venue predicate
+where every request is a POST (`hyperliquid/hyperliquidRetry.ts`,
+`grvt/grvtRetry.ts`). `onlyReads(cond)` wraps a broader condition (asterdex's
+503/504 rule); a signature-error retry (bybit, bitrue, apexomni) may stay, since
+the venue rejected that request. WEEX and Crypto.com enforce the same rule
+themselves. `__tests__/audit-regressions/no-retried-writes.test.ts` drives the
+real factories with a connection reset, and fails if a factory imports
+`axios-retry` without the helper.
+
+## Fault bench — proving behaviour on a bad link
+
+`src/__tests__/faultBench/` scripts what a link does to each request: deliver,
+drop before send, **lose the response of a request the venue acted on**, time
+out, hold a reply in flight (`hold`), add latency, or reject without acting.
+`createFakeVenue(routes)` records every request that reached it, so "sent once"
+and "the venue has it" are assertions, not inferences. `bench.install(xhr)`
+sits beneath remote signing, so a real venue factory runs its own signing,
+interceptors and axios-retry over it — `badLink.scenarios.test.ts` drives
+`OKXExchange` this way. **Key faults by route (`bench.on('post /path', ...)`)
+whenever requests run concurrently**; an unkeyed fault goes to whichever request
+reaches the adapter first. A known gap is an `it.fails` that names its phase of
+`docs/plans/BAD_LINK_RESILIENCE.md`; it fails loudly the day a fix lands, and is
+then flipped to `it`.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual

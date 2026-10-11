@@ -1,11 +1,13 @@
 import type { ExchangeOptions } from '../../types';
 
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { isSigningCaptureRequest } from '../../utils/signingCapture';
+import { isHyperliquidRead } from './hyperliquidRetry';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import { getHyperliquidRestRequestWeight, hyperliquidRestRateLimiter } from './hyperliquid.rateLimiter';
 import { BASE_URLS, ENDPOINTS } from './hyperliquidspot.types';
@@ -29,7 +31,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(isHyperliquidRead) });
 
   if (!options.publicDataOnly) {
     installTransportAdapter(xhr, options, exchange.name);

@@ -1,13 +1,14 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import type { OKXExchange } from './okx.exchange';
 import { BASE_URLS, RECV_WINDOW } from './okx.types';
@@ -40,7 +41,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   // Check OKX API-level errors (non-zero code) and convert to thrown errors
   // so they surface properly instead of crashing on missing `data` field
