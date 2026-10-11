@@ -233,14 +233,20 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     // Handle FILLED/PARTIALLY_FILLED - emit fill event
     if (orderData.X === 'PARTIALLY_FILLED' || orderData.X === 'FILLED') {
       this.mirrorCumulativeOrderFill(orderData);
-      this.parent.emitter.emit('fill', {
-        orderId: orderData.i?.toString(),
-        symbol: orderData.s,
-        side: orderData.S === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
-        price: parseFloat(orderData.ap || '0'),
-        qty: parseFloat(orderData.l || '0'),
-        timestamp: orderData.T || Date.now(),
-      });
+      // The fill contract is `id` + `amount`; `l`/`L` are this execution's size and price.
+      // A non-trade frame on a filled order carries l=0: no execution, no event.
+      const executedAmount = parseFloat(orderData.l || '0');
+      const lastPrice = parseFloat(orderData.L || '0');
+      if (executedAmount > 0) {
+        this.parent.emitter.emit('fill', {
+          id: orderData.i?.toString(),
+          orderId: orderData.i?.toString(),
+          symbol: orderData.s,
+          side: orderData.S === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
+          price: lastPrice > 0 ? lastPrice : parseFloat(orderData.ap || '0'),
+          amount: executedAmount,
+        });
+      }
     }
 
     // Handle FILLED - update status to closed

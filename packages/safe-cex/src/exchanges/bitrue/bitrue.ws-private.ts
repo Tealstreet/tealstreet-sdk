@@ -5,8 +5,11 @@ import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../typ
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
 import { reverseWsSymbol } from './bitrue.utils';
+import { createIncrementalFills } from '../../utils/incrementalFills';
 
 export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
+  private readonly incrementalFills = createIncrementalFills();
+
   private listenKeyRefreshTimeoutId: NodeJS.Timeout | undefined;
   private static readonly LISTEN_KEY_RETRY_DELAYS_MS = [250, 500, 1_000];
 
@@ -154,8 +157,11 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
     }
 
     if (`${update.x || ''}`.toUpperCase() === 'TRADE') {
+      // `z` is filled SO FAR; take this execution's share of the RAW value, then convert,
+      // since the raw-vs-scaled choice below can flip mid-order.
       const fillAmountRaw = Number(update.z ?? 0);
-      const fillAmount = amount > 0 && fillAmountRaw <= amount ? fillAmountRaw : fillAmountRaw * multiplier;
+      const executedRaw = this.incrementalFills(String(orderId), fillAmountRaw).qty;
+      const fillAmount = amount > 0 && fillAmountRaw <= amount ? executedRaw : executedRaw * multiplier;
       if (fillAmount > 0) {
         this.emitter.emit('fill', {
           id: String(orderId),

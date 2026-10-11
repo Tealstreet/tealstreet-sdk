@@ -1476,3 +1476,21 @@ These drift fast. Prefer:
   file when implementing or debugging signing/endpoints.
 - Proxy/tunnel architecture: `packages/safe-cex/CLAUDE.md`.
 - Tunnel infrastructure: `packages/safe-cex/src/httpOverWebsocket/`.
+
+
+## Fill events report ONE execution
+
+`OrderFillEvent.amount` is what that execution filled — never the order's
+running total. Consumers add fills up (the chaser's `addFillAmount`, the web's
+provisional positions), so a running total counts every partial again. Bybit
+(linear, inverse, spot) and Bitrue report running totals and convert through
+`utils/incrementalFills`; Bybit also prices each execution from its traded
+value (`qty / value` on inverse, where value is coin). A replayed frame emits
+nothing, and a worker restart reports an already-part-filled order's total once.
+
+**`fillEventUnits.ts` lists the venues whose event is VERIFIED** — one
+execution, in `native` (placement) or `base` units. A venue absent there emits a
+terminal total (BingX, ApeX, Coinbase), two events per execution (Lighter),
+string sizes or algo totals (WOO, Orderly), a cumulative fallback (Bitget,
+KuCoin Spot) or an unchecked unit, and the web builds no provisional position
+from it. Verify a venue before listing it; do not list one to turn the feature on.

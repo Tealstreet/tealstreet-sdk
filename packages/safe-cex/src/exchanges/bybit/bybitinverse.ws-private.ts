@@ -10,6 +10,7 @@ import { getTransport, resolveTransportRouting } from '../../transport/registry'
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
 import { OrderStatus, Position, Writable } from '../../types';
+import { createIncrementalFills } from '../../utils/incrementalFills';
 import { resolveBybitExecution } from './bybit.fill-event';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -18,6 +19,9 @@ import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybit.types';
 
 export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExchange> {
+  // Bybit reports what an order has filled SO FAR; a fill event reports this execution.
+  private readonly incrementalFills = createIncrementalFills();
+
   private directFallback = new WsDirectFallback();
 
   private authRetries = 0;
@@ -185,13 +189,22 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
         // limit and size. See bybit.fill-event.ts. The replace guard keeps
         // reading the raw fields so its behaviour is unchanged.
         const executed = resolveBybitExecution(order);
-        this.emitter.emit('fill', {
-          id: orders[0].id,
-          side: orders[0].side,
-          symbol: orders[0].symbol,
-          price: executed.price,
-          amount: executed.amount,
-        });
+        const cumulativeValue = parseFloat(v(order, 'cumExecValue'));
+        const fill = this.incrementalFills(
+          orders[0].id,
+          executed.amount,
+          Number.isFinite(cumulativeValue) ? cumulativeValue : undefined,
+        );
+        if (fill.qty > 0) {
+          this.emitter.emit('fill', {
+            id: orders[0].id,
+            side: orders[0].side,
+            symbol: orders[0].symbol,
+            // Inverse value is in BASE coin per USD contracts, so the price is qty / value.
+            price: fill.value ? fill.qty / fill.value : executed.price,
+            amount: fill.qty,
+          });
+        }
       }
 
       if (

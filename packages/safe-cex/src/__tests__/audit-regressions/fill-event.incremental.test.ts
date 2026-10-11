@@ -1,0 +1,173 @@
+import type { Market, OrderFillEvent } from '../../types';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
+import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
+import { DefaultStore } from '../../store/store.base';
+import { createIncrementalFills } from '../../utils/incrementalFills';
+
+// A fill event reports THIS execution. Consumers add them up (the chaser,
+// provisional positions), so a cumulative amount double-counts every partial.
+
+const MARKET: Market = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+  info: {},
+};
+
+const exchanges: Array<{ dispose: () => void }> = [];
+afterEach(() => {
+  for (const exchange of exchanges.splice(0)) exchange.dispose();
+  vi.restoreAllMocks();
+});
+
+describe('createIncrementalFills', () => {
+  it('turns cumulative fills into executions and ignores replays', () => {
+    const executed = createIncrementalFills();
+    expect(executed('o1', 1, 100)).toEqual({ qty: 1, value: 100 });
+    expect(executed('o1', 3, 330)).toEqual({ qty: 2, value: 230 });
+    expect(executed('o1', 3, 330)).toEqual({ qty: 0 });
+    expect(executed('o1', 2, 200)).toEqual({ qty: 0 });
+    expect(executed('o2', 5)).toEqual({ qty: 5 });
+  });
+
+  it('forgets the oldest orders past its bound', () => {
+    const executed = createIncrementalFills(2);
+    executed('a', 1);
+    executed('b', 1);
+    executed('c', 1);
+    expect(executed('a', 1)).toEqual({ qty: 1 });
+  });
+});
+
+describe('Bybit fill events', () => {
+  const frame = (status: string, cumExecQty: string, cumExecValue: string) => ({
+    orderId: 'bybit-1',
+    orderLinkId: '',
+    symbol: 'BTCUSDT',
+    side: 'Buy',
+    orderType: 'Limit',
+    price: '50000',
+    qty: '3',
+    cumExecQty,
+    cumExecValue,
+    avgPrice: String(Number(cumExecValue) / Number(cumExecQty)),
+    leavesQty: String(3 - Number(cumExecQty)),
+    orderStatus: status,
+    timeInForce: 'GTC',
+    positionIdx: 0,
+    reduceOnly: false,
+    updatedTime: '1000000',
+  });
+
+  it('reports each partial once, so the partials sum to the order', () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
+    exchanges.push(exchange);
+    const fills: OrderFillEvent[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
+
+    const socket = (exchange as any).privateWebsocket;
+    socket.handleOrderTopic([frame('PartiallyFilled', '1', '50000')]);
+    socket.handleOrderTopic([frame('PartiallyFilled', '1', '50000')]);
+    socket.handleOrderTopic([frame('Filled', '3', '150400')]);
+
+    expect(fills.map((fill) => fill.amount)).toEqual([1, 2]);
+    expect(fills.reduce((sum, fill) => sum + fill.amount, 0)).toBe(3);
+    // The second execution's own price, not the order's running average.
+    expect(fills[1].price).toBe(50200);
+  });
+});
+
+describe('Bybit inverse fill events', () => {
+  // Inverse value is base coin, quantity is USD contracts: price = qty / value.
+  it('prices each execution as contracts over coin, not its reciprocal', () => {
+    const store = new DefaultStore();
+    store.update({ markets: [{ ...MARKET, id: 'BTCUSD', symbol: 'BTCUSD', quote: 'USD', isInverse: true } as Market] });
+    const exchange = new BybitInverseExchange('bybitinverse' as any, { key: 'k', secret: 's' } as any, store);
+    exchanges.push(exchange);
+    const fills: OrderFillEvent[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
+
+    (exchange as any).privateWebsocket.handleOrderTopic([
+      {
+        orderId: 'inv-1',
+        orderLinkId: '',
+        symbol: 'BTCUSD',
+        side: 'Buy',
+        orderType: 'Limit',
+        price: '50000',
+        qty: '1000',
+        cumExecQty: '1000',
+        cumExecValue: '0.02',
+        avgPrice: '50000',
+        leavesQty: '0',
+        orderStatus: 'Filled',
+        timeInForce: 'GTC',
+        positionIdx: 0,
+        reduceOnly: false,
+        updatedTime: '1000000',
+      },
+    ]);
+
+    expect(fills).toEqual([expect.objectContaining({ amount: 1000, price: 50000 })]);
+  });
+});
+
+describe('AsterDEX fill events', () => {
+  it('carry the contract fields, so consumers do not read amount as NaN', () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new AsterDEXExchange('asterdex' as any, { key: 'k', secret: 's' } as any, store);
+    exchanges.push(exchange as any);
+    const fills: OrderFillEvent[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
+
+    const socket = (exchange as any).privateWebsocket;
+    const handler = socket.handleOrderUpdate ?? socket.handleOrderTradeUpdate;
+    expect(typeof handler).toBe('function');
+    handler.call(socket, {
+      o: {
+        i: 7,
+        s: 'BTCUSDT',
+        S: 'BUY',
+        X: 'PARTIALLY_FILLED',
+        x: 'TRADE',
+        l: '0.4',
+        L: '50100',
+        ap: '50000',
+        z: '0.4',
+        q: '1',
+        o: 'LIMIT',
+        p: '50000',
+      },
+    });
+
+    expect(fills).toEqual([expect.objectContaining({ id: '7', orderId: '7', amount: 0.4, price: 50100 })]);
+  });
+
+  it('emits nothing for a frame on a filled order that executed nothing', () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new AsterDEXExchange('asterdex' as any, { key: 'k', secret: 's' } as any, store);
+    exchanges.push(exchange as any);
+    const fills: OrderFillEvent[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
+    const socket = (exchange as any).privateWebsocket;
+    const handler = socket.handleOrderUpdate ?? socket.handleOrderTradeUpdate;
+
+    handler.call(socket, {
+      o: { i: 8, s: 'BTCUSDT', S: 'BUY', X: 'PARTIALLY_FILLED', x: 'AMENDMENT', l: '0', L: '0', ap: '50000', z: '0.4', q: '1', o: 'LIMIT', p: '50000' },
+    });
+
+    expect(fills).toEqual([]);
+  });
+});

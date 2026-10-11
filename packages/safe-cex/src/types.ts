@@ -760,6 +760,12 @@ export type OHLCVSOptions = {
   readonly limit?: number;
 };
 
+/**
+ * One execution. `amount` is what THIS execution filled — never the order's
+ * running total, which consumers would add up again (the chaser, provisional
+ * positions). Venues reporting a cumulative total convert with
+ * `utils/incrementalFills`.
+ */
 export type OrderFillEvent = Pick<Order, 'id' | 'amount' | 'price' | 'side' | 'symbol'> & {
   orderId?: string; // Order ID for tracking fills per order (used by chaser)
   realizedPnl?: number;
