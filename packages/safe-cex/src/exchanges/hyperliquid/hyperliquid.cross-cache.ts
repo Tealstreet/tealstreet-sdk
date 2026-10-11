@@ -276,6 +276,45 @@ export class HyperliquidCrossCache {
   }
 
   /**
+   * Strict variant for core-perp STOP ENTRIES. `orderUpdates` never carries
+   * trigger fields, so a non-reduce-only trigger order's first frame is
+   * indistinguishable from a plain limit except through this cache. Unlike
+   * `matchPrePlacement` there is no price match (the WS `limitPx` is the
+   * slippage cap, never the trigger price) and no FIFO fallback: a plain
+   * limit frame must NOT be able to claim a cached stop. Match only a
+   * trigger-type entry whose amount equals the frame's `origSz`, and only
+   * when exactly one does. Consumes the entry on a hit.
+   */
+  matchPrePlacementTrigger(coin: string, side: OrderSide, wsAmount: number): { type: OrderType; price: number } | undefined {
+    const key = this.getPrePlacementKey(coin, side);
+    const cache = this.readPrePlacementCache();
+    const entries = cache[key];
+    if (!entries || entries.length === 0) return undefined;
+
+    const now = Date.now();
+    const validEntries = entries.filter((e) => now - e.timestamp < 30000);
+    const candidates = validEntries.filter(
+      (e) => (e.type === OrderType.StopLoss || e.type === OrderType.TakeProfit) && e.amount === wsAmount,
+    );
+    if (candidates.length !== 1) return undefined;
+
+    const matched = candidates[0]!;
+    validEntries.splice(validEntries.indexOf(matched), 1);
+    if (validEntries.length === 0) {
+      delete cache[key];
+      this.workerPrePlacementCache.delete(key);
+      this.broadcastCacheUpdate('removePrePlacement', key);
+    } else {
+      cache[key] = validEntries;
+      this.workerPrePlacementCache.set(key, validEntries);
+      this.broadcastCacheUpdate('addPrePlacement', key, validEntries);
+    }
+    this.writePrePlacementCache(cache);
+
+    return { type: matched.type, price: matched.price };
+  }
+
+  /**
    * Clear all pre-placement entries for a given coin+side.
    * Called when orders are cancelled to prevent stale entries from poisoning future matches.
    */

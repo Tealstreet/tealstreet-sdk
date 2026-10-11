@@ -614,6 +614,17 @@ a second or more until REST corrected it. Widened 2026-10-11; the test is
 it is that a plain reduce-only limit reaches the store on the next REST refresh
 rather than its first WS frame.
 
+**A core-perp STOP ENTRY (non-reduce-only trigger) is recovered from the
+pre-placement cache**, which `placeOrder` now fills for core perps as well as
+HIP-3 when the order is not reduce-only. `matchPrePlacementTrigger` is a
+strict variant of `matchPrePlacement`: trigger-type entries only, same
+`origSz`, exactly one candidate, no price match and no FIFO fallback — so a
+plain limit frame can never claim a cached stop. Without a hit the frame is
+still inserted as a Limit at `limitPx` (the slippage cap), as before; a stop
+entry placed from another client therefore still corrects on the next REST
+refresh. A later frame for an order already in the store keeps the stored
+type and trigger price.
+
 Do not remove any of the four without the others, and do not extend the
 ghost's `removeUpdateDelay` beyond 15s — the fuzzy-match makes the shorter
 delay a non-issue in the common case, and the 15s floor is the safety net if

@@ -1196,10 +1196,35 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             continue;
           }
         } else {
-          const inferred = inferHyperliquidOrderTypeAndPrice(orderData);
-          inferredType = inferred.type;
-          inferredPrice = inferred.price;
-          inferenceSource = inferred.source;
+          // Core-perp STOP ENTRY: a non-reduce-only trigger placed from this
+          // app is recorded in the pre-placement cache; its first frame has
+          // no trigger fields and would read as a Limit at the slippage cap.
+          // The strict matcher only answers for a trigger-type entry with the
+          // same size, so a plain limit cannot claim it. Frames for orders
+          // already in the store keep what REST/placement established.
+          const existingOrder = !isHip3 ? existingOrdersById[orderId] : undefined;
+          const stopEntry =
+            !isHip3 && !existingOrder && !orderData.orderType && !orderData.triggerPx && !orderData.isTrigger
+              ? this.parent.matchPrePlacementTrigger(
+                  orderData.coin,
+                  orderData.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
+                  +orderData.origSz,
+                )
+              : undefined;
+          if (stopEntry) {
+            inferredType = stopEntry.type;
+            inferredPrice = stopEntry.price;
+            inferenceSource = 'pre-placement-trigger';
+          } else if (existingOrder && !orderData.orderType && !orderData.triggerPx && !orderData.isTrigger) {
+            inferredType = existingOrder.type;
+            inferredPrice = existingOrder.price;
+            inferenceSource = 'store-preserved';
+          } else {
+            const inferred = inferHyperliquidOrderTypeAndPrice(orderData);
+            inferredType = inferred.type;
+            inferredPrice = inferred.price;
+            inferenceSource = inferred.source;
+          }
         }
 
         // Log inference source for HIP-3 orders to aid debugging type/price mismatches

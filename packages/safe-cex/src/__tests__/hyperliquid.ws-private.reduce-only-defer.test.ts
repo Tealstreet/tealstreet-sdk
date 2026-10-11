@@ -36,6 +36,7 @@ const createHarness = (orders: any[] = []) => {
     scheduleOrderRefresh: vi.fn(),
     getPendingHip3Order: vi.fn(),
     matchPrePlacement: vi.fn(),
+    matchPrePlacementTrigger: vi.fn(),
     getPlacedLimitOrderTimeInForce: vi.fn(),
     suppressCancelledOrder: vi.fn(),
     forgetLimitOrderTimeInForce: vi.fn(),
@@ -104,5 +105,37 @@ describe('hyperliquid orderUpdates: core-perp reduce-only frames without trigger
     const inserted = store.addOrUpdateOrder.mock.calls[0][0];
     expect(inserted.type).toBe(OrderType.Limit);
     expect(inserted.price).toBe(100000);
+  });
+
+  it('uses the cached trigger for a core-perp STOP ENTRY (non-reduce-only) instead of a Limit at the slippage cap', () => {
+    const { ws, store, parent } = createHarness();
+    parent.matchPrePlacementTrigger.mockReturnValueOnce({ type: OrderType.StopLoss, price: 105000 });
+    ws.handleOrderUpdates([frame({ reduceOnly: false, side: 'B', limitPx: '110250' })]);
+    expect(parent.matchPrePlacementTrigger).toHaveBeenCalledWith('BTC', OrderSide.Buy, 0.5);
+    const inserted = store.addOrUpdateOrder.mock.calls[0][0];
+    expect(inserted.type).toBe(OrderType.StopLoss);
+    expect(inserted.price).toBe(105000);
+    expect(inserted.reduceOnly).toBe(false);
+  });
+
+  it('keeps a stored stop entry\'s type and trigger price on a later frame without trigger fields', () => {
+    const existing = {
+      id: '42',
+      symbol: 'BTC-PERP',
+      type: OrderType.StopLoss,
+      side: OrderSide.Buy,
+      price: 105000,
+      amount: 0.5,
+      filled: 0,
+      remaining: 0.5,
+      reduceOnly: false,
+      status: OrderStatus.Open,
+    };
+    const { ws, store, parent } = createHarness([existing]);
+    ws.handleOrderUpdates([frame({ reduceOnly: false, side: 'B', limitPx: '110250' })]);
+    expect(parent.matchPrePlacementTrigger).not.toHaveBeenCalled();
+    const inserted = store.addOrUpdateOrder.mock.calls[0][0];
+    expect(inserted.type).toBe(OrderType.StopLoss);
+    expect(inserted.price).toBe(105000);
   });
 });

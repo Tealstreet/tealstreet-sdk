@@ -336,6 +336,11 @@ export class HyperliquidExchange extends BaseExchange {
     return getCrossCache().matchPrePlacement(coin, side, wsLimitPx, wsAmount);
   }
 
+  // Strict trigger-only match for core-perp stop entries (see cross-cache)
+  public matchPrePlacementTrigger(coin: string, side: OrderSide, wsAmount: number): { type: OrderType; price: number } | undefined {
+    return getCrossCache().matchPrePlacementTrigger(coin, side, wsAmount);
+  }
+
   // Get pending HIP-3 order from cross-context cache
   public getPendingHip3Order(orderId: string): { type: OrderType; price: number } | undefined {
     return getCrossCache().getPendingOrder(orderId);
@@ -3978,8 +3983,12 @@ export class HyperliquidExchange extends BaseExchange {
       const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
 
       // Add to pre-placement cache BEFORE REST call so WS handler can match this order
-      // even if WS arrives before REST returns
-      if (market.id.includes(':')) {
+      // even if WS arrives before REST returns.
+      // Core perps too, but only for a STOP ENTRY (non-reduce-only trigger):
+      // its first `orderUpdates` frame carries no trigger fields and would
+      // otherwise insert as a Limit at the slippage cap. Reduce-only stops
+      // need no cache — the WS handler defers those to REST outright.
+      if (market.id.includes(':') || !opts.reduceOnly) {
         const coin = symbolToCoin(market.symbol);
         this.addToPrePlacementCache(coin, opts.side, opts.type, opts.price || 0, opts.amount);
       }
