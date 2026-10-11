@@ -4,8 +4,6 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import { isNodeOrBunRuntime } from './runtime';
-
 dayjs.extend(utc);
 
 // Imported at call time: the transport module imports this one (via accessToken).
@@ -163,16 +161,15 @@ class VirtualClock {
   };
 
   private syncClientServerTimeInner = async () => {
-    if (isNodeOrBunRuntime()) {
-      // A server keeps its own clock; one shared offset would move every user's.
+    if (typeof window === 'undefined') {
+      // assume we are running onto a server
+      // this should have a better time sync
       this.server = null;
       this.client = null;
       this.offsetMs = 0;
+
       return;
     }
-    // A browser worker (no `window`) keeps the offset the main thread pushes or a
-    // venue correction set; zeroing it here undid both every 5 minutes.
-    if (typeof window === 'undefined') return;
 
     this.syncFromServerTime((await this.fetchServerTime()).valueOf());
     this.notifyTimeSync();
@@ -182,18 +179,15 @@ class VirtualClock {
     (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ?? dayjs.utc();
 
   public syncBybitClientServerTime = async (time?: number) => {
-    // A web worker has no `window` either; only a Node/Bun server skips. Testing
-    // `window` zeroed the offset in every browser exchange worker instead.
-    if (isNodeOrBunRuntime()) {
+    if (typeof window === 'undefined') {
+      // assume we are running onto a server
+      // this should have a better time sync
       this.server = null;
       this.client = null;
       this.offsetMs = 0;
 
       return;
     }
-    // Without a venue time, a browser worker keeps the offset the main thread pushes:
-    // fetching here would cost every account's worker a request on each WS reconnect.
-    if (!time && typeof window === 'undefined') return;
 
     this.server = time ? dayjs(time) : await this.fetchBybitTime();
     this.client = dayjs.utc();

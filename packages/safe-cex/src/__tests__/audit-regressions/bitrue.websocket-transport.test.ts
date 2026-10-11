@@ -87,9 +87,7 @@ describe('audit regression: Bitrue websocket transport boundaries', () => {
     expect(post).toHaveBeenCalledWith(ENDPOINTS.LISTEN_KEY);
     expect(createWebsocket).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledTimes(1);
-    // One string since the socket retries through the close path's backoff (`retryFailedConnect`,
-    // fix/online-recovery) instead of giving up; it still opens no socket during the quick attempts.
-    expect(error.mock.calls[0][0]).toContain('was not started');
-    expect(error.mock.calls[0][0]).toContain('Failed to acquire Bitrue futures listen key after 4 attempts');
+    expect((error.mock.calls[0][0] as Error).message).toContain('Failed to acquire Bitrue futures listen key after 4 attempts');
+    expect(error.mock.calls[0][1]).toContain('was not started');
   });
 });

@@ -1135,17 +1135,29 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         } else if (
           !isHip3 &&
           Boolean(orderData.reduceOnly) &&
-          (!orderData.origSz || Number(orderData.origSz) === 0) &&
           !orderData.orderType &&
           !orderData.triggerPx &&
           !orderData.isTrigger
         ) {
-          // Core-perp positional TP/SL (cancel+replace): Hyperliquid's first
-          // WS `orderUpdates` message for a freshly-placed positional TP/SL
+          // Core-perp reduce-only order with no trigger fields: Hyperliquid's
+          // first WS `orderUpdates` message for a freshly-placed TP/SL
           // arrives with `orderType`, `triggerPx`, and `isTrigger` all
           // `undefined` — only `limitPx` and `reduceOnly` are populated. The
           // trigger fields only materialize on the REST `frontendOpenOrders`
           // snapshot (~500–700 ms later) or on subsequent WS frames.
+          //
+          // This used to require `origSz === 0` (positional TP/SL only). A
+          // SIZED TP/SL — the legs attached to a limit entry via
+          // `normalTpsl`, or a partial stop — fell through to the generic
+          // inference below and was inserted as a Limit at `limitPx`. For an
+          // attached leg that `limitPx` is the ENTRY price, so the chart drew
+          // the stop sitting on the break-even line until REST corrected it;
+          // for a standalone sized stop it is mark ±5%. Widened 2026-10-11 to
+          // every reduce-only frame without trigger fields. The cost is that
+          // a plain reduce-only limit now lands in the store on the next REST
+          // refresh (~0.5–1.5 s) instead of its first WS frame; one placed
+          // from this app is covered by the web's optimistic ghost meanwhile,
+          // and one placed elsewhere just appears slightly later.
           //
           // Feeding that first WS frame through inferHyperliquidOrderTypeAndPrice()
           // misclassifies it as `type: Limit` at `limitPx`, which:
@@ -1176,7 +1188,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
                 : 'store-preserved';
           } else {
             this.parent.log(
-              `[orderUpdates] Deferring positional TP/SL insert (core-perp WS lacks orderType/triggerPx/isTrigger): ` +
+              `[orderUpdates] Deferring reduce-only insert (core-perp WS lacks orderType/triggerPx/isTrigger): ` +
                 `oid=${orderId} coin=${orderData.coin} limitPx=${orderData.limitPx}. Scheduling REST refresh.`,
               LogSeverity.Debug,
             );

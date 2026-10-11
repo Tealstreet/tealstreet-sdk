@@ -43,7 +43,9 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
         this.ws.addEventListener('message', this.onMessage);
         this.ws.addEventListener('close', this.onClose);
       } catch (err: any) {
-        this.retryFailedConnect(err?.response?.data?.msg || err?.message || 'Failed to connect to private WebSocket');
+        this.parent.emitAndLogError(
+          err?.response?.data?.msg || err?.message || 'Failed to connect to private WebSocket',
+        );
       }
     }
   };

@@ -50,7 +50,7 @@ export class KucoinSpotPublicWebsocket extends BaseWebSocket<KucoinSpotExchange>
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
     } catch (err: any) {
-      this.retryFailedConnect(
+      this.parent.emitAndLogError(
         err?.response?.data?.msg || err?.message || 'Failed to connect KuCoin Spot public WebSocket',
       );
     }

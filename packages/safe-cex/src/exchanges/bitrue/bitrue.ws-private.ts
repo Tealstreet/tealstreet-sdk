@@ -24,8 +24,9 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
         this.ws.addEventListener('message', this.onMessage);
         this.ws.addEventListener('close', this.onClose);
       } catch (error) {
-        this.retryFailedConnect(
-          `Bitrue futures private WebSocket was not started: ${error instanceof Error ? error.message : String(error)}`,
+        this.emitAndLogError(
+          error instanceof Error ? error : String(error),
+          'Bitrue futures private WebSocket was not started; retry after the documented listen-key endpoint recovers.',
         );
       }
     }

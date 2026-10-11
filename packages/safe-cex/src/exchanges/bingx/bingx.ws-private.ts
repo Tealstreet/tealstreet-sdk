@@ -30,26 +30,10 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
     };
   }
 
-  /** One connect at a time: a recovery and a reconnect landing together would leak a socket. */
-  private connecting = false;
-
   connectAndSubscribe = async () => {
-    if (!this.isDisposed && !this.connecting) {
+    if (!this.isDisposed) {
       this.clearListenKeyRefreshTimer();
-      this.connecting = true;
-      let listenKey: string;
-      try {
-        listenKey = await this.fetchListenKey();
-      } catch (error: any) {
-        // Commonly the browser reported "online" before the link worked. Through the base
-        // backoff, so an online recovery can run the pending retry at once.
-        this.retryFailedConnect(
-          `Failed to fetch BingX listen key: ${error?.response?.data?.msg || error?.message || String(error)}`,
-        );
-        return;
-      } finally {
-        this.connecting = false;
-      }
+      const listenKey = await this.fetchListenKey();
       if (this.isDisposed) return;
 
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';

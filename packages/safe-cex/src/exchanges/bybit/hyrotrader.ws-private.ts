@@ -15,9 +15,6 @@ type PendingAck = {
 };
 
 export class HyroPrivateWebsocket extends BybitPrivateWebsocket {
-  // Its session handshake gates every event; online recovery falls back to an account reload.
-  protected readonly recoversAfterOffline = false;
-
   declare parent: HyrotraderExchange;
   ready = false;
   started = false;

@@ -24,7 +24,6 @@ export type StoreWorkerIncomingOp =
   // Trading
   | 'chaser:start'
   | 'chaser:terminate'
-  | 'chaser:terminateAll'
   | 'twap:start'
   | 'twap:resume'
   | 'twap:cleanup'

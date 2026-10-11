@@ -263,8 +263,6 @@ export class BaseWebSocket<T extends BaseExchange> {
   messageHandlersStats: MessageHandlersStats = {};
   private lastStatsReconcileAt = 0;
   reconnecting = false;
-  /** The native path's pending reconnect, so a recovery can replace it. */
-  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectBackoffAttempts = 0;
   private reconnectBackoffCloseCode: number | undefined;
   private reconnectBackoffLastFailureAt = 0;
@@ -772,7 +770,6 @@ export class BaseWebSocket<T extends BaseExchange> {
   };
 
   private resetFailureStreak = () => {
-    this.connectFailureAnnounced = false;
     this.consecutiveCloseFailures = 0;
     this.reconnectPauseUntil = 0;
     this.reconnectPauseAnnounced = false;
@@ -1025,7 +1022,48 @@ export class BaseWebSocket<T extends BaseExchange> {
         this.parent.log(`Reconnecting in ${reconnectDelay}ms`, LogSeverity.Info);
         lifecycleLog(`[BaseWebSocket] ⏰ ${this.parent.name} will reconnect in ${reconnectDelay}ms`);
 
-        this.reconnectTimer = setTimeout(this.reconnectNow, reconnectDelay);
+        setTimeout(() => {
+          if (this.parent.isDisposed) {
+            lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} disposed during reconnect delay, aborting`);
+            return;
+          }
+
+          // Log the options to understand why we're taking a specific path
+          lifecycleLog(`[BaseWebSocket] 🔍 ${this.parent.name} options check:`, {
+            publicDataOnly: this.parent.options.publicDataOnly,
+            hasKey: this.parent.options.key !== '',
+            key: this.parent.options.key ? '[REDACTED]' : 'empty',
+            forceClosed: this.forceClosed,
+          });
+
+          // don't fetch snapshot for public exchanges
+          if (this.parent.options.publicDataOnly || this.parent.options.key === '') {
+            lifecycleLog(
+              `[BaseWebSocket] 🌍 ${this.parent.name} taking PUBLIC path (publicDataOnly=${this.parent.options.publicDataOnly}, key empty=${this.parent.options.key === ''})`,
+            );
+            if (!this.forceClosed) {
+              lifecycleLog(`[BaseWebSocket] 📡 ${this.parent.name} calling connectAndSubscribe() for public WebSocket`);
+              this.connectAndSubscribe();
+            } else {
+              lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} forceClosed=true, skipping connectAndSubscribe()`);
+            }
+            (this.ws as any as WebSocket)?.addEventListener('open', this.emitWsReconnected);
+          } else {
+            lifecycleLog(`[BaseWebSocket] 🔐 ${this.parent.name} taking PRIVATE path`);
+            if (!this.forceClosed) {
+              lifecycleLog(
+                `[BaseWebSocket] 📡 ${this.parent.name} calling connectAndSubscribe() for private WebSocket`,
+              );
+              this.connectAndSubscribe();
+            } else {
+              lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} forceClosed=true, skipping connectAndSubscribe()`);
+            }
+            (this.ws as any as WebSocket)?.addEventListener('open', this.emitWsReconnected);
+          }
+          lifecycleLog(`[BaseWebSocket] ✅ ${this.parent.name} reconnection complete, setting reconnecting=false`);
+          this.reconnecting = false;
+          this.lastCloseTime = Date.now();
+        }, reconnectDelay);
       }
     }
   };
@@ -1088,107 +1126,6 @@ export class BaseWebSocket<T extends BaseExchange> {
       lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} no WebSocket to reconnect, calling onClose()`);
       this.onClose();
     }
-  };
-
-  /** The native close path's reconnect: run by its backoff timer, or at once by a recovery. */
-  private reconnectNow = () => {
-    this.reconnectTimer = undefined;
-    if (this.parent.isDisposed) {
-      lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} disposed during reconnect delay, aborting`);
-      return;
-    }
-
-    // Log the options to understand why we're taking a specific path
-    lifecycleLog(`[BaseWebSocket] 🔍 ${this.parent.name} options check:`, {
-      publicDataOnly: this.parent.options.publicDataOnly,
-      hasKey: this.parent.options.key !== '',
-      key: this.parent.options.key ? '[REDACTED]' : 'empty',
-      forceClosed: this.forceClosed,
-    });
-
-    // don't fetch snapshot for public exchanges
-    if (this.parent.options.publicDataOnly || this.parent.options.key === '') {
-      lifecycleLog(
-        `[BaseWebSocket] 🌍 ${this.parent.name} taking PUBLIC path (publicDataOnly=${this.parent.options.publicDataOnly}, key empty=${this.parent.options.key === ''})`,
-      );
-      if (!this.forceClosed) {
-        lifecycleLog(`[BaseWebSocket] 📡 ${this.parent.name} calling connectAndSubscribe() for public WebSocket`);
-        this.connectAndSubscribe();
-      } else {
-        lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} forceClosed=true, skipping connectAndSubscribe()`);
-      }
-      (this.ws as any as WebSocket)?.addEventListener('open', this.emitWsReconnected);
-    } else {
-      lifecycleLog(`[BaseWebSocket] 🔐 ${this.parent.name} taking PRIVATE path`);
-      if (!this.forceClosed) {
-        lifecycleLog(
-          `[BaseWebSocket] 📡 ${this.parent.name} calling connectAndSubscribe() for private WebSocket`,
-        );
-        this.connectAndSubscribe();
-      } else {
-        lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} forceClosed=true, skipping connectAndSubscribe()`);
-      }
-      (this.ws as any as WebSocket)?.addEventListener('open', this.emitWsReconnected);
-    }
-    lifecycleLog(`[BaseWebSocket] ✅ ${this.parent.name} reconnection complete, setting reconnecting=false`);
-    this.reconnecting = false;
-    this.lastCloseTime = Date.now();
-  };
-
-  /**
-   * A connect that failed before any socket existed (a listen-key or token fetch).
-   * Without this it was never retried. Toasts the first failure of a streak only, then
-   * retries through the close path's backoff and failure-streak pause.
-   */
-  protected retryFailedConnect = (message: string) => {
-    if (this.parent.isDisposed || this.forceClosed) return;
-    if (this.connectFailureAnnounced) this.parent.log(message, LogSeverity.Warning);
-    else this.parent.emitAndLogError(message);
-    this.connectFailureAnnounced = true;
-    this.onClose({ code: 1006 });
-  };
-
-  /** Cleared with the failure streak (healthy traffic, a normal close, a recovery). */
-  private connectFailureAnnounced = false;
-
-  /** False where a subclass runs its own close loop (Lighter, Polymarket, HyroTrader's private socket). */
-  protected readonly recoversAfterOffline: boolean = true;
-
-  /**
-   * The browser came back online. Time offline left this socket in the worst of
-   * its retry states — a long backoff, the 120s failure-streak pause, or past
-   * the 100-close cap with `reconnecting` stuck — none of which a plain
-   * `reconnect()` clears. Forget them and connect now; a link that is not up
-   * yet just starts a fresh, short backoff.
-   */
-  recoverAfterOffline = (): boolean => {
-    if (this.parent.isDisposed || this.forceClosed) return true;
-    if (!this.recoversAfterOffline) return false;
-    // The library runs its own backoff; a reconnect() during its wait starts a second chain,
-    // so only a socket it thinks is open (likely half-open) is reconnected.
-    if (this.ws instanceof ReconnectingWebSocket) {
-      if (this.ws.readyState === ReconnectingWebSocket.OPEN) this.ws.reconnect();
-      return true;
-    }
-    this.resetFailureStreak();
-    this.resetReconnectBackoff();
-    this.onCloseCount = 0;
-    this.reconnectCount = 0;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectNow();
-    } else if (this.ws && this.ws.readyState !== WebSocket.CONNECTING) {
-      // Usually half-open after an offline spell. Its own close event drives the close path:
-      // detaching instead left venue close handlers (Kraken, Bitunix, MEXC, AsterDEX) on the
-      // stale socket, and its late close tore down the replacement.
-      this.ws.close();
-    } else if (this.reconnecting) {
-      // Stuck past the 100-close cap with no timer.
-      this.reconnectNow();
-    }
-    // Otherwise a connect is in flight (still CONNECTING, or awaiting a listen-key or token): it
-    // lands or retries itself, and closing or doubling it would only cost or leak a socket.
-    return true;
   };
 
   private forceClosed = false;

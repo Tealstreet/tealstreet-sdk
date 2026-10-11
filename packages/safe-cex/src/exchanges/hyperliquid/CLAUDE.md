@@ -602,6 +602,18 @@ against. Four things bridge that:
    Without that handoff the list is deduped, but the chart still flickers or
    warps as stale and real snapshots race.
 
+**Every core-perp reduce-only frame without trigger fields is deferred to REST,
+not only the size-0 positional one.** `orderUpdates` never carries `orderType`
+/ `triggerPx` / `isTrigger`; the deferral in `handleOrderUpdates` used to
+require `origSz === 0`, so a SIZED TP/SL (the legs attached to a limit entry
+via `normalTpsl`, or a partial stop) fell through to generic inference and was
+inserted as a Limit at `limitPx`. For an attached leg that `limitPx` is the
+entry price, which is why a fresh stop sat on the chart's break-even line for
+a second or more until REST corrected it. Widened 2026-10-11; the test is
+`src/__tests__/hyperliquid.ws-private.reduce-only-defer.test.ts`. The price of
+it is that a plain reduce-only limit reaches the store on the next REST refresh
+rather than its first WS frame.
+
 Do not remove any of the four without the others, and do not extend the
 ghost's `removeUpdateDelay` beyond 15s — the fuzzy-match makes the shorter
 delay a non-issue in the common case, and the 15s floor is the safety net if

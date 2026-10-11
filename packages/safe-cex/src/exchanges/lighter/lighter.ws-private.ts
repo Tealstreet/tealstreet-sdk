@@ -81,9 +81,6 @@ type WsAccountMessage = {
 type ThrottleTimeoutKey = 'ordersThrottleTimeout' | 'positionsThrottleTimeout' | 'balanceThrottleTimeout';
 
 export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
-  // Runs its own close loop; online recovery falls back to an account reload.
-  protected readonly recoversAfterOffline = false;
-
   // Lighter's pong echoes are unreliable — any inbound traffic (account,
   // position, order-book updates, server pings) is sufficient proof of
   // liveness. The existing `shouldEnforcePongMissReconnect = false` already

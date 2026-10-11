@@ -51,7 +51,6 @@ import { loop } from '../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, divide, subtract } from '../../utils/safe-math';
-import { isUnknownOutcome } from '../../utils/unknownSendOutcome';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { patternClientOrderIdRule } from '../clientOrderId';
@@ -1634,9 +1633,6 @@ export class BybitInverseExchange extends BaseExchange {
         return data;
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.retMsg || err.message);
-        // A lost response on an order carrying the caller's client id may hide a live
-        // order: throw, so the caller looks it up rather than reading `[]` as "not placed".
-        if (payloads.length === 1 && clientOrderId !== undefined && isUnknownOutcome(err)) throw err;
         return undefined;
       }
     });

@@ -15,13 +15,8 @@ import {
 import { getTickerPredictedBestAsk } from '../../utils/getTickerPredictedBestAsk';
 import { getTickerPredictedBestBid } from '../../utils/getTickerPredictedBestBid';
 import { adjust } from '../../utils/safe-math';
-import { isUnknownOutcome } from '../../utils/unknownSendOutcome';
 import { ChaserOrderInstance, placementFilled } from './ChaserOrderInstance';
-import {
-  CHASER_KEPT_ORDER_STOP_REASON,
-  CHASER_UNCONFIRMED_ORDER_STOP_REASON,
-  ChaserCompleteEvent,
-} from './ChaserOrderOptions';
+import { CHASER_KEPT_ORDER_STOP_REASON, ChaserCompleteEvent } from './ChaserOrderOptions';
 
 const FILL_RECONCILED_VENUES = new Set(['hyperliquid', 'grvt', 'bybitdemo']);
 
@@ -41,10 +36,6 @@ const BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_INTERVAL_MS = 500;
 // 1000ms is enough to absorb a normal multi-tranche fill burst; if no
 // more fills arrive within the window, normal chasing resumes.
 const CHASER_HOLD_STEADY_AFTER_PARTIAL_FILL_MS = 1000;
-
-// After a send whose outcome is unknown. Shorter than the web's 45s: a chase is
-// waiting on it, and an unconfirmed order stops the chase instead of retrying.
-const LOST_PLACEMENT_CHECKS_MS = [1_000, 2_000, 4_000, 8_000];
 
 export class ChaserOrderManager {
   private _chaserOrderInstances: ChaserOrderInstance[] = [];
@@ -250,58 +241,22 @@ export class ChaserOrderManager {
       instance,
     );
 
-    const placeOpts = {
-      symbol: instance.options.symbol,
-      side: instance.options.side,
-      type: OrderType.Limit,
-      price,
-      amount: instance.remainingSize,
-      reduceOnly: instance.options.reduceOnly,
-      timeInForce: OrderTimeInForce.PostOnly,
-    };
-    // Undefined where the venue would refuse a caller id: the chase then behaves as before.
-    const clientOrderId = exchange.mintClientOrderId?.(placeOpts);
-
     let orderIds: string[] = [];
-    let placementError: unknown;
     try {
-      orderIds = await exchange.placeOrder(clientOrderId ? { ...placeOpts, clientOrderId } : placeOpts);
+      orderIds = await exchange.placeOrder({
+        symbol: instance.options.symbol,
+        side: instance.options.side,
+        type: OrderType.Limit,
+        price,
+        //amount: instance.options.size,
+        amount: instance.remainingSize,
+        reduceOnly: instance.options.reduceOnly,
+        timeInForce: OrderTimeInForce.PostOnly,
+      });
       this.log(`placeOrder returned: ${JSON.stringify(orderIds)}`, instance);
     } catch (e) {
-      placementError = e;
       console.error(e);
       this.log(`placeOrder exception: ${e}`, instance);
-    }
-
-    if (clientOrderId && orderIds.length === 0) {
-      const lost = placementError !== undefined && isUnknownOutcome(placementError);
-      // An empty result is checked once: some adapters swallow a lost response
-      // into `[]`, but most return it for an ordinary rejection, which retries.
-      if (lost || placementError === undefined) {
-        const order = await this.findLostPlacement(instance, clientOrderId, lost ? LOST_PLACEMENT_CHECKS_MS : [0]);
-        const finished = order?.status === OrderStatus.Closed || order?.status === OrderStatus.Canceled;
-        if (order && !finished) {
-          orderIds = [order.id];
-        } else if (order) {
-          // Filled, or cancelled (a post-only reject) after a partial fill: count it, then retry what is left.
-          instance.setFilledAmount(order.id, placementFilled(order));
-          if (instance.isStopped) return [];
-        } else if (lost) {
-          // Placing again could double it. The order may still land, so say where to look —
-          // also when a STOP arrived during the lookups, which is no evidence it did not.
-          const message = `Chaser for ${instance.options.symbol} stopped: could not confirm whether its order was placed — check open orders`;
-          this.log(message, instance);
-          exchange.emitter.emit('error', message);
-          if (!instance.isStopped) {
-            instance.markComplete(CHASER_UNCONFIRMED_ORDER_STOP_REASON);
-            // Off the manager now, like the maxTries stop: a TWAP slice timeout then
-            // finds no chase and does not fire a market order on top of this one.
-            this.checkAndMarkIfComplete(instance);
-            void this.cleanupInstance(instance);
-          }
-          return [];
-        }
-      }
     }
 
     // If the user cancelled while `placeOrder` was in flight, cancel
@@ -341,34 +296,6 @@ export class ChaserOrderManager {
     }
 
     return this.tryPlaceOrders(instance, tries + 1);
-  }
-
-  /**
-   * Looks the order up by its client id after each delay; a failed lookup is a
-   * miss. A STOP ends the wait early with one last look, so an order that did
-   * land is still found and cancelled by the caller rather than left resting.
-   */
-  private async findLostPlacement(
-    instance: ChaserOrderInstance,
-    clientOrderId: string,
-    delaysMs: number[],
-  ): Promise<Order | undefined> {
-    const lookup = async () => {
-      try {
-        const result = await instance.exchange.findOrderByClientOrderId(instance.options.symbol, clientOrderId);
-        return result.found ? result.order : undefined;
-      } catch (e) {
-        this.log(`client order id lookup failed: ${e}`, instance);
-        return undefined;
-      }
-    };
-    for (const delayMs of delaysMs) {
-      if (instance.isStopped) return lookup();
-      if (delayMs > 0) await sleep(delayMs);
-      const order = await lookup();
-      if (order) return order;
-    }
-    return undefined;
   }
 
   private async processInstance(instance: ChaserOrderInstance) {
