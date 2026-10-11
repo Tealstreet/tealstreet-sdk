@@ -19,8 +19,6 @@ export type ExchangeName =
   | 'bitget'
   | 'bitgetinverse'
   | 'bitgetusdc'
-  | 'bitmex'
-  | 'bitmextestnet'
   | 'bitrue'
   | 'bitunix'
   | 'blofin'
