@@ -575,7 +575,7 @@ function resolveRoePrice(tok: string, ctx: PreprocessContext): number {
   // It was removed on the grounds that `Position.contracts` is normalised to
   // base, so `entryPrice * contracts` is a valid notional either way. That is
   // false: every inverse mapper derives `contracts` from the MARK, not the
-  // entry (`bybitinverse.exchange.ts`, `bitgetinverse`, `bitmex`, `okx` all
+  // entry (`bybitinverse.exchange.ts`, `bitgetinverse`, `okx` all
   // compute `notionalUSD / (mark || last)`), so the divisor drifts with the
   // market and the identity only holds at `mark == entry`. On top of that,
   // bybitinverse and bitgetinverse leave `unrealizedPnl` BASE-denominated,

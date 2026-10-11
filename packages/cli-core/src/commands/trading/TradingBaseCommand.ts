@@ -148,7 +148,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       const leverage = positionForLev?.leverage ?? 1;
       const notional = (balance.free * leverage * pct) / 100;
       // Inverse contracts are USD-denominated: each contract is
-      // `contractSize` USD (1 for BitMEX/Bybit/Bitget; 100 or 10 for
+      // `contractSize` USD (1 for Bybit/Bitget; 100 or 10 for
       // Binance Coin-M / Deribit). The contract count is notional /
       // contractSize. No divide-by-price; we also skip the ticker
       // lookup, since it's irrelevant on this path. See the longer
@@ -183,10 +183,9 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * `notional / contractSize`. Dividing by price (the linear formula)
    * would round to zero against the typical precision (1) and the
    * order goes out empty — that's the `orderQty is required`
-   * rejection a user reported on BitMEX.
+   * rejection a user reported on BitMEX (retired 2026-10).
    *
    * Inverse contract-size landscape across exchanges:
-   *   - BitMEX XBTUSD              → $1   per contract (contractSize unset; default 1)
    *   - Bybit inverse BTCUSD       → $1   per contract (contractSize unset; default 1)
    *   - Bitget inverse BTCUSD      → $1   per contract (contractSize unset; default 1)
    *   - Binance Coin-M BTCUSD_PERP → $100 per contract (if we ever support it)

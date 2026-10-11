@@ -252,7 +252,7 @@ Three consequences worth knowing before debugging one:
 `TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide
 the base amount by `market.contractSize` via `baseToNativeContracts`. Both
 handled **inverse** contracts from the start, and both assumed every _linear_
-venue uses 1 contract = 1 base coin. That is true for bitmex / bybit / bitget —
+venue uses 1 contract = 1 base coin. That is true for bybit / bitget —
 and false for **OKX**, whose linear swaps publish a real `ctVal`:
 
 ```

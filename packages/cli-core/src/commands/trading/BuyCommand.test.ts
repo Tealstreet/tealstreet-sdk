@@ -521,8 +521,8 @@ describe('BuyCommand', () => {
       expect(order.amount).toBeCloseTo(0.002);
     });
 
-    it('end-to-end: `buy 100$` on an INVERSE contract (BitMEX XBTUSD)', async () => {
-      // User-reported regression: BitMEX inverse contracts (XBTUSD)
+    it('end-to-end: `buy 100$` on an INVERSE $1-per-contract market', async () => {
+      // User-reported regression (on BitMEX, since retired): inverse contracts
       // are USD-denominated — 1 contract = $1. The previous
       // notionalToSize divided by price ($100 / $50k = 0.002), which
       // BitMEX then adjusted to precision-1 = 0 → "orderQty is
@@ -572,7 +572,7 @@ describe('BuyCommand', () => {
       // Hypothetical exchange where each inverse contract is $100
       // notional, not $1. The formula must be `notional / contractSize`,
       // not the naive `notional = contracts` shortcut that worked
-      // accidentally for BitMEX/Bybit/Bitget (contractSize = 1).
+      // accidentally for Bybit/Bitget (contractSize = 1).
       const exchange = createMockExchange();
       exchange.store!.markets = [
         {

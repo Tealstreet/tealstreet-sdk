@@ -1162,8 +1162,8 @@ describe('$roe', () => {
    * `entryPrice * contracts` is a valid notional either way.
    *
    * That premise is false. Every inverse mapper derives `contracts` from the
-   * MARK rather than the entry — `bybitinverse.exchange.ts`, `bitgetinverse`,
-   * `bitmex` and `okx` all compute `notionalUSD / (mark || last)` — so the
+   * MARK rather than the entry — `bybitinverse.exchange.ts`, `bitgetinverse`
+   * and `okx` all compute `notionalUSD / (mark || last)` — so the
    * divisor drifts with the market and the identity holds only at
    * `mark == entry`. bybitinverse and bitgetinverse additionally leave
    * `unrealizedPnl` base-denominated, putting the numerator in the wrong
