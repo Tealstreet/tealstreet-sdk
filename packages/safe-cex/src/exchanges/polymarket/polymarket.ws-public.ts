@@ -28,6 +28,9 @@ type MessageHandlers = {
 };
 
 export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange> {
+  // Runs its own close loop; online recovery falls back to an account reload.
+  protected readonly recoversAfterOffline = false;
+
   connectUrl = POLYMARKET_CONFIG.WS_MARKET;
 
   private pingInterval?: NodeJS.Timeout;

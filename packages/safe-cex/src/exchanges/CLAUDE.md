@@ -439,6 +439,27 @@ these on the server's clock. `ExternalPublicDataProvider` is not a
 `BaseWebSocket` and is absent from `getPublicSockets()`, so gateway-mode
 accounts report no close code even though the gateway drives `publicHealthy`.
 
+**`recoverAfterOffline` is the reconnect for "the browser came back online".**
+An offline spell leaves a socket in states a plain `reconnect()` cannot clear: a
+pending 120s pause timer (`reconnect()` with no `ws` falls into `onClose`, which
+skips while `reconnecting`), a FRESH pause (closing a socket mid-connect counts
+another failure), or `reconnecting` stuck after the 100-close cap. It resets the
+streak, backoff and caps and then acts on exactly one state: a pending timer runs
+now; a socket that still looks open (usually half-open) is closed and its OWN
+close event drives the close path; a socket stuck past the cap reconnects.
+**Do not detach a socket here to skip waiting for its close event**: Kraken,
+Bitunix, MEXC and AsterDEX public register their own close/error closures, which
+stay on a detached socket and tear down the replacement when its late close
+arrives. Anything else is a connect in flight and is left alone, because a second
+connect leaks the first socket. A `ReconnectingWebSocket` is reconnected only while
+it reports OPEN: during the library's backoff wait, `reconnect()` runs two chains. A socket
+with its own close loop sets `recoversAfterOffline = false` (Lighter, Polymarket,
+HyroTrader's private socket); the exchange then returns `false` and the web
+reloads that account instead. A connect that fails before any socket exists
+(listen-key or token fetch) goes through `retryFailedConnect`: one toast per
+outage (its own flag, cleared with the failure streak — not the streak itself, which
+a dropped socket has already set), then the close path's backoff — BingX keeps its own listen-key recovery.
+
 Native-WebSocket reconnects use close-code-scoped exponential backoff. A
 different close code or a failure-free window longer than twice the maximum
 delay resets growth to the base delay. Eight consecutive non-normal close

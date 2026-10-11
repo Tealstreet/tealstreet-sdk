@@ -9,6 +9,7 @@ import qs from 'qs';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { canSignPayload, signPayload } from '../../utils/payloadSigner';
+import { isNodeOrBunRuntime } from '../../utils/runtime';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { getBybitResponseMeta } from './bybit.response';
@@ -50,6 +51,14 @@ const isPublicEndpoint = (url?: string) => Boolean(url?.includes('/v5/market/'))
 const isInstrumentsInfoRequest = (error: any) => error?.config?.url === ENDPOINTS.MARKETS;
 
 const isBybitClockSyncRetMsg = (retMsg: string) => retMsg.toLowerCase().includes('recv');
+
+// Bybit names its own clock in the rejection ("server_timestamp[1791518966503]"),
+// which is exact and needs no request.
+export const parseBybitServerTimestamp = (retMsg: string): number | undefined => {
+  const match = /server_timestamp\[(\d{12,})\]/.exec(retMsg);
+  const timestamp = match ? Number(match[1]) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+};
 
 const hasRetriedClockSync = (config: unknown) =>
   Boolean((config as Record<string, unknown> | undefined)?.[CLOCK_SYNC_RETRY_CONFIG_KEY]);
@@ -292,7 +301,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       const retMsg = finalResponseMeta.retMsg || '';
       if (isBybitClockSyncRetMsg(retMsg)) {
         if (!hasRetriedClockSync(response.config)) {
-          await virtualClock.syncBybitClientServerTime(); // This method name stays the same as it's a common sync
+          const serverTimestamp = parseBybitServerTimestamp(retMsg);
+          // On a server the clock is shared by every user's exchange; leave it alone there.
+          if (serverTimestamp !== undefined && !isNodeOrBunRuntime()) virtualClock.syncFromServerTime(serverTimestamp);
+          else await virtualClock.syncBybitClientServerTime();
           return xhr.request({
             ...response.config,
             [CLOCK_SYNC_RETRY_CONFIG_KEY]: true,

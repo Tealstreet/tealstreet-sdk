@@ -126,7 +126,7 @@ Beta validation checklist:
 
 **Trading market startup telemetry** (`bybit.exchange.ts`): `BybitTradingMarketsRequestError` must keep the underlying cause classified with a fixed vocabulary (`rate-limited`, `blocked`, `timeout`, `network`, `HTTP <status>`, `unknown`) so Sentry gets real signal without raw Bybit `retMsg` values, proxy IPs, or ban timestamps. The error carries a worker Sentry cooldown key; repeated same-reason startup failures are suppressed for five minutes and the next reported event includes a suppressed-count summary. Keep this scoped to the required Trading markets request, not optional PreLaunch markets.
 
-**Time sync** (`bybit.api.ts:92-105`): On `recv_window` errors (response `retMsg` containing `'recv'`), automatically calls `virtualClock.syncBybitClientServerTime()` and retries the signed request once. If the retry also fails, the error is logged and returned to the caller. Also logs server unavailability when the raw response includes "too much traffic or a configuration error".
+**Time sync** (`bybit.api.ts` response interceptor): On `recv_window` errors (response `retMsg` containing `'recv'`), resyncs from the `server_timestamp[…]` Bybit names in the rejection (`parseBybitServerTimestamp` → `virtualClock.syncFromServerTime`; falls back to `syncBybitClientServerTime`) and retries the signed request once — rejected, so the retry cannot double an order. A successful retry surfaces nothing. **`syncBybitClientServerTime` used to test `typeof window`, which is undefined in a web worker too**, so in the browser the resync zeroed the offset and the retry failed again (the 2026-10-09 toast); it now skips only on a real Node/Bun server. The periodic `syncClientServerTime` likewise no longer zeroes a worker's offset every 5 minutes (it keeps what the main thread pushed). On a server the parsed correction is NOT applied: there `virtualClock` is one process-wide offset shared by every user's exchange. If the retry also fails, the error is logged and returned to the caller. Also logs server unavailability when the raw response includes "too much traffic or a configuration error".
 
 **HTTP-over-WebSocket tunnel** (`bybit.api.ts:87-90`): When `options.tealstreetTunnel` is set, the Axios adapter is replaced with `createAxiosHttpOverWebsocketAdapter` using the configured `proxyRegion`.
 
@@ -447,7 +447,7 @@ every Bybit variant reads `bybit.types.ts`.
 
 5. **Order size splitting** (`bybit.exchange.ts:1128-1141`): Orders exceeding `market.limits.amount.max` are split into multiple lots. Only the first lot carries TP/SL; subsequent lots have TP/SL stripped to avoid duplicates.
 
-6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
+6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots — **except a single-lot order carrying the CALLER's client id whose response was lost** (`utils/unknownSendOutcome.isUnknownOutcome`), which is rethrown in all three variants; an order with a generated id (stops, conditionals, scaled legs) has nothing to look up and still returns `[]`. Returning `[]` there read as "not placed", so a chase placed again on top of a live order; thrown, the caller looks it up by its `orderLinkId`. Gated by `__tests__/faultBench/bybitLostCreate.scenarios.test.ts`.
 
 ### Native Market Slippage Protection
 

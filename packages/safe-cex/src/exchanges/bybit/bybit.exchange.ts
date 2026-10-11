@@ -57,6 +57,7 @@ import { loop } from '../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
+import { isUnknownOutcome } from '../../utils/unknownSendOutcome';
 import { splitTimeRange } from '../../utils/splitTimeRange';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
@@ -2532,7 +2533,7 @@ export class BybitExchange extends BaseExchange {
 
   protected async submitCreateOrders(
     payloads: Record<string, any>[],
-    _opts: PlaceOrderOpts,
+    opts: PlaceOrderOpts,
   ): Promise<BybitCreateOrderResponse[]> {
     const responses = await mapSeries(payloads, async (payload) => {
       try {
@@ -2540,6 +2541,9 @@ export class BybitExchange extends BaseExchange {
         return { data, payload };
       } catch (err: any) {
         this.emitAndLogError(this.formatBybitVenueError(err?.response?.data, err?.message));
+        // A lost response on an order carrying the caller's client id may hide a live
+        // order: throw, so the caller looks it up rather than reading `[]` as "not placed".
+        if (payloads.length === 1 && opts.clientOrderId && isUnknownOutcome(err)) throw err;
         return undefined;
       }
     });

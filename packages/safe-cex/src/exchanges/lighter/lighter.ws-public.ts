@@ -45,6 +45,9 @@ const normalizeLighterFundingRate = (fundingRatePercentPerHour: number): number 
 };
 
 export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
+  // Runs its own close loop; online recovery falls back to an account reload.
+  protected readonly recoversAfterOffline = false;
+
   private static readonly PROXY_ROUTE_FAILURES_BEFORE_DIRECT_FALLBACK = 3;
   private static readonly PROXY_DIRECT_FALLBACK_FAILURE_COOLDOWN_MS = 2 * 60_000;
   private static readonly DIRECT_ROUTE_FAILURES_BEFORE_READONLY = 2;
