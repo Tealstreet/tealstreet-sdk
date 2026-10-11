@@ -130,9 +130,16 @@ fi
 
 # ── Production guard ──
 
-if [ "${VERCEL_ENV:-}" = "production" ] && [ "${VERCEL_DOCS_ALLOW_PROD:-0}" != "1" ]; then
-  echo "Production builds are disabled by default"
-  handle_skip
+if [ "${VERCEL_ENV:-}" = "production" ]; then
+  if [ "${VERCEL_DOCS_ALLOW_PROD:-0}" != "1" ]; then
+    echo "Production builds are disabled by default"
+    handle_skip
+  fi
+  # An allowed production build (a `vercel promote`, which rebuilds the source
+  # deployment as production) used to fall through to the catch-all skip below,
+  # so the override never actually produced a build. Build explicitly.
+  echo "Production build allowed via VERCEL_DOCS_ALLOW_PROD"
+  handle_build
 fi
 
 # ── Preview: build only when docs changed ──

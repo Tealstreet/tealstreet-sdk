@@ -36,6 +36,18 @@ failed comparison builds conservatively; branch and override gates run first.
    /opt/homebrew/bin/vercel promote <preview-url> --scope tealstreet-b565b19f
    ```
 
+   **The CLI path needs the override env.** `vercel promote` REBUILDS the source
+   deployment as a production deployment, so the Ignored Build Step runs with
+   `VERCEL_ENV=production` and cancels it unless `VERCEL_DOCS_ALLOW_PROD=1` is
+   set on the project's Production environment
+   (`vercel env add VERCEL_DOCS_ALLOW_PROD production --project tealstreet-docs-monorepo --scope tealstreet-b565b19f`,
+   value `1`). Remove it again after the promote so the guard is back. Until
+   2026-10-11 the script skipped an ALLOWED production build too (it fell
+   through to the catch-all), so three promotes in a row were "Canceled" with
+   the env set; that is fixed in `scripts/vercel-ignore.sh`. The promote also
+   clones the SOURCE deployment's commit, so a script fix only takes effect on
+   a preview built after it landed.
+
    **Dashboard**: Vercel → `tealstreet-docs-monorepo` → Deployments → pick the validated Preview → "Promote to Production". Leave "Use project's Ignore Build Step" **unchecked** when promoting.
 
 5. Confirm `docs.tealstreet.io` serves the new content (hard-refresh; CDN cache flips fast).
