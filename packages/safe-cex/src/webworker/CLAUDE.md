@@ -128,7 +128,7 @@ _contents_ between prepare and clone are fine (we want the latest
 content). It is only the omit-decision fields where the race
 matters.
 
-This bug was BitMEX-visible because cancel is terminal: BitMEX
+This bug was BitMEX-visible (BitMEX, since retired) because cancel is terminal: BitMEX
 sends exactly one WS frame with `ordStatus: 'Canceled'` and no
 follow-up. Drop that frame at the bridge and the order is frozen
 open on the main thread forever. Other exchanges' order state can

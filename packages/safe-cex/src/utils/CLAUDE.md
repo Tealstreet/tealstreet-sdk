@@ -20,7 +20,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | apexomni                              | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT`                                     |
 | breakoutprop                          | `{B}USD`           | `BTCUSD`         | USD           | Quote hardcoded to 'USD'                                 |
 | blofin                                | `{B}{Q}`           | `BTCUSDC`        | USDC          | API id is `BTC-USDC`                                     |
-| bitmex                                | `{B}{Q}`           | `SUIUSDT`        | USDT          | USD pairs: `WLDUSD`                                      |
 | okx                                   | `{B}{Q}`           | `ACTUSDT`        | USDT          | API id `ACT-USDT-SWAP`, normalized                       |
 | woo                                   | `{B}{Q}`           | `BCHUSDT`        | USDT          |                                                          |
 | bitrue                                | `E-{B}-{Q}`        | `E-BTC-USDT`     | USDT          | E- prefix, dash-separated                                |
@@ -54,7 +53,7 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 
 | Standard | Alias | Used by                             |
 | -------- | ----- | ----------------------------------- |
-| BTC      | XBT   | kraken, kucoin, bitmex (in id only) |
+| BTC      | XBT   | kraken, kucoin |
 
 ## `v()` / `vn()` helpers (`get-key.ts`)
 
@@ -240,8 +239,8 @@ drift measurement.
   venue error text to attach to; hyperliquid consumes it directly.
 - `httpFailureContext.ts` — correlates a swallowed non-2xx to an error emitted
   just after it, for Sentry TAGS only. Needed because `axiosErrorEnhancer`'s
-  causal `statusCode` only exists on the REJECTED path, and six venues
-  (bitmex, phemex, woo, coinbase, kucoin, bingx) have no response interceptor
+  causal `statusCode` only exists on the REJECTED path, and five venues
+  (phemex, woo, coinbase, kucoin, bingx) have no response interceptor
   at all — so there is no point where the failing response and the eventual
   message are both in scope. Three rules are load-bearing: the tags are named
   `recentHttp*` and carry their own age because they are circumstantial, not

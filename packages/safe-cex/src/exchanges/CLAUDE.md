@@ -11,6 +11,11 @@ the `CLAUDE.md` inside each exchange's directory.
 For proxy/tunnel architecture (CORS proxy, HTTP-over-WebSocket adapter), see
 `packages/safe-cex/CLAUDE.md`.
 
+**Retired venues.** BitMEX (closed 2026-09-23) was removed in 2026-10 following the
+Apex Pro pattern: directory, registry and metadata deleted, literal removed from
+`ExchangeName`; stored accounts hide via `isExchangeAvailableInCurrentEnv`.
+Remaining mentions of bitmex in this doc and others are history.
+
 API factories that select HOW or another Axios transport must call
 `setInnerAdapterForRemoteSigning`; direct `defaults.adapter` assignment
 silently removes hosted browser-delegated signing. This applies to public and
@@ -697,11 +702,10 @@ early-return; cryptocom and polymarket instead compute a URL-derived
 `requiresAuth`/`isPublic` and fall past the signing block. Either shape is fine
 to tag.
 
-An exchange with no per-URL **market-data** test (bitget, bitmex, phemex, bingx,
+An exchange with no per-URL **market-data** test (bitget, phemex, bingx,
 bitrue, kucoin futures, grvt, breakoutprop) needs that distinction established
 first, which is a signing change, not a tagging one. Some of those do have a
-per-URL early return for something else — bingx's `LISTEN_KEY`, bitmex's
-`/udf/` — which is not the same thing and does not cover their market data.
+per-URL early return for something else — bingx's `LISTEN_KEY` — which is not the same thing and does not cover their market data.
 
 ### Big-Integer JSON Parsing
 
@@ -806,8 +810,7 @@ actually yields a snapshot, reset state on close and final unsubscribe, parse
 all levels into finite positive prices/nonnegative amounts, and add a fresh
 venue regression before replacing working code. Never infer compatibility
 from `seqId`/`prevSeqId` field names alone. OKX and BloFin keep their audited
-venue-specific implementations until this review is done; BitMEX's current
-price-keyed Aggregated feed has no verified compatible predecessor contract.
+venue-specific implementations until this review is done.
 
 ### `messageHandlerStats` checks SUBSCRIPTIONS, not the connection
 
@@ -1159,7 +1162,7 @@ two values were being recomputed on every trade:
   Monday-week / calendar-month start with the current bucket cached, so the
   hot path does no `Date` work until the bar rolls. **Do not inline an epoch
   floor for those two** — it starts a Thursday week and a 30-day "month" that
-  match no venue kline. Other venues' trade-built bars (apexomni, bitmex,
+  match no venue kline. Other venues' trade-built bars (apexomni,
   blofin, lighter, woo) still epoch-floor `1w`.
 - `opts.interval.endsWith('s')` — invariant per subscription, hoist.
 

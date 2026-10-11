@@ -69,7 +69,7 @@ SDK.
   OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
   KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
   Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni.
-  **Rejecting venues**: AsterDEX, BitMEX, BreakoutProp, Hyperliquid (+spot),
+  **Rejecting venues**: AsterDEX, BreakoutProp, Hyperliquid (+spot),
   HyroTrader, Kraken (+spot), Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
@@ -663,7 +663,7 @@ Is requiresCors true?
     │
     └── Is enforceWsTunnel true OR supportsTunnel not false?
         ├── YES → Proxy + Tunnel (REST via HOW adapter through proxy)
-        │   Examples: BingX, BitMEX, Bitrue, Bitget, GRVT,
+        │   Examples: BingX, Bitrue, Bitget, GRVT,
         │             ApexOmni, Phemex, Coinbase
         └── NO → Proxy only (REST via CORS proxy, no WS adapter)
             Examples: Crypto.com, Backpack, BloFin, Polymarket

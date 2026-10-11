@@ -169,7 +169,7 @@ When `calculateUnrealizedPnl` recomputes from `ticker.last` (Bybit forces it via
 reports 0), an inverse position is `extra.contractsNative × contractSize × move / entry`.
 `contracts` is coin converted at MARK, so `move × contracts` is off by entry/mark
 (BTCUSD showed $19.30 against the venue's $23.94). OKX counts `contractSize`-dollar
-contracts; Bybit and BitMEX inverse leave `contractSize` unset ($1).
+contracts; Bybit inverse leaves `contractSize` unset ($1).
 
 ### `DisplayedMarginPostprocessor` derives `store.displayedMargin`
 
