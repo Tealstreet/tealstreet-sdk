@@ -14,6 +14,7 @@ import {
 import { createPositionId } from '../../utils/createPositionId';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
+import { readHyperliquidCloid } from './hyperliquid.cloid';
 import { systemSubscriptionTypes } from './hyperliquid.constants';
 import { hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import { HyperliquidExchange } from './hyperliquid.exchange';
@@ -1034,6 +1035,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
       const orderId = `${orderData.oid}`;
       const status = update.status; // 'open', 'filled', 'canceled', 'triggered', 'rejected', 'marginCanceled'
+      // Every order we place carries a cloid, and the frame echoes it.
+      const cloid = readHyperliquidCloid(orderData.cloid);
 
       this.parent.log(
         `[orderUpdates] Processing order update: coin=${orderData.coin}, symbol=${market.symbol}, oid=${orderId}, status=${status}`,
@@ -1054,6 +1057,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         this.parent.suppressCancelledOrder(orderId);
         this.parent.store.removeOrder({ id: orderId });
         this.parent.forgetLimitOrderTimeInForce(orderId);
+        if (cloid) this.parent.forgetPlacementRecord(cloid);
         continue;
       }
 
@@ -1078,11 +1082,26 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         let inferenceSource = 'unknown';
 
         const isHip3 = market.id.includes(':');
+        const side = orderData.side === 'B' ? OrderSide.Buy : OrderSide.Sell;
+
+        // PRIMARY: an order we placed is identified by the cloid it went out
+        // with — exact type, trigger price, reduce-only and tif, recorded
+        // before the REST call. Everything below is the FALLBACK for frames
+        // with no cloid or no record: orders placed from another client, or a
+        // context the record never reached (the hosted exchange-server).
+        const record = cloid ? this.parent.getPlacementRecord(cloid) : undefined;
 
         // For HIP-3 orders, check pending cache first (just placed, shared across instances)
-        const pendingOrder = isHip3 ? this.parent.getPendingHip3Order(orderId) : null;
+        const pendingOrder = !record && isHip3 ? this.parent.getPendingHip3Order(orderId) : null;
 
-        if (pendingOrder) {
+        if (record && cloid) {
+          inferredType = record.type;
+          inferredPrice = record.price;
+          inferenceSource = 'cloid-record';
+          // Its pre-placement entry is no longer needed; left behind, the FIFO
+          // fallback could hand it to a different, cloid-less frame.
+          this.parent.forgetPrePlacement(orderData.coin, side, cloid);
+        } else if (pendingOrder) {
           // Use cached type/price from order we just placed (from shared cache)
           inferredType = pendingOrder.type;
           inferredPrice = pendingOrder.price;
@@ -1093,7 +1112,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           // Pre-placement entries are added BEFORE REST, pending entries AFTER REST.
           // If we don't consume here, old pre-placement entries accumulate and can
           // poison future matchPrePlacement calls (e.g., after cancel-all + re-place).
-          const side = orderData.side === 'B' ? OrderSide.Buy : OrderSide.Sell;
           this.parent.matchPrePlacement(orderData.coin, side);
         } else if (isHip3 && !orderData.orderType && !orderData.triggerPx && orderData.limitPx) {
           // HIP-3 order without explicit type — check store (O(1) via the
@@ -1112,7 +1130,6 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             }
           } else {
             // Try pre-placement cache with WS data for disambiguation
-            const side = orderData.side === 'B' ? OrderSide.Buy : OrderSide.Sell;
             const wsLimitPx = parseFloat(orderData.limitPx) || undefined;
             const wsAmount = orderData.origSz ? +orderData.origSz : undefined;
             const prePlacement = this.parent.matchPrePlacement(orderData.coin, side, wsLimitPx, wsAmount);
@@ -1139,6 +1156,11 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           !orderData.triggerPx &&
           !orderData.isTrigger
         ) {
+          // FALLBACK since every order we place carries a cloid record (handled
+          // above): this deferral now only meets frames with no cloid or no
+          // record — reduce-only orders from another client, or the hosted
+          // exchange-server, which never sees the browser's records.
+          //
           // Core-perp reduce-only order with no trigger fields: Hyperliquid's
           // first WS `orderUpdates` message for a freshly-placed TP/SL
           // arrives with `orderType`, `triggerPx`, and `isTrigger` all
@@ -1196,6 +1218,10 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
             continue;
           }
         } else {
+          // FALLBACK since the cloid record (above) identifies our own stop
+          // entries exactly; this only answers for a frame that arrived without
+          // its cloid.
+          //
           // Core-perp STOP ENTRY: a non-reduce-only trigger placed from this
           // app is recorded in the pre-placement cache; its first frame has
           // no trigger fields and would read as a Limit at the slippage cap.
@@ -1205,11 +1231,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           const existingOrder = !isHip3 ? existingOrdersById[orderId] : undefined;
           const stopEntry =
             !isHip3 && !existingOrder && !orderData.orderType && !orderData.triggerPx && !orderData.isTrigger
-              ? this.parent.matchPrePlacementTrigger(
-                  orderData.coin,
-                  orderData.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
-                  +orderData.origSz,
-                )
+              ? this.parent.matchPrePlacementTrigger(orderData.coin, side, +orderData.origSz)
               : undefined;
           if (stopEntry) {
             inferredType = stopEntry.type;
@@ -1243,8 +1265,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         // Determine timeInForce: use WS data if present, otherwise preserve.
         // `orderUpdates` omits tif for EVERY market, not just HIP-3 ones, so
         // without this fallback each update wipes the value REST/placement set.
-        let inferredTimeInForce = parseHyperliquidOrderTimeInForce(orderData.tif);
-        if (!inferredTimeInForce) {
+        let inferredTimeInForce = record ? record.timeInForce : parseHyperliquidOrderTimeInForce(orderData.tif);
+        if (!inferredTimeInForce && !record) {
           // Store first (O(1) via the pre-built map), then the placement-time
           // record — core perps are never REST-reconciled after startup, so for
           // them the placement record is the only source.
@@ -1255,7 +1277,8 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         // In hosted mode the order was placed on the browser mirror, so this
         // instance never saw the placement and REST is its only tif source.
         // Debounced + rate-limited, so a burst of orders costs one fetch.
-        if (!inferredTimeInForce && inferredType === OrderType.Limit) {
+        // A recorded order's tif is what we sent; REST has nothing to add.
+        if (!inferredTimeInForce && !record && inferredType === OrderType.Limit) {
           this.parent.scheduleOrderRefresh();
         }
 
@@ -1264,14 +1287,16 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           status: orderStatus,
           symbol: market.symbol,
           type: inferredType,
-          side: orderData.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
+          side,
           price: inferredPrice,
           amount: +orderData.origSz,
           filled: +orderData.origSz - +orderData.sz,
           remaining: +orderData.sz,
-          reduceOnly: Boolean(orderData.reduceOnly),
+          // Frames omit `reduceOnly` for orders that are not; the record knows.
+          reduceOnly: record ? record.reduceOnly : Boolean(orderData.reduceOnly),
           lastUpdate: virtualClock.getCurrentTimeMs(),
           timeInForce: inferredTimeInForce,
+          ...(cloid ? { clientOrderId: cloid } : {}),
           info: orderData,
         };
 

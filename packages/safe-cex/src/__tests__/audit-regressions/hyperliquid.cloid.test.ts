@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { mintHyperliquidCloid, placementRecordFromWire } from '../../exchanges/hyperliquid/hyperliquid.cloid';
-import { getCrossCache } from '../../exchanges/hyperliquid/hyperliquid.cross-cache';
+import { getCrossCache, PLACEMENT_RECORD_TTL_MS } from '../../exchanges/hyperliquid/hyperliquid.cross-cache';
 import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
 import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -374,5 +374,42 @@ describe('hyperliquidspot placement wires carry a cloid', () => {
     expect(wires).toHaveLength(2);
     for (const wire of wires) expect(wire.c).toMatch(CLOID);
     expect(wires[0].c).not.toBe(wires[1].c);
+  });
+});
+
+describe('cross-cache placement records', () => {
+  it('expires a record after its TTL', () => {
+    const cache = getCrossCache();
+    const cloid = mintHyperliquidCloid();
+    const now = Date.now();
+    cache.addPlacementRecord(cloid, {
+      type: OrderType.StopLoss,
+      price: 1,
+      side: OrderSide.Sell,
+      amount: 1,
+      reduceOnly: true,
+      symbol: 'BTC-PERP',
+      placedAt: now,
+    });
+    expect(cache.getPlacementRecord(cloid)).toMatchObject({ price: 1 });
+
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + PLACEMENT_RECORD_TTL_MS + 1);
+    expect(cache.getPlacementRecord(cloid)).toBeUndefined();
+    clock.mockRestore();
+
+    cache.removePlacementRecord(cloid);
+    expect(cache.getPlacementRecord(cloid)).toBeUndefined();
+  });
+
+  it('removes exactly the pre-placement entry placed with a cloid', () => {
+    const cache = getCrossCache();
+    const [first, second] = [mintHyperliquidCloid(), mintHyperliquidCloid()];
+    cache.addPrePlacement('ETH', OrderSide.Buy, OrderType.StopLoss, 3000, 1, first);
+    cache.addPrePlacement('ETH', OrderSide.Buy, OrderType.StopLoss, 3100, 1, second);
+
+    cache.removePrePlacementByCloid('ETH', OrderSide.Buy, first);
+
+    // With one candidate left, the strict matcher answers — and it is the second one.
+    expect(cache.matchPrePlacementTrigger('ETH', OrderSide.Buy, 1)).toEqual({ type: OrderType.StopLoss, price: 3100 });
   });
 });

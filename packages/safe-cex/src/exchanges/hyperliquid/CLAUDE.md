@@ -603,6 +603,13 @@ against. Four things bridge that:
    Without that handoff the list is deduped, but the chart still flickers or
    warps as stale and real snapshots race.
 
+**Both paragraphs below are now the FALLBACK.** An order we placed is
+identified by its cloid record first (see "Client order ID"), which gives the
+exact type, trigger price, reduce-only and tif on the very first frame. The
+deferral and the strict stop-entry match only meet frames with no cloid or no
+record: orders from another client, and every order on the hosted
+exchange-server, which never sees the browser's records.
+
 **Every core-perp reduce-only frame without trigger fields is deferred to REST,
 not only the size-0 positional one.** `orderUpdates` never carries `orderType`
 / `triggerPx` / `isTrigger`; the deferral in `handleOrderUpdates` used to
@@ -961,7 +968,7 @@ Spot collateral freshness:
 **WebSocket order updates**:
 
 - `orderUpdates` is the only live order feed for core and HIP-3.
-- HIP-3 updates omit order type fields, so pending/pre-placement caches preserve known metadata and unknown orders trigger the bounded REST retry chain.
+- Updates omit order type fields. Our own orders are identified by their cloid record; for frames without one, pending/pre-placement caches preserve known metadata and unknown orders trigger the bounded REST retry chain.
 - Order removal comes from terminal `orderUpdates` states and authoritative `fetchOrders()` reconciliation.
 
 **Cancellation Suppression** (`_cancelledOrders` map):
@@ -994,10 +1001,11 @@ The private WS tracks per-position realized PnL in `handleFills`:
 
 ### HIP-3 Order Type Inference
 
-HIP-3 `orderUpdates` WS channel omits `orderType`, `triggerPx`, and `tpsl`. This requires a multi-layer inference system:
+HIP-3 `orderUpdates` WS channel omits `orderType`, `triggerPx`, and `tpsl` (core perps do too — see Known Quirks 1). Our own orders are identified by cloid first; the rest of the chain is the fallback for frames without a cloid record:
 
 ```
 Order type resolution chain (in priority order):
+0. Cloid record     → cloid → type/price/reduceOnly/tif (written before the REST call; every market)
 1. Pending cache    → orderId → type/price  (set after REST returns order ID)
 2. API fields       → orderType, triggerPx   (available for core perps, not HIP-3)
 3. Store preserved  → existing order in store (from previous REST or optimistic add)
@@ -1013,7 +1021,7 @@ Before placing a HIP-3 order, the type/price/amount are cached keyed by `coin|si
 2. Amount match: WS `origSz` === cached amount (unique match required)
 3. FIFO: oldest entry
 
-Entries expire after 30 seconds. Cleared on cancel to prevent stale matches. Consuming a pending cache entry also consumes the corresponding pre-placement entry.
+Entries expire after 30 seconds. Cleared on cancel to prevent stale matches. Consuming a pending cache entry also consumes the corresponding pre-placement entry. Entries carry the order's cloid, and when the WS handler identifies an order from its cloid record it drops exactly that entry (`removePrePlacementByCloid`) — otherwise the FIFO fallback could hand it to a different, cloid-less frame.
 
 ### Pending Orders Cache
 
@@ -1038,7 +1046,7 @@ Entries expire after 60 seconds.
 
 ## Known Quirks / Implementation Notes
 
-1. **HIP-3 `orderUpdates` missing fields**: `orderType`, `triggerPx`, `tpsl` are omitted (API limitation). Requires the multi-layer inference system described above.
+1. **HIP-3 `orderUpdates` missing fields**: `orderType`, `triggerPx`, `tpsl` are omitted (API limitation). Our own orders are identified by their cloid record instead (see "Client order ID"); everything in this entry — the tif fallback, the defer branch — is what still handles frames without one.
 
    **`tif` is omitted for EVERY market, core perps included** — the field is absent from the `WsOrder.order` payload entirely, so `parseHyperliquidOrderTimeInForce(orderData.tif)` never resolves on the WS path. Only REST `frontendOpenOrders` carries it. This used to be believed HIP-3-only, and the preserve-from-store fallback was gated on `isHip3`; core-perp orders therefore had `timeInForce` overwritten with `undefined` by every order update, and the UI's TIF column rendered blank (caught by the Cypress `expected '' to equal 'GTC'` assertion). Two things make the value survive now, and **both are needed**:
 
@@ -1391,5 +1399,22 @@ replacement's freshly minted cloid as `clientOrderId`. Callers reading
 **Lookup** (`findOrderByClientOrderId`) asks `orderStatus` with the cloid as
 `oid`, which also answers for filled and cancelled orders and, unlike
 `fetchOrders` here, never writes the store. A miss is still never definitive.
+
+**The WS handler reads the record first.** `handleOrderUpdates` looks the
+frame's `cloid` up (`getPlacementRecord`) before any inference. On a hit it
+builds the order from the record — type, trigger price as `price`,
+reduce-only, tif — plus the frame's live `sz`/`origSz`, stamps
+`clientOrderId`, and skips the pending cache, the pre-placement matchers, the
+reduce-only deferral and the tif-driven REST refresh. A terminal frame drops
+the record. Records live 30 minutes (`PLACEMENT_RECORD_TTL_MS`, capped at 500):
+the first frame arrives within a second, so the TTL only covers a slow or
+reconnecting socket; after it a later frame finds the order in the store.
+
+**The record does not reach the hosted exchange-server.** It is written where
+the order is placed (the browser's main-thread mirror) and shared through
+sessionStorage + BroadcastChannel, which the server cannot see; its
+`handleOrderUpdates` still runs the fallback chain. Same for orders placed from
+another client. Frames with a cloid but no record still get `clientOrderId`
+stamped, so the web's exact match works for them once REST/WS delivers.
 
 **Cancel** still goes by oid; `cancelByCloid` exists but nothing needs it yet.
