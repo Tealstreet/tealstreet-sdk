@@ -447,7 +447,7 @@ every Bybit variant reads `bybit.types.ts`.
 
 5. **Order size splitting** (`bybit.exchange.ts:1128-1141`): Orders exceeding `market.limits.amount.max` are split into multiple lots. Only the first lot carries TP/SL; subsequent lots have TP/SL stripped to avoid duplicates.
 
-6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots.
+6. **Sequential submission**: Lots are submitted sequentially via `mapSeries`. Each failure is logged but does not abort subsequent lots — **except a single-lot order carrying the CALLER's client id whose response was lost** (`utils/unknownSendOutcome.isUnknownOutcome`), which is rethrown in all three variants; an order with a generated id (stops, conditionals, scaled legs) has nothing to look up and still returns `[]`. Returning `[]` there read as "not placed", so a chase placed again on top of a live order; thrown, the caller looks it up by its `orderLinkId`. Gated by `__tests__/faultBench/bybitLostCreate.scenarios.test.ts`.
 
 ### Native Market Slippage Protection
 

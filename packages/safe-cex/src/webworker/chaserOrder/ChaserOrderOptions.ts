@@ -46,6 +46,9 @@ export type ChaserOrderOptions = {
 /** Stop reason of `removeKeepOrder`: the chase stopped but its order rests on. */
 export const CHASER_KEPT_ORDER_STOP_REASON = 'User cancelled, kept order in book';
 
+/** A placement's response was lost and the lookups never found it: it may still land. */
+export const CHASER_UNCONFIRMED_ORDER_STOP_REASON = 'Could not confirm order placement';
+
 /**
  * Emitted once on the exchange emitter when a chase ends, however it ends.
  * `filled` is in order-placement units (the unit of `size`), clamped to

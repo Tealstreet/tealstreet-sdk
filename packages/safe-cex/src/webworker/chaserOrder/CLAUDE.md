@@ -155,6 +155,28 @@ The only Bybit REST snapshot backstop that should remain is the
 `SET_TRADING_STOP` path, because that endpoint returns no concrete order IDs and
 is not the Chaser limit-order loop.
 
+## A lost placement is looked up, never placed again blind
+
+`tryPlaceOrders` mints a client order id (`exchange.mintClientOrderId`; none on
+venues that refuse caller ids, which keep the old behaviour). A throw that may
+still have placed the order (`utils/unknownSendOutcome.isUnknownOutcome`: no
+venue answer, a 5xx, Binance -1007) is looked up by that id at 1/2/4/8s:
+
+- found **open** → the chase adopts it;
+- found **filled** or **cancelled** (a post-only reject) → its fill is counted,
+  then what is left is retried;
+- **not found** → the chase STOPS with an error telling the user to check open
+  orders. Re-placing could double the position, and the order may still land
+  after the lookups (a venue honours a signed request until ~30s).
+
+A venue REFUSAL still retries at once, and an EMPTY result gets one immediate
+lookup only: most adapters return `[]` for an ordinary rejection, so the full
+wait would turn every rejection into a stopped chase. An adapter that swallows a
+LOST send into `[]` defeats this, which is why Bybit's single-order create now
+rethrows it (`bybit/CLAUDE.md`). A STOP during the lookups gets one last look:
+a found order is cancelled by the existing `isStopped` branch, and a miss still
+emits the "check open orders" error. TWAP slices place through this same path.
+
 ## Hold-steady window after partial fills
 
 `updateOrders` short-circuits the cancel+replace path when

@@ -1143,3 +1143,112 @@ describe('ChaserOrderManager', () => {
     });
   });
 });
+
+// A placement whose response is lost may have landed; placing again doubles it.
+describe('ChaserOrderManager lost placement', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  const startChase = (exchange: Exchange) => {
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+    manager.add(instance);
+    return instance;
+  };
+
+  const withLostResponse = () => {
+    const mock = createMockExchange();
+    const exchange = mock.exchange as any;
+    exchange.mintClientOrderId = vi.fn(() => 'chase-cid-1');
+    exchange.placeOrder = vi.fn().mockRejectedValueOnce(new Error('timeout of 20000ms exceeded'));
+    exchange.findOrderByClientOrderId = vi.fn();
+    return { ...mock, exchange };
+  };
+
+  it('adopts the order a lost response placed instead of placing it again', async () => {
+    const { exchange } = withLostResponse();
+    exchange.findOrderByClientOrderId
+      .mockResolvedValueOnce({ found: false, definitive: false })
+      .mockResolvedValueOnce({ found: true, order: createOrder('order-1', 100) });
+
+    const instance = startChase(exchange);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
+    expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ clientOrderId: 'chase-cid-1' }));
+    expect(instance.currentOrderIds).toEqual(['order-1']);
+    expect(instance.isStopped).toBe(false);
+  });
+
+  it('stops rather than placing blind when the order cannot be confirmed', async () => {
+    const { exchange } = withLostResponse();
+    exchange.findOrderByClientOrderId.mockResolvedValue({ found: false, definitive: false });
+
+    const instance = startChase(exchange);
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
+    expect(instance.isStopped).toBe(true);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringContaining('check open orders'));
+    const completions = (exchange.emitter.emit as any).mock.calls.filter(([event]: [string]) => event === 'chaser:complete');
+    expect(completions).toHaveLength(1);
+    expect(completions[0][1]).toMatchObject({ stopReason: 'Could not confirm order placement' });
+  });
+
+  it('counts a fill the lost order already made, then places only the rest', async () => {
+    const { exchange } = withLostResponse();
+    exchange.placeOrder.mockResolvedValueOnce(['order-2']);
+    exchange.findOrderByClientOrderId.mockResolvedValueOnce({
+      found: true,
+      order: { ...createOrder('order-x', 100), status: OrderStatus.Canceled, filled: 0.4 },
+    });
+
+    startChase(exchange);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
+    expect(exchange.placeOrder).toHaveBeenLastCalledWith(expect.objectContaining({ amount: 0.6 }));
+  });
+
+  it('a signing timeout sent nothing, so it retries instead of looking up', async () => {
+    const { exchange } = withLostResponse();
+    exchange.placeOrder = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Signing request abc timed out after 15000ms'))
+      .mockResolvedValueOnce(['order-1']);
+
+    startChase(exchange);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(exchange.findOrderByClientOrderId).not.toHaveBeenCalled();
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries at once when the venue refused the order', async () => {
+    const { exchange } = withLostResponse();
+    exchange.placeOrder = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('Order would immediately match'), { response: { status: 400 } }))
+      .mockResolvedValueOnce(['order-1']);
+
+    startChase(exchange);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(exchange.findOrderByClientOrderId).not.toHaveBeenCalled();
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
+  });
+});
+
