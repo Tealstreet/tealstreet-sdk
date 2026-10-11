@@ -1,6 +1,8 @@
 import type { ParadexSDKAccount } from '../exchanges/paradex/paradex.sdk';
 import type { ExchangeOptions, PayloadSignerRequest } from '../types';
 
+import '../transport/registerTealstreetTransport';
+
 import { Account, ec } from 'starknet';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
