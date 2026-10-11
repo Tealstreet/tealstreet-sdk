@@ -73,8 +73,14 @@ SDK.
   HyroTrader, Kraken (+spot), Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
-  `BROKER_ID_…`); a caller ID goes out bare, so those orders carry no
-  client-ID attribution. Composing one is deliberately deferred.
+  `BROKER_ID_…`); a caller ID goes out bare. **To keep attribution, get the ID
+  from `mintClientOrderId(opts)`**, which returns one in the venue's own
+  generated format (`ClientOrderIdRule.mint`) or `undefined` where the venue
+  would refuse one — it never emits, so call it before deciding how to send. A
+  venue whose attribution lives in its ID must declare `mint`, or minted orders
+  silently lose it; the fail-closed test pins the prefixed venues. Per-venue
+  behaviour, including where the ID lands on a mapped `Order`:
+  [`CLIENT_ORDER_IDS.md`](CLIENT_ORDER_IDS.md).
 - **`placeOrderWithClientOrderId(opts)` returns `{ orderIds, clientOrderId }`**,
   where `clientOrderId` is the value on the wire. It is the caller's string
   because no adapter transforms an honored ID; the numeric venues (Backpack

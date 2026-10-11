@@ -107,7 +107,9 @@ const parseOKXTriggerPxType = (triggerPxType?: string) => {
 };
 
 export class OKXExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
+    mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
+  });
 
   xhr: Axios;
   region: OkxRegion;

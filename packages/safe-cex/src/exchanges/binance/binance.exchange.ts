@@ -153,7 +153,9 @@ const REQUEST_WEIGHT_BACKOFF_MS = 60_000;
 
 // TODO: translate our err messages
 export class BinanceExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
+    mint: () => 'x-s3vFFRQp' + uuid(),
+  });
 
   /** Journal records: this venue has no reported closed axis, so round trips fold from fills. */
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) =>

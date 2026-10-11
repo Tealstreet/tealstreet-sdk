@@ -107,7 +107,9 @@ const isKnownNonSwapInstrument = (payload: Record<string, any>) => {
 };
 
 export class BlofinExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
+    mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
+  });
 
   xhr: Axios;
 

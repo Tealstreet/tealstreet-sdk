@@ -59,6 +59,7 @@ import { BaseWebSocket } from './base.ws';
 import {
   clientOrderIdShapeMessage,
   clientOrderIdSplitMessage,
+  defaultMintCandidates,
   isRegularClientOrderShape,
   type ClientOrderIdPlaceOrderOpts,
   type ClientOrderIdRule,
@@ -292,6 +293,7 @@ export interface Exchange {
   placeOrder: (opts: PlaceOrderOpts) => Promise<string[]>;
   placeOrders: (orders: PlaceOrderOpts[]) => Promise<string[]>;
   placeOrderWithClientOrderId: (opts: ClientOrderIdPlaceOrderOpts) => Promise<PlacedOrderRef>;
+  mintClientOrderId: (opts: PlaceOrderOpts) => string | undefined;
   updateOrder: (opts: UpdateOrderOpts) => Promise<string[]>;
   cancelOrders: (orders: Order[]) => Promise<void>;
   cancelSymbolOrders: (symbol: string) => Promise<void>;
@@ -851,6 +853,19 @@ export class BaseExchange implements Exchange {
     return { orderIds, clientOrderId };
   };
 
+  /**
+   * A client order ID this venue will honor on `opts`, in the venue's own format,
+   * or undefined when it would refuse one. Never emits: callers ask before sending.
+   */
+  mintClientOrderId = (opts: PlaceOrderOpts): string | undefined => {
+    const rule = this.clientOrderIdRule;
+    if (!rule || !(rule.isHonorableShape ?? isRegularClientOrderShape)(opts)) return undefined;
+    if (!this.store.marketsBySymbol[opts.symbol] || this.wouldSplitOrder(opts)) return undefined;
+    // A venue's own format carries its attribution; never trade it for a generic ID.
+    const candidates = rule.mint ? [rule.mint()] : defaultMintCandidates();
+    return candidates.find((candidate) => rule.isValid(candidate));
+  };
+
   /** Venue rule for `PlaceOrderOpts.clientOrderId`; undefined means the venue cannot honor caller IDs. */
   protected readonly clientOrderIdRule: ClientOrderIdRule | undefined = undefined;
 
@@ -896,11 +911,16 @@ export class BaseExchange implements Exchange {
 
   // An order above the market's maxSize splits into several native orders, so it rejects up front;
   // adapters still assert the payload count after formatting as a backstop.
-  private assertCallerClientOrderIdUnsplit(opts: PlaceOrderOpts) {
+  private wouldSplitOrder(opts: PlaceOrderOpts): boolean {
     const market = this.store.marketsBySymbol[opts.symbol];
-    if (opts.clientOrderId === undefined || !market) return;
+    if (!market) return false;
     const maxSize = market.limits.amount.max;
-    if (maxSize > 0 && adjust(opts.amount, market.precision.amount) > maxSize) {
+    return maxSize > 0 && adjust(opts.amount, market.precision.amount) > maxSize;
+  }
+
+  private assertCallerClientOrderIdUnsplit(opts: PlaceOrderOpts) {
+    if (opts.clientOrderId === undefined) return;
+    if (this.wouldSplitOrder(opts)) {
       this.rejectPreflight(
         `${this.clientOrderIdRule?.label ?? this._exchangeName} order exceeds the market's max size for one order; a caller clientOrderId cannot span several orders`,
       );

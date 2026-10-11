@@ -247,3 +247,46 @@ describe('BaseExchange client order ID helpers', () => {
     expect(events).toEqual(['emit', 'threw']);
   });
 });
+
+// A minted ID is one the venue will honor, in the venue's own format: a lost
+// response can be looked up by it, and broker-prefixed venues keep their prefix.
+describe('mintClientOrderId', () => {
+  beforeEach(() => {
+    vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');
+  });
+
+  it.each(HONORING)('%s mints an ID its own contract accepts, without emitting', (name, Ctor) => {
+    const { exchange, emitted } = setup(name, Ctor);
+    const clientOrderId = exchange.mintClientOrderId(order());
+
+    expect(clientOrderId).toEqual(expect.any(String));
+    expect((exchange as any).resolveCallerClientOrderId(order({ clientOrderId }))).toBe(clientOrderId);
+    expect(emitted).toEqual([]);
+  });
+
+  it.each([
+    ['binance', BinanceExchange, 'x-s3vFFRQp'],
+    ['binancepm', BinancePMExchange, 'x-s3vFFRQp'],
+    ['binancespot', BinanceSpotExchange, 'x-s3vFFRQp'],
+    ['okx', OKXExchange, 'e847386590ce4dBC'],
+    ['blofin', BlofinExchange, 'b3cdedc0a20880ba'],
+    ['phemex', PhemexExchange, 'Tealstreet_'],
+  ] as Array<[string, ExchangeCtor, string]>)('%s keeps its broker prefix', (name, Ctor, prefix) => {
+    expect(setup(name, Ctor).exchange.mintClientOrderId(order())).toMatch(new RegExp(`^${prefix}`));
+  });
+
+  it.each(NOT_HONORING)('%s mints nothing', (name, Ctor) => {
+    const { exchange, emitted } = setup(name, Ctor);
+    expect(exchange.mintClientOrderId(order())).toBeUndefined();
+    expect(emitted).toEqual([]);
+  });
+
+  it.each(HONORING)('%s mints nothing for a shape or size it would refuse', (name, Ctor) => {
+    const { exchange, emitted } = setup(name, Ctor);
+    expect(exchange.mintClientOrderId(order({ stopLoss: 49_000 }))).toBeUndefined();
+    expect(exchange.mintClientOrderId(order({ type: OrderType.StopLoss, triggerPrice: 49_000 }))).toBeUndefined();
+    expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
+    expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
+    expect(emitted).toEqual([]);
+  });
+});

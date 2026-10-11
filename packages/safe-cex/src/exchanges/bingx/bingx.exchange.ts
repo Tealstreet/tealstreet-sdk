@@ -71,6 +71,7 @@ export class BingxExchange extends BaseExchange {
   // BingX lowercases client order IDs server-side, so an uppercase ID could never be queried back.
   protected readonly clientOrderIdRule: ClientOrderIdRule = {
     label: 'BingX',
+    mint: () => `ts${uuid()}`.toLowerCase().slice(0, 40),
     requirement: 'be 1-40 characters with no uppercase letters',
     isValid: (clientOrderId) =>
       clientOrderId.length >= 1 && clientOrderId.length <= 40 && clientOrderId === clientOrderId.toLowerCase(),

@@ -93,7 +93,9 @@ const isCoinbaseZeroDecimal = (value: unknown): value is string =>
   typeof value === 'string' && COINBASE_ZERO_DECIMAL.test(value);
 
 export class CoinbaseExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S+$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S+$/, {
+    mint: () => 'tealstreet-' + uuid(),
+  });
 
   xhr: Axios;
   unlimitedXHR: Axios;

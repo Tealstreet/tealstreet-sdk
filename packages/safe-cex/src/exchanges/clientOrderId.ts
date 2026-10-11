@@ -1,6 +1,7 @@
 import type { PlaceOrderOpts } from '../types';
 
 import { OrderType } from '../types';
+import { uuid } from '../utils/uuid';
 
 /**
  * How a venue honors `PlaceOrderOpts.clientOrderId`. The adapter sends the
@@ -12,7 +13,15 @@ export type ClientOrderIdRule = {
   readonly requirement: string;
   readonly isValid: (clientOrderId: string) => boolean;
   readonly isHonorableShape?: (opts: PlaceOrderOpts) => boolean;
+  /** The venue's own generated-id format, so a minted id keeps its broker attribution. */
+  readonly mint?: () => string;
 };
+
+// Tried after a venue's own `mint`: one fits every alphanumeric rule, one every numeric rule.
+export const defaultMintCandidates = (): string[] => [
+  `ts${uuid()}`,
+  String(100_000_000 + Math.floor(Math.random() * 900_000_000)),
+];
 
 export const isRegularClientOrderShape = (opts: PlaceOrderOpts): boolean =>
   (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
@@ -34,7 +43,7 @@ export const clientOrderIdSplitMessage = (label: string): string =>
 export const patternClientOrderIdRule = (
   label: string,
   pattern: RegExp,
-  overrides: Pick<ClientOrderIdRule, 'isHonorableShape'> = {},
+  overrides: Pick<ClientOrderIdRule, 'isHonorableShape' | 'mint'> = {},
 ): ClientOrderIdRule => ({
   label,
   requirement: `match ${pattern}`,

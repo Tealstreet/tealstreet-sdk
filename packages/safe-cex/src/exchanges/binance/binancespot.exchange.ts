@@ -50,7 +50,9 @@ import { BinancePublicWebsocket } from './binancespot.ws-public';
 // TODO: translate our err messages
 export class BinanceSpotExchange extends BaseExchange {
   // Spot's legal range differs from USD-M/PM: no '.', ':' or '/'.
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance Spot', /^[A-Za-z0-9_-]{1,36}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance Spot', /^[A-Za-z0-9_-]{1,36}$/, {
+    mint: () => 'x-s3vFFRQp' + uuid(),
+  });
 
   xhr: Axios;
   unlimitedXHR: Axios;

@@ -116,7 +116,9 @@ const extractArray = <T = Record<string, any>>(payload: any, keys: string[] = []
 };
 
 export class WeexExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
+    mint: () => `ts${uuid()}`.slice(0, 36),
+  });
 
   xhr: Axios;
   publicWebsocket: WeexPublicWebsocket;

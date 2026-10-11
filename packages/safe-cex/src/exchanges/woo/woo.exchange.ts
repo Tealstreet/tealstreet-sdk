@@ -193,6 +193,8 @@ export class WOOXExchange extends BaseExchange {
   // WOO client_order_id is numeric; only a canonical JS-safe integer string survives the round trip.
   protected readonly clientOrderIdRule: ClientOrderIdRule = {
     label: 'WOO',
+    // Any safe integer: a 15-digit space keeps minted IDs from colliding.
+    mint: () => String(100_000_000_000_000 + Math.floor(Math.random() * 900_000_000_000_000)),
     requirement: 'be a canonical positive decimal integer within the JavaScript safe-integer range',
     isValid: (clientOrderId) => /^[1-9]\d*$/.test(clientOrderId) && Number.isSafeInteger(Number(clientOrderId)),
   };

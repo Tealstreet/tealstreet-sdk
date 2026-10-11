@@ -113,6 +113,7 @@ const signerHeaders = (headers?: Record<string, string>) => (headers ? [{ header
 
 export class ParadexExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('Paradex', /^.{1,64}$/, {
+    mint: () => `ts_${uuid()}`,
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
   });
 

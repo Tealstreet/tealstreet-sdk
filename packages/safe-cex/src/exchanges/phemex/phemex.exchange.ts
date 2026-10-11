@@ -62,7 +62,9 @@ import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
 
 export class PhemexExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('Phemex', /^.{1,40}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Phemex', /^.{1,40}$/, {
+    mint: () => `${BROKER_ID}_${uuid()}`,
+  });
 
   xhr: Axios;
   unlimitedXHR: Axios;

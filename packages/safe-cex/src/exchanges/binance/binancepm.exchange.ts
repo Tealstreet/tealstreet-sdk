@@ -91,7 +91,9 @@ const requireBinancePMArrayResponse = <T>(endpoint: string, payload: unknown): T
 
 // TODO: translate our err messages
 export class BinancePMExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/);
+  protected readonly clientOrderIdRule = patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, {
+    mint: () => 'x-s3vFFRQp' + uuid(),
+  });
 
   papiXhr: Axios;
   fapiXhr: Axios;
