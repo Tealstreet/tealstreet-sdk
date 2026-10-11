@@ -300,7 +300,7 @@ Consequences that look like bugs and are not:
 - **`minAmount` / `maxAmount` are checked only when `contractSize === 1`.**
   `precision.amount` is native everywhere; `limits.amount` is adapter-dependent
   and not consistently anything — OKX and BloFin build `min` as `minSz × ctVal`
-  while leaving `max` native, KuCoin, BitMEX and Crypto.com report both
+  while leaving `max` native, KuCoin and Crypto.com report both
   natively despite setting a `contractSize`. No single conversion is right for
   all of them, and a wrong one refuses every order on a whole venue. So
   `limitsComparable` skips the check where the units may differ, and the venue

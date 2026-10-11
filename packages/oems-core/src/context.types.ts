@@ -180,7 +180,7 @@ export interface OemsMarketRef {
    * safely comparable when `contractSize === 1`.
    *
    * OKX and BloFin build `min` as `minSz × ctVal` (base, or quote on an inverse
-   * market) while leaving `max` in native contracts; KuCoin, BitMEX and
+   * market) while leaving `max` in native contracts; KuCoin and
    * Crypto.com report both natively despite setting a `contractSize`. No single
    * conversion is right for all of them, and a wrong one refuses every order on
    * a whole venue — so a consumer must skip the comparison rather than guess.
