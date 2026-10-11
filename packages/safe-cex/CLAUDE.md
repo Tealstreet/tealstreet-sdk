@@ -112,6 +112,21 @@ themselves. `__tests__/audit-regressions/no-retried-writes.test.ts` drives the
 real factories with a connection reset, and fails if a factory imports
 `axios-retry` without the helper.
 
+## Fault bench — proving behaviour on a bad link
+
+`src/__tests__/faultBench/` scripts what a link does to each request: deliver,
+drop before send, **lose the response of a request the venue acted on**, time
+out, hold a reply in flight (`hold`), add latency, or reject without acting.
+`createFakeVenue(routes)` records every request that reached it, so "sent once"
+and "the venue has it" are assertions, not inferences. `bench.install(xhr)`
+sits beneath remote signing, so a real venue factory runs its own signing,
+interceptors and axios-retry over it — `badLink.scenarios.test.ts` drives
+`OKXExchange` this way. **Key faults by route (`bench.on('post /path', ...)`)
+whenever requests run concurrently**; an unkeyed fault goes to whichever request
+reaches the adapter first. A known gap is an `it.fails` that names its phase of
+`docs/plans/BAD_LINK_RESILIENCE.md`; it fails loudly the day a fix lands, and is
+then flipped to `it`.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual
