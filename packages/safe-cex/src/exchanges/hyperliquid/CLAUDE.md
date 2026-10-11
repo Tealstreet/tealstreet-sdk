@@ -572,7 +572,13 @@ on the next occurrence, which should name it.
 
 The optimistic ghost row in `inProgressOrdersAtom` will keep its `optim_*` id
 forever in this case — we never get a real id to `confirm()` the reconciler
-against. Four things bridge that:
+against. **The primary bridge is now the cloid**: the stop's ghost carries the
+cloid `mintClientOrderId` gave it (`createStopLossOrder` sends through
+`sendOrder`), a drag's `Updating` ghost is stamped with the replacement's cloid
+from `updateOrder`'s `ReplacementOrderIds`, and the store order carries the
+same `clientOrderId` from WS or REST, so `getOpenOrders` pairs them exactly.
+The four mechanisms below remain the fallback for orders without one (placed
+from another client) and for the window before a drag's result arrives:
 
 1. `apps/web/src/utils/order/getOpenOrders.ts` — `mergeOrdersWithInProgress`
    fuzzy-matches `Creating` AND `Updating` trigger-like ghosts to same-slot
