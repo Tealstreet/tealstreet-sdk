@@ -21,7 +21,7 @@ export const TRADE_TUNNEL_RPC_VERSION = 4;
 const TRADE_TUNNEL_ACCEPT_ENCODING = ['gzip'] as const;
 const TRADE_TUNNEL_GZIP_BASE64_ENCODING = 'gzip+base64';
 const SENSITIVE_LOG_KEY_PATTERN =
-  /authorization|cookie|password|passphrase|secret|token|signature|api[-_]?key|apikey|access[-_]?key|x-mbx-apikey|x-bitmex/i;
+  /authorization|cookie|password|passphrase|secret|token|signature|api[-_]?key|apikey|access[-_]?key|x-mbx-apikey/i;
 
 type TradeTunnelRouteContext = {
   selectedRegion: 'JA' | 'SG';

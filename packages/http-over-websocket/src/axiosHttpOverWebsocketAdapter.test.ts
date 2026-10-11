@@ -598,9 +598,9 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     const callerConfig: any = {
       url: '/api/v1/order?apiKey=query-key',
       method: 'POST',
-      baseURL: 'https://www.bitmex.com',
+      baseURL: 'https://api.bybit.com',
       headers: { Authorization: 'Bearer secret-token' },
-      params: { symbol: 'XBTUSD', signature: 'param-signature' },
+      params: { symbol: 'BTCUSDT', signature: 'param-signature' },
       data: JSON.stringify({
         price: 100,
         apiKey: 'body-key',
@@ -626,8 +626,8 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     expect(requestLog).toMatchObject({
       method: 'POST',
       route: { selectedRegion: 'JA', tunnelHost: 'tokyo', forcedRegion: 'JA', bypassProxy: false },
-      url: { origin: 'https://www.bitmex.com', pathname: '/api/v1/order', queryKeys: ['apiKey'] },
-      params: { symbol: 'XBTUSD', signature: '[REDACTED]' },
+      url: { origin: 'https://api.bybit.com', pathname: '/api/v1/order', queryKeys: ['apiKey'] },
+      params: { symbol: 'BTCUSDT', signature: '[REDACTED]' },
       data: { price: 100, apiKey: '[REDACTED]', nested: { token: '[REDACTED]', visible: 'ok' } },
     });
     expect(responseLog).toMatchObject({
