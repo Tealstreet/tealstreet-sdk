@@ -31,13 +31,13 @@ const runStartupSnapshot = async (exchange: BinanceExchange) => {
 };
 
 const snapshotCommitters = [
-  ['private startup', (exchange: BinanceExchange) => runStartupSnapshot(exchange)],
+  ['private startup', (exchange: BinanceExchange) => runStartupSnapshot(exchange), false],
   ['private-WS throttled refresh', (exchange: BinanceExchange) => {
     const websocket = new BinancePrivateWebsocket(exchange);
     return (websocket as any).fetchThrottledOrders();
-  }],
-  ['private-WS reconnect snapshot', (exchange: BinanceExchange) => exchange.fetchAndSetPrivateSnapshot()],
-  ['worker-triggered full refresh', (exchange: BinanceExchange) => exchange.fetchAndSetOrders()],
+  }, false],
+  ['private-WS reconnect snapshot', (exchange: BinanceExchange) => exchange.fetchAndSetPrivateSnapshot(), true],
+  ['worker-triggered full refresh', (exchange: BinanceExchange) => exchange.fetchAndSetOrders(), true],
 ] as const;
 
 describe('Binance order snapshot audit regression', () => {
@@ -67,7 +67,7 @@ describe('Binance order snapshot audit regression', () => {
 
   it.each(snapshotCommitters)(
     '%s cannot turn a transient fetch failure into an empty authoritative snapshot',
-    async (_name, commitSnapshot) => {
+    async (_name, commitSnapshot, marksLoadedOnFailure) => {
       const { exchange, store } = createExchange();
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
       vi.spyOn(exchange.xhr, 'get').mockRejectedValue({ message: 'Too many requests', response: { status: 429 } });
@@ -75,7 +75,9 @@ describe('Binance order snapshot audit regression', () => {
       await commitSnapshot(exchange);
 
       expect(store.orders).toBe(preservedOrders);
-      expect(store.loaded.orders).toBe(true);
+      // Startup and the throttled refresh leave a failed snapshot UNLOADED (the tick
+      // retries it), so an empty startup store never renders as "no open orders".
+      expect(store.loaded.orders).toBe(marksLoadedOnFailure);
     },
   );
 
