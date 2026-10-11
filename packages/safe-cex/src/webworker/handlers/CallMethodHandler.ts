@@ -53,6 +53,9 @@ export class CallMethodHandler extends BaseHandler {
         case 'reconnect':
           this._exchange.reconnect();
           break;
+        case 'recoverAfterOffline':
+          result = this._exchange.recoverAfterOffline();
+          break;
         case 'fetchOHLCV':
           result = await this._exchange.fetchOHLCV(...(args as Parameters<typeof this._exchange.fetchOHLCV>));
           break;

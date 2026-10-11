@@ -221,6 +221,7 @@ export type CallableMethodsInWorker =
   | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
   | 'reconnect'
+  | 'recoverAfterOffline'
   | 'fetchOHLCV'
   | 'fetchHistoricalFills'
   | 'fetchOrders'
@@ -335,6 +336,7 @@ export interface Exchange {
   fetchAndSetOrders: (symbols?: string[]) => Promise<Order[]>;
   removeOrders: (orders: Pick<Order, 'id'>[]) => void;
   reconnect: () => void;
+  recoverAfterOffline: () => boolean;
   getOrFetchPositionsForSymbol: (symbol: string) => Promise<Position[]>;
   getAllSockets(): BaseWebSocket<any>[];
   getPublicSockets(): BaseWebSocket<any>[];
@@ -1581,9 +1583,8 @@ export class BaseExchange implements Exchange {
     this._isOnline = isOnline;
 
     if (wasOffline && isOnline) {
-      // Coming back online - trigger reconnection for all sockets
       this.log('Network came online - triggering WebSocket reconnection', LogSeverity.Info);
-      this.reconnect();
+      this.recoverAfterOffline();
     } else if (!isOnline) {
       this.log('Network went offline - WebSocket reconnects will be paused', LogSeverity.Info);
     }
@@ -1592,6 +1593,15 @@ export class BaseExchange implements Exchange {
   reconnect = () => {
     this.getAllSockets().forEach((socket) => socket?.reconnect());
   };
+
+  /**
+   * See `BaseWebSocket.recoverAfterOffline`: reconnect now, past any offline backoff.
+   * False when a socket cannot (it runs its own close loop), so the caller reloads.
+   */
+  recoverAfterOffline = (): boolean =>
+    this.getAllSockets()
+      .map((socket) => socket?.recoverAfterOffline() ?? true)
+      .every(Boolean);
 
   /**
    * Note the most recent non-2xx that axios resolved instead of rejecting.

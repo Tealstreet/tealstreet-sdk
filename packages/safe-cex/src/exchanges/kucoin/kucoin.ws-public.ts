@@ -77,7 +77,7 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
         this.ws.addEventListener('message', this.onMessage);
         this.ws.addEventListener('close', this.onClose);
       } catch (err: any) {
-        this.parent.emitAndLogError(err?.response?.data?.msg || err?.message || 'Failed to connect to WebSocket');
+        this.retryFailedConnect(err?.response?.data?.msg || err?.message || 'Failed to connect to WebSocket');
       }
     }
   };
