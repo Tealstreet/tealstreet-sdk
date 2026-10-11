@@ -231,8 +231,9 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
       const orders = this.parent.mapOrders([o]);
 
       if (orders.length) {
-        if (o.state === 'filled' || o.state === 'canceled') {
-          this.store.updateOrdersStatus(orders, o.state === 'filled' ? OrderStatus.Closed : OrderStatus.Canceled);
+        if (o.state === 'filled' || o.state === 'canceled' || o.state === 'mmp_canceled') {
+          // OKX's filled and (mmp_)canceled are final; a snapshot read before this must not reopen it.
+          this.store.markOrdersTerminal(orders, o.state === 'filled' ? OrderStatus.Closed : OrderStatus.Canceled);
         }
 
         if (o.state === 'live' || o.state === 'partially_filled') {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Market, Order, OrderSide, OrderStatus, OrderType, Position, PositionSide, Ticker } from '../types';
 import { DefaultStore, defaultStore } from './store.base';
@@ -326,6 +326,76 @@ describe('DefaultStore', () => {
         expect(store.orders.find((o) => o.symbol === 'BTCUSDT')?.id).toBe('btc-new');
         expect(store.orders.find((o) => o.symbol === 'ETHUSDT')?.id).toBe('eth-1');
       });
+    });
+  });
+
+  // A REST snapshot that read the venue before a final event must not reopen the order.
+  describe('markOrdersTerminal', () => {
+    let store: DefaultStore;
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'], now: 1_000_000 });
+      store = new DefaultStore();
+      store.update({ orders: [createOrder({ id: 'a' }), createOrder({ id: 'b' })] });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('marks the status, and keeps the order closed against a stale snapshot', () => {
+      store.markOrdersTerminal([{ id: 'a' }], OrderStatus.Canceled);
+      expect(store.orders.find((o) => o.id === 'a')?.status).toBe(OrderStatus.Canceled);
+
+      store.update({ orders: [createOrder({ id: 'a' }), createOrder({ id: 'b' })] });
+      expect(store.orders.map((o) => [o.id, o.status])).toEqual([
+        ['a', OrderStatus.Canceled],
+        ['b', OrderStatus.Open],
+      ]);
+    });
+
+    it('holds against every upsert and replace path', () => {
+      store.markOrdersTerminal([{ id: 'a' }], OrderStatus.Closed);
+      const reopened = createOrder({ id: 'a' });
+
+      store.addOrUpdateOrder(reopened);
+      store.addOrUpdateOrders([reopened]);
+      store.setOrdersForSymbol('BTCUSDT', [reopened]);
+      expect(store.orders.find((o) => o.id === 'a')?.status).toBe(OrderStatus.Closed);
+
+      store.addOrUpdateOrdersFull([reopened]);
+      store.addOrder(reopened);
+      expect(store.orders.filter((o) => o.id === 'a')).toEqual([expect.objectContaining({ status: OrderStatus.Closed })]);
+    });
+
+    it('drops a reopening row when the closed order has already left the store', () => {
+      store.markOrdersTerminal([{ id: 'a' }], OrderStatus.Closed);
+      store.removeOrders([{ id: 'a' }]);
+
+      store.update({ orders: [createOrder({ id: 'a' })] });
+      expect(store.orders).toEqual([]);
+    });
+
+    it('still accepts the terminal row itself, other orders, and the id again after a minute', () => {
+      store.markOrdersTerminal([{ id: 'a' }], OrderStatus.Closed);
+      store.addOrUpdateOrders([createOrder({ id: 'a', status: OrderStatus.Closed, filled: 1 }), createOrder({ id: 'c' })]);
+      expect(store.orders.find((o) => o.id === 'a')?.filled).toBe(1);
+      expect(store.orders.some((o) => o.id === 'c')).toBe(true);
+
+      vi.setSystemTime(1_060_000);
+      store.update({ orders: [createOrder({ id: 'a' })] });
+      expect(store.orders.find((o) => o.id === 'a')?.status).toBe(OrderStatus.Open);
+    });
+
+    // A removal or a mapped status is not proof of finality (Hyperliquid, Lighter, Bybit "Triggered").
+    it('infers nothing from a removal or a plain status update', () => {
+      store.removeOrders([{ id: 'a' }]);
+      store.updateOrdersStatus([{ id: 'b' }], OrderStatus.Closed);
+      store.update({ orders: [createOrder({ id: 'a' }), createOrder({ id: 'b' })] });
+      expect(store.orders.every((o) => o.status === OrderStatus.Open)).toBe(true);
+    });
+
+    it('forgets everything on reset', () => {
+      store.markOrdersTerminal([{ id: 'a' }], OrderStatus.Closed);
+      store.reset();
+      store.update({ orders: [createOrder({ id: 'a' })] });
+      expect(store.orders.map((o) => o.status)).toEqual([OrderStatus.Open]);
     });
   });
 

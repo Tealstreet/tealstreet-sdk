@@ -254,13 +254,13 @@ describe('bad link: a REST snapshot racing the private stream (real BaseExchange
     return store.orders.find((candidate) => candidate.id === order.id)?.status;
   };
 
-  // Gap 4 (docs/plans/BAD_LINK_RESILIENCE.md phase 4): the snapshot read the
-  // venue before the cancel, lands after it, and resurrects the order.
-  it.fails('a snapshot taken before a cancel does not reopen the cancelled order', async () => {
+  // Gap 4, fixed by DefaultStore.markOrdersTerminal: the snapshot read the venue
+  // before the cancel/fill and lands after it; it must not reopen the order.
+  it('a snapshot taken before a cancel does not reopen the cancelled order', async () => {
     expect(await raceSnapshotAgainst('canceled')).not.toBe(OrderStatus.Open);
   });
 
-  it.fails('a snapshot taken before a fill does not reopen the filled order', async () => {
+  it('a snapshot taken before a fill does not reopen the filled order', async () => {
     expect(await raceSnapshotAgainst('filled')).not.toBe(OrderStatus.Open);
   });
 });

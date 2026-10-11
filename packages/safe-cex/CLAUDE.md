@@ -160,6 +160,12 @@ future test files from being silently ignored.
 
 ## Reconciliation fetch and store safety
 
+**A final order event goes through `store.markOrdersTerminal`**, not
+`updateOrdersStatus`, when the venue's event is genuinely final (filled,
+cancelled — never "triggered", never "expired" on a venue that expires stops as
+they fire). It keeps a REST snapshot that read the venue before the event from
+reopening the order. Opt-in per venue; see `src/store/CLAUDE.md`.
+
 `fetchOrders()`, `fetchPositions()`, and `fetchBalance()` return reconciliation
 data. Callers must assign, return, or explicitly commit that data; a bare,
 awaited-only, voided, or unused `Promise.all` fetch is not a refresh. The local

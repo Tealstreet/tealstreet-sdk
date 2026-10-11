@@ -207,3 +207,23 @@ than skipped so the chaser can still move closer to the touch.
 - Live packed-ticker production:
   `ExchangeWorker._packTickerDeltasSinceBaseline`; the store's apply/consume
   methods are compatibility and test scaffolding, not an active producer path.
+
+
+## `markOrdersTerminal` — a stale snapshot cannot reopen a closed order
+
+A REST orders snapshot can read the venue BEFORE a cancel or fill and land
+AFTER the private stream reported it; replacing the list wholesale then reopened
+the order. `markOrdersTerminal(ids, Closed | Canceled)` sets the status AND
+remembers the ids for 60s (bounded at 1,000, cleared by `reset`); every
+orders-replacing or upserting path (`update({ orders })` except `fromWorker`,
+`addOrder`, `addOrUpdateOrder(s)`, `addOrUpdateOrdersFull`, `setOrdersForSymbol`)
+refuses a NON-terminal row for a remembered id — the store's terminal row stands
+in, or the row is dropped if the order already left.
+
+**It is opt-in, and must stay that way.** Nothing is inferred from
+`removeOrders` (Hyperliquid's reconciler, Lighter and ApeX remove live orders
+and rely on them coming back) or from `updateOrdersStatus` (Bybit and Phemex map
+a non-final "Triggered" to Closed; Binance sends `EXPIRED` when a stop
+triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` /
+`canceled` today. `fromWorker` is skipped because the worker's store has already
+applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.

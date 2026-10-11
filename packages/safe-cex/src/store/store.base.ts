@@ -4,6 +4,12 @@ import uniqBy from 'lodash/uniqBy';
 
 import { Market, Order, OrderStatus, Position, RequestOutcome, StoreData, Ticker, Writable } from '../types';
 import { clone } from '../utils/clone';
+import { virtualClock } from '../utils/virtualClock';
+
+// Longer than any REST snapshot is in flight; short enough that a wrong "final" heals.
+const TERMINAL_ORDER_MEMORY_MS = 60_000;
+const TERMINAL_ORDER_MEMORY_MAX = 1_000;
+const TERMINAL_STATUSES = new Set<OrderStatus>([OrderStatus.Closed, OrderStatus.Canceled]);
 
 export const PACKED_TICKER_FIELDS = [
   'bid',
@@ -477,6 +483,51 @@ export class DefaultStore implements Store {
     }
   };
 
+  // Ids a venue reported FINAL (markOrdersTerminal), so a REST snapshot that read
+  // the venue before that event cannot reopen them. Never inferred from a removal
+  // or a mapped status: several venues remove live orders, or map "Triggered" to Closed.
+  private terminalOrderIds = new Map<string, number>();
+
+  private isRememberedTerminal(id: string, now: number) {
+    const markedAt = this.terminalOrderIds.get(id);
+    if (markedAt === undefined) return false;
+    if (now - markedAt < TERMINAL_ORDER_MEMORY_MS) return true;
+    this.terminalOrderIds.delete(id);
+    return false;
+  }
+
+  private keepTerminalOrdersClosed(incoming: Order[]): Order[] {
+    if (this.terminalOrderIds.size === 0) return incoming;
+    const now = virtualClock.getCurrentTimeMs();
+    let kept: Order[] | undefined;
+    incoming.forEach((order, index) => {
+      const reopens = !TERMINAL_STATUSES.has(order.status) && this.isRememberedTerminal(order.id, now);
+      if (reopens && !kept) kept = incoming.slice(0, index);
+      if (!kept) return;
+      if (!reopens) {
+        kept.push(order);
+        return;
+      }
+      const current = this.state.orders.find((candidate) => candidate.id === order.id);
+      if (current && TERMINAL_STATUSES.has(current.status)) kept.push(current);
+    });
+    return kept ?? incoming;
+  }
+
+  markOrdersTerminal = (orders: Array<Pick<Order, 'id'>>, status: OrderStatus.Closed | OrderStatus.Canceled) => {
+    const now = virtualClock.getCurrentTimeMs();
+    orders.forEach(({ id }) => {
+      this.terminalOrderIds.delete(id);
+      this.terminalOrderIds.set(id, now);
+    });
+    // Insertion order is age order; drop the oldest past the cap.
+    for (const id of this.terminalOrderIds.keys()) {
+      if (this.terminalOrderIds.size <= TERMINAL_ORDER_MEMORY_MAX) break;
+      this.terminalOrderIds.delete(id);
+    }
+    this.updateOrdersStatus(orders, status);
+  };
+
   update = (changes: StoreUpdate, fromWorker = false) => {
     let normalizedChanges: Partial<Writable<StoreUpdate>> = changes;
     const ensureMutableChanges = () => {
@@ -555,6 +606,11 @@ export class DefaultStore implements Store {
     }
     if (!hasChanges) return;
 
+    // A worker's store already kept its terminal orders closed.
+    if (!fromWorker && normalizedChanges.orders) {
+      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders as Order[]);
+      if (orders !== normalizedChanges.orders) ensureMutableChanges().orders = orders;
+    }
     Object.assign(this.state, normalizedChanges);
     if (normalizedChanges.positions) this.auditPositions(true);
 
@@ -602,6 +658,7 @@ export class DefaultStore implements Store {
 
   reset = () => {
     this.state = clone(defaultStore);
+    this.terminalOrderIds.clear();
     this.tickerIndexMap.clear();
     this.marketIndexMap.clear();
     this.marketsVersion = 0;
@@ -672,12 +729,16 @@ export class DefaultStore implements Store {
   };
 
   addOrder = (order: Order) => {
+    const [kept] = this.keepTerminalOrdersClosed([order]);
+    if (kept !== order) return;
     this.state.orders.push(order);
     this.state.updateIds.orders += 1;
     this.notify();
   };
 
   addOrUpdateOrder = (order: Order) => {
+    const [kept] = this.keepTerminalOrdersClosed([order]);
+    if (kept !== order) return;
     const idx = this.state.orders.findIndex((o) => o.id === order.id);
     if (idx > -1) {
       this.updateInArray('orders', idx, order);
@@ -688,7 +749,8 @@ export class DefaultStore implements Store {
     this.notify();
   };
 
-  addOrUpdateOrders = (orders: Order[]) => {
+  addOrUpdateOrders = (incoming: Order[]) => {
+    const orders = this.keepTerminalOrdersClosed(incoming);
     if (orders.length === 0) return;
 
     const orderIndexById =
@@ -834,7 +896,7 @@ export class DefaultStore implements Store {
    */
   addOrUpdateOrdersFull = (orders: Order[]) => {
     Object.assign(this.state, {
-      orders,
+      orders: this.keepTerminalOrdersClosed(orders),
     });
     this.state.updateIds.orders += 1;
     this.notify();
@@ -846,10 +908,12 @@ export class DefaultStore implements Store {
    * @param orders
    */
   setOrdersForSymbol = (symbol: string, orders: Order[]) => {
+    // Before the old rows go, so a terminal one can stand in for its reopened copy.
+    const kept = this.keepTerminalOrdersClosed(orders);
     // remove old orders
     this.state.orders = this.state.orders.filter((o) => o.symbol !== symbol);
     // add new orders
-    this.state.orders.push(...orders);
+    this.state.orders.push(...kept);
 
     this.state.updateIds.orders += 1;
     this.notify();

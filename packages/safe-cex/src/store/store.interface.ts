@@ -25,6 +25,11 @@ export interface Store {
   updateOrderStatus: (order: Pick<Order, 'id'>, newStatus: OrderStatus) => void;
   removeOrders: (ids: Array<Pick<Order, 'id'>>) => void;
   updateOrdersStatus: (ids: Array<Pick<Order, 'id'>>, newStatus: OrderStatus) => void;
+  /**
+   * Like updateOrdersStatus, for a venue event that is FINAL (filled, cancelled):
+   * for a while after, no snapshot or upsert may reopen these ids.
+   */
+  markOrdersTerminal: (ids: Array<Pick<Order, 'id'>>, status: OrderStatus.Closed | OrderStatus.Canceled) => void;
   updateOrder: (id: Pick<Order, 'id'>, changes: Partial<Order>) => void;
 
   updatePosition: (position: Pick<Position, 'id'>, changes: Partial<Position>) => void;
