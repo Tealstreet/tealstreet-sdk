@@ -353,7 +353,8 @@ describe('HyroTrader private stream recovery ordering', () => {
     const { exchange } = setup();
     const { socket } = attach(exchange);
     const snapshot = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot');
-    socket.setupHouseKeepEventListener();
+    (socket as any).trackConnected();
+    (socket as any).trackConnected();
     expect(snapshot).not.toHaveBeenCalled();
     socket.started = true;
     await expect(

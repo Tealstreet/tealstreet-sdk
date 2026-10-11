@@ -18,7 +18,7 @@ export const SIMULATE_HTTP_OVER_WEBSOCKET = Boolean(+(process.env.NEXT_PUBLIC_SI
  * Verbose lifecycle logging for BaseWebSocket (close/reconnect/ping plumbing).
  *
  * When false (default), the emoji-decorated `console.log` lines in
- * `base.ws.ts` (`processClose`, `reconnect`, `setupHouseKeepEventListener`,
+ * `base.ws.ts` (`processClose`, `reconnect`, the re-open resync,
  * etc.) are suppressed so that a busy reconnect cycle doesn't flood DevTools
  * with hundreds of messages. The structured `this.parent.log(...)` calls and
  * the `console.error` for non-trivial close codes still fire so that real

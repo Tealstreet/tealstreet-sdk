@@ -24,6 +24,32 @@ import {
 } from '../utils/wsDiagnostics';
 import { MessageHandlers, MessageHandlersStats } from './types';
 
+// Per exchange: the last re-open that triggered a private-state resync, and its socket.
+const lastReopenResync = new WeakMap<object, { at: number; socket: object }>();
+// Per exchange: a resync still running, and whether a re-open arrived during it.
+// A socket flapping faster than a resync's retries (a rejected key over a relay)
+// must not stack loops of signed requests, yet a re-open mid-run may have missed
+// more than that run's snapshot saw, so it earns exactly one follow-up run.
+const reopenResyncInFlight = new WeakMap<object, { rerun: boolean }>();
+const REOPEN_RESYNC_COALESCE_MS = 2_000;
+
+const runReopenResync = (parent: BaseExchange) => {
+  const state = { rerun: false };
+  reopenResyncInFlight.set(parent, state);
+  let resync: Promise<void>;
+  try {
+    resync = Promise.resolve(parent.fetchAndSetPrivateSnapshot(10));
+  } catch (error) {
+    resync = Promise.reject(error);
+  }
+  void resync
+    .catch((error: unknown) => parent.log(`Private resync after re-open failed: ${String(error)}`, LogSeverity.Warning))
+    .finally(() => {
+      reopenResyncInFlight.delete(parent);
+      if (state.rerun && !parent.isDisposed) runReopenResync(parent);
+    });
+};
+
 type FreshHeadersProvider = () => Record<string, string>;
 type WebSocketConnectionOptions = Omit<Options, 'headers'> & {
   headers?: Record<string, string> | FreshHeadersProvider;
@@ -575,10 +601,43 @@ export class BaseWebSocket<T extends BaseExchange> {
   }
 
   private trackConnected = () => {
-    if (!this.parent.isDisposed) {
-      this.lastConnectedAt = Date.now();
-    }
+    if (this.parent.isDisposed) return;
+    this.lastConnectedAt = Date.now();
+    const reopened = this.hasOpenedBefore;
+    this.hasOpenedBefore = true;
+    if (reopened) this.resyncPrivateStateAfterReopen();
   };
+
+  private hasOpenedBefore = false;
+
+  /**
+   * Whether a RE-open of this socket means private state may have moved while it
+   * was down. The exchange's private socket by default; a socket carrying private
+   * data under another name opts in, and one that resyncs only after its own
+   * acknowledged auth opts out.
+   */
+  protected get resyncsPrivateStateOnReopen(): boolean {
+    return this.parent.getPrivateSockets().includes(this);
+  }
+
+  // Runs from the open listener every socket gets in createWebsocket, so it covers
+  // the native, library, relay and header paths and sockets created after an await.
+  private resyncPrivateStateAfterReopen() {
+    const { options } = this.parent;
+    if (this.forceClosed || options.publicDataOnly || !options.key || !this.resyncsPrivateStateOnReopen) return;
+    const now = Date.now();
+    // Sibling sockets that drop together (OKX private + business) resync once;
+    // the same socket dropping again still resyncs, since it may have missed more.
+    const last = lastReopenResync.get(this.parent);
+    if (last && last.socket !== this && now - last.at < REOPEN_RESYNC_COALESCE_MS) return;
+    lastReopenResync.set(this.parent, { at: now, socket: this });
+    const running = reopenResyncInFlight.get(this.parent);
+    if (running) {
+      running.rerun = true;
+      return;
+    }
+    runReopenResync(this.parent);
+  }
 
   protected handleWebSocketError = (event: Event) => {
     // Prevent the error from propagating
@@ -932,9 +991,6 @@ export class BaseWebSocket<T extends BaseExchange> {
       this.ws?.removeEventListener?.('open', this.onOpen);
       this.ws?.removeEventListener?.('message', this.onMessage);
       this.ws?.removeEventListener?.('close', this.onClose);
-      if (this.housekeepEventListener) {
-        this.ws?.removeEventListener?.('open', this.housekeepEventListener);
-      }
       this.ws?.removeEventListener('open', this.emitWsReconnected);
       this.ws = undefined;
 
@@ -1003,7 +1059,6 @@ export class BaseWebSocket<T extends BaseExchange> {
               lifecycleLog(`[BaseWebSocket] ⚠️ ${this.parent.name} forceClosed=true, skipping connectAndSubscribe()`);
             }
             (this.ws as any as WebSocket)?.addEventListener('open', this.emitWsReconnected);
-            this.setupHouseKeepEventListener();
           }
           lifecycleLog(`[BaseWebSocket] ✅ ${this.parent.name} reconnection complete, setting reconnecting=false`);
           this.reconnecting = false;
@@ -1011,17 +1066,6 @@ export class BaseWebSocket<T extends BaseExchange> {
         }, reconnectDelay);
       }
     }
-  };
-
-  private housekeepEventListener: (() => void) | undefined;
-  setupHouseKeepEventListener = () => {
-    this.housekeepEventListener = () => {
-      if (this.parent.isDisposed) return;
-      this.parent.fetchAndSetPrivateSnapshot(10);
-      (this.ws as any as WebSocket)?.removeEventListener('open', this.housekeepEventListener!);
-    };
-
-    (this.ws as any as WebSocket)?.addEventListener('open', this.housekeepEventListener);
   };
 
   dispose() {

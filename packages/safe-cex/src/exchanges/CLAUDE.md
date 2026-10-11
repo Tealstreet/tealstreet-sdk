@@ -390,7 +390,7 @@ disposal:
   `this.parent.isDisposed`, and `dispose()` sets `forceClosed=true` so the
   native reconnect path bails too.
 - `BaseExchange.fetchAndSetPrivateSnapshot()` — runs on every private-WS
-  (re)connect via the housekeep listener with `tries=10`. On a disposed
+  RE-open (`BaseWebSocket.trackConnected`) with `tries=10`. On a disposed
   account (browser gone / remote signer dead) it would retry `fetchOrders()`
   10×, each signing a REST request that throws "Remote signer unavailable" —
   flooding logs/CPU indefinitely. It now checks `isDisposed` at entry, each
@@ -476,11 +476,24 @@ orders may legitimately contain tokens such as `SPONGE` or client identifiers
 containing `ping`, and those frames must trigger the reconnect path.
 
 Every subclass `onOpen` must preserve the base lifecycle contract: public
-sockets call `emitWsReconnected()` so consumers resubscribe, while private
-sockets arrange `parent.fetchAndSetPrivateSnapshot(10)` after reconnect (the
-native reconnect path installs this through `setupHouseKeepEventListener`).
-An authentication handshake may run first, but the reconnect notification or
-private snapshot refresh must not be omitted.
+sockets call `emitWsReconnected()` so consumers resubscribe. Private state is
+resynced by the base: the open listener every socket gets in `createWebsocket`
+(`trackConnected`) calls `parent.fetchAndSetPrivateSnapshot(10)` on every
+RE-open of a socket whose `resyncsPrivateStateOnReopen` is true — the
+exchange's `privateWebsocket` by default; OKX's business socket (algo orders)
+opts in, HyroTrader's opts out (it recovers after acknowledged auth). It is
+coalesced per exchange over 2s.
+
+**This replaced `setupHouseKeepEventListener`, which healed almost nothing.**
+It ran only from the native `processClose` path, so every Tealstreet-hosted,
+relay or header socket (the `ReconnectingWebSocket` path) never resynced, and
+on venues that connect after an `await` (listenKey/token: Binance, Binance PM,
+BingX, Bitrue, KuCoin, AsterDEX) it attached to `undefined` and never fired.
+Orders on OKX via proxy, Bybit via relay, GRVT, Bitget's fallback host and
+Bitrue stayed stale until an unrelated event. Several venues still gate their
+own `onOpen` snapshot behind `ENABLE_RECONNECTING_WEBSOCKET`; those gates are
+now redundant, not load-bearing. MEXC and WEEX resync in `onOpen` too, so a
+re-open there fetches twice — harmless.
 
 ### virtualClock
 

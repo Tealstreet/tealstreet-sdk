@@ -30,6 +30,11 @@ export const ORDER_STATS_TOPIC = 'orders';
 export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
   topics: SubscribedTopics = {};
 
+  // Carries algo orders, so a re-open resyncs private state like the private socket.
+  protected get resyncsPrivateStateOnReopen() {
+    return true;
+  }
+
   get endpoint() {
     return BASE_WS_URLS[this.parent.region].business[this.parent.options.testnet ? 'testnet' : 'livenet'];
   }

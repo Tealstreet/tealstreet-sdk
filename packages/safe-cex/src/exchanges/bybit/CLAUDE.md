@@ -1248,7 +1248,7 @@ available during parent construction.
 
 `/v5/order/realtime` lags order creation, worst on `api-demo`. Several paths
 wholesale-replace `store.orders` from it — private-WS reconnect housekeeping
-(`base.ws.ts setupHouseKeepEventListener`), a `needsReinit` startup refetch, and
+(`BaseWebSocket.trackConnected` re-open resync), a `needsReinit` startup refetch, and
 the `SET_TRADING_STOP` backstop. A snapshot fetched before the venue indexed a
 just-placed order used to erase it from the store; the Chaser supervisor saw its
 live order "disappear", stopped itself, and cancelled that order on the exchange.

@@ -1501,7 +1501,7 @@ export class BaseExchange implements Exchange {
   fetchAndSetPrivateSnapshot = async (tries = 1) => {
     if (this.isPublicDataOnly) return;
     // Disposal guard: this runs on every private-WS (re)connect via the
-    // housekeep listener with tries=10. Without these checks a disposed
+    // re-open resync (BaseWebSocket.trackConnected) with tries=10. Without these checks a disposed
     // account (browser gone / remote signer dead) would keep retrying
     // fetchOrders() — each retry signs a REST request that throws
     // "Remote signer unavailable", flooding logs/CPU forever. See

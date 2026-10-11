@@ -88,7 +88,9 @@ export class HyroPrivateWebsocket extends BybitPrivateWebsocket {
   }
 
   // Recovery belongs after acknowledged auth/subscription, never the base open callback.
-  setupHouseKeepEventListener = () => {};
+  protected get resyncsPrivateStateOnReopen() {
+    return false;
+  }
 
   sendReconnectSequence = async () => {
     this.started = true;
