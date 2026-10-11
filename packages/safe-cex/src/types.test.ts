@@ -449,14 +449,12 @@ describe('types', () => {
         'okx',
         'hyperliquid',
         'hyrotrader',
-        'bitmex',
-        'bitmextestnet',
         'coinbase',
         'kraken',
         'weex',
       ];
 
-      expect(exchanges).toHaveLength(10);
+      expect(exchanges).toHaveLength(8);
       exchanges.forEach((exchange) => {
         expect(typeof exchange).toBe('string');
       });

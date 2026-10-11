@@ -49,7 +49,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
       position.side === PositionSide.Long ? ticker.last - position.entryPrice : position.entryPrice - ticker.last;
     // Inverse: N USD of contracts pays N*(1/entry - 1/last) coin, worth N*move/entry USD at last.
     // `contracts` is coin converted at mark, so the linear formula is off by entry/mark. OKX
-    // counts contracts of `contractSize` USD each; Bybit and BitMEX contracts are $1. KuCoin
+    // counts contracts of `contractSize` USD each; Bybit contracts are $1. KuCoin
     // reports a negative multiplier (-1) on inverse, so the sign comes from `side` alone.
     const contractsNative = position.extra?.contractsNative;
     if (market?.isInverse && contractsNative) {

@@ -5,7 +5,7 @@ import type { Market } from '../types';
  * linear venue expects as its order size.
  *
  * Most linear venues really do use 1 contract = 1 base coin, so this is a no-op
- * for bitmex / bybit / bitget and the rest. OKX is the exception: its linear
+ * for bybit / bitget and the rest. OKX is the exception: its linear
  * swaps publish a real `ctVal` — `DOGE-USDT-SWAP` is 1000 DOGE per contract,
  * `BTC-USDT-SWAP` is 0.01 BTC — so sending a base amount straight through is
  * wrong by a factor of `contractSize`, in whichever direction `ctVal` points:

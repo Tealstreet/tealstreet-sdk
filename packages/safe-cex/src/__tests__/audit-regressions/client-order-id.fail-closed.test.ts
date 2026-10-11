@@ -11,7 +11,6 @@ import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
 import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
 import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { BitmexExchange } from '../../exchanges/bitmex/bitmex.exchange';
 import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
 import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
 import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
@@ -86,7 +85,6 @@ const HONORING: Array<[string, ExchangeCtor]> = [
 
 const NOT_HONORING: Array<[string, ExchangeCtor]> = [
   ['asterdex', AsterDEXExchange],
-  ['bitmex', BitmexExchange],
   ['breakoutprop', BreakoutpropExchange],
   ['hyperliquid', HyperliquidExchange],
   ['hyperliquidspot', HyperliquidSpotExchange],

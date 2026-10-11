@@ -50,7 +50,7 @@ export const convertMarginToSizeCurrency = (
   price: number,
   btcPrice?: number,
 ): number => {
-  // BITMEX support code
+  // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
       console.error('btcPrice is required for quanto markets');
@@ -59,7 +59,7 @@ export const convertMarginToSizeCurrency = (
     const marginInQuote = handleRoundingError(margin * btcPrice);
     return convertFromQuoteSizeToNative(marginInQuote, market, price);
   }
-  // END BITMEX support code
+  // END quanto support code
   if (market.isInverse) {
     return convertFromBaseSizeToNative(margin, market, price);
   } else {
@@ -68,7 +68,7 @@ export const convertMarginToSizeCurrency = (
 };
 
 export const convertSizeToMarginCurrency = (size: number, market: Market, price: number, btcPrice?: number): number => {
-  // BITMEX support code
+  // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
       console.error('btcPrice is required for quanto markets');
@@ -77,7 +77,7 @@ export const convertSizeToMarginCurrency = (size: number, market: Market, price:
     const sizeInUsd = convertFromNativeSizeToQuote(size, market, price);
     return handleRoundingError(sizeInUsd / btcPrice);
   }
-  // END BITMEX support code
+  // END quanto support code
   if (market.isInverse) {
     return convertFromNativeSizeToBase(size, market, price);
   } else {
@@ -86,7 +86,7 @@ export const convertSizeToMarginCurrency = (size: number, market: Market, price:
 };
 
 export const convertFromMarginToQuote = (margin: number, market: Market, price?: number, btcPrice?: number): number => {
-  // BITMEX support code
+  // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
       console.error('btcPrice is required for quanto markets');
@@ -95,7 +95,7 @@ export const convertFromMarginToQuote = (margin: number, market: Market, price?:
     const marginInQuote = handleRoundingError(margin * btcPrice);
     return marginInQuote;
   }
-  // END BITMEX support code
+  // END quanto support code
   if (market.isInverse) {
     if (!price) {
       console.error('price is required for inverse markets');
@@ -115,11 +115,11 @@ export const getSizeCurrency = (market?: Market): string => {
 };
 
 export const getMarginCurrency = (market?: Market, fallback = ''): string => {
-  // BITMEX support code
+  // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market?.info?.isQuanto) {
     return 'BTC';
   }
-  // END BITMEX support code
+  // END quanto support code
   if (market?.isSpot) {
     return '';
   }
@@ -143,7 +143,7 @@ export const calculatePnlInMarginCurrency = (
 ): number => {
   const units = size * (market.contractSize || 1);
   let longPnl: number;
-  // BITMEX support code
+  // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
       console.error('btcPrice is required for quanto markets');

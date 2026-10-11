@@ -110,24 +110,6 @@
     "ETHUSD": "ETHUSD",
     "XRPUSD": "XRPUSD"
   },
-  "bitmex": {
-    "XBTUSDT": "BTCUSDT",
-    "SUIUSDT": "SUIUSDT",
-    "SUIUSD": "SUIUSD",
-    "OPUSDT": "OPUSDT",
-    "XRPUSD": "XRPUSD",
-    "LOTUSDT": "LOTUSDT",
-    "PUMPUSDT": "PUMPUSDT",
-    "ZECUSDT": "ZECUSDT",
-    "XAUTUSDT": "XAUTUSDT",
-    "WTIUSDT": "WTIUSDT",
-    "SEIUSDT": "SEIUSDT",
-    "AAPLUSDT": "AAPLUSDT",
-    "QQQUSDT": "QQQUSDT",
-    "MSFTUSDT": "MSFTUSDT",
-    "FILUSDT": "FILUSDT",
-    "LTCUSDT": "LTCUSDT"
-  },
   "bitrue": {
     "E-BTC-USDT": "BTCUSDT",
     "E-BTC-USDC": "BTCUSDC",

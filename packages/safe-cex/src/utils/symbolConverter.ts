@@ -57,15 +57,6 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     case 'bingx':
       return symbol;
 
-    // -- BitMEX: XBTUSDT → BTCUSDT (XBT→BTC in symbol) ---------------------
-    case 'bitmex':
-    case 'bitmextestnet': {
-      if (symbol.startsWith('XBT')) {
-        return 'BTC' + symbol.slice(3);
-      }
-      return symbol;
-    }
-
     // -- Phemex: U1000SHIBUSDT → 1000SHIBUSDT (strip U prefix on multiplier symbols)
     case 'phemex': {
       // Phemex prefixes some symbols with U (e.g., U1000SHIBUSDT)
@@ -260,15 +251,6 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'what':
     case 'weex':
       return symbol;
-
-    // -- BitMEX: BTCUSDT → XBTUSDT (BTC→XBT in symbol) ---------------------
-    case 'bitmex':
-    case 'bitmextestnet': {
-      if (symbol.startsWith('BTC')) {
-        return 'XBT' + symbol.slice(3);
-      }
-      return symbol;
-    }
 
     // -- Phemex: passthrough (U prefix only exists on API side, not in our format)
     case 'phemex':

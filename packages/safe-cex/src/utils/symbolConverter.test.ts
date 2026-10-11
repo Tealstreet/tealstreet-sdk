@@ -36,8 +36,6 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'bitget',
   'bitgetinverse',
   'bitgetusdc',
-  'bitmex',
-  'bitmextestnet',
   'bitrue',
   'bitunix',
   'blofin',

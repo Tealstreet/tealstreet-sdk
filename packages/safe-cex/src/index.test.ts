@@ -23,17 +23,16 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
   getExchangeMetadata: vi.fn((exchangeName: string) => ({
     exchangeName,
     requiresCors: exchangeName === 'coinbase',
-    enforceWsTunnel: exchangeName === 'bitmex',
+    enforceWsTunnel: exchangeName === 'bybit',
   })),
 }));
 
 vi.mock('./exchanges/registry', () => ({
   exchangeRegistry: {
     bybit: () => Promise.resolve(testState.MockExchange),
-    bitmex: () => Promise.resolve(testState.MockExchange),
     coinbase: () => Promise.resolve(testState.MockExchange),
   },
-  getRegisteredExchangeNames: vi.fn(() => ['bybit', 'bitmex', 'coinbase']),
+  getRegisteredExchangeNames: vi.fn(() => ['bybit', 'coinbase']),
 }));
 
 vi.mock('./utils/virtualClock', () => ({
@@ -60,7 +59,7 @@ describe('createPublicExchange', () => {
   });
 
   it('uses the same proxy override for public exchanges that enforce HoW', () => {
-    expect(buildPublicExchangeOptions('bitmex')).toMatchObject({
+    expect(buildPublicExchangeOptions('bybit')).toMatchObject({
       key: '',
       secret: '',
       publicDataOnly: true,

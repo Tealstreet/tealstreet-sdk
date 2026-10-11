@@ -15,7 +15,6 @@ import { createAPI as createBinanceSpotAPI } from '../../exchanges/binance/binan
 import { createAPI as createBingxAPI } from '../../exchanges/bingx/bingx.api';
 import { ENDPOINTS as BINGX } from '../../exchanges/bingx/bingx.types';
 import { createAPI as createBitgetAPI } from '../../exchanges/bitget/bitget.api';
-import { createAPI as createBitmexAPI } from '../../exchanges/bitmex/bitmex.api';
 import { createAPI as createBitrueAPI } from '../../exchanges/bitrue/bitrue.api';
 import { createAPI as createBitunixAPI } from '../../exchanges/bitunix/bitunix.api';
 import { createAPI as createBlofinAPI } from '../../exchanges/blofin/blofin.api';
@@ -77,9 +76,6 @@ const polymarketWallet = () => '0x0000000000000000000000000000000000000001';
 
 const venues: Record<string, Venue> = {
   okx: { create: () => createOkxAPI(options, exchange), write: ['post', '/api/v5/trade/order'], read: ['get', '/a'] },
-  'bitmex place': { create: () => createBitmexAPI(options, exchange), write: ['post', '/order'], read: ['get', '/a'] },
-  'bitmex amend': { create: () => createBitmexAPI(options, exchange), write: ['put', '/order'] },
-  'bitmex cancel': { create: () => createBitmexAPI(options, exchange), write: ['delete', '/order'] },
   blofin: {
     create: () => createBlofinAPI(options, exchange),
     write: ['post', '/api/v1/trade/order'],
