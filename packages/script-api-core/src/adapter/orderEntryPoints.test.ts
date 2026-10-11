@@ -80,7 +80,10 @@ const isTest = (file: string): boolean => /\.(test|cy)\.tsx?$/.test(file);
  * human at a button and wrong for a pipeline.
  */
 const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
-  // The web UI order path.
+  // The web UI order path. createMarketOrder.ts and createLimitOrder.ts used
+  // to be listed here and each sent to the venue itself; dcc41e7d5f moved
+  // that send into sendOrder.ts (client order ids) and both now go through it,
+  // so sendOrder.ts is the entry point and they are not.
   'apps/web/src/order/sendOrder.ts':
     'the web send with a client order id — createMarketOrder and createLimitOrder delegate here',
   'apps/web/src/order/createConditionalOrder.ts': 'web conditional orders',
