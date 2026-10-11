@@ -1,7 +1,7 @@
 import type { ExchangeOptions } from '../../types';
 import type { BackpackSigningParams } from './backpack.signing';
 
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
@@ -10,6 +10,7 @@ import { appendHttpFailure } from '../../utils/httpFailure';
 import { BaseExchange } from '../base';
 import { generateAuthHeaders } from './backpack.signing';
 import { BASE_URLS, INSTRUCTIONS } from './backpack.types';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 const BACKPACK_MAX_AUTH_WINDOW_MS = 60_000;
 
@@ -42,7 +43,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // Retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   // Only use HTTP-over-WebSocket adapter when tealstreetTunnel is enabled (browser/production)
   if (options.tealstreetTunnel) {

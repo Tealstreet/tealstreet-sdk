@@ -1,6 +1,6 @@
 import type { ExchangeOptions } from '../../types';
 
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
@@ -8,6 +8,8 @@ import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosC
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
 import { describeHttpFailure } from '../../utils/httpFailure';
 import { isSigningCaptureRequest } from '../../utils/signingCapture';
+import { isHyperliquidRead } from './hyperliquidRetry';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import {
   EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE,
@@ -192,7 +194,7 @@ export const createExchangeAPI = (options: ExchangeOptions, exchange: BaseExchan
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(isHyperliquidRead) });
   if (!options.publicDataOnly) {
     addSigningInterceptor(xhr, options, exchange);
     installTransportAdapter(xhr, options, exchange.name);
@@ -222,7 +224,7 @@ export const createInfoAPI = (options: ExchangeOptions, exchange: BaseExchange) 
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(isHyperliquidRead) });
 
   // This instance has no signing interceptor at all — every request through it
   // is unsigned by construction — yet it still carries the remote-signing

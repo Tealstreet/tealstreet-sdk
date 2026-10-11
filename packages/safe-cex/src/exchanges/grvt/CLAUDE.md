@@ -562,10 +562,10 @@ this.tradingXhr = rateLimit(createTradingAPI(opts, this), { maxRPS: 10 });
 
 ### Network Retry
 
-All three instances retry 5 times on network errors (`isNetworkError`):
+All three instances retry 5 times on network errors, **reads only**. GRVT POSTs its reads, so `grvtRetry.ts` names them (matched on the last path segment, since the TDG client posts under both `/lite/v1/` and `/full/v1/`); any other path, including every order write, is never resent:
 
 ```typescript
-retry(instance, { retries: 5, retryCondition: isNetworkError });
+retry(instance, { retries: 5, retryCondition: networkErrorOnRead(isGrvtRead) });
 ```
 
 ### Tick Interval

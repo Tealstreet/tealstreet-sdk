@@ -1,12 +1,13 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
 import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { BaseExchange } from '../base';
 import { BASE_URL, RECV_WINDOW, UDF_BASE_URL } from './bitmex.types';
 
@@ -43,7 +44,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   }
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };

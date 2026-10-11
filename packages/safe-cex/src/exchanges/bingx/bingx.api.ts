@@ -1,6 +1,6 @@
 import type { ExchangeOptions } from '../../types';
 
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import omit from 'lodash/omit';
 import qs from 'qs';
@@ -10,6 +10,7 @@ import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosC
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './bingx.types';
+import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
 
 const sort = function alphabeticalSort(a: string, b: string) {
   return a.localeCompare(b);
@@ -38,7 +39,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY)) });
 
   // Browser callers go through the HTTP-over-WebSocket tunnel by default
   // (BingX requires CORS + the tunnel hops through tealstreet's proxy IPs).

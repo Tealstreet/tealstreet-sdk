@@ -1,3 +1,4 @@
+import type { IsReadRequest } from '../../utils/retryReadsOnly';
 import type { AsterDEXExchange } from './asterdex.exchange';
 import type { AsterDEXAPIVersion } from './asterdex.types';
 
@@ -9,9 +10,10 @@ import axiosRetry from 'axios-retry';
 import { ethers } from 'ethers';
 
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
-import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
+import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { ExchangeOptions, LogSeverity } from '../../types';
 import { appendHttpFailure } from '../../utils/httpFailure';
+import { isReadOnlyMethod, onlyReads } from '../../utils/retryReadsOnly';
 import {
   ASTERDEX_ENDPOINTS,
   isAsterDEXV3PrivateKey,
@@ -19,6 +21,10 @@ import {
   resolveAsterDEXV3AuthContext,
 } from './asterdex.types';
 import { asterDEXVirtualClock } from './asterdex.virtualClock';
+
+// The listen key is a POSTed read; its path is versioned, so match the suffix.
+const isAsterdexRead: IsReadRequest = (config) =>
+  isReadOnlyMethod(config) || (config.url?.split('?')[0] ?? '').endsWith('/listenKey');
 
 interface AsterDEXAPIOptions {
   apiKey?: string;
@@ -220,13 +226,13 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
   axiosRetry(api, {
     retries: 3,
     retryDelay: (retryCount) => retryCount * 1000,
-    retryCondition: (error) => {
-      return (
+    retryCondition: onlyReads(
+      (error) =>
         axiosRetry.isNetworkOrIdempotentRequestError(error) ||
         error.response?.status === 503 ||
-        error.response?.status === 504
-      );
-    },
+        error.response?.status === 504,
+      isAsterdexRead,
+    ),
   });
 
   // Add rate limiting
@@ -381,10 +387,7 @@ export const createAPI = (
       // Check if response contains an error (Binance-style API returns errors with 200 status)
       if (response.data?.code && response.data.code < 0) {
         const detail = getAsterDEXErrorDetail(response.data.msg, response.data.code);
-        const errorMessage = appendHttpFailure(
-          `AsterDEX API Error: ${detail} (code: ${response.data.code})`,
-          response,
-        );
+        const errorMessage = appendHttpFailure(`AsterDEX API Error: ${detail} (code: ${response.data.code})`, response);
 
         if (!shouldSuppressUnknownOrderError(response.config, response.data.code, response.data.msg) && exchange) {
           exchange.emitAndLogError(errorMessage);
@@ -486,13 +489,13 @@ export const createAPI = (
   axiosRetry(api, {
     retries: 3,
     retryDelay: (retryCount) => retryCount * 1000,
-    retryCondition: (error) => {
-      return (
+    retryCondition: onlyReads(
+      (error) =>
         axiosRetry.isNetworkOrIdempotentRequestError(error) ||
         error.response?.status === 503 ||
-        error.response?.status === 504
-      );
-    },
+        error.response?.status === 504,
+      isAsterdexRead,
+    ),
   });
 
   // Add rate limiting based on endpoint weight

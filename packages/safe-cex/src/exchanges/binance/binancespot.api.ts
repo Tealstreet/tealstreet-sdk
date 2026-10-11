@@ -1,7 +1,7 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
@@ -9,6 +9,7 @@ import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancespot.types';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
@@ -30,7 +31,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   xhr.interceptors.request.use((config) => {
     const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);

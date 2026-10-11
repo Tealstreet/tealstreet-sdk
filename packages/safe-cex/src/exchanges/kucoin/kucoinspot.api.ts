@@ -1,17 +1,19 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
-import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
+import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
+import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { addKucoinBrokerHeaders, getKucoinRequestTimestamp } from './kucoin.broker';
 import {
   KUCOIN_SPOT_BASE_URL,
   KUCOIN_SPOT_BROKER_ID,
+  KUCOIN_SPOT_ENDPOINTS,
   KUCOIN_SPOT_PUBLIC_ENDPOINTS,
   KUCOIN_SPOT_RECV_WINDOW,
 } from './kucoinspot.types';
@@ -43,7 +45,12 @@ export const createKucoinSpotAPI = (options: ExchangeOptions, exchange: BaseExch
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: networkErrorOnRead(
+      readsAndPosted(KUCOIN_SPOT_ENDPOINTS.GET_PUBLIC_WS_TOKEN, KUCOIN_SPOT_ENDPOINTS.GET_PRIVATE_WS_TOKEN),
+    ),
+  });
 
   if (!options.publicDataOnly) {
     installTransportAdapter(xhr, options, exchange.name);

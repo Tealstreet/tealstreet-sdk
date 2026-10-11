@@ -1,7 +1,7 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
 
@@ -11,6 +11,7 @@ import { appendHttpFailure } from '../../utils/httpFailure';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 // Bitget error codes that must NOT surface as raw user-facing toasts. The
 // `_detectAccountType` probe in bitget.exchange.ts intentionally calls a
@@ -55,7 +56,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };

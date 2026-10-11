@@ -1,7 +1,7 @@
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
-import retry, { isNetworkError } from 'axios-retry';
+import retry from 'axios-retry';
 import qs from 'qs';
 
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
@@ -12,6 +12,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL } from './bitunix.types';
 import { sha256Hex } from './bitunix.utils';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const xhr = safeCexAxiosCreate(
@@ -25,7 +26,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: isNetworkError });
+  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
 
   if (!options.publicDataOnly) {
     installTransportAdapter(xhr, options, exchange.name);

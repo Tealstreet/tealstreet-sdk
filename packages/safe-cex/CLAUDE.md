@@ -96,6 +96,22 @@ SDK.
   accepts the old ID there, because a rejection silently falls back to
   cancel+replace.
 
+## Automatic retries are for reads only
+
+**Never let `axios-retry` resend a write.** A connection reset after the venue
+accepted an order loses the response, not the order; resending it places the
+order twice. Every factory's `retryCondition` goes through
+`utils/retryReadsOnly.ts`: `networkErrorOnRead()` where reads are GET,
+`networkErrorOnRead(readsAndPosted(...paths))` where a few reads are POSTed
+(Kraken spot's private API, KuCoin ws tokens, listen keys), or a venue predicate
+where every request is a POST (`hyperliquid/hyperliquidRetry.ts`,
+`grvt/grvtRetry.ts`). `onlyReads(cond)` wraps a broader condition (asterdex's
+503/504 rule); a signature-error retry (bybit, bitrue, apexomni) may stay, since
+the venue rejected that request. WEEX and Crypto.com enforce the same rule
+themselves. `__tests__/audit-regressions/no-retried-writes.test.ts` drives the
+real factories with a connection reset, and fails if a factory imports
+`axios-retry` without the helper.
+
 ## Test placement and trust boundary
 
 `src/exchanges/**` is production runtime code only. The legacy tests, manual
