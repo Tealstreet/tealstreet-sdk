@@ -265,7 +265,7 @@ const noMarket = (symbol: string, account: string): string =>
  * `precision.amount` is native everywhere. `limits.amount` is NOT, and it is
  * not consistently anything: OKX and BloFin build `min` as `minSz × ctVal`
  * (base, or quote on an inverse market) while their `max` stays native
- * contracts; KuCoin, BitMEX and Crypto.com report both in native contracts
+ * contracts; KuCoin and Crypto.com report both in native contracts
  * despite setting a `contractSize`. There is no conversion that is right for
  * all of them, and a wrong one refuses every order on a whole venue.
  *
