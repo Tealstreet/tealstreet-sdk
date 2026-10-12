@@ -53,7 +53,7 @@ connect error.
 { "listener": { "remoteExec": false } }
 ```
 
-State frames (`state:accounts`, `state:tasks`, `state:hooks`) continue;
+State frames (`state:accounts`, `state:tasks`) continue;
 inbound `cmd:exec` is rejected. Useful as a panic-button toggle.
 
 ```text
@@ -98,4 +98,4 @@ the standalone's account list.
 - [Operations → Pairing](../operations/pairing.md) — the approval UX
 - [Operations → Trusted clients](../operations/trusted-clients.md) — revoke / list
 - [Web CLI subset](../reference/web-cli.md) — what runs where
-- [Recipe: Webhook from TradingView](./webhook-from-tradingview.md) — current hosted webhook status
+- [Recipe: Webhook from TradingView](./webhook-from-tradingview.md) — TradingView alerts as CLI commands

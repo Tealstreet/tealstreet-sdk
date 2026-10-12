@@ -66,12 +66,11 @@ flow at runtime looks like:
 | Standalone prints output for that run  | Each line streams back as `cmd:output { id, kind, text }` (`kind ∈ print \| success \| warn \| error \| info`).                                                            |
 | Standalone finishes the run            | `cmd:done { id, success, error? }`. Late frames from `;` / `&` chains may still arrive — match by `id`.                                                                    |
 | Web edits an account                   | Web sends `mutate:account { id, op, account?, name? }`; standalone replies `mutate:ack` or `mutate:err`. Account snapshot reflows via `state:accounts`.                    |
-| Web creates / rotates / revokes a hook | Web sends `mutate:hook { id, op, name?, command?, account?, hookId? }`; standalone replies `mutate:ack { data }` with the new hook (secret included on `create`/`rotate`). |
 | A webhook fires while you're paired    | Standalone publishes `cmd:output` + `cmd:done` on the `hook-output` topic. Same frame shape — paired clients see the run in real time.                                     |
 
-`state:accounts`, `state:tasks`, and `state:hooks` are pushed to subscribed
-clients on connect and after every mutation; `state:hooks` is scrubbed of
-secrets server-side, so the web never has to handle them.
+`state:accounts` and `state:tasks` are pushed to subscribed clients on
+connect and after every mutation. Hooks are managed from the REPL only
+(`hook create`), so their secrets never cross this socket.
 
 ---
 

@@ -27,14 +27,11 @@ subset — every standalone command except watch modes, hooks, recording,
 and a few host-process commands also works in the web CLI. See
 [Web CLI vs standalone](./reference/web-cli.md).
 
-:::caution Webhook status
+:::tip TradingView webhooks
 
-TradingView-to-CLI webhooks are not available as a hosted Tealstreet
-feature yet. The standalone CLI has local listener/hook building blocks,
-but the public relay that would route TradingView alerts through
-Tealstreet into a user's local CLI is not live. Treat CLI webhooks as
-unsupported unless you are deliberately running and securing your own
-public tunnel to the local listener.
+A TradingView alert can run CLI commands in this REPL: paste your webhook
+URL from Settings → Webhooks into the alert and write the commands in its
+message. See [Webhook from TradingView](./recipes/webhook-from-tradingview.md).
 
 :::
 

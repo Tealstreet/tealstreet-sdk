@@ -5,18 +5,114 @@ sidebar_position: 2
 
 # Hooks & webhooks
 
-:::caution Hosted webhook relay is not live
+There are two ways a webhook reaches the CLI:
 
-TradingView-to-CLI webhooks are not currently available as a hosted
-Tealstreet feature. The CLI has local listener and hook primitives, but
-Tealstreet does not yet run the public relay that would receive a
-TradingView alert and route it into a user's local CLI session.
+- **Hosted webhooks** — TradingView (or any sender) posts to your
+  Tealstreet webhook URL, and Tealstreet relays the alert to whichever
+  listener you designated: this CLI, or a browser tab. **The alert message
+  is CLI commands.** This is the supported path.
+- **Local hooks** — a fixed command fired by `POST /hook/<id>` on the
+  loopback listener. Only reachable from this machine.
 
-The details below describe the local building blocks and are useful for
-development or self-managed tunnels. They should not be treated as a
-supported Tealstreet-hosted webhook path.
+---
 
-:::
+## Hosted webhooks
+
+### How it works
+
+```text
+TradingView alert --POST--> your Tealstreet webhook URL
+                              (Settings -> Webhooks)
+        |
+        v
+Tealstreet relay --> the ONE listener you claimed (this CLI or a web tab)
+        |
+        v
+the alert message runs here as CLI commands
+```
+
+The CLI connects to the relay automatically when the REPL starts, as long as
+you are logged in (`login`) and `listener.remoteExec` is not `false`. It runs
+nothing until you choose it: no listener receives your webhooks until you run
+`webhook claim` (or choose one in Settings → Webhooks). That is deliberate — a
+TradingView URL you set up before this existed may still be posting.
+
+### The alert message is CLI commands
+
+Put the commands you want to run in the TradingView alert's **Message**
+box. The full grammar works — `;` / `&` chaining, aliases, `@vars`,
+`retry`, `sleep` and `set ec`. To try an alert without trading, turn
+`simulation on` in the REPL first (a webhook cannot change it):
+
+```text
+buy $250 SOLUSDT at -0.5%
+close longs; buy $500 BTCUSDT
+my-entry-alias
+```
+
+**Aliases resolve on the listener that runs the alert.** An alias you
+defined in this CLI exists here; one defined in a browser does not.
+
+Each alert runs in order behind anything you are typing, **against the
+account the REPL is currently on**. Name the symbol in each order
+(`buy $100 SOLUSDT`); a webhook cannot switch the account or symbol.
+
+### Which listener runs it — the claim
+
+Exactly one listener receives your webhooks. You can run the CLI and the web
+app at the same time, possibly on different accounts, so Tealstreet never
+picks for you after the first one:
+
+```text
+webhook            # who receives your webhooks, and every listener you have
+webhook claim      # make THIS CLI the receiver
+webhook release    # stop receiving here; alerts expire until something claims
+```
+
+You can also move the claim from **Settings → Webhooks** in the web app.
+Whenever it moves, the CLI tells you.
+
+If the claimed listener is offline, an alert waits (60 seconds by default,
+set in Settings) and then expires **without running**. It is never sent to a
+different listener.
+
+### What a webhook may not run
+
+A webhook message is text from whoever holds your webhook URL. It may trade;
+it may not reconfigure the CLI. These are refused, and the refusal is
+recorded as the alert's result:
+
+`login`, `logout`, `auth`/`whoami`, `update`, `exit`, `quit`, `clients`,
+`hook`, `webhook`, `logs`/`log`/`clearlogs`, `audit`, `footer`, `export`,
+`import`, `script`/`scripts` (running `script:<name>` is allowed), the watch
+modes, and these commands under any of their aliases: `account`, `accounts`,
+`symbol`, `set`, `sets`, `unset`, `track`, `untrack`, `alias`, `unalias`,
+`when`, `simulation`, `fatfinger`, `unfatfinger`, `budget`, `whitelist`,
+`unwhitelist`, `history`, `wait`. Reading a var you set yourself
+(`buy @size SOLUSDT`) works; changing one does not, and neither does a capture
+(`@o = buy …`).
+
+A webhook also may not hold the CLI for long, since it runs in line with what
+you type: at most 50 steps, at most 60 seconds of `sleep` in total, and one
+`repeat`. An alert that waits behind your own commands past its expiry is not
+run.
+
+These rules are for hosted webhooks only. Local hooks (`hook create`) run a
+command you saved yourself and are not restricted.
+
+### Delivery guarantees
+
+- **At most once.** The CLI confirms with the relay before running an alert,
+  and the relay confirms each alert to one listener exactly once. A dropped
+  connection can cost an alert; it can never run one twice.
+- **Results are recorded.** Each alert's output and done/failed status show
+  in the delivery log under Settings → Webhooks.
+- **Your URL is the secret.** Anyone with it can trade on the receiving
+  listener's accounts. Rotate it from Settings → Webhooks if it leaks.
+
+---
+
+## Local hooks
 
 A hook is a registered command body that fires over HTTP when the local
 listener receives a `POST /hook/<id>` with a matching `X-Hook-Token`. The
@@ -76,10 +172,6 @@ has focused at fire time. That's fine for hooks you want to follow your
 manual context, but explicit pinning is the safer default for unattended
 fires.
 
-The web app can create hooks via `mutate:hook` over the WS (see
-[Listener → wire frames](./listener.md#wire-frames)) — same `account` field,
-same semantics.
-
 ---
 
 ## HTTP fire shape
@@ -117,18 +209,9 @@ $ curl -X POST http://127.0.0.1:53219/hook/4f3a1c8e... \
 
 ## TradingView (and other senders)
 
-The supported Tealstreet-hosted route is not live yet:
-
-```text
-TradingView -> Tealstreet public relay -> user's local CLI listener
-```
-
-`127.0.0.1` is unreachable from the public internet, so TradingView (or any
-external sender) cannot hit the standalone listener directly. Advanced
-users can run their own public tunnel to `127.0.0.1:53219`, but that
-tunnel, auth boundary, and operational risk are self-managed.
-
-Current status: [Webhook from TradingView](../recipes/webhook-from-tradingview.md).
+`127.0.0.1` is unreachable from the public internet, so external senders
+cannot hit a local hook. Use [hosted webhooks](#hosted-webhooks) instead —
+see [Webhook from TradingView](../recipes/webhook-from-tradingview.md).
 
 ---
 

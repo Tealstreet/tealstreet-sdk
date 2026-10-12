@@ -1,6 +1,6 @@
 ---
 title: Webhooks
-description: Webhooks are a way for Tealstreet to receive alerts from external services like TradingView and Arkham Intelligence, which are then displayed as notifications in the terminal.
+description: Webhooks let TradingView alerts run CLI commands on a listener you choose, and let Arkham Intelligence send alerts to Tealstreet.
 sidebar_position: 6
 hide_title: false
 draft: true
@@ -17,11 +17,7 @@ import WebHooks3 from '/img/trading/webhooks/v3/tradingview-webhook.png';
 import WebHooks4 from '/img/trading/webhooks/v3/arkham-webhook.png';
 import WebHooks5 from '/img/trading/webhooks/v3/arkham-webhook2.png';
 
-Webhooks allow Tealstreet to receive real-time alerts from external services like TradingView and Arkham Intelligence. When these services send alerts to Tealstreet's webhook endpoints, they are automatically displayed as notifications in your terminal.
-
-## How Webhooks Work
-
-When you set up a webhook, Tealstreet creates a unique endpoint URL that external services can send HTTP POST requests to. These requests contain alert data that gets stored in Tealstreet's database and displayed as notifications in your terminal interface.
+Webhooks let external services reach Tealstreet. A **TradingView** alert runs CLI commands — on the Tealstreet CLI or in a browser tab, whichever listener you choose. **Arkham Intelligence** alerts are received into Tealstreet.
 
 ## Creating a webhook
 
@@ -38,10 +34,6 @@ When you set up a webhook, Tealstreet creates a unique endpoint URL that externa
 </div>
 
 In here you will be able to get the information necessary to link Tealstreet to other services. Such as TradingView or Arkham Intelligence.
-
-<!-- :::note
-Note that in the case of **[Runbot](/docs/webhooks/runbot)** you will need to select an appropriate key as they do not support all exchanges. For example, if you are using a **Binance** Runbot strategy you will need to select a **Binance** API key.
-::: -->
 
 ---
 
@@ -71,12 +63,33 @@ TradingView requires you to enable 2FA authentication to use webhooks. You may g
 
 - **Save the Alert**: Click Save when done.
 
-#### How It Works
+#### The alert message is CLI commands
 
-- **Authentication**: Tealstreet uses a unique 256-character hexadecimal hash as the webhook identifier
-- **Data Storage**: When TradingView sends an alert, it's stored in the `tradingview_log` table in Tealstreet's database
-- **Real-time Display**: The alert content is immediately displayed as a notification in your terminal
-- **Security**: Each user has their own unique hash, ensuring alerts are only received by the intended user
+Write the commands to run in the TradingView alert's **Message** box, exactly as you would type them in the CLI:
+
+```
+buy $250 SOLUSDT at -0.5%
+close longs; buy $500 BTCUSDT
+```
+
+Chaining (`;` waits for the previous step, `&` runs alongside it), aliases and vars all work. The listener runs each alert on its **current account**; name the symbol in each order. Commands that change saved state or settings (`account`, `set`, `alias`, `simulation`, `fatfinger`, …) are refused — see the [CLI docs](/cli/operations/hooks-and-webhooks#what-a-webhook-may-not-run) for the full list.
+
+#### Choose which listener runs your alerts
+
+Exactly one listener runs your TradingView alerts — the Tealstreet CLI or a browser tab. You can run both, possibly on different accounts, so Tealstreet never switches between them for you. In **Settings → Webhooks**:
+
+- **Receive webhooks in this browser** makes this browser a listener you can choose. It is off by default, and only one tab of the browser listens.
+- **Listeners** shows each CLI and browser that has connected, whether it is online, and its accounts. **Make this the listener** moves your alerts to it.
+- **Wait for an offline listener** sets how long an alert waits for the chosen listener to come back. After that it **expires without running** — it is never sent to a different listener.
+- **Recent alerts** shows each alert, its status (done, failed, expired) and its output.
+
+No listener runs your alerts until you choose one — not even the first that connects — because a TradingView URL set up before this feature may still be posting.
+
+#### Security
+
+- **The webhook URL is a password.** Anyone who has it can trade on the chosen listener's accounts. Regenerate it if it leaks; the old URL stops working.
+- **Each alert runs at most once**, even across reconnects.
+- At most 60 alerts per minute are accepted.
 
 ---
 
@@ -116,10 +129,6 @@ https://preview.tealstreet.io/api/webhooks/arkham
 - **Real-time Display**: Arkham alerts appear as notifications in your terminal interface
 - **Security**: Only alerts with valid header tokens are processed and displayed
 
-## Notification Display
-
-When webhook alerts are received, they are automatically displayed as notifications in your Tealstreet terminal. The system uses real-time database subscriptions to ensure alerts appear immediately when received.
-
 ## Security Features
 
 - **Unique Identifiers**: Each user has their own unique webhook URLs and authentication keys
@@ -131,5 +140,5 @@ When webhook alerts are received, they are automatically displayed as notificati
 
 - **TradingView 2FA**: Ensure 2FA is enabled on your TradingView account
 - **Invalid Requests**: Check that you're using the correct webhook URL and authentication tokens
-- **No Notifications**: Verify that your webhook settings are properly configured and saved
+- **An alert did not run**: open Settings → Webhooks → Recent alerts. *Expired* means it did not run: no listener was chosen, the chosen listener was offline past the wait time, or you moved the listener before it ran; *failed* shows the error.
 - **Multiple Alerts**: For Arkham, ensure multiple keys are separated by commas without spaces

@@ -126,3 +126,29 @@ export {
 // Terminal management and UnifiedExecutor are CLI-only (use Node.js APIs)
 // Import directly from '@tealstreet/cli-core/src/terminal' or '@tealstreet/cli-core/src/executor'
 // in the CLI app instead of through the main package export
+
+// Webhook trust boundary, shared by the standalone CLI and the web listener
+export { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from './webhook/webhookGuard';
+export {
+  WebhookRelayClient,
+  DEFAULT_NEWS_WS_URL,
+  type RelayNotice,
+  type RelaySocket,
+  type RunWebhookBody,
+  type WebhookPrintKind,
+  type WebhookRelayOptions,
+  type WebhookRelayState,
+  type WebhookRunContext,
+} from './webhook/WebhookRelayClient';
+
+// CLI aliases that follow the user across the CLI and browsers
+export {
+  enqueueAliasChange,
+  syncAliases,
+  type AliasChange,
+  type AliasSyncHost,
+  type AliasSyncRejection,
+  type AliasSyncReport,
+  type AliasSyncResponse,
+  type AliasSyncState,
+} from './aliasSync/aliasSync';

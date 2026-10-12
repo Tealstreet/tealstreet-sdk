@@ -738,6 +738,8 @@ quirks.
 Detailed in [Operations → Listener](../operations/listener.md) and
 [Hooks & webhooks](../operations/hooks-and-webhooks.md). Listed here:
 
+- `webhook` / `webhook status` / `webhook claim` / `webhook release` — hosted
+  webhooks: who receives them, take them here, give them up
 - `hook` / `hooks` / `hook create` / `hook revoke` / `hook rotate` / `hook show`
 - `clients` / `clients list` / `clients revoke`
 

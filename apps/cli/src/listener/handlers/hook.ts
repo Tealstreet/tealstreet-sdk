@@ -1,5 +1,5 @@
-// Two entry points: mutate:hook (WS) for registry CRUD, and handleHookFire
-// (HTTP) for the actual POST /hook/<id> trigger. Hook fire reuses the #4
+// handleHookFire (HTTP) is the POST /hook/<id> trigger; hooks are created and
+// managed from the REPL (hook-repl.ts). Hook fire reuses the #4
 // ALS adapter-context machinery so command output streams as cmd:output
 // frames on the 'hook-output' topic. We also mirror frames locally so the
 // foreground REPL user sees their hook fires too — distinct from cmd:exec
@@ -8,97 +8,15 @@
 
 import crypto from 'crypto';
 import chalk from 'chalk';
-import type { ServerWebSocket } from 'bun';
-import type { WsSessionData } from '../ws';
 import { logger, originalConsoleLog } from '../../logger';
 import { runWithAdapterContext, type PrintKind } from '../adapter-context';
 import { isRemoteExecEnabled, isListenerEnabled } from '../config';
-import { createHook, rotateHookSecret, revokeHook, verifyHookToken } from '../hooks-store';
+import { verifyHookToken } from '../hooks-store';
 import type { ProcessCommandFn } from './cmd';
 
 export const HOOK_OUTPUT_TOPIC = 'hook-output';
 
 type ServerLike = { publish(topic: string, data: string): number };
-
-function send(ws: ServerWebSocket<WsSessionData>, frame: Record<string, unknown>): void {
-  try {
-    ws.send(JSON.stringify(frame));
-  } catch (err) {
-    logger.warn(`hook: send failed: ${(err as Error).message}`);
-  }
-}
-
-function ackErr(ws: ServerWebSocket<WsSessionData>, id: string, message: string): void {
-  send(ws, { t: 'mutate:err', id, error: message });
-}
-
-function ackOk(ws: ServerWebSocket<WsSessionData>, id: string, data?: Record<string, unknown>): void {
-  send(ws, data ? { t: 'mutate:ack', id, data } : { t: 'mutate:ack', id });
-}
-
-export interface MutateHookResult {
-  wrote: boolean;
-}
-
-export function handleMutateHook(ws: ServerWebSocket<WsSessionData>, frame: unknown): MutateHookResult {
-  const f = frame as {
-    id?: unknown;
-    op?: unknown;
-    name?: unknown;
-    command?: unknown;
-    account?: unknown;
-    hookId?: unknown;
-  };
-  const id = typeof f.id === 'string' ? f.id : '';
-  if (!id) {
-    logger.warn('mutate:hook missing id');
-    return { wrote: false };
-  }
-
-  const op = f.op;
-  if (op === 'create') {
-    const name = typeof f.name === 'string' ? f.name : '';
-    const command = typeof f.command === 'string' ? f.command : '';
-    const account = typeof f.account === 'string' && f.account.length > 0 ? f.account : undefined;
-    if (!name) return (ackErr(ws, id, 'mutate:hook create missing name'), { wrote: false });
-    if (!command) return (ackErr(ws, id, 'mutate:hook create missing command'), { wrote: false });
-    try {
-      const { hook, secret } = createHook({ name, command, account });
-      ackOk(ws, id, { hookId: hook.id, secret });
-      return { wrote: true };
-    } catch (err) {
-      ackErr(ws, id, `create failed: ${(err as Error).message}`);
-      return { wrote: false };
-    }
-  }
-
-  if (op === 'rotate') {
-    const hookId = typeof f.hookId === 'string' ? f.hookId : '';
-    if (!hookId) return (ackErr(ws, id, 'mutate:hook rotate missing hookId'), { wrote: false });
-    const result = rotateHookSecret(hookId);
-    if ('error' in result) {
-      ackErr(ws, id, `rotate failed: ${result.error}`);
-      return { wrote: false };
-    }
-    ackOk(ws, id, { hookId: result.hook.id, secret: result.secret });
-    return { wrote: true };
-  }
-
-  if (op === 'revoke') {
-    const hookId = typeof f.hookId === 'string' ? f.hookId : '';
-    if (!hookId) return (ackErr(ws, id, 'mutate:hook revoke missing hookId'), { wrote: false });
-    const result = revokeHook(hookId);
-    if (result.removed.length !== 1) {
-      ackErr(ws, id, result.matches && result.matches.length > 1 ? 'ambiguous hookId' : 'hookId not found');
-      return { wrote: false };
-    }
-    ackOk(ws, id);
-    return { wrote: true };
-  }
-
-  ackErr(ws, id, `mutate:hook unknown op: ${String(op)}`);
-  return { wrote: false };
-}
 
 export interface HookFireResult {
   status: number;

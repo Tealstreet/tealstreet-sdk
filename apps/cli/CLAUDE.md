@@ -102,15 +102,16 @@ src/
 │   ├── clients.ts           # REPL `clients list` / `revoke`
 │   ├── account-broadcast.ts # state:accounts + fs.watch + dedup
 │   ├── tasks-broadcast.ts   # state:tasks + fs.watch
-│   ├── hooks-broadcast.ts   # state:hooks (scrubbed) + fs.watch
 │   ├── hooks-store.ts       # hooks.json + secret/token plumbing
 │   ├── hook-repl.ts         # REPL `hook list/create/revoke/rotate/show`
+│   ├── webhook-relay.ts     # Hosted webhooks: outbound WS to news-gateway, ack-gated delivery runner
+│   ├── webhook-repl.ts      # REPL `webhook [status]/claim/release`
 │   ├── adapter-context.ts   # AsyncLocalStorage adapter override
 │   ├── config.ts            # 3 kill-switch readers
 │   └── handlers/
 │       ├── cmd.ts           # cmd:exec → cmd:output → cmd:done
 │       ├── account.ts       # mutate:account upsert/delete (LWW)
-│       └── hook.ts          # mutate:hook + handleHookFire
+│       └── hook.ts          # handleHookFire (POST /hook/<id>); hooks are managed from the REPL only
 ├── record/                  # Market data recording (SQLite)
 │   ├── database.ts          # SQLite DB (~/.tealstreet/recording.db)
 │   └── recorders/           # Recorder implementations
@@ -187,6 +188,7 @@ All in `~/.tealstreet/`:
 - `cross-trade.json` — Cross-trade engine configs (`StoredCrossTradeConfig[]`). Shape extends safe-cex's `CrossTradeConfig` (master/copiers) with `id` + `updatedAt` + `deletedAt` for LWW + tombstones. The CLI daemon (`tealstreet cross-trade run`, wired in B3) and the web side both read this same shape so the listener bridge can sync edits across runtimes. Chase mode is accepted at `add` but skipped at `run` in v1 — Market and LimitSlippage only.
 - `vars.json` — User variables (`set @x …`) — `Record<string, string>`
 - `aliases.json` — User aliases (`alias <n> "<cmd>"`) — `Record<string, string>`
+- `aliases-sync.json` — alias changes queued for the server plus its revision cursor (`src/alias-sync.ts`, shared logic in cli-core `aliasSync`). The SERVER orders changes (`supabase/cli_aliases.sql`); never add device timestamps. Only user changes through `FilePreprocessStore`'s overrides are queued — `applyRemoteAliases` and construction-time loading must not be, or every pull echoes back as a push.
 - `cli-export.json` — Default target for the `export` / `import` REPL
   commands (vars + aliases + reserved `binds`).
 - `listener.json` — Persistent `listenerId` UUID (web clients pin this on first approval)
@@ -562,6 +564,29 @@ name}` footer segment auto-runs the named script ~1×/sec
   web side treats missing-from-snapshot as "ignore" (not "deleted"),
   so a physical drop would not propagate the delete and could
   silently desync.
+- **Hosted webhooks run ONLY after the relay's ack.** `webhook-relay.ts`
+  sends `webhook.ack received` and runs the body only on
+  `webhook.acked accepted:true`; a refusal, a 10 s timeout or a dropped
+  socket means it never runs here. That ack is the at-most-once guarantee
+  (`fn_webhook_ack` in `supabase/webhook_relay.sql`), so do not add a path that
+  runs first and acks after. The body goes onto the REPL's `commandQueue` (the
+  same queue typed input uses) so an alert never interleaves with a chain the
+  user is mid-way through. Started from `startRepl` only — one-shot commands
+  must never hold that socket open. Design: `docs/plans/WEBHOOK_RELAY_v1.md`.
+- **`webhookRefusal` (`packages/cli-core/src/webhook/webhookGuard.ts`) is the
+  trust boundary for webhook bodies**, shared with the web listener. A hosted
+  body is text from whoever holds the URL, so `runStep` refuses any step whose
+  verb reconfigures the terminal or changes saved state when the ALS `source`
+  is `'webhook'` (local hook fires share it). It resolves the verb through the
+  command registry, so a command's aliases (`sim`, `use`) are refused with it,
+  and it runs AFTER user-alias expansion. `account`/`symbol` are refused, so a
+  webhook trades on the REPL's current account. A new command that changes
+  credentials, access, safety limits, files or persistent state belongs on
+  that list in the same commit.
+- **A webhook run drains its whole chain before acking** (`processCommand(body,
+  { drainFinalInFlight: true })`), or a one-step `buy` would report `done`
+  before the order existed. A refused sign-in is never retried with the same
+  token; the relay re-reads the token every minute so `login` revives it.
 - **`X-Hook-Token` length-guard.**
   `apps/cli/src/listener/hooks-store.ts:verifyHookToken`
   short-circuits on `token.length !== hook.secret.length` BEFORE

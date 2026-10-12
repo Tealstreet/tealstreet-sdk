@@ -167,19 +167,22 @@ that every command you type in the web CLI runs in the standalone process
 
 ---
 
-## 8. TradingView webhooks — not hosted yet
+## 8. TradingView webhooks
 
-TradingView-to-CLI webhooks are not currently available as a hosted
-Tealstreet feature. The standalone CLI has local listener and hook
-building blocks, but Tealstreet does not yet run the public relay that
-would accept TradingView alerts and route them into a user's local CLI.
+Paste your webhook URL (Settings → Webhooks) into a TradingView alert and
+put CLI commands in the alert message. The logged-in REPL receives them and
+runs them here:
 
-Do not rely on TradingView alerts to trigger CLI trades through
-Tealstreet today. Advanced users can experiment with their own public
-tunnel to the local listener, but that is self-managed and not the
-supported hosted path.
+```text
+buy $250 SOLUSDT at -0.5%
+```
 
-This is separate from exchange geo-restrictions. If the CLI can execute a
+`webhook` shows which listener receives your webhooks; `webhook claim` moves
+them to this CLI.
+
+→ [Recipe: Webhook from TradingView](./recipes/webhook-from-tradingview.md)
+
+Webhooks are separate from exchange geo-restrictions. If the CLI can execute a
 command but Bybit returns a 403 geo-block, use a VPN or add the account
 with Tealstreet proxy routing:
 
@@ -187,7 +190,7 @@ with Tealstreet proxy routing:
 > accounts add -n mybybit -e bybit -k <KEY> -s <SECRET> --tealstreet-proxy --proxy-region SG
 ```
 
-→ [Current hook/listener status](./operations/hooks-and-webhooks.md)
+→ [Hooks & webhooks](./operations/hooks-and-webhooks.md)
 
 ---
 

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { MemoryPreprocessStore } from '@tealstreet/cli-core';
-import type { PreprocessStore } from '@tealstreet/cli-core';
+import { enqueueAliasChange, type AliasChange, type AliasSyncState, type PreprocessStore } from '@tealstreet/cli-core';
 import { logger } from './logger';
 
 const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), '.tealstreet');
@@ -12,6 +12,8 @@ const WHITELIST_FILE = join(CONFIG_DIR, 'whitelist.json');
 const FATFINGER_FILE = join(CONFIG_DIR, 'fatfingers.json');
 const SIMULATION_FILE = join(CONFIG_DIR, 'simulation.json');
 const BUDGET_FILE = join(CONFIG_DIR, 'budget.json');
+// Alias changes not yet accepted by the server, and its cursor (alias-sync.ts).
+const ALIAS_SYNC_FILE = join(CONFIG_DIR, 'aliases-sync.json');
 
 /**
  * File-backed `PreprocessStore` for the standalone CLI. Vars persist to
@@ -53,19 +55,73 @@ export class FilePreprocessStore extends MemoryPreprocessStore implements Prepro
     save(VARS_FILE, super.getVars());
   }
 
+  // Every user-made alias change is queued for sync (alias-sync.ts) so it
+  // reaches the server and every other listener. Loading at construction goes
+  // through super directly and is NOT queued; nor is applyRemoteAliases.
+  private aliasChangeListener: (() => void) | null = null;
+
+  setAliasChangeListener(listener: (() => void) | null): void {
+    this.aliasChangeListener = listener;
+  }
+
+  private queueAliasChange(change: AliasChange): void {
+    this.setAliasSyncState(enqueueAliasChange(this.getAliasSyncState(), change));
+    this.aliasChangeListener?.();
+  }
+
   override setAlias(name: string, command: string): void {
     super.setAlias(name, command);
     save(ALIASES_FILE, super.getAliases());
+    this.queueAliasChange({ name, command });
   }
 
   override unsetAlias(name: string): boolean {
     const removed = super.unsetAlias(name);
-    if (removed) save(ALIASES_FILE, super.getAliases());
+    if (removed) {
+      save(ALIASES_FILE, super.getAliases());
+      this.queueAliasChange({ name, command: null });
+    }
     return removed;
   }
 
   override unsetAllAliases(): void {
+    const names = Object.keys(super.getAliases());
     super.unsetAllAliases();
+    save(ALIASES_FILE, super.getAliases());
+    for (const name of names) this.queueAliasChange({ name, command: null });
+  }
+
+  getAliasSyncState(): AliasSyncState {
+    try {
+      if (!existsSync(ALIAS_SYNC_FILE)) return { cursor: null, pending: [] };
+      const parsed = JSON.parse(readFileSync(ALIAS_SYNC_FILE, 'utf-8')) as Partial<AliasSyncState>;
+      return {
+        cursor: typeof parsed.cursor === 'number' ? parsed.cursor : null,
+        pending: Array.isArray(parsed.pending) ? parsed.pending : [],
+        owner: typeof parsed.owner === 'string' ? parsed.owner : null,
+        ...(parsed.uploadLocal === false ? { uploadLocal: false } : {}),
+      };
+    } catch (err) {
+      logger.warn(`alias sync: unreadable ${ALIAS_SYNC_FILE}, starting over: ${(err as Error).message}`);
+      return { cursor: null, pending: [] };
+    }
+  }
+
+  setAliasSyncState(state: AliasSyncState): void {
+    try {
+      writeFileSync(ALIAS_SYNC_FILE, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+    } catch (err) {
+      logger.warn(`alias sync: could not save ${ALIAS_SYNC_FILE}: ${(err as Error).message}`);
+    }
+  }
+
+  /** Server rows applied locally without being queued back as new changes. */
+  applyRemoteAliases(entries: AliasChange[]): void {
+    if (entries.length === 0) return;
+    for (const entry of entries) {
+      if (entry.command === null) super.unsetAlias(entry.name);
+      else super.setAlias(entry.name, entry.command);
+    }
     save(ALIASES_FILE, super.getAliases());
   }
 

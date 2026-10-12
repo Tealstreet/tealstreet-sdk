@@ -120,6 +120,10 @@ import {
 import { enableStatusLine } from './status-line';
 import { classifyForCLI, criticalErrorKey } from './error-classifier';
 import { startListener, stopListener } from './listener';
+import { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from '@tealstreet/cli-core';
+import { restartWebhookRelay, startWebhookRelay, stopWebhookRelay } from './listener/webhook-relay';
+import { startAliasSync, stopAliasSync, syncAliasesIfStale } from './alias-sync';
+import { cmdWebhookClaim, cmdWebhookRelease, cmdWebhookStatus } from './listener/webhook-repl';
 import { cmdClientsList, cmdClientsRevoke } from './listener/clients';
 import { cmdHookList, cmdHookCreate, cmdHookRevoke, cmdHookRotate, cmdHookShow } from './listener/hook-repl';
 import { getAdapterContext, runWithAdapterContext } from './listener/adapter-context';
@@ -1228,12 +1232,17 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
   // Handle login command
   if (command === 'login') {
     await login();
+    // The relay authenticated with the token that was current when it
+    // connected; reconnect it as whoever is signed in now.
+    restartWebhookRelay();
     return;
   }
 
   // Handle logout command
   if (command === 'logout') {
     logout();
+    // Alerts must stop with the session, not with the socket.
+    restartWebhookRelay();
     return;
   }
 
@@ -1251,6 +1260,20 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
   if (command.startsWith('clients revoke')) {
     const target = command.slice('clients revoke'.length).trim();
     cmdClientsRevoke(adapter, target || undefined);
+    return;
+  }
+
+  // Hosted webhook relay
+  if (command === 'webhook' || command === 'webhook status') {
+    await cmdWebhookStatus(adapter);
+    return;
+  }
+  if (command === 'webhook claim') {
+    await cmdWebhookClaim(adapter);
+    return;
+  }
+  if (command === 'webhook release') {
+    await cmdWebhookRelease(adapter);
     return;
   }
 
@@ -2022,6 +2045,14 @@ export async function processCommand(
       ? (exchangeManager.getExchange(ctx.accountOverride) ?? null)
       : session.currentExchange;
 
+  if (ctx?.untrustedBody) {
+    const bodyRefusal = webhookBodyRefusal(commandString);
+    if (bodyRefusal) {
+      adapter.printError(bodyRefusal);
+      return;
+    }
+  }
+
   let result;
   try {
     result = preprocessCommand(commandString, {
@@ -2037,6 +2068,14 @@ export async function processCommand(
 
   for (const w of result.warnings) {
     adapter.printWarning(w.message);
+  }
+
+  if (ctx?.untrustedBody) {
+    const chainRefusal = webhookChainRefusal(result.steps);
+    if (chainRefusal) {
+      adapter.printError(chainRefusal);
+      return;
+    }
   }
 
   // Chain execution with `;` / `&` semantics. Fire-and-forget steps
@@ -2092,6 +2131,18 @@ async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): P
       return;
     }
     resolvedCommand = command;
+  }
+
+  // A hosted webhook body is someone else's text; it may trade, not reconfigure the CLI.
+  if (getAdapterContext()?.untrustedBody) {
+    // A capture writes ~/.tealstreet/vars.json, which a later typed command reads.
+    const refusal =
+      webhookRefusal(resolvedCommand) ??
+      (step.captureTo !== undefined ? `"@${step.captureTo} = …" captures cannot be used in a webhook.` : null);
+    if (refusal) {
+      reportStepError(step, new Error(refusal));
+      return;
+    }
   }
 
   // Phase 5 — `script:<name>` prefix dispatch. See SPEC §6.1.
@@ -2556,6 +2607,38 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
 
   await startListener({ adapter, processCommand });
 
+  startAliasSync(preprocessStore, (message) => adapter.printWarning(message));
+
+  // Hosted webhooks (docs/plans/WEBHOOK_RELAY_v1.md). Each delivered body goes
+  // onto the SAME queue typed input uses, so an alert never interleaves with a
+  // chain the user is midway through.
+  startWebhookRelay({
+    runBody: (body, ctx) => {
+      // Drain the chain's last fire-and-forget step, or a one-step `buy` would
+      // ack `done` before the order is even placed.
+      // An alias in the body may have been defined on another listener moments ago.
+      const queued = commandQueue.then(async () => {
+        // It waited behind typed input; an alert past its expiry is stale.
+        if (ctx.expiresAt !== undefined && Date.now() > ctx.expiresAt) {
+          throw new Error('Not run: it waited behind your own commands past its expiry.');
+        }
+        await syncAliasesIfStale();
+        return runWithAdapterContext({ ...ctx, untrustedBody: true }, () =>
+          processCommand(body, { drainFinalInFlight: true }),
+        );
+      });
+      commandQueue = queued.then(
+        () => undefined,
+        () => undefined,
+      );
+      return queued;
+    },
+    notice: {
+      info: (message) => adapter.printInfo(message),
+      warn: (message) => adapter.printWarning(message),
+    },
+  });
+
   rl.on('line', (line) => {
     const command = line.trim();
 
@@ -2580,6 +2663,8 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
           networkMonitor = null;
         }
         stopListener();
+        stopWebhookRelay();
+        stopAliasSync();
         // Stop all exchanges (primary and enabled)
         await exchangeManager.stopAll();
         process.exit(0);
@@ -2595,6 +2680,9 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
         rl.prompt();
       }
     });
+    // A command that throws must not leave the queue rejected: every later
+    // typed command and webhook would then fail without running.
+    commandQueue = commandQueue.catch((err) => adapter.printError(`Error: ${(err as Error).message}`));
   });
 
   rl.on('close', async () => {
@@ -2614,6 +2702,8 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     }
 
     stopListener();
+    stopWebhookRelay();
+    stopAliasSync();
 
     // Stop all exchanges (primary and enabled)
     await exchangeManager.stopAll();

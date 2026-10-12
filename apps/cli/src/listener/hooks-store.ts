@@ -19,8 +19,6 @@ export interface Hook {
   createdAt: number;
 }
 
-export type PublicHook = Omit<Hook, 'secret'>;
-
 interface HooksFile {
   hooks: Hook[];
 }
@@ -63,15 +61,6 @@ export function loadHooks(): Hook[] {
 
 function saveHooks(hooks: Hook[]): void {
   atomicWrite(HOOKS_FILE, JSON.stringify({ hooks }, null, 2));
-}
-
-export function scrubSecret(hook: Hook): PublicHook {
-  const { secret: _ignore, ...rest } = hook;
-  return rest;
-}
-
-export function loadPublicHooks(): PublicHook[] {
-  return loadHooks().map(scrubSecret);
 }
 
 export function createHook(input: { name: string; command: string; account?: string }): { hook: Hook; secret: string } {

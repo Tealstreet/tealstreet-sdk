@@ -10,7 +10,6 @@ export function buildServeOptions({
   listenerId,
   processCommand,
   notifyOwnAccountWrite,
-  notifyOwnHookWrite,
   notifyOwnCrossTradeWrite,
   onClientConnect,
 }: {
@@ -19,7 +18,6 @@ export function buildServeOptions({
   listenerId: string;
   processCommand: ProcessCommandFn;
   notifyOwnAccountWrite: () => void;
-  notifyOwnHookWrite: () => void;
   notifyOwnCrossTradeWrite: () => void;
   onClientConnect?: () => void;
 }) {
@@ -56,7 +54,6 @@ export function buildServeOptions({
       listenerId,
       processCommand,
       notifyOwnAccountWrite,
-      notifyOwnHookWrite,
       notifyOwnCrossTradeWrite,
       onClientConnect,
     }),

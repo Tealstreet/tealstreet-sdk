@@ -7,10 +7,9 @@ import { promptApproval } from './prompt';
 import { handleCmdExec, type ProcessCommandFn } from './handlers/cmd';
 import { handleMutateAccount } from './handlers/account';
 import { handleMutateCrossTrade } from './handlers/cross-trade';
-import { handleMutateHook, HOOK_OUTPUT_TOPIC } from './handlers/hook';
+import { HOOK_OUTPUT_TOPIC } from './handlers/hook';
 import { sendAccountsSnapshot, ACCOUNTS_TOPIC } from './account-broadcast';
 import { sendTasksSnapshot, TASKS_TOPIC } from './tasks-broadcast';
-import { sendHooksSnapshot, HOOKS_TOPIC } from './hooks-broadcast';
 import { sendCrossTradeSnapshot, CROSS_TRADE_TOPIC } from './cross-trade-broadcast';
 import { isAccountSyncEnabled } from './config';
 
@@ -85,7 +84,6 @@ export function buildWebSocketHandler({
   listenerId,
   processCommand,
   notifyOwnAccountWrite,
-  notifyOwnHookWrite,
   notifyOwnCrossTradeWrite,
   onClientConnect,
 }: {
@@ -93,7 +91,6 @@ export function buildWebSocketHandler({
   listenerId: string;
   processCommand: ProcessCommandFn;
   notifyOwnAccountWrite: () => void;
-  notifyOwnHookWrite: () => void;
   notifyOwnCrossTradeWrite: () => void;
   onClientConnect?: () => void;
 }): WebSocketHandler<WsSessionData> {
@@ -104,9 +101,7 @@ export function buildWebSocketHandler({
     }
     ws.subscribe(TASKS_TOPIC);
     sendTasksSnapshot(ws);
-    ws.subscribe(HOOKS_TOPIC);
     ws.subscribe(HOOK_OUTPUT_TOPIC);
-    sendHooksSnapshot(ws);
     ws.subscribe(CROSS_TRADE_TOPIC);
     sendCrossTradeSnapshot(ws);
   };
@@ -216,11 +211,6 @@ export function buildWebSocketHandler({
       if (t === 'mutate:account') {
         const result = handleMutateAccount(ws, parsed);
         if (result.wrote) notifyOwnAccountWrite();
-        return;
-      }
-      if (t === 'mutate:hook') {
-        const result = handleMutateHook(ws, parsed);
-        if (result.wrote) notifyOwnHookWrite();
         return;
       }
       if (t === 'mutate:cross-trade-config') {

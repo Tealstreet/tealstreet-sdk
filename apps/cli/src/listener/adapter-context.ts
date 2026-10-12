@@ -40,6 +40,13 @@ export interface AdapterContext {
    * undefined means "treat as REPL / direct invocation".
    */
   source?: 'cmd-exec' | 'webhook';
+  /**
+   * A HOSTED webhook body: text from whoever holds the user's webhook URL, so
+   * `runStep` applies cli-core's webhook refusals and limits to it. Local hooks
+   * (POST /hook/<id>) share `source: 'webhook'` but run a command the user saved
+   * themselves, and are deliberately NOT marked.
+   */
+  untrustedBody?: boolean;
 }
 
 const als = new AsyncLocalStorage<AdapterContext>();

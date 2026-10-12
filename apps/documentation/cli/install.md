@@ -130,9 +130,9 @@ or add the account from inside the REPL with Tealstreet proxy routing:
 > accounts add -n mybybit -e bybit -k <KEY> -s <SECRET> --tealstreet-proxy --proxy-region SG
 ```
 
-This only changes how the CLI reaches the exchange. It does not make
-TradingView webhooks reach the CLI; the hosted TradingView-to-CLI relay is
-not live yet.
+This only changes how the CLI reaches the exchange. TradingView webhooks
+are set up separately — see
+[Webhook from TradingView](./recipes/webhook-from-tradingview.md).
 
 ---
 

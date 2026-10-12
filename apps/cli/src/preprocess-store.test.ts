@@ -152,11 +152,7 @@ describe('FilePreprocessStore', () => {
 
       expect(store.getVar('x')).toBeUndefined();
       expect(store.getLiveVar('x')).toBe('$ask');
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        file('vars.json'),
-        JSON.stringify({}, null, 2) + '\n',
-        'utf-8',
-      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(file('vars.json'), JSON.stringify({}, null, 2) + '\n', 'utf-8');
       const writeTargets = vi.mocked(fs.writeFileSync).mock.calls.map((c) => c[0]);
       expect(writeTargets).toEqual([file('vars.json')]);
     });
@@ -205,11 +201,7 @@ describe('FilePreprocessStore', () => {
       expect(store.getVar('x')).toBeUndefined();
       expect(store.getTrackedVar('x')).toMatchObject({ kind: 'max' });
       // vars.json rewritten without x.
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        file('vars.json'),
-        JSON.stringify({}, null, 2) + '\n',
-        'utf-8',
-      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(file('vars.json'), JSON.stringify({}, null, 2) + '\n', 'utf-8');
       const writeTargets = vi.mocked(fs.writeFileSync).mock.calls.map((c) => c[0]);
       expect(writeTargets).toEqual([file('vars.json')]);
     });
@@ -228,5 +220,46 @@ describe('FilePreprocessStore', () => {
       expect(writeCalls.length).toBe(1);
       expect(writeCalls[0][0]).toBe(file('vars.json'));
     });
+  });
+});
+
+describe('FilePreprocessStore alias sync queue', { timeout: 30_000 }, () => {
+  /** writeFileSync is mocked; read the store's last write of a file back. */
+  const lastWrite = (name: string) => {
+    const calls = vi.mocked(fs.writeFileSync).mock.calls.filter(([f]) => String(f) === file(name));
+    const last = calls[calls.length - 1];
+    return last ? JSON.parse(String(last[1])) : undefined;
+  };
+
+  beforeEach(() => {
+    vi.mocked(fs.writeFileSync).mockClear();
+  });
+
+  it('queues a user alias change and a deletion for sync', async () => {
+    const store = await makeStore();
+    vi.mocked(fs.readFileSync).mockImplementation((f) => {
+      const written = lastWrite('aliases-sync.json');
+      return String(f) === file('aliases-sync.json') && written ? JSON.stringify(written) : '';
+    });
+    vi.mocked(fs.existsSync).mockImplementation(
+      (f) => String(f) === file('aliases-sync.json') && !!lastWrite('aliases-sync.json'),
+    );
+
+    store.setAlias('long', 'buy 1');
+    store.unsetAlias('long');
+
+    expect(lastWrite('aliases-sync.json')).toEqual({ cursor: null, owner: null, pending: [{ name: 'long', command: null }] });
+  });
+
+  it('applies server aliases without queueing them back', async () => {
+    const store = await makeStore();
+    store.applyRemoteAliases([
+      { name: 'long', command: 'buy 1' },
+      { name: 'gone', command: null },
+    ]);
+
+    expect(store.getAliases()).toEqual({ long: 'buy 1' });
+    expect(lastWrite('aliases-sync.json')).toBeUndefined();
+    expect(lastWrite('aliases.json')).toEqual({ long: 'buy 1' });
   });
 });

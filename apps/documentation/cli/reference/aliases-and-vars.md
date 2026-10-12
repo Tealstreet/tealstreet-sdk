@@ -134,8 +134,18 @@ Multi-statement bodies splice back into the outer chain — so chain operators
 | `unalias z`                   | Remove one         |
 | `unalias all`                 | Remove all         |
 
-Aliases persist to `~/.tealstreet/aliases.json` (standalone) or jotai atom
-(web).
+Aliases persist to `~/.tealstreet/aliases.json` (standalone) or browser
+storage (web), and **sync between the CLI and every browser signed in to the
+same account**. An alias you define in one shows up in the others within a
+few seconds (a running REPL checks every few minutes and right before it runs a
+webhook). That is what lets a [TradingView webhook](../recipes/webhook-from-tradingview.md)
+call an alias on whichever listener runs it.
+
+If the same alias is changed in two places, the change the server receives
+last wins. The first time a device syncs, aliases it already had are uploaded
+unless the account already has one with that name, in which case the account's
+version wins. Up to 500 aliases; a name is at most 64 characters and a body at
+most 2000.
 
 ---
 
@@ -171,12 +181,12 @@ Source: `packages/cli-core/src/preprocess/preprocess.ts:38-39, 165-172`.
 
 ## Storage at a glance
 
-| Kind                 | Lives in                             | Survives restart? |
-| -------------------- | ------------------------------------ | ----------------- |
-| `set` (static)       | `~/.tealstreet/vars.json` / jotai    | yes               |
-| `sets` (reactive)    | in-process                           | no                |
-| `track` (aggregator) | in-process                           | no                |
-| `alias`              | `~/.tealstreet/aliases.json` / jotai | yes               |
+| Kind                 | Lives in                                                     | Survives restart? |
+| -------------------- | ------------------------------------------------------------ | ----------------- |
+| `set` (static)       | `~/.tealstreet/vars.json` / jotai                            | yes               |
+| `sets` (reactive)    | in-process                                                   | no                |
+| `track` (aggregator) | in-process                                                   | no                |
+| `alias`              | `~/.tealstreet/aliases.json` / jotai, synced to your account | yes               |
 
 Persistent ones round-trip through
 [`export` / `import`](./commands.md#import--export). Session-scoped ones

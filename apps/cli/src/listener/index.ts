@@ -8,7 +8,6 @@ import { isListenerEnabled, isAccountSyncEnabled } from './config';
 import type { ProcessCommandFn } from './handlers/cmd';
 import { startAccountsBroadcast, type AccountsBroadcastHandle } from './account-broadcast';
 import { startTasksBroadcast, type TasksBroadcastHandle } from './tasks-broadcast';
-import { startHooksBroadcast, type HooksBroadcastHandle } from './hooks-broadcast';
 import { startCrossTradeBroadcast, type CrossTradeBroadcastHandle } from './cross-trade-broadcast';
 import { gcTombstonedAccounts, getConfigFilePath } from '../config';
 import { gcTombstonedCrossTradeConfigs, getCrossTradeFilePath } from '../cross-trade-store';
@@ -52,7 +51,6 @@ const CLIENT_HINT_DELAY_MS = 75_000;
 let server: ReturnType<typeof Bun.serve> | null = null;
 let accountsBroadcast: AccountsBroadcastHandle | null = null;
 let tasksBroadcast: TasksBroadcastHandle | null = null;
-let hooksBroadcast: HooksBroadcastHandle | null = null;
 let crossTradeBroadcast: CrossTradeBroadcastHandle | null = null;
 let clientHintTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -86,10 +84,8 @@ export async function startListener({
     // Bootstrap loop: build serve options needs a notifier; the broadcast
     // needs the server it's notifying. Wire via a small mutable bridge.
     let broadcast: AccountsBroadcastHandle | null = null;
-    let hooks: HooksBroadcastHandle | null = null;
     let crossTrade: CrossTradeBroadcastHandle | null = null;
     const notifyOwnAccountWrite = () => broadcast?.notifyOwnWrite();
-    const notifyOwnHookWrite = () => hooks?.notifyOwnWrite();
     const notifyOwnCrossTradeWrite = () => crossTrade?.notifyOwnWrite();
     const onClientConnect = () => {
       if (clientHintTimer) {
@@ -104,7 +100,6 @@ export async function startListener({
         listenerId,
         processCommand,
         notifyOwnAccountWrite,
-        notifyOwnHookWrite,
         notifyOwnCrossTradeWrite,
         onClientConnect,
       }),
@@ -112,8 +107,6 @@ export async function startListener({
     broadcast = startAccountsBroadcast(server);
     accountsBroadcast = broadcast;
     tasksBroadcast = startTasksBroadcast(server);
-    hooks = startHooksBroadcast(server);
-    hooksBroadcast = hooks;
     crossTrade = startCrossTradeBroadcast(server);
     crossTradeBroadcast = crossTrade;
     adapter.printInfo(`listener on http://127.0.0.1:${port}`);
@@ -127,7 +120,6 @@ export async function startListener({
     server = null;
     accountsBroadcast = null;
     tasksBroadcast = null;
-    hooksBroadcast = null;
     crossTradeBroadcast = null;
     const msg = (err as Error)?.message ?? String(err);
     adapter.printError(`listener failed to bind on 127.0.0.1:${port}: ${msg}`);
@@ -143,8 +135,6 @@ export function stopListener(): void {
   accountsBroadcast = null;
   tasksBroadcast?.stop();
   tasksBroadcast = null;
-  hooksBroadcast?.stop();
-  hooksBroadcast = null;
   crossTradeBroadcast?.stop();
   crossTradeBroadcast = null;
   if (!server) return;
