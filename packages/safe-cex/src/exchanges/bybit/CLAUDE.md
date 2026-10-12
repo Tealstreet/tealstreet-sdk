@@ -1436,6 +1436,17 @@ Comment in code: "we need to re-create TP/SL after cancel all / before bybit was
 - `changeMarginType(false)` sends `setMarginMode: 'REGULAR_MARGIN'` (cross margin).
 - After a successful switch, every position is refetched because one request changes the whole account.
 - Bybit returns detailed failures in `result.reasons`; surface those reason messages before the generic `retMsg`.
+- **Success is `retCode === 0` with empty `reasons`. Never compare `retMsg`.**
+  Live wire 2026-10-09: on an account already in `REGULAR_MARGIN`, setting
+  `REGULAR_MARGIN` answered
+  `{"retCode":0,"retMsg":"Request accepted","result":{"reasons":[]}}`, so a
+  no-op is a success, not a "not modified" error (unlike leverage's 110043). A
+  third-party SDK's success fixture (WSS-Group/BybitApi, Feb 2025) records the
+  same body. A real cross/isolated switch has not been captured yet.
+  `88692e3afb` (2026-07-15) moved off the deprecated per-symbol
+  `/v5/position/switch-isolated` but kept its `retMsg === 'OK'` check, so every
+  call threw before setting `marginType` and the UI kept the old mode until a
+  reload.
 
 ### WebSocket Position Update Invalidation
 

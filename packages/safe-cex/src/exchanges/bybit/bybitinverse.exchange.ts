@@ -2362,8 +2362,10 @@ export class BybitInverseExchange extends BaseExchange {
       setMarginMode: isolated ? 'ISOLATED_MARGIN' : 'REGULAR_MARGIN',
     });
 
+    // Success is retCode 0 with no reasons. Do not compare retMsg: this
+    // endpoint answers a successful switch with "Request accepted", not "OK".
     const reasons = Array.isArray(data?.result?.reasons) ? data.result.reasons : [];
-    if (v(data, 'retMsg') !== 'OK' || +v(data, 'retCode') !== 0 || reasons.length > 0) {
+    if (+v(data, 'retCode') !== 0 || reasons.length > 0) {
       const reasonMessage = reasons
         .map((reason: any) => reason?.reasonMsg)
         .filter(Boolean)
