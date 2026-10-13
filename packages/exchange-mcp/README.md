@@ -24,7 +24,7 @@ Set `EXCHANGE_API_SECRET` or the two signer variables. Signer mode needs an adap
 
 `get_markets`, `get_tickers`, `get_candles`, `get_balance`, `get_positions`, `get_open_orders`, `get_order_history`, `get_fills`, `get_closed_pnl`, `get_income`, `place_order`, `amend_order`, `cancel_orders`, `cancel_all_orders`, `set_leverage`, `set_position_mode`, `set_margin_type`.
 
-The server loads markets on the first tool call and fetches everything else when asked. It opens no websockets and runs no background polling.
+The server starts the exchange as soon as it connects, and fetches everything else when asked. It opens no websockets and runs no background polling.
 
 ## Develop
 
