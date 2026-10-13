@@ -6,8 +6,8 @@ import { createExchange } from '@tealstreet/safe-cex/src/index';
 
 import { supportedTools } from './tools';
 
-/** Starts the exchange on first use, and again on the next call if starting failed. */
-const lazyStart = (exchange: Exchange): (() => Promise<Exchange>) => {
+/** Starts the exchange once, and again on the next call if starting failed. */
+const startOnce = (exchange: Exchange): (() => Promise<Exchange>) => {
   let started: Promise<Exchange> | undefined;
   return () =>
     (started ??= exchange.start().then(
@@ -22,7 +22,7 @@ const lazyStart = (exchange: Exchange): (() => Promise<Exchange>) => {
 export const createServer = async ({ exchange: name, options }: ServerConfig, version: string) => {
   const exchange: Exchange = await createExchange(name, options);
   exchange.disablePublicWebsockets();
-  const ready = lazyStart(exchange);
+  const ready = startOnce(exchange);
 
   const server = new McpServer({ name: `exchange-mcp-${name}`, version });
   for (const tool of supportedTools(exchange)) {
@@ -31,5 +31,5 @@ export const createServer = async ({ exchange: name, options }: ServerConfig, ve
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     });
   }
-  return { server, exchange };
+  return { server, exchange, ready };
 };

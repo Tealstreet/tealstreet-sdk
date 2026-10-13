@@ -35,6 +35,13 @@ describe('supportedTools', () => {
   });
 });
 
+describe('market filters', () => {
+  it('reads an empty symbols list as every market', async () => {
+    const exchange = { fetchPositions: async () => [order('1', 'BTCUSDT')] };
+    expect(await run('get_positions', exchange, { symbols: [] })).toHaveLength(1);
+  });
+});
+
 describe('order tools', () => {
   it('names the ids that are not open and cancels nothing', async () => {
     const cancelOrders = vi.fn();

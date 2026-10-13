@@ -32,7 +32,7 @@ const to = z.number().int().optional().describe('End time, ms since epoch');
 const limit = z.number().int().positive().optional();
 
 const inMarkets = <T extends { symbol: string }>(rows: T[], wanted?: string[]): T[] =>
-  wanted ? rows.filter((r) => wanted.includes(r.symbol)) : rows;
+  wanted?.length ? rows.filter((r) => wanted.includes(r.symbol)) : rows;
 
 const openOrders = async (exchange: Exchange, ids: string[]): Promise<Order[]> => {
   const orders = (await exchange.fetchOrders()).filter((o) => ids.includes(o.id));
@@ -53,7 +53,7 @@ export const tools: Tool[] = [
     },
     run: async (exchange, { symbols: wanted, search }) => {
       const markets = exchange.store.markets;
-      if (!wanted && !search) return markets.map((m) => m.symbol);
+      if (!wanted?.length && !search) return markets.map((m) => m.symbol);
       const needle = search?.toLowerCase();
       return markets
         .filter(
@@ -99,14 +99,16 @@ export const tools: Tool[] = [
     description: 'Open positions.',
     method: 'fetchPositions',
     input: { symbols },
-    run: async (exchange, { symbols: wanted }) => inMarkets(await exchange.fetchPositions(wanted), wanted),
+    run: async (exchange, { symbols: wanted }) =>
+      inMarkets(await exchange.fetchPositions(wanted?.length ? wanted : undefined), wanted),
   }),
   tool({
     name: 'get_open_orders',
     description: 'Open orders, including conditional orders.',
     method: 'fetchOrders',
     input: { symbols },
-    run: async (exchange, { symbols: wanted }) => inMarkets(await exchange.fetchOrders(wanted), wanted),
+    run: async (exchange, { symbols: wanted }) =>
+      inMarkets(await exchange.fetchOrders(wanted?.length ? wanted : undefined), wanted),
   }),
   tool({
     name: 'get_order_history',
@@ -145,7 +147,7 @@ export const tools: Tool[] = [
   tool({
     name: 'place_order',
     description:
-      'Place an order. Returns the new order ids. Size is in the units of the market\'s limits.amount from get_markets.',
+      "Place an order. Returns the new order ids. Size is in the units of the market's limits.amount from get_markets.",
     method: 'placeOrder',
     input: {
       symbol,
@@ -195,7 +197,7 @@ export const tools: Tool[] = [
     input: { symbol: symbol.optional() },
     run: async (exchange, { symbol: market }) => {
       const wanted = market ? [market] : undefined;
-      const orders = inMarkets(await exchange.fetchOrders(wanted), wanted);
+      const orders = inMarkets(await exchange.fetchOrders(wanted?.length ? wanted : undefined), wanted);
       if (orders.length) await exchange.cancelOrders(orders);
       return { cancelled: orders.map((o) => o.id) };
     },
